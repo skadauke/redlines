@@ -432,9 +432,8 @@ function edited(
   const parsed = parse(text);
   checkTableEdits(text, [{ ...edit, insert: typed }], parsed);
   // A cell of a pending move's copy: the edit is written in both halves of the move.
-  if (!half && movedCopyAt(text, { ...edit, insert: typed }, parsed)) {
-    return editMoveCopy(text, parsed, edit, ctx);
-  }
+  const copy = half ? null : movedCopyAt(text, { ...edit, insert: typed }, parsed);
+  if (copy) return editMoveCopy(text, parsed, edit, ctx, copy);
   const markers = markerRanges(parsed);
   let from: number;
   let to: number;

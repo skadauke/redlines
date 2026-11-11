@@ -21,6 +21,8 @@ const move = (text: string, op: WithoutTable<TableOp>) => {
 };
 const plain = (text: string, from: number, to: number, insert: string) =>
   applyChanges(text, untrackedEdit(text, { from, to, insert }));
+/** The file's body, byte for byte, without the blank lines that end it. */
+const exact = (text: string) => bodyOf(text).replace(/\s+$/, '');
 const tidy = (text: string) => bodyOf(text).replace(/ +/g, ' ').replace(/\s+$/, '');
 /** The text of cell `col` of row `row` of the first table: its range. */
 const cellAt = (text: string, row: number, col: number) => {
@@ -82,36 +84,38 @@ describe('a plain edit in a moved column', () => {
     decidesWell('header', head, file(COLS.replace('| a ', '| AB')));
   });
 
-  it('writes a cell written `| |` or `||`, and typing in it', () => {
-    for (const body of [
-      '| a | b |\n| - | - |\n| x | y |\n| w | |',
-      '| a | b |\n| - | - |\n| x | y |\n| w ||',
-    ]) {
+  it('writes a cell written `| |` or `||`, and typing in it, byte for byte in both halves', () => {
+    const cases: [string, string, string][] = [
+      [
+        '| a | b |\n| - | - |\n| x | y |\n| w | |',
+        '| <!--ins k3x9 col--> b | a |\n| - | - |\n| y | x |\n| Q| w |\n\n<!--del w8nn col=3  b \\n - \\n y \\n Q-->',
+        '| a | b |\n| - | - |\n| x | y |\n| w | Q|',
+      ],
+      [
+        '| a | b |\n| - | - |\n| x | y |\n| w ||',
+        '| <!--ins k3x9 col--> b | a |\n| - | - |\n| y | x |\n|Q| w |\n\n<!--del w8nn col=3  b \\n - \\n y \\nQ-->',
+        '| a | b |\n| - | - |\n| x | y |\n| w |Q|',
+      ],
+    ];
+    for (const [body, written, original] of cases) {
       const text = move(file(body), { kind: 'moveCols', cols: [1], to: 0 });
-      if (!readTables(text, parse(text))[0]) throw new Error(`not a table:\n${text}`);
       const empty = cellAt(text, 2, 0);
       expect(empty.textFrom).toBe(empty.textTo);
       const edited = plain(text, empty.textFrom, empty.textFrom, 'Q');
-      expect(edited).not.toBe(text);
-      const original = file(
-        body.replace(/\| ?(\||$)/, (m) => m.replace('|', 'Q|')).replace('w ||', 'w |Q|'),
-      );
+      expect(exact(edited)).toBe(written);
       for (const mark of parse(edited).marks.filter((m) => m.entry.move !== undefined)) {
+        expect(exact(applyChanges(edited, reject(edited, mark.id)))).toBe(original);
         expect(() => accept(edited, mark.id)).not.toThrow();
-        expect(() => reject(edited, mark.id)).not.toThrow();
-        expect(applyChanges(edited, reject(edited, mark.id))).toContain('Q');
       }
-      expect(() => rejectAll(edited)).not.toThrow();
-      expect(applyChanges(edited, rejectAll(edited))).toContain('Q');
-      expect(originalView(edited).text).toContain('Q');
-      void original;
+      expect(exact(applyChanges(edited, rejectAll(edited)))).toBe(original);
+      expect(exact(originalView(edited).text)).toBe(original);
       expectEveryOrderAlike('empty', edited, exactly);
     }
   });
 
-  it('keeps other people’s marks in the row, with LF and CRLF', () => {
+  it('keeps other people’s marks in the row, with LF and CRLF, byte for byte', () => {
     for (const eol of ['\n', '\r\n']) {
-      const base = file(COLS.replace('xx', 'xx').replaceAll('\n', eol));
+      const base = file(COLS.replaceAll('\n', eol));
       let text = move(base, { kind: 'moveCols', cols: [0], to: 2 });
       const spot = text.indexOf('yy') + 1;
       text = applyChanges(
@@ -120,12 +124,33 @@ describe('a plain edit in a moved column', () => {
       );
       const at2 = text.indexOf('xx') + 1;
       const edited = plain(text, at2, at2, 'Z');
+      const lines = [
+        '| b  | <!--ins k3x9 col--> a  |',
+        '| -- | -- |',
+        '| y<!--ins b7cd-->q<!--/b7cd-->y | xZx |',
+        '|    | w  |',
+        '',
+        '<!--del w8nn col=1  a  \\n -\\- \\n xZx \\n w  -->',
+        '',
+      ];
+      expect(exact(edited)).toBe(lines.join(eol).replace(/\s+$/, ''));
+      const back = [
+        '| a  | b  |',
+        '| -- | -- |',
+        '| xZx | y<!--ins b7cd-->q<!--/b7cd-->y |',
+        '| w  |    |',
+        '',
+      ];
+      // Rejecting everything takes Bo's `q` too.
+      expect(exact(applyChanges(edited, rejectAll(edited)))).toBe(
+        back.join(eol).replace('y<!--ins b7cd-->q<!--/b7cd-->y', 'yy').replace(/\s+$/, ''),
+      );
       for (const mark of parse(edited).marks.filter((m) => m.entry.move !== undefined)) {
         expect(() => accept(edited, mark.id)).not.toThrow();
-        expect(() => reject(edited, mark.id)).not.toThrow();
+        expect(exact(applyChanges(edited, reject(edited, mark.id)))).toBe(
+          back.join(eol).replace(/\s+$/, ''),
+        );
       }
-      expect(() => rejectAll(edited)).not.toThrow();
-      expect(applyChanges(edited, rejectAll(edited))).toContain('xZx');
     }
   });
 });

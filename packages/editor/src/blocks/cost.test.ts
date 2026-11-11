@@ -288,6 +288,53 @@ describe.skipIf(!process.env['REDLINES_COST'])(
   },
 );
 
+// A letter typed and deleted with Track Changes off in a cell of a pending move's copy (tables, Stage 3b):
+// the edit is written in both halves of the move (the cell and the kept copy), and must cost what a
+// keystroke in any other cell costs on main. A timing test: it runs with REDLINES_COST set, and a run over
+// the bound is timed twice more before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a moved cell', () => {
+  it('costs at most twice what main’s build costs, in a moved column and a moved row', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const axis of ['column', 'row'] as const) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const cellOf = (row: number, col: number) => tablesOf(view.state)[0]!.rows[row]!.cells[col]!;
+      if (axis === 'column') {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 2).textFrom) });
+        moveCols(view, true);
+      } else {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 0).textFrom) });
+        moveRows(view, true);
+      }
+      expect(view.state.doc.toString()).toMatch(axis === 'column' ? /col=\d+ / : /row=\d+ /);
+      editor.setTracking(false);
+      // The copy: the moved column, in row 150, or the moved row, which is row 149 now.
+      const target = axis === 'column' ? cellOf(150, 1) : cellOf(149, 1);
+      const at = target.textFrom + 1;
+      time(editor, at, 'type');
+      const label = 'Track Changes off, cell, type';
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      const limit = 2 * main! * scale + 1;
+      let ours = Infinity;
+      for (let attempt = 0; attempt < 3 && ours >= limit; attempt++) {
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        ours = median(runs);
+      }
+      console.log(
+        `cost: moved ${axis}, ${label}: main ${(main! * scale).toFixed(2)} ms, bound ${limit.toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+      );
+      expect(ours, `a moved ${axis}`).toBeLessThan(limit);
+    }
+  }, 600_000);
+});
+
 describe('the cost of a rectangle selection in a table', () => {
   it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
     const { doc } = longDocument({ table: true });
