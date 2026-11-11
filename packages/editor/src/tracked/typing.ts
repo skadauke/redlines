@@ -59,6 +59,7 @@ import { onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
   bodyEnd,
+  markupViewFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -561,13 +562,13 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
   }
   if (tracked.changes.empty) return {};
   const toRedlines = suggests(start, start.doc, edits, tracked.changes)
-    ? [setViewModeEffect.of('redlines')]
+    ? [setViewModeEffect.of(start.facet(markupViewFacet))]
     : [];
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
 }
 
 /**
- * Whether a tracked edit made in Clean suggests something, which switches the view to Redlines so
+ * Whether a tracked edit made in Clean suggests something, which switches the view to the markup view so
  * that suggestions are never invisible to their author (design §5.3): whether the format wrote
  * more than the plain edit would have, unlike a line break at the end of a paragraph.
  */
@@ -732,7 +733,7 @@ function finishComposition(view: EditorView): void {
     changes = back.compose(made.changes);
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
     if (tracking && suggests(state, base, edits, made.changes)) {
-      effects.push(setViewModeEffect.of('redlines'));
+      effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;

@@ -384,7 +384,13 @@ does not read it so yet. Emphasis is read as micromark 4.0.2 reads it: each run 
 can close, left to right, pairs with the nearest run before it that can open, on what is left of the
 two after the pairs made before, the rule of three included (`***word** x**y` leaves one `*` before
 `word`, and 1 + 2 makes the `**` of `x**y` text); the runs between a pair are then paired among
-themselves, as they are left, and are text after that.
+themselves, as they are left, and are text after that. GFM's strikethrough is read in the same
+pass, as micromark with `micromark-extension-gfm-strikethrough` 2.1.0 reads it: a run of one or two
+`~` pairs only with a run of its own length; a run of three or more is text; a `*` or `_` next to a
+`~` reads as if the `~` were a letter on the other side (a run before a `~` can open, and a run
+after it can close); and each kind of run is paired in a pass of its own, the kind that comes first
+in the paragraph first, so that a run left over by one pass is text for the other. The runs between
+a pair are paired as above, strikethrough first.
 
 **Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
 marks of its block that are apart from it pending while it tries the others: words inserted, deleted,
@@ -1246,6 +1252,18 @@ A new paragraph.<!--split v2pc-->
   text<!--/k3x9-->`. The first block keeps its type, as in a deletion across blocks. Typing
   nothing makes it one deletion. Where other people's changes are in it, it is a deletion split
   around them, and an insertion after it (§3.6). Rejecting brings every byte back.
+- **An agent's `str_replace` that takes the line break in front of a block and keeps that block's
+  marker** (`## `, `> `, `- ` or `1. `) in the new text asks for the marker as text. A deletion
+  of the break takes the marker of the block that follows it, so the marker is written again as
+  text, in the same change as the break: `two<!--sub s7q7 \n\n## --> ## <!--/s7q7-->Head` reads
+  `two ## Head` in the newest view. This holds for each form the edit may be written in (joined,
+  whole-block or word by word). Where a change takes such a break, the newest view is checked
+  against the text that was asked for (apart from white space around breaks and the numbers of a
+  list); if it still reads otherwise the form is refused, and the edit when no form can be written
+  (`no-legal-placement`). Edits that take no break in front of a marker are not checked this way.
+- **An agent's `str_replace` at a pending insertion**, anyone's, leaves that insertion rejectable.
+  Where the insertion could be rejected before the edit and rejecting it would be refused after,
+  whatever the cause, the edit is refused (`no-legal-placement`) and writes nothing.
 
 ### 3.5 Atomic content
 
@@ -1458,7 +1476,10 @@ line under it as one paragraph, which such an opener parts.
 Front matter is YAML, not Markdown, and is read as YAML only. A line in it that a Markdown block
 would start with, such as a fence or an HTML tag in a block scalar (`description: |` and then a
 line of three backticks, or `<div>`), starts no block, and a code span in it ends there: the body
-is read from its first line, as a file is, whatever the front matter holds. A marker that someone
+is read from its first line, as a file is, whatever the front matter holds. That goes for HTML
+comments too: front matter ends at its closing line, and a `<!--` in it that is not closed before
+that line stays inside it, so that it hides nothing in the body, as it does for pandoc, Quarto and
+GitHub, which end the front matter at its closing line. A marker that someone
 wrote in front matter by hand, which no edit does, is still found there, and reads as it did.
 
 ### 3.9 One form per state

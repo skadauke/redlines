@@ -1,7 +1,13 @@
 // Helpers shared by the review interface's tests, which run under happy-dom. They are not part of
 // the package.
 
-import { createEditor, type Author, type Editor, type MetPerson } from '@redlines/editor';
+import {
+  createEditor,
+  type Author,
+  type Editor,
+  type MarkupView,
+  type MetPerson,
+} from '@redlines/editor';
 import { accept, acceptMarks, EditError, reject, rejectMarks } from '@redlines/format';
 import type { HostDocumentData } from '@redlines/plugin-api';
 import { createReview, type ReviewController, type ReviewOptions } from './index.ts';
@@ -80,11 +86,13 @@ export function mount(
     real = false,
     review: options = {},
     people,
+    markupView,
   }: {
     refuse?: boolean;
     real?: boolean;
     review?: Partial<ReviewOptions>;
     people?: readonly MetPerson[];
+    markupView?: MarkupView;
   } = {},
 ): Mounted {
   const parent = document.createElement('div');
@@ -94,6 +102,7 @@ export function mount(
     doc,
     author: me,
     ...(people ? { people } : {}),
+    ...(markupView ? { markupView } : {}),
     onNotice: (message) => notices.push(message),
   });
   // happy-dom fires `selectionchange` while CodeMirror is still writing a focused editor's

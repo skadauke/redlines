@@ -11,6 +11,7 @@ describe('the page-facing API', () => {
   it('lists the views in order with the words of the app’s View menu', () => {
     expect(VIEWS).toEqual([
       { view: 'clean', label: 'Clean' },
+      { view: 'simple', label: 'Simple' },
       { view: 'redlines', label: 'Redlines' },
       { view: 'raw', label: 'Raw' },
     ]);

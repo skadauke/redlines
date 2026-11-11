@@ -180,7 +180,14 @@ const editor = createEditor(element('#editor'), {
     return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
   },
   typing: typingOf(settings),
+  // A word ended with Return gets the system's correction, which only the app can ask for; a plain
+  // browser has none. Asked only while Preferences' spell check is on (the editor sees to that).
+  correctWord: isTauri
+    ? (word, before) => invoke<string | null>('correct_word', { word, before })
+    : undefined,
   showLineBreakMarks: settings.showLineBreakMarks,
+  markupView: settings.markupView,
+  viewKeys: { simple: '⌥⌘2', redlines: '⌥⌘3' },
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -192,6 +199,8 @@ const editor = createEditor(element('#editor'), {
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
     ui = state;
+    // The markup view chosen last is kept for every window, for what each opens next.
+    if (state.markupView !== settings.markupView) changeSettings({ markupView: state.markupView });
     render();
   },
 });
@@ -871,6 +880,8 @@ watchSettings((changed) => {
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
+  // The markup view another window chose reaches this one's next switches, not the view it shows.
+  editor.setMarkupView(settings.markupView);
   editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {
@@ -891,6 +902,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
 // Debug only (block-check.ts): block editing's keys and inputs, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
   void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
+}
+
+// Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_SIMPLE_CHECK']) {
+  void import('./simple-check.ts').then(({ runSimpleCheck }) => runSimpleCheck(editor));
 }
 
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.

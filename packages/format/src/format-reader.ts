@@ -85,9 +85,14 @@ function readEmphasis(
     while (end < to && s[end] === char && !joints.has(end)) end++;
     const before = charBefore(s, i, joints);
     const after = charAfter(s, end, joints);
-    const left = !isSpace(after) && (!punctuation(after) || isSpace(before) || punctuation(before));
+    // micromark reads a `*` or `_` next to a `~` as if the `~` were a letter on the far side: a run
+    // before a `~` can open, and a run after a `~` can close (#238).
+    const left =
+      (!isSpace(after) && (!punctuation(after) || isSpace(before) || punctuation(before))) ||
+      (char !== '~' && after === '~');
     const right =
-      !isSpace(before) && (!punctuation(before) || isSpace(after) || punctuation(after));
+      (!isSpace(before) && (!punctuation(before) || isSpace(after) || punctuation(after))) ||
+      (char !== '~' && before === '~');
     runs.push({
       char,
       from: i,
@@ -100,48 +105,57 @@ function readEmphasis(
   }
   const size = (run: Run) => run.to - run.from;
   const spans: Span[] = [];
-  /** Pairs the runs of `[lo, hi)` as micromark's `attention` does: each closer, left to right, with
-   * the nearest opener before it that is left, on what is left of each run (#140). The runs between
-   * a pair are paired among themselves then, as they are left, and are text after that. */
-  const resolve = (lo: number, hi: number) => {
-    for (let c = lo; c < hi; c++) {
-      const closer = runs[c];
-      if (!closer?.canClose) continue;
-      while (size(closer) > 0) {
-        let o = c - 1;
-        for (; o >= lo; o--) {
+  type Pass = 'strike' | 'emphasis';
+  /** Resolves the runs of `[lo, hi)` as micromark does: one pass for each kind of run, in `order`. A
+   * pass pairs each closer, left to right, with the nearest opener before it that is left, on what is
+   * left of each run (#140); a `~` pairs only with a run of its own length (#238). The runs between a
+   * pair are resolved among themselves then (strikethrough first, then emphasis), and are text after
+   * that, as are the runs that a pass leaves unpaired. */
+  const resolve = (lo: number, hi: number, order: readonly Pass[]) => {
+    for (const pass of order) {
+      const mine = (run: Run) => (run.char === '~') === (pass === 'strike');
+      for (let c = lo; c < hi; c++) {
+        const closer = runs[c];
+        if (!closer || !mine(closer) || !closer.canClose) continue;
+        while (size(closer) > 0) {
+          let o = c - 1;
+          for (; o >= lo; o--) {
+            const opener = runs[o];
+            if (!opener || !mine(opener) || !opener.canOpen || size(opener) === 0) continue;
+            if (pass === 'strike') {
+              if (opener.length === closer.length && closer.length <= 2) break;
+              continue;
+            }
+            if (opener.char !== closer.char) continue;
+            // The rule of three: where either run can both open and close, their sizes add up to a
+            // multiple of three only if the closer's size is a multiple of three as well.
+            const either = opener.canClose || closer.canOpen;
+            const sum = size(opener) + size(closer);
+            if (!(either && sum % 3 === 0 && size(closer) % 3 !== 0)) break;
+          }
           const opener = runs[o];
-          if (!opener || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
-            continue;
-          }
-          if (closer.char === '~') {
-            if (opener.length === closer.length && closer.length <= 2) break;
-            continue;
-          }
-          // The rule of three: where either run can both open and close, their sizes add up to a
-          // multiple of three only if the closer's size is a multiple of three as well.
-          const either = opener.canClose || closer.canOpen;
-          const sum = size(opener) + size(closer);
-          if (!(either && sum % 3 === 0 && size(closer) % 3 !== 0)) break;
+          if (o < lo || !opener) break;
+          const use =
+            pass === 'strike' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
+          const format = pass === 'strike' ? 'strike' : use === 2 ? 'bold' : 'italic';
+          spans.push({
+            format,
+            open: { from: opener.to - use, to: opener.to },
+            close: { from: closer.from, to: closer.from + use },
+          });
+          opener.to -= use;
+          closer.from += use;
+          resolve(o + 1, c, ['strike', 'emphasis']);
+          for (const between of runs.slice(o + 1, c)) between.from = between.to;
         }
-        const opener = runs[o];
-        if (o < lo || !opener) break;
-        const use =
-          closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
-        const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
-        spans.push({
-          format,
-          open: { from: opener.to - use, to: opener.to },
-          close: { from: closer.from, to: closer.from + use },
-        });
-        opener.to -= use;
-        closer.from += use;
-        resolve(o + 1, c);
-        for (const between of runs.slice(o + 1, c)) between.from = between.to;
       }
+      for (const run of runs.slice(lo, hi)) if (mine(run)) run.from = run.to;
     }
   };
-  resolve(0, runs.length);
+  // The kind of run that comes first in the text is resolved first (micromark resolves its
+  // constructs in the order that each first appears).
+  const first = runs.find((run) => run.char !== '~' || run.length <= 2);
+  resolve(0, runs.length, first?.char === '~' ? ['strike', 'emphasis'] : ['emphasis', 'strike']);
   // `***a***` reads as emphasis around strong emphasis, and the bytes are the same the other way.
   // Bold on the outside lets a mark that removes it stand outside all of the stars.
   for (const outer of spans) {

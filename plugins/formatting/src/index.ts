@@ -13,6 +13,7 @@ import {
   type Author,
   checkBoxEffect,
   type Editor,
+  markupViewFacet,
   parsedField,
   type EditorCommand,
   indentItems,
@@ -209,9 +210,9 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       userEvent,
       scrollIntoView: true,
     });
-    // A tracked change made in Clean shows in Redlines, as typing does.
+    // A tracked change made in Clean shows in the markup view, as typing does.
     if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
-      view.dispatch({ effects: setViewModeEffect.of('redlines') });
+      view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return view.state.doc !== before;
   };

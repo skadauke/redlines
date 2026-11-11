@@ -202,7 +202,7 @@ describe('the menu bar', () => {
   it('offers the Redlines view, and its shortcut, whatever the document holds', async () => {
     const menu = await createNativeMenu(modelOf(commands()), null);
     const redlines = itemWith('check', 'Redlines');
-    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+2');
+    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+3');
     // A disabled item takes its shortcut with it.
     menu.update(documentState({ hasRedlines: false }));
     expect(redlines.enabled).toBe(true);
@@ -491,11 +491,15 @@ describe('browser shortcuts', () => {
     expect(press('KeyE', { metaKey: true, shiftKey: true })).toBe(true);
     expect(c.toggleTracking).toHaveBeenCalledOnce();
     // Option changes the character typed, so the key's position decides.
-    press('Digit3', { metaKey: true, altKey: true, key: '£' });
+    press('Digit4', { metaKey: true, altKey: true, key: '¢' });
     expect(c.setView).toHaveBeenCalledWith('raw');
-    // Redlines is there for any document, so its key never waits for redlines.
-    press('Digit2', { metaKey: true, altKey: true, key: '™' });
+    // Redlines and Simple are there for any document, so their keys never wait for redlines.
+    press('Digit3', { metaKey: true, altKey: true, key: '£' });
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    press('Digit2', { metaKey: true, altKey: true, key: '™' });
+    expect(c.setView).toHaveBeenLastCalledWith('simple');
+    press('Digit1', { metaKey: true, altKey: true, key: '¡' });
+    expect(c.setView).toHaveBeenLastCalledWith('clean');
     press('KeyS', { metaKey: true, ctrlKey: true });
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     expect(c.save).not.toHaveBeenCalled();
@@ -536,7 +540,7 @@ describe('browser shortcuts', () => {
     const stop = installShortcuts(modelOf(c));
     expect(press('KeyE', { metaKey: true })).toBe(false);
     expect(press('KeyS', { ctrlKey: true })).toBe(false);
-    expect(press('Digit3', { metaKey: true })).toBe(false);
+    expect(press('Digit4', { metaKey: true })).toBe(false);
     expect(c.toggleTracking).not.toHaveBeenCalled();
     expect(c.save).not.toHaveBeenCalled();
     expect(c.setView).not.toHaveBeenCalled();

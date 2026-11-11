@@ -28,6 +28,7 @@ const COMMANDS: &[&str] = &[
     "allow_document",
     "answer_install",
     "beep",
+    "correct_word",
     "default_app",
     "document_windows",
     "forget_documents",
