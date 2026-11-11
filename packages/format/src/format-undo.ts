@@ -5,7 +5,8 @@
 import { openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { blockUndo } from './format-blocks.ts';
-import { DELIMITER, isBlockUndo, isInlineFormat, opsOf } from './format-ops.ts';
+import { DELIMITER, isAlignOps, isBlockUndo, isInlineFormat, opsOf } from './format-ops.ts';
+import { alignDecision } from './table-align.ts';
 import type { ParsedFormatOp } from './format-ops.ts';
 import {
   PREFIX,
@@ -185,6 +186,9 @@ export function formatDecision(
   segment: Segment,
   action: 'accept' | 'reject',
 ): TextChange[] {
+  // An alignment change of a table, whose closer stands below it: its own markers go and its own
+  // old row comes back (format §3.7).
+  if (isAlignOps(opsOf(mark, segment))) return alignDecision(reader, mark, segment, action);
   const ops = action === 'reject' ? opsOf(mark, segment) : [];
   if (isBlockUndo(ops)) return blockUndo(reader, segment, ops);
   return segmentChanges(reader, mark, segment, ops);

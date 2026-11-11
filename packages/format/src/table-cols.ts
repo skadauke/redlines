@@ -99,8 +99,16 @@ export function columnChanges(text: string, grid: Grid, final: readonly ColItem[
   const staying = new Set(final.flatMap((item) => (isStaying(item) ? [item.src] : [])));
   const first = final[0];
   const firstStays = first !== undefined && isStaying(first) && first.src === 0;
-  grid.lines.forEach((line, k) => {
-    if (line.lone) return;
+  grid.lines.forEach((read, k) => {
+    // A line that is one pipe stands for one empty cell, which a column written back is put in front of
+    // or after (it was emptied by a deletion that went with a column's).
+    const pipe = read.lone ? text.indexOf('|', read.from) : -1;
+    const line = read.lone
+      ? {
+          ...read,
+          cells: [{ open: pipe, close: pipe, contentFrom: pipe + 1, contentTo: pipe + 1 }],
+        }
+      : read;
     const n = line.cells.length;
     const limit = Math.min(n, grid.columns);
     const marker = grid.rowMarkers[k] ?? null;

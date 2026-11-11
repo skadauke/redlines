@@ -9,6 +9,7 @@ import { parse } from './parse.ts';
 import { tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
+import type { TableAlign } from './table.ts';
 import type { TextChange } from './types.ts';
 import { bo, ada, context, expectEveryOrderAlike, file, exactly } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
@@ -30,7 +31,8 @@ type Shape =
   | { kind: 'moveRows'; rows: number[]; to: number }
   | { kind: 'insertCols'; after: number }
   | { kind: 'deleteCols'; cols: number[] }
-  | { kind: 'moveCols'; cols: number[]; to: number };
+  | { kind: 'moveCols'; cols: number[]; to: number }
+  | { kind: 'align'; cols: number[]; align: TableAlign };
 
 function shapes(rows: number, columns: number): Shape[] {
   const all: Shape[] = [];
@@ -48,6 +50,10 @@ function shapes(rows: number, columns: number): Shape[] {
       if (to !== c && to !== c + 1) all.push({ kind: 'moveCols', cols: [c], to });
     }
   }
+  for (let c = 0; c < columns; c++) {
+    for (const align of ['center', 'right', ''] as const)
+      all.push({ kind: 'align', cols: [c], align });
+  }
   return all;
 }
 
@@ -61,6 +67,9 @@ const REFUSALS = [
   /^The columns are already there\.$/,
   /column is pending\. Decide it first\.$/,
   /pending change is in this column\. Decide it first\.$/,
+  /alignment change is pending\. Decide it first\.$/,
+  /^The columns are already aligned that way\.$/,
+  /^Accept or reject the alignment change in this table first\.$/,
 ];
 
 function run(

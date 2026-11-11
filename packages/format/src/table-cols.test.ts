@@ -667,4 +667,22 @@ describe('a comment that starts above a table without pipes at its edges', () =>
     expect(parse(deleted).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
     expectInOrder('comment', ['c9qf'], deleted);
   });
+
+  it('writes a column back into a row that a decision left as one pipe', () => {
+    // The other cell of a row of two went with a deleted column; accepting the deletion of the text that
+    // is left leaves the row as a pipe alone, which stands for one empty cell and takes the column back.
+    const bare = file('a | b\n--|--\nc | d\ne | f');
+    const gone = edit(bare, { kind: 'deleteCols', cols: [0] }).after;
+    const at = gone.indexOf('| f') + 2;
+    const typed = applyChanges(
+      gone,
+      trackedEdit(gone, { from: at, to: at + 1, insert: '' }, context(ada, ['f3gg'])),
+    );
+    const kept = applyChanges(typed, accept(typed, 'f3gg'));
+    expect(trim(kept)).toContain('| \n\n<!--del');
+    const back = applyChanges(kept, reject(kept, 'k3x9'));
+    expect(columnsOf(back)).toEqual([2, 2, 2]);
+    expect(trim(back)).toContain('e |');
+    expectEveryOrderAlike('a row left as a pipe', typed, exactly);
+  });
 });

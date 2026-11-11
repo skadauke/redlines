@@ -9,7 +9,8 @@
 import { openerRange, splitEnd } from './blocks.ts';
 import { applyChanges, eolOf, inEol } from './changes.ts';
 import { EditError } from './errors.ts';
-import { decidesFormat, parseFormatOps } from './format-ops.ts';
+import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
+import { alignChange, alignHide, alignLabel } from './table-align.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
@@ -67,6 +68,15 @@ function hideMarkers(segment: Segment): TextChange[] {
   const changes = [{ ...openerRange(segment), insert: '' }];
   if (segment.close) changes.push({ ...segment.close, insert: '' });
   return changes;
+}
+
+/** `hideMarkers` for the segments of `mark`: an alignment change of a table takes the blank line
+ * before its closer with it (format §3.7), as deciding it does. */
+function hiddenBy(text: string, mark: MarkRange): (segment: Segment) => TextChange[] {
+  return (segment) =>
+    mark.kind === 'fmt' && isAlignOps(opsOf(mark, segment))
+      ? alignHide(text, segment)
+      : hideMarkers(segment);
 }
 
 /**
@@ -213,7 +223,7 @@ export function newestView(text: string): DocView {
     if (row) return [{ ...row.marker, insert: '' }];
     // An inserted column's marker goes with the space after it, as accepting it does.
     const col = cols.find((candidate) => candidate.mark === mark);
-    return col ? [{ ...col.marker, insert: '' }] : mark.segments.flatMap(hideMarkers);
+    return col ? [{ ...col.marker, insert: '' }] : mark.segments.flatMap(hiddenBy(text, mark));
   });
   changes.push(...dropped);
   return viewOf(
@@ -287,7 +297,7 @@ export function originalChanges(
         // was the deletion of the break that someone recorded after it.
         const to = splitEnd(text, segment.open, deletions, parsed.ledgerRange?.from);
         changes.push({ from: segment.open.from, to, insert: '' });
-      } else changes.push(...hideMarkers(segment));
+      } else changes.push(...hiddenBy(text, mark)(segment));
     }
   }
   // Text a row's rearranging writes where the ledger starts is not hidden by it.
@@ -327,7 +337,7 @@ export function originalView(text: string): DocView {
     const undone = resolve([
       ...(last ? formats : inner).flatMap((mark) =>
         mark.segments.flatMap((segment) =>
-          last ? hideMarkers(segment) : undoneFormat(reader, mark, segment),
+          last ? hiddenBy(current, mark)(segment) : undoneFormat(reader, mark, segment),
         ),
       ),
       ...(last ? ledgerChanges(read) : []),
@@ -363,7 +373,7 @@ function undoneFormat(reader: FormatReader, mark: MarkRange, segment: Segment): 
   try {
     return formatDecision(reader, mark, segment, 'reject');
   } catch (error) {
-    if (error instanceof EditError) return hideMarkers(segment);
+    if (error instanceof EditError) return hiddenBy(reader.text, mark)(segment);
     throw error;
   }
 }
@@ -373,6 +383,7 @@ function notation(
   mark: MarkRange,
   segment: Segment,
   entries: readonly { by: Handle; text: string }[],
+  parsed: Parsed,
 ): { open: string; close: string } {
   const tag = `[${mark.id} ${mark.entry.by}]`;
   const comment = entries.map((e) => `{>>[${mark.id} ${e.by}] ${e.text}<<}`).join('');
@@ -389,10 +400,12 @@ function notation(
     case 'fmt': {
       // A format change is named by the operations that rejecting it undoes. A block's syntax
       // stays as it reads, so the name follows the block, and a box's mark stands for itself.
-      const named = `{>>${noteOf(mark)}<<}`;
+      const named = `{>>${noteOf(mark, parsed)}<<}`;
       if (!segment.close) return { open: named, close: '' };
       const ops = parseFormatOps(segment.payload ?? mark.payload ?? '');
-      if (ops.some((op) => op.name === 'was')) return { open: '', close: named };
+      if (ops.some((op) => op.name === 'was' || op.name === 'align')) {
+        return { open: '', close: named };
+      }
       return { open: '{==', close: `==}${named}` };
     }
     case 'cmt':
@@ -405,8 +418,11 @@ function notation(
 }
 
 /** A format change's name in the review view: its id, its author and its operations. */
-function noteOf(mark: MarkRange): string {
+function noteOf(mark: MarkRange, parsed: Parsed): string {
   const ops = mark.segments[0]?.payload ?? mark.payload ?? '';
+  if (/^align=/.test(ops)) {
+    return `[${mark.id} ${mark.entry.by}] Formatted: ${alignLabel(alignChange(parsed, mark))}`;
+  }
   return `[${mark.id} ${mark.entry.by}] Formatted: ${ops}`;
 }
 
@@ -490,12 +506,13 @@ export function reviewView(text: string): string {
       continue;
     }
     for (const segment of mark.segments) {
-      let { open, close } = notation(mark, segment, reviewEntries(parsed, mark.id));
+      let { open, close } = notation(mark, segment, reviewEntries(parsed, mark.id), parsed);
       if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
         open = close = '';
       }
       const inside = held.get(segment);
-      if (inside) close = close.replace(/<<}$/, `; ${inside.map(noteOf).join('; ')}<<}`);
+      if (inside)
+        close = close.replace(/<<}$/, `; ${inside.map((m) => noteOf(m, parsed)).join('; ')}<<}`);
       changes.push({ ...openerRange(segment), insert: open });
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }

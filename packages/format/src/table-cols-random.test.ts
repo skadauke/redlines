@@ -54,6 +54,7 @@ describe('rows and columns, random', () => {
     let used = 0;
     let refusals = 0;
     let withColumns = 0;
+    let withAlign = 0;
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
       const bare = columns > 1 && random() < 0.15;
@@ -69,9 +70,25 @@ describe('rows and columns, random', () => {
       const widths = Array.from({ length: columns }, (_, c) =>
         Math.max(3, ...grid.map((r) => (r[c] ?? '').length)),
       );
+      // The delimiter row says each column's alignment, as written by hand or by a formatter.
+      const ALIGNS = [undefined, undefined, 'left', 'center', 'right'] as const;
+      const aligned = Array.from({ length: columns }, () => pick(ALIGNS));
+      const dashes = (c: number, width: number) => {
+        const how = aligned[c];
+        const colons =
+          (how === 'left' || how === 'center' ? 1 : 0) +
+          (how === 'center' || how === 'right' ? 1 : 0);
+        return `${how === 'left' || how === 'center' ? ':' : ''}${'-'.repeat(Math.max(1, width - colons))}${how === 'center' || how === 'right' ? ':' : ''}`;
+      };
       const lines = grid.map((cells, r) => {
         const shown = cells.map((cell, c) =>
-          padded ? (r === 1 ? '-'.repeat(widths[c] ?? 3) : cell.padEnd(widths[c] ?? 3)) : cell,
+          padded
+            ? r === 1
+              ? dashes(c, widths[c] ?? 3)
+              : cell.padEnd(widths[c] ?? 3)
+            : r === 1
+              ? dashes(c, 1)
+              : cell,
         );
         const joined = shown.map((cell) => ` ${cell} `.replace(/ {2}$/, ' ')).join('|');
         return bare ? joined.trim() : `|${joined}|`;
@@ -125,6 +142,9 @@ describe('rows and columns, random', () => {
           'deleteCol',
           'moveCol',
           'moveCol',
+          'align',
+          'align',
+          'align',
           'cell',
           'cell',
           'bold',
@@ -172,6 +192,15 @@ describe('rows and columns, random', () => {
             table: table.from,
             cols,
             to: Math.floor(random() * (width + 1)),
+          };
+        } else if (kind === 'align') {
+          const first = Math.floor(random() * width);
+          const cols = random() < 0.3 ? [first, Math.floor(random() * width)] : [first];
+          op = {
+            kind: 'align',
+            table: table.from,
+            cols,
+            align: pick(['left', 'center', 'right', ''] as const),
           };
         } else if (kind === 'bold' || kind === 'comment') {
           // A format change or a comment on the text of a cell, or on a stretch of it.
@@ -288,6 +317,7 @@ describe('rows and columns, random', () => {
       if (marks === 0 || marks > 5) continue;
       used++;
       if (/col-->|col=\d/.test(text)) withColumns++;
+      if (/<!--fmt \w{4} align=/.test(text)) withAlign++;
       try {
         expectEveryOrderAlike(label, text, exactly);
       } catch (error) {
@@ -330,5 +360,6 @@ describe('rows and columns, random', () => {
     // (a run of the default size draws too few tables to count on one).
     if (fuzzCount(120) >= 1000) expect(refusals).toBeGreaterThan(0);
     expect(withColumns).toBeGreaterThan(used / 4);
+    expect(withAlign).toBeGreaterThan(used / 10);
   }, 3_600_000);
 });

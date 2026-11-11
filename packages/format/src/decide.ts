@@ -4,6 +4,7 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
+import { isAlignOps, opsOf } from './format-ops.ts';
 import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
@@ -298,6 +299,11 @@ function emptiedAnnotations(
   return extra;
 }
 
+/** An alignment change of a table (format §3.7): its closer stands below the table, after the deletion
+ * lines, so it is decided last, on the text the others leave. */
+const isAlignMark = (mark: MarkRange) =>
+  mark.kind === 'fmt' && mark.segments.some((segment) => isAlignOps(opsOf(mark, segment)));
+
 /** Whether a mark is a half of a move of a row. */
 const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== undefined;
 
@@ -314,9 +320,10 @@ function decide(
   action: Action,
 ): TextChange[] {
   const tiers = [
-    marks.filter((mark) => !isRowMove(mark) && !isColMark(mark)),
+    marks.filter((mark) => !isRowMove(mark) && !isColMark(mark) && !isAlignMark(mark)),
     marks.filter(isColMark),
     marks.filter(isRowMove),
+    marks.filter(isAlignMark),
   ].filter((tier) => tier.length > 0);
   if (tiers.length <= 1) return decideNow(text, parsed, marks, action);
   let changes: TextChange[] = [];

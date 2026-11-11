@@ -270,7 +270,7 @@ applies its inverse:
 | `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
 | `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
 | `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
-| `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row                               |
+| `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above (§3.7)      |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
   `md-image`, which restores Markdown image syntax when an image resize is rejected.
@@ -964,7 +964,8 @@ The importer ships in April.
 A mark that ends at the end of a block closes at the end of the block's last text line: before an
 ATX heading's closing `#`s or its `{#id}`, and on a setext heading's text line, not its
 underline. After fenced code, a thematic break or an HTML block, the closer goes on the following
-line. After a table, it goes after one blank line.
+line. After a table, it goes after one blank line; below a table's deletion lines (§3.7) it goes
+after one blank line too, in front of the closers that stand there already.
 
 A closing fence may have nothing but spaces after it on its line: with a marker there, the code
 block would run on to the end of the file. When the new text of an insertion or a substitution
@@ -1742,9 +1743,53 @@ it, one per line:
 - A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
   otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
   re-padded.
-- **Alignment changes are not written by the app yet** (they come in a later stage); the rule below
-  holds for a file in which another tool wrote one: an alignment change is a block format change
-  (`align=SPEC`) around the table, and while it is pending every column operation is refused.
+- **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
+  Changing it with Track Changes on is a block format change around the table, `align=SPEC`, whose
+  `SPEC` is the old delimiter row as written, as a value (§2.6: a space is `\x20`, a pipe `\|`).
+  Its opener stands alone on the line before the table, with the blank line after it (§3.3), and its
+  closer after one blank line below the table and its deletion lines, in front of the closers that
+  stand there already:
+
+  ```markdown
+  <!--fmt k3x9 align=\|\x20:-\-\-\-\-\x20\|\x20-\-\-\-\-\x20\|-->
+
+  | Fruit  | Count |
+  | :----- | :---: |
+  | Apples | 3     |
+
+  <!--del w8nn row=2 \| Pears \| 5 \|-->
+
+  <!--/k3x9-->
+  ```
+
+  - The new delimiter row is the old one with the colons of the columns changed: each cell as wide
+    as it was (a cell of one dash grows by the colons), left `:--`, center `:-:`, right `--:`, none
+    all dashes. The cells of columns not changed are not touched.
+  - Accepting takes the markers away, the opener with its line break and blank line (§3.3) and the
+    closer with the line break and blank line before it, so that nothing else changes; rejecting writes
+    `SPEC` back as the delimiter row, so that every byte is as it was. It is decided after the other
+    marks of the table, on the text they leave, so that every order of decisions writes the same
+    bytes.
+  - **One change per table.** The author's own pending alignment change is changed in place, and is
+    taken away, with its old row written back as it was, when the new alignments are the old ones.
+    Another person's pending alignment change refuses yours: "Bo Chen's alignment change is pending.
+    Decide it first." A request that changes nothing is refused: "The columns are already aligned that
+    way."
+  - **Alignment and column changes don't mix,** because `SPEC` keeps the whole old delimiter row, a
+    cell for each column the table had: an alignment change is refused with Track Changes on while a
+    column is pending insertion, deletion or move ("Accept or reject the column changes in this table
+    first."), and every column operation, tracked or not, while an alignment change is pending
+    ("Accept or reject the alignment change in this table first."). Any row change is allowed beside
+    an alignment change, and an alignment change beside any row change: a row is never a cell of the
+    delimiter row.
+  - **With Track Changes off** the delimiter row is changed as it says and no mark is written. It is
+    allowed beside a pending column change, and the other places that keep the cell are changed too,
+    so that a plain edit changes both views (§3.10): the old row of a pending alignment change (so
+    that rejecting it keeps what was done, and the change goes when its old and new alignments are
+    the same), and the kept copy of a column that is a pending move's, in both halves of the move.
+  - A table keeps its alignment when its columns are inserted (a new column has none), deleted or
+    moved: the delimiter cell travels with the column, and a deleted column keeps its own in its
+    payload, as above.
 - **Rows and columns don't change together,** because a deleted row keeps its cells as written and a
   deleted column its cells top to bottom, so a change on the other axis while it is pending would
   leave it the wrong number of cells. With Track Changes on, a pending change allows:
@@ -1766,7 +1811,8 @@ it, one per line:
   columns: deleting or moving a column with a row inserted is refused with Track Changes on (the
   kept column would lack a cell for the row), and any column change with a row deleted or moved or
   an alignment change pending is refused, tracked or not ("Accept or reject the row changes in this
-  table first."). Decisions are made on the lines of the table in this order: the other marks, then
+  table first." or "… the alignment change …"). An alignment change is allowed with any row pending,
+  and with a column pending only with Track Changes off (rule 5 above). Decisions are made on the lines of the table in this order: the other marks, then
   the columns, then the moves of rows, each on the text the ones before leave.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
@@ -2596,6 +2642,11 @@ The library derives three read-only views of a document. None is ever stored.
   columns out of every line, writes deleted columns back at their positions and moves a moved column
   back. Accept all and Reject all decide columns with the other changes.
 
+  An alignment change of a table (§3.7) is in the newest view as the new delimiter row, without its
+  markers or the blank line before the closer, and in the original view as the old one. In the review
+  view its closer is replaced by a note, on a line of its own after the table, that names what
+  changed: `{>>[k3x9 ada] Formatted: column Count centered (was default)<<}`.
+
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
 
@@ -2773,7 +2824,7 @@ R users can still get full fidelity: the R package can run the TypeScript export
    edits in a fixed order. Should that be a conflict instead?
 4. **Not yet tested:** front-matter changes in full history; Word import into full history (Word
    doesn't record the order of its changes); live sessions with several authors in full history;
-   and table column changes, moves and header changes in live simulation.
+   and table column changes, alignment changes, moves and header changes in live simulation.
 5. **Likes in Word round trips.** Word stores likes in `commentsExtensible.xml`; whether they
    survive a round trip is untested.
 6. **Full history with authors and times in the ledger.** The history prototype kept them in

@@ -157,6 +157,17 @@ export function tableEnd(table: TableRead): number {
   return Math.max(table.rows.at(-1)?.to ?? 0, table.delimiter.to);
 }
 
+/** The start of the line of closers that stands after one blank line below the line that ends at
+ * `end`: the closers of marks that end with the table (format §3.3, §3.7), or -1. */
+export function closersBelow(text: string, end: number): number {
+  const first = text.indexOf('\n', end);
+  if (first === -1) return -1;
+  const blankEnd = lineEnd(text, first + 1);
+  if (text.slice(first + 1, blankEnd).trim() !== '') return -1;
+  const next = text.indexOf('\n', blankEnd);
+  return next !== -1 && text.startsWith('<!--/', next + 1) ? next + 1 : -1;
+}
+
 /**
  * The changes that take the deletions in `lines` (indexes into `table.deletions`) out of the text;
  * the blank line in front of them goes with the last one.
@@ -220,7 +231,15 @@ export function addDeletionLines(
       changes.push({ from: last.to, to: last.to, insert: lines.map((l) => eol + l).join('') });
     } else {
       const at = tableEnd(table);
-      changes.push({ from: at, to: at, insert: eol + eol + lines.join(eol) });
+      // After the blank line, in front of the closers that stand below the table (format §3.3).
+      const closers = closersBelow(text, at);
+      if (closers !== -1) {
+        changes.push({
+          from: closers,
+          to: closers,
+          insert: lines.map((l) => l + eol + eol).join(''),
+        });
+      } else changes.push({ from: at, to: at, insert: eol + eol + lines.join(eol) });
     }
   }
   return changes;
