@@ -1013,6 +1013,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundColor: 'var(--rl-color)',
   },
   '.rl-trow.rl-bar-mixed > .rl-tc:first-child::before': { backgroundColor: 'var(--rl-mixed)' },
+  // The hovered bar of a row is the row's class; the first cell draws the bar.
+  '.rl-trow.rl-bar.rl-bar-hot > .rl-tc:first-child::before': { width: '3px' },
   // An inserted table row: the author's tint behind its cells, and the text underlined and in the
   // author's color as inserted text is.
   '.rl-trow.rl-ins-row > .rl-tc': {

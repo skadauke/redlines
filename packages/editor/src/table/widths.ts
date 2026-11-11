@@ -136,24 +136,63 @@ function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
   return hidden.toSorted((a, b) => a.from - b.from || b.to - a.to);
 }
 
+/** Marks that stand in a measured text where bold text starts and ends. Private-use characters, so
+ * that nothing a person writes can be taken for them (they are taken out of the text first). */
+export const BOLD_ON = '\uE000';
+export const BOLD_OFF = '\uE001';
+
 /** What a cell shows with the caret elsewhere: its text without the syntax the preview hides, with
- * what `cellShows` reads of the rest. */
-export function shownText(state: EditorState, cell: Cell): string {
+ * what `cellShows` reads of the rest. With `bold`, the stretches shown bold stand between
+ * `BOLD_ON` and `BOLD_OFF`, for a measure that sets them in the bold weight. */
+export function shownText(state: EditorState, cell: Cell, bold = false): string {
+  const marks: { pos: number; mark: string }[] = [];
+  if (bold) {
+    syntaxTree(state).iterate({
+      from: cell.textFrom,
+      to: cell.textTo,
+      enter: (node) => {
+        if (node.name !== 'StrongEmphasis') return;
+        marks.push({ pos: node.from, mark: BOLD_ON }, { pos: node.to, mark: BOLD_OFF });
+      },
+    });
+    marks.sort((x, y) => x.pos - y.pos);
+  }
   let text = '';
   let at = cell.textFrom;
+  let next = 0;
+  // The text from `at` to `to`, with the marks that fall in it (and, up to `to`, those before it).
+  const emit = (to: number) => {
+    for (; next < marks.length; next++) {
+      const found = marks[next];
+      if (!found || found.pos > to) break;
+      if (found.pos > at) text += state.sliceDoc(at, found.pos);
+      at = Math.max(at, found.pos);
+      text += found.mark;
+    }
+    if (to > at) text += state.sliceDoc(at, to);
+    at = Math.max(at, to);
+  };
   for (const range of hiddenSyntax(state, cell.textFrom, cell.textTo)) {
     if (range.to <= at) continue;
-    if (range.from > at) text += state.sliceDoc(at, range.from);
+    emit(range.from);
+    // What is hidden shows nothing, but the marks it holds still count.
+    for (; next < marks.length; next++) {
+      const found = marks[next];
+      if (!found || found.pos > range.to) break;
+      text += found.mark;
+    }
     at = Math.max(at, range.to);
   }
-  text += state.sliceDoc(at, cell.textTo);
+  emit(cell.textTo);
   return cellShows(text);
 }
 
 /** The text of every row of a table, as it reads. */
 function cellsOf(state: EditorState, table: Table): string[][] {
   return table.rows.map((row) =>
-    row.cells.filter((cell) => cell.col < table.columns).map((cell) => shownText(state, cell)),
+    row.cells
+      .filter((cell) => cell.col < table.columns)
+      .map((cell) => shownText(state, cell, true)),
   );
 }
 
@@ -168,15 +207,16 @@ export interface WidthEnvironment {
   signature(view: EditorView): string;
 }
 
-/** Longest word and line of a text in a canvas, with the font of the cell it is for. */
+/** Longest word and line of a text in a canvas, with the font of the cell it is for. Text between
+ * `BOLD_ON` and `BOLD_OFF` is measured in the bold weight. */
 function canvasMeasure(view: EditorView): (text: string, row: number) => Measured {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   const body = fontOf(view, false);
   const header = fontOf(view, true);
-  const width = (text: string, font: CellFont) => {
+  const width = (text: string, font: CellFont, bold: boolean) => {
     if (!context) return text.length * 8;
-    context.font = font.font;
+    context.font = bold ? boldFont(font.font) : font.font;
     const shown = font.upper ? text.toUpperCase() : text;
     return context.measureText(shown).width + shown.length * font.spacing;
   };
@@ -184,15 +224,46 @@ function canvasMeasure(view: EditorView): (text: string, row: number) => Measure
     const font = row === 0 ? header : body;
     let longestWord = 0;
     let longestLine = 0;
+    let bold = false;
     for (const line of text.split('\n')) {
-      longestLine = Math.max(longestLine, width(line, font));
-      for (const word of line.split(/\s+/)) longestWord = Math.max(longestWord, width(word, font));
+      let lineWidth = 0;
+      let wordWidth = 0;
+      let piece = '';
+      const flush = () => {
+        if (!piece) return;
+        const w = width(piece, font, bold);
+        lineWidth += w;
+        wordWidth += w;
+        piece = '';
+      };
+      const endWord = () => {
+        flush();
+        longestWord = Math.max(longestWord, wordWidth);
+        wordWidth = 0;
+      };
+      for (const char of line) {
+        if (char === BOLD_ON || char === BOLD_OFF) {
+          flush();
+          bold = char === BOLD_ON;
+        } else if (/\s/.test(char)) {
+          // A space is set in the weight it stands in, and ends the word.
+          endWord();
+          lineWidth += width(char, font, bold);
+        } else piece += char;
+      }
+      endWord();
+      longestLine = Math.max(longestLine, lineWidth);
     }
     return {
       longestWord: longestWord + font.padding,
       longestLine: longestLine + font.padding,
     };
   });
+}
+
+/** `font` in the bold weight (a CSS font shorthand: style, weight, size, family). */
+function boldFont(font: string): string {
+  return font.replace(/^(italic )?(\d+|normal|bold) /, (_m, italic: string | undefined) => `${italic ?? ''}700 `);
 }
 
 interface CellFont {
