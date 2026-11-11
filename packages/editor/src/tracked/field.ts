@@ -93,15 +93,17 @@ export function hasRedlines(parsed: Parsed): boolean {
 /**
  * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution, an
  * inserted line break (a split, format §3.4), the two halves of a move included, or a format
- * change that accept and reject decide, and an inserted table row (format §3.7). Table column
- * marks and row and column deletions, and format changes with operations this version can't undo,
- * are kept as written, with their markers hidden, but this version doesn't draw them.
+ * change that accept and reject decide, and an inserted table row or column and a deleted one
+ * (format §3.7). Format changes with operations this version can't undo are kept as written, with
+ * their markers hidden, but this version doesn't draw them.
  */
 export function isDrawnChange(mark: MarkRange): boolean {
   if (mark.kind === 'sub' || mark.kind === 'split') return true;
   if (mark.kind === 'fmt') return isDecidable(mark);
-  if (mark.kind === 'ins') return mark.payload === undefined || mark.payload === 'row';
-  if (mark.kind === 'del') return isRowDeletion(mark) || !/^col=/.test(mark.payload ?? '');
+  if (mark.kind === 'ins') {
+    return mark.payload === undefined || mark.payload === 'row' || mark.payload === 'col';
+  }
+  if (mark.kind === 'del') return true;
   return false;
 }
 
@@ -110,15 +112,29 @@ export function isRowDeletion(mark: MarkRange): boolean {
   return mark.kind === 'del' && /^row=/.test(mark.payload ?? '');
 }
 
+/** A deleted column of a table (format §3.7), kept below it and drawn as a ghost cell in each row. */
+export function isColDeletion(mark: MarkRange): boolean {
+  return mark.kind === 'del' && /^col=/.test(mark.payload ?? '');
+}
+
+/** A deleted row or column, which is drawn as ghosts and never as deleted text. */
+export const isTableDeletion = (mark: MarkRange): boolean =>
+  isRowDeletion(mark) || isColDeletion(mark);
+
+/** An inserted column of a table (format §3.7): the marker in its header cell. */
+export const isColInsertion = (mark: MarkRange): boolean =>
+  mark.kind === 'ins' && mark.payload === 'col';
+
 /**
  * Whether the editor lists and decides a mark as a change, in the review bar, its counts and the
  * cards: a change it draws, except the halves of a move (format §5.2), which v0.1 doesn't accept or
  * reject.
  */
 export function isChange(mark: MarkRange): boolean {
-  // A move of a row is one change, the row at its new place: its old place is its ghost.
-  if (isRowDeletion(mark)) return mark.entry.move === undefined;
-  if (mark.kind === 'ins' && mark.payload === 'row') return true;
+  // A move of a row or column is one change, the row or column at its new place: its old place is its
+  // ghost.
+  if (isTableDeletion(mark)) return mark.entry.move === undefined;
+  if (mark.kind === 'ins' && (mark.payload === 'row' || mark.payload === 'col')) return true;
   return isDrawnChange(mark) && mark.entry.move === undefined;
 }
 

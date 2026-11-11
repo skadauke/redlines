@@ -3,7 +3,7 @@ import { activateHover } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
 import { parse, type MarkRange } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { describeChange } from './cards.ts';
+import { describeChange, describeChanges } from './cards.ts';
 import {
   button,
   click,
@@ -632,5 +632,90 @@ describe('an inserted table row', () => {
   it('is listed in the review bar’s changes', () => {
     const { editor } = mount(ONE);
     expect(editor.getUiState().changes.map((change) => change.id)).toEqual(['k3x9']);
+  });
+});
+
+describe('an inserted, deleted or moved table column', () => {
+  const COLS = file(
+    '| Fruit | <!--ins k3x9 col--> A | <!--ins m2bd col--> B |\n| ----- | - | - |\n| Apples |  |  |',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+      '  m2bd: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+    ],
+  );
+  const ONE = file('| Fruit | <!--ins k3x9 col--> A |\n| ----- | - |\n| Apples |  |', [
+    ...PEOPLE,
+    'marks:',
+    '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+  ]);
+  const DELETED = file(
+    '| Fruit | Price |\n| ----- | ----- |\n| Apples | 1 |\n\n<!--del g5nb col=2 Count\\n-\\-\\-\\n3-->',
+    [...PEOPLE, 'marks:', '  g5nb: {by: bo, at: 2026-10-31T09:30Z}'],
+  );
+  const MOVED = file(
+    '| Price | <!--ins h6nb col--> Fruit |\n| ----- | ----- |\n| 1 | Apples |\n\n<!--del j7nb col=1 Fruit\\n-\\-\\-\\nApples-->',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  h6nb: {by: bo, at: 2026-10-31T09:30Z, move: j7nb}',
+      '  j7nb: {by: bo, at: 2026-10-31T09:30Z, move: h6nb}',
+    ],
+  );
+
+  it('is described as Inserted column, Inserted 2 columns, Deleted column and Moved column', async () => {
+    const cols = parse(COLS);
+    expect(describeChange(cols, cols.marks[0]!)).toBe('Inserted column');
+    expect(describeChanges(cols, cols.marks)).toBe('Inserted 2 columns');
+    const deleted = parse(DELETED);
+    expect(describeChange(deleted, deleted.marks[0]!)).toBe('Deleted column');
+    const moved = parse(MOVED);
+    expect(describeChange(moved, moved.marks[0]!)).toBe('Moved column');
+    const { editor } = mount(COLS);
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-col');
+    expect(what(editor)).toBe('Inserted 2 columns');
+    const ghost = mount(DELETED);
+    ghost.editor.setViewMode('redlines');
+    await clickOn(ghost.editor, '.rl-ghost-col');
+    expect(what(ghost.editor)).toBe('Deleted column');
+    const again = mount(MOVED);
+    again.editor.setViewMode('redlines');
+    await clickOn(again.editor, '.rl-ghost-col');
+    expect(what(again.editor)).toBe('Moved column');
+  });
+
+  it('Accept writes the plain column, and Reject takes it out', async () => {
+    const { editor } = mount(ONE, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-col');
+    button(card(editor)!, 'Accept').click();
+    expect(editor.getDoc()).toContain('| Fruit | A |');
+    expect(editor.getDoc()).not.toContain('<!--ins');
+    const rejecting = mount(ONE, { real: true });
+    rejecting.editor.setViewMode('redlines');
+    await clickOn(rejecting.editor, '.rl-ins-col');
+    button(card(rejecting.editor)!, 'Reject').click();
+    expect(rejecting.editor.getDoc()).not.toContain('| A |');
+    expect(rejecting.editor.getDoc()).toContain('| Fruit |');
+  });
+
+  it('is listed in the review bar’s changes, a move once', () => {
+    expect(
+      mount(ONE)
+        .editor.getUiState()
+        .changes.map((change) => change.id),
+    ).toEqual(['k3x9']);
+    expect(
+      mount(MOVED)
+        .editor.getUiState()
+        .changes.map((change) => change.id),
+    ).toEqual(['h6nb']);
+    expect(
+      mount(DELETED)
+        .editor.getUiState()
+        .changes.map((change) => change.id),
+    ).toEqual(['g5nb']);
   });
 });

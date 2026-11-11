@@ -216,7 +216,7 @@ describe('the widths of a table in an editor', () => {
     expect(style?.textContent).toMatch(
       new RegExp(`\\.rl-tbl\\[data-table="${id}"\\]\\{--w0:[\\d.]+px;--w1:[\\d.]+px;\\}`),
     );
-    expect(style?.textContent).toContain('.rl-tc[data-col="1"]{width:var(--w1)}');
+    expect(style?.textContent).toContain('.rl-tc[data-vcol="1"]{width:var(--w1)}');
   });
 
   it('keeps a table’s widths on it when a table is added above it, never on another', async () => {

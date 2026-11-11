@@ -143,7 +143,6 @@ describe('Tab and a pending change under the table', () => {
     keys: ['Tab'],
     tc,
     expect: { refusal: REFUSAL },
-    skip: { decisions: 'Columns are not decided until Stage 4, in the file as it starts' },
   });
   scriptRows([column(false), column(true)]);
 
