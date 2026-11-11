@@ -96,8 +96,14 @@ describe('rows and columns, random', () => {
       const joined = lines.join(random() < 0.2 ? '\r\n' : '\n');
       // A comment that starts on a line of its own above a header without pipes, and ends after the
       // first character of its first cell: a column operation on that column is refused (format 3.7).
-      const above = bare && random() < 1 / 3;
-      let text = above ? file(joined, {}, THREAD) : file(joined);
+      // Paragraphs above and below the table, which other people's changes (and the same person's) reach:
+      // a closer of an alignment change stands between the table and the paragraph below it.
+      const around = random() < 0.5;
+      const above = !around && bare && random() < 1 / 3;
+      const gap = joined.includes('\r\n') ? '\r\n\r\n' : '\n\n';
+      let text = above
+        ? file(joined, {}, THREAD)
+        : file(around ? `Intro words.${gap}${joined}${gap}Outro words.` : joined);
       if (above) {
         const eol = joined.includes('\r\n') ? '\r\n' : '\n';
         text = applyChanges(text, [
@@ -145,6 +151,8 @@ describe('rows and columns, random', () => {
           'align',
           'align',
           'align',
+          'outside',
+          'outside',
           'cell',
           'cell',
           'bold',
@@ -193,6 +201,27 @@ describe('rows and columns, random', () => {
             cols,
             to: Math.floor(random() * (width + 1)),
           };
+        } else if (kind === 'outside') {
+          // Typing, deleting or breaking in a paragraph beside the table, found in the newest view.
+          const view = newestView(text);
+          const word = pick(['Intro', 'Outro'] as const);
+          const at = view.text.indexOf(word);
+          if (at === -1) continue;
+          const end = at + word.length;
+          const mode = pick(['delete', 'type', 'new'] as const);
+          let a = at;
+          let b = end;
+          let insert = '';
+          if (mode === 'type') {
+            a = b = end;
+            insert = 'q';
+          } else if (mode === 'new') {
+            a = b = word === 'Intro' ? at : end;
+            insert = word === 'Intro' ? 'New.\n\n' : '\n\nNew.';
+          }
+          const from = view.map.toSource(a, 1);
+          const to = Math.max(from, view.map.toSource(b, -1));
+          edit = { from, to, insert };
         } else if (kind === 'align') {
           const first = Math.floor(random() * width);
           const cols = random() < 0.3 ? [first, Math.floor(random() * width)] : [first];
@@ -312,6 +341,33 @@ describe('rows and columns, random', () => {
           ).toBe(true);
         }
       }
+      // Last, the paragraph below the table with the break in front of it deleted, as a person who removes
+      // it writes it (the table's own operations come before it: a table joined to a paragraph is not
+      // one that rows and columns are drawn on).
+      if (around && random() < 0.5) {
+        const view = newestView(text);
+        const at = view.text.indexOf('Outro');
+        if (
+          at > 1 &&
+          view.text.slice(at - 2, at) === '\n\n' &&
+          view.text.startsWith('Outro words.', at)
+        ) {
+          const from = view.map.toSource(at - 2, 1);
+          const to = Math.max(from, view.map.toSource(at + 'Outro words.'.length, -1));
+          const person = pick([ada, bo]);
+          try {
+            text = applyChanges(
+              text,
+              pick([true, false])
+                ? trackedEdit(text, { from, to, insert: '' }, context(person, ids()))
+                : untrackedEdit(text, { from, to, insert: '' }),
+            );
+            steps.push(`last: delete the break and the paragraph ${from}-${to}`);
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+          }
+        }
+      }
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
       const marks = parse(text).marks.length;
       if (marks === 0 || marks > 5) continue;
@@ -337,7 +393,12 @@ describe('rows and columns, random', () => {
       // Comments stay (they are decided by no one); every change is gone, and what is left reads as
       // the newest view, or as the original.
       const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
-      const accepted = applyChanges(text, acceptAll(text));
+      let accepted: string;
+      try {
+        accepted = applyChanges(text, acceptAll(text));
+      } catch (error) {
+        throw new Error(`${label}: accept all: ${String(error)}\n${text}`, { cause: error });
+      }
       expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
       const tidy = (view: string) => view.replace(/\s+$/, '');
       expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(

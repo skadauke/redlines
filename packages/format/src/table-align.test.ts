@@ -2,6 +2,7 @@
 // block format change around the table whose `align=` keeps the old delimiter row.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import type { TextChange } from './types.ts';
 import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { formatChange } from './format-blocks.ts';
@@ -283,6 +284,57 @@ describe('aligning a column, tracked (format §3.7)', () => {
       );
       expectEveryOrderAlike(`typed after ${word}`, edited, exactly);
     }
+  });
+
+  it('reads alike in every order whatever is deleted or typed in the paragraph below the table', () => {
+    const text = file(`${FRUIT}\n\nOutro words.\n\nMore.`);
+    const one = align(text, [1], 'center').after;
+    const view = newestView(one);
+    const at = view.text.indexOf('Outro words.');
+    const end = at + 'Outro words.'.length;
+    // Written as the editor writes them: from the newest view, mapped into the file.
+    const shapes: [string, number, number, string][] = [
+      ['the paragraph', at, end, ''],
+      ['the break and the paragraph', at - 2, end, ''],
+      ['the word Outro', at, at + 5, ''],
+      ['the break and the word', at - 2, at + 5, ''],
+      ['typing at its end', end, end, 'q'],
+      ['a new paragraph after it', end, end, '\n\nNew.'],
+      ['typing at its start', at, at, 'q'],
+    ];
+    let checked = 0;
+    for (const who of [bo, ada]) {
+      for (const [name, a, b, insert] of shapes) {
+        const from = view.map.toSource(a, 1);
+        const to = Math.max(from, view.map.toSource(b, -1));
+        let edited: string;
+        try {
+          edited = applyChanges(
+            one,
+            trackedEdit(one, { from, to, insert }, context(who, ['c2dd', 'f3gg', 'h4jj'])),
+          );
+        } catch (error) {
+          if (error instanceof EditError) continue;
+          throw error;
+        }
+        checked++;
+        expectEveryOrderAlike(`${who.handle}: ${name}`, edited, exactly);
+        // Both decided as the views say: the alignment kept, the edit kept, or both undone.
+        const all = (decide: (t: string) => TextChange[]) => {
+          try {
+            return applyChanges(edited, decide(edited));
+          } catch (error) {
+            throw new Error(`${who.handle}: ${name}: ${String(error)}\n${edited}`, {
+              cause: error,
+            });
+          }
+        };
+        expect(trim(all(acceptAll)), `${name}: accept all`).toBe(trim(newestView(edited).text));
+        expect(trim(all(rejectAll)), `${name}: reject all`).toBe(trim(originalView(edited).text));
+        expect(trim(originalView(edited).text), `${name}: original`).toBe(trim(text));
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(8);
   });
 
   it('is one change with the rest of a group, and takes a note', () => {

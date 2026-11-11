@@ -325,6 +325,25 @@ function decide(
     marks.filter(isRowMove),
     marks.filter(isAlignMark),
   ].filter((tier) => tier.length > 0);
+  const aligned = tiers.at(-1)?.some(isAlignMark) === true;
+  try {
+    return decideTiers(text, parsed, marks, action, tiers);
+  } catch (error) {
+    // An alignment change goes last, after the deletion lines it stands behind. Where deciding a mark
+    // of the paragraph below the table first would leave its closer in front of text, the alignment
+    // change goes first: the closer is gone then, and that decision is as it is in any order.
+    if (!(error instanceof EditError) || !aligned || tiers.length < 2) throw error;
+    return decideTiers(text, parsed, marks, action, [tiers.at(-1) ?? [], ...tiers.slice(0, -1)]);
+  }
+}
+
+function decideTiers(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+  tiers: readonly (readonly MarkRange[])[],
+): TextChange[] {
   if (tiers.length <= 1) return decideNow(text, parsed, marks, action);
   let changes: TextChange[] = [];
   let current = text;
