@@ -650,6 +650,9 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   const text = lf(check.doc);
   editor.setViewMode('clean');
   editor.setTracking(check.tracking ?? false);
+  // Over an empty document first: the same text loaded over the last check's open empty paragraph
+  // keeps it open (an echo of the file is no change), and this check starts from nothing.
+  editor.reloadDoc('');
   editor.reloadDoc(text.replace('‸', ''));
   view.focus();
   view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')), scrollIntoView: true });
@@ -714,6 +717,7 @@ async function tab(editor: Editor): Promise<unknown> {
   editor.setTracking(false);
   const load = async (doc: string) => {
     const text = lf(doc);
+    editor.reloadDoc('');
     editor.reloadDoc(text.replace('‸', ''));
     editor.view.focus();
     editor.view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')) });

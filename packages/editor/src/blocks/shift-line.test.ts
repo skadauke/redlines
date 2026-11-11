@@ -102,4 +102,37 @@ describe('the empty line Shift-Return opens', () => {
       if (tracking) expect(editor.getUiState().view).toBe('redlines');
     }
   });
+
+  it('is taken back by Backspace with the caret on either side of the space', () => {
+    for (const tracking of [false, true]) {
+      for (const how of ['before', 'after'] as const) {
+        const editor = mount('One two.\n\nNext.', tracking);
+        press(editor, 'Enter', true);
+        const line = editor.view.state.doc.lineAt(editor.view.state.selection.main.head);
+        if (how === 'after') {
+          const end = line.text.indexOf('\u00a0') + 1 + line.from;
+          editor.view.dispatch({ selection: { anchor: end } });
+        }
+        const label = `${how}, tracking ${tracking}`;
+        press(editor, 'Backspace');
+        expect(textWithoutOpen(editor.view.state), label).toBe('One two.\n\nNext.');
+        expect(openBlock(editor.view.state), label).toBeNull();
+        expect(editor.view.state.doc.toString().includes('\u00a0'), label).toBe(false);
+        expect(editor.view.state.doc.lines, label).toBeLessThan(5);
+      }
+    }
+  });
+
+  it('stays open when the same file is loaded again, as an agent echo of it does', () => {
+    // The WebKit block check loads each check's document over the last one's: with the empty
+    // paragraph of the check before still open, the same text left it open (`throughOpen`).
+    const editor = mount('One two.\n\nNext.', false);
+    press(editor, 'Enter');
+    editor.reloadDoc('One two.\n\nNext.');
+    expect(openBlock(editor.view.state)).not.toBeNull();
+    editor.reloadDoc('');
+    editor.reloadDoc('One two.\n\nNext.');
+    expect(openBlock(editor.view.state)).toBeNull();
+    expect(editor.view.state.doc.toString()).toBe('One two.\n\nNext.');
+  });
 });
