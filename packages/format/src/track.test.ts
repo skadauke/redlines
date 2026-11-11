@@ -1188,7 +1188,24 @@ describe('a change inside the prefix of a block keeps the break before it (forma
       return 'no error';
     };
     expect(codeOf(replace(0, 1, '7'))).toBe('no-legal-placement');
-    expect(codeOf(remove(0, 3))).toBe('no-legal-placement');
+    // Not the whole prefix, with the text after it staying: that is the prefix's deletion, written
+    // with its opener alone on the first line (below).
+    expect(codeOf(remove(1, 3))).toBe('no-legal-placement');
+    expect(codeOf(remove(0, 2))).toBe('no-legal-placement');
+  });
+
+  it('writes the deletion of the whole first prefix, with the text after it staying (#248)', () => {
+    for (const [body, to, form, newest] of [
+      ['1. one\n2. two', 3, '<!--del k3x9 1. -->\n\none\n2. two', 'one\n2. two'],
+      ['- one\n- two', 2, '<!--del k3x9 - -->\n\none\n- two', 'one\n- two'],
+      ['> One.\n>\n> Two.', 2, '<!--del k3x9 > -->\n\nOne.\n>\n> Two.', 'One.\n>\n> Two.'],
+      ['  - one\n  - two', 4, '<!--del k3x9   - -->\n\none\n  - two', 'one\n  - two'],
+    ] as const) {
+      const result = changed(body, remove(0, to));
+      expect(result.body, body).toBe(form);
+      expect(result.newest, body).toBe(newest);
+      expect(result.rejected, body).toBe(body);
+    }
   });
 
   it('is the same for a number typed over a part of the prefix with text', () => {

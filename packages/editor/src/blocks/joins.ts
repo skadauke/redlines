@@ -122,6 +122,10 @@ function endOfNoText(state: EditorState, block: Block): number {
   return last.to;
 }
 
+/** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
+const FIRST_NUMBERED =
+  "The first item of a numbered list at the start of the file can't leave the list while Track Changes is on: the next number would read as text of this line. Take the number out with Track Changes off.";
+
 /** Words for a join onto a setext heading with Track Changes on. */
 const SETEXT_JOIN =
   "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
@@ -522,6 +526,12 @@ function outOfList(
     const next = doc.line(last.number + 1);
     const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
     if (number && number[2] !== '1') {
+      // The first line of the file, Track Changes on: the format takes the marker out as a change
+      // of its own, and has no place for the blank line that this item's number needs after it
+      // (a line break before a numbered item, which is a line of its list: #248).
+      if (!prev && line.number === 1 && state.field(trackingField, false)) {
+        return { ...nothing(state), refusal: FIRST_NUMBERED };
+      }
       let first = changes[0] as { from: number; to: number; insert?: string };
       // The marker's removal and the blank line are one change with the break above, as the
       // format writes the block's change.

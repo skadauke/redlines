@@ -3726,3 +3726,46 @@ describe('a backslash typed at the end of a line that ends in a pending deletion
     }
   });
 });
+
+describe('the deletion of the prefix of a file’s first line, its text staying (#248)', () => {
+  // Taking the first block of a longer list or quote out of it: the prefix is the mark's text, and
+  // its opener stands alone on the first line, with the break and blank line the block after it
+  // needs (format §3.3). One mark, so every order of decisions reads alike, and micromark reads
+  // the file as the newest view.
+  it('reads as the newest view in the file and in every order of decisions', () => {
+    for (const [body, to] of [
+      ['- one\n- two', 2],
+      ['- one\n\n- two', 2],
+      ['- one\n  - two\n- three', 2],
+      ['* one\n+ two', 2],
+      ['1. one\n1. two', 3],
+      ['1) one\n1) two', 3],
+      ['1. one\n2. two', 3],
+      ['> One.\n>\n> Two.', 2],
+      ['> One.\n> Two.', 2],
+      ['  - one\n  - two', 4],
+      ['- **one** two\n- three', 2],
+    ] as const) {
+      const before = file(body);
+      const result = trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(newestView(after).text, body).toBe(`${body.slice(to)}\n`.replace(/^\s+/, ''));
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is not written next to another mark, or in a heading or a paragraph', () => {
+    for (const [body, to] of [
+      ['- <!--del k3x9 x-->one\n- two', 2],
+      ['## One\n\nTwo', 3],
+    ] as const) {
+      const before = file(body, { k3x9: 'bo' });
+      expect(
+        () => trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd'])),
+        body,
+      ).toThrow(EditError);
+    }
+  });
+});

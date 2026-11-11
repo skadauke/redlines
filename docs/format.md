@@ -880,7 +880,8 @@ the original text stay as they are: over the whole construct, as a substitution 
 one character where a marker would change how emphasis flanks. A marker also never cuts a run of
 `*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a change
 inside the prefix of the first line of the file (`- `, `> `, `##`; every other prefix is changed
-together with the break in front of it, §3.4) or after a heading's closing `#`s, with the error
+together with the break in front of it, §3.4), except the deletion of all of a list marker or a
+quote marker there, with its text staying (§3.4) or after a heading's closing `#`s, with the error
 code `no-legal-placement`.
 
 ### 3.2 Line starts
@@ -1057,6 +1058,23 @@ reads as, the first item kept and the break and marker after it deleted
 editor that wants the line's place left empty writes its own line breaks in front of the mark, as
 they are, and the file never holds them (Return in the empty first item of a list at the start of a
 file).
+
+**The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
+the body, a list marker or a quote's `>` with the white space after it, where the text of its block
+stays on the line (taking the first block of a longer list or quote out of it), is the prefix's
+own deletion: its text is the marker, `<!--del k3x9 - -->`, and the opener stands where the marker
+was, alone on the line, for the text that stays is the block it starts: the line break and the
+blank line after it are its carrier (§3.3), `<!--del k3x9 - -->\n\none\n- two`. Accepting takes the
+marker, the opener and its carrier away, `one\n- two`, and rejecting writes the marker back in
+their place, `- one\n- two`, so that the original is what the file was, and the newest view reads
+as the file does in CommonMark, in every order, with one mark. It is written only where nothing
+else could stand against it: with no other marker in front of the text or among the prefix, which
+the deletion would join, or the opener would start a line that has text after it. A heading's `#`s
+and the first line's indentation alone are not a prefix of this kind, and are refused as before.
+The newest view reads what is asked, and no more: the next item of a numbered list that is not
+numbered 1, right under the text, is a line of its text (`1. one\n2. two` leaves `one\n2. two`),
+which is why the editor does not take the first numbered item out of its list while Track Changes
+is on.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the

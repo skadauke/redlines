@@ -1296,6 +1296,27 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
 }
 
 /**
+ * A deletion of the prefix of the first line of the body alone, a list marker or a quote's `>`
+ * with the text after it staying (taking a longer list's or quote's first block out of it, #248):
+ * the deleted prefix is the mark's text, and its opener stands where the prefix was, alone on the
+ * line, for the text that stays is the block it starts, which the opener's line break and blank
+ * line carry (format §3.3). Undefined for any other range.
+ */
+function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
+  const { text } = plan;
+  if (from !== plan.bodyStart || prefixEnd(plan, from) !== to) return undefined;
+  const line = text.slice(from, lineEnd(text, from));
+  const prefix = text.slice(from, to);
+  if (!/^[ \t]*(?:[-+*]|\d{1,9}[.)]|>)[ \t]*$/.test(prefix) || line.length === prefix.length) {
+    return undefined;
+  }
+  // A marker right after it (another mark's, which the deletion would join, or a comment's) would
+  // stand at the start of the line, with the text after it on the line: refused as before.
+  if (plan.markers.some((marker) => marker.from === to || marker.from < to)) return undefined;
+  return { from, to, at: to };
+}
+
+/**
  * A deletion of the whole first line of a block that goes on takes the line break after it, with the
  * indentation of the next line. A marker that is alone on its line in front of the lines of a block
  * is the opener of the mark that starts the block (format §3.3), and would take the line break for
@@ -3740,7 +3761,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
     typed === '' &&
     !inOwnBreak(plan, from, to) &&
     !ownTextOnly(plan, from, to)
-      ? coverBlocks(plan, from, to)
+      ? (coverBlocks(plan, from, to) ?? firstPrefix(plan, from, to))
       : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
   let lead = '';

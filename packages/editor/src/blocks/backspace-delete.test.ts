@@ -47,21 +47,14 @@ const same = (caret: string) => ({ off: { caret }, on: { caret } });
 const BS: Step[] = ['Backspace'];
 const DEL: Step[] = ['Delete'];
 
-/**
- * With Track Changes on the format has no form for taking the syntax off the first line of the
- * document, a list's marker or a quote's (it would put a marker in front of it), nor for deleting
- * a block of syntax alone there. Format rules wanted; refused with the format's words until then.
- */
-/** The format's words for a join at the start of a file with a numbered list after it. */
-const LINE_BREAK_TAKES =
-  'A line break at the end of this text would take the start of the block that follows it.';
+/** The words for taking the first numbered item out of its list at the start of the file. */
+const FIRST_NUMBERED =
+  "The first item of a numbered list at the start of the file can't leave the list while Track Changes is on: the next number would read as text of this line. Take the number out with Track Changes off.";
 
 /** Words for a join onto a setext heading: its underline can't be written again behind a marker. */
 const SETEXT_JOIN =
   "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
 
-const AT_THE_START =
-  "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
 
 /** The design's: Backspace right after a Return over a selection joins, the text stays deleted. */
@@ -486,57 +479,81 @@ describe('The first item of a list', () => {
   );
 });
 
-describe('At the start of the document, Track Changes on: refused by the format', () => {
+describe('At the start of the document, Track Changes on', () => {
   scriptRows(
     both([
+      // #248: the first item's marker, or the quote's, is the mark's text, its opener alone on
+      // the first line for the block that stays (the format's `firstPrefix`, §3.3).
       {
         name: 'the first item of a list at the start of the document: out of the list',
         doc: '- ‸one⏎- two',
         keys: BS,
         off: { caret: '‸one⏎- two' },
-        on: { caret: '- ‸one⏎- two', refusal: AT_THE_START },
+        on: { caret: '<del - >⏎⏎‸one⏎- two', newest: 'one⏎- two', original: '- one⏎- two' },
       },
       {
         name: 'the first paragraph of a longer quote at the start of the document',
         doc: '> ‸One.⏎>⏎> Two.',
         keys: BS,
         off: { caret: '‸One.⏎⏎> Two.' },
-        on: { caret: '> ‸One.⏎>⏎> Two.', refusal: AT_THE_START },
+        on: { caret: '<del > >⏎⏎‸One.⏎>⏎> Two.', newest: 'One.⏎>⏎> Two.' },
       },
+      {
+        name: 'the same, with an item of another list after it, and one that holds a list',
+        doc: '- ‸a⏎1. b',
+        keys: BS,
+        off: { caret: '‸a⏎1. b' },
+        on: { caret: '<del - >⏎⏎‸a⏎1. b' },
+      },
+      {
+        name: 'the first item holding a nested list',
+        doc: '- ‸one⏎  - two⏎- three',
+        keys: BS,
+        off: { caret: '‸one⏎  - two⏎- three' },
+        on: { caret: '<del - >⏎⏎‸one⏎  - two⏎- three' },
+      },
+      {
+        name: 'a numbered list whose next item is numbered 1',
+        doc: '1. ‸a⏎1. b',
+        keys: BS,
+        off: { caret: '‸a⏎1. b' },
+        on: { caret: '<del 1. >⏎⏎‸a⏎1. b' },
+      },
+      {
+        name: 'then text typed, and taken back',
+        doc: '- ‸one⏎- two',
+        keys: [...BS, { type: 'x' }, 'Mod-z', 'Mod-z'],
+        ...same('- ‸one⏎- two'),
+      },
+      // A numbered item's next one reads as text of its line without a blank line between them,
+      // which the format has no place for next to the marker's deletion: refused, in words.
       {
         name: 'the first numbered item at the start of the document: the caret stays at its text (review I1)',
         doc: '1. ‸a⏎2. b',
         keys: BS,
         off: { caret: '‸a⏎⏎2. b' },
-        on: { caret: '1. ‸a⏎2. b', refusal: LINE_BREAK_TAKES },
+        on: { caret: '1. ‸a⏎2. b', refusal: FIRST_NUMBERED },
       },
       {
         name: 'the same with a third item',
         doc: '1. ‸a⏎2. b⏎3. c',
         keys: BS,
         off: { caret: '‸a⏎⏎2. b⏎3. c' },
-        on: { caret: '1. ‸a⏎2. b⏎3. c', refusal: LINE_BREAK_TAKES },
+        on: { caret: '1. ‸a⏎2. b⏎3. c', refusal: FIRST_NUMBERED },
       },
       {
         name: 'a numbered list that starts at 2, and one with a paren',
         doc: '2. ‸a⏎3. b',
         keys: BS,
         off: { caret: '‸a⏎⏎3. b' },
-        on: { caret: '2. ‸a⏎3. b', refusal: LINE_BREAK_TAKES },
+        on: { caret: '2. ‸a⏎3. b', refusal: FIRST_NUMBERED },
       },
       {
         name: 'the first numbered item of a quote at the start of the document',
         doc: '> 1. ‸a⏎> 2. b',
         keys: BS,
         off: { caret: '> ‸a⏎>⏎> 2. b' },
-        on: { caret: '> 1. ‸a⏎> 2. b', refusal: LINE_BREAK_TAKES },
-      },
-      {
-        name: 'a bulleted list whose next item is numbered, at the start of the document',
-        doc: '- ‸a⏎1. b',
-        keys: BS,
-        off: { caret: '‸a⏎1. b' },
-        on: { caret: '- ‸a⏎1. b', refusal: AT_THE_START },
+        on: { caret: '> 1. ‸a⏎> 2. b', refusal: FIRST_NUMBERED },
       },
       {
         name: 'an empty code block at the start of the document',
