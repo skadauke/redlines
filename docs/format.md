@@ -1019,6 +1019,13 @@ away with it. Two other forms were weighed against the oracle (#223): the backsl
 a change of window, saving and a switch of view would each have to answer. The paragraph breaks and the
 next block's first word are taken where a block follows, as before a line break.
 
+The closer alone on the line stands only as the last line of the body. A key that leaves anything
+after it in a list item (a bullet, an indented line, a number: Return in an item gives them),
+or puts a marker after the prefix of a line, is refused, in words that say so: in a list the
+line with the marker is not a blank line to a renderer that does not know the markers, which
+would end the item, or the list, or loosen it, where the newest view does not. In a paragraph
+or a quote it reads alike, and is written.
+
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
 ledger entry go, and the paragraph is whole again. That is so where the first half is an empty

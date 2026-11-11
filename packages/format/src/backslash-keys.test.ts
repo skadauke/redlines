@@ -12,8 +12,9 @@ import { EditError } from './errors.ts';
 import { escapedMarker, expectSound, readsAsNewest } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { ada, bodyOf, context, dropEmptyBlocks, file, squash } from './test-helpers.ts';
+import { ada, bo, bodyOf, context, dropEmptyBlocks, file, squash } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
+import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The key typed at the caret of `text`: Backspace and Delete are a range, deleting `cut` characters
@@ -432,6 +433,151 @@ describe('a backslash typed at the end of the document (#223)', () => {
       expect(() => press(body, { insert: '\\' }), body).toThrow(/line after it takes no change/);
     }
   });
+});
+
+describe('keys after the line break that a backslash brought at the end of the document (#223)', () => {
+  const brought = (start: string) => `${start}<!--ins k3x9-->\\\n‸<!--/k3x9-->`;
+  const own = { k3x9: 'ada' };
+  /** The rows of `expectRows`, but for a body that holds markers, where the edit's offsets are
+   * not the newest view's. */
+  const expectWritten = (rows: readonly Row[]) => {
+    for (const [body, key, expected] of rows) {
+      const label = `${JSON.stringify(body)} ${JSON.stringify(key)}`;
+      const { before, after } = press(body, key, own);
+      expect(written(after), label).toBe(expected);
+      expectKept(before, after, label);
+    }
+  };
+
+  it('write Return in a paragraph and a quote, as the closer stays alone on its line', () => {
+    for (const start of ['One two', '> One two']) {
+      expectWritten([
+        [
+          brought(start),
+          { insert: '\n- ' },
+          `${start}<!--ins k3x9-->\\\n<!--/k3x9--><!--split m2bd-->\n- `,
+        ],
+        [
+          brought(start),
+          { insert: '\n  ' },
+          `${start}<!--ins k3x9-->\\\n<!--split m2bd-->\n  <!--/k3x9-->`,
+        ],
+        [brought(start), { insert: 'x' }, `${start}<!--ins k3x9-->\\\nx<!--/k3x9-->`],
+      ]);
+    }
+  });
+
+  it('refuse Return in a list, where the line with the closer is no blank line', () => {
+    // The line with a marker on it would end the item, or the list, or loosen it, to a renderer that
+    // does not know the markers; the newest view has a blank line there.
+    for (const start of ['- One two', '1. One two', '- a\n  - One two', '- One\n  two']) {
+      for (const insert of ['\n  ', '\n\n  ', '\n- ', '\n> ', '\n\n> ']) {
+        expect(
+          () => press(brought(start), { insert }, own),
+          `${JSON.stringify(start)} ${JSON.stringify(insert)}`,
+        ).toThrow(/leave a marker at the start of a line after a backslash, in a list/);
+      }
+      // What leaves the closer the last line is written.
+      expectWritten([
+        [brought(start), { insert: 'x' }, `${start}<!--ins k3x9-->\\\nx<!--/k3x9-->`],
+      ]);
+    }
+  });
+
+  it('read as micromark reads them: every key at every place after a backslash, for two people', () => {
+    // The sweep: a paragraph, a quote and items, with the backslashes typed as keys, and then a key at
+    // each place from the end of the text to after the line break that the backslashes brought.
+    let seq = 0;
+    const ids = () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const k = ++seq * 12 + i;
+        return `${FIRST[k % 19]}${REST[Math.floor(k / 19) % 27]}${REST[Math.floor(k / 513) % 27]}x`;
+      });
+    const at = (text: string, caret: number, insert: string, cut: number, who: Person) => {
+      const view = newestView(text);
+      const lo = Math.max(0, Math.min(caret, caret + cut));
+      const hi = Math.min(view.text.length, Math.max(caret, caret + cut));
+      const from = lo === hi ? view.map.toSource(lo, -1) : view.map.toSource(lo, 1);
+      const to = lo === hi ? from : view.map.toSource(hi, -1);
+      const edit = { from, to: Math.max(from, to), insert };
+      const after = applyChanges(text, trackedEdits(text, [edit], context(who, ids())).changes);
+      return { after, edit: { from: lo, to: hi, insert } };
+    };
+    const starts = [
+      'One two',
+      'One two\n',
+      '> One two',
+      '- One two',
+      '1. One two',
+      '- a\n  - One two',
+      '- One\n  two',
+    ];
+    const typed = ['\\', '\\\\\\', 'a\\', ' C:\\Users\\'];
+    const keys: [string, number][] = [
+      ['', -1],
+      ['', 1],
+      ['', -2],
+      ['', 2],
+      ['x', 0],
+      ['\\', 0],
+      [' ', 0],
+      ['\n', 0],
+      ['\n\n', 0],
+      ['\n  ', 0],
+      ['\n- ', 0],
+      ['\n\n  ', 0],
+      ['\n> ', 0],
+      ['\n\n> ', 0],
+      ['\n1. ', 0],
+    ];
+    let judged = 0;
+    let refused = 0;
+    for (const start of starts) {
+      for (const keysTyped of typed) {
+        for (const who of [ada, bo]) {
+          let text = file(start);
+          let caret = newestView(text).text.indexOf('two') + 3;
+          try {
+            for (const c of keysTyped) {
+              text = at(text, caret, c, 0, ada).after;
+              caret += 1;
+            }
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+            continue;
+          }
+          const view = newestView(text).text;
+          const lo = view.indexOf('two') + 3;
+          for (let p = lo; p <= Math.min(view.length, lo + keysTyped.length + 2); p++) {
+            for (const [insert, cut] of keys) {
+              const label = JSON.stringify([start, keysTyped, who.handle, p, insert, cut]);
+              let result;
+              try {
+                result = at(text, p, insert, cut, who);
+              } catch (error) {
+                if (!(error instanceof EditError)) throw error;
+                refused++;
+                continue;
+              }
+              // A key at the empty line after the body is written after the ledger, as it is on
+              // main, where nothing reads it.
+              if (result.after.slice(result.after.lastIndexOf('\n-->') + 4).trim() !== '') continue;
+              judged++;
+              const why = `${label} => ${JSON.stringify(bodyOf(result.after))}`;
+              expect(escapedMarker(result.after), why).toBe(false);
+              expect(readsAsNewest(result.after), why).toBe(true);
+              expect(squash(newestView(result.after).text), why).toBe(
+                squash(applyChanges(view, [result.edit])),
+              );
+              expectSound(why, result.after);
+            }
+          }
+        }
+      }
+    }
+    expect(judged).toBeGreaterThan(1000);
+    expect(refused).toBeGreaterThan(0);
+  }, 300_000);
 });
 
 /** Documents of words, backslashes, hard breaks, quotes, items, headings and fences, for the keys

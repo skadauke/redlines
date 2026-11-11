@@ -1853,6 +1853,49 @@ function escapedMarkers(text: string, parsed: Parsed): number {
   return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
 }
 
+const AFTER_BRING =
+  "A line break can't be typed here while Track Changes is on: the change would leave a marker at the start of a line after a backslash, in a list, where other Markdown readers would read the list otherwise. Type something after the backslash first, or turn off Track Changes.";
+
+/**
+ * How many markers of a file's body start a line (after its prefix) right after a line that ends in
+ * an unescaped backslash, in a list, with more than the marker on it or text after it: the closer
+ * that stands alone after the line break a backslash brought at the end of the document (format
+ * §3.2) is the last line, and it is only allowed there, in a list; a blank line and a line with a
+ * marker on it read otherwise to the list that goes on or breaks off after it. A marker after a
+ * prefix is never allowed there.
+ */
+function bringsBroken(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  const lines = body.split(/\r?\n/);
+  const item = (at: number) => {
+    // A list item holds the line when a bullet or a number starts it or an unbroken run of lines
+    // above it, or when it is indented under one.
+    for (let i = at, n = 0; i >= 0 && n < 40; i--, n++) {
+      const line = lines[i] ?? '';
+      if (/^[ \t>]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) return true;
+      if (line.trim() === '' && !/^[ \t]/.test(lines[at] ?? '')) return false;
+    }
+    return false;
+  };
+  let count = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const lead = /^(?:[ \t>]|[-+*][ \t]|\d{1,9}[.)][ \t])*/.exec(line)?.[0].length ?? 0;
+    if (!/^<!--\/?[a-z]+ ?\w{0,4}/.test(line.slice(lead))) continue;
+    // The line above, past the lines that hold nothing but markers.
+    let above = i - 1;
+    while (above > 0 && (lines[above] ?? '').replace(/<!--[^>]*-->/g, '') === '') above--;
+    if (!oddBackslashes((lines[above] ?? '').replace(/<!--[^>]*-->/g, ''))) continue;
+    const alone = lead === 0 && /^(?:<!--[^>]*-->)*$/.test(line);
+    const more = lines.slice(i + 1).some((l) => l.trim() !== '');
+    // A bullet or a number in front of the marker, or the marker after the indent or the line
+    // that ends the item, in a list.
+    const bullet = /[-+*\d][.)]?[ \t]/.test(line.slice(0, lead));
+    if (bullet || ((!alone || more) && item(above))) count++;
+  }
+  return count;
+}
+
 /** Where the last marker of a file's body that an unescaped backslash escapes starts. */
 function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
   const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
@@ -4528,6 +4571,9 @@ function editsOnce(
       if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {
         const at = escapedMarkerAt(after, parsed) ?? -1;
         throw new EditError(backslashBeforeAt(parsed, at, ctx.author), 'no-legal-placement');
+      }
+      if (bringsBroken(after, parsed) > bringsBroken(text, plan.parsed)) {
+        throw new EditError(AFTER_BRING, 'no-legal-placement');
       }
       // Nor in any other order of decisions: the old text of a change, given back, ends in one.
       const now = restoredEscapes(after, parsed, new Set([...plan.created, ...plan.split]));
