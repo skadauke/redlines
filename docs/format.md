@@ -676,10 +676,15 @@ away.
   that is decided, and a range over a block that can't change refuses the whole change. In the lines
   right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
-  order, as above: more than five items of one list at once are too many to try. A block change
-  leaves no mark apart: it changes the lines of its block, and has a budget twice as large: it
-  works with five other pending changes in its list and is refused, in the words below, with six
-  (and a change of up to six items at once is checked; seven are too many). A refusal for too many marks says how
+  order, as above. What limits a change is the number of marks to try, the new ones and the pending
+  changes of its region, and a region longer than about a thousand characters counts more, so these
+  numbers hold for a short list. An inline format works with four other pending changes in its
+  region and is refused with five, and with five items of one list at once and not six ("Change up
+  to five items at a time."). A block change leaves no mark apart (it changes the lines of its
+  block) and has a larger budget: with Track Changes on, where it adds a mark to try, it works with
+  five other pending changes in its list and is refused with six; with it off, where it adds none,
+  it works with six and is refused with seven; a change of up to six items at once is checked, and
+  seven are too many ("Change up to six items at a time."). A refusal for too many marks says how
   many stand in the region and where: "There are 7 pending changes in this list, too many to check
   this change against. Accept or reject some of them first."; a box click says "This box can't be
   changed while 7 changes in its list are pending…". Whether a change is in the region counts
