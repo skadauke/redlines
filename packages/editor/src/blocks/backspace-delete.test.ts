@@ -409,6 +409,37 @@ describe('Delete at the end of a block', () => {
         off: { caret: 'Para.‸one⏎⏎3. two' },
         on: { caret: 'Para.‸<sub ⏎⏎2. one>one⏎</sub>⏎3. two' },
       },
+      // #248: Delete at the end of a list before a separate list of other markers joins the first
+      // item of the list below into the item above, as it does before a list of the same markers
+      // (`sameListLevel` is the Return rule's and never reads these keys).
+      {
+        name: 'a bullet list before a numbered list (#248)',
+        doc: '- b‸⏎⏎3. c',
+        keys: DEL,
+        off: { caret: '- b‸c' },
+        on: { caret: '- b‸<del ⏎⏎3. >c', newest: '- bc' },
+      },
+      {
+        name: 'a numbered list before a bullet list (#248)',
+        doc: '1. b‸⏎⏎- c⏎- d',
+        keys: DEL,
+        off: { caret: '1. b‸c⏎- d' },
+        on: { caret: '1. b‸<del ⏎⏎- >c⏎- d' },
+      },
+      {
+        name: 'a bullet list before a list of another bullet, in a quote (#248)',
+        doc: '> - b‸⏎>⏎> + c',
+        keys: DEL,
+        off: { caret: '> - b‸c' },
+        on: { caret: '> - b‸<del ⏎>⏎> + >c' },
+      },
+      {
+        name: 'a numbered list before another numbered list (#248)',
+        doc: '1. b‸⏎⏎1) c',
+        keys: DEL,
+        off: { caret: '1. b‸c' },
+        on: { caret: '1. b‸<del ⏎⏎1) >c' },
+      },
     ]),
   );
 });
