@@ -2099,26 +2099,29 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     m.mark.kind !== 'split' &&
     m.to >= from &&
     m.from <= to;
+  // Whether the change was written again by a character for the sake of the marks against it.
+  let byCharacter = false;
   const touch = () => {
     const against = markers.filter((m) => stands(m));
     for (const m of against) if (m.mark) plan.emphasis.near.add(m.mark.id);
     if (against.length > 0) plan.emphasis.touched = true;
     return against.length > 0;
   };
-  /** Whether the text from `a` to `b`, which the change would write again, is text of someone
-   * else's insertion or substitution: that is not the author's to write again. (The marker of a
+  /** Whether the text from `a` to `b`, which the change would write again, is text of an insertion
+   * or substitution: that is not the change's to write again (it would take the mark in). (The marker of a
    * deletion holds no text, and the change may stand on either side of it.) */
   const reaches = (a: number, b: number) =>
     plan.containers.some(
       (c) =>
-        !c.own &&
-        c.content.to > a &&
-        c.content.from < b &&
-        (c.content.to <= from || c.content.from >= to),
+        c.content.to > a && c.content.from < b && (c.content.to <= from || c.content.from >= to),
     );
   /** The words of a refusal that names the mark that stands against the change. */
   const againstWords = () => {
-    const other = markers.find((m) => stands(m));
+    const standing = markers.filter((m) => stands(m));
+    const other =
+      standing.find(
+        (m) => m.mark?.kind === 'ins' || m.mark?.kind === 'sub' || m.mark?.kind === 'del',
+      ) ?? standing[0];
     return other?.mark
       ? changesHow(plan.parsed, other.mark, plan.ctx.author)
       : 'A marker here would change how the text next to it is emphasized.';
@@ -2248,7 +2251,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           else if (room(l, from) && keptAt(l, to)) grow(l, to);
           else if (room(l, from) && room(to, r)) grow(l, r);
           else refuse('A marker here would change how the text next to it is emphasized.');
-        } else if (plan.emphasis.mode > 0) {
+        } else if (plan.emphasis.mode > 0 && !byCharacter) {
           // Next to another mark, as typed has been read otherwise: by a character on one side or
           // both, never into the text or the marker of another person's mark, and each way is read
           // in every order of decisions, the one that leaves the emphasis as it was first.
@@ -2260,8 +2263,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           ways.sort((x, y) => Number(keptAt(...y)) - Number(keptAt(...x)));
           plan.emphasis.options = Math.max(plan.emphasis.options, ways.length);
           const way = ways[Math.min(plan.emphasis.mode, ways.length) - 1];
-          if (way) grow(...way);
-          else refuse(againstWords());
+          if (way) {
+            byCharacter = true;
+            grow(...way);
+          } else refuse(againstWords());
         }
       }
     }
@@ -4560,7 +4565,10 @@ function editsOnce(
         if (!emphasisReadsAlike(after, ids)) {
           if (mode === 0 || mode < plan.emphasis.options) throw new ReadsOtherwise();
           const next = neighbours(after, ids);
-          const other = next.find((mark) => mark.entry.by !== ctx.author.handle) ?? next[0];
+          const other =
+            next.find(
+              (mark) => mark.entry.by !== ctx.author.handle && mark.entry.by !== 'unknown',
+            ) ?? next[0];
           throw new EditError(
             other
               ? changesHow(parsed, other, ctx.author)

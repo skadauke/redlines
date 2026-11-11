@@ -157,9 +157,9 @@ export function emphasisReadsAlike(after: string, created: ReadonlySet<string>):
   return walk(after);
 }
 
-/** The marks that stand against the `created` ones, which a refusal names. */
-export function neighbours(after: string, created: ReadonlySet<string>): MarkRange[] {
+/** The marks that are read with the `seeds`, which a refusal names. */
+export function neighbours(after: string, seeds: ReadonlySet<string>): MarkRange[] {
   const parsed = parse(after);
-  const cluster = clusterOf(parsed, created);
-  return parsed.marks.filter((mark) => cluster.has(mark.id) && !created.has(mark.id));
+  const cluster = clusterOf(parsed, seeds);
+  return parsed.marks.filter((mark) => cluster.has(mark.id));
 }
