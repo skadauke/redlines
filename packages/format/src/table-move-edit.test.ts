@@ -17,10 +17,7 @@ const IDS = ['k3x9', 'w8nn', 'p5qm'];
 type WithoutTable<T> = T extends unknown ? Omit<T, 'table'> : never;
 const move = (text: string, op: WithoutTable<TableOp>) => {
   const table = readTables(text, parse(text))[0]?.from ?? 0;
-  return applyChanges(
-    text,
-    tableEdit(text, { ...op, table } as TableOp, context(ada, IDS)).changes,
-  );
+  return applyChanges(text, tableEdit(text, { ...op, table }, context(ada, IDS)).changes);
 };
 const plain = (text: string, from: number, to: number, insert: string) =>
   applyChanges(text, untrackedEdit(text, { from, to, insert }));
