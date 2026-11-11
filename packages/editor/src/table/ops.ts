@@ -35,7 +35,8 @@ export function planned(
   view: EditorView,
   op: TableOp,
   group?: string,
-): { changes: TextChange[]; caret: number; rows?: number[] } | { refusal: string } {
+):
+  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string } {
   const { state } = view;
   const text = state.doc.toString();
   try {
@@ -57,7 +58,10 @@ function perform(
   view: EditorView,
   op: TableOp,
   userEvent = 'table.insert.row',
-  select?: (after: EditorView, done: { caret: number; rows?: number[] }) => EditorSelection,
+  select?: (
+    after: EditorView,
+    done: { caret: number; rows?: number[]; cols?: number[] },
+  ) => EditorSelection,
 ): boolean {
   const done = planned(view, op);
   if ('refusal' in done) {
@@ -223,4 +227,181 @@ export function insertRowBelow(view: EditorView): boolean {
   const found = shownCellAt(state, state.selection.main.head);
   const row = found?.table.rows.find((r) => r.cells.includes(found.cell));
   return found && row ? insertRowAfter(view, found.table, row) : false;
+}
+
+// Columns: the same operations, on the columns the selection touches.
+
+/** The columns the selection touches: a rectangle's, or the caret's column; and the row the caret is
+ * in. Null outside a table, and in Raw. */
+export function touchedCols(state: EditorState): {
+  table: Table;
+  first: number;
+  last: number;
+  rectangle: boolean;
+  row: number;
+} | null {
+  if (state.field(viewModeField, false) === 'raw' || !state.field(tablesField, false)) return null;
+  const rect = rectOf(state);
+  if (rect) {
+    return {
+      table: rect.table,
+      first: rect.cols[0],
+      last: rect.cols[1],
+      rectangle: true,
+      row: rect.head.row,
+    };
+  }
+  const found = shownCellAt(state, state.selection.main.head);
+  const row = found?.table.rows.find((r) => r.cells.includes(found.cell));
+  return found && row
+    ? {
+        table: found.table,
+        first: found.cell.col,
+        last: found.cell.col,
+        rectangle: false,
+        row: row.index,
+      }
+    : null;
+}
+
+/** How many columns the selection touches, at least one. */
+export const colCount = (state: EditorState): number => {
+  const touched = touchedCols(state);
+  return touched ? touched.last - touched.first + 1 : 1;
+};
+
+const countedCols = (verb: string, tail: string) => (state: EditorState) => {
+  const n = colCount(state);
+  return n === 1 ? `${verb} Column${tail}` : `${verb} ${n} Columns${tail}`;
+};
+
+/** The titles of the column commands, which count the columns the selection touches. */
+export const colTitles = {
+  insertLeft: countedCols('Insert', ' Left'),
+  insertRight: countedCols('Insert', ' Right'),
+  delete: countedCols('Delete', ''),
+  moveLeft: countedCols('Move', ' Left'),
+  moveRight: countedCols('Move', ' Right'),
+};
+
+/** The selection in column `col` of row `row` of the table at `table` in the new text: the cell's
+ * text, or the rectangle of `cols` over every row when the columns were selected as one. */
+function colsSelected(
+  state: EditorState,
+  table: Table,
+  cols: readonly number[],
+  row: number,
+  rectangle: boolean,
+  fallback: number,
+): EditorSelection {
+  const read = state.field(tablesField, false)?.find((t) => t.from === table.from);
+  const first = cols[0];
+  const last = cols.at(-1);
+  if (!read || first === undefined || last === undefined) return EditorSelection.single(fallback);
+  if (rectangle) {
+    const rect = rectSelection(
+      read,
+      { row: 0, col: first },
+      { row: read.rows.length - 1, col: last },
+    );
+    if (rect) return rect;
+  }
+  const cell = (read.rows[Math.min(row, read.rows.length - 1)] ?? read.rows[0])?.cells[first];
+  return EditorSelection.single(cell?.textFrom ?? fallback);
+}
+
+/** Inserts as many columns as the selection touches, left of its first column or right of its last,
+ * with the caret in the first new cell of the caret's row. */
+export function insertCols(view: EditorView, left: boolean): boolean {
+  const touched = touchedCols(view.state);
+  if (!touched) return false;
+  const count = touched.last - touched.first + 1;
+  return perform(
+    view,
+    {
+      kind: 'insertCols',
+      table: touched.table.from,
+      after: left ? touched.first : touched.last + 1,
+      count,
+    },
+    'table.insert.col',
+    (after, done) =>
+      colsSelected(after.state, touched.table, done.cols ?? [], touched.row, false, done.caret),
+  );
+}
+
+/** Deletes the columns the selection touches; the caret goes to the cell of the column that is then
+ * where they were, in its row. */
+export function deleteCols(view: EditorView): boolean {
+  const touched = touchedCols(view.state);
+  if (!touched) return false;
+  const cols = Array.from(
+    { length: touched.last - touched.first + 1 },
+    (_, i) => touched.first + i,
+  );
+  return perform(
+    view,
+    { kind: 'deleteCols', table: touched.table.from, cols },
+    'table.delete.col',
+    (after, done) =>
+      colsSelected(after.state, touched.table, done.cols ?? [], touched.row, false, done.caret),
+  );
+}
+
+/** Moves columns `first` to `last` of `table` to the boundary `to` (0 before the first column, the
+ * number of columns after the last), and keeps them selected as they were. A boundary that is where
+ * they are is no move. */
+export function moveColsTo(
+  view: EditorView,
+  table: Table,
+  first: number,
+  last: number,
+  to: number,
+  rectangle = true,
+  row = 0,
+): boolean {
+  if (to >= first && to <= last + 1) return false;
+  const cols = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  return perform(
+    view,
+    { kind: 'moveCols', table: table.from, cols, to },
+    'table.move.col',
+    (after, done) => colsSelected(after.state, table, done.cols ?? [], row, rectangle, done.caret),
+  );
+}
+
+/** Inserts `count` columns at the boundary `at` (0 before the first), the caret in the first. */
+export function insertColsAt(view: EditorView, table: Table, at: number, count = 1): boolean {
+  return perform(
+    view,
+    { kind: 'insertCols', table: table.from, after: at, count },
+    'table.insert.col',
+    (after, done) => colsSelected(after.state, table, done.cols ?? [], 1, false, done.caret),
+  );
+}
+
+/** Moves the columns the selection touches one place left or right; they stay selected. At the edge
+ * there is no place: it says so. */
+export function moveCols(view: EditorView, left: boolean): boolean {
+  const touched = touchedCols(view.state);
+  if (!touched) return false;
+  const { table, first, last } = touched;
+  const edge = left ? first === 0 : last === table.columns - 1;
+  if (edge) {
+    view.dispatch({
+      effects: refusedEditEffect.of(
+        left ? 'The column is at the left.' : 'The column is at the right.',
+      ),
+    });
+    return true;
+  }
+  return moveColsTo(
+    view,
+    table,
+    first,
+    last,
+    left ? first - 1 : last + 2,
+    touched.rectangle,
+    touched.row,
+  );
 }

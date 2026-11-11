@@ -141,6 +141,11 @@ describe('the tables plugin', () => {
       'table.deleteRow',
       'table.moveRowUp',
       'table.moveRowDown',
+      'table.insertColumnLeft',
+      'table.insertColumnRight',
+      'table.deleteColumn',
+      'table.moveColumnLeft',
+      'table.moveColumnRight',
       'table.selectCell',
       'table.selectRow',
       'table.selectColumn',
@@ -374,5 +379,163 @@ describe('the row commands', () => {
     editor.view.dispatch({ selection: { anchor: at('a |'), head: at('42') + 1 } });
     editor.commands.run('table.deleteRow');
     expect(editor.getDoc()).toBe(text);
+  });
+});
+
+describe('the column commands', () => {
+  const G = [
+    '| a | b | c | d |',
+    '| - | - | - | - |',
+    '| 11 | 12 | 13 | 14 |',
+    '| 21 | 22 | 23 | 24 |',
+  ].join('\n');
+  const doc = `Intro.\n\n${G}\n\nAfter.\n`;
+  const at = (text: string) => doc.indexOf(text) + 1;
+  const header = (editor: Editor) =>
+    editor
+      .getDoc()
+      .split('\n')
+      .find((line) => /^\| (?:<!--ins \w+ col--> )?a /.test(line) || /\| a \|/.test(line));
+  const headers = (editor: Editor): string[] =>
+    (editor.getDoc().split('\n')[2] ?? '')
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.replace(/<!--ins \w+ col-->/, '+').trim());
+  const titles = (editor: Editor) => editor.getUiState().commandTitles;
+  const selectCols = (editor: Editor, from: string, to: string) =>
+    editor.view.dispatch({ selection: { anchor: at(from), head: at(to) + 1 } });
+
+  it('are listed under the Table menu with their keys, and move has none', () => {
+    const editor = mount(doc);
+    const list = editor.commands.list();
+    for (const [id, shortcut] of [
+      ['table.insertColumnLeft', 'Alt-Mod-ArrowLeft'],
+      ['table.insertColumnRight', 'Alt-Mod-ArrowRight'],
+      ['table.deleteColumn', 'Ctrl-Mod-Backspace'],
+    ] as const) {
+      expect(list.find((c) => c.id === id)).toMatchObject({ shortcut, menu: 'table' });
+    }
+    expect(list.find((c) => c.id === 'table.moveColumnLeft')?.shortcut).toBeUndefined();
+    expect(list.find((c) => c.id === 'table.moveColumnRight')).toMatchObject({ menu: 'table' });
+  });
+
+  it('title the columns the selection touches, and are disabled outside a table', () => {
+    const editor = mount(doc);
+    select(editor, at('12'));
+    expect(titles(editor)).toMatchObject({
+      'table.insertColumnLeft': 'Insert Column Left',
+      'table.deleteColumn': 'Delete Column',
+      'table.moveColumnRight': 'Move Column Right',
+    });
+    selectCols(editor, '12', '13');
+    expect(titles(editor)['table.insertColumnLeft']).toBe('Insert 2 Columns Left');
+    expect(titles(editor)['table.deleteColumn']).toBe('Delete 2 Columns');
+    selectCols(editor, '12', '24');
+    expect(titles(editor)['table.deleteColumn']).toBe('Delete 3 Columns');
+    select(editor, 3);
+    expect(editor.getUiState().enabledCommands).not.toContain('table.deleteColumn');
+    expect(editor.commands.run('table.deleteColumn')).toBe(false);
+  });
+
+  it('inserts as many columns as the selection touches, tracked or not, the caret in the new cell', () => {
+    for (const tracking of [false, true]) {
+      const editor = mount(doc, tracking);
+      selectCols(editor, '12', '13');
+      expect(editor.commands.run('table.insertColumnRight')).toBe(true);
+      const text = editor.getDoc();
+      expect(text.split('\n')[2]?.split('|').length).toBe(8);
+      expect((text.match(/<!--ins \w+ col-->/g) ?? []).length).toBe(tracking ? 2 : 0);
+      // In the new column, in the row the caret was in (the first body row).
+      const head = editor.view.state.selection.main.head;
+      const line = editor.view.state.doc.lineAt(head);
+      expect(line.text).toMatch(/^\| 11 \| 12 \| 13 \|/);
+      expect(head).toBeGreaterThan(line.from + line.text.indexOf('13') + 2);
+      const left = mount(doc, tracking);
+      select(left, at('12'));
+      expect(left.commands.run('table.insertColumnLeft')).toBe(true);
+      expect(left.getDoc().split('\n')[4]).toMatch(/^\| 11 \|\s+\| 12 \|/);
+    }
+  });
+
+  it('deletes the columns the selection touches, the caret in the column that is then there', () => {
+    const editor = mount(doc);
+    selectCols(editor, '12', '13');
+    expect(editor.commands.run('table.deleteColumn')).toBe(true);
+    expect(headers(editor)).toEqual(['a', 'd']);
+    const { head } = editor.view.state.selection.main;
+    expect(editor.view.state.doc.lineAt(head).text).toContain('14');
+    const tracked = mount(doc, true);
+    select(tracked, at('12'));
+    expect(tracked.commands.run('table.deleteColumn')).toBe(true);
+    expect(tracked.getDoc()).toContain('<!--del');
+    expect(tracked.getDoc()).toMatch(/col=2 /);
+  });
+
+  it('moves columns one place and keeps them selected, and says so at the edges', () => {
+    const editor = mount(doc);
+    selectCols(editor, '12', '13');
+    expect(editor.commands.run('table.moveColumnLeft')).toBe(true);
+    expect(headers(editor)).toEqual(['b', 'c', 'a', 'd']);
+    expect(
+      selectedCells(editor.view.state).map((c) => editor.getDoc().slice(c.textFrom, c.textTo)),
+    ).toEqual(['b', 'c', '12', '13', '22', '23']);
+    expect(editor.commands.run('table.moveColumnRight')).toBe(true);
+    expect(headers(editor)).toEqual(['a', 'b', 'c', 'd']);
+    const edge = mount(doc);
+    select(edge, at('a |'));
+    expect(edge.commands.run('table.moveColumnLeft')).toBe(true);
+    expect(edge.getDoc()).toBe(doc);
+    const tracked = mount(doc, true);
+    select(tracked, at('11'));
+    expect(tracked.commands.run('table.moveColumnRight')).toBe(true);
+    expect(tracked.getDoc()).toMatch(/<!--ins \w+ col--> a/);
+    expect(tracked.getDoc()).toMatch(/<!--del \w+ col=1 /);
+  });
+
+  it('is one step to undo, which brings back the selection it was made with', () => {
+    const editor = mount(doc);
+    selectCols(editor, '12', '13');
+    const { anchor, head } = editor.view.state.selection.main;
+    editor.commands.run('table.deleteColumn');
+    expect(editor.getUiState().undo).toBe('Delete Column');
+    editor.undo();
+    expect(editor.getDoc()).toBe(doc);
+    expect(editor.view.state.selection.main).toMatchObject({ anchor, head });
+  });
+
+  it('binds its keys only in a table', () => {
+    const editor = mount(doc);
+    select(editor, at('12'));
+    const mods = [{ metaKey: true }, { ctrlKey: true }];
+    expect(mods.some((mod) => press(editor, 'ArrowLeft', { altKey: true, ...mod }))).toBe(true);
+    expect(headers(editor).length).toBe(5);
+    const plain = mount(doc);
+    select(plain, 3);
+    for (const mod of mods) press(plain, 'ArrowLeft', { altKey: true, ...mod });
+    expect(plain.getDoc()).toBe(doc);
+    const keyed = mount(doc);
+    select(keyed, at('12'));
+    expect(
+      [{ metaKey: true }, { ctrlKey: true }].some((mod) =>
+        press(keyed, 'Backspace', { ctrlKey: true, ...mod }),
+      ),
+    ).toBe(true);
+    expect(headers(keyed)).toEqual(['a', 'c', 'd']);
+  });
+
+  it('refuses with a reason and writes nothing: deleting every column, a row pending deleted', () => {
+    const editor = mount(doc);
+    const text = editor.getDoc();
+    editor.view.dispatch({ selection: { anchor: at('a |'), head: at('24') + 1 } });
+    editor.commands.run('table.deleteColumn');
+    expect(editor.getDoc()).toBe(text);
+    const tracked = mount(doc, true);
+    select(tracked, at('21'));
+    tracked.commands.run('table.deleteRow');
+    const after = tracked.getDoc();
+    select(tracked, at('12'));
+    tracked.commands.run('table.deleteColumn');
+    expect(tracked.getDoc()).toBe(after);
+    void header;
   });
 });

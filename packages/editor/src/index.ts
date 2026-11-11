@@ -105,14 +105,22 @@ export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
+  colCount,
+  colTitles,
+  deleteCols,
   deleteRows,
+  insertColsAt,
+  insertCols,
   insertRowBelow,
   insertRows,
   insertRowsAt,
+  moveCols,
+  moveColsTo,
   moveRows,
   moveRowsTo,
   rowCount,
   rowTitles,
+  touchedCols,
   touchedRows,
 } from './table/ops.ts';
 export { tablesOf } from './table/model.ts';
