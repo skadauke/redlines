@@ -52,6 +52,7 @@ describe('settings', () => {
       appearance: 'system',
       sidebarOpen: false,
       showResolved: false,
+      markupView: 'redlines',
       rotateIcon: true,
       checkForUpdates: true,
       identity: null,
@@ -76,6 +77,7 @@ describe('settings', () => {
       appearance: 'dark',
       sidebarOpen: true,
       showResolved: true,
+      markupView: 'simple',
       rotateIcon: false,
       checkForUpdates: false,
       identity: { name: 'Ada Lovelace', handle: 'ada' },
@@ -105,6 +107,27 @@ describe('settings', () => {
     });
     expect(SETTINGS_KEY).toBe('redlines.settings');
     expect(loadSettings()).toEqual(changed);
+  });
+
+  it('keeps the markup view like the other settings, reaching the other windows but setting no view', () => {
+    expect(DEFAULT_SETTINGS.markupView).toBe('redlines');
+    updateSettings({ markupView: 'simple' });
+    expect(loadSettings().markupView).toBe('simple');
+    // A window that changes it tells the others, with the settings; nothing in them is a view.
+    const seen: unknown[] = [];
+    const stop = watchSettings((settings) => seen.push(settings));
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ ...loadSettings(), markupView: 'redlines' }),
+    );
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ markupView: 'redlines' });
+    expect(Object.keys(seen[0] as object)).not.toContain('view');
+    // A value it doesn't know is Redlines.
+    localStorage.setItem(SETTINGS_KEY, '{"markupView":"clean"}');
+    expect(loadSettings().markupView).toBe('redlines');
   });
 
   it('ignores stored values it does not know', () => {

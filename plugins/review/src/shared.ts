@@ -1,8 +1,9 @@
 // What the parts of the review interface share: the editor they work on and its changes, how they
 // write to the ledger, and how a refused action shows.
 
-import type { EditorView, Rect } from '@codemirror/view';
-import type { Author, Editor } from '@redlines/editor';
+import { EditorSelection } from '@codemirror/state';
+import { EditorView, type Rect } from '@codemirror/view';
+import { type Author, type Editor, setViewModeEffect, viewModeField } from '@redlines/editor';
 import {
   type BlockType,
   EditError,
@@ -49,15 +50,54 @@ export function suggestionIn(ctx: ReviewContext, id: string): MarkRange[] {
   return found ?? changesOf(ctx).filter((mark) => mark.id === id);
 }
 
+/** The text of the suggestion that change `id` is in, from the start of its first mark to the end of its last. */
+export function suggestionRange(ctx: ReviewContext, id: string): Range | null {
+  const marks = suggestionIn(ctx, id);
+  const first = marks[0];
+  const last = marks.at(-1);
+  return first && last ? { from: spanOf(first).from, to: spanOf(last).to } : null;
+}
+
 /**
  * Accepts or rejects the whole suggestion that change `id` is in, in one step to undo, or none of
- * it when one mark is refused. A mark alone is decided by its id, as always.
+ * it when one mark is refused. A mark alone is decided by its id, as always. Returns whether it
+ * decided.
+ *
+ * Nothing is decided in Simple, where the old text of a change is hidden (design: No decision is
+ * made in Simple): the view switches to Redlines and the suggestion is shown, selected and in view,
+ * for the person to decide where it can be read. This one function holds the rule, so the notes,
+ * the cards and the review bar's buttons all obey it, and it returns false.
  *
  * @throws EditError when the editor refuses.
  */
-export function decideSuggestion(ctx: ReviewContext, how: 'accept' | 'reject', id: string): void {
+export function decideSuggestion(
+  ctx: ReviewContext,
+  how: 'accept' | 'reject',
+  id: string,
+): boolean {
+  const { view } = ctx.editor;
+  if (view.state.field(viewModeField) === 'simple') {
+    const range = suggestionRange(ctx, id);
+    // The switch alone, not a choice: the markup view stays Simple.
+    view.dispatch({
+      ...(range ? { selection: EditorSelection.range(range.from, range.to) } : {}),
+      effects: [
+        setViewModeEffect.of('redlines'),
+        ...(range
+          ? [
+              EditorView.scrollIntoView(EditorSelection.range(range.from, range.to), {
+                y: 'center' as const,
+              }),
+            ]
+          : []),
+      ],
+      userEvent: 'select.review',
+    });
+    return false;
+  }
   const ids = suggestionIn(ctx, id).map((mark) => mark.id);
   ctx.editor[how](ids.length > 1 ? ids : id);
+  return true;
 }
 
 /**

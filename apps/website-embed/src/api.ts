@@ -4,7 +4,7 @@
 /** The two demos; the bundle holds their documents. */
 export type DemoName = 'plan' | 'design';
 /** The editor's views, as `ViewMode` has them (a type test in the embed holds them equal). */
-export type DemoView = 'clean' | 'redlines' | 'raw';
+export type DemoView = 'clean' | 'simple' | 'redlines' | 'raw';
 
 export interface DemoOptions {
   demo: DemoName;

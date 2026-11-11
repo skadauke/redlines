@@ -2,9 +2,9 @@
 // shown, and who is editing. Format calls run on the LF text that CodeMirror holds, so the parse's
 // offsets are CodeMirror positions.
 
-import { Annotation, Facet, StateEffect, StateField } from '@codemirror/state';
+import { Annotation, Compartment, Facet, StateEffect, StateField } from '@codemirror/state';
 import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
-import type { Author, MetPerson, ViewMode } from '../api.ts';
+import type { Author, MarkupView, MetPerson, ViewMode } from '../api.ts';
 
 /**
  * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
@@ -33,6 +33,32 @@ export const peopleFacet = Facet.define<readonly MetPerson[], readonly MetPerson
 export const lineBreakMarksFacet = Facet.define<boolean, boolean>({
   combine: (values) => values[0] ?? false,
 });
+
+/**
+ * The markup view chosen last, Simple or Redlines, which the editor shows where it picks one for
+ * you (design: Which markup view, when).
+ */
+export const markupViewFacet = Facet.define<MarkupView, MarkupView>({
+  combine: (values) => values[0] ?? 'redlines',
+});
+
+/**
+ * Where the markup view lives in a state. One compartment serves every editor: it is only a key.
+ */
+export const markupViewCompartment = new Compartment();
+
+/**
+ * What choosing a view does, as effects for one transaction: shows it, and when it is Simple or
+ * Redlines makes it the markup view too. The review bar and the automatic switches dispatch
+ * `setViewModeEffect` alone, because they don't choose.
+ */
+export function chooseViewEffects(mode: ViewMode): StateEffect<unknown>[] {
+  const effects: StateEffect<unknown>[] = [setViewModeEffect.of(mode)];
+  if (mode === 'simple' || mode === 'redlines') {
+    effects.push(markupViewCompartment.reconfigure(markupViewFacet.of(mode)));
+  }
+  return effects;
+}
 
 /**
  * The parse of the document. Each parse hands the previous one to the next, so a ledger whose
@@ -90,20 +116,22 @@ export function isChange(mark: MarkRange): boolean {
 export const setViewModeEffect = StateEffect.define<ViewMode>();
 
 /**
- * How the document is shown. It starts in Redlines when the document has redlines and in Clean
- * when it doesn't (design §5.3), and after that it stays as chosen: Redlines is available whatever
- * the document holds, so one whose last redline goes stays in it. The one exception is a document
- * that gains redlines while it is shown Clean, as when an agent's suggestions arrive, which
- * switches to Redlines, so suggestions are never invisible.
+ * How the document is shown. It starts in the markup view (Simple or Redlines, whichever was
+ * chosen last) when the document has redlines and in Clean when it doesn't (design §5.3), and
+ * after that it stays as chosen: Redlines is available whatever the document holds, so one whose
+ * last redline goes stays in it. The one exception is a document that gains redlines while it is
+ * shown Clean, as when an agent's suggestions arrive, which switches to the markup view, so
+ * suggestions are never invisible.
  */
 export const viewModeField = StateField.define<ViewMode>({
-  create: (state) => (hasRedlines(state.field(parsedField)) ? 'redlines' : 'clean'),
+  create: (state) =>
+    hasRedlines(state.field(parsedField)) ? state.facet(markupViewFacet) : 'clean',
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
     if (!tr.docChanged || mode !== 'clean') return mode;
     const gained =
       hasRedlines(tr.state.field(parsedField)) && !hasRedlines(tr.startState.field(parsedField));
-    return gained ? 'redlines' : mode;
+    return gained ? tr.state.facet(markupViewFacet) : mode;
   },
 });

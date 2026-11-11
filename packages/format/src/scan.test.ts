@@ -201,3 +201,19 @@ describe('where a blank line is content', () => {
     expect(verbatim('One.\n\nTwo `code` and <b>bold</b>.\n')).toEqual([]);
   });
 });
+
+describe('front matter (format §3.8)', () => {
+  it('ends at its closing line, whatever an unclosed comment in it holds (#239)', () => {
+    for (const closing of ['---', '...']) {
+      const text = ['---', 'note: <!-- never closed', closing, '', `Words ${MARK} here.`].join(
+        '\n',
+      );
+      expect(idsIn(...text.split('\n')), closing).toEqual(['k3x9']);
+    }
+  });
+
+  it('still finds a comment that closes inside it', () => {
+    const text = ['---', 'note: <!-- closed -->', '---', '', `Words ${MARK} here.`].join('\n');
+    expect(idsIn(...text.split('\n'))).toEqual(['k3x9']);
+  });
+});
