@@ -2,6 +2,13 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { openerRange } from './blocks.ts';
+export { deletedBlocks } from './deleted-blocks.ts';
+export type {
+  DeletedBlock,
+  DeletedBlockKind,
+  DeletedBlocksContext,
+  DeletedPiece,
+} from './deleted-blocks.ts';
 export { readBlocks } from './block-read.ts';
 export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
