@@ -901,7 +901,9 @@ These are refused with the format's words, and each is a format issue already op
 
 - Return or Shift-Return right next to another person's pending line break of one line (#112), and
   in the middle of a block another person's block change is pending on. (A hard break is not one of these: see rule 10.)
-- Tab or Shift-Tab in a list with more than five other pending changes, until rule 6.
+- Tab or Shift-Tab in a list with more than five other pending changes that a decision could make
+  reach a line's start or a line break, or in a numbered list or beside an open empty item (rule 6
+  leaves those marks tried, not apart; a list numbered 1 2 3 has the weaker limit).
 - Edits in code and front matter with Track Changes on, until format §3.5 and §3.8's front-matter
   records are built.
 - The rare layouts of #102, #107–#110, #119, #120 and #143, which the conformance suite runs (Tests).
