@@ -375,6 +375,23 @@ interface ListMemo {
   holders: Map<number, Holder | null>;
   /** The lines whose reading wasn't sure, and was read as before #139. */
   unsure: Set<number>;
+  /** How many lines deeper than the one an entry was read at its reading went, entry by entry. */
+  kindHeights: Map<number, number>;
+  holderHeights: Map<number, number>;
+  /** The deepest the reading under way has gone: `MAX_DEPTH` where the cap cut it short. */
+  reached: number;
+  /** What earlier calls read of the same text and markers that doesn't depend on the depth. */
+  shared: Shared;
+}
+
+/** Readings that the cap on the depth did not touch, so that they are what a reading from any depth
+ * that leaves them room to be read in full gives: the kind of a line and whether it was unsure, and
+ * what holds the paragraph above a line, with how many lines deeper they went. */
+interface Shared {
+  kinds: Map<number, { kind: LineStart; unsure: boolean; height: number }>;
+  holders: Map<number, { holder: Holder | null; height: number }>;
+  /** The answers of whole readings, from depth 0: the kind of the line at a position. */
+  answers: Map<number, LineStart>;
 }
 
 /** What holds a paragraph: the line that starts the item it is in, with that line's items (none at
@@ -404,11 +421,35 @@ function kindOf(
     const items = itemsOf(quotedColumns(bare).rest, 0);
     if ((items[0]?.marker ?? 4) < 4) return 'block';
   }
-  if (depth >= MAX_DEPTH) return undefined;
+  if (depth >= MAX_DEPTH) {
+    memo.reached = MAX_DEPTH;
+    return undefined;
+  }
   let kind = memo.kinds.get(line);
-  if (kind === undefined) {
-    kind = lineStartKind(text, line + prefixLength(bare), hidden, depth + 1, memo);
-    memo.kinds.set(line, kind);
+  if (kind !== undefined) {
+    memo.reached = Math.max(memo.reached, depth + (memo.kindHeights.get(line) ?? 0));
+  } else {
+    const kept = memo.shared.kinds.get(line);
+    if (kept && depth + kept.height < MAX_DEPTH) {
+      kind = kept.kind;
+      memo.kinds.set(line, kind);
+      memo.kindHeights.set(line, kept.height);
+      if (kept.unsure) memo.unsure.add(line);
+      memo.reached = Math.max(memo.reached, depth + kept.height);
+    } else {
+      const outer = memo.reached;
+      memo.reached = depth;
+      kind = lineStartKind(text, line + prefixLength(bare), hidden, depth + 1, memo);
+      // A reading that the cap cut short stays cut short wherever its entry is reused.
+      const height = memo.reached >= MAX_DEPTH ? MAX_DEPTH : memo.reached - depth;
+      memo.kinds.set(line, kind);
+      memo.kindHeights.set(line, height);
+      // Read in full, with room to spare: it is what a reading from any depth with room gives.
+      if (memo.reached < MAX_DEPTH) {
+        memo.shared.kinds.set(line, { kind, unsure: memo.unsure.has(line), height });
+      }
+      memo.reached = Math.max(outer, memo.reached);
+    }
   }
   return memo.unsure.has(line) ? undefined : kind;
 }
@@ -429,9 +470,25 @@ function holderAbove(
   memo: ListMemo,
 ): Holder | undefined {
   const known = memo.holders.get(start);
-  if (known !== undefined) return known ?? undefined;
+  if (known !== undefined) {
+    memo.reached = Math.max(memo.reached, depth + (memo.holderHeights.get(start) ?? 0));
+    return known ?? undefined;
+  }
+  const kept = memo.shared.holders.get(start);
+  if (kept && depth + kept.height < MAX_DEPTH) {
+    memo.holders.set(start, kept.holder);
+    memo.holderHeights.set(start, kept.height);
+    memo.reached = Math.max(memo.reached, depth + kept.height);
+    return kept.holder ?? undefined;
+  }
+  const outer = memo.reached;
+  memo.reached = depth;
   const found = readHolder(text, start, quotes, hidden, depth, memo);
+  const height = memo.reached >= MAX_DEPTH ? MAX_DEPTH : memo.reached - depth;
   memo.holders.set(start, found ?? null);
+  memo.holderHeights.set(start, height);
+  if (memo.reached < MAX_DEPTH) memo.shared.holders.set(start, { holder: found ?? null, height });
+  memo.reached = Math.max(outer, memo.reached);
   return found;
 }
 
@@ -487,7 +544,11 @@ function stackOf(
   if (isBodyStart(text, line) || marker < 2) return own;
   const above = masked(text, lineStart(text, line - 1), lineEnd(text, line - 1), hidden);
   if (CONTAINER_PREFIX.test(above.replaceAll('\0', '').replace(/\r$/, ''))) return undefined;
-  if (depth >= MAX_DEPTH) return undefined;
+  if (depth >= MAX_DEPTH) {
+    memo.reached = MAX_DEPTH;
+    return undefined;
+  }
+  memo.reached = Math.max(memo.reached, depth);
   const outer = holderAbove(text, line, quotes, hidden, depth, memo);
   if (!outer || !('line' in outer)) return undefined;
   const stack = stackOf(text, outer, hidden, depth + 1, memo);
@@ -550,6 +611,47 @@ export type LineStart =
   /** On a line that is only syntax, such as a setext underline or a table row. */
   | 'syntax';
 
+/** What the readings of one text read of it that the cap on the depth didn't touch, kept for the
+ * next reading of the same text with the same markers: a numbered item reads the lines above it,
+ * and a list of them is read once, not once for every item (a walk reads the same few texts again
+ * and again). A reading only ever takes from it what it would have read itself, from the depth it is
+ * at: so the answer is the one a fresh reading gives, whatever the order of the calls. Keyed by the
+ * array `markerRanges` gave for a parse and checked against the text and the ranges it holds now,
+ * so that an array a caller changed is read afresh. */
+const SHARED = new WeakMap<
+  readonly Range[],
+  { text: string; ranges: readonly number[]; shared: Shared }
+>();
+
+/** The `from` and `to` of each range, flat: what a kept reading is checked against, exactly. */
+const flatRanges = (hidden: readonly Range[]) => hidden.flatMap(({ from, to }) => [from, to]);
+
+const sameRanges = (kept: readonly number[], hidden: readonly Range[]) =>
+  kept.length === hidden.length * 2 &&
+  hidden.every(({ from, to }, i) => kept[2 * i] === from && kept[2 * i + 1] === to);
+
+/** A memory for one reading, which takes from what earlier readings of the text kept. */
+export function listMemo(text: string, hidden: readonly Range[]): ListMemo {
+  let shared: Shared | undefined;
+  if (hidden.length > 0) {
+    const known = SHARED.get(hidden);
+    if (known && known.text === text && sameRanges(known.ranges, hidden)) shared = known.shared;
+    else {
+      shared = { kinds: new Map(), holders: new Map(), answers: new Map() };
+      SHARED.set(hidden, { text, ranges: flatRanges(hidden), shared });
+    }
+  }
+  return {
+    kinds: new Map(),
+    holders: new Map(),
+    unsure: new Set(),
+    kindHeights: new Map(),
+    holderHeights: new Map(),
+    reached: 0,
+    shared: shared ?? { kinds: new Map(), holders: new Map(), answers: new Map() },
+  };
+}
+
 /**
  * Whether `position` is at the start of its line's content, after the container prefix, and if so
  * whether a block starts there (a marker may stand alone on the line before it) or a wrapped line
@@ -561,8 +663,26 @@ export function lineStartKind(
   position: number,
   hidden: readonly Range[] = [],
   depth = 0,
-  memo: ListMemo = { kinds: new Map(), holders: new Map(), unsure: new Set() },
+  memo?: ListMemo,
 ): LineStart {
+  if (memo) return readLineStart(text, position, hidden, depth, memo);
+  // A whole reading is a function of the text, the markers and the position: kept.
+  const fresh = listMemo(text, hidden);
+  const known = fresh.shared.answers.get(position);
+  if (known !== undefined) return known;
+  const kind = readLineStart(text, position, hidden, depth, fresh);
+  if (depth === 0) fresh.shared.answers.set(position, kind);
+  return kind;
+}
+
+function readLineStart(
+  text: string,
+  position: number,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): LineStart {
+  memo.reached = Math.max(memo.reached, depth);
   const start = lineStart(text, position);
   const before = text.slice(start, position);
   if (!CONTAINER_PREFIX.test(before)) return 'inline';

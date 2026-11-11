@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { holdsMisreadItem, marksApart } from './format-apart.ts';
+import { holdsMisreadItem, itemLines, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
 import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
@@ -197,23 +197,47 @@ function expectSampledDecisions(
   return states;
 }
 
-/** Whether the block change `op` at `range` of `text` moves blocks other than its own in the file
- * with no mark pending (#263): 'moves', or 'sound' where it doesn't (or can't be made there). The
- * range is kept relative to the word `target`. */
-function withoutMarks(text: string, range: Range, op: FormatOp): 'moves' | 'sound' {
-  if (op.kind === 'inline') return 'sound';
-  const bare = applyChanges(text, acceptAll(text));
-  const shift = bare.indexOf('target') - text.indexOf('target');
-  const here = { from: Math.max(0, range.from + shift), to: Math.max(0, range.to + shift) };
-  try {
-    const after = applyChanges(bare, untrackedFormat(bare, here, op, { author: ada }));
-    expectBlocksAs('bare', after, bare, op, Infinity);
-    return 'sound';
-  } catch (error) {
-    if (error instanceof EditError) return 'sound';
-    return 'moves';
-  }
-}
+describe('the lines that the reading of list items is sure are items (format §2.6)', () => {
+  it('are items to micromark too, in random layouts of numbered lists under any line', () => {
+    const MARKS = ['1.', '2.', '3.', '9.', '10.', '11.', '1)', '2)', '10)', '-', '*', '+'];
+    let sure = 0;
+    for (let seed = 1; seed <= fuzzCount(4000); seed++) {
+      const random = seeded(seed * 6151);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
+      const lines: string[] = [];
+      for (let n = 1 + below(12); n > 0; n--) {
+        const kind = below(10);
+        const tag = `w${lines.length}`;
+        if (kind < 6) {
+          const pad = pick(['', '', ' ', '  ', '   ', '    ']);
+          const mark = pick(MARKS);
+          lines.push(`${pad}${mark}${' '.repeat(1 + below(2))}${tag}`);
+        } else if (kind === 6) lines.push(tag);
+        else if (kind === 7) lines.push('');
+        else if (kind === 8) lines.push(pick(['# h', '---', '***', '  ## h']));
+        else lines.push(`${pick(['  ', '    ', ' '])}${tag}`);
+      }
+      const text = lines.join('\n');
+      const html = micromark(text);
+      const starts = itemLines(text);
+      for (const start of starts) {
+        const line = text.slice(
+          start,
+          text.indexOf('\n', start) === -1 ? undefined : text.indexOf('\n', start),
+        );
+        const tag = /w\d+$/.exec(line)?.[0];
+        if (!tag) continue;
+        sure++;
+        expect(
+          new RegExp(`<li>\\s*(?:<p>)?${tag}\\b`).test(html),
+          `seed ${seed}: ${JSON.stringify(text)}\nline ${JSON.stringify(line)}\n${html}`,
+        ).toBe(true);
+      }
+    }
+    expect(sure).toBeGreaterThan(1000);
+  });
+});
 
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
   // A co-author's insertions, deletions and substitutions in five items, and a sixth left alone.
@@ -870,6 +894,164 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
     expectSampledDecisions('indent off', text, typed, [], indent(1), seeded(6), 40, 1, true);
   });
 
+  it('indents an item of a list numbered in order with eight other pending changes (#264)', () => {
+    const below = (first: number, delimiter: string, quote = '') =>
+      [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${quote}${i + first}${delimiter} ${edited(i)}`);
+    // Right-aligned numbering, ` 1.` to `10.`, and lists indented one to three columns: micromark reads
+    // them as ordinary lists, with the pending changes in ten of the items.
+    const ten = (pad: (n: number) => string, first = 3, delimiter = '.') =>
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `${pad(i + first)}${delimiter} ${edited(i)}`);
+    const right = (n: number) => String(n).padStart(2, ' ');
+    const aligned: [string, string[]][] = [
+      ['right-aligned', [' 1. one', ' 2. two', ...ten(right)]],
+      ['right-aligned parentheses', [' 1) one', ' 2) two', ...ten(right, 3, ')')]],
+      ['one column', [' 1. one', ' 2. two', ...ten((n) => ` ${n}`)]],
+      ['two columns', ['  1. one', '  2. two', ...ten((n) => `  ${n}`)]],
+      ['three columns', ['   1. one', '   2. two', ...ten((n) => `   ${n}`)]],
+      ['under text', ['intro', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under text, wrapped', ['intro', 'more', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a heading', ['# Title', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a rule', ['intro', '---', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a list and a blank', ['- a', '', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under text and a blank', ['intro', '', ' 3. one', ' 4. two', ...ten(right, 5)]],
+      ['indented, under text', ['intro', '  1. one', '  2. two', ...ten((n) => `  ${n}`)]],
+      ['wrapped', [' 1. one', ' 2. two', ...ten(right).flatMap((row) => [row, '    more'])]],
+      ['loose', [' 1. one', '', ' 2. two', '', ...ten(right).flatMap((row) => [row, ''])]],
+    ];
+    for (const [name, rows] of aligned) {
+      const text = mine(rows.join('\n'));
+      for (const tracked of [true, false]) {
+        const got = attempt(text, 'two', indent(1), tracked);
+        expect(got.error, `${name} ${tracked}`).toBeUndefined();
+        const after = applyChanges(text, got.changes ?? []);
+        if (tracked) expectSampledDecisions(name, text, after, ['m2bd'], indent(1), seeded(21), 12);
+        else
+          expectSampledDecisions(`${name} off`, text, after, [], indent(1), seeded(22), 8, 1, true);
+      }
+    }
+    const shapes: [string, string[]][] = [
+      ['1, 2, 3', ['1. one', '2. two', ...below(3, '.')]],
+      ['parentheses', ['1) one', '2) two', ...below(3, ')')]],
+      ['from 3', ['3. one', '4. two', ...below(5, '.')]],
+      ['in a quote', ['> 1. one', '> 2. two', ...below(3, '.', '> ')]],
+      ['loose', ['1. one', '', '2. two', '', ...below(3, '.').flatMap((row) => [row, ''])]],
+      ['nested', ['- a', '  1. one', '  2. two', ...below(3, '.', '  ')]],
+      ['wrapped', ['1. one', '2. two', ...below(3, '.').flatMap((row) => [row, '   and more'])]],
+      ['with children', ['1. one', '2. two', ...below(3, '.').flatMap((row) => [row, '   - sub'])]],
+      [
+        'out of order',
+        [
+          '1. one',
+          '2. two',
+          ...below(3, '.').map(
+            (row, i) => `${[9, 4, 7, 5, 8, 6, 12, 10][i]}${row.slice(row.indexOf('.'))}`,
+          ),
+        ],
+      ],
+    ];
+    for (const [name, rows] of shapes) {
+      const text = mine(rows.join('\n'));
+      for (const [op, tracked] of [
+        [indent(1), true],
+        [indent(1), false],
+      ] as const) {
+        const got = attempt(text, 'two', op, tracked);
+        expect(got.error, `${name} ${tracked}`).toBeUndefined();
+        const after = applyChanges(text, got.changes ?? []);
+        expect(
+          parse(after)
+            .marks.map((mark) => mark.id)
+            .filter((id) => id !== 'm2bd'),
+        ).toEqual(IDS.slice(0, 8));
+        if (tracked) {
+          expect(rejected(after, 'm2bd'), name).toBe(text);
+          expectSampledDecisions(name, text, after, ['m2bd'], op, seeded(11), 30);
+        } else {
+          expectSampledDecisions(`${name} off`, text, after, [], op, seeded(12), 20, 1, true);
+        }
+      }
+    }
+  });
+
+  it('changes the type of an item with lines under it at any column, and reads them as before (#263)', () => {
+    const UNDER = [
+      ['  > q'],
+      ['   > q'],
+      ['    > q'],
+      ['  ```', '  code', '  ```'],
+      ['   ```', '   code', '   ```'],
+      ['  <div>', '  x'],
+      ['  - sub'],
+      ['   - sub', '  lazy'],
+      ['  # h'],
+      ['', '  later'],
+      ['', '  > later'],
+      ['  1. sub'],
+      ['   - sub', '  > q'],
+      ['    - a'],
+      ['     - a'],
+      ['    ```'],
+      ['      - a'],
+      ['       - a'],
+      ['      > q'],
+      ['       > q'],
+      ['      ```', '      c', '      ```'],
+      ['   - a', '       - b'],
+      ['    2. a'],
+    ];
+    const HEADS = ['1. ', '10. ', '- ', '* ', '- [ ] ', '1) ', ' 1. ', '  1. ', '   1. ', '  10. '];
+    const OPS = [block('ul'), block('task'), block('ol'), block('ul'), block('task')];
+    let written = 0;
+    let refused = 0;
+    for (let seed = 1; seed <= fuzzCount(300); seed++) {
+      const random = seeded(seed * 104729);
+      const below = (n: number) => Math.floor(random() * n);
+      const head = HEADS[below(HEADS.length)] ?? '- ';
+      const under = UNDER[below(UNDER.length)] ?? [];
+      const body = [`${head}target`, ...under, ...(below(2) === 0 ? ['2. next'] : [])].join('\n');
+      const text = below(3) === 0 ? file(body).replace(/\n/g, '\r\n') : file(body);
+      const op = OPS[below(OPS.length)] as FormatOp;
+      const label = `seed ${seed}: ${JSON.stringify(op)} in ${JSON.stringify(bodyOf(text))}`;
+      const at = text.indexOf('target');
+      const range = { from: at, to: at };
+      const off = outcomeOf(() => untrackedFormat(text, range, op, { author: ada }));
+      if (off.result && off.result.length > 0) {
+        expectBlocksAs(`off: ${label}`, applyChanges(text, off.result), text, op, Infinity);
+        written++;
+      } else if (off.error) refused++;
+      const on = outcomeOf(() => trackedFormat(text, range, op, ctx()));
+      if (on.result && on.result.changes.length > 0) {
+        const after = applyChanges(text, on.result.changes);
+        expectSampledDecisions(label, text, after, on.result.markIds, op, seeded(seed), 6);
+      }
+    }
+    expect(written, `${refused} refused`).toBeGreaterThan(0);
+    expect(refused).toBeGreaterThan(0);
+  });
+
+  it('costs about what indenting does in a bulleted list, in a numbered one (#264)', () => {
+    const rows = (numbered: boolean) =>
+      mine(
+        [
+          numbered ? '1. one' : '- one',
+          numbered ? '2. two' : '- two',
+          ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${numbered ? `${i + 3}.` : '-'} ${edited(i)}`),
+        ].join('\n'),
+      );
+    const best = (text: string) => {
+      let fastest = Infinity;
+      for (let run = 0; run < 7; run++) {
+        const start = performance.now();
+        expect(attempt(text, 'two', indent(1)).error).toBeUndefined();
+        fastest = Math.min(fastest, performance.now() - start);
+      }
+      return fastest;
+    };
+    best(rows(true));
+    // About 1.1 here: both leave the eight pending changes alone.
+    expect(best(rows(true)) / best(rows(false))).toBeLessThan(3);
+  });
+
   it('checks twelve boxes one after another, as twelve clicks do, and each reads right (rule 6)', () => {
     const letters = 'abcdefghijkl'.split('');
     let text = file(letters.map((c) => `- [ ] item ${c} words`).join('\n'));
@@ -960,20 +1142,67 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
 
   it('says why the limit applies where the lines below would be read again', () => {
     const again = ' The lines below would be read again.';
+    // An empty item under a line of text is none Markdown can hold: its lines are all tried.
+    const open = mine(
+      [
+        'intro',
+        '- ',
+        '- one',
+        '- two',
+        ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `- ${edited(i)}`),
+      ].join('\n'),
+    );
+    expect(attempt(open, 'two', indent(1)).error).toBe(many(8) + again);
+    // A numbered item under the item the one above it is nested in, which has a pending change at
+    // its first character that leaves a space (seed 4904 of the suite), was the one shape that kept
+    // the count: the lists are read as flat lists of items now, and it is written, as with bullets.
+    const spaced = (marker: (i: number) => string) =>
+      mine(
+        [
+          `${marker(1)}one`,
+          `${marker(2)}<!--del kmx9 new --> beta`,
+          `${marker(3)}two`,
+          ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${marker(i + 4)}${edited(i)}`),
+        ].join('\n'),
+      );
+    expect(
+      attempt(
+        spaced((i) => `${i}. `),
+        'two',
+        indent(1),
+      ).error,
+    ).toBeUndefined();
+    expect(
+      attempt(
+        spaced(() => '- '),
+        'two',
+        indent(1),
+      ).error,
+    ).toBeUndefined();
+    // A list numbered from 3, or in any order, is no such case, and nor is a bulleted one.
     const numbered = mine(
       ['3. one', '4. two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${i + 5}. ${edited(i)}`)].join(
         '\n',
       ),
     );
-    expect(attempt(numbered, 'two', indent(1)).error).toBe(many(8) + again);
+    expect(attempt(numbered, 'two', indent(1)).error).toBeUndefined();
     const bullets = mine(
       ['- one', '- two', ...[0, 1, 2, 3, 4, 5].map((i) => `- ${edited(i, 'start')}`)].join('\n'),
     );
     expect(attempt(bullets, 'two', indent(1)).error).toBe(many(6));
+    // Marks at the start of numbered items are counted as in any list, with no sentence added.
+    const starts = mine(
+      [
+        '1. one',
+        '2. two',
+        ...[0, 1, 2, 3, 4, 5].map((i) => `${i + 3}. ${edited(i, 'start')}`),
+      ].join('\n'),
+    );
+    expect(attempt(starts, 'two', indent(1)).error).toBe(many(6));
   });
 
   it('allows what trying every mark allows, with the marks beside the written lines tried', () => {
-    // The item above the one that moves, and the numbered items under it, stand against its lines.
+    // The item above the one that moves stands against its lines, and the numbered items under it.
     const text = (rows: readonly string[]) => mine(rows.join('\n'));
     for (const [name, rows, word] of [
       ['above', ['- one', `- ${edited(0)}`, '- two', `- ${edited(1)}`, `- ${edited(2)}`], 'two'],
@@ -1170,7 +1399,7 @@ describe(
     /** A list of five to twelve items, one with the word `target`, in the others Bo's pending words,
      * each in a place of its own, mostly after the first character of the item's text and now and
      * then not; a bullet, numbered, task or nested list, tight or loose, in a quote now and then. */
-    function listDocument(random: () => number): { text: string; irregular: boolean } {
+    function listDocument(random: () => number): string {
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
       const count = 5 + below(8);
@@ -1222,10 +1451,40 @@ describe(
                     : '- ';
       const quoted = below(5) === 0 ? '> ' : '';
       const loose = kind === 5 || kind === 7 ? `\n${quoted ? '>' : ''}\n` : '\n';
+      // Now and then a line or a block under an item, at an indentation of its own: a quote, a
+      // fence, a line of HTML, a bullet, a heading, text (#263: they are read at their own column).
+      const UNDER = [
+        ['  > q'],
+        ['   > q'],
+        [' > q'],
+        ['  ```', '  code', '  ```'],
+        ['   ```', '   code', '   ```'],
+        ['  <div>', '  x'],
+        ['  - sub'],
+        ['   - sub', '  lazy'],
+        ['  # h'],
+        ['', '  later'],
+        ['    - deep'],
+      ];
+      const under = items.map((_, i) => (below(i === target ? 2 : 5) === 0 ? pick(UNDER) : []));
       const body = items
-        .map((text, i) => `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}`)
+        .map(
+          (text, i) =>
+            `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}${(under[i] ?? [])
+              .map((line) => `\n${quoted}${line}`)
+              .join('')}`,
+        )
         .join(loose);
-      return { text: file(body, marks), irregular: kind === 6 };
+      return file(body, marks);
+    }
+
+    /** Whether the body of `text` is a list whose items are numbered 1, 2, 3 in order, in a quote or
+     * not, tight or loose. */
+    function numberedInOrder(text: string): boolean {
+      const numbers = bodyOf(text)
+        .split(/\r?\n/)
+        .flatMap((line) => /^(?:> )?(\d+)\. /.exec(line)?.[1] ?? []);
+      return numbers.length > 1 && numbers.every((n, i) => Number(n) === i + 1);
     }
 
     /** A range around the word `target`, or from a view offset to another a few words on. */
@@ -1271,7 +1530,6 @@ describe(
       let more = 0;
       let checked = 0;
       let sampled = 0;
-      let skipped = 0;
       const histogram = new Map<string, number>();
       // REDLINES_SEED starts the run at one seed.
       const first = Number(process.env['REDLINES_SEED'] ?? 1);
@@ -1280,7 +1538,7 @@ describe(
         const random = seeded(seed * step);
         const below = (n: number) => Math.floor(random() * n);
         const made = lists && seed % 3 !== 0 ? listDocument(random) : undefined;
-        const plain = made?.text ?? regionDocument(random, kinds);
+        const plain = made ?? regionDocument(random, kinds);
         const text = seed % 2 === 0 ? plain.replace(/\r?\n/g, '\r\n') : plain;
         const caret = text.indexOf('target') + below(7);
         const range =
@@ -1288,12 +1546,6 @@ describe(
             ? { from: caret, to: caret + (below(3) === 0 ? 1 : 0) }
             : randomRange(below, text);
         const op = ops[below(ops.length)] as FormatOp;
-        // Indentation at random: a block change can move the lines under it into its item (a bullet
-        // two columns in under a number three wide, #263), which is no matter of marks. The chain
-        // check is skipped only where the same change with no mark pending does that itself.
-        const bare = made?.irregular === true ? withoutMarks(text, range, op) : undefined;
-        const irregular = bare === 'moves';
-        if (irregular) skipped++;
         const label = `seed ${seed}: ${JSON.stringify(op)} on ${JSON.stringify(range)} in ${JSON.stringify(bodyOf(text))}`;
         const c = () => ({
           author: ada,
@@ -1310,6 +1562,26 @@ describe(
                 (apart.result?.changes.length ? 'ok' : 'nothing'),
             ) ?? 0),
         );
+        // A list numbered in order, 1, 2, 3, is refused for the number of its pending changes only
+        // where the same list with bullets is (#264, rule 6), or with the reason given: a state of
+        // the walk in which the lines below read otherwise. The numbers below are no reason.
+        const reasoned = apart.error?.message.endsWith('would be read again.') === true;
+        if (
+          made &&
+          op.kind === 'indent' &&
+          tooMany(apart.error) &&
+          numberedInOrder(text) &&
+          !reasoned
+        ) {
+          const twin = text.replace(/^(> )?\d+\. /gm, '$1- ');
+          const by = twin.indexOf('target') - text.indexOf('target');
+          const bulleted = outcome(() =>
+            trackedFormat(twin, { from: range.from + by, to: range.to + by }, op, c()),
+          );
+          expect(tooMany(bulleted.error), `${label}\nas bullets: ${bulleted.error?.message}`).toBe(
+            true,
+          );
+        }
         if (every.result) {
           // What trying every mark allows, leaving some pending allows too, the same way.
           expect(apart.error?.message, label).toBeUndefined();
@@ -1347,7 +1619,6 @@ describe(
               12,
               result.extendedIds.length + reshaped,
               false,
-              !irregular,
             );
             sampled++;
           }
@@ -1369,12 +1640,12 @@ describe(
         } else if (apartOff.result && apartOff.result.length > 0) {
           const after = applyChanges(text, apartOff.result);
           expectEveryDecision(`off: ${label}`, text, after, [], { inPlace: true, limit: 7 });
-          if (!irregular) expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
+          expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
         }
       }
       if (process.env['REDLINES_FUZZ'])
         console.log(
-          `apart: ${JSON.stringify({ documents, alike, more, checked, sampled, skipped })}`,
+          `apart: ${JSON.stringify({ documents, alike, more, checked, sampled })}`,
           histogram,
         );
       // Most documents can be tried both ways, and some are allowed only with marks left pending.

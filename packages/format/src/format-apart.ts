@@ -87,9 +87,11 @@
 // or first character an edit writes as one whose start is not known: `fixedAt` and `inPrefix` take
 // it out of the reading of list items (`listItemAt`), so a paragraph stands against a written line
 // only where it is sure of its own start: a blank line that nothing touches, or its own item (a
-// bullet or a 1, less than four columns in, with its prefix and first character unwritten). So the
-// marks of the item right above the one that changes, and of a numbered item under it, whose start
-// the reading takes from the lines above, are tried, and the others are not.
+// bullet or a 1, less than four columns in, with its prefix and first character unwritten), or a
+// numbered item with another number (`numberedAt`), which reads its start from the lines above and
+// from nothing a mark apart holds: the walk reads those lines in each state, in both files, and
+// tries every mark where the paragraph is not the one it was. So the marks of the item right above
+// the one that changes are tried, and the others are not.
 //
 // The first shortcut of this kind, when format changes were new, left out the marks of the
 // change's own paragraph that did not stand next to its syntax, and tried them only all accepted
@@ -192,6 +194,18 @@ const SHOWN = '\u0000';
  * or with nothing after it. A thematic break is none, nor a line with a tab before its text, which
  * counts in columns. */
 function itemOf(line: string): Item | undefined {
+  if (ITEMS.has(line)) return ITEMS.get(line);
+  if (ITEMS.size > 4000) ITEMS.clear();
+  const item = readItem(line);
+  ITEMS.set(line, item);
+  return item;
+}
+
+/** What `itemOf` has read: it is a function of the line, and the walks read the same lines of a
+ * list again in every state. */
+const ITEMS = new Map<string, Item | undefined>();
+
+function readItem(line: string): Item | undefined {
   const quotes = QUOTES.exec(line)?.[0] ?? '';
   const rest = line.slice(quotes.length);
   if (THEMATIC_BREAK.test(rest)) return undefined;
@@ -243,6 +257,98 @@ interface ListLines {
   known: Map<number, Item | null>;
 }
 
+/** What the lines of a file down to one are, as a flat list of items: null before the first item or
+ * after a line that ends one (a blank line, a heading, a rule), 'text' right after a paragraph (no
+ * item that stands under it is one but a bullet or a 1), an object once there are some items, all
+ * with the same delimiter and the same quoting depth, each less than four columns in, where
+ * `content` is the content column of the last and `blank` whether a blank line follows it; false
+ * when they are anything else. */
+type Flat =
+  null | false | 'text' | { delimiter: string; depth: number; content: number; blank: boolean };
+
+const FLATS = new WeakMap<ListLines, Map<number, Flat>>();
+
+/**
+ * Whether the lines above the line at `start` are nothing but the items of one list, each less than
+ * four columns in, with the same delimiter (`1.`, ` 2.`, `10.`, `1)`...), their wrapped lines and
+ * the blank lines between them, and every item's prefix and first character are as written. Then a
+ * numbered item of that delimiter less than four columns in, whatever its number, and in front of the
+ * text of the item above it, is the next item of the list: a sibling of the items above, whichever of
+ * them it stands more or less in than. The nearest item's content column is returned with it.
+ */
+function flatBefore(lines: ListLines, start: number): Flat {
+  if (start === 0) return null;
+  let memo = FLATS.get(lines);
+  if (!memo) {
+    memo = new Map<number, Flat>();
+    FLATS.set(lines, memo);
+  }
+  const chain: number[] = [];
+  let at = lineStart(lines.text, start - 1);
+  for (;;) {
+    chain.push(at);
+    if (memo.has(at) || at === 0) break;
+    at = lineStart(lines.text, at - 1);
+  }
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const line = chain[i] as number;
+    if (memo.has(line)) continue;
+    const before = line === 0 ? null : (memo.get(lineStart(lines.text, line - 1)) as Flat);
+    memo.set(line, flatStep(lines, line, before));
+  }
+  return memo.get(chain[0] as number) as Flat;
+}
+
+/** The state after the line at `at`, from the state `before` the line above leaves. */
+function flatStep(lines: ListLines, at: number, before: Flat): Flat {
+  if (before === false) return false;
+  const text = lines.line(at);
+  const flat = typeof before === 'object' && before !== null ? before : undefined;
+  if (lines.blank(at)) {
+    if (flat) return depthOf(text) === flat.depth ? { ...flat, blank: true } : false;
+    // A blank line ends a paragraph: what follows it starts a block.
+    return depthOf(text) === 0 ? null : false;
+  }
+  // A line in the last item (indented to its text or more): a child, or a line of one, an item
+  // nested in it included, however it starts. It leaves the list as it was.
+  if (flat && depthOf(text) === flat.depth) {
+    const indent = /^ */.exec(afterQuotes(text))?.[0].length ?? 0;
+    if (indent >= flat.content) return flat.blank ? { ...flat, blank: false } : flat;
+  }
+  const item = itemOf(text);
+  if (item) {
+    // An item whose text starts a block of its own (a list inside it, a quote) is none of a flat list.
+    if (
+      item.marker > 3 ||
+      item.code ||
+      item.empty ||
+      !lines.fixed(at, at + item.text) ||
+      /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|^>/.test(text.slice(item.text))
+    ) {
+      return false;
+    }
+    // Right under a paragraph only a bullet or a 1 starts a list.
+    if (before === 'text' && !(item.bullet || item.number === 1)) return false;
+    if (before === 'text' && item.depth !== 0) return false;
+    if (flat && (flat.delimiter !== item.delimiter || flat.depth !== item.depth) && !flat.blank) {
+      return false;
+    }
+    return { delimiter: item.delimiter, depth: item.depth, content: item.content, blank: false };
+  }
+  const indent = /^ */.exec(afterQuotes(text))?.[0].length ?? 0;
+  const quoted = depthOf(text) !== (flat?.depth ?? 0);
+  // A heading and a rule are one line: what follows them starts a block, which ends a list.
+  if (!quoted && (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(text) || THEMATIC_BREAK.test(text))) {
+    return lines.fixed(at, at + indent) ? null : false;
+  }
+  if (!lines.plain(at) || quoted) return false;
+  // Text goes on the paragraph of the item or the text above it, with no blank line between.
+  if (before === 'text' || (flat && !flat.blank)) return before;
+  // A paragraph of its own: after a blank line, or the start; four columns in it is code.
+  if (indent >= 4 || (flat && indent >= flat.content)) return false;
+  return 'text';
+}
+
 /**
  * The list item that the line at `start` starts, as CommonMark reads it from the lines above it:
  * undefined when it starts none, or when the reading can't be sure. A bullet, or the number 1, less
@@ -271,6 +377,22 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   // What can interrupt a paragraph: a bullet or a 1, with something after it.
   const first = (item.bullet || item.number === 1) && !item.empty;
   if (first && item.marker <= 3) return item;
+  // The first line of the file starts an item, whatever its number: no paragraph is above it.
+  if (start === 0 && item.marker <= 3) return item;
+  // A numbered item in a list of items less than four columns in, with the same delimiter, whatever
+  // their numbers and their indentation (right-aligned ` 1.` to `10.` too): the next item of it.
+  if (!first && item.marker <= 3 && !item.code && !item.empty) {
+    const flat = flatBefore(lines, start);
+    if (
+      typeof flat === 'object' &&
+      flat &&
+      flat.delimiter === item.delimiter &&
+      flat.depth === item.depth &&
+      item.marker < flat.content
+    ) {
+      return item;
+    }
+  }
   // Right under a blank line, no paragraph is interrupted: anything less than four columns in.
   // Indented code goes on past a blank line, though, and micromark lets only what interrupts a
   // paragraph interrupt it: so the line above the blank lines is neither code nor an item of code.
@@ -426,8 +548,8 @@ export function holdsMisreadItem(text: string, hidden: readonly Range[], limit: 
         !THEMATIC_BREAK.test(afterQuotes(words));
       if (
         paragraph &&
-        lineStartKind(text, start + prefixLength(raw), hidden) === 'block' &&
-        !listItemAt(lines, start)
+        !listItemAt(lines, start) &&
+        lineStartKind(text, start + prefixLength(raw), hidden) === 'block'
       ) {
         return true;
       }
@@ -437,6 +559,17 @@ export function holdsMisreadItem(text: string, hidden: readonly Range[], limit: 
     start = text.indexOf('\n', start) + 1 || limit;
   }
   return false;
+}
+
+/** The starts of the lines of `text` that the reading of list items is sure start an item (for the
+ * tests, which hold it to micromark's). */
+export function itemLines(text: string): number[] {
+  const lines = writtenLines(text, []);
+  const found: number[] = [];
+  for (let start = 0; start < text.length; start = text.indexOf('\n', start) + 1 || text.length) {
+    if (listItemAt(lines, start)) found.push(start);
+  }
+  return found;
 }
 
 /** A segment of a mark, with what it takes up of the file. */
@@ -659,12 +792,34 @@ export function marksApart(
     itemEverywhere(start);
   }
 
+  /** Whether the line at `start` is a numbered item whose prefix and first character nothing
+   * writes or holds, less than four columns in, with text after its marker. Whether it starts an
+   * item or goes on a paragraph above depends on the lines above it and on nothing in its own text
+   * or in the text of the lines above (format §2.6, "Marks apart for block changes"): a number
+   * other than 1 reads from them, and the marks apart are not among what it reads. */
+  const numberedAt = (start: number) => {
+    const item = itemOf(everyDecision.line(start));
+    return (
+      item !== undefined &&
+      !item.bullet &&
+      !item.empty &&
+      !item.code &&
+      item.marker <= 3 &&
+      everyDecision.fixed(start, start + item.text)
+    );
+  };
+
   /** Whether the first line of a paragraph, at `from`, starts a block in every decision, as
    * CommonMark reads it: after a blank line that nothing changes, or as a list item that is one in
-   * every decision, or as a row. */
+   * every decision, or as a row; or as a numbered item that nothing writes, which reads from the
+   * lines above, in the states of the walk (`numberedAt`). */
   const startsBlock = (from: number, row: boolean) => {
     if (row || from === 0) return true;
-    return stillBlank(lineStart(text, from - 1)) || itemEverywhere(from) !== undefined;
+    return (
+      stillBlank(lineStart(text, from - 1)) ||
+      itemEverywhere(from) !== undefined ||
+      numberedAt(from)
+    );
   };
 
   /** Whether the line after the last line of a paragraph, which ends at `to`, starts a block in
@@ -674,7 +829,7 @@ export function marksApart(
     const newline = text.indexOf('\n', to);
     const next = newline + 1;
     if (newline === -1 || next >= limit || stillBlank(next)) return true;
-    if (!row) return itemEverywhere(next) !== undefined;
+    if (!row) return itemEverywhere(next) !== undefined || numberedAt(next);
     const bar = next + prefixLength(text.slice(next, lineEnd(text, next)));
     return text[bar] === '|' && !isHidden(bar) && !inPrefix(next, bar + 1);
   };

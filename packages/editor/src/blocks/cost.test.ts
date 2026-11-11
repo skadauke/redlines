@@ -12,6 +12,7 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+import { trackedFormat } from '@redlines/format';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
 import { tablesOf } from '../table/model.ts';
@@ -573,6 +574,61 @@ describe.skipIf(!process.env['REDLINES_COST'])(
     }, 120_000);
   },
 );
+
+// Tab on an item of a list under review, in a list numbered 1, 2, 3 and in a bulleted one, with 20
+// pending changes in the items below it (format §2.6, rule 6): a numbered item with a number other
+// than 1 reads the lines above it, and the marks of the items below must not be tried for it, nor
+// read again once for each of them. At most twice the bulleted list's time (plus a millisecond).
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered list', () => {
+  it('is at most twice what it is in a bulleted list, with 20 pending changes below', () => {
+    const ids = Array.from(
+      { length: 20 },
+      (_, i) => `k${'bcdfghjkmnpqrstvwxz'[i % 19]}${'ab'[Math.floor(i / 19)]}x9`,
+    );
+    const list = (numbered: boolean) => {
+      const rows = [
+        numbered ? '1. one' : '- one',
+        numbered ? '2. two' : '- two',
+        ...ids.map(
+          (id, i) =>
+            `${numbered ? `${i + 3}.` : '-'} item ${i} <!--ins ${id}-->new <!--/${id}-->words`,
+        ),
+      ];
+      const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-10-13T22:30Z}\n`).join('');
+      return `${rows.join('\n')}\n\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo}\n  ada: {name: Ada}\nmarks:\n${marks}-->\n`;
+    };
+    const tab = (text: string) => {
+      const at = text.indexOf('two');
+      const start = performance.now();
+      trackedFormat(
+        text,
+        { from: at, to: at },
+        { kind: 'indent', by: 1 },
+        {
+          author: ada,
+          time: '2026-10-31T09:00Z',
+          random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+        },
+      );
+      return performance.now() - start;
+    };
+    const measure = (text: string) => {
+      for (let i = 0; i < 5; i++) tab(text);
+      const runs: number[] = [];
+      for (let i = 0; i < 15; i++) runs.push(tab(text));
+      return median(runs);
+    };
+    const attempt = (): Held => {
+      const bulleted = measure(list(false));
+      return { ours: measure(list(true)), limit: 2 * bulleted + 1 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: Tab with 20 changes below: bulleted ${((result.limit - 1) / 2).toFixed(2)} ms, numbered ${result.ours.toFixed(2)} ms`,
+    );
+    expect(result.ours).toBeLessThan(result.limit);
+  }, 120_000);
+});
 
 // A typed letter and Backspace in the middle of a fenced code block of 200 lines, in a document with
 // paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
