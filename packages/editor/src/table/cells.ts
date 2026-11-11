@@ -56,6 +56,12 @@ function textCellAt(
   return { table, row, cell };
 }
 
+/** The cell the head of the selection is in, with its table and row, or null outside a table. */
+export function headCell(state: EditorState): { table: Table; row: Row; cell: Cell } | null {
+  if (state.field(viewModeField, false) === 'raw') return null;
+  return textCellAt(state, state.selection.main.head);
+}
+
 /**
  * The rectangle of cells a selection makes: its two ends in two different cells of one table, every
  * cell in the rows and columns between them. Null for a caret, for text inside one cell, for a

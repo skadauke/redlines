@@ -24,10 +24,18 @@ import {
   type WarningCode,
 } from '@redlines/format';
 import { type FontStacks, destination, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
-import { htmlToMarkdown } from '../clipboard/paste-html.ts';
+import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { heldRemoteImages } from '../preview/image.ts';
-import { copyOfCells, partsToHtml, type TableCopy } from '../table/clipboard.ts';
+import { headCell, rectOf } from '../table/cells.ts';
+import {
+  cellFromPlain,
+  copyOfCells,
+  partsToHtml,
+  type TableCopy,
+  tsvToRange,
+} from '../table/clipboard.ts';
+import { pasteRange } from '../table/paste.ts';
 import { viewModeField } from './field.ts';
 
 /** The warnings the format gives a marker that makes no mark, with the marker's range. */
@@ -153,6 +161,9 @@ function inCode(state: EditorState, pos: number): boolean {
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+/** The paste events of Paste as Plain Text, which never read HTML and put anything in as text. */
+export const plainPastes = new WeakSet<Event>();
+
 /** Whether this editor wrote the clipboard's HTML: its wrapper says so. */
 const OWN_WRAPPER = /<div\s[^>]*\bdata-redlines[\s=>/]/i;
 
@@ -163,7 +174,12 @@ function pastedMarkdown(data: DataTransfer, ownText: string | null): string | nu
   // Redlines' own copy is Markdown already: its plain text is the source, and the HTML would only
   // lose what Markdown has and HTML hasn't (references, footnotes, comments, raw HTML). A page
   // could forge the attribute, and gets what plain text gets.
-  if (OWN_WRAPPER.test(html) || (ownText !== null && data.getData('text/plain') === ownText)) {
+  // Cells copied here, pasted outside a table, are a table (a range), not the tab-separated text.
+  const cells = /<table[\s>]/i.test(html) && data.getData('text/plain').includes('\t');
+  if (
+    !cells &&
+    (OWN_WRAPPER.test(html) || (ownText !== null && data.getData('text/plain') === ownText))
+  ) {
     return null;
   }
   const markdown = htmlToMarkdown(html);
@@ -177,6 +193,39 @@ function pastedMarkdown(data: DataTransfer, ownText: string | null): string | nu
     return null;
   }
   return markdown;
+}
+
+/**
+ * A paste into a table's cells, which is the table's to place: a range (an HTML table, or text with
+ * tabs) over the cells, one value into each selected cell, Paste as Plain Text as text with its tabs
+ * as spaces. False for a paste the text way suits (a value at a caret in a cell, anything outside a
+ * table).
+ */
+function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string | null): boolean {
+  const data = event.clipboardData;
+  const { state } = view;
+  if (!data || (!rectOf(state) && !headCell(state))) return false;
+  const text = data.getData('text/plain');
+  if (plainPastes.has(event)) {
+    if (!text) return false;
+    if (rectOf(state)) return pasteRange(view, [[cellFromPlain(text)]]);
+    view.dispatch({
+      ...state.replaceSelection(text.replace(/\t/g, ' ')),
+      userEvent: 'input.paste',
+      scrollIntoView: true,
+    });
+    return true;
+  }
+  const html = data.getData('text/html');
+  const range = (html ? htmlToRange(html) : null) ?? tsvToRange(text);
+  if (range) return pasteRange(view, range);
+  // One value onto selected cells: into every one of them.
+  const rect = rectOf(state);
+  if (!rect) return false;
+  const markdown = pastedMarkdown(data, ownText);
+  const value =
+    markdown === null ? cellFromPlain(plainText(text)) : cellFromPlain(plainText(markdown));
+  return pasteRange(view, [[value]]);
 }
 
 /** Copy, cut, drag and paste of the newest text, outside Raw. */
@@ -231,6 +280,10 @@ export function clipboard(): Extension {
         const data = event.clipboardData;
         if (!data || raw(view.state) || inCode(view.state, view.state.selection.main.head)) {
           return false;
+        }
+        if (pasteInCells(view, event, lastCopied)) {
+          event.preventDefault();
+          return true;
         }
         const markdown = pastedMarkdown(data, lastCopied);
         if (markdown === null) return false;

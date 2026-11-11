@@ -61,7 +61,7 @@ import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
-import { clipboard } from './tracked/clipboard.ts';
+import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import { breakCorrection } from './tracked/break-correction.ts';
@@ -427,9 +427,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const clipboardData = new DataTransfer();
       clipboardData.setData('text/plain', text);
       view.focus();
-      view.contentDOM.dispatchEvent(
-        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
-      );
+      const event = new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true });
+      plainPastes.add(event);
+      view.contentDOM.dispatchEvent(event);
     },
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
     focus: () => view.focus(),

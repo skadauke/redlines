@@ -29,7 +29,7 @@ import type { Row, Table } from './model.ts';
 import { shownCellAt } from './stops.ts';
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
-function planned(
+export function planned(
   view: EditorView,
   op: TableOp,
 ): { changes: TextChange[]; caret: number } | { refusal: string } {

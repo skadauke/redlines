@@ -16,6 +16,7 @@ import {
 } from '../clipboard/copy-html.ts';
 import { type Rect, rectOf } from './cells.ts';
 import { type Cell, type Table } from './model.ts';
+import { cellText } from './escape.ts';
 import { reachOf } from './reach.ts';
 
 /** One stretch of what is copied: Markdown text, or cells with the table's alignments. */
@@ -140,4 +141,51 @@ export function copyOfCells(state: EditorState): TableCopy | null {
   pieces.sort((a, b) => a.at - b.at);
   if (pieces.length === 0) return null;
   return { text: pieces.map((p) => p.text).join('\n'), parts: pieces.map((p) => p.part) };
+}
+
+/** A cell's Markdown for plain text: a line break `<br>`, a tab a space, a pipe escaped. */
+export function cellFromPlain(text: string): string {
+  return cellText('', text.replace(/\t/g, ' '));
+}
+
+/**
+ * The cells of text with tabs (a range copied from a spreadsheet or a text editor): cells parted by
+ * tabs, rows by line breaks, a cell in quotes holding its tabs, line breaks and doubled quotes. Null
+ * for text without a tab, which is a value and not a range. Each cell is returned as the Markdown
+ * it is written in.
+ */
+export function tsvToRange(text: string): string[][] | null {
+  if (!text.includes('\t')) return null;
+  const source = text.replace(/\r\n?/g, '\n');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  let start = true;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i]!;
+    if (quoted) {
+      if (char !== '"') cell += char;
+      else if (source[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else quoted = false;
+    } else if (char === '"' && start) quoted = true;
+    else if (char === '\t' || char === '\n') {
+      row.push(cell);
+      cell = '';
+      start = true;
+      if (char === '\n') {
+        rows.push(row);
+        row = [];
+      }
+      continue;
+    } else cell += char;
+    start = false;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows.map((cells) => cells.map(cellFromPlain));
 }
