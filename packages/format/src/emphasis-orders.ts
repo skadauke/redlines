@@ -33,37 +33,49 @@ export function unreadDelimiters(s: string): string {
 }
 
 /** The most states of decisions that are read; a file with more is refused. */
-const MOST_STATES = 400;
+const MOST_STATES = 40;
 /** How many lines on either side of a marker belong to its paragraph. */
 const MOST_LINES = 30;
 
-/** The marks that `created` touches, through the marks that stand against them with no text between
+/** The marks that `seeds` touch, through the marks that stand against them with no text between
  * or are around or inside them, and the marks that stand against those: deciding any of them puts other delimiters beside theirs. */
-function clusterOf(parsed: Parsed, created: ReadonlySet<string>): Set<string> {
-  const spans = new Map<string, Range>();
-  for (const marker of markerRanges(parsed)) {
-    // A format change and a split are written for their delimiters and breaks (§2.6, §3.4): they
-    // are no marks to read as punctuation here.
-    if (!marker.mark || marker.mark.kind === 'fmt' || marker.mark.kind === 'split') continue;
-    const span = spans.get(marker.mark.id);
-    spans.set(marker.mark.id, {
-      from: Math.min(span?.from ?? marker.from, marker.from),
-      to: Math.max(span?.to ?? marker.to, marker.to),
-    });
+function clusterOf(parsed: Parsed, seeds: ReadonlySet<string>): Set<string> {
+  // Where each mark has its markers, and its text: another mark joins by a marker that stands
+  // against one of these, or inside the text of one.
+  const markers = markerRanges(parsed).filter(
+    (m) => m.mark && m.mark.kind !== 'fmt' && m.mark.kind !== 'split',
+  );
+  const texts = new Map<string, Range[]>();
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'ins' && mark.kind !== 'sub') continue;
+    for (const segment of mark.segments) {
+      if (!segment.close) continue;
+      const list = texts.get(mark.id) ?? [];
+      list.push({ from: segment.open.to, to: segment.close.from });
+      texts.set(mark.id, list);
+    }
   }
-  const cluster = new Set([...created].filter((id) => spans.has(id)));
-  for (let grown = true; grown;) {
-    grown = false;
-    for (const [id, span] of spans) {
-      if (cluster.has(id)) continue;
-      for (const other of cluster) {
-        const near = spans.get(other);
-        if (near && near.to >= span.from && span.to >= near.from) {
-          cluster.add(id);
-          grown = true;
-          break;
-        }
-      }
+  const joins = (a: string, b: string) =>
+    markers.some(
+      (x) =>
+        x.mark?.id === a &&
+        markers.some(
+          (y) =>
+            y.mark?.id === b &&
+            (x.to === y.from ||
+              y.to === x.from ||
+              (texts.get(a) ?? []).some((r) => r.from <= y.from && y.to <= r.to) ||
+              (texts.get(b) ?? []).some((r) => r.from <= x.from && x.to <= r.to)),
+        ),
+    );
+  const ids = [...new Set(markers.map((m) => m.mark?.id ?? ''))];
+  const cluster = new Set([...seeds].filter((id) => ids.includes(id)));
+  // The marks that stand against theirs, or are inside them; and one more step, the marks that
+  // stand against those, which a decision puts next to the change.
+  for (let step = 0; step < 2; step++) {
+    const now = [...cluster];
+    for (const id of ids) {
+      if (!cluster.has(id) && now.some((other) => joins(other, id))) cluster.add(id);
     }
   }
   return cluster;

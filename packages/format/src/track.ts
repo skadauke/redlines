@@ -179,7 +179,7 @@ interface Plan {
    * change is first written as typed (`mode` 0) and read in every order of decisions, then written
    * again by a character on one side or the other (`mode` 1 on), as far as `options` goes.
    * `touched` is set where the markers stand against a mark. */
-  readonly emphasis: { mode: number; options: number; touched: boolean };
+  readonly emphasis: { mode: number; options: number; touched: boolean; near: Set<string> };
 }
 
 /** A deletion of a table row or column (format §3.7), which text is not merged into. */
@@ -240,7 +240,7 @@ function createPlan(text: string, ctx: EditContext, mode = 0): Plan {
     plain: false,
     touched: [],
     spans: [],
-    emphasis: { mode, options: 0, touched: false },
+    emphasis: { mode, options: 0, touched: false, near: new Set() },
   };
 }
 
@@ -2100,9 +2100,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     m.to >= from &&
     m.from <= to;
   const touch = () => {
-    const against = markers.some((m) => stands(m));
-    if (against) plan.emphasis.touched = true;
-    return against;
+    const against = markers.filter((m) => stands(m));
+    for (const m of against) if (m.mark) plan.emphasis.near.add(m.mark.id);
+    if (against.length > 0) plan.emphasis.touched = true;
+    return against.length > 0;
   };
   /** Whether the text from `a` to `b`, which the change would write again, is text of someone
    * else's insertion or substitution: that is not the author's to write again. (The marker of a
@@ -2127,6 +2128,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   const delimiters = () => {
     const touching = markers.filter((m) => stands(m));
     if (touching.length === 0) return false;
+    for (const m of touching) if (m.mark) plan.emphasis.near.add(m.mark.id);
     const chars = [
       left + typing.inner + right,
       visibleBefore(plan, from).at(-1),
@@ -4554,7 +4556,7 @@ function editsOnce(
       // A change that stands against another mark reads as typed in every order of decisions, or
       // is written again by a character, or is refused (format §3.1, rule 5).
       if (plan.emphasis.touched) {
-        const ids = new Set([...plan.created, ...plan.touched]);
+        const ids = new Set(plan.emphasis.near);
         if (!emphasisReadsAlike(after, ids)) {
           if (mode === 0 || mode < plan.emphasis.options) throw new ReadsOtherwise();
           const next = neighbours(after, ids);
