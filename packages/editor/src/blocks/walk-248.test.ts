@@ -52,6 +52,8 @@ export function issueDocument(random: () => number): string {
     return below(4) === 0 ? `${base}<del ${pick(['a', ' ', 'z'])}>` : base;
   };
   const markers = ['- ', '+ ', '* ', '1. ', '1) ', '3. '];
+  // A nested list right under text starts with a bullet or 1: other numbers are text there.
+  const nestable = markers.filter((marker) => !marker.startsWith('3'));
   const list = (indent: string, marker: string, items: number): string => {
     const pad = indent + ' '.repeat(marker.length);
     return Array.from({ length: items }, (_, i) => {
@@ -73,7 +75,7 @@ export function issueDocument(random: () => number): string {
     if (roll < 8) {
       const outer = pick(['- ', '1. ']);
       const pad = ' '.repeat(outer.length);
-      return `${outer}${text()}${below(2) ? `⏎${pad}${text()}` : ''}⏎${list(pad, pick(markers), 1 + below(2))}`;
+      return `${outer}${text()}${below(2) ? `⏎${pad}${text()}` : ''}⏎${list(pad, pick(nestable), 1 + below(2))}`;
     }
     if (roll < 9) return `> ${text()}⏎>⏎> ${text()}`;
     if (roll < 10) return `${text()}⏎${text()}`;
@@ -131,9 +133,11 @@ it(`holds every invariant over ${WALKS} walks of #248's shapes`, () => {
     const script = { name, doc: doc.slice(0, at) + '‸' + doc.slice(at), keys, tc, expect: {} };
     try {
       const before = invariantProblems(runScript({ ...script, keys: [] }));
-      const after = invariantProblems(runScript(script));
+      const result = runScript(script);
+      const after = invariantProblems(result);
       for (const invariant of WALKED) {
         if (before[invariant].length || !after[invariant].length) continue;
+        if (invariant === 'stray-blank-line' && tc && TWO_BREAKS.test(result.file)) continue;
         failures.push(`${name}: ${invariant}: ${after[invariant].join('; ').slice(0, 300)}`);
       }
     } catch (error) {

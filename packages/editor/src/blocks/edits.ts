@@ -474,7 +474,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       // insertion on it, would be no blank line to a reader that doesn't know the markers; #248).
       const joined = `\n${blankOf(item.indent)}${insert}`;
       return {
-        changes: [{ from: above!.to, insert: joined }],
+        changes: [{ from: above.to, insert: joined }],
         selection: EditorSelection.single(start + joined.length),
         userEvent: 'input.break',
         caretAt: start,

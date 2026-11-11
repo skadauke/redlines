@@ -132,7 +132,7 @@ describe('Return in a list item', () => {
         name: 'in the empty first item at the start of the file, taken back (#248)',
         doc: '- ‸⏎- two',
         keys: ['Enter', 'Backspace'],
-        ...same('- ‸⏎- two'),
+        ...same({ caret: '- ‸⏎- two' }),
       },
       {
         name: 'in a numbered empty first item at the start of the file (#248)',
@@ -237,7 +237,7 @@ describe('Return in a list item', () => {
         name: 'the same, with an item after it, and taken back',
         doc: '- One⏎  Beta⏎  + ‸delta⏎  + two',
         keys: ['Enter', 'Backspace'],
-        ...same('- One⏎  Beta⏎  + ‸delta⏎  + two'),
+        ...same({ caret: '- One⏎  Beta⏎  + ‸delta⏎  + two' }),
       },
       {
         name: 'the same, in a numbered list, and in a quote',
