@@ -1403,7 +1403,9 @@ it, one per line:
   held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
   front of the table's first row as it does in front of a paragraph's first line, and everything
   the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
-  other; only the delimiter row takes no change.
+  other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
+  of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
+  can unmake the table, as an edit of any line can unmake what it is).
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
