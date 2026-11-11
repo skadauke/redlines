@@ -86,7 +86,7 @@ describe('an agent’s str_replace over a table', () => {
   });
 
   it('writes a row added and a cell changed in one group, as word marks in the cell', () => {
-    const { after, text } = run(
+    const { after } = run(
       T(APPLES, PEARS),
       T(APPLES, PEARS),
       T(APPLES, '| Pears | 6 |', PLUMS),
