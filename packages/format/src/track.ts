@@ -1899,7 +1899,7 @@ const DELIMITERS = /[*_~]/;
  * (format §3.1, rule 5): `content` is the text the change writes, with a `SPLIT` in front of each
  * line break that is a split. A marker reads as punctuation to a delimiter run next to it, which
  * can change what the run does; where the run closes an emphasis that opens in `content`, in the
- * same pair with or without the markers, it is no change (#81). Only text of the line is read, and
+ * same pair with or without the markers, it is no change (#81). The whole line is read, and
  * only when a delimiter is next to a marker: the check costs nothing for other keys.
  */
 function emphasisKept(
@@ -1909,8 +1909,12 @@ function emphasisKept(
   content: string,
   trail: string,
 ): boolean {
-  const before = visibleBefore(plan, from);
-  const after = trail !== '' ? '\n' : visibleAfter(plan, to);
+  // The whole line: an emphasis opened far back on it pairs with a closer here (#81).
+  const before = visibleText(plan.text, plan.markers, lineStart(plan.text, from), from);
+  const after =
+    trail !== ''
+      ? '\n'
+      : (visibleText(plan.text, plan.markers, to, lineEnd(plan.text, to)).split(/\r?\n/)[0] ?? '');
   // The splits are markers too: each stands where its `SPLIT` was.
   let text = before;
   const joints = new Set<number>([before.length]);

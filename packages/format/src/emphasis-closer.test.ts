@@ -89,6 +89,33 @@ describe('a change next to a delimiter that is no emphasis (#81)', () => {
   });
 });
 
+describe('an emphasis opened far back on the line (#81)', () => {
+  it('is read whole: random long lines with a far opener, pasted runs and letters', () => {
+    const openers = ['**x ', '*x ', '***x ', '_x ', '__x ', '*foo **'];
+    const runs = ['*', '**', '***', '_', '__', 'a', 'bc', ' ', 'w '];
+    let wrong = 0;
+    const total = fuzzCount(500);
+    for (let seed = 1; seed <= total; seed++) {
+      const random = seeded(seed * 7907);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      const make = (n: number) => Array.from({ length: n }, () => pick(runs)).join('');
+      const filler = 'w '.repeat(50 + below(30));
+      const target = `${pick(openers)}${filler}${make(1 + below(3))}‸${make(1 + below(4))}a${make(below(4))} end`;
+      const pasted = make(2 + below(6));
+      let after: string;
+      try {
+        after = paste(target, pasted);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        continue;
+      }
+      if (!readsAsNewest(after)) wrong++;
+    }
+    expect(wrong).toBe(0);
+  });
+});
+
 describe('text pasted before a letter reads as micromark reads it (#81)', () => {
   it('for random words and runs of `*`, `_` and `**`', () => {
     const pieces = ['a', 'bc', ' ', ' ', '*', '**', '***', '_', '__', '*', '**', 'word'];
