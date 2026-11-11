@@ -7,8 +7,11 @@ import { GFM } from '@lezer/markdown';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, parsedField, type ViewMode } from '../index.ts';
 import { idFor, longDocument } from '../test-documents.ts';
-import { buildTables, tablesField, tablesOf } from '../table/model.ts';
+import { buildTables, type Table, tablesField, tablesOf } from '../table/model.ts';
 import { previewDecorations } from './decorations.ts';
+
+/** Tables without their identities, which a rebuild gives new. */
+const bare = (tables: readonly Table[]) => tables.map((table) => ({ ...table, id: 0 }));
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -187,10 +190,10 @@ describe('a long document with a table', () => {
       const here = state.doc.toString().indexOf(doc.slice(at - 4, at + 2));
       for (const insert of ['x', 'yz', ' ']) {
         state = state.update({ changes: { from: here + 4, insert } }).state;
-        expect(tablesOf(state)).toEqual(buildTables(state));
+        expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
       }
       state = state.update({ changes: { from: here + 4, to: here + 5 } }).state;
-      expect(tablesOf(state)).toEqual(buildTables(state));
+      expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
     }
   });
 });

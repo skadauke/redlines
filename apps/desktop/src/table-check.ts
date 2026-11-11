@@ -502,6 +502,64 @@ const CHECKS: Check[] = [
       return median < 16 && doc(editor) === long ? null : { median, budget: 16 };
     },
   },
+  {
+    // The plan's table (`longDocument({ table: true })`): 300 rows of 5 columns, 40 pending
+    // insertions in its cells and a ledger, typed in with Track Changes on, in a cell's text and in
+    // a row after the marks, which the table layer must not make slower than the budget says: the
+    // spec's budget for a keystroke, 16 ms, where WebKit measures about 2 ms (a timer of 1 ms).
+    name: 'keystroke-cost-in-a-300-row-table-with-40-marks',
+    async run(editor) {
+      const rest = 'bcdfghjkmnpqrstvwxz23456789';
+      const idFor = (n: number) =>
+        `b${rest[Math.floor(n / 27) % 27]}${rest[n % 27]}${rest[(n * 7) % 27]}`;
+      const ids = Array.from({ length: 40 }, (_, i) => idFor(i + 1));
+      if (new Set(ids).size !== 40) return { why: 'the ids are not distinct' };
+      const rows = Array.from({ length: 300 }, (_, n) => {
+        const k = Math.floor((n * 40) / 300);
+        const marked = Math.floor(((n + 1) * 40) / 300) > k;
+        const note = marked
+          ? `the quick brown fox <!--ins ${ids[k]}-->added<!--/${ids[k]}-->`
+          : 'the quick brown fox';
+        return `| item ${n} | ${n} | place ${n} | ${note} | owner ${n % 9} |`;
+      });
+      const entries = ids.map((id) => `  ${id}: {by: ada, at: 2026-10-31T09:30Z}\n`).join('');
+      const long = [
+        'Intro.',
+        '',
+        '| Item | Count | Place | Note | Owner |',
+        '| ---- | ----- | ----- | ---- | ----- |',
+        ...rows,
+        '',
+        'After.',
+        '',
+        `<!-- redlines\nversion: 1\nmarks:\n${entries}-->\n`,
+      ].join('\n');
+      await load(editor, long, true);
+      const table = tablesOf(editor.view.state)[0];
+      if (table?.rows.length !== 301) return { why: 'the table was not read' };
+      const pos = cellOf(editor, 150, 0).textTo;
+      editor.view.dispatch({ selection: EditorSelection.cursor(pos), scrollIntoView: true });
+      await frames();
+      const samples: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        const start = performance.now();
+        editor.view.dispatch({
+          changes: { from: pos, insert: 'x' },
+          selection: EditorSelection.cursor(pos + 1),
+          userEvent: 'input.type',
+        });
+        samples.push(performance.now() - start);
+        editor.view.dispatch({
+          changes: { from: pos, to: pos + 1 },
+          selection: EditorSelection.cursor(pos),
+          userEvent: 'delete.backward',
+        });
+      }
+      const median = [...samples].sort((a, b) => a - b)[samples.length >> 1] ?? Infinity;
+      console.log(`TABLE-CHECK keystroke with marks median ${median.toFixed(2)} ms`);
+      return median < 16 ? null : { median, budget: 16 };
+    },
+  },
 ];
 
 export async function runTableCheck(editor: Editor): Promise<void> {

@@ -26,7 +26,8 @@ import { EditorView } from '@codemirror/view';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { cellEscapes } from './escape.ts';
-import { type Cell, type Table, cellAt, tablesField } from './model.ts';
+import { type Dirty, type DirtyTable, dirtyOf, type Span } from './dirty.ts';
+import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
 
 export const TEXT_IN_CELLS = "A table's text goes in its cells.";
 
@@ -52,21 +53,30 @@ function breaksIn(state: EditorState, cell: Cell): { from: number; to: number }[
   }));
 }
 
-/** The cells of a table that GFM shows, in order of the document. */
-function shownCells(table: Table): Cell[] {
-  return table.rows.flatMap((row) => row.cells.filter((cell) => cell.col < table.columns));
-}
+/** The cells of a row that GFM shows. */
+const shownOf = (table: Table, row: Row): Cell[] =>
+  row.cells.filter((cell) => cell.col < table.columns);
 
-/** The atoms of the tables of a state. */
-export function stopAtoms(state: EditorState): RangeSet<StopAtom> {
-  if (state.field(viewModeField, false) === 'raw') return RangeSet.of<StopAtom>([]);
-  const spans: { from: number; to: number }[] = [];
-  for (const table of state.field(tablesField, false) ?? []) {
-    const cells = shownCells(table);
+/**
+ * The atoms of a table that its rows own, by where they start: the one in front of the first cell
+ * (the first row's), the stretch from a cell's end to the next cell's text (the row of the first of
+ * the two), the one after the last cell (the last row's) and the line breaks in its cells. Every row
+ * of the table when `rows` is null. The work is that of the rows asked for.
+ */
+function atomsOf(state: EditorState, table: Table, rows: readonly Row[] | null): Span[] {
+  const spans: Span[] = [];
+  let lastRow: Row | undefined;
+  for (let i = table.rows.length - 1; i >= 0 && !lastRow; i--) {
+    const row = table.rows[i];
+    if (row && shownOf(table, row).length > 0) lastRow = row;
+  }
+  for (const row of rows ?? table.rows) {
+    const cells = shownOf(table, row);
     const first = cells[0];
     const last = cells.at(-1);
     if (!first || !last) continue;
-    spans.push({ from: Math.max(0, table.from - 1), to: first.textFrom });
+    if (row === table.rows[0])
+      spans.push({ from: Math.max(0, table.from - 1), to: first.textFrom });
     for (let i = 1; i < cells.length; i++) {
       const before = cells[i - 1];
       const after = cells[i];
@@ -74,26 +84,92 @@ export function stopAtoms(state: EditorState): RangeSet<StopAtom> {
         spans.push({ from: before.textTo, to: after.textFrom });
       }
     }
-    spans.push({ from: last.textTo, to: Math.min(state.doc.length, table.to + 1) });
+    if (row === lastRow) {
+      spans.push({ from: last.textTo, to: Math.min(state.doc.length, table.to + 1) });
+    } else {
+      // Over the end of the row and the start of the next one that has a cell GFM shows.
+      for (let k = row.index + 1; k < table.rows.length; k++) {
+        const next = table.rows[k] && shownOf(table, table.rows[k]!)[0];
+        if (!next) continue;
+        if (next.textFrom > last.textTo) spans.push({ from: last.textTo, to: next.textFrom });
+        break;
+      }
+    }
     // A line break is one atom: the caret never rests inside it.
     for (const cell of cells) spans.push(...breaksIn(state, cell));
   }
-  return RangeSet.of(
-    spans.filter((span) => span.to > span.from).map((span) => ATOM.range(span.from, span.to)),
-    true,
+  return spans.filter((span) => span.to > span.from);
+}
+
+const toAtoms = (spans: readonly Span[]) => spans.map((span) => ATOM.range(span.from, span.to));
+
+/** The atoms of the tables of a state. */
+export function stopAtoms(state: EditorState): RangeSet<StopAtom> {
+  if (state.field(viewModeField, false) === 'raw') return RangeSet.of<StopAtom>([]);
+  const spans = (state.field(tablesField, false) ?? []).flatMap((table) =>
+    atomsOf(state, table, null),
   );
+  return RangeSet.of(toAtoms(spans), true);
+}
+
+/** What a set keeps when the atoms that start in `from`..`to` are taken out. */
+const without = (from: number, to: number) => ({
+  filter: (a: number) => !(a >= from && a <= to),
+  filterFrom: from,
+  filterTo: to,
+});
+
+/** The atoms after a change in the tables' text, as the layout's sets are patched: mapped, and built
+ * again for the rows the change touches and the one before each (its last atom reaches into them). */
+function patchAtoms(value: RangeSet<StopAtom>, tr: Transaction, dirty: Dirty): RangeSet<StopAtom> {
+  let atoms = value.map(tr.changes);
+  for (const span of dirty.gone) atoms = atoms.update(without(span.from - 1, span.to));
+  // Taken out first, all of it, then built: see `patchLayout`.
+  const wanted = new Map<DirtyTable, Row[]>();
+  for (const dirtyTable of dirty.tables) {
+    const { table, rows, clear } = dirtyTable;
+    if (rows === null) {
+      atoms = atoms.update(without(clear.from - 1, clear.to));
+      continue;
+    }
+    const spans = new Map<Row, Span>();
+    for (const { row, clear: span } of rows) {
+      spans.set(row, span);
+      const above = table.rows[row.index - 1];
+      if (above && !spans.has(above)) spans.set(above, { from: above.from, to: above.to });
+    }
+    for (const [row, span] of spans) {
+      const from = row.index === 0 ? Math.min(span.from, clear.from - 1) : span.from;
+      atoms = atoms.update(without(from, Math.max(span.to, row.to)));
+    }
+    wanted.set(dirtyTable, [...spans.keys()]);
+  }
+  for (const dirtyTable of dirty.tables) {
+    const { table } = dirtyTable;
+    const rows = wanted.get(dirtyTable) ?? null;
+    atoms = atoms.update({ add: toAtoms(atomsOf(tr.state, table, rows)), sort: true });
+  }
+  return atoms;
 }
 
 const atomField = StateField.define<RangeSet<StopAtom>>({
   create: stopAtoms,
   update(value, tr) {
-    const changed =
-      tr.startState.field(tablesField, false) !== tr.state.field(tablesField, false) ||
-      tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-    return changed ? stopAtoms(tr.state) : value;
+    const tables = tr.state.field(tablesField, false);
+    const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
+    if (tr.startState.field(tablesField, false) === tables && !mode) return value;
+    if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
+      return stopAtoms(tr.state);
+    }
+    if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
+    const dirty = dirtyOf(tr);
+    return dirty ? patchAtoms(value, tr, dirty) : stopAtoms(tr.state);
   },
   provide: (field) => EditorView.atomicRanges.of((view) => view.state.field(field)),
 });
+
+/** The atoms a state has, as the field keeps them up to date. */
+export const atomsOfState = (state: EditorState): RangeSet<StopAtom> => state.field(atomField);
 
 /** The cell GFM shows that holds `pos`, or the last it shows in the row when `pos` is in one it
  * doesn't. */

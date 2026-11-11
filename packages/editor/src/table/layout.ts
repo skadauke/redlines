@@ -10,7 +10,13 @@
 // so the blank line after the table, a struck block widget or the ledger are in none; a table in a
 // quote or a list item is no table here (`model.ts`), and stays source.
 
-import { type EditorState, type Range, RangeSet, StateField } from '@codemirror/state';
+import {
+  type EditorState,
+  type Range,
+  RangeSet,
+  StateField,
+  type Transaction,
+} from '@codemirror/state';
 import {
   BlockWrapper,
   Decoration,
@@ -20,6 +26,7 @@ import {
 } from '@codemirror/view';
 import { tableMarkerEnd } from '@redlines/format';
 import { viewModeField } from '../tracked/field.ts';
+import { type Dirty, dirtyOf, type Span } from './dirty.ts';
 import { type Cell, type Row, type Table, tablesField } from './model.ts';
 import { BR } from './stops.ts';
 
@@ -88,6 +95,9 @@ function markerIn(state: EditorState, cell: Cell): { from: number; to: number } 
   return to === null ? null : { from, to: from + to };
 }
 
+/** The rows built, for tests: the layout builds only the rows a change touches. */
+export const layoutStats = { rows: 0 };
+
 function rowDecorations(
   state: EditorState,
   table: Table,
@@ -95,6 +105,9 @@ function rowDecorations(
   out: Range<Decoration>[],
   cells: Range<Decoration>[],
 ): void {
+  layoutStats.rows++;
+  // The delimiter row: its line break and the row, hidden in one piece with the header's end.
+  if (row.header) out.push(HIDDEN.range(row.to, table.delimiter.to));
   out.push(
     Decoration.line({
       class: row.header ? 'rl-trow rl-th' : 'rl-trow',
@@ -140,6 +153,28 @@ function rowDecorations(
   });
 }
 
+/** The two wrappers around the lines of a table: the one that scrolls and the one that is the table. */
+function wrappersOf(table: Table): Range<BlockWrapper>[] {
+  const attributes = {
+    role: 'table',
+    'aria-rowcount': String(table.rows.length),
+    'aria-colcount': String(table.columns),
+    'data-table': String(table.id),
+  };
+  return [
+    BlockWrapper.create({
+      tagName: 'div',
+      attributes: { class: 'rl-tbl-scroll' },
+      rank: 1,
+    }).range(table.from, table.to),
+    BlockWrapper.create({
+      tagName: 'div',
+      attributes: { class: 'rl-tbl', ...attributes },
+      rank: 0,
+    }).range(table.from, table.to),
+  ];
+}
+
 /** The layout of the tables of a state: none in Raw. */
 export function layoutOf(state: EditorState): Layout {
   const none: Layout = {
@@ -152,30 +187,10 @@ export function layoutOf(state: EditorState): Layout {
   const wrappers: Range<BlockWrapper>[] = [];
   const out: Range<Decoration>[] = [];
   const cells: Range<Decoration>[] = [];
-  tables.forEach((table) => {
-    const attributes = {
-      role: 'table',
-      'aria-rowcount': String(table.rows.length),
-      'aria-colcount': String(table.columns),
-      'data-table': String(table.id),
-    };
-    wrappers.push(
-      BlockWrapper.create({
-        tagName: 'div',
-        attributes: { class: 'rl-tbl-scroll' },
-        rank: 1,
-      }).range(table.from, table.to),
-      BlockWrapper.create({
-        tagName: 'div',
-        attributes: { class: 'rl-tbl', ...attributes },
-        rank: 0,
-      }).range(table.from, table.to),
-    );
+  for (const table of tables) {
+    wrappers.push(...wrappersOf(table));
     for (const row of table.rows) rowDecorations(state, table, row, out, cells);
-    // The delimiter row: its line break and the row, hidden in one piece.
-    const header = table.rows[0];
-    if (header) out.push(HIDDEN.range(header.to, table.delimiter.to));
-  });
+  }
   return {
     wrappers: BlockWrapper.set(wrappers, true),
     decorations: Decoration.set(out, true),
@@ -183,13 +198,67 @@ export function layoutOf(state: EditorState): Layout {
   };
 }
 
+/** What a set keeps when the ranges that start in `from`..`to` and end by it are taken out. */
+const without = (from: number, to: number) => ({
+  filter: (a: number, b: number) => !(a >= from && b <= to),
+  filterFrom: from,
+  filterTo: to,
+});
+
+/**
+ * The layout after a change that is in the tables' text: the sets mapped through it, the tables it
+ * doesn't touch as they were, the rows it touches built again, and a table whose shape it changes
+ * (or that is new) built whole.
+ */
+function patchLayout(value: Layout, tr: Transaction, dirty: Dirty): Layout {
+  let { wrappers, decorations, cells } = {
+    wrappers: value.wrappers.map(tr.changes),
+    decorations: value.decorations.map(tr.changes),
+    cells: value.cells.map(tr.changes),
+  };
+  const dropRows = (span: Span) => {
+    decorations = decorations.update(without(span.from, span.to));
+    cells = cells.update(without(span.from, span.to));
+  };
+  for (const span of dirty.gone) {
+    wrappers = wrappers.update(without(span.from, span.to));
+    dropRows(span);
+  }
+  // Everything that is to be built again is taken out first: what a change touches can lie where
+  // another table's drawing starts, and nothing built may be taken out after.
+  for (const { rows, clear } of dirty.tables) {
+    wrappers = wrappers.update(without(clear.from, clear.to));
+    if (rows === null) dropRows(clear);
+    else for (const { clear: span } of rows) dropRows(span);
+  }
+  for (const { table, rows } of dirty.tables) {
+    const built = rows ? rows.map((r) => r.row) : table.rows;
+    const out: Range<Decoration>[] = [];
+    const inCells: Range<Decoration>[] = [];
+    for (const row of built) rowDecorations(tr.state, table, row, out, inCells);
+    wrappers = wrappers.update({ add: wrappersOf(table), sort: true });
+    decorations = decorations.update({ add: out, sort: true });
+    cells = cells.update({ add: inCells, sort: true });
+  }
+  return { wrappers, decorations, cells };
+}
+
 const layoutField = StateField.define<Layout>({
   create: layoutOf,
   update(value, tr) {
+    const tables = tr.state.field(tablesField, false);
     const changed =
-      tr.startState.field(tablesField, false) !== tr.state.field(tablesField, false) ||
+      tr.startState.field(tablesField, false) !== tables ||
       tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-    return changed ? layoutOf(tr.state) : value;
+    if (!changed) return value;
+    const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
+    // A change of view, or tables read again from a parse that went on, builds them all.
+    if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
+      return layoutOf(tr.state);
+    }
+    if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
+    const dirty = dirtyOf(tr);
+    return dirty ? patchLayout(value, tr, dirty) : layoutOf(tr.state);
   },
   // From a state field rather than a view plugin, because the delimiter row is hidden with the line
   // break in front of it.
@@ -199,6 +268,9 @@ const layoutField = StateField.define<Layout>({
     EditorView.blockWrappers.from(field, (value) => value.wrappers),
   ],
 });
+
+/** The layout a state has, as the field keeps it up to date. */
+export const layoutOfState = (state: EditorState): Layout => state.field(layoutField);
 
 /** Tables laid out as tables, in Clean and Redlines. */
 export function tableLayout() {
