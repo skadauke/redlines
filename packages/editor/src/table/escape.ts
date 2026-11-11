@@ -3,16 +3,18 @@
 // that runs before the tracked layer turns what a person types, pastes or drops into a cell into
 // the text that belongs in one; the tracked layer then records that as it records any typing.
 
+import { isolateHistory } from '@codemirror/commands';
 import {
   type Annotation,
+  type AnnotationType,
   ChangeSet,
   EditorSelection,
   EditorState,
   Prec,
-  type Transaction,
+  Transaction,
 } from '@codemirror/state';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
-import { composedTextFacet } from '../tracked/typing.ts';
+import { composedTextFacet, editGroupAnnotation } from '../tracked/typing.ts';
 import { tablesField } from './model.ts';
 import { shownCellAt } from './stops.ts';
 
@@ -45,11 +47,21 @@ const isInput = (tr: Transaction) =>
   !tr.isUserEvent('input.type.compose') &&
   !tr.annotation(trackedEditAnnotation);
 
-/** A transaction's annotations, as the typing layer reads them. */
+/** The annotations a transaction that puts text in carries that the editor reads: the user event that
+ * the history groups by, whether it is added to the history or isolated in it, whether it is
+ * remote, and which group of edits it is of. Read through the public API, one by one. */
 function annotationsOf(tr: Transaction): Annotation<unknown>[] {
-  return [
-    ...((tr as unknown as { annotations?: readonly Annotation<unknown>[] }).annotations ?? []),
-  ];
+  const types = [
+    Transaction.userEvent,
+    Transaction.addToHistory,
+    Transaction.remote,
+    isolateHistory,
+    editGroupAnnotation,
+  ] as readonly AnnotationType<unknown>[];
+  return types.flatMap((type) => {
+    const value = tr.annotation(type);
+    return value === undefined ? [] : [type.of(value)];
+  });
 }
 
 const escapeFilter = Prec.lowest(
