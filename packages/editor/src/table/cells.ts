@@ -139,7 +139,7 @@ export function cellOfRef(table: Table, ref: CellRef): Cell | null {
 }
 
 /** The selection of a rectangle from one cell's text to another's. */
-function rectSelection(table: Table, from: CellRef, to: CellRef): EditorSelection | null {
+export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorSelection | null {
   const a = cellOfRef(table, from);
   const b = cellOfRef(table, to);
   if (!a || !b) return null;

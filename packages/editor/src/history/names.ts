@@ -59,6 +59,8 @@ function userName(event: string | null): string | null {
   if (is(event, 'input.break')) return 'Typing';
   if (is(event, 'input.paste')) return 'Paste';
   if (is(event, 'table.insert.row')) return 'Insert Row';
+  if (is(event, 'table.delete.row')) return 'Delete Row';
+  if (is(event, 'table.move.row')) return 'Move Row';
   if (is(event, 'input.drop') || is(event, 'move.drop')) return 'Drag';
   if (is(event, 'format') || is(event, 'input.format')) return 'Formatting';
   if (is(event, 'input.replace.all')) return 'Replace All';

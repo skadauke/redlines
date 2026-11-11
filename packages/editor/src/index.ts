@@ -30,7 +30,12 @@ import type {
   MarkupView,
   ViewMode,
 } from './api.ts';
-import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
+import {
+  activeCommands,
+  commandTitles,
+  createCommandRegistry,
+  enabledCommands,
+} from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
 import { blockKeys } from './blocks/keys.ts';
@@ -97,7 +102,15 @@ export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
-export { insertRowBelow } from './table/ops.ts';
+export {
+  deleteRows,
+  insertRowBelow,
+  insertRows,
+  moveRows,
+  rowCount,
+  rowTitles,
+  touchedRows,
+} from './table/ops.ts';
 export { tablesOf } from './table/model.ts';
 export type { Cell as TableCell, Row as TableRow, Table } from './table/model.ts';
 export { headInTable, selectionInTable } from './table/stops.ts';
@@ -119,10 +132,16 @@ export {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
+export { baseTitle } from './commands.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
+
+const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+};
 
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
@@ -134,6 +153,7 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.changes.every((mark, i) => mark.id === b.changes[i]?.id) &&
   sameIds(a.activeCommands, b.activeCommands) &&
   sameIds(a.enabledCommands, b.enabledCommands) &&
+  sameTitles(a.commandTitles, b.commandTitles) &&
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
@@ -262,6 +282,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
       enabledCommands: enabledCommands(commands.list(), state),
+      commandTitles: commandTitles(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
       canUndo: undoHasSomething(state),

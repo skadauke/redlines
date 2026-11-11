@@ -7,7 +7,7 @@
 // bar, whose item would run the command again (a Mac's webview sees a key before the menu bar does),
 // or to WebKit, which would make the text bold itself.
 
-import { type EditorState, Prec } from '@codemirror/state';
+import { EditorState, Prec } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
 
@@ -21,6 +21,27 @@ export const activeCommands = (commands: readonly EditorCommand[], state: Editor
 /** The ids of the commands that can run in `state`. */
 export const enabledCommands = (commands: readonly EditorCommand[], state: EditorState) =>
   commands.filter((command) => isEnabled(command, state)).map(({ id }) => id);
+
+/** A command's title in `state`. */
+export const titleOf = (command: EditorCommand, state: EditorState): string =>
+  typeof command.title === 'function' ? command.title(state) : command.title;
+
+/** A command's title before there is a state to read: what its function says of an empty document,
+ * so a title function must work on a state that has none of the editor's fields. */
+export const baseTitle = (command: EditorCommand): string =>
+  typeof command.title === 'function' ? command.title(EditorState.create()) : command.title;
+
+/** The titles of the commands whose title reads the state, by id. */
+export function commandTitles(
+  commands: readonly EditorCommand[],
+  state: EditorState,
+): Record<string, string> {
+  const titles: Record<string, string> = {};
+  for (const command of commands) {
+    if (typeof command.title === 'function') titles[command.id] = command.title(state);
+  }
+  return titles;
+}
 
 /** The modifiers CodeMirror reads. */
 const MODIFIER = /^(mod|cmd|meta|m|ctrl|control|c|alt|a|shift|s)$/i;

@@ -434,3 +434,21 @@ describe('a key that falls through', () => {
     parent.remove();
   });
 });
+
+describe('a command whose title reads the state', () => {
+  it('is reported in the UI state when it changes, and a plain title is not', () => {
+    const seen: EditorUiState[] = [];
+    const editor = mount({ doc: 'One two.\n', onUiState: (ui) => seen.push(ui) });
+    editor.commands.register([
+      command({
+        id: 'x.count',
+        title: (state) => `Count ${state.selection.main.to - state.selection.main.from}`,
+      }),
+      command({ id: 'x.plain', title: 'Plain' }),
+    ]);
+    expect(editor.getUiState().commandTitles).toEqual({ 'x.count': 'Count 0' });
+    editor.view.dispatch({ selection: { anchor: 0, head: 3 } });
+    expect(editor.getUiState().commandTitles).toEqual({ 'x.count': 'Count 3' });
+    expect(seen.at(-1)?.commandTitles).toEqual({ 'x.count': 'Count 3' });
+  });
+});

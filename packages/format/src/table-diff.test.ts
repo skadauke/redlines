@@ -86,11 +86,7 @@ describe('an agent’s str_replace over a table', () => {
   });
 
   it('writes a row added and a cell changed in one group, as word marks in the cell', () => {
-    const { after } = run(
-      T(APPLES, PEARS),
-      T(APPLES, PEARS),
-      T(APPLES, '| Pears | 6 |', PLUMS),
-    );
+    const { after } = run(T(APPLES, PEARS), T(APPLES, PEARS), T(APPLES, '| Pears | 6 |', PLUMS));
     const marks = parse(after).marks;
     expect(marks.map((m) => m.kind).sort()).toEqual(['ins', 'sub']);
     expect(bodyOf(after)).toMatch(/<!--ins \w{4} row--> Plums \| 7 \|/);
