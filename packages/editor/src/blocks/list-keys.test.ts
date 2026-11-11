@@ -109,6 +109,49 @@ describe('Return in a list item', () => {
         // The empty paragraph's line breaks were plain: rejecting the paragraph leaves them.
         on: { newest: '- one ⏎⏎X', original: '- one⏎- ⏎⏎' },
       },
+      // #248: an empty first item at the very start of the file, Track Changes on. The format has
+      // no place for a marker in front of the item's marker, so the item's deletion alone is
+      // tracked (it takes the break after it, and the next item's marker: `- ⏎- two` reads as
+      // `- two` in the newest view, and rejecting gives the empty item back), and the empty
+      // paragraph's line breaks go in front of it as they are.
+      {
+        name: 'in the empty first item at the start of the file, an item after it (#248)',
+        doc: '- ‸⏎- two',
+        off: { file: '- ⏎- two', caret: '⏎‸⏎⏎- two' },
+        on: { file: '- ⏎- two', caret: '‸⏎⏎- <del ⏎- >⏎  two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, then text typed (#248)',
+        doc: '- ‸⏎- two',
+        keys: ['Enter', { type: 'X' }],
+        off: { file: '⏎X⏎⏎- two' },
+        // The empty paragraph's line breaks were plain: rejecting the paragraph leaves them.
+        on: { newest: 'X⏎⏎- two', original: '⏎⏎- ⏎- two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, taken back (#248)',
+        doc: '- ‸⏎- two',
+        keys: ['Enter', 'Backspace'],
+        ...same('- ‸⏎- two'),
+      },
+      {
+        name: 'in a numbered empty first item at the start of the file (#248)',
+        doc: '1. ‸⏎2. two',
+        off: { file: '1. ⏎2. two', caret: '⏎‸⏎⏎2. two' },
+        on: { file: '1. ⏎2. two', caret: '‸⏎⏎1. <del ⏎2. >⏎   two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, a paragraph after it (#248)',
+        doc: '- ‸⏎⏎Para',
+        off: { file: '- ⏎⏎Para', caret: '⏎‸⏎⏎Para' },
+        on: { file: '- ⏎⏎Para', caret: '‸⏎⏎<del - ⏎⏎>⏎⏎Para' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, indented (#248)',
+        doc: '  - ‸⏎  - two',
+        off: { caret: '⏎  ‸⏎⏎  - two' },
+        on: { caret: '‸⏎⏎  - <del ⏎  - >⏎    two' },
+      },
       {
         name: "at the end of an item's line before a soft line break (review D I11)",
         doc: '- one‸⏎  two',

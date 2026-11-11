@@ -306,6 +306,19 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
   const ledgerless = tracking && !state.field(parsedField, false)?.ledgerRange;
   const tail = (end: number) =>
     ledgerless && end === doc.length && insert.endsWith('\n') ? '\n' : '';
+  // The first line of the file, an empty item's marker alone on it: nothing is in front of it for
+  // the format to write a mark around, so the empty item's deletion alone is tracked (the format
+  // takes the break after it with it, and a following item's marker), and the empty paragraph's
+  // line breaks go in front of it as they are (#248).
+  const atFileStart: KeyEdit | null =
+    tracking && !nested && line.from === 0 && /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(line.text)
+      ? {
+          changes: [{ from: line.from, to: line.to }],
+          selection: EditorSelection.single(line.from),
+          userEvent: 'input.break',
+          openPlain: { insert: '\n\n', down: 0, at: 0 },
+        }
+      : null;
   const changes: ChangeSpec[] = [];
   let at: number;
   let caret: number;
@@ -351,6 +364,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
                 userEvent: 'input.break',
                 open: { at: from, assoc: 1, down: lineBreaks(insert) },
                 caretInOpen: true,
+                ...(atFileStart ? { fallback: atFileStart } : {}),
               },
             }
           : {}),
@@ -376,7 +390,9 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
             openPlain: { insert, down: lineBreaks(insert) },
           },
         }
-      : {}),
+      : atFileStart
+        ? { fallback: atFileStart }
+        : {}),
   };
 }
 

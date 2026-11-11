@@ -1047,7 +1047,16 @@ would stand on the line of an empty item (`5. ` and nothing after it), a line br
 it would be read as its carrier (§3.3): the change is refused until the item has text. The editor
 makes the edits of one keystroke the last one first, so that the item that Enter adds is not there
 yet when the numbers after it change, and that order is not refused. The first line of a file has
-no break in front of it: a change inside its prefix is refused.
+no break in front of it: a change inside its prefix is refused. A deletion of the whole first line,
+when it holds only a list marker (an empty item, as Return in it takes it away), is not a change
+inside a prefix: it is the deletion of the line and its break, as anywhere, and the next item's
+marker or the next block's text follows on the same line. The format writes it as the join it
+reads as, the first item kept and the break and marker after it deleted
+(`- <!--del k3x9 \n- -->\n  two.`), which reads as `- two.` in the newest view, gives `- ` and
+`- two.` back when rejected, and has one mark, so that every order of decisions reads alike. An
+editor that wants the line's place left empty writes its own line breaks in front of the mark, as
+they are, and the file never holds them (Return in the empty first item of a list at the start of a
+file).
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
