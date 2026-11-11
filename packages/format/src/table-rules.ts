@@ -146,6 +146,10 @@ export function inOwnInsertedRow(
   parsed: Parsed,
   handle: string,
 ): boolean {
+  // Cheap first, for a key anywhere in the file: the row's marker is on the line the edit is in.
+  if (!text.slice(lineStart(text, edit.from), lineEnd(text, edit.to)).includes('row-->')) {
+    return false;
+  }
   if (!parsed.marks.some((mark) => mark.kind === 'ins' && mark.payload === 'row')) return false;
   for (const table of tablesIn(text, parsed)) {
     if (edit.from < table.from || edit.to > table.to) continue;

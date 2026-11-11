@@ -469,6 +469,20 @@ export function tableAt(text: string, parsed: Parsed, pos: number): TableRead | 
   return readTables(text, parsed).find((table) => table.from <= pos && pos <= table.to) ?? null;
 }
 
+/** The tables of the last few texts asked about by `insertedRows`: the views of one edit ask about the
+ * same text again and again (the newest and the original view, before and after), and a file with an
+ * inserted row reads its tables for each. */
+const recent: { text: string; tables: TableRead[] }[] = [];
+
+function tablesOfText(text: string, parsed: Parsed): TableRead[] {
+  const known = recent.find((entry) => entry.text === text);
+  if (known) return known.tables;
+  const tables = readTables(text, parsed);
+  recent.unshift({ text, tables });
+  recent.length = Math.min(recent.length, 4);
+  return tables;
+}
+
 /** An inserted row (format §3.7) with the ranges that deciding it and the views change. */
 export interface InsertedRow {
   mark: MarkRange;
@@ -488,14 +502,20 @@ export interface InsertedRow {
  * is empty, so that a row keeps the width its cell was written with.
  */
 export function insertedRows(text: string, parsed: Parsed): InsertedRow[] {
-  const wanted = parsed.marks.filter((mark) => mark.kind === 'ins' && mark.payload === 'row');
-  if (wanted.length === 0) return [];
+  const wanted = new Map(
+    parsed.marks
+      .filter((mark) => mark.kind === 'ins' && mark.payload === 'row')
+      .map((mark) => [mark.id, mark]),
+  );
+  if (wanted.size === 0) return [];
   const found: InsertedRow[] = [];
-  for (const table of readTables(text, parsed)) {
+  for (const table of tablesOfText(text, parsed)) {
     table.rows.forEach((row, index) => {
-      const mark = row.insertion;
+      const read = row.insertion;
+      // The caller's own mark: the tables may have been read from another parse of the same text.
+      const mark = read && wanted.get(read.id);
       const cell = row.cells[0];
-      const open = mark?.segments[0]?.open;
+      const open = read?.segments[0]?.open;
       if (!mark || !cell || !open) return;
       const after = text.slice(open.to, cell.textTo > open.to ? cell.textTo : open.to);
       let to = open.to;

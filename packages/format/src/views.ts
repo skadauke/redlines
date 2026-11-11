@@ -151,20 +151,30 @@ export interface Views {
   original(text: string): DocView;
 }
 
+/** The views of the last few texts, for every edit: the text an edit leaves is the text the next one
+ * starts from, so one keystroke's views of the text before it were worked out by the last. A file
+ * with an inserted row reads its tables for each view, and that is not done twice for the same text. */
+const recentNewest: Map<string, DocView> = new Map();
+const recentOriginal: Map<string, DocView> = new Map();
+const RECENT = 4;
+
 /** Views that are each worked out once, the first time they are asked for. */
 export function viewsOnce(): Views {
-  const once = (make: (text: string) => DocView) => {
-    const made = new Map<string, DocView>();
+  const once = (make: (text: string) => DocView, recent: Map<string, DocView>) => {
     return (text: string) => {
-      let view = made.get(text);
-      if (!view) {
-        view = make(text);
-        made.set(text, view);
+      let view = recent.get(text);
+      if (view) {
+        recent.delete(text);
+      } else view = make(text);
+      recent.set(text, view);
+      for (const old of recent.keys()) {
+        if (recent.size <= RECENT) break;
+        recent.delete(old);
       }
       return view;
     };
   };
-  return { newest: once(newestView), original: once(originalView) };
+  return { newest: once(newestView, recentNewest), original: once(originalView, recentOriginal) };
 }
 
 /** Every change accepted: no markers, no deleted text and no ledger. */
