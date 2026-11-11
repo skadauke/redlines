@@ -40,6 +40,8 @@ import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
+import { emptyLineTyping } from './blocks/shift-line.ts';
+import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
@@ -194,6 +196,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
     trackedTyping(),
     openBlocks(),
+    emptyLineTyping,
+    typedSyntax,
     tableKeymap(),
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.

@@ -125,6 +125,13 @@ export function isChange(mark: MarkRange): boolean {
 export const setViewModeEffect = StateEffect.define<ViewMode>();
 
 /**
+ * Marks an edit whose switch from Clean waits: the empty line Shift-Return opens holds the view
+ * until the first character is typed (blocks/shift-line.ts), since the line goes again if the
+ * caret leaves.
+ */
+export const holdViewAnnotation = Annotation.define<boolean>();
+
+/**
  * How the document is shown. It starts in the markup view (Simple or Redlines, whichever was
  * chosen last) when the document has redlines and in Clean when it doesn't (design §5.3), and
  * after that it stays as chosen: Redlines is available whatever the document holds, so one whose
@@ -138,7 +145,7 @@ export const viewModeField = StateField.define<ViewMode>({
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
-    if (!tr.docChanged || mode !== 'clean') return mode;
+    if (!tr.docChanged || mode !== 'clean' || tr.annotation(holdViewAnnotation)) return mode;
     const gained =
       hasRedlines(tr.state.field(parsedField)) && !hasRedlines(tr.startState.field(parsedField));
     return gained ? tr.state.facet(markupViewFacet) : mode;

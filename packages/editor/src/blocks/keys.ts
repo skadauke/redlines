@@ -15,6 +15,7 @@ import {
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
+  holdViewAnnotation,
   markupViewFacet,
   parsedField,
   setViewModeEffect,
@@ -24,6 +25,7 @@ import {
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
+import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
   atBlockEnd,
@@ -56,7 +58,8 @@ type KeyCaret =
   | { before: number }
   | { range: { anchor: number; head: number } }
   | { inOpen: OpenRequest }
-  | { afterText: { from: number; text: string } };
+  | { afterText: { from: number; text: string } }
+  | { onLine: { at: number; down: number; col: number } };
 
 const caretAnnotation = Annotation.define<KeyCaret>();
 
@@ -108,7 +111,14 @@ const keyCaret = Prec.highest(
     }
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('inOpen' in caret) {
+    else if ('onLine' in caret) {
+      const line = requestedLine(tr, {
+        at: caret.onLine.at,
+        assoc: -1,
+        down: caret.onLine.down,
+      });
+      pos = line.from + caret.onLine.col;
+    } else if ('inOpen' in caret) {
       // After the line's container syntax, in front of any markers on it.
       const line = requestedLine(tr, caret.inOpen);
       pos = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
@@ -148,10 +158,12 @@ export function applyKeyEdit(
   // A step that the next joins is isolated only from the step before it.
   const isolate = edit.isolateBefore ? 'before' : edit.join ? 'after' : 'full';
   const annotations: Annotation<unknown>[] = [isolateHistory.of(isolate)];
+  if (edit.join && !edit.isolateBefore) annotations.push(joinsStep.of(true));
   if (edit.record ?? edit.userEvent.startsWith('input.break')) {
     annotations.push(returnAnnotation.of(true));
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
+  if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
   if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
@@ -160,6 +172,7 @@ export function applyKeyEdit(
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
     annotations.push(caretAnnotation.of({ inOpen: edit.open }));
+  else if (edit.caretOnLine) annotations.push(caretAnnotation.of({ onLine: edit.caretOnLine }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));
   }
@@ -200,6 +213,21 @@ function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }
 
+/**
+ * Takes the open empty line back, from the record or, with none, as leaving it does, the caret at
+ * the end of the text above. False when it can't go.
+ */
+function takeBackEmptyLine(view: EditorView): boolean {
+  // The Return after it joins its step: one step to undo.
+  if (takeBack(view, 'delete.selection', undefined, 'before')) return true;
+  const { doc } = view.state;
+  const open = openBlock(view.state);
+  if (!open) return false;
+  const above = doc.line(doc.lineAt(open.empty.from).number - 1);
+  const syntax = /(?:\\| {2,})$/.exec(above.text)?.[0].length ?? 0;
+  return closeOpen(view, EditorSelection.single(above.to - syntax));
+}
+
 const returnKey = blockKey((view) => {
   // In the open empty item Markdown can't hold at its level: out one level, where it can.
   const open = openBlock(view.state);
@@ -207,6 +235,16 @@ const returnKey = blockKey((view) => {
   if (open?.item && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
     const out = planTab(view.state, true);
     if (out) return applyKeyEdit(view, out);
+  }
+  if (open?.line && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    // On the empty line Shift-Return opened: that is taken back, and Return opens an empty
+    // paragraph below the block (two steps: replacing the line break in one edit would leave the
+    // split pending).
+    if (!takeBackEmptyLine(view)) return true;
+    const again = planReturn(view.state);
+    return again
+      ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
+      : true;
   }
   const over = planSelectionReturn(view.state);
   if (over) {

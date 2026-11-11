@@ -349,6 +349,42 @@ describe('where a position is in its line', () => {
     }
   });
 
+  it('reads the line under a thematic break or a closing fence as micromark does (rule 2)', () => {
+    // A line under a thematic break or a closing fence starts a block; under a break indented by
+    // four columns or more, which is text of the paragraph above, it goes on that paragraph.
+    const shapes: string[] = [];
+    for (const indent of ['', ' ', '  ', '   ', '    ', '     ']) {
+      for (const rule of ['---', '***', '___', '- - -', '* * *']) {
+        shapes.push(`para\n${indent}${rule}\nnext`, `> para\n> ${indent}${rule}\n> next`);
+      }
+    }
+    shapes.push(
+      '```\nx\n```\nnext',
+      '~~~\nx\n~~~~\nnext',
+      '- a\n  ```\n  x\n```\nfoo',
+      '- a\n  ```\n  x\n  ```\nfoo',
+      '> ```\n> x\n```\nfoo',
+      '1. a\n   ```\n   x\n```\nfoo\n```\nbar',
+    );
+    for (const text of shapes) {
+      const lines = text.split('\n');
+      const last = text.lastIndexOf('\n') + 1;
+      const word = lines.at(-1)!.replace(/^[ >]*/, '');
+      const leaves = blockLeaves(text);
+      const holder = leaves.find((leaf) => leaf.text.includes(word));
+      // `next` goes on a block of text above it, or is a block of its own (code, or text).
+      const goesOn = holder !== undefined && /para|\ba\b/.test(holder.text) && holder.kind === 'p';
+      const kind = lineStartKind(text, last + (/^(?:> )?/.exec(lines.at(-1)!)?.[0].length ?? 0));
+      // Where a fence stands in a container, the line is read as before, a line of the text above,
+      // unless micromark reads it as a block start too.
+      if (/^[ >\d.-]+(?:```|~~~)/m.test(text)) {
+        if (kind === 'block') expect(goesOn, JSON.stringify(text)).toBe(false);
+        continue;
+      }
+      expect(kind, JSON.stringify(text)).toBe(goesOn ? 'continuation' : 'block');
+    }
+  });
+
   it('reads random layouts of items as micromark does, or as an item that the checks fall back on', () => {
     // 30,000 layouts by default, in two halves. Two to four lines, each indented zero to eight
     // columns, with up to two list markers and one to five spaces after each; in the wider half,

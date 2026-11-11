@@ -103,7 +103,8 @@ describe('closing pairs', () => {
     expect(editor.getDoc()).toBe('snake`');
     const fence = load('');
     typeAll(fence, '```');
-    expect(fence.getDoc()).toBe('```');
+    // The third backtick on a line of its own closes the fence (typed syntax), with no stray one.
+    expect(fence.getDoc()).toBe('```\n\n```');
   });
 
   it('does nothing in code or in Raw', () => {

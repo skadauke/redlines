@@ -15,6 +15,7 @@
 import {
   CONTAINER_PREFIX,
   blockEdges,
+  closesFenceAt,
   isBodyStart,
   lineEnd,
   lineStart,
@@ -37,7 +38,7 @@ const NOT_A_TYPE =
 const INSIDE =
   "A block inside a list or a quote can't change type. Change the list item or the quote it is in.";
 const ON_ITS_OWN =
-  'Only a block with a blank line before and after it can change into another kind of block: Markdown would read it into the block next to it.';
+  'Only a block with a blank line before and after it (or right under a heading, a thematic break or a closing fence) can change into another kind of block: Markdown would read it into the block next to it.';
 const ONE_LINE = 'A heading is one line. Join the lines of this paragraph first.';
 const BREAK_PENDING = 'A pending change to a line break is in the way. Decide it first.';
 const STARTS_BLOCK =
@@ -120,7 +121,9 @@ export interface BlockReader extends FormatReader {
 function linesBefore(
   reader: BlockReader,
   block: Block,
-): { inside: string[]; previous: string | undefined; next: string | undefined } | undefined {
+):
+  | { inside: string[]; previous: string | undefined; next: string | undefined; ends: boolean }
+  | undefined {
   const { original } = reader;
   if (!original) return undefined;
   const text = original.text;
@@ -135,7 +138,7 @@ function linesBefore(
   const previous = isBodyStart(text, from) ? undefined : lineAt(text, lineStart(text, from - 1));
   const after = text.indexOf('\n', to);
   const next = after === -1 || after + 1 >= text.length ? undefined : lineAt(text, after + 1);
-  return { inside, previous, next };
+  return { inside, previous, next, ends: endsBlockAbove(text, from) };
 }
 
 /** A block as a change of its type sees it. Positions are in the file. */
@@ -198,6 +201,22 @@ function nextLine(reader: BlockReader, at: number): number | undefined {
  * the line after front matter, which is read as the first of a file (format §3.8). */
 function standsAfterBlank(text: string, top: number): boolean {
   return isBodyStart(text, top) || isBlank(text, lineStart(text, top - 1));
+}
+
+/** An ATX heading line, and a thematic break line: blocks that take no lazy line after them. */
+const ENDS_ITSELF =
+  /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+
+/**
+ * Whether the line right above the one at `at` ends a block that takes no lazy line (format §2.6,
+ * "Blocks"): an ATX heading, a thematic break or the closing fence of a fenced code block. What
+ * stands under it is no part of it, whatever follows, so that it needs no blank line to be a block
+ * of its own. False for the first line of the body, which has none above it.
+ */
+function endsBlockAbove(text: string, at: number): boolean {
+  if (isBodyStart(text, at)) return false;
+  const above = lineStart(text, at - 1);
+  return ENDS_ITSELF.test(lineAt(text, above)) || closesFenceAt(text, above);
 }
 
 /** The container syntax at the start of the line at `line`: its indentation, and a `> ` or a
@@ -597,11 +616,14 @@ function planType(
     if (lead > 0) throw refused(inItem(reader, block.line, lead) ? INSIDE : INDENTED);
     if (isHeading(to) && block.lines.length > 0) throw refused(ONE_LINE);
     const after = nextLine(reader, block.end);
-    if (!standsAfterBlank(text, block.top) || (after !== undefined && !isBlank(text, after))) {
+    // A blank line, the start of the body, or a heading, a thematic break or a closing fence above
+    // it, which take no lazy line (the same in every view).
+    const stands = standsAfterBlank(text, block.top) || endsBlockAbove(text, block.top);
+    if (!stands || (after !== undefined && !isBlank(text, after))) throw refused(ON_ITS_OWN);
+    const blankOr = (line: string | undefined) => line === undefined || line.trim() === '';
+    if (before && !((blankOr(before.previous) || before.ends) && blankOr(before.next))) {
       throw refused(ON_ITS_OWN);
     }
-    const blankOr = (line: string | undefined) => line === undefined || line.trim() === '';
-    if (before && !(blankOr(before.previous) && blankOr(before.next))) throw refused(ON_ITS_OWN);
     if (isList(block.type) && subtreeEnd(reader, block) > block.end) throw refused(ON_ITS_OWN);
   }
   const quoted = block.type === 'quote';

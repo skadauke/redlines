@@ -10,7 +10,7 @@ import { EditorSelection, EditorState, type Extension, Prec, Transaction } from 
 import { EditorView } from '@codemirror/view';
 import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
-import { type KeyEdit, moveTo, nothing, textEnd, textStart } from './edits.ts';
+import { hardBreakAt, type KeyEdit, moveTo, nothing, textEnd, textStart } from './edits.ts';
 import { type Block, blockAt, neighbours, NO_TEXT } from './structure.ts';
 
 /** The block before `block` that the caret can rest in: past thematic breaks, which it skips. */
@@ -45,6 +45,12 @@ export function planArrowLeft(state: EditorState): KeyEdit | null {
   if (!main.empty || state.selection.ranges.length > 1) return null;
   const block = blockAt(state, main.head);
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
+  // A hard line break is one character: ← from the start of the line after it goes to the end of
+  // the text before it, past the syntax the break hides.
+  const hard = hardBreakAt(state, block, main.head);
+  if (hard && main.head > hard.from && main.head <= hard.to) {
+    return moveTo(outOfHidden(state, hard.from, false));
+  }
   const first = state.doc.lineAt(block.lines.from);
   if (main.head > textStart(state, block) || main.head < first.from) return null;
   const prev = restingBefore(state, block);
@@ -70,6 +76,11 @@ export function planArrowRight(state: EditorState): KeyEdit | null {
   if (!main.empty || state.selection.ranges.length > 1) return null;
   const block = blockAt(state, main.head);
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
+  // → in front of a hard line break's syntax, or in it: the start of the next line's text.
+  const hard = hardBreakAt(state, block, main.head);
+  if (hard && main.head >= hard.from && main.head < hard.to) {
+    return moveTo(outOfHidden(state, hard.to, true));
+  }
   if (main.head < textEnd(state, block)) return null;
   const next = restingAfter(state, block);
   // At the end of the last block there is nowhere to go: CodeMirror's → would step into the closers
