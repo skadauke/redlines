@@ -1,6 +1,7 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, type ChangeSpec } from '@codemirror/state';
+import { parse as parseFormat, readTables } from '@redlines/format';
 import { GFM } from '@lezer/markdown';
 import { describe, expect, it, vi } from 'vitest';
 import { buildTables, cellAt, type Table, tablesField, tablesOf } from './model.ts';
@@ -232,4 +233,33 @@ describe('a table indented by up to three spaces', () => {
       expect(after[0]).toBe(before[0]);
     });
   }
+});
+
+describe('the tables of a state against the format reader (#290)', () => {
+  it('has the tables, rows and cells the format reads, over random leading whitespace', () => {
+    let seed = 290;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const white = () => {
+      let out = '';
+      for (let n = Math.floor(random() * 6); n > 0; n--) out += random() < 0.35 ? '\t' : ' ';
+      return out;
+    };
+    for (let n = 0; n < 1500; n++) {
+      const bareTable = random() < 0.5;
+      const wrap = (line: string) => (bareTable ? line : `| ${line} |`);
+      const lines = [wrap('h0 | h1'), wrap('--- | :-:')];
+      for (let r = Math.floor(random() * 4); r > 0; r--) lines.push(wrap('c0 | c1'));
+      const doc = lines.map((line) => `${random() < 0.4 ? '' : white()}${line}`).join('\n');
+      const mine = tablesOf(make(doc)).map((t) =>
+        t.rows.map((r) => r.cells.map((c) => doc.slice(c.textFrom, c.textTo))),
+      );
+      const format = readTables(doc, parseFormat(doc)).map((t) =>
+        t.rows.map((r) => r.cells.map((c) => doc.slice(c.textFrom, c.textTo))),
+      );
+      expect(mine, JSON.stringify(doc)).toEqual(format);
+    }
+  });
 });

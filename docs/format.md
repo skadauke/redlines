@@ -1737,6 +1737,14 @@ comments were decided in every order, against micromark 4.0.2 with GFM tables.
 
 Text in cells takes inline marks, as anywhere else.
 
+**What reads as a table.** The reader agrees with micromark 4.0.2 with GFM tables on the whitespace
+that leads a line, a header row, the delimiter row and every row below. Leading whitespace is counted
+in columns, a tab going to the next multiple of four, so a tab anywhere in it makes four columns or
+more. A header row or delimiter row of four columns or more is indented code, and makes no table;
+a row of four columns or more ends the table's rows. Spaces up to three, in front of any row, are no
+part of its first cell. (Before this, the reader counted a tab as one character and read a delimiter
+row led by a tab as a table's, where micromark reads a paragraph.)
+
 **A table typed with Track Changes on.** The editor's Return at the end of a line of cells
 (`| a | b |`) alone in a paragraph writes the table's delimiter row and an empty first row, as one
 edit. Where the line is the author's own pending insertion, the two rows are written into that

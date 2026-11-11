@@ -71,7 +71,17 @@ const DELIMITER_CELL = /^:?-+:?$/;
 const TABLE_DELETION = /^(row|col)=(\d+)/;
 
 const isBlank = (line: string) => /^[ \t]*$/.test(line);
-const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0;
+/** A line's indentation in columns: a tab goes to the next multiple of four, so a tab anywhere in
+ * the leading whitespace makes four columns or more. */
+export function indentOf(line: string): number {
+  let columns = 0;
+  for (const c of line) {
+    if (c === ' ') columns++;
+    else if (c === '\t') columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
+}
 const isSpace = (c: string | undefined) => c === ' ' || c === '\t';
 
 /** The offsets of a line's pipes that start a cell: those no backslash escapes. A pipe in a code
