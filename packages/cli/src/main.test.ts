@@ -427,7 +427,7 @@ describe('str-replace', () => {
 
   it('replaces code whole (format §3.5), and refuses it in a list item, in the words of fenced code (#153)', async () => {
     const refused =
-      "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.\n";
+      "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.\n";
     for (const [text, whole] of [
       ['# Plan\n\n    make all\n    make test\n', true],
       ['- Step:\n\n      make all\n      make test\n', false],
