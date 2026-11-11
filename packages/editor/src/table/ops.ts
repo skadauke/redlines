@@ -95,7 +95,8 @@ export function insertRowAfter(view: EditorView, table: Table, row: Row): boolea
 export function touchedRows(
   state: EditorState,
 ): { table: Table; first: number; last: number; rectangle: boolean } | null {
-  if (state.field(viewModeField, false) === 'raw') return null;
+  // A title is worked out on a state with none of the editor's fields too (`baseTitle`).
+  if (state.field(viewModeField, false) === 'raw' || !state.field(tablesField, false)) return null;
   const rect = rectOf(state);
   if (rect) return { table: rect.table, first: rect.rows[0], last: rect.rows[1], rectangle: true };
   const found = shownCellAt(state, state.selection.main.head);

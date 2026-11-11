@@ -452,3 +452,16 @@ describe('a command whose title reads the state', () => {
     expect(seen.at(-1)?.commandTitles).toEqual({ 'x.count': 'Count 3' });
   });
 });
+
+describe('baseTitle', () => {
+  it('works for the row commands, on a state with none of the editor’s fields', async () => {
+    const { baseTitle, rowTitles } = await import('./index.ts');
+    for (const [title, expected] of [
+      [rowTitles.insertAbove, 'Insert Row Above'],
+      [rowTitles.delete, 'Delete Row'],
+      [rowTitles.moveDown, 'Move Row Down'],
+    ] as const) {
+      expect(baseTitle({ id: 'x', title, run: () => true })).toBe(expected);
+    }
+  });
+});

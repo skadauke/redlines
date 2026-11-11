@@ -314,10 +314,13 @@ class Grips {
     const touched = touchedRows(this.view.state);
     if (!touched) return;
     const { drawn } = press;
-    const lines = drawn.lines.slice(touched.first, touched.last + 1);
+    const linesNow = () => {
+      const now = drawnTables(this.view).find((d) => d.table.id === drawn.table.id) ?? drawn;
+      return now.lines.slice(touched.first, touched.last + 1);
+    };
     this.drag = beginDrag({
       view: this.view,
-      lines,
+      lines: linesNow,
       boundaries: () =>
         boundariesOf(
           drawnTables(this.view).find((d) => d.table.id === drawn.table.id)?.rects ?? drawn.rects,
@@ -327,7 +330,7 @@ class Grips {
         return { left: now.left, right: now.right };
       },
       layer: this.layer,
-      label: (lines[0]?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      label: (linesNow()[0]?.textContent ?? '').replace(/\s+/g, ' ').trim(),
     });
     this.hide();
   }

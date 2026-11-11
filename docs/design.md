@@ -542,7 +542,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   above or below at the same x (an empty cell too), and out of the table at its first and last
   row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
   Docs keep one). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
-  adds a row; ⌘↩ is Insert Row Below, in the Table menu. To leave the table by keyboard, press
+  adds a row; ⌘↩ and ⌥⌘↓ are Insert Row Below, in the Table menu. To leave the table by keyboard, press
   Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
   (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
   in a cell lands in that cell, also in an empty one.
@@ -577,11 +577,34 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   undo. Text without tabs goes into the cell (line breaks as `<br>`, pipes escaped); Paste as
   Plain Text puts anything into the cell with its tabs as spaces. A range pasted outside a table
   is a new table, as an HTML table was.
+- **Rows, tracked as Word tracks them.** The Table menu's row commands count the selection ("Insert 2
+  Rows Above", "Delete 3 Rows", "Move Row Up", every one a step to undo with its selection back);
+  insertion adds as many rows as the selection touches, with the caret in the first new cell;
+  deletion takes the rows the selection touches and puts the caret in the row that is then there;
+  moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
+  the row under the pointer, left of the change bars and inside the window, in a layer over the
+  editor that assistive technology does not see (the menu bar has every command); a press selects
+  the row (⇧ extends) and opens its menu (Insert Above and Below, Delete, Move Up and Down, Clear
+  Contents), Esc closes it and keeps the selection; a drag moves the rows, and the others selected
+  with it, to any boundary, the last included: they dim, a copy follows the pointer, a 2 px line
+  marks the drop, the page scrolls near its edges, Esc cancels. A + shows within 8 px of a row
+  boundary in the strip beside the table, with a thin line across it, and a press inserts a row
+  there.
 - **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
   take the author's tint and its text is underlined in the author's color, with a change bar on the
-  row; Clean shows the plain row. The review bar, the cards ("Inserted row", "Inserted 2 rows") and
-  the notes list it, and Accept and Reject decide it. Row and column deletions, moves and the rest
-  of the commands in the list above arrive in the later stages.
+  row; Clean shows the plain row. A **deleted row** is kept below the table in the file and drawn in
+  Redlines as a ghost row at its place, a row of cells in the table's columns: its text struck in the
+  author's color on the author's tint, with a bar, not editable; the caret and ↑ ↓ skip it, a press
+  on it opens its card and puts no caret there. A **moved row** has a double underline and the tint at
+  its new place, and a ghost with a double strikethrough at the old; its card is the moved row's, and
+  accepting or rejecting either half decides both (rejecting moves the row itself back, with what
+  was typed in it since). The cards say "Inserted row", "Deleted row" and "Moved row" (and
+  "Deleted 3 rows" for rows deleted together). Simple draws the bars of the same rows and no ghost,
+  tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
+  Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
+  but not deleted until those are decided; an agent that replaces a table with the table it wants
+  changes rows as these commands do (format §3.7, "Agents"). Column commands, deletions and moves
+  and the rest of the list above arrive in the later stages.
 
 ### 5.9 Command palette and shortcuts
 
@@ -608,7 +631,8 @@ menus, shortcuts, the palette, plugins and agents.
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
-| In a table: insert row below   | ⌘↩                                                                                            | Ctrl+Enter                |
+| In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
+| In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |

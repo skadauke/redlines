@@ -307,7 +307,12 @@ function decide(
   action: Action,
 ): TextChange[] {
   if (marks.some(isRowMove) && marks.some((mark) => !isRowMove(mark))) {
-    const first = decideNow(text, parsed, marks.filter((mark) => !isRowMove(mark)), action);
+    const first = decideNow(
+      text,
+      parsed,
+      marks.filter((mark) => !isRowMove(mark)),
+      action,
+    );
     const current = applyChanges(text, first);
     const read = parse(current);
     const ids = new Set(marks.filter(isRowMove).map((mark) => mark.id));

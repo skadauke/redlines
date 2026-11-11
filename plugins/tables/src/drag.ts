@@ -46,8 +46,9 @@ export interface Drag {
 
 interface DragOptions {
   view: EditorView;
-  /** The dragged rows' lines, which dim. */
-  lines: readonly HTMLElement[];
+  /** The dragged rows' lines, which dim: asked again as the pointer moves, for the page draws lines
+   * again when what it shows changes. */
+  lines: () => readonly HTMLElement[];
   /** The boundaries' `y`s, read again as the page scrolls. */
   boundaries: () => number[];
   /** Where the drop line goes: the table's left and right, and a boundary's `y`. */
@@ -66,7 +67,10 @@ export function beginDrag(options: DragOptions): Drag {
   const line = document.createElement('div');
   line.className = 'rl-drop-line';
   layer.append(copy, line);
-  for (const el of lines) el.classList.add('rl-row-dim');
+  const dim = () => {
+    for (const el of lines()) el.classList.add('rl-row-dim');
+  };
+  dim();
   let y = 0;
   let current = 0;
   let timer: number | undefined;
@@ -92,6 +96,7 @@ export function beginDrag(options: DragOptions): Drag {
     boundary: () => current,
     move(nextX, nextY) {
       y = nextY;
+      dim();
       const base = layer.getBoundingClientRect();
       copy.style.left = `${nextX - base.left + 12}px`;
       copy.style.top = `${nextY - base.top + 8}px`;
@@ -100,7 +105,7 @@ export function beginDrag(options: DragOptions): Drag {
     end(cancel = false) {
       if (timer !== undefined) window.clearInterval(timer);
       timer = undefined;
-      for (const el of lines) el.classList.remove('rl-row-dim');
+      for (const el of view.dom.querySelectorAll('.rl-row-dim')) el.classList.remove('rl-row-dim');
       copy.remove();
       line.remove();
       return cancel ? null : current;
