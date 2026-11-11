@@ -7,19 +7,14 @@ import { bodyStart, isBodyStart, lineEnd, lineStart, prefixLength } from './bloc
 import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 import type { InlineFormat } from './format-ops.ts';
+import { isOlderPunctuation, isPunctuation, isSpace, runRole } from './flanking.ts';
 import { DELIMITER_ROW, hitsIn, isSyntaxLine, paragraphRange, visible } from './inline.ts';
 import type { Hit } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import type { Parsed, Range } from './types.ts';
 
-export const isSpace = (c: string | undefined): boolean => c === undefined || /\s/u.test(c);
-/** CommonMark's punctuation since 0.31, which has the symbols, such as emoji. */
-export const isPunctuation = (c: string | undefined): boolean =>
-  c !== undefined && /[\p{P}\p{S}]/u.test(c);
-/** Punctuation as GitHub still reads it: an emoji is not. A change must read right either way. */
-export const isOlderPunctuation = (c: string | undefined): boolean =>
-  c !== undefined && /[\p{P}$+<=>^`|~]/u.test(c);
+export { isOlderPunctuation, isPunctuation, isSpace };
 
 /** The character in front of `index`, or what a marker that stands there is to a delimiter. */
 export function charBefore(
@@ -61,6 +56,32 @@ interface Run {
   canClose: boolean;
 }
 
+/** The runs of delimiters in `[from, to)` of `s`, with what each can do (`joints` as for `readEmphasis`). */
+function runsOf(
+  s: string,
+  from: number,
+  to: number,
+  joints: ReadonlySet<number>,
+  punctuation: (c: string | undefined) => boolean,
+): Run[] {
+  const runs: Run[] = [];
+  for (let i = from; i < to;) {
+    const char = s.charAt(i);
+    if (char !== '*' && char !== '_' && char !== '~') {
+      i++;
+      continue;
+    }
+    let end = i + 1;
+    while (end < to && s[end] === char && !joints.has(end)) end++;
+    const before = charBefore(s, i, joints);
+    const after = charAfter(s, end, joints);
+    const { open, close } = runRole(char, before, after, punctuation);
+    runs.push({ char, from: i, to: end, length: end - i, canOpen: open, canClose: close });
+    i = end;
+  }
+  return runs;
+}
+
 /**
  * The emphasis in `[from, to)` of `s`, as CommonMark's delimiter algorithm has it, and GFM's `~~` and
  * `~`, which pair with a run of their own length.
@@ -74,35 +95,7 @@ function readEmphasis(
   joints: ReadonlySet<number>,
   punctuation: (c: string | undefined) => boolean,
 ): Span[] {
-  const runs: Run[] = [];
-  for (let i = from; i < to;) {
-    const char = s.charAt(i);
-    if (char !== '*' && char !== '_' && char !== '~') {
-      i++;
-      continue;
-    }
-    let end = i + 1;
-    while (end < to && s[end] === char && !joints.has(end)) end++;
-    const before = charBefore(s, i, joints);
-    const after = charAfter(s, end, joints);
-    // micromark reads a `*` or `_` next to a `~` as if the `~` were a letter on the far side: a run
-    // before a `~` can open, and a run after a `~` can close (#238).
-    const left =
-      (!isSpace(after) && (!punctuation(after) || isSpace(before) || punctuation(before))) ||
-      (char !== '~' && after === '~');
-    const right =
-      (!isSpace(before) && (!punctuation(before) || isSpace(after) || punctuation(after))) ||
-      (char !== '~' && before === '~');
-    runs.push({
-      char,
-      from: i,
-      to: end,
-      length: end - i,
-      canOpen: char === '_' ? left && (!right || punctuation(before)) : left,
-      canClose: char === '_' ? right && (!left || punctuation(after)) : right,
-    });
-    i = end;
-  }
+  const runs = runsOf(s, from, to, joints, punctuation);
   const size = (run: Run) => run.to - run.from;
   const spans: Span[] = [];
   type Pass = 'strike' | 'emphasis';
@@ -178,6 +171,56 @@ function readEmphasis(
     outer.close = { from: end - 3, to: end - 2 };
   }
   return spans;
+}
+
+/**
+ * Whether markers at `joints` of `s` leave the emphasis in it as it reads without them, under either
+ * reading of punctuation: the same runs, the same pairs, and the same part left of each run that no
+ * pair uses, which can open or close with whatever comes after it. A run that a marker lets close
+ * where it could also open stays one that closes, as it did, in the pair it makes.
+ */
+export function sameEmphasis(s: string, joints: ReadonlySet<number>): boolean {
+  for (const punctuation of [isPunctuation, isOlderPunctuation]) {
+    const none = new Set<number>();
+    const a = runsOf(s, 0, s.length, none, punctuation);
+    const b = runsOf(s, 0, s.length, joints, punctuation);
+    if (a.length !== b.length) return false;
+    const spansA = readEmphasis(s, 0, s.length, none, punctuation);
+    const spansB = readEmphasis(s, 0, s.length, joints, punctuation);
+    if (JSON.stringify(spansA) !== JSON.stringify(spansB)) return false;
+    for (const [i, run] of a.entries()) {
+      const other = b[i];
+      if (!other || other.from !== run.from || other.to !== run.to) return false;
+      const used = spansA.reduce(
+        (sum, span) =>
+          sum +
+          [span.open, span.close].reduce(
+            (n, r) => n + (r.from >= run.from && r.to <= run.to ? r.to - r.from : 0),
+            0,
+          ),
+        0,
+      );
+      if (used < run.length && (run.canOpen !== other.canOpen || run.canClose !== other.canClose)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether markers at `joints` of `s` leave the emphasis in it as it reads without them, under either
+ * reading of punctuation: the same pairs. A run that no pair uses is no change (as for `sameEmphasis`
+ * it would be, where it can pair with text that is not in `s`): this is for a text that holds
+ * the whole paragraph, where every pair the text can make is in it.
+ */
+export function sameReading(s: string, joints: ReadonlySet<number>): boolean {
+  for (const punctuation of [isPunctuation, isOlderPunctuation]) {
+    const spansA = readEmphasis(s, 0, s.length, new Set<number>(), punctuation);
+    const spansB = readEmphasis(s, 0, s.length, joints, punctuation);
+    if (JSON.stringify(spansA) !== JSON.stringify(spansB)) return false;
+  }
+  return true;
 }
 
 /** What a character of a paragraph is: text, the prefix of its line, or other syntax. */

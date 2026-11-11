@@ -82,7 +82,9 @@ import {
   listGoesOnEveryWay,
   blankBetween,
 } from './list-run.ts';
-import { inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { sameEmphasis, sameReading } from './format-reader.ts';
+import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
+import { codeSpanAt, inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -174,12 +176,17 @@ interface Plan {
   readonly touched: string[];
   /** The range each edit replaces once it is widened, a point for typing. */
   readonly spans: Range[];
+  /** The emphasis next to a change that stands against another mark (format §3.1, rule 5): the
+   * change is first written as typed (`mode` 0) and read in every order of decisions, then written
+   * again by a character on one side or the other (`mode` 1 on), as far as `options` goes.
+   * `touched` is set where the markers stand against a mark. */
+  readonly emphasis: { mode: number; options: number; touched: boolean; near: Set<string> };
 }
 
 /** A deletion of a table row or column (format §3.7), which text is not merged into. */
 const TABLE_DELETION = /^(?:row|col)=/;
 
-function createPlan(text: string, ctx: EditContext): Plan {
+function createPlan(text: string, ctx: EditContext, mode = 0): Plan {
   const parsed = parse(text);
   const markers = markerRanges(parsed);
   const me = ctx.author.handle;
@@ -234,6 +241,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     plain: false,
     touched: [],
     spans: [],
+    emphasis: { mode, options: 0, touched: false, near: new Set() },
   };
 }
 
@@ -284,6 +292,8 @@ interface Typing {
   inner: string;
   trail: string;
   fenced?: boolean;
+  /** `inner` starts with line breaks typed right after a backslash, written as they are. */
+  plain?: boolean;
 }
 
 const isEmpty = (typing: Typing) => typing.inner === '' && typing.trail === '';
@@ -723,17 +733,24 @@ function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
   };
 }
 
-function replaceRange(plan: Plan, from: number, to: number, typing: Typing): void {
+/** Whether replacing `[from, to)` by `typing` is one substitution of a piece of text of the file. */
+function soleReplace(plan: Plan, from: number, to: number, typing: Typing): boolean {
   const pieces = piecesIn(plan, from, to);
   const [only] = pieces;
-  if (
+  return (
     typing.inner !== '' &&
     pieces.length === 1 &&
-    only &&
+    only !== undefined &&
     !only.how &&
     only.from === from &&
     only.to === to
-  ) {
+  );
+}
+
+function replaceRange(plan: Plan, from: number, to: number, typing: Typing): void {
+  const pieces = piecesIn(plan, from, to);
+  const [only] = pieces;
+  if (soleReplace(plan, from, to, typing) && only) {
     plan.changes.push(replaceOne(plan, only, typing));
     return;
   }
@@ -1482,11 +1499,39 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
   // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
   // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
   const rest = lineText.slice(lead);
-  if (SYNTAX_LINE.test(rest) || startsHtmlBlock(rest, blank)) return undefined;
+  // A line that opens a container (a deeper quote, a list item) starts the first block of it: a tag
+  // alone on it is an HTML block there, as after a blank line.
+  const above = text.slice(lineStart(text, line - 1), Math.max(0, line - 1));
+  const opens = !blank && line > 0 && opensContainer(above, lineText.slice(0, lead));
+  if (SYNTAX_LINE.test(rest) || startsHtmlBlock(rest, blank || opens)) return undefined;
   let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
   if (p >= end || text.startsWith('<!--', p)) return undefined;
   while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  // Not inside a code span, which takes no marker: after it, and the rest of the word. Nor right
+  // after a backslash that the word ends with, which would escape it: the character after it goes
+  // too, or the line break and the first word of the next line.
+  for (let again = 0; again < 8; again++) {
+    const span = codeSpanAt(text, markers, p);
+    if (span) p = span.to;
+    else if (p < end && oddBackslashes(visibleText(text, markers, line, p))) {
+      p = stepRight(text, markers, p);
+      continue;
+    } else if (p >= end && oddBackslashes(visibleText(text, markers, line, p))) {
+      return nextWordEnd(plan, nextLineStart(text, p));
+    } else break;
+    while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  }
   return p;
+}
+
+/**
+ * Whether the prefix of a line opens a container that the line above is not in: more quote markers
+ * than it has, or a list marker (CommonMark's first block of a container is not a continuation of
+ * the paragraph above, so a tag alone on the line is an HTML block).
+ */
+function opensContainer(above: string, prefix: string): boolean {
+  const quotes = (line: string) => line.slice(0, prefixLength(line)).split('>').length - 1;
+  return quotes(prefix) > quotes(above) || /(?:[-*+]|\d{1,9}[.)])[ \t]/.test(prefix);
 }
 
 /** The text of a line, past its container prefix, that is only syntax: a thematic break, a setext
@@ -1553,52 +1598,138 @@ function ownPlain(
 }
 
 /**
- * An edit at the end of your own insertion or substitution after which its text ends in a
- * backslash, which would escape its closer (format §3.1): a backslash typed there, or the text after
- * one deleted, as in correcting a path. The insertion becomes a substitution of the same id, and a
- * substitution takes more, the text after it, as a typed backslash takes it: the next character,
- * or the line break and the first word of the next line, or the paragraph break and the next
- * block's first word. Returns whether it wrote that. Where nothing can follow, typing goes on to
- * the rules of ordinary edits, which refuse it or write it there, and a deletion is refused.
+ * Where a change that ends in a backslash puts its closer at the end of the document, where nothing
+ * but white space follows it before the ledger or the end of the file (format §3.1): after the line
+ * break that ends the last block, which the change takes in, so that the closer stands alone on
+ * the line after it, and no block follows to be read with it. The body has none where the ledger
+ * follows at once, the line breaks in front of it being its own (§2.5), or the file ends: then the
+ * change brings one of its own (`bring`), as its last text. `at` is where the text ends. Undefined
+ * where anything but white space follows.
  */
-function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): boolean {
+function endOfBody(plan: Plan, at: number): { end: number; bring: boolean } | undefined {
+  const { text } = plan;
+  const rest = text.slice(at, plan.parsed.ledgerRange?.from ?? text.length);
+  if (!/^\s*$/.test(rest)) return undefined;
+  const lineBreak = /^\r?\n/.exec(rest);
+  return lineBreak ? { end: at + lineBreak[0].length, bring: false } : { end: at, bring: true };
+}
+
+/**
+ * Why no word follows a backslash at `at` for the closer to stand after: another person's marker
+ * starts what follows (named, as `backslashBeforeAt` names it), or the next line takes no closer.
+ */
+function noWordReason(plan: Plan, at: number): string {
   const { text, markers } = plan;
-  const c = ownPlain(plan, 'ins', from, to) ?? ownPlain(plan, 'sub', from, to);
-  if (!c || to !== c.content.to || c.open.to !== c.content.from) return false;
-  if (!oddBackslashes(text.slice(c.content.from, from) + typed)) return false;
-  // A deletion has no other form: where nothing can follow, it is refused here, as typing is.
-  const none = (reason: string) => {
-    if (typed === '') throw new EditError(reason, 'no-legal-placement');
-    return false;
-  };
-  const at = c.close.to;
-  if (plan.parsed.ledgerRange !== null && at >= plan.parsed.ledgerRange.from) {
-    return none(BACKSLASH_AT_END);
+  const starts = (position: number) =>
+    markers.find(
+      (m) => m.from === position && m.mark && m.mark.entry.by !== plan.ctx.author.handle,
+    );
+  let found = starts(at);
+  for (let line = nextLineStart(text, at), n = 0; !found && line < text.length && n < 50; n++) {
+    const lead = line + prefixLength(text.slice(line, lineEnd(text, line)));
+    found = starts(lead);
+    if (lead < lineEnd(text, line)) break;
+    line = nextLineStart(text, line);
   }
+  return found
+    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
+    : BACKSLASH_BEFORE_SYNTAX;
+}
+
+/**
+ * Where the closer of your own insertion or substitution goes once its text ends in a backslash,
+ * which would escape it, or in a line break and the prefix of a block (format §3.1): after the next
+ * character, or the line break and the first word of the next line, or the paragraph break and the
+ * next block's first word, or, at the end of the document, its final line break. `at` is where the
+ * closer is now. Returns the end, or the words of why there is none.
+ */
+function ownBackslashTakes(plan: Plan, at: number): number | string {
+  const { text, markers } = plan;
+  const last = endOfBody(plan, at);
+  if (last) return last.bring ? at : last.end;
   const next = stepRight(text, markers, at);
-  if (next === at) return none(BACKSLASH_AT_END);
+  if (next === at) return BACKSLASH_AT_END;
   const inWay = markers.find((m) => m.from >= at && m.from < next);
-  if (inWay) return none(backslashBeforeAt(plan.parsed, inWay.from, plan.ctx.author));
-  const end = /[\r\n]/.test(text.slice(at, next))
-    ? nextWordEnd(plan, nextLineStart(text, at))
-    : next;
-  if (end === undefined) return none(BACKSLASH_AT_END);
+  if (inWay) return backslashBeforeAt(plan.parsed, inWay.from, plan.ctx.author);
+  const lineBreak = /[\r\n]/.test(text.slice(at, next));
+  const end = lineBreak ? nextWordEnd(plan, nextLineStart(text, at)) : next;
+  if (end === undefined) return noWordReason(plan, at);
   const across = markers.find((m) => m.from < end && m.to > at);
-  if (across) return none(backslashBeforeAt(plan.parsed, across.from, plan.ctx.author));
-  if (!closerFits(plan, from, to, typed, end)) {
-    return none(backslashBefore(nameOf(plan.parsed, c.mark, plan.ctx.author), true));
-  }
+  if (across) return backslashBeforeAt(plan.parsed, across.from, plan.ctx.author);
+  return end;
+}
+
+/**
+ * Writes an edit in your own insertion or substitution with its closer moved on to `end`: the
+ * insertion becomes a substitution of the same id, and a substitution takes more, `text[at, end)`,
+ * where `at` is where its closer is. The edit is made in its text as it is.
+ */
+function ownTakes(
+  plan: Plan,
+  c: Container,
+  edit: { from: number; to: number; typed: string },
+  end: number,
+): void {
+  const { text } = plan;
   const { id } = c.mark;
+  // Nothing to take: the document ends here, and the text gets a line break of its own, in front
+  // of the closer (`endOfBody`).
+  if (end === c.close.to) {
+    const brk = plan.eol;
+    if (edit.to === c.close.from) {
+      plan.changes.push({ from: edit.from, to: edit.to, insert: edit.typed + brk });
+    } else {
+      plan.changes.push(
+        { from: edit.from, to: edit.to, insert: edit.typed },
+        { from: c.close.from, to: c.close.from, insert: brk },
+      );
+    }
+    plan.spans.push({ from: edit.from, to: c.close.to });
+    plan.touched.push(id);
+    return;
+  }
   const was = c.mark.kind === 'sub' ? (c.mark.payload ?? '') : '';
-  const old = was + text.slice(at, end).replaceAll('\r\n', '\n');
+  const old = was + text.slice(c.close.to, end).replaceAll('\r\n', '\n');
   plan.changes.push(
     { from: c.open.from, to: c.open.to, insert: `<!--sub ${id} ${encodePayload(old)}-->` },
-    { from, to, insert: typed },
+    { from: edit.from, to: edit.to, insert: edit.typed },
     { from: c.close.from, to: c.close.to, insert: '' },
     { from: end, to: end, insert: `<!--/${id}-->` },
   );
   plan.spans.push({ from: c.open.from, to: end });
   plan.touched.push(id);
+}
+
+/**
+ * An edit at the end of your own insertion or substitution after which its text ends in a
+ * backslash, which would escape its closer (format §3.1): a backslash typed there, or the text after
+ * one deleted, as in correcting a path. The insertion becomes a substitution of the same id, and a
+ * substitution takes more (`ownBackslashTakes`), as a typed backslash takes it. Returns whether it
+ * wrote that. Where nothing can follow, typing goes on to the rules of ordinary edits, which refuse
+ * it or write it there, and a deletion is refused.
+ */
+function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text } = plan;
+  // Only what the text ends with matters: an edit that leaves a character other than a backslash
+  // last, in what follows it, changes no ending.
+  const c = ownPlain(plan, 'ins', from, to) ?? ownPlain(plan, 'sub', from, to);
+  if (!c || c.open.to !== c.content.from) return false;
+  if (to < c.content.to && text[c.content.to - 1] !== '\\') return false;
+  const tail = text.slice(to, c.content.to);
+  if (!oddBackslashes(text.slice(c.content.from, from) + typed + tail)) return false;
+  if (typed !== '' && onDefinitionLine(plan, from)) return false;
+  // A deletion has no other form: where nothing can follow, it is refused here, as typing is.
+  const none = (reason: string) => {
+    if (typed === '') throw new EditError(reason, 'no-legal-placement');
+    return false;
+  };
+  const end = ownBackslashTakes(plan, c.close.to);
+  if (typeof end === 'string') return none(end);
+  // At the end of the document the closer stands alone on its line, after a line break.
+  if (!endOfBody(plan, c.close.to) && !closerFits(plan, from, to, typed, end)) {
+    return none(backslashBefore(nameOf(plan.parsed, c.mark, plan.ctx.author), true));
+  }
+  ownTakes(plan, c, { from, to, typed }, end);
   return true;
 }
 
@@ -1611,16 +1742,73 @@ const TYPED_BREAK =
  * A line break typed right after a backslash in the text of your own substitution or insertion, as
  * Return after a backslash typed at a line's end (`<!--sub ID \nb-->\\⏎b<!--/ID-->`), in a list
  * item (`⏎- `, `⏎2. `) or after `C:\` in your own insertion: written as it is, plain, in that
- * text. A split there would stand right after the backslash, which would escape its marker; the
- * change holds the break, and rejecting it gives back the text as it was.
+ * text, in front of the spaces that the key takes away, as Enter in front of a space does. A split
+ * there would stand right after the backslash, which would escape its marker; the change holds the
+ * break, and rejecting it gives back the text as it was. Where the text then ends in a backslash
+ * (Enter between the two of `\\`), or in the prefix of a line that the closer would start, it
+ * takes more, as a typed backslash does (`ownBackslashTakes`).
  */
 function ownBreakAfterBackslash(plan: Plan, from: number, to: number, typed: string): boolean {
-  if (from !== to || !TYPED_BREAK.test(typed)) return false;
+  const { text } = plan;
+  if (!TYPED_BREAK.test(typed) || (from !== to && !/^[ \t]+$/.test(text.slice(from, to)))) {
+    return false;
+  }
   const c = ownPlain(plan, 'sub', from, to) ?? ownPlain(plan, 'ins', from, to);
   if (!c || c.open.to !== c.content.from) return false;
-  if (!oddBackslashes(plan.text.slice(c.content.from, from))) return false;
-  plan.changes.push({ from, to, insert: typed });
-  plan.spans.push({ from, to });
+  if (!oddBackslashes(text.slice(c.content.from, from))) return false;
+  const now = typed + text.slice(to, c.content.to);
+  const lineEnd = text.indexOf('\n', c.close.to);
+  const after = text.slice(c.close.to, lineEnd === -1 ? text.length : lineEnd);
+  const start = text.slice(c.content.from, from) + now;
+  // The closer would stand after the prefix of a line, in front of text: it takes that text, up to
+  // the end of its first word.
+  const prefixed = endsInPrefix(start) && after.trim() !== '';
+  const end = oddBackslashes(start)
+    ? ownBackslashTakes(plan, c.close.to)
+    : prefixed
+      ? (/^[ \t]*\S+/.exec(after)?.[0].length ?? 0) + c.close.to
+      : undefined;
+  if (typeof end === 'string') throw new EditError(end, 'no-legal-placement');
+  if (end === undefined) {
+    plan.changes.push({ from, to, insert: typed });
+    plan.spans.push({ from, to });
+    plan.touched.push(c.mark.id);
+    return true;
+  }
+  if (plan.markers.some((m) => m.from < end && m.to > c.close.to)) return false;
+  ownTakes(plan, c, { from, to, typed }, end);
+  return true;
+}
+
+/**
+ * An edit in the text of your own insertion at the end of the document that a backslash made bring
+ * a line break of its own (`endOfBody`), after which its text no longer ends in a backslash: the
+ * line break goes, and the closer follows the text again, as the substitution that a backslash made
+ * goes back to an insertion (`ownBackslashLeft`). Where the edit takes all the text but the line
+ * break, the insertion goes with its markers. Returns whether it wrote the edit.
+ */
+function ownBringLeft(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text } = plan;
+  // Only where an insertion ends the body with a line break: a closer after one.
+  const end = plan.parsed.ledgerRange?.from ?? text.length;
+  if (!/\n<!--\/\w+-->$/.test(text.slice(Math.max(0, end - 24), end))) return false;
+  const c = ownPlain(plan, 'ins', from, to);
+  if (!c || c.open.to !== c.content.from) return false;
+  const gap = c.content.to - plan.eol.length;
+  if (gap < c.content.from || text.slice(gap, c.content.to) !== plan.eol || to > gap) return false;
+  if (endOfBody(plan, c.close.to)?.bring !== true) return false;
+  if (!oddBackslashes(text.slice(c.content.from, gap))) return false;
+  const mine = text.slice(c.content.from, from) + typed + text.slice(to, gap);
+  // Not where the closer would then follow a line break and the prefix of a block.
+  if (oddBackslashes(mine) || /\n[ \t>]*$/.test(mine)) return false;
+  if (mine === '') {
+    // All the text of the insertion is gone: it goes, with its markers.
+    plan.changes.push({ from: c.open.from, to: c.close.to, insert: '' });
+    plan.spans.push({ from: c.open.from, to: c.close.to });
+    return true;
+  }
+  plan.changes.push({ from, to: c.content.to, insert: typed + text.slice(to, gap) });
+  plan.spans.push({ from, to: c.content.to });
   plan.touched.push(c.mark.id);
   return true;
 }
@@ -1666,11 +1854,78 @@ function escapedMarkers(text: string, parsed: Parsed): number {
   return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
 }
 
+const AFTER_BRING =
+  "A line break can't be typed here while Track Changes is on: the change would leave a marker at the start of a line after a backslash, in a list, where other Markdown readers would read the list otherwise. Type something after the backslash first, or turn off Track Changes.";
+
+/**
+ * How many markers of a file's body start a line (after its prefix) right after a line that ends in
+ * an unescaped backslash, in a list, with more than the marker on it or text after it: the closer
+ * that stands alone after the line break a backslash brought at the end of the document (format
+ * §3.2) is the last line, and it is only allowed there, in a list; a blank line and a line with a
+ * marker on it read otherwise to the list that goes on or breaks off after it. A marker after a
+ * prefix is never allowed there.
+ */
+function bringsBroken(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  const lines = body.split(/\r?\n/);
+  const item = (at: number) => {
+    // A list item holds the line when a bullet or a number starts it or an unbroken run of lines
+    // above it, or when it is indented under one.
+    for (let i = at, n = 0; i >= 0 && n < 40; i--, n++) {
+      const line = lines[i] ?? '';
+      if (/^[ \t>]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) return true;
+      if (line.trim() === '' && !/^[ \t]/.test(lines[at] ?? '')) return false;
+    }
+    return false;
+  };
+  let count = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const lead = /^(?:[ \t>]|[-+*][ \t]|\d{1,9}[.)][ \t])*/.exec(line)?.[0].length ?? 0;
+    if (!/^<!--\/?[a-z]+ ?\w{0,4}/.test(line.slice(lead))) continue;
+    // The line above, past the lines that hold nothing but markers.
+    let above = i - 1;
+    while (above > 0 && (lines[above] ?? '').replace(/<!--[^>]*-->/g, '') === '') above--;
+    if (!oddBackslashes((lines[above] ?? '').replace(/<!--[^>]*-->/g, ''))) continue;
+    const alone = lead === 0 && /^(?:<!--[^>]*-->)*$/.test(line);
+    const more = lines.slice(i + 1).some((l) => l.trim() !== '');
+    // A bullet or a number in front of the marker, or the marker after the indent or the line
+    // that ends the item, in a list.
+    const bullet = /[-+*\d][.)]?[ \t]/.test(line.slice(0, lead));
+    if (bullet || ((!alone || more) && item(above))) count++;
+  }
+  return count;
+}
+
 /** Where the last marker of a file's body that an unescaped backslash escapes starts. */
 function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
   const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
   let at: number | undefined;
   for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
+  return at;
+}
+
+/**
+ * Where a marker stands right after the closer of a substitution, or the marker of a deletion, whose
+ * old text ends in an unescaped backslash: rejecting that change gives the text back in front of
+ * the marker, which it would escape (format §3.1). After a deletion, only the opener of a mark
+ * that `created` has (an edit's own new marks): the deletions that were there already, and the
+ * closers of other changes after them, are as other edits left them.
+ */
+function restoredEscapes(text: string, parsed: Parsed, created: ReadonlySet<string>): number[] {
+  const limit = parsed.ledgerRange?.from ?? text.length;
+  const at: number[] = [];
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'sub' && mark.kind !== 'del') continue;
+    for (const segment of mark.segments) {
+      const old = segment.payload ?? mark.payload ?? '';
+      if (!oddBackslashes(old)) continue;
+      const end = segment.close?.to ?? segment.open.to;
+      if (end >= limit || !text.startsWith('<!--', end)) continue;
+      const next = /^<!--[a-z]+ (\w{4})/.exec(text.slice(end, end + 16))?.[1];
+      if (mark.kind === 'sub' || (next !== undefined && created.has(next))) at.push(end);
+    }
+  }
   return at;
 }
 
@@ -1698,8 +1953,91 @@ function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
   return backslashBefore(nameOf(parsed, mark, author), mark.entry.by === author.handle);
 }
 
+/** Why a change can't be written next to a mark that someone else has not decided yet. */
+function changesHow(parsed: Parsed, mark: MarkRange, author: Person): string {
+  return `This would change how ${nameOf(parsed, mark, author)} reads. Decide it first, or turn off Track Changes.`;
+}
+
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
+
+const BACKSLASH_OLD =
+  'The text this change replaces ends in a backslash. Deciding the changes in another order could leave it right in front of the marker of the new text, where it would escape the marker. Replace the text in two steps, or turn off Track Changes.';
+
+const BACKSLASH_TAKEN =
+  "The backslash that ends the line here can't have a change start after it: the change would take it in, together with other changes next to it, and deciding those in another order could read it otherwise. Decide them first, or turn off Track Changes.";
+
+const BACKSLASH_DEFINITION =
+  "A backslash can't end a link reference definition while Track Changes is on: the change's marker would stand in the definition's destination, and other Markdown readers would no longer read the line as a definition. Type it with Track Changes off.";
+
+/** Whether the line that holds `position` is a link reference definition. */
+function onDefinitionLine(plan: Plan, position: number): boolean {
+  const { text, markers } = plan;
+  const line = visibleText(text, markers, lineStart(text, position), lineEnd(text, position));
+  return /^[ \t>]*\[[^\]\n]+\]:/.test(line);
+}
+
+const BACKSLASH_BEFORE_SYNTAX =
+  "A backslash can't end a block while Track Changes is on when the line after it takes no change (a rule, a fence, a table, a definition, a heading's #s, code, a block of HTML, or a word that ends in a backslash at the end of the document): the change's marker would have to follow the backslash, or start that line. Type it with Track Changes off, or after a word on that line.";
+
+/** The characters of emphasis delimiters. */
+const DELIMITERS = /[*_~]/;
+
+/** Whether the lines of `from` and `to` start and end a paragraph: the lines around them are blank
+ * as they read, or there are none. */
+function aloneInBlock(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const blank = (a: number, b: number) => /^\s*$/.test(visibleText(text, markers, a, b));
+  const start = lineStart(text, from);
+  if (start > 0 && !blank(lineStart(text, start - 1), start - 1)) return false;
+  const end = lineEnd(text, to);
+  if (end >= text.length) return true;
+  const next = nextLineStart(text, end);
+  return next >= text.length || blank(next, lineEnd(text, next));
+}
+
+/**
+ * Whether the markers of a change leave the emphasis in the text around it as it reads without them
+ * (format §3.1, rule 5): `content` is the text the change writes, with a `SPLIT` in front of each
+ * line break that is a split. A marker reads as punctuation to a delimiter run next to it, which
+ * can change what the run does; where the run closes an emphasis that opens in `content`, in the
+ * same pair with or without the markers, it is no change (#81). The whole line is read, and
+ * only when a delimiter is next to a marker: the check costs nothing for other keys.
+ */
+function emphasisKept(
+  plan: Plan,
+  from: number,
+  to: number,
+  content: string,
+  trail: string,
+): boolean {
+  // The whole line: an emphasis opened far back on it pairs with a closer here (#81).
+  const before = visibleText(plan.text, plan.markers, lineStart(plan.text, from), from);
+  const after =
+    trail !== ''
+      ? '\n'
+      : (visibleText(plan.text, plan.markers, to, lineEnd(plan.text, to)).split(/\r?\n/)[0] ?? '');
+  // The splits are markers too: each stands where its `SPLIT` was.
+  let text = before;
+  const joints = new Set<number>([before.length]);
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === SPLIT) {
+      i++;
+      joints.add(text.length);
+    } else text += content[i];
+  }
+  joints.add(text.length);
+  const near = [before.at(-1), content[0], text.at(-1), after[0]];
+  if (!near.some((c) => c !== undefined && DELIMITERS.test(c))) return true;
+  const read = unreadDelimiters(text + after);
+  // A paragraph of its own, a blank line or the document's edge on either side, with the change at
+  // its end, holds every pair its text can make: a run that no pair uses has nothing to open with, whatever the markers
+  // make of its flanks (a fence's tildes typed on a line of their own, with Track Changes on).
+  if (trail === '' && after === '' && !/\n/.test(content) && aloneInBlock(plan, from, to)) {
+    return sameReading(read, joints);
+  }
+  return sameEmphasis(read, joints);
+}
 
 /** Whether `where`, the start of a deletion from `from` to `to`, is the first row of a table that
  * the deletion covers whole: a table is deleted as a block (format §3.4, §3.7). */
@@ -1765,16 +2103,109 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       to = b;
     }
   };
+  // Whether the closer goes alone on the line after the document's final line break.
+  let atEnd = false;
+  // The words that say why a change took in more than it was typed with, when it is refused after.
+  let tookBackslash = '';
+  // Whether the change starts in front of the backslash that a marker would have followed.
+  let grew = false;
+  /** Whether the markers leave the emphasis next to the change as it reads without them. */
+  const kept = () => {
+    const now = left + typing.inner + right;
+    const next = [text[from - 1], now[0], now.at(-1), text[to]];
+    return (
+      !next.some((c) => c !== undefined && DELIMITERS.test(c)) ||
+      emphasisKept(plan, from, to, now, typing.trail)
+    );
+  };
+  /** Whether a marker stands against the change, which the markers of both read as punctuation to
+   * the delimiters between them: then it is written as typed first, and read in every order of
+   * decisions (`emphasisReadsAlike`), and written again by a character if that reads otherwise. */
+  /** Whether a marker of a mark that is no format change or split touches the change. */
+  const stands = (m: MarkerRange) =>
+    m.mark !== undefined &&
+    m.mark.kind !== 'fmt' &&
+    m.mark.kind !== 'split' &&
+    m.to >= from &&
+    m.from <= to;
+  // Whether the change was written again by a character for the sake of the marks against it.
+  let byCharacter = false;
+  const touch = () => {
+    const against = markers.filter((m) => stands(m));
+    for (const m of against) if (m.mark) plan.emphasis.near.add(m.mark.id);
+    if (against.length > 0) plan.emphasis.touched = true;
+    return against.length > 0;
+  };
+  /** Whether the text from `a` to `b`, which the change would write again, is text of an insertion
+   * or substitution: that is not the change's to write again (it would take the mark in). (The marker of a
+   * deletion holds no text, and the change may stand on either side of it.) */
+  const reaches = (a: number, b: number) =>
+    plan.containers.some(
+      (c) =>
+        c.content.to > a && c.content.from < b && (c.content.to <= from || c.content.from >= to),
+    );
+  /** The words of a refusal that names the mark that stands against the change. */
+  const againstWords = () => {
+    const standing = markers.filter((m) => stands(m));
+    const other =
+      standing.find(
+        (m) => m.mark?.kind === 'ins' || m.mark?.kind === 'sub' || m.mark?.kind === 'del',
+      ) ?? standing[0];
+    return other?.mark
+      ? changesHow(plan.parsed, other.mark, plan.ctx.author)
+      : 'A marker here would change how the text next to it is emphasized.';
+  };
+  /** Whether a delimiter stands in the change, next to it, or in or next to a mark that stands
+   * against it: then deciding that mark can put delimiters next to the markers of the change. */
+  const delimiters = () => {
+    const touching = markers.filter((m) => stands(m));
+    if (touching.length === 0) return false;
+    for (const m of touching) if (m.mark) plan.emphasis.near.add(m.mark.id);
+    const chars = [
+      left + typing.inner + right,
+      visibleBefore(plan, from).at(-1),
+      visibleAfter(plan, to)[0],
+    ];
+    for (const m of touching) {
+      const same = markers.filter((o) => o.mark === m.mark);
+      const a = Math.min(...same.map((o) => o.from));
+      const b = Math.max(...same.map((o) => o.to));
+      chars.push(text.slice(a, b), visibleBefore(plan, a).at(-1), visibleAfter(plan, b)[0]);
+    }
+    return chars.some((c) => c !== undefined && DELIMITERS.test(c));
+  };
   for (let attempt = 0; attempt < 24; attempt++) {
     const state = `${from} ${to} ${left} ${right}`;
-    const content = left + typing.inner + right;
+    let content = left + typing.inner + right;
     const first = firstChar(content);
     // A prefix that the change takes away is no place for the marker, but what it leaves is.
     const where = from === start && at !== undefined ? at : from;
     const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
     // A table that the deletion covers whole goes as a block, its first row an opener's place.
     if (open.kind === 'refuse') {
-      if (!coversTable(plan, where, from, to)) refuse(open.reason);
+      if (coversTable(plan, where, from, to)) {
+        // No marker stands in front of it.
+      } else {
+        // Right after a backslash at the end of a line, which would escape the opener: the change
+        // takes the backslash in and starts in front of it (format §3.1).
+        const backslash = open.backslash;
+        if (open.trailing !== undefined && where === from) {
+          // Among the trailing spaces of a hard break: the change starts in front of them.
+          grow(open.trailing, to);
+        } else if (
+          backslash === undefined ||
+          where !== from ||
+          text.slice(backslash, from) !== '\\'
+        ) {
+          refuse(open.reason);
+        } else if (endsInPrefix(`\n${visibleBefore(plan, backslash)}`)) {
+          // The backslash starts its line's text: the opener in front of it would start the line.
+          refuse('A marker here would start a line.');
+        } else {
+          grew = true;
+          grow(backslash, to);
+        }
+      }
     } else if (open.kind === 'construct') grow(open.from, open.to);
     else if (open.kind === 'flank') {
       const p = stepLeft(text, markers, from);
@@ -1790,6 +2221,8 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       }
       grow(start, to);
     }
+    // The text as the opener's widening left it.
+    content = left + typing.inner + right;
     if (content !== '') {
       // The closer comes right after the text, not at the start of the line it is on now; after a
       // closing fence, alone on the line after it (format §3.3).
@@ -1801,28 +2234,99 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         ...(typing.trail !== '' ? { after: SPLIT } : {}),
         ...(joined ? { joined: true } : {}),
       });
-      if (close.kind === 'refuse') refuse(close.reason);
+      if (close.kind === 'refuse' && close.trailing !== undefined) {
+        // Among or behind the trailing spaces of a hard break: the change goes on past the line
+        // break, to the end of the first word of the next line.
+        const ahead = nextWordEnd(plan, nextLineStart(text, to));
+        if (ahead === undefined) refuse(close.reason);
+        grow(from, ahead ?? to);
+      } else if (close.kind === 'refuse') refuse(close.reason + tookBackslash);
       else if (close.kind === 'construct') grow(close.from, close.to);
-      else if (close.kind === 'flank') {
+      else if (
+        close.kind === 'flank' &&
+        (typing.inner === '' ||
+          !kept() ||
+          (touch() && plan.emphasis.mode > 0 && !reaches(to, stepRight(text, markers, to))))
+      ) {
         const p = stepRight(text, markers, to);
         if (p === to || /[\r\n]/.test(text.slice(to, p))) {
           refuse('A marker here would change how the text next to it is emphasized.');
         }
         grow(from, p);
+      } else if (
+        (!kept() || (plan.emphasis.mode > 0 && delimiters())) &&
+        !markers.some(
+          (m) =>
+            (m.from < to && m.to > from) ||
+            (m.to >= from && m.from <= to && (m.mark?.kind === 'fmt' || m.mark?.kind === 'split')),
+        )
+      ) {
+        // The markers read as punctuation to the delimiters next to them, as to a run that both of
+        // them stand next to. Where a marker stands there already, in the range or next to it, the
+        // text is read with it. One character more on the right, or on the left, or both, whichever
+        // leaves it as it was.
+        const l = stepLeft(text, markers, from);
+        const r = stepRight(text, markers, to);
+        const room = (a: number, b: number) => !/[\r\n]/.test(text.slice(a, b)) && a !== b;
+        const keptAt = (a: number, b: number) =>
+          emphasisKept(
+            plan,
+            a,
+            b,
+            visibleText(text, markers, a, from) +
+              left +
+              typing.inner +
+              right +
+              visibleText(text, markers, to, b),
+            typing.trail,
+          );
+        if (!touch()) {
+          if (room(to, r) && keptAt(from, r)) grow(from, r);
+          else if (room(l, from) && keptAt(l, to)) grow(l, to);
+          else if (room(l, from) && room(to, r)) grow(l, r);
+          else refuse('A marker here would change how the text next to it is emphasized.');
+        } else if (plan.emphasis.mode > 0 && !byCharacter) {
+          // Next to another mark, as typed has been read otherwise: by a character on one side or
+          // both, never into the text or the marker of another person's mark, and each way is read
+          // in every order of decisions, the one that leaves the emphasis as it was first.
+          const free = (a: number, b: number) => room(a, b) && !reaches(a, b);
+          const ways: [number, number][] = [];
+          if (free(to, r)) ways.push([from, r]);
+          if (free(l, from)) ways.push([l, to]);
+          if (free(l, from) && free(to, r)) ways.push([l, r]);
+          ways.sort((x, y) => Number(keptAt(...y)) - Number(keptAt(...x)));
+          plan.emphasis.options = Math.max(plan.emphasis.options, ways.length);
+          const way = ways[Math.min(plan.emphasis.mode, ways.length) - 1];
+          if (way) {
+            byCharacter = true;
+            grow(...way);
+          } else refuse(againstWords());
+        }
       }
     }
     // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change
     // takes the character after the backslash as well, which it escapes or stands in front of, or
     // the line break and the next word.
-    if (content !== '' && oddBackslashes(visibleBefore(plan, from) + content)) {
+    const now = left + typing.inner + right;
+    if (now !== '' && oddBackslashes(visibleBefore(plan, from) + now)) {
+      tookBackslash =
+        ' A backslash takes in the character after it, so that the change\u2019s marker does not follow it.';
+      if (onDefinitionLine(plan, from)) refuse(BACKSLASH_DEFINITION);
+      // At the end of the document: the closer goes after the line break that ends it, or after one
+      // of the change's own (`endOfBody`).
+      const last = endOfBody(plan, to);
+      if (last) {
+        atEnd = true;
+        if (last.bring) right += plan.eol;
+        else grow(from, last.end);
+        continue;
+      }
       const p = stepRight(text, markers, to);
-      const past =
-        p === to || (plan.parsed.ledgerRange !== null && p > plan.parsed.ledgerRange.from)
-          ? undefined
-          : /[\r\n]/.test(text.slice(to, p))
-            ? nextWordEnd(plan, nextLineStart(text, to))
-            : p;
-      grow(from, past ?? refuse(BACKSLASH_AT_END));
+      const lineBreak = p !== to && /[\r\n]/.test(text.slice(to, p));
+      const ahead = lineBreak ? nextWordEnd(plan, nextLineStart(text, to)) : undefined;
+      if (p === to) refuse(BACKSLASH_AT_END);
+      if (lineBreak && ahead === undefined) refuse(noWordReason(plan, to));
+      grow(from, ahead ?? p);
       continue;
     }
     // The closer must not start a line either, after the prefix of its block as well (`6. `): the
@@ -1834,18 +2338,33 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       typing.trail === '' &&
       !(typing.fenced === true && right === '') &&
       endsInPrefix(full) &&
+      !atEnd &&
       (/\n[ \t>]*$/.test(full) || visibleAfter(plan, to).trim() !== '')
     ) {
       let p = to;
       while (text[p] === ' ' || text[p] === '\t') p = stepRight(text, markers, p);
       if (p >= text.length || text[p] === '\r' || text[p] === '\n') {
-        refuse('A marker here would start a line.');
+        // Breaks typed after a backslash and the line break that is there: the closer goes after
+        // the line break and the first word of the line after it, as for a backslash alone.
+        const end =
+          typing.plain === true && p === to && p < text.length
+            ? nextWordEnd(plan, nextLineStart(text, p))
+            : undefined;
+        if (end === undefined) refuse('A marker here would start a line.');
+        grow(from, end ?? p);
+        continue;
       }
       while (p < text.length && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
       grow(from, p);
     }
     if (state === `${from} ${to} ${left} ${right}`) {
       if (right !== '' && typing.trail !== '') refuse('A marker here would start a line.');
+      // A change that took in the backslash in front of it is one substitution, or nothing: with
+      // other changes in its range, deciding them in another order could read it otherwise.
+      if (grew && !soleReplace(plan, from, to, { ...typing, inner: left + typing.inner + right })) {
+        refuse(BACKSLASH_TAKEN);
+      }
+      if (delimiters()) plan.emphasis.touched = true;
       return { from, to, left, right };
     }
   }
@@ -2626,6 +3145,13 @@ function closerAfterWord(
   let p = start;
   while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
   for (let attempt = 0; attempt < 16 && p <= end; attempt++) {
+    // Not inside a code span, which takes no marker: after it, and the rest of the word.
+    const span = codeSpanAt(edited, moved, p + delta);
+    if (span) {
+      p = span.to - delta;
+      while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+      continue;
+    }
     const place = inspectPlace(edited, moved, p + delta);
     if (place.kind === 'ok') return p;
     if (place.kind === 'construct' && place.to - delta > p) p = place.to - delta;
@@ -3044,6 +3570,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // A backslash that would end your own insertion, typed or left by a deletion, and the text after
   // the one that a backslash ended once it no longer does (format §3.1).
   if (
+    ownBringLeft(plan, from, to, typed) ||
     ownBreakAfterBackslash(plan, from, to, typed) ||
     ownBackslashEnd(plan, from, to, typed) ||
     ownBackslashLeft(plan, from, to, typed)
@@ -3297,16 +3824,50 @@ function planEdit(plan: Plan, edit: TextChange): void {
   let typing: Typing = { inner: typed, trail: '' };
   if (!past) {
     const tokens = tokenize(typed, linePrefixAt(text, from), typedAt(plan, from, to));
+    // A line break typed right after a backslash is text of the change, with no split: a split
+    // would stand right after the backslash, which would escape its marker (format §3.1).
+    let plain = false;
+    if (tokens.some((token) => 'brk' in token)) {
+      let written = visibleBefore(plan, from);
+      for (const [i, token] of tokens.entries()) {
+        if ('text' in token) written += token.text;
+        else {
+          if (oddBackslashes(written)) {
+            tokens[i] = { text: token.brk };
+            plain = true;
+          }
+          written += token.brk;
+        }
+      }
+    }
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
     const settled = settleTrail(plan, { from, to }, tokens);
     ({ from, to } = settled.range);
-    typing = typingOf(settled.tokens);
+    typing = { ...typingOf(settled.tokens), ...(plain ? { plain: true } : {}) };
   }
   const placed = past
     ? { from, to, left: '', right: '' }
     : legalize(plan, { from, to }, typing, blocks?.at);
+  // The old text ends in a backslash that a marker follows right after it: only a substitution
+  // keeps that text in its marker, where deciding the changes in another order would give it back
+  // in front of the marker of the new text (format §3.1).
+  if (
+    !past &&
+    placed.from < placed.to &&
+    placed.left + typing.inner + placed.right !== '' &&
+    text[placed.to - 1] === '\\' &&
+    oddBackslashes(
+      visibleBefore(plan, placed.from) + visibleText(text, markers, placed.from, placed.to),
+    ) &&
+    !soleReplace(plan, placed.from, placed.to, {
+      ...typing,
+      inner: placed.left + typing.inner + placed.right,
+    })
+  ) {
+    throw new EditError(BACKSLASH_OLD, 'no-legal-placement');
+  }
   plan.spans.push({ from: placed.from, to: placed.to });
   // Widening can take a split into the range. The break is in the text that is written again.
   if (!past && (placed.from < from || placed.to > to)) {
@@ -4052,7 +4613,52 @@ export function trackedEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  const plan = createPlan(text, ctx);
+  const random = ctx.random;
+  // The next try draws the ids that the first one did.
+  const drawn: Uint8Array[] = [];
+  const first: EditContext = random
+    ? {
+        ...ctx,
+        random: (n) => {
+          const bytes = random(n);
+          drawn.push(Uint8Array.from(bytes));
+          return bytes;
+        },
+      }
+    : ctx;
+  const again = (): EditContext => {
+    let next = 0;
+    return random
+      ? {
+          ...ctx,
+          random: (n) => {
+            const bytes = drawn[next++];
+            return bytes?.length === n ? bytes : random(n);
+          },
+        }
+      : ctx;
+  };
+  // As typed first; where that reads otherwise next to another mark, each way of writing the change
+  // again by a character, until one reads alike in every order of decisions, or none does.
+  for (let mode = 0; ; mode++) {
+    try {
+      return editsOnce(text, edits, mode === 0 ? first : again(), mode);
+    } catch (error) {
+      if (!(error instanceof ReadsOtherwise)) throw error;
+    }
+  }
+}
+
+/** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
+class ReadsOtherwise extends Error {}
+
+function editsOnce(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  mode: number,
+): TrackedEdits {
+  const plan = createPlan(text, ctx, mode);
   const views = viewsOnce();
   // A caret between the CR and the LF of a line break is after the line break: text typed there
   // would leave a CR of its own, which Markdown reads as a line break.
@@ -4109,10 +4715,40 @@ export function trackedEdits(
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
+      // A change that stands against another mark reads as typed in every order of decisions, or
+      // is written again by a character, or is refused (format §3.1, rule 5).
+      if (plan.emphasis.touched) {
+        const ids = new Set(plan.emphasis.near);
+        if (!emphasisReadsAlike(after, ids)) {
+          if (mode === 0 || mode < plan.emphasis.options) throw new ReadsOtherwise();
+          const next = neighbours(after, ids);
+          const other =
+            next.find(
+              (mark) => mark.entry.by !== ctx.author.handle && mark.entry.by !== 'unknown',
+            ) ?? next[0];
+          throw new EditError(
+            other
+              ? changesHow(parsed, other, ctx.author)
+              : 'A marker here would change how the text next to it is emphasized.',
+            'no-legal-placement',
+          );
+        }
+      }
       // Whatever the path: no marker this edit brings right after an unescaped backslash.
       if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {
         const at = escapedMarkerAt(after, parsed) ?? -1;
         throw new EditError(backslashBeforeAt(parsed, at, ctx.author), 'no-legal-placement');
+      }
+      if (bringsBroken(after, parsed) > bringsBroken(text, plan.parsed)) {
+        throw new EditError(AFTER_BRING, 'no-legal-placement');
+      }
+      // Nor in any other order of decisions: the old text of a change, given back, ends in one.
+      const now = restoredEscapes(after, parsed, new Set([...plan.created, ...plan.split]));
+      if (now.length > 0 && now.length > restoredEscapes(text, plan.parsed, new Set()).length) {
+        throw new EditError(
+          backslashBeforeAt(parsed, now.at(-1) ?? -1, ctx.author),
+          'no-legal-placement',
+        );
       }
     },
     inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))
