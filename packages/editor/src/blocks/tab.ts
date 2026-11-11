@@ -11,6 +11,7 @@
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
 import { EditError, type FormatOp } from '@redlines/format';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
 import { openBlock, recordField } from './open.ts';
@@ -32,6 +33,8 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 }
 
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
 const NOT_UNDER_TEXT =
   "An empty item can't be indented under a line of text in Markdown. Type in it first.";
 
@@ -40,8 +43,28 @@ const NOT_UNDER_TEXT =
  * edit is final, as it stands, no typing: of the break of the item's own pending split, or of a
  * line no reader sees the indentation of.
  */
-function planned(state: EditorState, changes: ChangeSpec[], more: Partial<KeyEdit> = {}): KeyEdit {
+function planned(
+  state: EditorState,
+  changes: ChangeSpec[],
+  more: Partial<KeyEdit> = {},
+  item?: Item,
+): KeyEdit {
   const { head } = state.selection.main;
+  // Another person's pending split made the break: its prefix is theirs, and the tracked layer
+  // takes no edit of it until their change is decided, so it is refused, in words.
+  const me = state.facet(authorFacet)?.handle;
+  const theirs =
+    item !== undefined &&
+    item.line.number > 1 &&
+    state
+      .field(parsedField)
+      .marks.some(
+        (mark) =>
+          mark.kind === 'split' &&
+          mark.entry.by !== me &&
+          mark.segments.some((g) => g.open.to === state.doc.line(item.line.number - 1).to),
+      );
+  if (theirs) return { ...nothing(state), userEvent: 'indent', refusal: THEIR_SPLIT };
   return {
     changes,
     selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
@@ -70,7 +93,7 @@ function planEmptyItem(state: EditorState, item: Item, outdent: boolean): KeyEdi
     const changes: ChangeSpec[] = [{ from: line.from, to: mark.from, insert: parent.indent }];
     // An open item that moves out is an ordinary item again, and Backspace right after puts it
     // back, open.
-    return planned(state, changes, openBlock(state)?.item ? { record: true } : {});
+    return planned(state, changes, openBlock(state)?.item ? { record: true } : {}, item);
   }
   let before = item.node.prevSibling;
   while (before && before.name !== 'ListItem') before = before.prevSibling;
@@ -99,9 +122,9 @@ function planEmptyItem(state: EditorState, item: Item, outdent: boolean): KeyEdi
   ) {
     const made = state.field(recordField, false)?.at(-1)?.caret === head;
     if (!made) return { ...nothing(state), userEvent: 'indent', refusal: NOT_UNDER_TEXT };
-    return planned(state, changes, { open: { at: head, assoc: 1, item: true } });
+    return planned(state, changes, { open: { at: head, assoc: 1, item: true } }, item);
   }
-  return planned(state, changes);
+  return planned(state, changes, {}, item);
 }
 
 /** Whether the item is nested in another one. */

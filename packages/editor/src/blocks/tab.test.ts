@@ -510,6 +510,26 @@ describe('an unsound empty item the file already holds is an ordinary line', () 
   );
 });
 
+describe("an empty item of another person's pending split", () => {
+  // The tracked layer takes no edit of their break until it is decided, and the file is never
+  // changed untracked: refused, in words, and every order of decisions reads as before.
+  const THEIRS =
+    "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
+  scriptRows(
+    ['Tab', 'Shift-Tab'].map((key) => ({
+      name: `${key} with Track Changes on is refused`,
+      doc: key === 'Tab' ? '- one⏎  - a<split>⏎- ‸' : '- one⏎  - a<split>⏎  - ‸',
+      others: 'bo',
+      keys: [key as 'Tab'],
+      tc: true,
+      expect: {
+        file: key === 'Tab' ? '- one⏎  - a<split>⏎- ' : '- one⏎  - a<split>⏎  - ',
+        refusal: THEIRS,
+      },
+    })),
+  );
+});
+
 describe('the open empty item', () => {
   it('is read as an item at its level holding a character, and left out of the file', () => {
     const parent = document.createElement('div');
