@@ -62,7 +62,10 @@ describe('random keys in code after other people’s changes', () => {
         else if (k < 0.9) blocks.push(`- list a${i}\n- list b${i}`);
         else blocks.push(`## Head ${i}`);
       }
-      let text = file(blocks.join(r() < 0.8 ? '\n\n' : '\n'));
+      // A quarter of the files have CRLF line breaks, which an agent through the command line sends.
+      const eol = r() < 0.25 ? '\r\n' : '\n';
+      const lf = (insert: string) => insert.replace(/\n/g, eol);
+      let text = file(blocks.join(r() < 0.8 ? '\n\n' : '\n')).replace(/\n/g, eol);
       try {
         if (parse(text).warnings.length) continue;
       } catch {
@@ -74,10 +77,10 @@ describe('random keys in code after other people’s changes', () => {
         const at = Math.floor(r() * body.length);
         const edit =
           kind === 0
-            ? { from: at, to: at, insert: pick(['x', 'ab', '\n', ' ']) }
+            ? { from: at, to: at, insert: lf(pick(['x', 'ab', '\n', ' '])) }
             : kind === 1
               ? { from: at, to: Math.min(body.length, at + 1 + Math.floor(r() * 5)), insert: '' }
-              : { from: at, to: at, insert: '\n\n' };
+              : { from: at, to: at, insert: lf('\n\n') };
         try {
           const result = trackedEdits(text, [edit], context(who, ids.splice(0, 6)));
           text = applyChanges(text, result.changes);
@@ -91,7 +94,7 @@ describe('random keys in code after other people’s changes', () => {
       }
       const before = bodyOf(text);
       const lines = [
-        ...before.matchAll(/(?:let a = 1;|plot\(x\)|x = 1|one|y|indented one|\nx\n|Doc)/g),
+        ...before.matchAll(/(?:let a = 1;|plot\(x\)|x = 1|one|y|indented one|\r?\nx\r?\n|Doc)/g),
       ];
       // Not in a marker's payload: only text the document shows.
       const markers = [...before.matchAll(/<!--[^]*?-->/g)].map((m) => [
@@ -106,7 +109,7 @@ describe('random keys in code after other people’s changes', () => {
       const at = hit.index + Math.floor(r() * (hit[0].length + 1)) - (r() < 0.2 ? 1 : 0);
       const edit = pick([
         { from: at, to: at, insert: 'Q' },
-        { from: at, to: at, insert: '\n' },
+        { from: at, to: at, insert: lf('\n') },
         { from: at, to: Math.min(before.length, at + 1), insert: '' },
         { from: at, to: at, insert: '  ' },
         { from: at, to: at, insert: ' ' },
