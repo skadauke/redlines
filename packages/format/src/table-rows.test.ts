@@ -415,7 +415,8 @@ describe('the space after an inserted row’s marker', () => {
 });
 
 describe('a pending format change in a moved or deleted row', () => {
-  const BOLD = '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| <!--fmt m2bd +bold-->**Pears**<!--/m2bd-->  | 5     |\n| Plums  | 7     |';
+  const BOLD =
+    '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| <!--fmt m2bd +bold-->**Pears**<!--/m2bd-->  | 5     |\n| Plums  | 7     |';
   const bold = (by: string) => file(BOLD, { m2bd: by });
 
   it('travels with a moved row, and rejecting the move, the change or both read alike', () => {
@@ -436,7 +437,10 @@ describe('a pending format change in a moved or deleted row', () => {
     const deleted = edit(bold('ada'), { kind: 'deleteRows', rows: [2] }).after;
     expect(trim(deleted)).toContain('row=2 \\| Pears  \\| 5     \\|');
     expect(trim(deleted)).not.toContain('**');
-    const restored = applyChanges(deleted, reject(deleted, Object.keys(parse(deleted).ledger.marks)[0] ?? ''));
+    const restored = applyChanges(
+      deleted,
+      reject(deleted, Object.keys(parse(deleted).ledger.marks)[0] ?? ''),
+    );
     expect(trim(restored)).toContain('| Pears  | 5     |');
     expect(trim(restored)).not.toContain('**');
     expect(trim(originalView(deleted).text)).toBe(trim(restored));
