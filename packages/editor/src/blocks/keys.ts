@@ -40,6 +40,7 @@ import { blockAt } from './structure.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
+  openBlock,
   openAnnotation,
   type OpenRequest,
   requestedLine,
@@ -199,6 +200,13 @@ function blockKey(run: Command): Command {
 }
 
 const returnKey = blockKey((view) => {
+  // In the open empty item Markdown can't hold at its level: out one level, where it can.
+  const open = openBlock(view.state);
+  const { main } = view.state.selection;
+  if (open?.item && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    const out = planTab(view.state, true);
+    if (out) return applyKeyEdit(view, out);
+  }
   const over = planSelectionReturn(view.state);
   if (over) {
     const before = view.state.doc;

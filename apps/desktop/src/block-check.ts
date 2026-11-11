@@ -244,6 +244,48 @@ const CHECKS: Check[] = [
       editor.getDoc().includes('was=indent') ? { fmt: notation(editor.getDoc()) } : null,
   },
   {
+    name: 'tab-after-return-opens-item-not-in-file',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    caret: '- one⏎- two⏎  - ‸',
+    file: '- one⏎- two',
+    open: true,
+  },
+  {
+    name: 'tab-after-return-then-leaving-takes-it-back',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', 'ArrowUp'],
+    file: '- one⏎- two',
+    open: false,
+    test: (editor) =>
+      editor.view.state.doc.toString() === '- one\n- two'
+        ? null
+        : { live: editor.view.state.doc.toString() },
+  },
+  {
+    name: 'tab-after-return-then-shift-tab-is-an-ordinary-item',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', 'Shift-Tab'],
+    caret: '- one⏎- two⏎- ‸',
+    file: '- one⏎- two⏎- ',
+    open: false,
+  },
+  {
+    name: 'tracked-tab-after-return-opens-item-not-in-file',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    tracking: true,
+    file: '- one⏎- two',
+    open: true,
+  },
+  {
+    name: 'tab-on-empty-item-of-the-file-is-refused',
+    doc: '- one⏎- two⏎- ‸',
+    steps: ['Tab'],
+    file: '- one⏎- two⏎- ',
+    open: false,
+  },
+  {
     name: 'option-up-to-start-of-paragraph',
     doc: 'One.⏎⏎Tw‸o three.',
     steps: ['Alt-ArrowUp'],

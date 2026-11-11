@@ -282,6 +282,21 @@ block, each of which renders. So:
   as one loose list; the list must not be drawn loose while the caret is there.
 - An **empty line** opened by Shift-Return at the end of a block's text behaves the same way
   (below, "Shift-Return").
+- **An empty item that Tab indents under a line of text is open too (Stage 2).** Markdown has no
+  empty item right under a line of text in a tight list: an empty bullet item there is a setext
+  underline (`- one⏎- two⏎  - ` is `<li><h2>two</h2></li>`), and an empty numbered one is the
+  paragraph's text (`2. two⏎   1. ` is `<li>two 1.</li>`). So when the person's own Return made an
+  empty item and Tab (or Shift-Tab back and Tab again) moves it to a level where it would be one, it
+  is open, as the empty paragraph is: drawn as an empty item at its level, with spacing and numbers
+  read as if it held a character; left out of the file, with the line break and the marker that make
+  it (`textWithoutOpen`), so that the file never holds the form Markdown can't; written when text is
+  typed in it (`- two⏎  - x`; with Track Changes on the split's break is edited and no mark is made
+  for the indentation); taken back, with its Return, when the caret leaves; and an ordinary item
+  again when Shift-Tab or Return moves it to a level where Markdown can hold it (`- two⏎- `, as
+  Return writes it). **Call:** only an empty item the person's own keys made: a file that already
+  holds `- one⏎  -` is read as Markdown reads it, and Tab on an empty item that Return didn't just
+  make, where it would make this form, is refused ("An empty item can't be indented under a line
+  of text in Markdown. Type in it first.").
 
 **Call:** the empty paragraph is transient. Showing it after you leave would draw something no
 renderer shows; keeping its blank lines in the file would leave stray lines that pile up.
@@ -486,7 +501,7 @@ items, at every depth; the rows after the first block say what differs.
 | End of the first paragraph of an item that has a second (`- p1‸⏎⏎  p2`; reason below) | A new item | An empty paragraph inside the item, between the two | `- p1⏎⏎  ‸⏎⏎  p2` | Plain ✓ | ✓ |
 | Middle of the text (`- one ‸two`) | Two items | Two items; what follows in the item goes with the second | `- one ⏎- ‸two` | `- one <split>⏎- ‸two` ✓ | ✓ |
 | Start of the text (`- ‸two`) | An empty item above; the caret stays | Same | `- ⏎- ‸two` | `- <split>⏎- ‸two` ✓ | ✓ |
-| An empty nested item (`- one⏎  - ‸`) | Up one level (Word; Docs not confirmed) | Up one level | `- one⏎- ‸` | Your own item: the split's break edited ✓; another's: a change of its prefix | `- one⏎  - ‸` ✓ |
+| An empty nested item (`- one⏎  - ‸`; after a Return, Tab it is open: the file has `- one` without it until text is typed, above, "The empty paragraph") | Up one level (Word; Docs not confirmed) | Up one level | `- one⏎- ‸` | Your own item: the split's break edited ✓; another's: a change of its prefix | `- one⏎  - ‸` (the open item again) ✓ |
 | An empty item at the top level, the last | Ends the list: an empty Normal paragraph | Leaves the list: an empty paragraph after it | `- two⏎⏎‸⏎⏎After.` | `- two<split>⏎⏎‸⏎⏎After.` ✓ (your split's break changed) | Back to the empty item `- two⏎- ‸` ✓ |
 | An empty item at the top level, in the middle | Ends the list there; the rest is another list | The same: an empty paragraph between two lists (while it's empty the file would read one loose list, which is why saving leaves it out) | `- one⏎⏎‸⏎⏎- two` | A split changed, as above | ✓ |
 | An empty item in a list in a quote (`> - one⏎> - ‸`) | — | Leaves the list, stays in the quote | `> - one⏎>⏎> ‸` | Plain or your split's break | ✓ |
@@ -700,7 +715,8 @@ whatever its number.
 
 Tab right after Return, the common way to start a nested item, edits your own new item's split, as
 the probe shows (`- two<split>⏎  - ‸`), so it writes no block change and is never too many changes
-to check (#172).
+to check (#172). That empty item is open, not in the file (see "The empty paragraph"): the file has
+`- two` until text is typed in it, and the item is written then, as `- two<ins><split>⏎  - X</ins>`.
 
 ## Typed syntax and the Paragraph menu on an empty paragraph
 

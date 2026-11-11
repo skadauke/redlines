@@ -10,9 +10,10 @@
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
 import { EditError, type FormatOp } from '@redlines/format';
-import { authorFacet, parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
+import { openBlock, recordField } from './open.ts';
 import { type Block, blockAt } from './structure.ts';
 
 /** The innermost list item that a paragraph block is in, with the text position that stands for it. */
@@ -31,27 +32,15 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 }
 
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
-
-/** Whether `item` is an empty item that a pending split of the author's own made. */
-function ownSplitItem(state: EditorState, item: Item): boolean {
-  const me = state.facet(authorFacet)?.handle;
-  if (!me || item.line.number < 2) return false;
-  const above = state.doc.line(item.line.number - 1);
-  return state
-    .field(parsedField)
-    .marks.some(
-      (mark) =>
-        mark.kind === 'split' &&
-        mark.entry.by === me &&
-        mark.segments.some((segment) => segment.open.to === above.to),
-    );
-}
+const NOT_UNDER_TEXT =
+  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
 
 /**
  * A plain edit of an empty item's line, with the caret kept in place. With Track Changes on the
- * edit is of the break of the item's own pending split, as it stands: final, no typing.
+ * edit is final, as it stands, no typing: of the break of the item's own pending split, or of a
+ * line no reader sees the indentation of.
  */
-function planned(state: EditorState, changes: ChangeSpec[]): KeyEdit {
+function planned(state: EditorState, changes: ChangeSpec[], more: Partial<KeyEdit> = {}): KeyEdit {
   const { head } = state.selection.main;
   return {
     changes,
@@ -59,6 +48,7 @@ function planned(state: EditorState, changes: ChangeSpec[]): KeyEdit {
     userEvent: 'indent',
     caretAt: head,
     ...(state.field(trackingField, false) ? { final: true } : {}),
+    ...more,
   };
 }
 
@@ -78,7 +68,9 @@ function planEmptyItem(state: EditorState, item: Item, outdent: boolean): KeyEdi
     const parent = itemsAround(state, blockAt(state, head)!)[1];
     if (!parent) return { ...nothing(state), userEvent: 'indent' };
     const changes: ChangeSpec[] = [{ from: line.from, to: mark.from, insert: parent.indent }];
-    return planned(state, changes);
+    // An open item that moves out is an ordinary item again, and Backspace right after puts it
+    // back, open.
+    return planned(state, changes, openBlock(state)?.item ? { record: true } : {});
   }
   let before = item.node.prevSibling;
   while (before && before.name !== 'ListItem') before = before.prevSibling;
@@ -98,6 +90,17 @@ function planEmptyItem(state: EditorState, item: Item, outdent: boolean): KeyEdi
       ? { from: mark.from, to: mark.from + number.length, insert: `${indentation}1` }
       : { from: mark.from, insert: indentation },
   ];
+  // Under a line of text Markdown has no such item: it is open, as an empty paragraph is, if the
+  // person's own Return just made it; otherwise refused.
+  const found = EMPTY_ITEM.exec(line.text);
+  if (
+    found &&
+    unsoundEmptyItem(doc, line.number, found[1]!, found[2]!.length + indentation.length, found[3]!)
+  ) {
+    const made = state.field(recordField, false)?.at(-1)?.caret === head;
+    if (!made) return { ...nothing(state), userEvent: 'indent', refusal: NOT_UNDER_TEXT };
+    return planned(state, changes, { open: { at: head, assoc: 1, item: true } });
+  }
   return planned(state, changes);
 }
 
@@ -120,13 +123,10 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   if (!first || !last) return null;
   // Shift-Tab in a top-level item does nothing.
   if (outdent && !nested(state, start) && !nested(state, end)) return nothing(state);
-  // An empty item that has none: its own pending split's break is edited, or with Track Changes off
-  // the line is.
+  // An empty item has no text for the format to write a change around: its line is edited.
   const only = from === to && first.item.node === last.item.node;
-  if (only && start.text.from >= start.text.to) {
-    if (!state.field(trackingField, false) || ownSplitItem(state, first.item)) {
-      return planEmptyItem(state, first.item, outdent);
-    }
+  if (only && start.text.from >= start.text.to && start.lines.from === first.item.line.from) {
+    return planEmptyItem(state, first.item, outdent);
   }
   const op: FormatOp = { kind: 'indent', by: outdent ? -1 : 1 };
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };

@@ -98,6 +98,7 @@ const WALKED: Invariant[] = [
   'line-start',
   'decisions',
   'undo',
+  'list-reads',
   'open-caret',
   'history',
 ];

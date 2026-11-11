@@ -30,11 +30,18 @@ import {
   type TransactionSpec,
 } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditError, reject } from '@redlines/format';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
 import { doneDepth, dropStepsEffect } from '../history/index.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
-import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import {
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from '../tracked/field.ts';
+import { unsoundEmptyLine } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { blockAt, isGapLine, loose, type Span } from './structure.ts';
 
@@ -44,6 +51,11 @@ export interface OpenBlock {
   empty: Span;
   /** The lines of the block Return was pressed in, where the caret may be while it stays open. */
   pressedIn: Span | null;
+  /**
+   * An empty list item that Markdown can't hold at its level (`empty-item.ts`), open as an empty
+   * paragraph is: its line is the item's, marker and all, left out of the file with its line break.
+   */
+  item?: true;
 }
 
 /** What one Return did, kept so that it can be taken back exactly. */
@@ -82,6 +94,8 @@ export interface OpenRequest {
   down?: number;
   /** The block Return was pressed in, where the caret may be while it stays open. */
   pressedIn?: Span | null;
+  /** The line is an empty item's, not an empty paragraph's. */
+  item?: true;
 }
 
 /** Marks a key's transaction that opens (or keeps) the empty block, and where. */
@@ -134,7 +148,11 @@ function mapOpen(open: OpenBlock, mapping: ChangeDesc): OpenBlock | null {
     from: mapping.mapPos(open.pressedIn.from, -1),
     to: mapping.mapPos(open.pressedIn.to, 1),
   };
-  return { empty, pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null };
+  return {
+    empty,
+    pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null,
+    ...(open.item ? { item: true as const } : {}),
+  };
 }
 
 /** The blocks whose blank lines are content: no empty paragraph opens in them. */
@@ -215,6 +233,20 @@ function emptyParagraphAbove(tr: Transaction): OpenBlock | null {
   };
 }
 
+/**
+ * The empty item Markdown can't hold that the caret is on after ⌘Z or ⇧⌘Z has put it back (the Tab
+ * that made it, undone and redone): open again, since the file must not get it.
+ */
+function emptyItemAt(tr: Transaction): OpenBlock | null {
+  if (!tr.isUserEvent('undo') && !tr.isUserEvent('redo')) return null;
+  const { state } = tr;
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  const line = state.doc.lineAt(main.head);
+  if (!unsoundEmptyLine(state.doc, line.number) || inHolder(state, line.from)) return null;
+  return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
+}
+
 /** The line of the new document a key's open request names (`OpenRequest`). */
 export function requestedLine(tr: Transaction, request: OpenRequest): Line {
   const doc = tr.newDoc;
@@ -229,6 +261,9 @@ export function requestedLine(tr: Transaction, request: OpenRequest): Line {
 /** The open block a key asked for, in the transaction's new document. */
 function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
   const line = requestedLine(tr, request);
+  if (request.item) {
+    return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
+  }
   if (!gap(tr.state, line)) return null;
   let pressedIn: Span | null = null;
   if (request.pressedIn) {
@@ -260,7 +295,7 @@ export const openBlockField = StateField.define<OpenBlock | null>({
     // A change that leaves the caret on an empty line between blank lines opens it: ⌘Z of typing
     // in it, of a take-back, deleting all of a paragraph's text.
     if (tr.annotation(Transaction.remote)) return null;
-    return emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr);
+    return emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr) ?? emptyItemAt(tr);
   },
 });
 
@@ -317,6 +352,7 @@ function openers(state: EditorState): readonly Taken[] | null {
 function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
   const { doc } = state;
   const line = doc.lineAt(open.empty.from);
+  if (open.item) return itemRemoval(state, line);
   if (!BLANK.test(line.text)) return null;
   const plainBlank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
   const n = line.number;
@@ -338,6 +374,39 @@ function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
     to = doc.length;
   }
   return from < to ? state.changes({ from, to }) : null;
+}
+
+/** What `itemRemoval` found for a document, so that a file read isn't a parse each time. */
+let lastItemRemoval: { doc: Text; line: number; changes: ChangeSet | null } | undefined;
+
+/**
+ * The changes that take an open empty item away: its line and the line break before it, and with
+ * Track Changes on the split of the author's own that made the break, rejected, which takes its
+ * ledger entry with it. Null when the line is no item's.
+ */
+function itemRemoval(state: EditorState, line: Line): ChangeSet | null {
+  const { doc } = state;
+  const hit = lastItemRemoval;
+  if (hit && hit.doc === doc && hit.line === line.from) return hit.changes;
+  let changes: ChangeSet | null = null;
+  if (line.number > 1 && /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(line.text)) {
+    const above = doc.line(line.number - 1);
+    const split = state
+      .field(parsedField, false)
+      ?.marks.find(
+        (mark) => mark.kind === 'split' && mark.segments.some((g) => g.open.to === above.to),
+      );
+    if (split) {
+      try {
+        changes = ChangeSet.of(reject(doc.toString(), split.id), doc.length);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    }
+    changes ??= state.changes({ from: above.to, to: line.to });
+  }
+  lastItemRemoval = { doc, line: line.from, changes };
+  return changes;
 }
 
 /**
@@ -683,7 +752,7 @@ export function throughOpen(state: EditorState, next: Text): ThroughOpen | null 
     });
     return whole;
   }
-  if (gone(above) || gone(below)) survives = false;
+  if (gone(above) || gone(below) || open.item) survives = false;
   diff.iterChangedRanges((fromA, toA) => {
     if (fromA < gap.to && toA > gap.from && (fromA !== toA || (fromA > gap.from && fromA < gap.to)))
       survives = false;

@@ -1747,9 +1747,10 @@ describe('indenting a numbered item (format §2.6, rule 3, #171)', () => {
 describe('outdenting an item whose numbered sibling would become its child', () => {
   it('refuses, in words that say why, and outdents where the child reads as an item', () => {
     for (const text of ['1. one\n   1. a\n   2. b\n', '1) one\n   1) a\n   3) b\n']) {
-      expect(message(() => changed(text, rangeOf(text, 'a'), indent(-1))), text).toMatch(
-        /would become its first child/,
-      );
+      expect(
+        message(() => changed(text, rangeOf(text, 'a'), indent(-1))),
+        text,
+      ).toMatch(/would become its first child/);
     }
     // Numbered 1, after a blank line, a bullet, or its own child item: an item or a sibling.
     for (const text of [

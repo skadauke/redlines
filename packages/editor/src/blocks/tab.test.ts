@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 // Tab and Shift-Tab in list items (design: block editing, "Tab and Shift-Tab; numbered sublists"),
 // with Track Changes off and on.
+import { runScopeHandlers } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 import { createEditor } from '../index.ts';
+import { readTree } from '../preview/spacing.ts';
+import { openBlock } from './open.ts';
 import { type Script, scriptRows, type Step } from './script.ts';
 
 interface Row {
@@ -37,6 +40,8 @@ const both = (rows: Row[]): Script[] =>
 
 const NUMBERED_UNDER =
   "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
+const NOT_UNDER_TEXT =
+  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const TOO_MANY =
   'There are 7 pending changes in this list, too many to check this change against. Accept or reject some of them first.';
@@ -104,8 +109,9 @@ describe('Tab in a list item', () => {
         name: 'on an item that Return just made: the new item under the one it came from',
         doc: '- one⏎- two‸',
         keys: ['Enter', 'Tab'],
-        off: { file: '- one⏎- two⏎  - ', caret: '- one⏎- two⏎  - ‸' },
-        on: { file: '- one⏎- two<split>⏎  - ', caret: '- one⏎- two<split>⏎  - ‸' },
+        // Open: the item is drawn and the caret is in it, the file has none (`- two` alone).
+        off: { file: '- one⏎- two', caret: '- one⏎- two⏎  - ‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two<split>⏎  - ‸' },
       },
       {
         name: 'on an item that Return just made, then text typed',
@@ -125,8 +131,71 @@ describe('Tab in a list item', () => {
         name: 'on a numbered item that Return just made: numbered from 1',
         doc: '1. one⏎2. two‸',
         keys: ['Enter', 'Tab'],
-        off: { file: '1. one⏎2. two⏎   1. ', caret: '1. one⏎2. two⏎   1. ‸' },
-        on: { file: '1. one⏎2. two<split>⏎   1. ', caret: '1. one⏎2. two<split>⏎   1. ‸' },
+        off: { file: '1. one⏎2. two', caret: '1. one⏎2. two⏎   1. ‸' },
+        on: { file: '1. one⏎2. two', caret: '1. one⏎2. two<split>⏎   1. ‸' },
+      },
+      {
+        name: 'on an item Return just made, then the caret leaves: it is taken back with its Return',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'ArrowLeft'],
+        off: { file: '- one⏎- two', caret: '- one⏎- two‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two‸' },
+      },
+      {
+        name: 'on an item Return just made, then Backspace: it goes, the caret at the end above',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'Backspace'],
+        off: { file: '- one⏎- two', caret: '- one⏎- two‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two‸' },
+      },
+      {
+        name: 'on an item Return just made, then Return: out one level, an ordinary item',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'Enter'],
+        off: { file: '- one⏎- two⏎- ', caret: '- one⏎- two⏎- ‸' },
+        on: { file: '- one⏎- two<split>⏎- ', caret: '- one⏎- two<split>⏎- ‸' },
+      },
+      {
+        name: 'on an item Return just made, Shift-Tab, then Backspace: open again',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'Shift-Tab', 'Backspace'],
+        off: { file: '- one⏎- two', caret: '- one⏎- two⏎  - ‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two<split>⏎  - ‸' },
+      },
+      {
+        name: 'on an item Return just made, Shift-Tab, then Tab: open again',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'Shift-Tab', 'Tab'],
+        off: { file: '- one⏎- two', caret: '- one⏎- two⏎  - ‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two<split>⏎  - ‸' },
+      },
+      {
+        name: 'on an item Return just made, then Undo and Redo: open again, the file without it',
+        doc: '- one⏎- two‸',
+        keys: ['Enter', 'Tab', 'Mod-z', 'Mod-y'],
+        off: { file: '- one⏎- two', caret: '- one⏎- two⏎  - ‸' },
+        on: { file: '- one⏎- two', caret: '- one⏎- two<split>⏎  - ‸' },
+      },
+      {
+        name: 'on an empty item the file already holds: refused, in words that say why',
+        doc: '- one⏎- two⏎- ‸',
+        keys: ['Tab'],
+        off: { file: '- one⏎- two⏎- ', refusal: NOT_UNDER_TEXT },
+        on: { file: '- one⏎- two⏎- ', refusal: NOT_UNDER_TEXT },
+      },
+      {
+        name: 'on an empty item after a nested item: the form Markdown holds, written',
+        doc: '- one⏎  - a⏎- ‸',
+        keys: ['Tab'],
+        off: { file: '- one⏎  - a⏎  - ', caret: '- one⏎  - a⏎  - ‸' },
+        on: { file: '- one⏎  - a⏎  - ', caret: '- one⏎  - a⏎  - ‸' },
+      },
+      {
+        name: 'on an empty item after a blank line: the form Markdown holds, written',
+        doc: '- one⏎⏎- ‸',
+        keys: ['Tab'],
+        off: { file: '- one⏎⏎  - ', caret: '- one⏎⏎  - ‸' },
+        on: { file: '- one⏎⏎  - ', caret: '- one⏎⏎  - ‸' },
       },
       {
         name: 'on an item with text typed after Return: its split’s break, no mark',
@@ -325,6 +394,45 @@ describe('Escape, then Tab', () => {
     key('Escape', 27);
     expect(key('Tab', 9).defaultPrevented).toBe(false);
     expect(editor.getDoc()).toBe(before);
+    editor.destroy();
+    parent.remove();
+  });
+});
+
+describe('the open empty item', () => {
+  it('is read as an item at its level holding a character, and left out of the file', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: '- one\n- two',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: false,
+    });
+    const { view } = editor;
+    view.dispatch({ selection: { anchor: 11 } });
+    const press = (key: string) =>
+      runScopeHandlers(view, new KeyboardEvent('keydown', { key, bubbles: true }), 'editor');
+    press('Enter');
+    press('Tab');
+    expect(view.state.doc.toString()).toBe('- one\n- two\n  - ');
+    expect(editor.getDoc()).toBe('- one\n- two');
+    expect(openBlock(view.state)).toMatchObject({ item: true });
+    expect(view.contentDOM.dataset['rlOpenBlock']).toBe('3');
+    // Read as if it held a character: a nested list of one item, and the list is tight.
+    const read = readTree(view.state);
+    expect(read.reading.sliceDoc(0, read.reading.doc.length)).toBe('- one\n- two\n  - x');
+    let depth = 0;
+    read.tree.iterate({
+      enter: (node) => {
+        if (node.name === 'ListItem')
+          depth = Math.max(depth, 1 + (node.node.parent?.parent?.name === 'ListItem' ? 1 : 0));
+      },
+    });
+    expect(depth).toBe(2);
+    // Typing writes it.
+    view.dispatch(view.state.replaceSelection('x'), { userEvent: 'input.type' });
+    expect(editor.getDoc()).toBe('- one\n- two\n  - x');
+    expect(openBlock(view.state)).toBeNull();
     editor.destroy();
     parent.remove();
   });
