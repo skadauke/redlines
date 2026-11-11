@@ -303,6 +303,35 @@ describe('block types (format §2.6)', () => {
         expect(off, `off: ${label}`).toMatch(says);
       }
     }
+    // A lazy line of the item's own paragraph is the line it is: text now, a block in the new item.
+    // At every indent of the item, with Track Changes on and off (the lazy line stands a column
+    // short of the old text and at the new one).
+    for (const pad of ['', ' ', '  ', '   ']) {
+      for (const lazy of ['- a', '> q', '```', '1. a']) {
+        for (const wide of [false, true]) {
+          const old = wide ? '10. ' : '1. ';
+          const text = `${pad}${old}target\n${' '.repeat(pad.length + 2)}${lazy}\n`;
+          for (const to of ['ul', 'task'] as const) {
+            const label = `${JSON.stringify(text)} to ${to}`;
+            const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+            expect(tracked, label).not.toBe('no error');
+            const off = message(() => untypedAt(text, 'target', to));
+            expect(off, `off: ${label}`).not.toBe('no error');
+          }
+        }
+      }
+    }
+    for (const pad of ['  ', '   ']) {
+      const text = `${pad}1. target\n${pad}  - a\n`;
+      expect(
+        message(() => untypedAt(text, 'target', 'ul')),
+        JSON.stringify(text),
+      ).toMatch(/narrower bullet/);
+      expect(
+        message(() => changed(text, rangeOf(text, 'target'), block('ul'))),
+        'tracked',
+      ).toMatch(/narrower bullet/);
+    }
     // The other way, a wider item loses what its content column takes in.
     for (const text of ['- target\n  > q\n', '- target\n  ```\n  c\n  ```\n']) {
       expect(

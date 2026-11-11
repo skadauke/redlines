@@ -939,8 +939,11 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
       ['', '  > later'],
       ['  1. sub'],
       ['   - sub', '  > q'],
+      ['    - a'],
+      ['     - a'],
+      ['    ```'],
     ];
-    const HEADS = ['1. ', '10. ', '- ', '* ', '- [ ] ', '1) ', ' 1. '];
+    const HEADS = ['1. ', '10. ', '- ', '* ', '- [ ] ', '1) ', ' 1. ', '  1. ', '   1. ', '  10. '];
     const OPS = [block('ul'), block('task'), block('ol'), block('ul'), block('task')];
     let written = 0;
     let refused = 0;

@@ -537,8 +537,11 @@ function changesMembership(reader: BlockReader, block: Block, from: number, to: 
     /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|=+[ \t]*$|<[A-Za-z/!?])/;
   let fence: string | undefined;
   let html = false;
-  let above: string | undefined;
-  for (let at = nextLine(reader, block.end); at !== undefined; at = nextLine(reader, at)) {
+  // The lines of the item's own paragraph count as the lines they are: a lazy line is text now, and
+  // a block in the new item, where it stands at a column that the item's text reaches.
+  const own = new Set(block.lines);
+  let above: string | undefined = lineAt(text, block.line).trim();
+  for (let at = nextLine(reader, block.line); at !== undefined; at = nextLine(reader, at)) {
     const raw = lineAt(text, at);
     if (raw.trim() === '') {
       above = undefined;
@@ -546,7 +549,11 @@ function changesMembership(reader: BlockReader, block: Block, from: number, to: 
       continue;
     }
     const column = columnsOf(raw);
-    if (column <= lead) break;
+    if (column <= lead) {
+      if (!own.has(at)) break;
+      above = raw.trimStart();
+      continue;
+    }
     const content = raw.trimStart();
     if (column >= to) {
       // A child's own lines: a fence and a block of HTML keep what they hold.
