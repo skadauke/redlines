@@ -4026,12 +4026,15 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
-function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
-  // A list marker with a marker right behind it, no white space between, is text to a reader that
+function checkMarks(plan: Plan, after: string, parsed: Parsed, edits: readonly TextChange[]): void {
+  // A list number with a marker right behind it, no white space between, is text to a reader that
   // doesn't know the markers, and an item in the view: the edit wrote more of them than there were
   // (a change that took the line break and the number of the next item, #248, walk seed 511).
-  const bare = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])<!--/gm;
-  if ((after.match(bare)?.length ?? 0) > (plan.text.match(bare)?.length ?? 0)) {
+  const bare = /^[ \t>]*\d{1,9}[.)]<!--/gm;
+  if (
+    !edits.some((edit) => /[\d.)]/.test(edit.insert)) &&
+    (after.match(bare)?.length ?? 0) > (plan.text.match(bare)?.length ?? 0)
+  ) {
     throw new EditError(
       'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
       'no-legal-placement',
@@ -4800,7 +4803,7 @@ function editsOnce(
     ),
     exempt: plan.exempt,
     verify: (after, parsed, changes) => {
-      checkMarks(plan, after, parsed);
+      checkMarks(plan, after, parsed, edits);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
       // A change that stands against another mark reads as typed in every order of decisions, or

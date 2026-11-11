@@ -147,6 +147,22 @@ describe('Return in a list item', () => {
         on: { file: '- ⏎⏎Para', caret: '‸⏎⏎<del - ⏎⏎>⏎⏎Para' },
       },
       {
+        name: 'in an empty task item at the start of the file (#248 review)',
+        doc: '- [ ] ‸⏎- two',
+        off: { file: '- [ ] ⏎- two', caret: '⏎‸⏎⏎- two' },
+        on: { file: '- [ ] ⏎- two', caret: '‸⏎⏎<del - [ ] ⏎>⏎⏎- two' },
+      },
+      {
+        name: 'under a line that ends in a hard break: refused, in words (#248 review)',
+        doc: '- One⏎  Beta\\⏎  + ‸delta',
+        off: { caret: '- One⏎  Beta\\⏎⏎  + ⏎  + ‸delta' },
+        on: {
+          caret: '- One⏎  Beta\\⏎  + ‸delta',
+          refusal:
+            "A blank line can't be put right after a hard line break while Track Changes is on. Take the hard break out first (Backspace at the start of the next line), or turn Track Changes off.",
+        },
+      },
+      {
         name: 'in the empty first item at the start of the file, indented (#248)',
         doc: '  - ‸⏎  - two',
         off: { caret: '⏎  ‸⏎⏎  - two' },

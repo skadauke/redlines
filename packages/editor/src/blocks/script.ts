@@ -575,8 +575,11 @@ export function runScript(script: Script): ScriptResult {
       const again = mount(script, expanded);
       try {
         play(again.editor, 'Enter');
-        play(again.editor, 'Backspace');
-        result.takenBack = again.editor.getDoc();
+        // A Return the key refused made no line break to take back: Backspace then is Backspace.
+        if (!again.refusals.length) {
+          play(again.editor, 'Backspace');
+          result.takenBack = again.editor.getDoc();
+        }
       } finally {
         again.destroy();
       }

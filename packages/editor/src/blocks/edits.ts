@@ -311,7 +311,10 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
   // takes the break after it with it, and a following item's marker), and the empty paragraph's
   // line breaks go in front of it as they are (#248).
   const atFileStart: KeyEdit | null =
-    tracking && !nested && line.from === 0 && /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(line.text)
+    tracking &&
+    !nested &&
+    line.from === 0 &&
+    /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]*)?$/.test(line.text)
       ? {
           changes: [{ from: line.from, to: line.to }],
           selection: EditorSelection.single(line.from),
@@ -432,6 +435,10 @@ function itemDepth(state: EditorState, line: Line): number {
 const NEEDS_BLANK_LINE =
   "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.";
 
+/** Why Return at the start of a nested list's first item, under a line that ends in a hard break, is refused. */
+const NEEDS_BLANK_AFTER_HARD_BREAK =
+  "A blank line can't be put right after a hard line break while Track Changes is on. Take the hard break out first (Backspace at the start of the next line), or turn Track Changes off.";
+
 /** Return in a paragraph of a list item. */
 function returnInItem(state: EditorState, block: Block, head: number): KeyEdit | null {
   const items = itemsAround(state, block);
@@ -467,6 +474,10 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
+    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above!.text)) {
+      // A hard break above: the break typed after its backslash would put a marker right behind it.
+      return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
+    }
     if (under && tracking && items.length > 1) {
       // In the text of an item the blank line is one insertion with the new item's line, at the end
       // of the line above: the format writes it as a split whose break is the blank line and the
