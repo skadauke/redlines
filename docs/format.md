@@ -576,21 +576,27 @@ or its pieces are alike only all together, it tries every mark instead. The chec
 which the change makes more of the paragraph before it, as lazy text, can't go unseen: the pieces
 differ, and the change is refused, as it is for any change.
 
-What the proof doesn't give. Four shapes keep marks tried, and a block change in a list under review
+What the proof doesn't give. Five shapes keep marks tried, and a block change in a list under review
 with more than five changes pending is refused for their count, with "The lines below would be read
 again." at the end.
 
 - A numbered item with a number other than 1, four columns in or more.
-- A numbered item with a number other than 1 that is not the next item of a flat list: a list is flat
-  when every line above the item, down to the start of the region, is an item of one list less than
-  four columns in with one delimiter (`.` or `)`) and one quoting depth, a wrapped line of one, a
-  blank line, or a line in the text of the last item, whichever of them the item stands more or less
-  in than, so that right-aligned numbering (` 1.` to `10.`) and a list indented one, two or three
-  columns are covered. A list that is nested in another item, that mixes delimiters (`10.` then
-  `10)`, which Markdown reads as two lists) or that has an item whose own text starts a list or a
-  quote is not flat, and its numbers below an item that a change writes are read from the lines
-  above through the reading of list items (`listItemAt`), which is sure of them only in the cases
-  its comments name.
+- A numbered item with a number other than 1 that is not the next item of a flat list. A list is flat
+  when every line above the item, down to the start of the region, is one of these:
+  - an item less than four columns in, with one delimiter (`.` or `)`) and one quoting depth
+    (right-aligned numbering, ` 1.` to `10.`, and lists indented one, two or three columns are
+    covered, whichever of its siblings an item stands more or less in than);
+  - a wrapped line of an item, or any line in the text of the last item (indented to it or more);
+  - a blank line, a heading or a rule, which end a list: a list that starts after them, or after the
+    start of the region, may start with any number, and so may one after another list and a blank
+    line, with whatever delimiter;
+  - a paragraph, with no blank line between it and the list: then only a bullet or a 1 starts the
+    list, and a number other than 1 is more of the paragraph, so the lines under it are no flat list.
+- A numbered item with a number other than 1 in a list that is not flat: nested in another item,
+  mixing delimiters with no blank line between (`10.` then `10)`, which Markdown reads as two lists),
+  with an item whose own text starts a list or a quote, or under a closed fence, a quote or an HTML
+  block, which the reading doesn't look through. Its number is read from the lines above through the
+  reading of list items (`listItemAt`), which is sure of it only in the cases its comments name.
 - The empty item that Markdown can't hold, which the person's own Tab or Return made (design: block
   editing, "The empty paragraph"), is open and is not in the file. The editor gives a block change
   the document with it, where it is a line that starts no known block (an empty item under a line of
@@ -599,11 +605,12 @@ again." at the end.
   above.
 - A line that the editor reads as an item and Markdown as more of the paragraph above (#139).
 
-A numbered list in order (1, 2, 3), in any order, right-aligned or indented, that is flat is covered:
-Tab on an item with ten pending changes below it is written, at about the cost it has in a bulleted
-list (the same for twenty). A pending change at the first character of the item above that leaves a
-space (`6. {--new --} beta`) no longer reads two ways: in a flat list a number below is the next
-item whatever the content column of the item above is.
+A numbered list in order (1, 2, 3), in any order, right-aligned or indented, that is flat is covered,
+under a paragraph, a heading, a rule or a list and a blank line as at the start of a file: Tab on an
+item with ten pending changes below it is written, at about the cost it has in a bulleted list (the
+same for twenty). A pending change at the first character of the item above that leaves a space
+(`6. {--new --} beta`) no longer reads two ways: in a flat list a number below is the next item
+whatever the content column of the item above is.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
@@ -740,7 +747,10 @@ away.
   (the wider direction has its own words, above). The change would read a line it does not write
   otherwise, and it is refused, not repaired, with Track Changes off as on. A line of text under a
   line of a child's paragraph, a child's fence and what its HTML holds read the same either way
-  and are no reason. A numbered item that doesn't
+  and are no reason. The lines of the item's own paragraph count as the lines they are, at every
+  indent of the item: a line of text there stays lazy, and one that starts a block at a column
+  between the two content columns (`  1. target` with `    - a` under it) refuses, with Track
+  Changes on as off. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
   its first child right under its text; and so is indenting
