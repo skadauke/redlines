@@ -750,7 +750,12 @@ away.
   and are no reason. The lines of the item's own paragraph count as the lines they are, at every
   indent of the item: a line of text there stays lazy, and one that starts a block at a column
   between the two content columns (`  1. target` with `    - a` under it) refuses, with Track
-  Changes on as off. A numbered item that doesn't
+  Changes on as off. A child of the item (not of a child) four
+  columns or more past the content column of one type and less than four past the other's is a
+  block in one and indented code or more of the paragraph in the other: `1. target` with
+  `      - a` under it, three columns past its text, loses the child as a narrower bullet, and
+  refuses with the same words. A number other than 1 can't interrupt a paragraph, so a lazy `2. a`
+  reads alike in both and is no reason. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
   its first child right under its text; and so is indenting
