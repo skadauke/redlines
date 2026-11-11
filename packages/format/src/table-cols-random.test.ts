@@ -40,7 +40,7 @@ function tablesOf(text: string) {
 
 describe('rows and columns, random', () => {
   it('stay one table, read alike in every order, and decide to the newest and the original', () => {
-    const random = seeded(2027);
+    const random = seeded(Number(process.env['REDLINES_SEED'] ?? 2027));
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
     let used = 0;
     let withColumns = 0;
@@ -157,16 +157,18 @@ describe('rows and columns, random', () => {
           const target = pick(table.rows);
           const cell = pick(target.cells.slice(0, width));
           if (cell.textTo - cell.textFrom < 1) continue;
-          // A mark that starts a line of a row with no leading pipe is written on a line of its own,
-          // above the table: its other end is then in a cell that can leave without it.
-          if (cell.textFrom === target.from) continue;
           const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom));
           over = { from, to: Math.min(cell.textTo, from + 1 + Math.floor(random() * 3)), kind };
         } else {
           const target = pick(table.rows);
           const cell = pick(target.cells.slice(0, width));
-          const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom + 1));
-          edit = { from, to: from, insert: pick(['q', 'é', 'ab']) };
+          // Typing, deleting and replacing, in cells with text and in empty ones.
+          const size = cell.textTo - cell.textFrom;
+          const from = cell.textFrom + Math.floor(random() * (size + 1));
+          const mode = size === 0 ? 'insert' : pick(['insert', 'delete', 'replace'] as const);
+          const to =
+            mode === 'insert' ? from : Math.min(cell.textTo, from + 1 + Math.floor(random() * 3));
+          edit = { from, to, insert: mode === 'delete' ? '' : pick(['q', 'é', 'ab']) };
         }
         steps.push(`${who} ${JSON.stringify(op ?? edit ?? over)}`);
         const person = PEOPLE.find((p) => p.handle === who);

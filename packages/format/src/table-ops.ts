@@ -21,7 +21,13 @@ import {
   withColMarker,
 } from './table-cols.ts';
 import type { ColItem, Grid } from './table-cols.ts';
-import { commentsOf, commentsOfCols, ruleThree, ruleThreeCols } from './table-rules.ts';
+import {
+  commentFromAbove,
+  commentsOf,
+  commentsOfCols,
+  ruleThree,
+  ruleThreeCols,
+} from './table-rules.ts';
 import {
   addDeletionLines,
   afterRemoval,
@@ -815,6 +821,8 @@ function deleteCols(
   if (ctx) {
     const three = ruleThreeCols(table, parsed, cols, ctx.author, 'delete');
     if (three) throw new EditError(three, 'no-legal-placement');
+    const above = commentFromAbove(table, parsed, new Set(cols));
+    if (above) throw new EditError(above, 'no-legal-placement');
   }
   // With Track Changes off the columns go from the original as well: one that is not pending must
   // remain, or the original would have none.
@@ -921,6 +929,8 @@ function moveCols(
   if (ctx) {
     const three = ruleThreeCols(table, parsed, cols, ctx.author, 'move');
     if (three) throw new EditError(three, 'no-legal-placement');
+    const above = commentFromAbove(table, parsed, new Set(cols));
+    if (above) throw new EditError(above, 'no-legal-placement');
   }
   const moving = new Set(cols);
   const others = staying(0, columns).filter((item) => 'src' in item && !moving.has(item.src));

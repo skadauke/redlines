@@ -481,3 +481,31 @@ export function commentsOfCols(
     anchored,
   };
 }
+
+/**
+ * Rule 3's other case for columns: a comment that starts above the table (on a line of its own, where a
+ * marker can't start the header's line) and ends in a column that moves or is deleted. Its end would go
+ * with the column, or stay behind the start, and the change could not be rejected afterwards. Returns
+ * the refusal, naming the comment's author, or null.
+ */
+export function commentFromAbove(
+  table: TableRead,
+  parsed: Parsed,
+  cols: ReadonlySet<number>,
+): string | null {
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'cmt') continue;
+    for (const segment of mark.segments) {
+      const end = segment.close;
+      if (segment.open.from >= table.from || !end) continue;
+      const row = table.rows.find((r) => r.from <= end.from && end.to <= r.to);
+      const col = row ? cellIndexAt(row, end.from) : -1;
+      if (col !== -1 && cols.has(col)) {
+        const by =
+          parsed.ledger.comments.find((thread) => thread.id === mark.id)?.by ?? mark.entry.by;
+        return `${nameOf(parsed, by)}'s comment starts above this table and ends in this column. Resolve or delete it first.`;
+      }
+    }
+  }
+  return null;
+}

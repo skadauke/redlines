@@ -14,7 +14,8 @@ import { ada, bo, bodyOf, context, exactly, expectEveryOrderAlike, file } from '
 import { newestView, originalView } from './views.ts';
 
 const IDS = ['k3x9', 'w8nn', 'p5qm'];
-const move = (text: string, op: Omit<TableOp, 'table'>) => {
+type WithoutTable<T> = T extends unknown ? Omit<T, 'table'> : never;
+const move = (text: string, op: WithoutTable<TableOp>) => {
   const table = readTables(text, parse(text))[0]?.from ?? 0;
   return applyChanges(
     text,

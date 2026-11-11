@@ -627,3 +627,44 @@ describe('columns, decided and viewed', () => {
     expect(parse(all).marks.filter((m) => m.kind !== 'cmt')).toEqual([]);
   });
 });
+
+describe('a comment that starts above a table without pipes at its edges', () => {
+  const BARE = 'Fruit | Count | Price\n--- | --- | ---\nApples | 3 | 1\nPears | 5 | 2';
+  const thread = [
+    '  c9qf:',
+    '    by: ada',
+    '    at: 2026-10-13T22:40Z',
+    '    text: |-',
+    '      A note.',
+  ];
+  /** The comment on `Fruit`, with its start on a line of its own above the table. */
+  const commented = () => {
+    const base = file(BARE, {}, thread);
+    const at = base.indexOf('Fruit');
+    return applyChanges(base, [
+      { from: at, to: at, insert: '<!--cmt c9qf-->\n\n' },
+      { from: at + 5, to: at + 5, insert: '<!--/c9qf-->' },
+    ]);
+  };
+
+  it('is refused for a column move or deletion it ends in, naming its author', () => {
+    const text = commented();
+    expect(parse(text).marks.some((m) => m.id === 'c9qf')).toBe(true);
+    const words =
+      "Ada Lovelace's comment starts above this table and ends in this column. Resolve or delete it first.";
+    expect(said(() => edit(text, { kind: 'moveCols', cols: [0], to: 3 }))).toBe(words);
+    expect(said(() => edit(text, { kind: 'deleteCols', cols: [0] }))).toBe(words);
+  });
+
+  it('allows the operation on any other column, and with Track Changes off', () => {
+    const text = commented();
+    expect(said(() => edit(text, { kind: 'moveCols', cols: [1], to: 3 }))).toBe('no error');
+    expect(said(() => edit(text, { kind: 'deleteCols', cols: [2] }))).toBe('no error');
+    const moved = edit(text, { kind: 'moveCols', cols: [0], to: 3 }, null).after;
+    expect(parse(moved).marks.filter((m) => m.kind !== 'cmt')).toEqual([]);
+    expectInOrder('comment', ['c9qf'], moved);
+    const deleted = edit(text, { kind: 'deleteCols', cols: [0] }, null).after;
+    expect(parse(deleted).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
+    expectInOrder('comment', ['c9qf'], deleted);
+  });
+});

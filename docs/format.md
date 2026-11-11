@@ -1557,7 +1557,7 @@ it, one per line:
   the old place a plain deletion, and your own pending changes in a column you delete fold into the
   deletion. A comment in a column that leaves the table, deleted or rejected, becomes a point comment
   at the start of the text of the cell after it in the same row, or at the end of the text of the cell
-  before it for the last column; a comment in a moved column moves with it, both ways. A table keeps at
+  before it for the last column; a comment in a moved column moves with it, both ways. A comment that starts above the table, on a line of its own because a marker can't start the line of a header without a leading pipe, and ends in a column that moves or is deleted, refuses the operation with Track Changes on, in words that name its author ("Ada Lovelace's comment starts above this table and ends in this column. Resolve or delete it first."): its end would leave without its start, and the change could not be rejected. Another column of the table, and the operation with Track Changes off, are not refused. A table keeps at
   least one column: deleting the last, or rejecting the insertion of the last, is refused ("Delete the
   table instead."). With Track Changes off the columns go from the original as well, so the last
   column that is not pending can't be taken out ("Accept or reject the column changes in this table
@@ -1634,6 +1634,7 @@ it, one per line:
 - A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
   otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
   re-padded.
+- **Alignment changes are not written by the app yet** (they come in a later stage); the rule below holds for a file in which another tool wrote one: an alignment change is a block format change (`align=SPEC`) around the table, and while it is pending every column operation is refused.
 - **Rows and columns don't change together,** because a deleted row keeps its cells as written and a
   deleted column its cells top to bottom, so a change on the other axis while it is pending would
   leave it the wrong number of cells. With Track Changes on, a pending change allows:
