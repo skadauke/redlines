@@ -52,6 +52,28 @@ function editorFor(
 // document and not at all in the update (the ledger is not read again, see `parsedField`).
 const BUDGET_MS = 32;
 
+// The timing tests run with REDLINES_COST=check, as CI's check job sets, since a busy machine
+// can't time them. Their bounds follow the machine: the budget, or a multiple of what the markdown
+// parse alone takes for the same change, whichever is more.
+const timed = it.skipIf(!process.env['REDLINES_COST']);
+
+/** The time of `change` on `doc` in a state that has the markdown parse and nothing else. */
+function parseTime(doc: string, change: { from: number; insert: string } | { anchor: number }) {
+  const view = new EditorView({
+    state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
+    parent: document.body,
+  });
+  forceParsing(view, doc.length, 10_000);
+  const state = view.state.update({ selection: { anchor: 0 } }).state;
+  view.destroy();
+  return time(() =>
+    state.update('anchor' in change ? { selection: change } : { changes: change }),
+  );
+}
+
+/** What an update may take: the budget, or four times the parse's own time. */
+const bound = (parse: number) => Math.max(BUDGET_MS, 4 * parse);
+
 describe('a long document', () => {
   const { doc, firstMark } = longDocument();
   const afterMark = firstMark + `<!--ins ${idFor(0)}-->quick brown<!--/${idFor(0)}-->`.length;
@@ -84,22 +106,24 @@ describe('a long document', () => {
     expect(entities).toBe(45);
   });
 
-  it('updates decorations for one keystroke in under 16 ms on the long document', () => {
+  timed('updates decorations for one keystroke in under 16 ms on the long document', () => {
     const state = loaded();
     const keystroke = time(() => state.update({ changes: { from: mid, insert: 'x' } }).state);
     const afterAMark = time(
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
-    expect(keystroke).toBeLessThan(BUDGET_MS);
-    expect(afterAMark).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: mid, insert: 'x' })));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc, { from: afterMark, insert: 'x' })));
   });
 
-  it('updates decorations for a caret move in under 16 ms on the long document', () => {
+  timed('updates decorations for a caret move in under 16 ms on the long document', () => {
     const state = loaded();
-    expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(BUDGET_MS);
+    expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(
+      bound(parseTime(doc, { anchor: mid })),
+    );
   });
 
-  it('holds the same bounds in Simple, which draws every change as a bar', () => {
+  timed('holds the same bounds in Simple, which draws every change as a bar', () => {
     const state = loaded('simple');
     expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(200);
     const keystroke = time(() => state.update({ changes: { from: mid, insert: 'x' } }).state);
@@ -107,9 +131,9 @@ describe('a long document', () => {
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
     const caret = time(() => state.update({ selection: { anchor: mid } }).state);
-    expect(keystroke).toBeLessThan(BUDGET_MS);
-    expect(afterAMark).toBeLessThan(BUDGET_MS);
-    expect(caret).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: mid, insert: 'x' })));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc, { from: afterMark, insert: 'x' })));
+    expect(caret).toBeLessThan(bound(parseTime(doc, { anchor: mid })));
   });
 });
 
@@ -134,20 +158,21 @@ describe('a long document with a table', () => {
     expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(280);
   });
 
-  it('updates for one keystroke in a cell within the budget', () => {
+  timed('updates for one keystroke in a cell within the budget', () => {
     const state = loaded();
     const keystroke = time(() => state.update({ changes: { from: cell, insert: 'x' } }).state);
-    expect(keystroke).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: cell, insert: 'x' })));
   });
 
-  it('updates for a caret move in the table within the budget', () => {
+  timed('updates for a caret move in the table within the budget', () => {
     const state = loaded();
-    expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(BUDGET_MS);
+    expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(
+      bound(parseTime(doc, { anchor: cell })),
+    );
   });
 
-  // A timing test: it runs with REDLINES_COST=check, as CI's check job sets, since a busy machine
-  // can't time it. The rows a change rebuilds are pinned by count elsewhere (`layoutStats`).
-  it.skipIf(!process.env['REDLINES_COST'])(
+  // The rows a change rebuilds are pinned by count elsewhere (`layoutStats`).
+  timed(
     'keeps the table layer’s share of a row edit small',
     () => {
       // A state with the markdown parse and nothing else, and one that has the tables too: what they

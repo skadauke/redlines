@@ -28,6 +28,21 @@ const FRUIT = [
   'Below.',
 ].join('\n');
 
+/** A table whose Pears row is an insertion by someone else, with its ledger. */
+const WITH_ROW = [
+  '| Fruit | Count |',
+  '| ----- | ----- |',
+  '| Apples | 3 |',
+  '| <!--ins k3x9 row--> Pears | 5 |',
+  '',
+  '<!-- redlines',
+  'version: 1',
+  'marks:',
+  '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+  '-->',
+  '',
+].join('\n');
+
 /** A frame, and a little after it: the measures and the effects that follow an update. A page that
  * draws slowly (a hidden pane) is not waited for longer than a moment. */
 const frames = async () => {
@@ -503,10 +518,52 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // The bar of an inserted row, in Simple: the pointer over it widens it to 3 px (the first cell
+    // draws a row's bar) and a click on it, which never reaches the row's text, switches the views
+    // (`bar-switch.ts`'s `.rl-trow` fallback, which happy-dom cannot reach). A click beside the bar
+    // does nothing.
+    name: 'bar-click-on-an-inserted-row-switches-views',
+    async run(editor) {
+      await load(editor, WITH_ROW, false);
+      editor.setViewMode('simple');
+      await frames();
+      const row = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-trow')].find(
+        (line) => line.textContent?.includes('Pears'),
+      );
+      const cell = row?.querySelector<HTMLElement>(':scope > .rl-tc');
+      if (!row || !cell) return { why: 'no inserted row drawn' };
+      if (!row.classList.contains('rl-bar')) return { why: 'the row has no bar', row: row.className };
+      const box = await reveal(cell);
+      const x = box.left - 23;
+      const y = box.top + box.height / 2;
+      const mouse = (type: string, px: number) =>
+        new MouseEvent(type, { clientX: px, clientY: y, button: 0, detail: 1, bubbles: true });
+      const problems: Record<string, unknown> = {};
+      editor.view.scrollDOM.dispatchEvent(mouse('mousemove', x));
+      await frames();
+      const width = getComputedStyle(cell, '::before').width;
+      if (!row.classList.contains('rl-bar-hot') || width !== '3px') {
+        problems['hot'] = { hot: row.classList.contains('rl-bar-hot'), width };
+      }
+      editor.view.scrollDOM.dispatchEvent(mouse('mousedown', x));
+      document.dispatchEvent(mouse('mouseup', x));
+      await frames();
+      if (editor.getUiState().view !== 'redlines') problems['switched'] = editor.getUiState().view;
+      // Beside the bar: nothing.
+      editor.setViewMode('simple');
+      await frames();
+      editor.view.scrollDOM.dispatchEvent(mouse('mousedown', x + 60));
+      document.dispatchEvent(mouse('mouseup', x + 60));
+      if (editor.getUiState().view !== 'simple') problems['beside'] = editor.getUiState().view;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
     // The plan's table (`longDocument({ table: true })`): 300 rows of 5 columns, 40 pending
-    // insertions in its cells and a ledger, typed in with Track Changes on, in a cell's text and in
-    // a row after the marks, which the table layer must not make slower than the budget says: the
-    // spec's budget for a keystroke, 16 ms, where WebKit measures about 2 ms (a timer of 1 ms).
+    // insertions in its cells and a ledger, typed in with Track Changes on at one place, the text
+    // of a cell in row 150 (the view is Clean, as in every check here: the drawing of the marks is
+    // checked elsewhere). The table layer must not make a keystroke slower than the spec's budget,
+    // 16 ms, where WebKit measures about 2 ms (a timer of 1 ms).
     name: 'keystroke-cost-in-a-300-row-table-with-40-marks',
     async run(editor) {
       const rest = 'bcdfghjkmnpqrstvwxz23456789';
