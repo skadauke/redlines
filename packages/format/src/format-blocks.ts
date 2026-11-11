@@ -61,6 +61,8 @@ const OWN_FIRST = 'Accept or reject your other change to this block first.';
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
+const NUMBERED_CHILD =
+  "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
 const TABS = "Lines indented with tabs can't be moved. Indent them with spaces first.";
 const NO_ROOM = "This item can't be outdented: a line under it isn't indented far enough.";
 const STACKED =
@@ -760,6 +762,21 @@ function planIndent(
       );
     if (first) renumber = /^\d{1,9}[.)] +/.exec(block.syntax)?.[0];
     else if (!continuesSublist(reader, block, by, target, numbered)) throw refused(NUMBERED_UNDER);
+  }
+  // Outdented, the item the lines under it end with, if none, is followed by its old sibling, which
+  // is then its child: numbered otherwise than 1 right under the text, it would be read as text.
+  if (by === -1) {
+    const next = nextLine(reader, last);
+    const after = next === undefined ? '' : lineAt(text, next);
+    const sibling = /^(\d{1,9})[.)](?:[ \t]|$)/.exec(after.trimStart());
+    if (
+      sibling &&
+      (/^[ \t]*/.exec(after)?.[0].length ?? 0) === lead &&
+      !/^0*1$/.test(sibling[1]!) &&
+      !lines.some((at) => ITEM.test(lineAt(text, at).trimStart()))
+    ) {
+      throw refused(NUMBERED_CHILD);
+    }
   }
   assertPlace(reader, last);
   const delta = target - lead;

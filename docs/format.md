@@ -606,7 +606,9 @@ away.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
   except where a numbered item after it and the lines under it would then be read into it, or where
   the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
-  start at 1 can't interrupt text: outdenting one right after text is refused, and so is indenting
+  start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
+  an item that has no item under it when its old sibling, numbered otherwise than 1, would become
+  its first child right under its text; and so is indenting
   one right after text where it would not be the first of a new sublist, unless the sublist above it
   is numbered with the same delimiter, which it joins with the number it has. Indenting one that
   becomes the first of a new sublist writes `1.` (the mark keeps the old number, below). Changing

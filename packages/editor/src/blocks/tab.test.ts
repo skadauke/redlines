@@ -35,6 +35,8 @@ const both = (rows: Row[]): Script[] =>
     },
   ]);
 
+const NUMBERED_UNDER =
+  "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const TOO_MANY =
   'There are 7 pending changes in this list, too many to check this change against. Accept or reject some of them first.';
@@ -210,11 +212,26 @@ describe('Shift-Tab in a list item', () => {
         on: { file: '- one⏎- two', caret: '- one⏎- ‸two' },
       },
       {
-        name: 'in a nested numbered item',
+        name: 'in a nested numbered item: its numbered sibling would become its child, as text',
         doc: '1. one⏎   1. ‸a⏎   2. b',
         keys: ['Shift-Tab'],
-        off: { file: '1. one⏎1. a⏎   2. b' },
-        on: { newest: '1. one⏎1. a⏎   2. b' },
+        off: {
+          file: '1. one⏎   1. a⏎   2. b',
+          refusal:
+            "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.",
+        },
+        on: {
+          file: '1. one⏎   1. a⏎   2. b',
+          refusal:
+            "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.",
+        },
+      },
+      {
+        name: 'in the last nested numbered item, right under text: refused as before',
+        doc: '1. one⏎   1. a⏎   2. ‸b',
+        keys: ['Shift-Tab'],
+        off: { file: '1. one⏎   1. a⏎   2. b', refusal: NUMBERED_UNDER },
+        on: { file: '1. one⏎   1. a⏎   2. b', refusal: NUMBERED_UNDER },
       },
     ]),
   );
