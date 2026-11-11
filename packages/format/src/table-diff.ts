@@ -1,7 +1,9 @@
 // An agent's `str_replace` over a table (format §3.7, "Agents"): when the old and the new text hold the
 // same table, the two are compared as tables. Rows are matched by their text, so an added row is a row
 // insertion, a removed one a deletion, a reordered one a move, and the cells that changed in a row
-// that stays are changed word by word, as an edit in a cell is. The edits are those of a person, by
+// that stays are changed word by word, as an edit in a cell is. Tables of the same height are compared
+// by columns in the same way: a column added to every row, taken from every row, or put in another
+// place. The edits are those of a person, by
 // the agent's name; nothing here is a new form.
 
 import { wordHunks } from './agent.ts';
@@ -27,8 +29,9 @@ export interface CellChange {
   to: string;
 }
 
-/** What turns one table into another. The operations are in the order they are made: rows that go,
- * then rows that move, then rows that come, each counted in the table as the ones before left it. */
+/** What turns one table into another. The operations are in the order they are made: rows (or
+ * columns) that go, then those that move, then those that come, each counted in the table as the ones
+ * before left it. */
 export interface TableChanges {
   cells: CellChange[];
   ops: TableOp[];
@@ -74,30 +77,24 @@ function longestRun(values: readonly number[]): Set<number> {
   return kept;
 }
 
-/**
- * Compares two tables as tables. `null` when the texts do not hold one table each, or when only
- * cells changed (an edit in cells is written as it always was), or when only columns changed (the
- * columns come with Stage 3b); `{ refused }` when rows and columns change together.
- */
-export function diffTables(
-  oldText: string,
-  newText: string,
-): TableChanges | { refused: string } | null {
-  const oldRead = readTables(oldText, parse(oldText));
-  const newRead = readTables(newText, parse(newText));
-  const [before, after] = [oldRead[0], newRead[0]];
-  if (oldRead.length !== 1 || newRead.length !== 1 || !before || !after) return null;
-  const a = cellsOf(oldText, before);
-  const b = cellsOf(newText, after);
-  if (before.aligns.length !== after.aligns.length) {
-    return a.length === b.length ? null : { refused: ROWS_AND_COLUMNS };
-  }
-  const delimiter = (text: string, table: TableRead) =>
-    text.slice(table.delimiter.from, table.delimiter.to).replace(/\s+/g, '');
-  if (delimiter(oldText, before) !== delimiter(newText, after)) return null;
+/** How the items of one list (rows, or columns) become those of another, found by their text. */
+interface AxisPlan {
+  /** Items that stay in place but changed, old index to new. */
+  changed: Map<number, number>;
+  deleted: number[];
+  inserted: number[];
+  /** Items matched by their text and moved, as new indexes. */
+  moved: number[];
+  matchedNew: number[];
+  pairOfNew: Map<number, number>;
+  stable: Set<number>;
+  newOfOld: Map<number, number>;
+}
 
+/** Matches the items of `a` (old) and `b` (new) by their text, as a table's rows are matched. */
+function planAxis(a: readonly (readonly string[])[], b: readonly (readonly string[])[]): AxisPlan {
   const keyOf = (cells: readonly string[]) => cells.join('\u0001');
-  // Rows with the same text, in order.
+  // Items with the same text, in order.
   const free = new Map<string, number[]>();
   a.forEach((cells, i) => {
     const key = keyOf(cells);
@@ -113,7 +110,7 @@ export function diffTables(
   const stable = longestRun(matchedNew.map((j) => pairOfNew.get(j) ?? 0));
   const anchors = matchedNew.filter((_, k) => stable.has(k));
 
-  // Rows that stay in place but changed: between two anchors, the rows left over in order that have
+  // Items that stay in place but changed: between two anchors, the ones left over in order that have
   // a cell in common.
   const changed = new Map<number, number>();
   const bounds = [
@@ -138,14 +135,6 @@ export function diffTables(
       }
     }
   }
-  const cells: CellChange[] = [];
-  for (const [i, j] of changed) {
-    (a[i] ?? []).forEach((from, column) => {
-      const to = b[j]?.[column] ?? '';
-      if (from !== to) cells.push({ row: i, column, from, to });
-    });
-  }
-
   const deleted = a.map((_, i) => i).filter((i) => !matchedOld.has(i) && !changed.has(i));
   const newOfOld = new Map<number, number>([...pairOfNew].map(([j, i]) => [i, j]));
   for (const [i, j] of changed) newOfOld.set(i, j);
@@ -153,11 +142,26 @@ export function diffTables(
     .map((_, j) => j)
     .filter((j) => !pairOfNew.has(j) && ![...changed.values()].includes(j));
   const moved = matchedNew.filter((_, k) => !stable.has(k));
-  if (deleted.length === 0 && inserted.length === 0 && moved.length === 0) return null;
+  return { changed, deleted, inserted, moved, matchedNew, pairOfNew, stable, newOfOld };
+}
 
+/** The operations that make the items of `b` of the items of `a`, in the order they are made: items
+ * that go, then items that move, then items that come, each counted in the list as the ones before
+ * left it. `make` writes an operation of the axis. */
+function opsOf(
+  a: readonly (readonly string[])[],
+  b: readonly (readonly string[])[],
+  plan: AxisPlan,
+  make: {
+    deleteOp: (indexes: number[]) => TableOp;
+    moveOp: (index: number, to: number) => TableOp;
+    insertOp: (after: number, cells: readonly string[]) => TableOp;
+  },
+): TableOp[] {
+  const { deleted, inserted, newOfOld } = plan;
   const ops: TableOp[] = [];
-  if (deleted.length > 0) ops.push({ kind: 'deleteRows', table: 0, rows: deleted });
-  // The rows now, as old indexes, and the order they are to be in.
+  if (deleted.length > 0) ops.push(make.deleteOp(deleted));
+  // The items now, as old indexes, and the order they are to be in.
   let current = a.map((_, i) => i).filter((i) => !deleted.includes(i));
   const target = b
     .map((_, j) => j)
@@ -165,32 +169,114 @@ export function diffTables(
     .map((j) => [...newOfOld].find(([, to]) => to === j)?.[0] ?? -1);
   const inPlace = longestRun(current.map((i) => target.indexOf(i)));
   const movers = current.filter((_, k) => !inPlace.has(k));
-  for (const row of movers.toSorted((x, y) => target.indexOf(x) - target.indexOf(y))) {
-    const index = current.indexOf(row);
-    const rest = current.filter((r) => r !== row);
-    const before = target[target.indexOf(row) - 1];
+  for (const item of movers.toSorted((x, y) => target.indexOf(x) - target.indexOf(y))) {
+    const index = current.indexOf(item);
+    const rest = current.filter((r) => r !== item);
+    const before = target[target.indexOf(item) - 1];
     const place = before === undefined ? 0 : rest.indexOf(before) + 1;
     const to = place <= index ? place : place + 1;
-    if (to !== index && to !== index + 1)
-      ops.push({ kind: 'moveRows', table: 0, rows: [index], to });
-    current = [...rest.slice(0, place), row, ...rest.slice(place)];
+    if (to !== index && to !== index + 1) ops.push(make.moveOp(index, to));
+    current = [...rest.slice(0, place), item, ...rest.slice(place)];
   }
-  // New rows go below the row that comes before them in the new table.
-  const order = b.map((_, j) => j);
-  const presence = current.map((i) => newOfOld.get(i) ?? -1);
-  const layout = [...presence];
-  for (const j of order) {
+  // New items go after the item that comes before them in the new list.
+  const layout = current.map((i) => newOfOld.get(i) ?? -1);
+  for (const j of b.map((_, k) => k)) {
     if (!inserted.includes(j)) continue;
     const previous = j === 0 ? -1 : layout.indexOf(j - 1);
-    ops.push({
-      kind: 'insertRows',
-      table: 0,
-      after: j === 0 ? -1 : previous,
-      count: 1,
-      texts: [b[j] ?? []],
-    });
+    ops.push(make.insertOp(previous, b[j] ?? []));
     layout.splice(previous + 1, 0, j);
   }
+  return ops;
+}
+
+const transpose = (cells: readonly (readonly string[])[]): string[][] =>
+  Array.from({ length: cells[0]?.length ?? 0 }, (_, c) => cells.map((row) => row[c] ?? ''));
+
+/**
+ * Compares two tables of the same height as tables of columns: a column added to every row is an
+ * insertion, one taken from every row a deletion, columns in another order a move, and the cells that
+ * changed in a column that stays are changed word by word. `null` when nothing of columns changed.
+ */
+function diffColumns(a: readonly string[][], b: readonly string[][]): TableChanges | null {
+  const [x, y] = [transpose(a), transpose(b)];
+  const plan = planAxis(x, y);
+  if (plan.deleted.length === 0 && plan.inserted.length === 0 && plan.moved.length === 0) {
+    return null;
+  }
+  const cells: CellChange[] = [];
+  for (const [i, j] of plan.changed) {
+    (x[i] ?? []).forEach((from, row) => {
+      const to = y[j]?.[row] ?? '';
+      if (from !== to) cells.push({ row, column: i, from, to });
+    });
+  }
+  const ops = opsOf(x, y, plan, {
+    deleteOp: (cols) => ({ kind: 'deleteCols', table: 0, cols }),
+    moveOp: (index, to) => ({ kind: 'moveCols', table: 0, cols: [index], to }),
+    insertOp: (previous, texts) => ({
+      kind: 'insertCols',
+      table: 0,
+      after: previous + 1,
+      count: 1,
+      texts: [texts],
+    }),
+  });
+  return { cells, ops };
+}
+
+/**
+ * Compares two tables as tables. `null` when the texts do not hold one table each, or when only
+ * cells changed (an edit in cells is written as it always was); `{ refused }` when rows and columns
+ * change together.
+ */
+export function diffTables(
+  oldText: string,
+  newText: string,
+): TableChanges | { refused: string } | null {
+  const oldRead = readTables(oldText, parse(oldText));
+  const newRead = readTables(newText, parse(newText));
+  const [before, after] = [oldRead[0], newRead[0]];
+  if (oldRead.length !== 1 || newRead.length !== 1 || !before || !after) return null;
+  const a = cellsOf(oldText, before);
+  const b = cellsOf(newText, after);
+  if (before.aligns.length !== after.aligns.length) {
+    return a.length === b.length ? diffColumns(a, b) : { refused: ROWS_AND_COLUMNS };
+  }
+  const delimiter = (text: string, table: TableRead) =>
+    text.slice(table.delimiter.from, table.delimiter.to).replace(/\s+/g, '');
+  if (delimiter(oldText, before) !== delimiter(newText, after)) return null;
+  // The same size: columns in another order, every column the same as one it had, are a move.
+  if (a.length === b.length) {
+    const plan = planAxis(transpose(a), transpose(b));
+    const permuted =
+      plan.moved.length > 0 &&
+      plan.deleted.length === 0 &&
+      plan.inserted.length === 0 &&
+      plan.changed.size === 0;
+    if (permuted) return diffColumns(a, b);
+  }
+
+  const plan = planAxis(a, b);
+  const { changed, deleted, inserted, moved } = plan;
+  const cells: CellChange[] = [];
+  for (const [i, j] of changed) {
+    (a[i] ?? []).forEach((from, column) => {
+      const to = b[j]?.[column] ?? '';
+      if (from !== to) cells.push({ row: i, column, from, to });
+    });
+  }
+  if (deleted.length === 0 && inserted.length === 0 && moved.length === 0) return null;
+  const ops = opsOf(a, b, plan, {
+    deleteOp: (rows) => ({ kind: 'deleteRows', table: 0, rows }),
+    moveOp: (index, to) => ({ kind: 'moveRows', table: 0, rows: [index], to }),
+    insertOp: (previous, texts) => ({
+      kind: 'insertRows',
+      table: 0,
+      after: previous,
+      count: 1,
+      texts: [texts],
+    }),
+  });
   return { cells, ops };
 }
 

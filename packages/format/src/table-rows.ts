@@ -15,6 +15,17 @@ import type { Range, TextChange } from './types.ts';
  */
 export type RowItem = { src: number; patch?: readonly TextChange[] } | { text: string };
 
+/** The marker of an inserted row, with the space after it (as accepting takes it). */
+export function rowMarker(text: string, row: TableRowRead): { from: number; to: number } | null {
+  const open = row.insertion?.segments[0]?.open;
+  const cell = row.cells[0];
+  if (!open || !cell) return null;
+  // The marker and one space, whatever follows: what is in the cell after it is not what decides,
+  // or two orders of deciding the row and a change in its cell would not write the same bytes.
+  const to = open.to < cell.to && /^[ \t]/.test(text.charAt(open.to)) ? open.to + 1 : open.to;
+  return { from: open.from, to };
+}
+
 /** The line of a row, as written. */
 export function rowTextOf(text: string, row: TableRowRead): string {
   return text.slice(row.from, row.to);
@@ -215,24 +226,31 @@ export function addDeletionLines(
   return changes;
 }
 
-/** The changes that write `positions` into the deletions of `table` that are in `which`. */
+/**
+ * The changes that write `positions` into the deletions of `table` that are in `which`, of one axis.
+ * A column's position counts from 1 and a row's from 0 (format §3.7); `positions` are indexes, from 0,
+ * for both.
+ */
 export function setPositions(
   text: string,
   table: TableRead,
   positions: readonly number[],
   which?: ReadonlySet<number>,
+  axis: 'row' | 'col' = 'row',
 ): TextChange[] {
   const changes: TextChange[] = [];
+  const base = axis === 'col' ? 1 : 0;
   table.deletions.forEach((deletion, i) => {
     const position = positions[i];
-    if (deletion.axis !== 'row' || position === undefined || position === deletion.position) return;
+    if (deletion.axis !== axis || position === undefined) return;
+    if (position + base === deletion.position) return;
     if (which && !which.has(i)) return;
     const open = deletion.mark.segments[0]?.open;
     if (!open) return;
-    const found = /row=(\d+)/.exec(text.slice(open.from, open.to));
+    const found = new RegExp(`${axis}=(\\d+)`).exec(text.slice(open.from, open.to));
     if (!found?.[1]) return;
     const from = open.from + found.index + 4;
-    changes.push({ from, to: from + found[1].length, insert: String(position) });
+    changes.push({ from, to: from + found[1].length, insert: String(position + base) });
   });
   return changes;
 }

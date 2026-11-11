@@ -14,7 +14,9 @@ import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
-import { insertedRows, readRowCells, tablesOfText } from './table.ts';
+import { insertedCols, insertedRows, readRowCells, tablesOfText } from './table.ts';
+import { colMarkIds, columnChanges, decideCols, deletedColCells, gridOf } from './table-cols.ts';
+import type { ColItem } from './table-cols.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import {
   afterWriting,
@@ -188,17 +190,18 @@ export function viewsOnce(): Views {
 export function newestView(text: string): DocView {
   const parsed = parse(text);
   const rows = insertedRows(text, parsed);
+  const cols = insertedCols(text, parsed);
   const lines = new Set<string>();
   const dropped: TextChange[] = [];
-  if (parsed.marks.some((mark) => mark.kind === 'del' && /^row=/.test(mark.payload ?? ''))) {
-    // A deleted row's line goes, and the blank line before the lines when it is the last.
+  if (
+    parsed.marks.some((mark) => mark.kind === 'del' && /^(?:row|col)=/.test(mark.payload ?? ''))
+  ) {
+    // A deleted row's or column's line goes, and the blank line before the lines when it is the last.
     for (const table of tablesOfText(text, parsed)) {
       const gone = new Set<number>();
       table.deletions.forEach((deletion, i) => {
-        if (deletion.axis === 'row') {
-          gone.add(i);
-          lines.add(deletion.mark.id);
-        }
+        gone.add(i);
+        lines.add(deletion.mark.id);
       });
       dropped.push(...removeDeletionLines(text, table, gone));
     }
@@ -207,7 +210,10 @@ export function newestView(text: string): DocView {
     if (lines.has(mark.id)) return [];
     // An inserted row's marker goes with the space after it, as accepting it does.
     const row = rows.find((candidate) => candidate.mark === mark);
-    return row ? [{ ...row.marker, insert: '' }] : mark.segments.flatMap(hideMarkers);
+    if (row) return [{ ...row.marker, insert: '' }];
+    // An inserted column's marker goes with the space after it, as accepting it does.
+    const col = cols.find((candidate) => candidate.mark === mark);
+    return col ? [{ ...col.marker, insert: '' }] : mark.segments.flatMap(hideMarkers);
   });
   changes.push(...dropped);
   return viewOf(
@@ -245,6 +251,18 @@ export function originalChanges(
       const ids = rowMarkIds(table);
       if (ids.size === 0) continue;
       const done = decideRows(text, parsed, table, ids, 'reject', eol, true);
+      changes.push(...done.changes);
+      for (const id of ids) handled.add(id);
+    }
+  }
+  const isCol = (mark: MarkRange) =>
+    (mark.kind === 'ins' && mark.payload === 'col') ||
+    (mark.kind === 'del' && /^col=/.test(mark.payload ?? ''));
+  if (parsed.marks.some(isCol)) {
+    for (const table of tablesOfText(text, parsed)) {
+      const ids = colMarkIds(table);
+      if (ids.size === 0) continue;
+      const done = decideCols(text, parsed, table, ids, 'reject', true);
       changes.push(...done.changes);
       for (const id of ids) handled.add(id);
     }
@@ -459,10 +477,16 @@ export function reviewView(text: string): string {
   // The ledger goes first among the changes: a note at the end of the body goes in front of it.
   changes.push(...ledgerChanges(parsed));
   const rows = insertedRows(text, parsed);
+  const cols = insertedCols(text, parsed);
   for (const mark of parsed.marks) {
     const row = rows.find((candidate) => candidate.mark === mark);
     if (row) {
       changes.push({ ...row.marker, insert: '' });
+      continue;
+    }
+    const col = cols.find((candidate) => candidate.mark === mark);
+    if (col) {
+      changes.push({ ...col.marker, insert: '' });
       continue;
     }
     for (const segment of mark.segments) {
@@ -493,8 +517,75 @@ export function reviewView(text: string): string {
     const label = twin ? `Moved row from row ${was}` : 'Inserted row';
     writeAt(changes, row.table.rows[row.index]?.to ?? row.row.to, `{>>${tag} ${label}<<}`);
   }
+  // An inserted column's cells are inserted text, and its note follows the text of its header cell.
+  for (const col of cols) {
+    const tag = `[${col.mark.id} ${col.mark.entry.by}]`;
+    col.table.rows.forEach((line, index) => {
+      const cell = line.cells[col.col];
+      if (!cell) return;
+      for (const piece of pieces(parsed, col.mark, cell.textFrom, cell.textTo)) {
+        writeAt(changes, piece.from, '{++');
+        writeAt(changes, piece.to, '++}');
+      }
+      if (index !== 0) return;
+      const twin = col.table.deletions.find((d) => d.mark.id === col.mark.entry.move);
+      const was = twin ? (twin.position - 1 > col.col ? twin.position - 1 : twin.position) : 0;
+      const label = twin ? `Moved column from column ${was}` : 'Inserted column';
+      writeAt(changes, cell.textTo, `{>>${tag} ${label}<<}`);
+    });
+  }
   changes.push(...deletedRowsView(text, parsed, changes, eolOf(text, parsed.ledgerRange)));
+  changes.push(...deletedColsView(text, parsed, changes));
   return applyChanges(text, resolve(changes));
+}
+
+/**
+ * The deleted columns of every table as the review view writes them: back at their places, with their
+ * cells as deleted text and a note after the text of the header's, and the deletion lines gone
+ * (format §8). A column that is the old place of a move says where it went.
+ */
+function deletedColsView(text: string, parsed: Parsed, changes: TextChange[]): TextChange[] {
+  if (!parsed.marks.some((mark) => mark.kind === 'del' && /^col=/.test(mark.payload ?? ''))) {
+    return [];
+  }
+  const extra: TextChange[] = [];
+  for (const table of tablesOfText(text, parsed)) {
+    const lines = table.deletions
+      .map((deletion, line) => ({ deletion, line }))
+      .filter(({ deletion }) => deletion.axis === 'col');
+    if (lines.length === 0) continue;
+    const grid = gridOf(text, table);
+    let cur: ColItem[] = Array.from({ length: table.aligns.length }, (_, src) => ({ src }));
+    let positions = table.deletions.map((d) => (d.axis === 'col' ? d.position - 1 : d.position));
+    for (const { deletion, line } of lines.toReversed()) {
+      const cells = deletedColCells(deletion.mark.payload);
+      const link = deletion.mark.entry.move;
+      const copy = link === undefined ? undefined : table.colMarks.find((c) => c.mark.id === link);
+      const what = copy === undefined ? 'Deleted column' : `Moved column to column ${copy.col + 1}`;
+      const tag = `[${deletion.mark.id} ${deletion.mark.entry.by}]`;
+      const index = Math.min(Math.max(positions[line] ?? 0, 0), cur.length);
+      const item: ColItem = {
+        text: (k) => {
+          const content = cells[k] ?? '';
+          if (k === 1) return content;
+          const shown = content.trim();
+          const note = k === 0 ? `{>>${tag} ${what}<<}` : '';
+          return ` ${shown === '' ? '' : `{--${shown}--}`}${note} `;
+        },
+      };
+      cur = [...cur.slice(0, index), item, ...cur.slice(index)];
+      positions = positions.map((p, k) => (k === line ? p : afterWriting(p, index, k, line)));
+    }
+    const all = new Set(lines.map(({ line }) => line));
+    for (const change of [
+      ...columnChanges(text, grid, cur),
+      ...removeDeletionLines(text, table, all),
+    ]) {
+      if (change.from === change.to) writeAt(changes, change.from, change.insert);
+      else extra.push(change);
+    }
+  }
+  return extra;
 }
 
 /** The stretches of `from`..`to` that no mark other than `row` has a marker in, outermost marks

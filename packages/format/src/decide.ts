@@ -26,6 +26,7 @@ import {
 } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { tablesOfText } from './table.ts';
+import { colMarkIds, decideCols } from './table-cols.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 import { syntaxOnly } from './views.ts';
@@ -55,6 +56,11 @@ function isTableMark(mark: MarkRange): boolean {
 const isRowMark = (mark: MarkRange) =>
   (mark.kind === 'ins' && mark.payload === 'row') ||
   (mark.kind === 'del' && /^row=/.test(mark.payload ?? ''));
+
+/** An inserted column or a deleted column (format §3.7), the two halves of a move together. */
+const isColMark = (mark: MarkRange) =>
+  (mark.kind === 'ins' && mark.payload === 'col') ||
+  (mark.kind === 'del' && /^col=/.test(mark.payload ?? ''));
 
 /**
  * Whether a person can be offered to reject the mark: false for a format change whose text no
@@ -92,7 +98,7 @@ function beforeFence(text: string, mark: MarkRange): boolean {
 /** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
  * change with operations they can't undo. Comments are resolved instead. */
 export function isDecidable(mark: MarkRange): boolean {
-  if (isTableMark(mark)) return isRowMark(mark);
+  if (isTableMark(mark)) return isRowMark(mark) || isColMark(mark);
   if (mark.entry.move !== undefined) return false;
   if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
@@ -296,9 +302,10 @@ function emptiedAnnotations(
 const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== undefined;
 
 /**
- * The changes that decide `marks`, with the ledger that goes with them. A move of a row is decided
- * after the other marks, on the text they leave: the row goes back or stays with whatever is pending
- * in it decided already, which a decision over the row's own lines could not do.
+ * The changes that decide `marks`, with the ledger that goes with them. The columns are decided after
+ * the other marks, and a move of a row after those, each on the text the ones before leave: a column is
+ * taken out or written in every line of the table, and a row goes back or stays with whatever is
+ * pending in it decided already, which a decision over the same lines could not do together.
  */
 function decide(
   text: string,
@@ -306,20 +313,24 @@ function decide(
   marks: readonly MarkRange[],
   action: Action,
 ): TextChange[] {
-  if (marks.some(isRowMove) && marks.some((mark) => !isRowMove(mark))) {
-    const first = decideNow(
-      text,
-      parsed,
-      marks.filter((mark) => !isRowMove(mark)),
-      action,
-    );
-    const current = applyChanges(text, first);
-    const read = parse(current);
-    const ids = new Set(marks.filter(isRowMove).map((mark) => mark.id));
-    const later = read.marks.filter((mark) => ids.has(mark.id));
-    return spliceRepairs(text, first, current, decideNow(current, read, later, action));
+  const tiers = [
+    marks.filter((mark) => !isRowMove(mark) && !isColMark(mark)),
+    marks.filter(isColMark),
+    marks.filter(isRowMove),
+  ].filter((tier) => tier.length > 0);
+  if (tiers.length <= 1) return decideNow(text, parsed, marks, action);
+  let changes: TextChange[] = [];
+  let current = text;
+  let read = parsed;
+  for (const tier of tiers) {
+    const ids = new Set(tier.map((mark) => mark.id));
+    const later = changes.length === 0 ? tier : read.marks.filter((mark) => ids.has(mark.id));
+    const step = decideNow(current, read, later, action);
+    changes = changes.length === 0 ? step : spliceRepairs(text, changes, current, step);
+    current = applyChanges(current, step);
+    read = parse(current);
   }
-  return decideNow(text, parsed, marks, action);
+  return changes;
 }
 
 function decideNow(
@@ -335,9 +346,11 @@ function decideNow(
   const formats = marks.filter((mark) => mark.kind === 'fmt');
   const reader = formats.length > 0 ? formatReader(text, parsed) : undefined;
   const rowMarks = marks.filter(isRowMark);
+  const colMarks = marks.filter(isColMark);
   const decidedIds = new Set(marks.map((mark) => mark.id));
+  const travelling = new Set<string>();
   const raw = marks
-    .filter((mark) => !isRowMark(mark))
+    .filter((mark) => !isRowMark(mark) && !isColMark(mark))
     .flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol, reader));
   if (rowMarks.length > 0) {
     // The rows of a table are decided together, a move's two halves with each other.
@@ -359,7 +372,28 @@ function decideNow(
       throw new EditError(NOT_SUPPORTED, 'not-supported');
     }
   }
-  let changes = keepAnnotations(outermost(raw), parsed, decidedIds);
+  if (colMarks.length > 0) {
+    // The columns of a table are decided together, a move's two halves with each other.
+    const wanted = new Set(colMarks.map((mark) => mark.id));
+    const found = new Set<string>();
+    for (const table of tablesOfText(text, parsed)) {
+      const here = colMarkIds(table);
+      const mine = new Set([...wanted].filter((id) => here.has(id)));
+      if (mine.size === 0) continue;
+      const done = decideCols(text, parsed, table, mine, action);
+      raw.push(...done.changes);
+      for (const id of done.decided) {
+        found.add(id);
+        decidedIds.add(id);
+      }
+      for (const id of done.anchored) decidedIds.add(id);
+      for (const id of done.travelling) travelling.add(id);
+    }
+    if (colMarks.some((mark) => !found.has(mark.id))) {
+      throw new EditError(NOT_SUPPORTED, 'not-supported');
+    }
+  }
+  let changes = keepAnnotations(outermost(raw), parsed, new Set([...decidedIds, ...travelling]));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   // Every round removes markers that were not removed before, so the markers are the most rounds.
   const markers = parsed.marks.reduce((sum, mark) => sum + 2 * mark.segments.length, 0);
@@ -459,14 +493,17 @@ export function rejectMarks(text: string, ids: readonly string[]): TextChange[] 
 function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRange[] {
   // A row mark that is in no table (a text merge can leave one) is left pending.
   const inTable = new Set<string>();
-  if (parsed.marks.some(isRowMark)) {
+  if (parsed.marks.some((mark) => isRowMark(mark) || isColMark(mark))) {
     for (const table of tablesOfText(parsed.text, parsed)) {
       for (const id of rowMarkIds(table)) inTable.add(id);
+      for (const id of colMarkIds(table)) inTable.add(id);
     }
   }
   return parsed.marks.filter(
     (mark) =>
-      isChange(mark) && (!isRowMark(mark) || inTable.has(mark.id)) && (!filter || filter(mark)),
+      isChange(mark) &&
+      (!(isRowMark(mark) || isColMark(mark)) || inTable.has(mark.id)) &&
+      (!filter || filter(mark)),
   );
 }
 
