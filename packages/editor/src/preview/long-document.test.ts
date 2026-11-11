@@ -264,6 +264,8 @@ describe('a long document with many deleted blocks', () => {
       // Relative: the blocks add 200 widgets to 1,000 marks, never a scan of the marks for each.
       expect(struck).toBeLessThan(Math.max(bound(parseTime(withBlocks)) / 2, base * 2));
     },
+    // Two editors of 1,000 marks and 40 timed keys each: CI's runners take longer than the default.
+    60_000,
   );
 });
 
