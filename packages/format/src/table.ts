@@ -5,7 +5,7 @@
 // prefixes, and the editor leaves them as source.
 
 import { bodyStart, lineEnd } from './blocks.ts';
-import { HTML_STARTS } from './block-read.ts';
+import { HTML_STARTS, indentColumns } from './block-read.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
 
 export type TableAlign = '' | 'left' | 'center' | 'right';
@@ -71,17 +71,7 @@ const DELIMITER_CELL = /^:?-+:?$/;
 const TABLE_DELETION = /^(row|col)=(\d+)/;
 
 const isBlank = (line: string) => /^[ \t]*$/.test(line);
-/** A line's indentation in columns: a tab goes to the next multiple of four, so a tab anywhere in
- * the leading whitespace makes four columns or more. */
-export function indentOf(line: string): number {
-  let columns = 0;
-  for (const c of line) {
-    if (c === ' ') columns++;
-    else if (c === '\t') columns += 4 - (columns % 4);
-    else break;
-  }
-  return columns;
-}
+export const indentOf = indentColumns;
 const isSpace = (c: string | undefined) => c === ' ' || c === '\t';
 
 /** The offsets of a line's pipes that start a cell: those no backslash escapes. A pipe in a code

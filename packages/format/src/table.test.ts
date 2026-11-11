@@ -321,7 +321,8 @@ describe('readTables against the oracle', () => {
   });
 
   // Leading whitespace is columns, and a tab goes to the next multiple of four: four columns make
-  // indented code, which starts no table, is no delimiter row and ends the table's rows (#290).
+  // indented code, which starts no table, is no delimiter row and ends the table's rows (#290). Tabs
+  // and spaces around the pipes, CRLF and the blocks beside the table are drawn too.
   it('reads leading tabs and spaces before every row as micromark does', () => {
     const random = seeded(290);
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
@@ -330,20 +331,44 @@ describe('readTables against the oracle', () => {
       for (let n = Math.floor(random() * 6); n > 0; n--) out += random() < 0.35 ? '\t' : ' ';
       return out;
     };
+    // (blocks that end before the blank line after them, so that the table is a top-level block)
+    const BEFORE = [
+      '',
+      '',
+      'Words.\n\n',
+      '# Heading\n\n',
+      '- item\n\n',
+      '> quote\n\n',
+      '```\ncode\n```\n\n',
+      '    code\n\n',
+      '<div>\nx\n</div>\n\n',
+    ];
+    const AFTER = [
+      '',
+      '',
+      '\n\nWords.',
+      '\n\n# Heading',
+      '\n\n- item',
+      '\n\n> quote',
+      '\n\n    code',
+    ];
     const cases = Math.max(2000, fuzzCount(2000));
     for (let n = 0; n < cases; n++) {
       const bare = random() < 0.5;
       const columns = 1 + Math.floor(random() * 3);
+      const gap = () => pick(['', ' ', ' ', '\t', ' \t']);
       const cells = (word: (i: number) => string) =>
-        Array.from({ length: columns }, (_, i) => word(i)).join(' | ');
-      const wrap = (line: string) => (bare && columns > 1 ? line : `| ${line} |`);
+        Array.from({ length: columns }, (_, i) => word(i)).join(`${gap()}|${gap()}`);
+      const wrap = (line: string) => (bare && columns > 1 ? line : `|${gap()}${line}${gap()}|`);
       const lines = [
         wrap(cells((i) => `h${i}`)),
         wrap(cells(() => pick(['-', '---', ':-:', '--:']))),
       ];
       for (let r = Math.floor(random() * 4); r > 0; r--) lines.push(wrap(cells((i) => `c${i}`)));
       const lead = () => (random() < 0.4 ? '' : white());
-      expectOracle(lines.map((line) => `${lead()}${line}`).join('\n'));
+      const table = lines.map((line) => `${lead()}${line}`).join('\n');
+      const text = `${pick(BEFORE)}${table}${pick(AFTER)}`;
+      expectOracle(random() < 0.2 ? text.replaceAll('\n', '\r\n') : text);
     }
   });
 });

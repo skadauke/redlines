@@ -68,6 +68,18 @@ const TAG = /^ {0,3}<\/?[A-Za-z]/;
 // another character that JavaScript's `trim` and `\s` take for white space is text.
 const isBlank = (line: string) => /^[ \t]*$/.test(line);
 const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0;
+
+/** A line's indentation in columns: a tab goes to the next multiple of four, so a tab anywhere in
+ * the leading white space makes four columns or more. (`indentOf` counts characters, for offsets.) */
+export function indentColumns(line: string): number {
+  let columns = 0;
+  for (const c of line) {
+    if (c === ' ') columns++;
+    else if (c === '\t') columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
+}
 const stripStart = (line: string) => line.replace(/^[ \t]+/, '');
 const strip = (line: string) => line.replace(/^[ \t]+|[ \t]+$/g, '');
 
@@ -96,7 +108,7 @@ function itemOf(rest: string): { marker: string; ordered?: string; empty: boolea
  * lone tag may start an HTML block (undefined: not read).
  */
 function startsLazily(rest: string): boolean | undefined {
-  if (indentOf(rest) >= 4) return false;
+  if (indentColumns(rest) >= 4) return false;
   if (QUOTE.test(rest) || RULE.test(rest) || ATX.test(rest) || fenceOf(rest)) return true;
   if (HTML_STARTS.some(([start]) => start.test(rest))) return true;
   if (TAG.test(rest)) return undefined;
@@ -186,7 +198,8 @@ export function readBlocks(text: string): BlockRead[] | undefined {
       // Code right after a container that the line lacks the marker of, which micromark reads as
       // a code block for each line, or a fence or an HTML block that the end of its container
       // ends, which micromark gives a line more: not read.
-      if (indentOf(rest) >= 4 || leaf?.kind === 'fence' || leaf?.kind === 'html') return undefined;
+      if (indentColumns(rest) >= 4 || leaf?.kind === 'fence' || leaf?.kind === 'html')
+        return undefined;
       closeTo(matched);
     } else if (leaf?.kind === 'fence' || leaf?.kind === 'html') {
       // A line of a fence or of an HTML block, which may be the last.
@@ -236,7 +249,7 @@ export function readBlocks(text: string): BlockRead[] | undefined {
     // A line of container markers and nothing else.
     if (isBlank(rest)) continue;
     const paragraph = leaf?.kind === 'paragraph' ? leaf : undefined;
-    if (indentOf(rest) >= 4) {
+    if (indentColumns(rest) >= 4) {
       // Indented code, or a line of the paragraph, which code does not end.
       const target = paragraph ?? (leaf?.kind === 'code' ? leaf : undefined);
       if (target) {
