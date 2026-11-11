@@ -337,6 +337,19 @@ describe('aligning a column, tracked (format §3.7)', () => {
     expect(checked).toBeGreaterThanOrEqual(8);
   });
 
+  it('rejects all, and accepts all, with the header moved and a row put above it under the change', () => {
+    // One decision writes the delimiter row after the new first row, the next takes it away with the
+    // row that moves back: the two come to one change and no delimiter row is left in the table.
+    const centered = file('| x y  |\n| :---: |\n| b    |\n| alpha |\n| 11   |');
+    const one = align(centered, [0], '').after;
+    const moved = edit(one, { kind: 'moveRows', rows: [0], to: 2 }, ada, ['w8nn', 'p5qm']).after;
+    const text = edit(moved, { kind: 'insertRows', after: -1 }, bo, ['q6rs']).after;
+    const rejected = applyChanges(text, rejectAll(text));
+    expect(trim(rejected)).toBe(trim(centered));
+    expect(trim(applyChanges(text, acceptAll(text)))).toBe(trim(newestView(text).text));
+    expectEveryOrderAlike('header moved, row above it', text, exactly);
+  });
+
   it('is one change with the rest of a group, and takes a note', () => {
     const table = readTables(start, parse(start))[0]?.from ?? 0;
     const done = applyChanges(
