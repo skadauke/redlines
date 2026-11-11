@@ -474,7 +474,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above!.text)) {
+    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above.text)) {
       // A hard break above: the break typed after its backslash would put a marker right behind it.
       return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
     }

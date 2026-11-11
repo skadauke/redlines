@@ -1553,6 +1553,22 @@ interface Placed {
   right: string;
 }
 
+/** Whether a line that starts with a number, indented `indent`, is left of the content column of the
+ * nearest list item above it in the same block: an item of that list, not text of its paragraph. */
+function isSiblingNumber(text: string, line: number, indent: number): boolean {
+  let at = line;
+  for (let n = 0; n < 50 && at > 0; n++) {
+    at = lineStart(text, at - 1);
+    const above = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(above)) return false;
+    const item = /^([ \t>]*)(\d{1,9}[.)]|[-+*])([ \t]+)/.exec(above);
+    if (item) {
+      return indent < (item[1]?.length ?? 0) + (item[2]?.length ?? 0) + (item[3]?.length ?? 0);
+    }
+  }
+  return false;
+}
+
 /**
  * The end of the first word of the text on the line that starts at `at`, past its prefix and a
  * heading's `#`s, where a closer may follow it; past blank lines first, to the next block's first
@@ -4026,15 +4042,15 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
-function checkMarks(plan: Plan, after: string, parsed: Parsed, edits: readonly TextChange[]): void {
-  // A list number with a marker right behind it, no white space between, is text to a reader that
-  // doesn't know the markers, and an item in the view: the edit wrote more of them than there were
-  // (a change that took the line break and the number of the next item, #248, walk seed 511).
-  const bare = /^[ \t>]*\d{1,9}[.)]<!--/gm;
-  if (
-    !edits.some((edit) => /[\d.)]/.test(edit.insert)) &&
-    (after.match(bare)?.length ?? 0) > (plan.text.match(bare)?.length ?? 0)
-  ) {
+function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
+  // A list number with a marker right behind it and text after it is text to a reader that doesn't
+  // know the markers, and a sibling item in the view when it stands at or left of the content of the
+  // item above it: the edit wrote one where there was none (a change that took the line break and the
+  // number of the next item, #248, walk seed 511). Typed numbers are the person's own.
+  const bare = /^([ \t>]*)\d{1,9}[.)]<!--\/[a-z0-9]+--> /gm;
+  const wrote = (re: RegExp, text: string) =>
+    [...text.matchAll(re)].filter((m) => isSiblingNumber(text, m.index, m[1]?.length ?? 0)).length;
+  if (wrote(bare, after) > wrote(bare, plan.text)) {
     throw new EditError(
       'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
       'no-legal-placement',
@@ -4803,7 +4819,7 @@ function editsOnce(
     ),
     exempt: plan.exempt,
     verify: (after, parsed, changes) => {
-      checkMarks(plan, after, parsed, edits);
+      checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
       // A change that stands against another mark reads as typed in every order of decisions, or
