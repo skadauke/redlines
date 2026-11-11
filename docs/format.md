@@ -1573,6 +1573,7 @@ it, one per line:
   and the table allows what it allows with Track Changes on otherwise.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
+- **An agent's `str_replace` over a table.** When the old and the new text hold the same table, with the text around it as it was, the two are compared as tables: rows are matched by their text, so an added row is a row insertion (with its cells), a removed one a deletion and a reordered one a move, and a row that stays with some cells changed gets word-by-word marks in them, all one group. An edit of cells alone is written as any edit in cells is. A replacement that changes rows and columns together is refused: "Make the row changes now and leave the column changes until the person has decided them." A change of columns alone is not compared yet.
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
   cells.
 - Pandoc's `markdown` reader gives a pipe table relative column widths once a line is longer than

@@ -35,7 +35,14 @@ import type { EditContext, MarkEntry, MarkRange, Parsed, TextChange } from './ty
  * header, the number of rows below the last.
  */
 export type TableOp =
-  | { kind: 'insertRows'; table: number; after: number; count: number }
+  | {
+      kind: 'insertRows';
+      table: number;
+      after: number;
+      count: number;
+      /** The text of the cells of each new row, when it has some: an agent's rows. */
+      texts?: readonly (readonly string[])[];
+    }
   | { kind: 'deleteRows'; table: number; rows: number[] }
   | { kind: 'moveRows'; table: number; rows: number[]; to: number };
 
@@ -147,7 +154,12 @@ export function rewritePositions(
 
 /** The text of a new row, in the table's style: padded to line up where every row of the table is,
  * `| a | b |` otherwise. `first` is the text at the start of the first cell. */
-function rowText(table: TableRead, text: string, first: string): string {
+function rowText(
+  table: TableRead,
+  text: string,
+  first: string,
+  cells: readonly string[] = [],
+): string {
   const columns = table.aligns.length;
   const delimiter = text.slice(table.delimiter.from, table.delimiter.to);
   const widths: number[] = [];
@@ -169,7 +181,10 @@ function rowText(table: TableRead, text: string, first: string): string {
     const width = lined ? (widths[i] ?? 0) : 0;
     // The first cell's marker leaves the cell as wide as the others when it goes (accepting the
     // row): the spaces after it are the cell's own.
-    const content = i === 0 ? first + ' '.repeat(width) : ' '.repeat(width);
+    const body = cells[i] ?? '';
+    const pad = ' '.repeat(Math.max(0, width - body.length));
+    const lead = i === 0 ? first + (first !== '' && body !== '' ? ' ' : '') : '';
+    const content = body === '' ? (i === 0 ? first : '') + ' '.repeat(width) : lead + body + pad;
     line += `| ${content} `;
   }
   return `${line}|`;
@@ -497,7 +512,7 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
     if (group !== undefined) entry.group = group;
     if (ctx.note !== undefined) entry.note = ctx.note;
     ledger.marks[id] = entry;
-    lines.push(rowText(table, text, `<!--ins ${id} row-->`));
+    lines.push(rowText(table, text, `<!--ins ${id} row-->`, op.texts?.[i]));
   }
   const body = insertBody(text, table, op, eol, lines);
   const changes = commitEdit(text, body, ledger, { parsed, created: ids });
@@ -551,7 +566,7 @@ export function untrackedTableEdit(
   const refusal = ruleTwo(op.kind, pendingOf(table, parsed), false);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   const eol = eolOf(text, parsed.ledgerRange);
-  const lines = Array.from({ length: op.count }, () => rowText(table, text, ''));
+  const lines = Array.from({ length: op.count }, (_, i) => rowText(table, text, '', op.texts?.[i]));
   const body = insertBody(text, table, op, eol, lines);
   const changes = commitEdit(text, body, parsed.ledger, { parsed, keepLedger: true });
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
