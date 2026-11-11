@@ -67,6 +67,10 @@ function typed(text: string, range: Range, op: FormatOp): string {
   return after;
 }
 
+/** A block change with Track Changes off, at the word `at`. */
+const untypedAt = (text: string, at: string, to: BlockType) =>
+  typed(text, rangeOf(text, at), block(to));
+
 const message = (run: () => unknown): string => {
   try {
     run();
@@ -247,6 +251,37 @@ describe('block types (format §2.6)', () => {
     const ids = ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'k3x9', 'b2c3');
     expect(message(() => changed(six, all(six), block('ol'), ids))).toMatch(
       /Change up to six items at a time/,
+    );
+  });
+
+  it('refuses a narrower bullet that would take in a list two columns in (#263)', () => {
+    // The bullet at two columns is a list of its own under `1. ` (text at three), and an item of
+    // the item once it is `- ` or `- [ ] `: a line the change does not write would be read otherwise.
+    for (const [head, word] of [
+      ['1. _f_ k, target', 'target'],
+      ['10. word', 'word'],
+    ] as const) {
+      const text = `${head}\n  - alpha (b)\n`;
+      for (const to of ['ul', 'task'] as const) {
+        const label = `${head} to ${to}`;
+        expect(
+          message(() => changed(text, rangeOf(text, word), block(to))),
+          label,
+        ).toMatch(/can't get a narrower bullet/);
+        expect(
+          message(() => untypedAt(text, word, to)),
+          `off: ${label}`,
+        ).toMatch(/can't get a narrower bullet/);
+      }
+    }
+    // Lines at or past its text stay its own, and a bullet that is no wider changes as before.
+    const inside = '1. a\n   - child\n';
+    expect(accepted(changed(inside, rangeOf(inside, 'a'), block('task')), 'm2bd')).toBe(
+      '- [ ] a\n   - child\n',
+    );
+    const same = '- a\n  - child\n';
+    expect(accepted(changed(same, rangeOf(same, 'a'), block('task')), 'm2bd')).toBe(
+      '- [ ] a\n  - child\n',
     );
   });
 

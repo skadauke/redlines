@@ -56,6 +56,8 @@ const NEXT_ITEM =
   "This item can't change its list type: the numbered item after it would then be read as part of it. Turn off Track Changes to renumber this list.";
 const UNDER_IT =
   "This item can't get a wider bullet: the lines under it would no longer be indented enough to be its own.";
+const NARROWER =
+  "This item can't get a narrower bullet: lines under it that are not part of it now would be read as part of it.";
 const AT_START =
   'A pending change or a comment starts this block, and would have to move. Decide it first.';
 const OWN_FIRST = 'Accept or reject your other change to this block first.';
@@ -579,6 +581,18 @@ function planType(
     const children = subtreeEnd(reader, block) > block.end;
     const width = to === 'ol' ? 3 : 2;
     if (children && width > columnOf(block.syntax)) throw refused(UNDER_IT);
+    // And a narrower one takes in the lines under it that stand between the two columns: a bullet
+    // two columns in is a list of its own under `1. `, and an item of `- [ ] `.
+    if (children && width < columnOf(block.syntax)) {
+      const column = block.indent - block.line - quoteLength(text, block.line);
+      const between = (at: number) => {
+        const indent = /^[ \t]*/.exec(unquoted(text, at))?.[0].length ?? 0;
+        return indent >= column + width && indent < column + columnOf(block.syntax);
+      };
+      if (linesIn(reader, block.end, subtreeEnd(reader, block)).some(between)) {
+        throw refused(NARROWER);
+      }
+    }
     const after = nextLine(reader, block.end);
     if (after !== undefined) {
       const next = lineAt(text, after);

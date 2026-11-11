@@ -697,8 +697,13 @@ away.
   its text would make a bulleted or numbered item a task, and where the block after the blank line is
   indented far enough to become the new list item's.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
-  except where a numbered item after it and the lines under it would then be read into it, or where
-  the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
+  except where a numbered item after it and the lines under it would then be read into it, where
+  the lines under it would no longer be indented enough to be its own, or where a narrower bullet
+  would take in lines under it that stand between the two content columns (a bullet two columns in,
+  under `1. `, is a list of its own, and an item of `- [ ] `): "This item can't get a narrower
+  bullet: lines under it that are not part of it now would be read as part of it." The change would
+  read a line it does not write otherwise, and it is refused, not repaired, with Track Changes off
+  as on. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
   its first child right under its text; and so is indenting
