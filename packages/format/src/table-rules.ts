@@ -92,6 +92,20 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
   }
 }
 
+/** Whether a line above `position`, in the lines of text that run up to it, holds a pipe: the
+ * header, the delimiter row or a row of a table that a line without one can be a row of. */
+function pipeAbove(text: string, position: number): boolean {
+  let start = lineStart(text, position);
+  while (start > 0) {
+    const previous = lineStart(text, start - 1);
+    const line = text.slice(previous, start - 1);
+    if (line.trim() === '') return false;
+    if (line.includes('|')) return true;
+    start = previous;
+  }
+  return false;
+}
+
 /**
  * Where a plain `| ` goes so that a marker may stand at the start of a row (rule 7): at the start of
  * the text of a row that has no leading pipe, when `edit` is at that start, or null.
@@ -99,7 +113,8 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
 export function leadingPipeAt(text: string, edit: TextChange, parsed?: Parsed): number | null {
   if (!text.includes('|')) return null;
   const line = text.slice(lineStart(text, edit.from), lineEnd(text, edit.from));
-  if (!line.includes('|')) return null;
+  // A row with no pipe at all is one of a table too (the first under the delimiter row, say).
+  if (!line.includes('|') && !pipeAbove(text, edit.from)) return null;
   for (const table of tablesIn(text, parsed)) {
     if (edit.from < table.from || edit.from > table.to) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.from <= r.to);

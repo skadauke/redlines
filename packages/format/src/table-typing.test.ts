@@ -217,6 +217,44 @@ describe('a marker at the start of a row without a leading pipe (rule 7)', () =>
     });
   }
 
+  describe('a row with no pipe at all, right under the delimiter row', () => {
+    for (const [layout, rows] of [
+      ['with a row after it', '| a | b |\n| - | - |\ncc\n| d | e |'],
+      ['as the last row', '| a | b |\n| - | - |\ncc'],
+      ['among pipe-less rows', '| a | b |\n| - | - |\ncc\nff\ngg'],
+    ] as const) {
+      const bare = file(rows);
+      const first = at(bare, 'cc');
+      const keys: [string, TextChange][] = [
+        ['typing', type(first, 'x')],
+        ['deleting', remove(first, first + 1)],
+        ['replacing', replace(first, first + 1, 'x')],
+      ];
+      for (const [name, edit] of keys) {
+        it(`${name} at its start works, ${layout}, in every order of decisions`, () => {
+          const after = track(bare, edit);
+          expectInOrder(name, [], after);
+          expectEveryOrderAlike(name, after);
+          expect(bodyOf(after)).toContain('\n| <!--');
+          expect(originalView(after).text).toBe(`${rows.replace('cc', '| cc')}\n`);
+          expect(parse(after).warnings).toEqual([]);
+        });
+      }
+    }
+
+    it('writes a pipe for a pipe-less row and works in a CRLF file', () => {
+      const crlf = file('| a | b |\r\n| - | - |\r\ncc');
+      const after = track(crlf, type(at(crlf, 'cc'), 'x'));
+      expect(after).toContain('\r\n| <!--ins k3x9-->x');
+      expectEveryOrderAlike('crlf', after);
+    });
+
+    it('leaves a line that no table holds alone', () => {
+      const prose = file('Some words\nmore words\n\n| a | b |\n| - | - |');
+      expect(bodyOf(track(prose, type(at(prose, 'more'), 'x')))).not.toContain('| <!--');
+    });
+  });
+
   it('leaves a row alone when the edit is elsewhere in it, plain, or on a row with a pipe', () => {
     expect(bodyOf(track(text, type(start + 4, 'x')))).toContain('\nc | <!--ins');
     expect(plain(text, type(start, 'x'))).toContain('\nxc | d |');

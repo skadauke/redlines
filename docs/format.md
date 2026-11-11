@@ -1392,8 +1392,9 @@ it, one per line:
 
 - Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
   that has none, because a change begins in its first cell, the editor writes a plain `| ` in
-  front of it first, in both versions, so that nothing reads differently. A format change in a row
-  without one is still refused.
+  front of it first, in both versions, so that nothing reads differently. This holds for a row with
+  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
+  is still refused.
 - **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
