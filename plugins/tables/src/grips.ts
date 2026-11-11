@@ -76,6 +76,19 @@ interface Drawn {
   rects: { top: number; bottom: number }[];
 }
 
+/** A row's drawn box: the union of its cells' boxes, which WebKit and Chromium agree on, where a
+ * table row's own box differs between them; the line's own when it has no cells with a size. */
+function rowBox(line: HTMLElement): { top: number; bottom: number } {
+  const cells = [...line.querySelectorAll<HTMLElement>(':scope > .rl-tc')]
+    .map((cell) => cell.getBoundingClientRect())
+    .filter((box) => box.height > 0);
+  if (cells.length === 0) return line.getBoundingClientRect();
+  return {
+    top: Math.min(...cells.map((box) => box.top)),
+    bottom: Math.max(...cells.map((box) => box.bottom)),
+  };
+}
+
 function drawnTables(view: EditorView): Drawn[] {
   const tables = tablesOf(view.state);
   const drawn: Drawn[] = [];
@@ -89,7 +102,7 @@ function drawnTables(view: EditorView): Drawn[] {
       left: box.left,
       right: box.right,
       lines,
-      rects: lines.map((line) => line.getBoundingClientRect()),
+      rects: lines.map(rowBox),
     });
   }
   return drawn;

@@ -12,13 +12,19 @@ export interface RowEdges {
 }
 
 /**
- * The boundaries of a table's rows, as `y`s: the top of each row and the bottom of the last (so
+ * The boundaries of a table's rows, as `y`s: the top of the first, the middle of each gap between rows
+ * and the bottom of the last (so
  * `rows.length + 1` of them, boundary 0 above the header).
  */
-export const boundariesOf = (rows: readonly RowEdges[]): number[] => [
-  ...rows.map((row) => row.top),
-  ...(rows.length > 0 ? [rows[rows.length - 1]?.bottom ?? 0] : []),
-];
+export const boundariesOf = (rows: readonly RowEdges[]): number[] =>
+  rows.length === 0
+    ? []
+    : [
+        rows[0]?.top ?? 0,
+        // Between two rows, the middle of the gap their boxes leave (none, where they touch).
+        ...rows.slice(1).map((row, i) => ((rows[i]?.bottom ?? 0) + row.top) / 2),
+        rows[rows.length - 1]?.bottom ?? 0,
+      ];
 
 /** The boundary within `PLUS_REACH` of `y`, or null: 8 px away is near, 9 is not. */
 export function plusBoundary(y: number, boundaries: readonly number[]): number | null {

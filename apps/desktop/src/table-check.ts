@@ -1382,8 +1382,11 @@ const CHECKS: Check[] = [
         const line = editor.view.dom
           .querySelector<HTMLElement>('.rl-drop-line')
           ?.getBoundingClientRect();
+        const dropData = {
+          ...editor.view.dom.querySelector<HTMLElement>('.rl-drop-line')?.dataset,
+        };
         if (line && Math.abs(line.top - lastBox.bottom) > 3)
-          problems[`${view}-line-at`] = [line.top, lastBox.bottom];
+          problems[`${view}-line-at`] = [line.top, lastBox.bottom, dropData];
         // Esc cancels, and nothing is written.
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         mouse(window, 'mouseup', start.x + 10, lastBox.bottom + 2);
@@ -1399,7 +1402,11 @@ const CHECKS: Check[] = [
         mouse(window, 'mouseup', a.left + 10, lastBox.bottom + 2);
         await frames();
         if (firstColumn(editor).join() !== 'Fruit,Plums,Pears,Apples')
-          problems[`${view}-moved`] = firstColumn(editor);
+          problems[`${view}-moved`] = {
+            rows: firstColumn(editor),
+            drop: dropData,
+            pointerY: lastBox.bottom + 2,
+          };
         // The drag of three rows selected with it moves all three.
         await load(editor, ROWS, false);
         editor.setViewMode(view);

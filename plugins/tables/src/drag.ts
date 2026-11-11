@@ -75,6 +75,9 @@ export function beginDrag(options: DragOptions): Drag {
     const base = layer.getBoundingClientRect();
     const edges = options.boundaries();
     current = dropBoundary(y, edges);
+    line.dataset['boundary'] = String(current);
+    line.dataset['y'] = String(y);
+    line.dataset['edges'] = edges.map((edge) => Math.round(edge)).join(',');
     const { left, right } = options.table();
     line.style.top = `${(edges[current] ?? 0) - base.top - 1}px`;
     line.style.left = `${left - base.left}px`;
