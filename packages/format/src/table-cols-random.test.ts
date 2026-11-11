@@ -39,7 +39,7 @@ const THREAD = [
   '      A note.',
 ];
 const ABOVE =
-  "Ada Lovelace's comment starts above this table and ends in this column. Delete it first, or turn off Track Changes.";
+  /^.+'s comment starts above this table and ends in this column\. Delete it first, or turn off Track Changes\.$/;
 const WORDS = ['alpha', 'b', 'café', 'x y', '11', ''];
 const PEOPLE = [ada, bo, claudeAda];
 
@@ -191,21 +191,25 @@ describe('rows and columns, random', () => {
             mode === 'insert' ? from : Math.min(cell.textTo, from + 1 + Math.floor(random() * 3));
           edit = { from, to, insert: mode === 'delete' ? '' : pick(['q', 'é', 'ab']) };
         }
-        // The column the comment from above ends in, when an operation of a person moves or deletes it.
+        // A tracked move or deletion of a column that a comment from above the table ends in: the suite's
+        // own comment, or one it added to a first cell of a header without pipes, whose start goes on a
+        // line above the table too.
         let shouldRefuse = false;
-        if (
-          above &&
-          who !== 'plain' &&
-          op &&
-          (op.kind === 'moveCols' || op.kind === 'deleteCols')
-        ) {
-          const comment = parse(text).marks.find((m) => m.id === 'c9qf');
-          const end = comment?.segments[0]?.close;
-          const row = table.rows.find((r) => end && r.from <= end.from && end.from <= r.to);
-          const column = row?.cells.findIndex(
-            (c, i, all) => end && c.from <= end.from && (end.from < c.to || i === all.length - 1),
-          );
-          shouldRefuse = column !== undefined && column !== -1 && op.cols.includes(column);
+        if (who !== 'plain' && op && (op.kind === 'moveCols' || op.kind === 'deleteCols')) {
+          for (const comment of parse(text).marks) {
+            if (comment.kind !== 'cmt') continue;
+            for (const segment of comment.segments) {
+              const end = segment.close;
+              if (!end || segment.open.from >= table.from) continue;
+              const row = table.rows.find((r) => r.from <= end.from && end.from <= r.to);
+              const column = row?.cells.findIndex(
+                (c, i, all) => c.from <= end.from && (end.from < c.to || i === all.length - 1),
+              );
+              if (column !== undefined && column !== -1 && op.cols.includes(column)) {
+                shouldRefuse = true;
+              }
+            }
+          }
         }
         steps.push(`${who} ${JSON.stringify(op ?? edit ?? over)}`);
         const person = PEOPLE.find((p) => p.handle === who);
@@ -243,7 +247,7 @@ describe('rows and columns, random', () => {
           }
         } catch (error) {
           if (error instanceof EditError) {
-            if (error.message === ABOVE) {
+            if (ABOVE.test(error.message)) {
               expect(
                 shouldRefuse,
                 `refused for a column it does not end in: ${steps.join(' / ')}`,
