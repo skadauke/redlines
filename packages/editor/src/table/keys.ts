@@ -15,10 +15,11 @@ import { endOf, outOfHidden, restingAfter, restingBefore, startOf } from '../blo
 import { blockAt } from '../blocks/structure.ts';
 import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
+import { refusedEditEffect } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table } from './model.ts';
 import { insertRowBelow, insertRowAfter } from './ops.ts';
 import { deleteReach } from './reach.ts';
-import { shownCellAt } from './stops.ts';
+import { selectionInTable, shownCellAt } from './stops.ts';
 
 /** A key that moves the caret in a table, as the keymap names it. */
 export type MoveKey =
@@ -320,9 +321,15 @@ function deleteBy(forward: boolean, unit: 'group' | 'line'): Command {
   };
 }
 
-/** A key that does nothing in a cell, which CodeMirror's would break the row with (a row copied,
- * indented, commented or moved, or a line deleted or selected). */
-const nothingInCell: Command = (view) => hereIn(view.state) !== null;
+/** A key that CodeMirror's command would break the row with (a line indented, commented, deleted or
+ * selected): nothing is done in a cell, and the notice says so. */
+function notInCell(name: string): Command {
+  return (view) => {
+    if (!selectionInTable(view.state)) return false;
+    view.dispatch({ effects: refusedEditEffect.of(`${name} doesn't work in a table cell.`) });
+    return true;
+  };
+}
 
 /** ⌃T: nothing across a cell's edge. */
 const transpose: Command = (view) => {
@@ -419,17 +426,15 @@ export function tableKeymap(): Extension {
         { key: 'Mod-Delete', run: deleteBy(true, mac ? 'line' : 'group') },
         { mac: 'Ctrl-k', run: deleteBy(true, 'line') },
         { mac: 'Ctrl-t', run: transpose },
-        // Until rows can be moved, selected and deleted as rows (Stages 2 and 3), these do nothing in
-        // a cell, as copying, indenting or commenting a line would break the row.
-        { key: 'Alt-ArrowUp', run: nothingInCell },
-        { key: 'Alt-ArrowDown', run: nothingInCell },
-        { key: 'Shift-Alt-ArrowUp', run: nothingInCell },
-        { key: 'Shift-Alt-ArrowDown', run: nothingInCell },
-        { key: 'Mod-[', run: nothingInCell },
-        { key: 'Mod-]', run: nothingInCell },
-        { key: 'Mod-/', run: nothingInCell },
-        { key: 'Shift-Mod-k', run: nothingInCell },
-        { key: 'Ctrl-l', run: nothingInCell },
+        // ⌥↑ ⌥↓ and their ⇧ forms are not bound in a cell: they are the paragraph keys' and the
+        // line keys', whichever the editor has, and fall through. These would break the row (a line
+        // indented, commented, deleted or selected) and say so, until rows can be selected and
+        // deleted as rows (Stages 2 and 3).
+        { key: 'Mod-[', run: notInCell('Outdent') },
+        { key: 'Mod-]', run: notInCell('Indent') },
+        { key: 'Mod-/', run: notInCell('Toggle Comment') },
+        { key: 'Shift-Mod-k', run: notInCell('Delete Line') },
+        { key: 'Ctrl-l', run: notInCell('Select Line') },
       ]),
     ),
   ];

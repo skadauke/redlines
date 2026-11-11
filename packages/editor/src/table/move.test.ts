@@ -3,7 +3,8 @@
 // ⌘-arrows as keystroke scripts, with Track Changes off and on. Movement writes nothing. What needs
 // layout, a move between cells at the same x, is checked in the WebKit script.
 import { forceParsing } from '@codemirror/language';
-import { runScopeHandlers } from '@codemirror/view';
+import { Prec } from '@codemirror/state';
+import { keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor } from '../index.ts';
@@ -313,5 +314,102 @@ describe('⌘A in a table', () => {
     expect(selectAllInCell(editor.view)).toBe(false);
     expect(press(editor)).toBe(true);
     expect(selection(editor)).toEqual([0, doc.length]);
+  });
+});
+
+describe('keys that would break a row', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+  const doc = `Intro.\n\n| a | b |\n| - | - |\n| 12 | 34 |\n\nAfter.`;
+  function load(caret: number, head = caret, raw = false) {
+    const notices: string[] = [];
+    const fell: string[] = [];
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author: { handle: 'ada', name: 'Ada' },
+      onNotice: (message) => notices.push(message),
+      extensions: [
+        // What comes after the table's keys: the keys that reach it fell through.
+        Prec.high(
+          keymap.of(
+            ['Alt-ArrowUp', 'Alt-ArrowDown', 'Shift-Alt-ArrowUp', 'Shift-Alt-ArrowDown'].map(
+              (key) => ({
+                key,
+                run: () => {
+                  fell.push(key);
+                  return true;
+                },
+              }),
+            ),
+          ),
+        ),
+      ],
+    });
+    open.push(editor);
+    forceParsing(editor.view, doc.length, 10_000);
+    if (raw) editor.setViewMode('raw');
+    editor.view.dispatch({ selection: { anchor: caret, head } });
+    return { editor, notices, fell };
+  }
+  const press = (editor: Editor, key: string, init: KeyboardEventInit) =>
+    runScopeHandlers(
+      editor.view,
+      new KeyboardEvent('keydown', { key, ...init, cancelable: true }),
+      'editor',
+    );
+  const both = (editor: Editor, key: string, init: KeyboardEventInit = {}) =>
+    [{ metaKey: true }, { ctrlKey: true }].some((mod) => press(editor, key, { ...init, ...mod }));
+  const inCell = doc.indexOf('12') + 1;
+
+  it('lets ⌥↑ ⌥↓ ⇧⌥↑ ⇧⌥↓ fall through in a cell', () => {
+    const { editor, fell, notices } = load(inCell);
+    for (const shiftKey of [false, true]) {
+      press(editor, 'ArrowUp', { altKey: true, shiftKey });
+      press(editor, 'ArrowDown', { altKey: true, shiftKey });
+    }
+    expect(fell).toEqual([
+      'Alt-ArrowUp',
+      'Alt-ArrowDown',
+      'Shift-Alt-ArrowUp',
+      'Shift-Alt-ArrowDown',
+    ]);
+    expect(notices).toEqual([]);
+  });
+
+  const refused: [string, string, KeyboardEventInit][] = [
+    ['⌘[', 'Outdent', { key: '[' } as KeyboardEventInit],
+    ['⌘]', 'Indent', { key: ']' } as KeyboardEventInit],
+    ['⌘/', 'Toggle Comment', { key: '/' } as KeyboardEventInit],
+    ['⇧⌘K', 'Delete Line', { key: 'k', shiftKey: true } as KeyboardEventInit],
+  ];
+  for (const [label, command, init] of refused) {
+    it(`says ${label} does not work in a cell, and changes nothing`, () => {
+      const { editor, notices } = load(inCell);
+      const { key, ...rest } = init as KeyboardEventInit & { key: string };
+      expect(both(editor, key, rest)).toBe(true);
+      expect(notices).toEqual([`${command} doesn't work in a table cell.`]);
+      expect(editor.view.state.doc.toString()).toBe(doc);
+    });
+  }
+
+  it('says ⌃L does not work in a cell, with a selection in it too', () => {
+    const { editor, notices } = load(inCell - 1, inCell + 1);
+    expect(press(editor, 'l', { ctrlKey: true })).toBe(true);
+    expect(notices).toEqual(["Select Line doesn't work in a table cell."]);
+    expect(editor.view.state.doc.toString()).toBe(doc);
+  });
+
+  it('leaves them to CodeMirror outside a table and in Raw', () => {
+    const outside = load(2);
+    both(outside.editor, '/');
+    expect(outside.notices).toEqual([]);
+    const raw = load(inCell, inCell, true);
+    both(raw.editor, '/');
+    expect(raw.notices).toEqual([]);
   });
 });
