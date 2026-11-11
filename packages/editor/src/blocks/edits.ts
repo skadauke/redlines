@@ -1195,18 +1195,23 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (head >= end) return emptyLineAtEnd(state, block, head) ?? planReturn(state);
   const { doc } = state;
   const line = doc.lineAt(head);
-  if (head === line.to && line.to < block.text.to) {
+  // Right before only hidden text that ends the line (the marker of a pending deletion, `alph‸<del
+  // a>⏎`) is the soft break's end as well: the backslash goes behind the marker, in front of the
+  // break, where the format writes it as the change that takes the break and the word after it
+  // (#248). In front of the marker it would be a line break typed in the middle of the text.
+  if ((head === line.to || onlyHidden(state, head, line.to)) && line.to < block.text.to) {
     // At a soft line break: the backslash makes it a hard one.
-    if (hardBreakAt(state, block, head)) return refuse(ALREADY_A_BREAK);
+    const brk = line.to;
+    if (hardBreakAt(state, block, brk)) return refuse(ALREADY_A_BREAK);
     const next = doc.line(line.number + 1);
     const text = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
     // After the hard break, however the format writes the backslash (a line break is never in a
     // marker's payload as it is).
     return {
-      changes: [{ from: head, insert: '\\' }],
+      changes: [{ from: brk, insert: '\\' }],
       selection: EditorSelection.single(text + 1),
       userEvent: 'input.break.line',
-      caretAfterText: { from: head, text: '\\\n' },
+      caretAfterText: { from: brk, text: '\\\n' },
     };
   }
   // Right next to a hard break already: a second one would be a paragraph, which Return makes.

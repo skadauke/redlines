@@ -1148,6 +1148,16 @@ marker among them or behind them (§3.1, 6): a change that would stand among the
 them, and one that would end behind them goes on past the line break, to the end of the first word
 of the next line (`One<!--sub k3x9   \ntwo-->\  ⏎two<!--/k3x9-->`).
 
+**A hard break typed behind a pending deletion.** A backslash typed at the end of a line that ends
+in the marker of a pending deletion, in front of the line's soft break (Shift-Return with the caret
+in front of the marker, which no one sees: the caret steps over a deletion), goes behind the marker
+and is the same change as any backslash in front of a line break: it takes the break and the first
+word of the next line, `one alph<!--del k3x9 a--><!--sub w8nn \nx-->\⏎x<!--/w8nn--> café`. No
+marker is right after the backslash, the deletion's marker is not touched, and rejecting either
+change leaves the other as it was, in every order, so that the original view is `one alpha⏎x café`
+and the newest `one alph\⏎x café`. The same typed in front of the marker would put the line break
+inside the text it ends, in front of the deletion, and is not written.
+
 **A backslash typed at the end of the document.** Where nothing follows, the change takes the
 line break that ends the block, and its closer stands alone on the line after the backslash, where
 no block follows to read it with, as after a closing fence (§3.3): `One two<!--sub k3x9 \n-->\⏎<!--/k3x9-->`.

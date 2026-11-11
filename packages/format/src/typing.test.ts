@@ -3694,3 +3694,35 @@ describe('the deletion of a first line that holds a list marker alone (#248)', (
     }
   });
 });
+
+describe('a backslash typed at the end of a line that ends in a pending deletion (#248)', () => {
+  it('goes behind the marker, in front of the soft break, and reads alike in every order', () => {
+    for (const [body, form] of [
+      [
+        'one alph<!--del k3x9 a-->\nx café',
+        'one alph<!--del k3x9 a--><!--sub m2bd \\nx-->\\\nx<!--/m2bd--> café',
+      ],
+      [
+        '> one alph<!--del k3x9 a-->\n> x café',
+        '> one alph<!--del k3x9 a--><!--sub m2bd \\n> x-->\\\n> x<!--/m2bd--> café',
+      ],
+      [
+        '- one alph<!--del k3x9 a--><!--del n8fx b-->\n  x café',
+        '- one alph<!--del k3x9 a--><!--del n8fx b--><!--sub m2bd \\n  x-->\\\n  x<!--/m2bd--> café',
+      ],
+    ] as const) {
+      const marks = Object.fromEntries(
+        ['k3x9', 'n8fx'].filter((id) => body.includes(id)).map((id) => [id, 'bo']),
+      );
+      const before = file(body, marks);
+      const at = body.indexOf('\n');
+      const edit: TextChange = { from: at, to: at, insert: '\\' };
+      const result = trackedEdits(before, [edit], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
