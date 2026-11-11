@@ -418,3 +418,88 @@ describe.skipIf(!process.env['REDLINES_COST'])(
     }, 120_000);
   },
 );
+
+// A typed letter and Backspace in the middle of a fenced code block of 200 lines, in a document with
+// paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
+// block whole, and the keys after it edit the newest code, which the block's own pending substitution
+// holds. Each case is held to what the long-document tests hold an update to: twice the document's
+// markdown parse and two milliseconds for noise (`bound`, as in `preview/long-document.test.ts`).
+// A timing test: it runs with REDLINES_COST set, and a run over the bound is timed twice more, each
+// time with the parse, before it fails.
+const bound = (parse: number) => 2 * parse + 2;
+
+function codeDocument(): string {
+  const paragraph = (n: number) => `${WORDS} ${n}, with *emphasis* and more.`;
+  const code = Array.from(
+    { length: 200 },
+    (_, n) => `  const value${n} = compute(${n}, 'text ${n}'); // line ${n}`,
+  );
+  return [
+    ...Array.from({ length: 6 }, (_, n) => paragraph(n)),
+    ['```ts', ...code, '```'].join('\n'),
+    ...Array.from({ length: 6 }, (_, n) => paragraph(n + 6)),
+  ].join('\n\n');
+}
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code', () => {
+  const doc = codeDocument();
+
+  /** Milliseconds per typed letter and Backspace in the middle of the code. `fresh`: the file is
+   * the one it started from before each pair, so that the letter is the first key in the block. */
+  function codeTime(editor: Editor, fresh: boolean): number {
+    const { view } = editor;
+    const rounds = fresh ? 10 : ROUNDS;
+    let total = 0;
+    for (let i = 0; i < rounds; i++) {
+      // The file as it started (a reload keeps Track Changes on, as `setDoc` does not).
+      if (fresh) editor.reloadDoc(doc);
+      // The last one: a substitution's payload, in its marker, has the line too.
+      const at = view.state.doc.toString().lastIndexOf('line 100') + 'line 1'.length;
+      view.dispatch({ selection: EditorSelection.cursor(at) });
+      const start = performance.now();
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      press(view, 'Backspace');
+      total += performance.now() - start;
+    }
+    return total / rounds;
+  }
+
+  it.each([
+    ['Track Changes on, with the substitution made', true, false],
+    ['Track Changes on, the first key, which makes it', true, true],
+    ['Track Changes off', false, false],
+  ] as const)(
+    'is at most twice the document’s parse plus 2 ms: %s',
+    (label, tracking, fresh) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      expect(editor.view.state.doc.toString()).toContain('line 100');
+      // The case with the substitution made starts with the first key made.
+      if (tracking && !fresh) codeTime(editor, true);
+      codeTime(editor, fresh);
+      const attempt = (): Held => {
+        const limit = bound(parseTime(doc));
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(codeTime(editor, fresh));
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: code, ${label}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      if (tracking) {
+        const marks = (editor.view.state.doc.toString().match(/<!--sub /g) ?? []).length;
+        expect(marks, 'one substitution for the block').toBe(1);
+      }
+      expect(result.ours, label).toBeLessThan(result.limit);
+    },
+    120_000,
+  );
+});
