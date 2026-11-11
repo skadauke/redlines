@@ -346,6 +346,7 @@ class WidthPlugin {
 
   /** A change of the text size or of the room, which geometry changes show. */
   private checkEnvironment(): void {
+    if (tablesOf(this.view.state).length === 0) return;
     this.view.requestMeasure({
       key: this,
       read: (view) => this.environment.signature(view),
@@ -362,20 +363,25 @@ class WidthPlugin {
       key: this,
       read: (view) => {
         const tables = tablesOf(view.state);
+        // No table, nothing to read from the page.
+        if (tables.length === 0) return { signature: this.signature, widths: null, none: true };
         const room = this.environment.available(view);
         const signature = this.environment.signature(view);
-        if (tables.length === 0 || room <= 0) return { signature, widths: null };
+        if (room <= 0) return { signature, widths: null, none: false };
         const measure = this.environment.measure(view);
         return {
           signature,
+          none: false,
           widths: tables.map((table): TableWidths => {
             const columns = columnWidths(cellsOf(view.state, table), measure, room);
             return { id: table.id, columns, scrolls: columns.reduce((a, b) => a + b, 0) > room };
           }),
         };
       },
-      write: ({ signature, widths }) => {
+      write: ({ signature, widths, none }) => {
         this.signature = signature;
+        // A document with no table is measured: the next table changes the structure.
+        if (none) this.measured = true;
         if (!widths) return;
         this.measured = true;
         // After this update: a dispatch can't be made while one is being written.

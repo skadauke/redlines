@@ -289,6 +289,45 @@ describe('the widths of a table in an editor', () => {
     expect(editor.view.dom.querySelector('style[data-rl-widths]')?.textContent).toContain('width:');
   });
 
+  it('reads nothing from the page in a document with no table, and measures when one is made', async () => {
+    const calls = { available: 0, signature: 0, measure: 0 };
+    const spy: WidthEnvironment = {
+      measure: () => {
+        calls.measure++;
+        return (text) => tenPx(text);
+      },
+      available: () => {
+        calls.available++;
+        return room;
+      },
+      signature: () => {
+        calls.signature++;
+        return signature;
+      },
+    };
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: 'Just words.\n',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      extensions: [widthEnvironment.of(spy)],
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    await settle(editor);
+    for (let i = 0; i < 3; i++) {
+      editor.view.dispatch({ changes: { from: 0, insert: 'x' }, userEvent: 'input.type' });
+    }
+    window.dispatchEvent(new Event('resize'));
+    await settle(editor);
+    expect(calls).toEqual({ available: 0, signature: 0, measure: 0 });
+    // A table typed in is measured.
+    editor.view.dispatch({ changes: { from: 0, insert: '| a | b |\n| - | - |\n| c | d |\n\n' } });
+    await settle(editor);
+    expect(calls.available).toBeGreaterThan(0);
+    expect(widthsOf(editor.view.state)).toHaveLength(1);
+  });
+
   it('measures nothing where nothing is laid out', async () => {
     room = 0;
     const editor = await load();
