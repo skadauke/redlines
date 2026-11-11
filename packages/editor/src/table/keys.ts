@@ -16,6 +16,7 @@ import { blockAt } from '../blocks/structure.ts';
 import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { type Cell, type Row, type Table } from './model.ts';
+import { insertRowBelow, insertRowAfter } from './ops.ts';
 import { shownCellAt } from './stops.ts';
 
 /** A key that moves the caret in a table, as the keymap names it. */
@@ -208,6 +209,42 @@ function remove(view: EditorView, span: Span, forward: boolean): boolean {
   return true;
 }
 
+/** The cell after (before) the caret's in reading order, or null at the table's end (start). */
+function nextCell(here: Here, forward: boolean): Cell | null {
+  const shown = (row: Row) => row.cells.filter((cell) => cell.col < here.table.columns);
+  const mine = shown(here.row);
+  const beside = mine[mine.indexOf(here.cell) + (forward ? 1 : -1)];
+  if (beside) return beside;
+  const row = here.table.rows[here.row.index + (forward ? 1 : -1)];
+  if (!row) return null;
+  const cells = shown(row);
+  return (forward ? cells[0] : cells.at(-1)) ?? null;
+}
+
+/** Selects a cell's text (an empty cell gets the caret). */
+function selectCell(view: EditorView, cell: Cell): boolean {
+  const selection = visibleSelection(
+    view.state,
+    EditorSelection.single(cell.textFrom, cell.textTo),
+  );
+  view.dispatch({ selection, userEvent: 'select', scrollIntoView: true });
+  return true;
+}
+
+/** Tab and ⇧Tab: the next or previous cell, its text selected; Tab in the last cell adds a row, and
+ * ⇧Tab in the first does nothing. */
+function tab(forward: boolean): Command {
+  return (view) => {
+    const here = cellOfSelection(view.state);
+    if (!here) return false;
+    const to = nextCell(here, forward);
+    if (to) return selectCell(view, to);
+    if (!forward) return true;
+    const last = here.table.rows.at(-1) ?? here.row;
+    return insertRowAfter(view, here.table, last);
+  };
+}
+
 /** ↩ and ⇧↩: a `<br>` at the caret, over a selection in the cell, and the caret after it. */
 const lineBreak: Command = (view) => {
   const here = cellOfSelection(view.state);
@@ -348,6 +385,9 @@ export function tableKeymap(): Extension {
         { mac: 'Ctrl-e', run: lineEdge(true) },
         { mac: 'Cmd-ArrowUp', key: 'Ctrl-Home', run: key('Mod-ArrowUp') },
         { mac: 'Cmd-ArrowDown', key: 'Ctrl-End', run: key('Mod-ArrowDown') },
+        { key: 'Tab', run: tab(true) },
+        { key: 'Shift-Tab', run: tab(false) },
+        { key: 'Mod-Enter', run: insertRowBelow },
         { key: 'Enter', run: lineBreak },
         { key: 'Shift-Enter', run: lineBreak },
         { key: 'Alt-Enter', run: lineBreak },

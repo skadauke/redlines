@@ -99,7 +99,7 @@ export const editSourceFacet = Facet.define<EditSource, EditSource>({
 });
 
 /** The editing author, at the current minute (format §2.4). */
-function contextFor(state: EditorState): EditContext {
+export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);

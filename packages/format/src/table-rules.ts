@@ -119,3 +119,25 @@ export function isTableRowAt(text: string, position: number): boolean {
     table.rows.some((row) => row.from <= position && position <= row.to),
   );
 }
+
+/**
+ * Whether `edit` lies in the text of one cell of a row that `handle` inserted and nobody has decided
+ * (format §3.7): text typed there is part of the row's insertion, and is written as it is, with no
+ * mark of its own.
+ */
+export function inOwnInsertedRow(
+  text: string,
+  edit: TextChange,
+  parsed: Parsed,
+  handle: string,
+): boolean {
+  if (!parsed.marks.some((mark) => mark.kind === 'ins' && mark.payload === 'row')) return false;
+  for (const table of tablesIn(text, parsed)) {
+    if (edit.from < table.from || edit.to > table.to) continue;
+    const row = table.rows.find((r) => r.from <= edit.from && edit.to <= r.to);
+    if (!row?.insertion || row.insertion.entry.by !== handle) continue;
+    const cell = row.cells.find((c) => c.textFrom <= edit.from && edit.to <= c.textTo);
+    if (cell) return true;
+  }
+  return false;
+}

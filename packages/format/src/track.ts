@@ -59,7 +59,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
-import { checkTableEdits, leadingPipeAt } from './table-rules.ts';
+import { checkTableEdits, inOwnInsertedRow, leadingPipeAt } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -3946,7 +3946,15 @@ export function trackedEdits(
   const pipes = edits.flatMap((edit) => leadingPipeAt(text, edit, plan.parsed) ?? []);
   if (pipes.length > 0) return withLeadingPipes(text, edits, ctx, [...new Set(pipes)]);
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
-  for (const edit of edits) planEdit(plan, edit);
+  for (const edit of edits) {
+    // Text typed in a row the author inserted is part of the row's insertion (format §3.7).
+    if (inOwnInsertedRow(text, edit, plan.parsed, ctx.author.handle)) {
+      const typed = inEol(edit.insert, plan.eol);
+      if (typed !== '') assertNoMarkup(typed);
+      plan.changes.push({ from: edit.from, to: edit.to, insert: typed });
+      plan.plain = true;
+    } else planEdit(plan, edit);
+  }
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   // Widening an edit over a link or a break can make it reach into the next one. The changes of
   // one edit stand around the markers in its range, and another edit can fall between them: the

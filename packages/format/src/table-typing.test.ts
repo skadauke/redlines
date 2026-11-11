@@ -310,3 +310,41 @@ describe('blank lines written around a table', () => {
     expect(() => untrackedEdit(doc, type(first, '\n'))).toThrow(ONE_LINE);
   });
 });
+
+describe('typing in an inserted row (format §3.7)', () => {
+  const ROW = '| <!--ins k3x9 row--> Plums | 7     |';
+  const BODY = `| Fruit  | Count |\n| ------ | ----- |\n${ROW}\n| Pears  | 5     |`;
+
+  it('is part of the row when the row is the author’s: written as it is, with no mark', () => {
+    const text = file(BODY, { k3x9: 'ada' });
+    const out = applyChanges(
+      text,
+      trackedEdit(text, type(at(text, 'Plums', 2), 'x'), context(ada, ['z4q8'])),
+    );
+    expect(bodyOf(out)).toBe(BODY.replace('Plums', 'Plxums'));
+    expect(parse(out).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+    expectInOrder('typing in own row', [], out);
+  });
+
+  it('is part of the row when the cell is empty, after the marker', () => {
+    const text = file(BODY.replace('Plums', '     '), { k3x9: 'ada' });
+    const out = applyChanges(
+      text,
+      trackedEdit(text, type(at(text, '--> ', 4), 'x'), context(ada, ['z4q8'])),
+    );
+    expect(parse(out).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+  });
+
+  it('is a tracked insertion of its own in another person’s row', () => {
+    const text = file(BODY, { k3x9: 'bo' });
+    const out = applyChanges(
+      text,
+      trackedEdit(text, type(at(text, 'Plums', 2), 'x'), context(ada, ['z4q8'])),
+    );
+    expect(
+      parse(out)
+        .marks.map((mark) => mark.id)
+        .sort(),
+    ).toEqual(['k3x9', 'z4q8']);
+  });
+});
