@@ -176,4 +176,15 @@ describe('kept as the text changes', () => {
     const gone = edit({ from: 0, to: 7 });
     expect(gone.map((t) => t.id)).toEqual([first?.id, second?.id]);
   });
+
+  it('drops the tables that text above them makes code, as the tree has it', () => {
+    // A fence opened above the tables below it makes them code.
+    let state = make(`Intro.\n\n${T}\nMiddle.\n\n${T}`);
+    expect(tablesOf(state)).toHaveLength(2);
+    state = state.update({ changes: { from: 0, insert: '```\n' } }).state;
+    ensureSyntaxTree(state, state.doc.length, 5000);
+    state = state.update({}).state;
+    expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
+    expect(tablesOf(state)).toHaveLength(0);
+  });
 });

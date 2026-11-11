@@ -335,6 +335,13 @@ function inheritIds(fresh: Table[], olds: readonly Table[], changes?: ChangeDesc
   });
 }
 
+/** Whether the syntax tree has a top-level table that starts on the line `table` does (after up to
+ * three spaces of indent). */
+function inTree(tree: Tree, table: Table): boolean {
+  const node = tree.topNode.childAfter(Math.max(0, table.from - 1));
+  return node?.name === 'Table' && node.from >= table.from && node.from - table.from <= 3;
+}
+
 /** Tables by tree: the tree a field value was read from. */
 const read = new WeakMap<readonly Table[], Tree>();
 
@@ -353,8 +360,14 @@ export const tablesField = StateField.define<readonly Table[]>({
       read.set(again, tree);
       return again;
     }
-    const next = updateTables(tables, tr);
-    read.set(next, syntaxTree(tr.state));
+    let next = updateTables(tables, tr);
+    // A table the tree doesn't have (it is not parsed yet, or the text above it changed what it is)
+    // is for a build from the tree to say: the tables are a function of it.
+    const tree = syntaxTree(tr.state);
+    if (!next.every((table) => inTree(tree, table))) {
+      next = inheritIds(buildTables(tr.state), next);
+    }
+    read.set(next, tree);
     return next;
   },
 });
