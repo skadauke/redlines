@@ -538,7 +538,10 @@ describe('where an edit can go', () => {
     expect(() => trackedEdit(text, remove(inSpan, inSpan + 2), context(ada, ids))).toThrow(
       EditError,
     );
-    expect(() => trackedEdit(text, type(inFence, 'x'), context(ada, ids))).toThrow(message);
+    // A fenced block takes no marker either, so the change replaces the block whole (format §3.5).
+    const fenced = applyChanges(text, trackedEdit(text, type(inFence, 'x'), context(ada, ids)));
+    expect(fenced).toContain('<!--sub w8nn \\x60\\x60\\x60\\nfenced\\n\\x60\\x60\\x60-->');
+    expect(fenced).toContain('```\nfexnced\n```\n<!--/w8nn-->');
     // Around code is fine.
     const here = text.indexOf('here');
     expect(() => trackedEdit(text, type(here, 'x'), context(ada, ids))).not.toThrow();
@@ -831,14 +834,40 @@ describe('an edit in code (#153)', () => {
       for (const [how, edit] of EDITS) {
         const label = `${what}, ${how}`;
         const error = refusal(text, edit(text));
+        // Code at the top level takes the edits that stay inside it as a substitution of the whole
+        // block (format §3.5): no marker lands in the code, and rejecting gives the block back.
+        if (error === undefined && (what === 'indented' || what.startsWith('fenced'))) {
+          const result = applyChanges(
+            text,
+            trackedEdit(text, edit(text), context(ada, ['b953', 'w8nn', 'p3qz'])),
+          );
+          expect(
+            parse(result).marks.map((mark) => mark.kind),
+            label,
+          ).toEqual(['sub']);
+          expect(markersInIndentedCode(result), label).toEqual([]);
+          expect(bodyOf(applyChanges(result, rejectAll(result))).replace(/\n+$/, ''), label).toBe(
+            body,
+          );
+          continue;
+        }
         expect(error, label).toBeDefined();
-        if (what.startsWith('fenced')) {
-          // Fenced code takes no marker either, and a fence line none at all.
+        if (what.startsWith('fenced') || what === 'indented') {
+          // Fenced code takes no marker either, and a fence line none at all; a change that ends a
+          // block at the top level is refused as one that would end it.
           expect(['inside-code', 'no-legal-placement'], label).toContain(error?.code);
           continue;
         }
         expect(error?.code, label).toBe('inside-code');
-        expect(error?.message, label).toBe(IN_CODE);
+        // In a list item or a quote: code that is not built yet, in words that name it.
+        expect(
+          [IN_CODE, error?.message].some(
+            (m) =>
+              m === error?.message &&
+              (m === IN_CODE || /can't go in (?:indented )?code .*yet/.test(m ?? '')),
+          ),
+          label,
+        ).toBe(true);
       }
     }
   });
@@ -991,8 +1020,13 @@ describe('an edit in code (#153)', () => {
         ['Enter', type(text.indexOf('more') + 2, '\n')],
       ] as const) {
         const error = refusal(text, edit);
-        expect(error?.code, `${what}, ${how}`).toBe('inside-code');
-        expect(error?.message, `${what}, ${how}`).toBe(IN_CODE);
+        // A pending change of Bo's touches the code: refused, naming him; or the old words where the
+        // code is in one view only and nothing of his is near.
+        const named = error?.code === 'no-legal-placement';
+        expect(named || error?.code === 'inside-code', `${what}, ${how}`).toBe(true);
+        expect(error?.message, `${what}, ${how}`).toSatisfy((m: string) =>
+          named ? m.includes('pending change is in this code block') : m === IN_CODE,
+        );
       }
     }
   });

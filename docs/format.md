@@ -1457,6 +1457,84 @@ Some content can't hold markers. A change to it replaces it whole, as a substitu
 A changed code block is a whole-block substitution with the old block as payload, its backticks
 escaped so knitr can't run it. The fence holds the newest code, so the document still runs.
 
+This is rule 9. It holds for fenced code (R Markdown and Quarto chunks too), indented code, display
+math (`$$x = 1$$` in a paragraph, or a line of `$$`, the math, a line of `$$`, blank lines in it
+allowed) and the raw-text elements `script`, `style`, `pre`
+and `textarea`, and for an edit of any kind inside the code: a letter, a line break, a deletion, a
+replaced selection. The block is written as a block that starts a mark and ends one (§3.3), the
+opener alone on the line before it and the closer alone on the line after it:
+
+````markdown
+Intro.
+
+<!--sub k3x9 \x60\x60\x60js\nlet a = 1;\n\x60\x60\x60\n-->
+
+```js
+let a = 2;
+```
+<!--/k3x9-->
+Next paragraph.
+````
+
+- The payload is the whole old block, from its fence to its closing fence (for indented code, the
+  lines with their indentation), in the encoding of §2.5. Where a blank line follows the block at
+  the top level, the closer stands in that blank line and the payload ends with the block's line
+  break, so that both views, the accepted file and the rejected one keep as many blank lines as the
+  file had; the example above is that form. Otherwise (the next line is text, or the block is in a
+  quote or a list item) the closer stands alone on the line after the closing fence, with the
+  container's prefix, and accepting leaves one blank line more, as any closer after a closing fence
+  does (§3.3). Rejecting gives the old block back, byte for byte. In a quote or a list item the
+  opener stands on a line of its own with the container's prefix, and every line of the block keeps
+  it.
+- The code of a raw-text element is what stands between its opening tag's `>` and its closing tag
+  (also on one line: `<title>Docs</title>`); of display math, what stands between its two `$$`.
+  A change on a fence's line, in a tag, on a `$$` line outside the two `$$`, is not a change of the
+  code, and is refused (`no-legal-placement`): "A tracked change can't go on the line that opens or
+  closes code, math or raw text." No marker is ever written inside a block. So is an edit that
+  would end the block: a line of the code that closes the fence, `$$` or the closing tag, a line of
+  indented code that is not indented, or a line without the container's prefix ("This would end
+  the code block it is typed in."). An edit that crosses a block's edge is an edit of the text
+  around it and the block, and is refused as before.
+- Indented code that someone else's pending deletion of the blank line above it joins to the text
+  above (it is code in the original text and text of that block in the newest) takes no key until
+  it is decided: the edit is refused, naming the person, as for a marker in the block. Your own
+  marks never refuse.
+- Against the `$$` of display math, at the exact start of the opening line or the exact end of the
+  closing line, only line breaks are written (as the text around the block), with the prefixes of
+  the container's lines when the math is in a quote (`\n>\n> `) or a list item; text typed there
+  is refused. The line that Return at the end of indented code opens is no part of the block until
+  something that is not white space is typed on it; then it is code, and the substitution's payload
+  is the block without it.
+- Under a closing fence, line breaks are written plain at the top level, in a quote and in a list
+  item, in LF and CRLF files alike.
+- A marker anywhere in a block's range, its fence or tag lines and what follows the closing tag on
+  its line included, is a pending change in the code, and the edit is refused, naming the person
+  ("Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
+  "Your pending change…" for your own, except the substitution of this block that the edit goes
+  on through, below).
+- A block whose line breaks are not all the file's (a CRLF line in an LF block) is refused: the
+  payload gives one kind back ("…line breaks that the rest of the file doesn't…").
+- Further keystrokes of the author in a block that their own pending insertion or substitution
+  holds edit the newest code and make no mark: the pending change already holds the block, and its
+  payload is still the old block. The same goes for a block inside an insertion of the author's
+  that holds more than the block.
+- Another person's pending insertion or substitution that holds the block is theirs to decide
+  first. The edit is refused (`no-legal-placement`) and names them: "This would change how Bo
+  Chen's insertion reads. Decide it first, or turn off Track Changes." No form of a second
+  substitution in the new text of a first reads the same in every order of decisions.
+- Indented code is changed this way at the top level only, and only when no marker stands in the
+  block or in the lines between it and the text above it, where a change that adds or takes away a
+  blank line would make it code in one view and text in the other (§2.1). Not built yet, and
+  refused in words that name the code ("A tracked change can't go in code that starts a list item
+  yet. Turn off Track Changes to edit it."; "…in indented code in a list item or a quote yet…"):
+  fenced code that starts an item of a list (`- ```js`), and indented code in a list item or a
+  quote. With Track Changes off every key works in them as in any code. `pre` and `title` (and the
+  other raw-text elements) inside a quote or a list item are not read as raw text yet (#284): the
+  scan finds raw text only where it starts at the left edge, so a change there is written as in
+  any HTML block, and the promise that no marker goes inside them holds at the top level only. A `title` element is raw
+  text like the others, where its closing tag comes before a blank line. Front matter is never
+  touched by this rule (§3.8).
+
 In HTML blocks such as `<details>` and `<div>`, markers may go in element content, including at
 the start of any line but the block's first. They never go inside a tag or inside `script`,
 `style`, `textarea`, `pre` or `title`, and they never add or remove blank lines inside the block.
@@ -1800,6 +1878,9 @@ inside it, or on its closing line. A change to it has no marker. The ledger reco
 `frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
 an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
 edited with Track Changes on yet."
+
+Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
+the body's, and are written plain; anything else typed there is refused as an edit of front matter.
 
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends

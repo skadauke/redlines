@@ -197,7 +197,7 @@ describe('Enter where a blank line would change the document is not plain (forma
     return after === undefined ? undefined : bodyOf(after).slice(0, -1);
   }
 
-  it('is refused inside fenced code, where a blank line is code', () => {
+  it('is a line of the code inside fenced code, a substitution of the block (format §3.5)', () => {
     // The second review: each of these was written with no mark, and reject could not remove it.
     const cases: [string, string, (body: string) => number][] = [
       [
@@ -254,12 +254,19 @@ describe('Enter where a blank line would change the document is not plain (forma
     ];
     for (const [what, body, position] of cases) {
       for (const insert of ['\n', '\n\n']) {
-        // Markers inside code are not read, so there is no way to track the break: it is refused.
-        const { after, code } = enter(body, position(body), insert);
+        // Markers inside code are not read, so the break is a line of the code and the change
+        // replaces the block whole (format §3.5): a substitution, never a break with no mark.
+        // In a quote every line of the code keeps its `> `, as the editor types them.
+        const typed = what.includes('quote') ? insert.replace(/\n/g, '\n> ') : insert;
+        const { before, after, code } = enter(body, position(body), typed);
+        expect(code, `${what}: ${JSON.stringify(after)}`).toBeUndefined();
         expect(
-          ['inside-code', 'no-legal-placement'],
-          `${what}: ${JSON.stringify(after)}`,
-        ).toContain(code);
+          parse(after ?? '').marks.map((mark) => mark.kind),
+          what,
+        ).toEqual(['sub']);
+        expect(bodyText(applyChanges(after ?? '', rejectAll(after ?? ''))), what).toBe(
+          bodyText(before),
+        );
       }
     }
   });
@@ -272,16 +279,18 @@ describe('Enter where a blank line would change the document is not plain (forma
     );
   });
 
-  it('is refused inside an HTML comment and a pre block, where a blank line is content', () => {
+  it('is refused inside an HTML comment, and a substitution of the block in a pre block', () => {
     const comment = 'Intro.\n\n<!--\nnote\n\nmore\n-->\n\nAfter.';
     expect(enter(comment, endOf(comment, 'note\n')).code).toBeDefined();
     const pre = 'Intro.\n\n<pre>\nline one\n\nline two\n</pre>\n\nAfter.';
-    expect(enter(pre, endOf(pre, 'line one\n')).code).toBeDefined();
+    const { after } = enter(pre, endOf(pre, 'line one\n'));
+    expect(parse(after ?? '').marks.map((mark) => mark.kind)).toEqual(['sub']);
   });
 
-  it('is refused inside indented code', () => {
+  it('is a substitution of the block inside indented code', () => {
     const body = 'Intro.\n\n    code one\n\n    code two\n\nAfter.';
-    expect(enter(body, endOf(body, 'code one')).code).toBeDefined();
+    const inside = enter(body, endOf(body, 'code one'));
+    expect(parse(inside.after ?? '').marks.map((mark) => mark.kind)).toEqual(['sub']);
     // But not in front of it, or after it.
     expect(enter(body, endOf(body, 'Intro.')).after).toBeDefined();
     expect(enter(body, endOf(body, 'code two')).after).toBeDefined();
@@ -404,10 +413,12 @@ describe('Backspace over line breaks that Enter typed (format §3.4)', () => {
     expect(parse(soft).marks.map((mark) => mark.kind)).toEqual(['del']);
   });
 
-  it('does not take line breaks out of code', () => {
+  it('takes a blank line out of code as a substitution of the block (format §3.5)', () => {
     const body = 'Intro.\n\n```\nline one\n\n\nline two\n```\n\nAfter.';
     const at = endOf(body, 'line one\n');
-    expect(() => remove(body, at, at + 1)).toThrow(EditError);
+    const removed = remove(body, at, at + 1);
+    expect(parse(removed).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expect(bodyText(applyChanges(removed, rejectAll(removed)))).toBe(body);
   });
 });
 

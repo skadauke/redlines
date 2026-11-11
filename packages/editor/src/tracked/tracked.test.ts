@@ -609,6 +609,72 @@ describe('Deleted blocks', () => {
     expect(code?.textContent).not.toContain('`');
   });
 
+  describe('a block of code changed whole (format §3.5)', () => {
+    const changed = withLedger(
+      'One.\n\n<!--sub b2b2 ```js\\nlet a = 1;\\n\\n  b();\\n```\\n-->\n\n```js\nlet a = 2;\n\n  b();\n```\n<!--/b2b2-->\nAfter.',
+      { b2b2: 'bo' },
+    );
+
+    it('draws the old code struck above the new, as a code block, in the author’s color', () => {
+      const editor = load(changed);
+      const struck = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+      expect(struck).toHaveLength(1);
+      const [old] = struck;
+      expect(old?.classList).toContain('rl-codeblock');
+      expect(old?.classList).toContain('rl-bar');
+      expect(old?.classList).toContain('rl-author-3');
+      expect(old?.style.whiteSpace).toBe('pre-wrap');
+      // The old code, lines apart, indentation kept, no fence.
+      expect(old?.textContent).toBe('let a = 1;\n\n  b();');
+      expect(old?.dataset['mark']).toBe('b2b2');
+      expect(old?.querySelector('.rl-del.rl-author-3')?.textContent).toBe('let a = 1;\n\n  b();');
+      // It stands before the new code, and no marker is drawn as text.
+      const page = [...editor.view.contentDOM.children]
+        .filter((el) => el.matches('.cm-line, .rl-struck-blocks'))
+        .map((el) => (el.matches('.rl-struck-blocks') ? `~${el.textContent}~` : el.textContent));
+      expect(page.indexOf('~let a = 1;\n\n  b();~')).toBeLessThan(page.indexOf('let a = 2;'));
+      expect(editor.view.contentDOM.textContent).not.toContain('<!--');
+      // No payload is drawn inline as text of the line.
+      expect(editor.view.contentDOM.querySelector('.cm-line .rl-del')).toBeNull();
+    });
+
+    it('draws the same with the code indented, in math and in raw text', () => {
+      // Indented code without its indentation; math and raw text as they are written.
+      for (const [old, now, drawn] of [
+        ['    let a = 1;\\n    b();', '    let a = 2;\n    b();', 'let a = 1;\nb();'],
+        ['$$\\nx = 1\\n$$', '$$\nx = 2\n$$', '$$\nx = 1\n$$'],
+        ['<pre>\\nx = 1\\n</pre>', '<pre>\nx = 2\n</pre>', '<pre>\nx = 1\n</pre>'],
+      ] as const) {
+        const doc = withLedger(
+          `One.\n\n<!--sub b2b2 ${old}\\n-->\n\n${now}\n<!--/b2b2-->\nAfter.`,
+          { b2b2: 'bo' },
+        );
+        const editor = load(doc);
+        const [block] = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+        expect(block?.classList, old).toContain('rl-codeblock');
+        expect(block?.textContent, old).toBe(drawn);
+      }
+    });
+
+    it('draws no struck block for a payload of white space alone', () => {
+      const doc = withLedger('One.\n\n<!--sub b2b2 \\n\\n-->\n\n    x\n<!--/b2b2-->\nAfter.', {
+        b2b2: 'bo',
+      });
+      expect(load(doc).view.contentDOM.querySelector('.rl-struck')).toBeNull();
+    });
+
+    it('draws none in Simple and Clean, and keeps the bar in Simple', () => {
+      for (const view of ['simple', 'clean'] as const) {
+        const editor = load(changed, { view });
+        expect(editor.view.contentDOM.querySelector('.rl-struck'), view).toBeNull();
+        expect(editor.view.contentDOM.querySelector('.rl-del'), view).toBeNull();
+        expect(editor.view.contentDOM.textContent, view).not.toContain('let a = 1;');
+      }
+      const simple = load(changed, { view: 'simple' });
+      expect(simple.view.contentDOM.querySelector('.rl-bar')).not.toBeNull();
+    });
+  });
+
   it('draws an empty pair of fences as a struck code block a line high', () => {
     const doc = withLedger('One.\n\n<!--del b2b2 ```\\n```\\n\\n-->\n\nAfter.', { b2b2: 'bo' });
     const editor = load(doc);
