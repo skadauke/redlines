@@ -61,6 +61,7 @@ import { onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
   bodyEnd,
+  holdViewAnnotation,
   markupViewFacet,
   parsedField,
   setViewModeEffect,
@@ -576,9 +577,10 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
     throw error;
   }
   if (tracked.changes.empty) return {};
-  const toRedlines = suggests(start, start.doc, edits, tracked.changes)
-    ? [setViewModeEffect.of(start.facet(markupViewFacet))]
-    : [];
+  const toRedlines =
+    tr.annotation(holdViewAnnotation) !== true && suggests(start, start.doc, edits, tracked.changes)
+      ? [setViewModeEffect.of(start.facet(markupViewFacet))]
+      : [];
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
 }
 

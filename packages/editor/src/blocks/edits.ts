@@ -10,7 +10,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
-import { bodyEnd, parsedField } from '../tracked/field.ts';
+import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
@@ -1011,6 +1011,61 @@ function openAfterDeletion(state: EditorState): KeyEdit | null {
   return rest;
 }
 
+/** The no-break space a line holds until its first character is typed (design: Shift-Return). */
+export const EMPTY_LINE_HOLD = '\u00a0';
+
+/**
+ * Shift-Return at the end of a paragraph's text: a hard break and an empty line after it, in the
+ * block, the caret on it. The line holds a no-break space until the first character is typed (a
+ * hard break with nothing after it is a literal backslash, and an empty line in a list would make
+ * it loose); like the empty paragraph it is taken back when the caret leaves, and the file never
+ * gets it. Null where the text before the caret can't take a hard break (it ends in a backslash or
+ * is not text): Return's.
+ */
+function emptyLineAtEnd(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  if (head !== line.to || state.field(viewModeField, false) === 'raw') return null;
+  // After a backslash, or a hard break's spaces, the new break would not read as one.
+  if (/[\\ \t]$/.test(state.sliceDoc(Math.max(line.from, head - 1), head))) return null;
+  const insert = `\\\n${continuation(state, block)}${EMPTY_LINE_HOLD}`;
+  return {
+    changes: [{ from: head, insert }],
+    selection: EditorSelection.single(head + insert.length - 1),
+    userEvent: 'input.break.line',
+    open: { at: head, assoc: 1, down: 1, line: true },
+    caretInOpen: true,
+    fallback: planReturn(state) ?? undefined,
+  };
+}
+
+/**
+ * Backspace over the only character of the line after a hard break, at the end of a paragraph's
+ * text: the line goes back to the empty line Shift-Return opened, its no-break space in the
+ * character's place, since a hard break with nothing after it is a literal backslash. Null
+ * elsewhere.
+ */
+export function lastCharOfLine(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  if (block.kind !== 'paragraph' || line.number < 2 || line.from <= block.text.from) return null;
+  if (head < textEnd(state, block) || doc.lineAt(block.text.to).number !== line.number) return null;
+  const above = doc.line(line.number - 1);
+  if (!/(?<!\\)(?:\\\\)*(?:\\| {2,})$/.test(above.text)) return null;
+  const char = /(\P{M}\p{M}*)$/u.exec(doc.sliceString(line.from, head))?.[1];
+  if (!char || char === EMPTY_LINE_HOLD) return null;
+  const from = head - char.length;
+  const before = doc.sliceString(line.from, from).replace(/<!--[^]*?-->/g, '');
+  if (!/^[ \t>]*$/.test(before)) return null;
+  return {
+    changes: [{ from, to: head, insert: EMPTY_LINE_HOLD }],
+    selection: EditorSelection.single(from),
+    userEvent: 'delete.backward.block',
+    open: { at: from, assoc: 1, line: true },
+    caretInOpen: true,
+  };
+}
+
 const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
 const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
@@ -1042,7 +1097,8 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
   const start = textStart(state, block);
   const end = textEnd(state, block);
-  if (head <= start || head >= end) return planReturn(state);
+  if (head <= start) return planReturn(state);
+  if (head >= end) return emptyLineAtEnd(state, block, head) ?? planReturn(state);
   const { doc } = state;
   const line = doc.lineAt(head);
   if (head === line.to && line.to < block.text.to) {

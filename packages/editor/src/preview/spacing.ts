@@ -65,7 +65,7 @@ const HELD = 'x';
 export function readTree(state: EditorState): ReadTree {
   const open = openBlock(state);
   const lang = state.facet(language);
-  if (!open || !lang) {
+  if (!open || open.line || !lang) {
     return { reading: readingOf(state), tree: syntaxTree(state), back: (pos) => pos };
   }
   const at = open.empty.to;

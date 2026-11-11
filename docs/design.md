@@ -689,7 +689,9 @@ syntax Markdown needs, and never shows them.
 - **Return makes a block, Shift-Return a line break.** Return in a paragraph's text parts it in two;
   at its end it opens an empty paragraph below; at its start, one above, the caret staying with
   the text. In a list it makes an item, and in an empty item it goes up a level or out of the list.
-  Shift-Return writes a hard line break, a backslash and a line break. A heading and a table cell
+  Shift-Return writes a hard line break, a backslash and a line break (drawn as a break, the
+  backslash hidden and stepped over); at the end of a paragraph's text it opens an empty line in the
+  block, which is taken back when the caret leaves it, as the empty paragraph is. A heading and a table cell
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).

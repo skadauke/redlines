@@ -15,6 +15,7 @@ import {
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
+  holdViewAnnotation,
   markupViewFacet,
   parsedField,
   setViewModeEffect,
@@ -152,6 +153,7 @@ export function applyKeyEdit(
     annotations.push(returnAnnotation.of(true));
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
+  if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
   if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
@@ -200,6 +202,21 @@ function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }
 
+/**
+ * Takes the open empty line back, from the record or, with none, as leaving it does, the caret at
+ * the end of the text above. False when it can't go.
+ */
+function takeBackEmptyLine(view: EditorView): boolean {
+  // The Return after it joins its step: one step to undo.
+  if (takeBack(view, 'delete.selection', undefined, 'before')) return true;
+  const { doc } = view.state;
+  const open = openBlock(view.state);
+  if (!open) return false;
+  const above = doc.line(doc.lineAt(open.empty.from).number - 1);
+  const syntax = /(?:\\| {2,})$/.exec(above.text)?.[0].length ?? 0;
+  return closeOpen(view, EditorSelection.single(above.to - syntax));
+}
+
 const returnKey = blockKey((view) => {
   // In the open empty item Markdown can't hold at its level: out one level, where it can.
   const open = openBlock(view.state);
@@ -207,6 +224,16 @@ const returnKey = blockKey((view) => {
   if (open?.item && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
     const out = planTab(view.state, true);
     if (out) return applyKeyEdit(view, out);
+  }
+  if (open?.line && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    // On the empty line Shift-Return opened: that is taken back, and Return opens an empty
+    // paragraph below the block (two steps: replacing the line break in one edit would leave the
+    // split pending).
+    if (!takeBackEmptyLine(view)) return true;
+    const again = planReturn(view.state);
+    return again
+      ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
+      : true;
   }
   const over = planSelectionReturn(view.state);
   if (over) {

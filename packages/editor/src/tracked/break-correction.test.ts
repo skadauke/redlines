@@ -202,7 +202,24 @@ describe('a word ended with Return', () => {
     expect(questions).toHaveLength(1);
     expect(docText(editor)).not.toBe('Hello teh');
     await questions[0]!.answer('the');
-    expect(docText(editor)).toMatch(/^Hello the\n/);
+    // The empty line Shift-Return opens at the end: its hard break and its no-break space.
+    expect(docText(editor)).toBe('Hello the\\\n\u00a0');
+    expect(editor.view.state.selection.main.head).toBe('Hello the\\\n'.length);
+  });
+
+  it('corrects after Shift-Return at the end with Track Changes on, and in the middle', async () => {
+    for (const [doc, at] of [
+      ['Hello teh', 'Hello teh'.length],
+      ['Hello teh there', 'Hello teh'.length],
+    ] as const) {
+      const { editor, questions } = load(doc, { tracking: true });
+      editor.view.dispatch({ selection: { anchor: at } });
+      press(editor, 'Enter', { shiftKey: true });
+      expect(questions).toHaveLength(1);
+      await questions[0]!.answer('the');
+      // A tracked correction of the word, whose break stays after it.
+      expect(docText(editor)).toMatch(/Hello t<!--sub \w+ eh-->he<!--\/\w+-->/);
+    }
   });
 
   it('applies the answer after the person typed on, mapped through what they typed', async () => {

@@ -26,6 +26,12 @@ type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const HIDDEN = Decoration.replace({});
 
+/**
+ * A hard line break's syntax (a backslash, or two or more spaces, in front of the line break),
+ * hidden, and stepped over: the break is one character for the caret and for Backspace.
+ */
+const HARD_BREAK = Decoration.replace({ hardBreak: true });
+
 /** Text the spell check leaves alone. */
 const UNCHECKED = { spellcheck: 'false' };
 const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
@@ -227,6 +233,15 @@ function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
     } else {
       b.syntax(Math.max(hiddenTo, spaceBefore(line, mark.from)), mark.to, false);
     }
+  }
+}
+
+/** A hard line break: its syntax is hidden (the line break itself is drawn as the break). */
+function hardBreak(b: Builder, node: SyntaxNode): void {
+  // The node ends with the line break; the syntax is what comes before it.
+  const end = node.to - 1;
+  if (end > node.from && b.state.sliceDoc(end, node.to) === '\n') {
+    b.push(HARD_BREAK.range(node.from, end));
   }
 }
 
@@ -437,6 +452,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
+      else if (name === 'HardBreak') hardBreak(b, node);
       else if (name === 'Image') {
         image(b, node);
         return false;
@@ -484,8 +500,24 @@ const previewField = StateField.define<DecorationSet>({
     return changed ? previewDecorations(tr.state) : decorations;
   },
   // From a state field rather than a view plugin, because it draws block decorations.
-  provide: (field) => EditorView.decorations.from(field),
+  provide: (field) => [
+    EditorView.decorations.from(field),
+    EditorView.atomicRanges.of((view) => hardBreaksOf(view.state.field(field))),
+  ],
 });
+
+/** The hard breaks' syntax among a set of decorations, as what the caret steps over. */
+const stepped = new WeakMap<DecorationSet, DecorationSet>();
+function hardBreaksOf(decorations: DecorationSet): DecorationSet {
+  let found = stepped.get(decorations);
+  if (!found) {
+    found = decorations.update({
+      filter: (_from, _to, value) => (value.spec as { hardBreak?: true }).hardBreak === true,
+    });
+    stepped.set(decorations, found);
+  }
+  return found;
+}
 
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
