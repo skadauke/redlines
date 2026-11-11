@@ -29,8 +29,16 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
+import {
+  type DeletedBlockKind,
+  deletedBlocks,
+  type MarkRange,
+  type Parsed,
+  type Segment,
+} from '@redlines/format';
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
+import { BULLETS } from '../preview/decorations.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -61,6 +69,13 @@ interface Part {
   change: boolean;
   /** An inserted line break's pilcrow. */
   split?: boolean;
+  /**
+   * The deleted text of a substitution of a whole block, which ends its own line: the new text
+   * starts on the line below, in the same block (design: Part 3).
+   */
+  whole?: boolean;
+  /** The id of the change this deleted text belongs to, on its element as `data-mark`. */
+  mark?: string;
   /**
    * The id of the split a pilcrow draws, on its element as `data-rl-change`: drawn beside another
    * break's, with its marker on a hidden line (#198), its card is found by it.
@@ -112,8 +127,39 @@ interface Model {
    */
   placed: { at: number; side: -1 | 1; parts: Part[] }[];
   layers: Layer[];
+  /** The lines of inserted table rows, whose cells the author's tint and underline draw. */
+  rows: { at: number; className: string }[];
   /** Ordinary HTML comments, drawn dimmed. */
   comments: Span[];
+  /** Whole-block deletions drawn as blocks, in Redlines. */
+  struck: Struck[];
+}
+
+/** A stretch of a struck block's text and the color of whoever deleted it. */
+interface StruckRun {
+  text: string;
+  color: number;
+}
+
+interface StruckBlock {
+  kind: DeletedBlockKind;
+  runs: StruckRun[];
+}
+
+/**
+ * A whole-block deletion (format §3.4) drawn as the blocks it deleted, struck where they were.
+ * `lines` is its marker's own line, which the hidden lines around it hide (the widget replaces
+ * them); `before` is the line of the next item of a list, whose bullet the deletion leaves in
+ * front of its marker, and the blocks are drawn above it; `after` is the line above a block
+ * deleted at the end of the text, and the blocks are drawn below it.
+ */
+interface Struck {
+  id: string;
+  where: 'lines' | 'before' | 'after';
+  /** A position on the line the blocks belong to: the marker's. */
+  at: number;
+  colors: Set<number>;
+  blocks: StruckBlock[];
 }
 
 /** The span in `spans`, in document order and apart, that holds `pos`, ends included. */
@@ -152,15 +198,213 @@ const BLANK = /^[ \t>]*$/;
 const CONTAINER_PREFIX =
   /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
 
+/** How many segments the search for the deletions around whole-block deletions has visited, for tests. */
+export const struckStats = { visited: 0 };
+
+/** A marker, whose text holds no `-->`. */
+const MARKER = /<!--(?:[^-]|-(?!->))*-->/g;
+
+/** A line of the next item of a list, or a list item at all. */
+const ITEM_LINE = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/;
+
+/** Whether a line starts a block, so the line above it ends one. */
+const BLOCK_START = /^[ \t]*(?:[-*+>|]|\d{1,9}[.)]|#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/;
+
+/**
+ * Whether a substitution is of the whole text of its block or its table cell (design: Part 3): it
+ * starts where the block's text does, after its prefix, and ends where it ends. Its old text is
+ * then drawn above the new, on a line of its own, in the same block.
+ */
+function replacesBlock(doc: Text, segment: Segment, bodyEnd: number): boolean {
+  const { close } = segment;
+  if (!close || segment.payload === undefined) return false;
+  const line = doc.lineAt(segment.open.from);
+  const before = doc.sliceString(line.from, segment.open.from).replace(MARKER, '');
+  const last = doc.lineAt(close.to);
+  const after = doc.sliceString(close.to, last.to).replace(MARKER, '');
+  // A cell of a table: between its pipes, which a backslash before the first doesn't make one.
+  const cell = /^[ \t]*\|/.test(before) && /(?:^|[^\\])(?:\\\\)*\|[ \t]*$/.test(before);
+  if (cell) return /^[ \t]*(?:\||$)/.test(after);
+  if (!/^[ \t]*$/.test(after)) return false;
+  const heading = /^[ \t>]*#{1,6}[ \t]+$/.test(before);
+  if (!heading) {
+    // The first line of a block: an item or a quote line, or one under a blank line.
+    const gap = line.number === 1 || BLANK.test(doc.line(line.number - 1).text.replace(MARKER, ''));
+    if (!CONTAINER_PREFIX.test(before) || !(before.trim() !== '' || gap)) return false;
+    // And the last: a blank line, the end of the text or another block follows.
+    if (last.number < doc.lines && last.to < bodyEnd) {
+      const next = doc.line(last.number + 1).text.replace(MARKER, '');
+      if (!BLANK.test(next) && !BLOCK_START.test(next)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
+ * other people that they hold, whose deleted text is part of the blocks. A deletion is whole when
+ * `deletedBlocks` reads its payload as whole blocks, and the file is in the form that goes with
+ * it: its marker alone on its line before a block, the line of a bullet when the next item's
+ * prefix stands in front of it, or the end of the text. Anything else live between its segments,
+ * as text of another person's insertion, leaves it to be drawn inline.
+ */
+function struckBlocks(
+  state: EditorState,
+  parsed: Parsed,
+  colors: ReadonlyMap<string, number>,
+  marks: boolean,
+): { struck: Map<MarkRange, Struck>; absorbed: Set<MarkRange> } {
+  const struck = new Map<MarkRange, Struck>();
+  const absorbed = new Set<MarkRange>();
+  const { doc } = state;
+  const end = parsed.ledgerRange?.from ?? doc.length;
+  const colorOf = (mark: MarkRange) => colors.get(mark.entry.by) ?? 0;
+  // The segments of the deletions in file order, made once and only when a deletion needs them.
+  let sorted: { segment: Segment; mark: MarkRange }[] | null = null;
+  const deletions = () =>
+    (sorted ??= parsed.marks
+      .filter((other) => other.kind === 'del')
+      .flatMap((other) => other.segments.map((segment) => ({ segment, mark: other })))
+      .sort((a, b) => a.segment.open.from - b.segment.open.from));
+  /** The index of the first segment that opens at or after `from`. */
+  const firstFrom = (list: readonly { segment: Segment }[], from: number) => {
+    let low = 0;
+    let high = list.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (list[middle]!.segment.open.from < from) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'del' || !isDrawnChange(mark) || absorbed.has(mark)) continue;
+    const first = mark.segments[0];
+    const last = mark.segments.at(-1);
+    if (!first || !last || first.payload === undefined) continue;
+    const line = doc.lineAt(first.open.from);
+    const lead = doc.sliceString(line.from, first.open.from).replace(MARKER, '');
+    let where: Struck['where'];
+    let segments: { segment: Segment; mark: MarkRange }[] = mark.segments.map((segment) => ({
+      segment,
+      mark,
+    }));
+    const hold = new Set<MarkRange>();
+    if (first.carrier) {
+      if (!CONTAINER_PREFIX.test(lead)) continue;
+      where = BLANK.test(lead) ? 'lines' : 'before';
+      const lastLine = doc.lineAt(last.open.to);
+      // Nothing live between the segments: every line holds markers and blank lines alone.
+      let bare = true;
+      for (let n = line.number; n <= lastLine.number && bare; n++) {
+        const text = doc.line(n).text.replace(MARKER, '');
+        bare = where === 'before' ? n !== line.number || text === lead : BLANK.test(text);
+      }
+      if (!bare || (where === 'before' && mark.segments.length > 1)) continue;
+      if (where === 'lines') {
+        // Other people's deletions in the same lines belong to the blocks: found among the
+        // segments of all deletions, in file order, by search (not by a scan of every mark).
+        const inside = (segment: Segment) =>
+          segment.open.from >= line.from && segment.open.to <= lastLine.to;
+        const held = new Set<MarkRange>();
+        for (
+          let i = firstFrom(deletions(), line.from);
+          i < deletions().length && deletions()[i]!.segment.open.from <= lastLine.to;
+          i++
+        ) {
+          const found = deletions()[i]!;
+          struckStats.visited++;
+          if (inside(found.segment)) held.add(found.mark);
+        }
+        segments = [...held]
+          .flatMap((other) => other.segments.map((segment) => ({ segment, mark: other })))
+          .sort((a, b) => a.segment.open.from - b.segment.open.from);
+        const outside = segments.some(
+          ({ segment, mark: other }) => !inside(segment) || !isDrawnChange(other),
+        );
+        if (outside || segments[0]?.segment !== first) continue;
+        for (const { mark: other } of segments) hold.add(other);
+      }
+    } else {
+      where = 'after';
+      if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
+        continue;
+    }
+    const blocks = deletedBlocks(
+      segments.map(({ segment }) => segment),
+      { lead, atEnd: where === 'after' },
+    );
+    if (!blocks) continue;
+    // Each stretch of the blocks' text in the color of the person who deleted it.
+    const owners: { to: number; color: number }[] = [];
+    let total = 0;
+    for (const { segment, mark: owner } of segments) {
+      total += segment.payload?.length ?? 0;
+      owners.push({ to: total, color: colorOf(owner) });
+    }
+    const drawn = new Set<number>();
+    const struckBlock = blocks.map((block): StruckBlock => {
+      const runs: StruckRun[] = [];
+      const add = (text: string, color: number) => {
+        const previous = runs.at(-1);
+        if (previous?.color === color) previous.text += text;
+        else runs.push({ text, color });
+      };
+      block.pieces.forEach((piece, index) => {
+        if (index > 0)
+          add(block.kind.kind === 'code' ? '\n' : ' ', runs.at(-1)?.color ?? colorOf(mark));
+        let at = piece.at;
+        while (at < piece.at + piece.text.length) {
+          const owner = owners.find((candidate) => at < candidate.to) ?? owners.at(-1)!;
+          const to = Math.min(piece.at + piece.text.length, owner.to);
+          add(piece.text.slice(at - piece.at, to - piece.at), owner.color);
+          at = Math.max(to, at + 1);
+        }
+      });
+      if (marks) add('¶', runs.at(-1)?.color ?? colorOf(mark));
+      for (const run of runs) drawn.add(run.color);
+      return { kind: block.kind, runs };
+    });
+    drawn.add(colorOf(mark));
+    const item: Struck = {
+      id: mark.id,
+      where,
+      at: where === 'before' ? line.from : where === 'after' ? line.to : first.open.from,
+      colors: drawn,
+      blocks: struckBlock,
+    };
+    struck.set(mark, item);
+    for (const other of hold) if (other !== mark) absorbed.add(other);
+  }
+  return { struck, absorbed };
+}
+
 function analyze(state: EditorState, kept: number | null): Model {
-  const model: Model = { hidden: [], blocks: [], placed: [], layers: [], comments: [] };
+  const model: Model = {
+    hidden: [],
+    blocks: [],
+    placed: [],
+    layers: [],
+    rows: [],
+    comments: [],
+    struck: [],
+  };
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
+  // Simple is Redlines with every change's look off (design: The four views): the same parts and
+  // layers, so that the bars land on the same lines, with no text and no class, and no marks of
+  // line breaks. Comments, highlights and pins are drawn as in Redlines.
+  const markup = mode === 'redlines' || mode === 'simple';
   const redlines = mode === 'redlines';
-  const marks = state.facet(lineBreakMarksFacet);
+  const marks = redlines && state.facet(lineBreakMarksFacet);
   const colors = colorsOf(state);
   const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread]));
+  // Blocks deleted whole are drawn as blocks, only in Redlines: Simple and Clean draw none.
+  const blocks = redlines
+    ? struckBlocks(state, parsed, colors, state.facet(lineBreakMarksFacet))
+    : null;
+  if (blocks) model.struck = [...blocks.struck.values()];
   for (const mark of parsed.marks) {
     const color = colors.get(mark.entry.by) ?? 0;
     const author = colorClass(color);
@@ -171,25 +415,55 @@ function analyze(state: EditorState, kept: number | null): Model {
       const parts: Part[] = [];
       const { from, to } = segment.content;
       // A format change's payload is its operations, never deleted text.
-      if (redlines && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
-        const text = deletedText(segment.payload, marks);
-        parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
+      if (markup && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
+        // A block drawn as a block takes its own bar, and leaves the lines around it alone.
+        const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
+        const text = redlines ? deletedText(segment.payload, marks) : '';
+        if (!asBlock) {
+          const whole =
+            redlines &&
+            text !== '' &&
+            mark.kind === 'sub' &&
+            replacesBlock(state.doc, segment, parsed.ledgerRange?.from ?? state.doc.length);
+          parts.push({
+            text,
+            className: text ? `rl-del ${author}` : '',
+            color,
+            change: true,
+            mark: mark.id,
+            ...(whole ? { whole } : {}),
+          });
+        }
       }
-      if (redlines && tinted && !segment.close) {
+      if (markup && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
       }
-      if (redlines && mark.kind === 'split') {
+      // An inserted table row: a change bar, in Simple too, and in Redlines its line has the author's
+      // tint and underline.
+      if (markup && mark.kind === 'ins' && mark.payload === 'row') {
+        parts.push({ text: '', className: '', color, change: true });
+        if (redlines) model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
+      }
+      if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
         parts.push({ text: '', className, color, change: true, split: true, id: mark.id });
       }
       // The text of a format change, after the carrier of an opener alone on its line, as a block's
       // is. A box's mark is a point, and draws nothing of its own.
       const start = segment.carrier?.to ?? from;
-      if (redlines && mark.kind === 'fmt' && segment.close && start < to) {
-        model.layers.push({ from: start, to, className: `rl-fmt ${author}`, color, change: true });
-      } else if (redlines && mark.kind !== 'fmt' && segment.close && from < to) {
+      if (markup && mark.kind === 'fmt' && segment.close && start < to) {
+        const className = redlines ? `rl-fmt ${author}` : '';
+        model.layers.push({ from: start, to, className, color, change: true });
+      } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
-          model.layers.push({ from, to, className: `rl-ins ${author}`, color, change: true });
+          const className = redlines ? `rl-ins ${author}` : '';
+          // A substitution's text starts after the carrier of an opener alone on its line, which
+          // its old text is drawn after: struck text is no inserted text.
+          const start =
+            mark.kind === 'sub' && segment.carrier && segment.carrier.to < to
+              ? segment.carrier.to
+              : from;
+          model.layers.push({ from: start, to, className, color, change: true });
         } else if (tinted) {
           model.layers.push({ from, to, className: `rl-cmt ${author}`, color, change: false });
         }
@@ -474,6 +748,8 @@ class MarkupWidget extends WidgetType {
         (part, i) =>
           part.text === this.parts[i]?.text &&
           part.className === this.parts[i]?.className &&
+          part.whole === this.parts[i]?.whole &&
+          part.mark === this.parts[i]?.mark &&
           part.id === this.parts[i]?.id,
       )
     );
@@ -486,6 +762,10 @@ class MarkupWidget extends WidgetType {
       span.className = part.className;
       span.textContent = part.text;
       if (part.split && part.id) span.dataset['rlChange'] = part.id;
+      // Deleted text carries its change, which a card finds by it.
+      if (part.mark && part.text) span.dataset['mark'] = part.mark;
+      // The old text of a block replaced whole ends its own line: the new text starts below it.
+      if (part.whole) span.append(document.createElement('br'));
       // The pilcrows of line breaks stand in a box, side by side when there are several ("¶¶").
       const last = spans.at(-1);
       if (!part.split) spans.push(span);
@@ -504,6 +784,98 @@ class MarkupWidget extends WidgetType {
   }
 
   /** A click on deleted text puts the caret beside it. */
+  override ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+/** The blocks of one or more whole-block deletions drawn as blocks, struck where they were. */
+class StruckWidget extends WidgetType {
+  readonly deleted: readonly Struck[];
+  /** Whether a list item stands right above, so that a struck item is the next of its list. */
+  readonly afterItem: boolean;
+  /** Whether it stands after the last line of the text, below the line it belongs to. */
+  readonly after: boolean;
+
+  constructor(deleted: readonly Struck[], afterItem: boolean, after = false) {
+    super();
+    this.deleted = deleted;
+    this.afterItem = afterItem;
+    this.after = after;
+  }
+
+  override eq(other: StruckWidget): boolean {
+    return (
+      other.afterItem === this.afterItem &&
+      other.after === this.after &&
+      other.deleted.length === this.deleted.length &&
+      other.deleted.every(
+        (item, i) =>
+          item.id === this.deleted[i]!.id &&
+          JSON.stringify(item.blocks) === JSON.stringify(this.deleted[i]!.blocks) &&
+          [...item.colors].join() === [...this.deleted[i]!.colors].join(),
+      )
+    );
+  }
+
+  override get estimatedHeight(): number {
+    return this.deleted.reduce((sum, item) => sum + item.blocks.length * 28, 0);
+  }
+
+  override toDOM(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'rl-struck-blocks';
+    if (this.after) wrap.dataset['after'] = 'true';
+    let item = this.afterItem;
+    for (const deleted of this.deleted) {
+      const bar = barClass(deleted.colors);
+      for (const block of deleted.blocks) {
+        const { kind } = block;
+        const div = document.createElement('div');
+        div.dataset['mark'] = deleted.id;
+        const classes = ['rl-struck', bar];
+        if (kind.kind === 'heading') classes.push(`rl-h${kind.level}`);
+        else if (kind.kind === 'quote') classes.push('rl-quote');
+        // Code: its lines apart, in the code font, as the preview draws it, with no fence.
+        else if (kind.kind === 'code') {
+          classes.push('rl-codeblock', 'rl-codeblock-first', 'rl-codeblock-last');
+          div.style.whiteSpace = 'pre-wrap';
+        } else if (kind.kind === 'item') classes.push('rl-hang', 'rl-li');
+        classes.push(kind.kind === 'item' && item ? 'rl-space-item' : 'rl-space-block');
+        item = kind.kind === 'item';
+        div.className = classes.join(' ');
+        if (kind.kind === 'item') {
+          const depth = Math.min(Math.floor(kind.indent / 2) + 1, BULLETS.length);
+          const mark = document.createElement('span');
+          mark.className = 'rl-list-mark';
+          mark.style.setProperty('--rl-cols', String(kind.width));
+          mark.textContent = /^[-*+]$/.test(kind.marker) ? BULLETS[depth - 1]! : kind.marker;
+          div.style.setProperty('--rl-hang', String(kind.indent + kind.width));
+          if (kind.indent > 0) {
+            const indent = document.createElement('span');
+            indent.className = 'rl-indent';
+            indent.textContent = ' '.repeat(kind.indent);
+            div.append(indent);
+          }
+          div.append(mark);
+        }
+        // A block with no text, an empty pair of fences, still stands a line high.
+        if (block.runs.every((run) => run.text === '' || run.text === '¶')) {
+          div.append(document.createTextNode('\u200b'));
+        }
+        for (const run of block.runs) {
+          const span = document.createElement('span');
+          span.className = `rl-del ${colorClass(run.color)}`;
+          span.textContent = run.text;
+          div.append(span);
+        }
+        wrap.append(div);
+      }
+    }
+    return wrap;
+  }
+
+  /** A click on a struck block puts the caret beside it: it is atomic. */
   override ignoreEvent(): boolean {
     return false;
   }
@@ -589,16 +961,53 @@ function display(state: EditorState): Display {
     const widget = shown.length ? new MarkupWidget(shown) : null;
     ranges.push((widget ? Decoration.replace({ widget }) : HIDDEN).range(from, to));
   }
-  for (const { from, to } of model.blocks) ranges.push(HIDDEN_LINES.range(from, to));
+  // Whole blocks deleted, drawn as blocks: in the place of the hidden lines of their markers, above
+  // the line of the next item of a list, or below the line above the end of the text.
+  const slots = new Map<string, { at: number; to: number; side: -1 | 1 | 0; items: Struck[] }>();
+  for (const item of model.struck) {
+    const span = item.where === 'lines' ? spanAt(model.blocks, item.at) : undefined;
+    const slot = span
+      ? { at: span.from, to: span.to, side: 0 as const }
+      : item.where === 'after'
+        ? { at: item.at, to: item.at, side: 1 as const }
+        : { at: doc.lineAt(item.at).from, to: doc.lineAt(item.at).from, side: -1 as const };
+    const key = `${slot.at} ${slot.side}`;
+    const same = slots.get(key);
+    if (same) same.items.push(item);
+    else slots.set(key, { ...slot, items: [item] });
+  }
+  const itemAbove = (slot: { at: number; side: -1 | 1 | 0 }) => {
+    // The line the blocks follow: the nearest above them that shows text.
+    let n = doc.lineAt(slot.at).number - (slot.side === 1 ? 0 : 1);
+    while (n >= 1 && BLANK.test(doc.line(n).text)) n--;
+    return n >= 1 && ITEM_LINE.test(doc.line(n).text);
+  };
+  for (const { from, to } of model.blocks) {
+    const slot = slots.get(`${from} 0`);
+    if (!slot) ranges.push(HIDDEN_LINES.range(from, to));
+    else {
+      const widget = new StruckWidget(slot.items, itemAbove(slot));
+      ranges.push(Decoration.replace({ block: true, widget }).range(from, to));
+      slots.delete(`${from} 0`);
+    }
+  }
+  for (const slot of slots.values()) {
+    const widget = new StruckWidget(slot.items, itemAbove(slot), slot.side === 1);
+    ranges.push(Decoration.widget({ block: true, widget, side: slot.side || -1 }).range(slot.at));
+  }
   for (const { at, side, parts } of model.placed) {
     const shown = drawn(parts);
     if (!shown.length) continue;
     ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side }).range(at));
   }
   for (const { from, to, className } of model.layers) {
-    ranges.push(Decoration.mark({ class: className }).range(from, to));
+    // A layer with no class, a change in Simple, only takes a bar.
+    if (className) ranges.push(Decoration.mark({ class: className }).range(from, to));
   }
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
+  for (const { at, className } of model.rows) {
+    ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
+  }
   for (const [n, className] of bars(doc, model)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
@@ -687,7 +1096,9 @@ export function trackedText(state: EditorState, from: number, to: number): Track
     .filter((span) => span.from < to && from < span.to)
     .sort((a, b) => a.from - b.from || b.to - a.to);
   const around = (start: number, end: number) =>
-    layers.filter((layer) => layer.from <= start && end <= layer.to).map((l) => l.className);
+    layers
+      .filter((layer) => layer.className && layer.from <= start && end <= layer.to)
+      .map((l) => l.className);
   const visible = (start: number, end: number, pieces: TrackedPiece[]) => {
     const cuts = new Set([start, end]);
     for (const layer of layers) {
@@ -845,7 +1256,7 @@ const hiddenCount = EditorView.contentAttributes.compute([trackedField], (state)
   return { 'data-rl-hidden-lines': String(count) };
 });
 
-/** The view's class on the editor: `rl-view-clean`, `rl-view-redlines` or `rl-view-raw`. */
+/** The view's class on the editor: `rl-view-clean`, `-simple`, `-redlines` or `-raw`. */
 const viewClass = EditorView.editorAttributes.compute([viewModeField], (state) => ({
   class: `rl-view-${state.field(viewModeField)}`,
 }));
@@ -975,8 +1386,37 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundColor: 'var(--rl-color)',
   },
   '.rl-bar-mixed::before': { backgroundColor: 'var(--rl-mixed)' },
+  // Under the pointer, in Simple and Redlines, a bar is wider (3 px instead of 2): a click on it
+  // switches the views (bar-switch.ts). The pointer is a hand over its target.
+  '.rl-bar.rl-bar-hot::before': { width: '3px' },
   // A quote's own border would move its bar right.
   '.rl-quote.rl-bar::before': { left: '-26px' },
+  // A table row's bar is drawn by its first cell: nothing but a cell may be a child of a row.
+  '.rl-trow.rl-bar::before': { display: 'none' },
+  '.rl-trow.rl-bar > .rl-tc:first-child': { position: 'relative' },
+  '.rl-trow.rl-bar > .rl-tc:first-child::before': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: '-24px',
+    width: '2px',
+    backgroundColor: 'var(--rl-color)',
+  },
+  '.rl-trow.rl-bar-mixed > .rl-tc:first-child::before': { backgroundColor: 'var(--rl-mixed)' },
+  // The hovered bar of a row is the row's class; the first cell draws the bar.
+  '.rl-trow.rl-bar.rl-bar-hot > .rl-tc:first-child::before': { width: '3px' },
+  // An inserted table row: the author's tint behind its cells, and the text underlined and in the
+  // author's color as inserted text is.
+  '.rl-trow.rl-ins-row > .rl-tc': {
+    backgroundColor: 'var(--rl-color-tint)',
+    color: 'var(--rl-color)',
+    textDecoration: 'underline',
+    textDecorationColor: 'var(--rl-color)',
+    textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px',
+    textDecorationSkipInk: 'none',
+  },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

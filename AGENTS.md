@@ -32,6 +32,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
+| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
@@ -77,6 +78,13 @@ repo root.
   `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks;
   `REDLINES_QUIT_ANSWER` takes the same words for the second question, asked when the Redlines to be
   replaced is open (nothing else ever quits it)
+- Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
+  (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
+  cost of a keystroke) and `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
+  over them, their bars and cards, in Redlines and Simple) serve the page, and `pnpm tauri dev` runs
+  it in WKWebView; each writes its results to the console and ends with a `... done <n> passed,
+  <n> failed` line (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`). They read
+  nothing in a release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

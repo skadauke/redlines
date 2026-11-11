@@ -2,7 +2,8 @@
 import type { Editor } from '@redlines/editor';
 import { accept, applyChanges, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { button, file, mount, PEOPLE, press, REFUSAL, unmountAll } from './test-helpers.ts';
+import { decideSuggestion } from './shared.ts';
+import { button, file, me, mount, PEOPLE, press, REFUSAL, unmountAll } from './test-helpers.ts';
 
 afterEach(unmountAll);
 
@@ -46,6 +47,35 @@ const undo = (editor: Editor) => {
   const mac = /Mac/.test(navigator.platform);
   press(editor.view.contentDOM, 'z', { ctrlKey: !mac, metaKey: mac });
 };
+
+describe('decideSuggestion', () => {
+  it('decides in Redlines and returns true', () => {
+    const { editor, decided } = mount(suggestion);
+    expect(decideSuggestion({ editor, author: me }, 'accept', 'p7qd')).toBe(true);
+    expect(decided.map(({ id }) => id)).toEqual(['k3x9', 'p7qd', 'w2rf']);
+  });
+
+  it.each(['accept', 'reject'] as const)(
+    'decides nothing in Simple, and shows the suggestion in Redlines: %s',
+    (how) => {
+      const { editor, decided } = mount(suggestion);
+      editor.setViewMode('simple');
+      const before = editor.getDoc();
+      expect(decideSuggestion({ editor, author: me }, how, 'p7qd')).toBe(false);
+      expect(decided).toEqual([]);
+      expect(editor.getDoc()).toBe(before);
+      expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+      // The whole suggestion, from its first mark to its last.
+      const { from, to } = editor.view.state.selection.main;
+      expect(editor.view.state.sliceDoc(from, to)).toBe(
+        BODY.slice(
+          BODY.indexOf('<!--ins k3x9'),
+          BODY.indexOf('<!--/w2rf-->') + '<!--/w2rf-->'.length,
+        ),
+      );
+    },
+  );
+});
 
 describe('a suggestion of several marks', () => {
   it('shows one card for a suggestion of several marks, with its note once', () => {

@@ -370,14 +370,16 @@ export function appMenuModel(
     },
     { title: 'Format', rows: withCommands('format', []) },
     { title: 'Paragraph', rows: withCommands('paragraph', []) },
+    { title: 'Table', rows: withCommands('table', []) },
     {
       title: 'View',
       rows: withCommands('view', [
-        // ⌥⌘1 to ⌥⌘3 are provisional: Word for Mac uses them for headings (design §14, open
-        // question 6).
+        // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
+        // the clash proves real (design §14, open question 6).
         viewRow('clean', 'Clean', '1'),
-        viewRow('redlines', 'Redlines', '2'),
-        viewRow('raw', 'Raw', '3'),
+        viewRow('simple', 'Simple', '2'),
+        viewRow('redlines', 'Redlines', '3'),
+        viewRow('raw', 'Raw', '4'),
         SEPARATOR,
         // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
         // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
@@ -484,6 +486,6 @@ export function appMenuModel(
       rows: [{ text: 'Show Agent Logs', action: () => commands.showAgentLogs() }],
     },
   ];
-  // Format and Paragraph hold only commands, and a menu with nothing in it isn't shown.
+  // Format, Paragraph and Table hold only commands, and a menu with nothing in it isn't shown.
   return { menus: menus.filter((menu) => menu.rows.length) };
 }

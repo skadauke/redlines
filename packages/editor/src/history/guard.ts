@@ -74,6 +74,11 @@ const outsideField = StateField.define<boolean>({
   },
 });
 
+/** Whether `tr` starts the history over: a reload that changed the text (`startOver`). */
+export function startsOver(tr: Transaction): boolean {
+  return tr.effects.some((effect) => effect.is(startedOver));
+}
+
 /** Whether the text changed outside the history since it started (over). For tests. */
 export function changedOutside(state: EditorState): boolean {
   return state.field(outsideField, false) ?? false;

@@ -320,6 +320,24 @@ describe('tracked typing', () => {
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', tracking: true });
   });
 
+  it.each(['simple', 'redlines'] as const)(
+    'a tracked edit in Clean switches to the markup view, %s',
+    (markupView) => {
+      const editor = load(fixture, { view: 'clean', ids: ['q4gt'], markupView });
+      caret(editor, fixture.indexOf(' in <!--sub'));
+      type(editor, 'x');
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('a tracked edit in Simple stays in Simple', () => {
+    const editor = load(fixture, { view: 'simple', ids: ['q4gt'] });
+    caret(editor, fixture.indexOf(' in <!--sub'));
+    type(editor, 'x');
+    expect(body(editor)).toContain('<!--ins q4gt-->x<!--/q4gt-->');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('accept removes the markers', () => {
     const reports: EditorUiState[] = [];
     const editor = load(fixture, { onUiState: (ui) => reports.push(ui) });
@@ -2189,6 +2207,15 @@ describe('composition', () => {
     expect(editor.getUiState().view).toBe('redlines');
   });
 
+  it('switches Clean to the markup view when the composed text is a suggestion', async () => {
+    const doc = withLedger('Gruss aus <!--ins b2b2-->der <!--/b2b2-->Kln.', { b2b2: 'bo' });
+    const editor = load(doc, { view: 'clean', ids: ['q4gt'], markupView: 'simple' });
+    const at = doc.indexOf('ln.');
+    compose(editor, at, at, 'ö', true);
+    await tick();
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('moves text composed at the end of an insertion out of it, with Track Changes off', async () => {
     const doc = withLedger('Gruss <!--ins b2b2-->aus<!--/b2b2--> Koln.', { b2b2: 'bo' });
     const at = doc.indexOf('<!--/b2b2-->');
@@ -2216,6 +2243,61 @@ describe('composition', () => {
     expect(editor.getDoc()).toBe('Gruss aus Köln.\n');
     undo(editor.view);
     expect(editor.getDoc()).toBe(doc);
+  });
+
+  describe('a pipe composed in a table cell is written as \\|, as a typed one is', () => {
+    const doc = '| a | b |\n| - | - |\n| one | two |\n';
+    const finish = async (editor: Editor) => {
+      composing(editor, false);
+      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      await tick();
+    };
+
+    for (const tracking of [true, false]) {
+      it(`at the end of the composition, Track Changes ${tracking ? 'on' : 'off'}`, async () => {
+        const at = doc.indexOf('one') + 1;
+        const notices: string[] = [];
+        const editor = load(doc, {
+          tracking,
+          ids: ['q4gt'],
+          onNotice: (message) => notices.push(message),
+        });
+        composing(editor, true);
+        compose(editor, at, at, '¨', true);
+        compose(editor, at, at + 1, '|');
+        await tick();
+        await finish(editor);
+        // Never refused, never taken back.
+        expect(notices).toEqual([]);
+        expect(docText(editor)).toContain(
+          tracking ? 'o<!--ins q4gt-->\\|<!--/q4gt-->ne' : 'o\\|ne',
+        );
+        expect(docText(editor)).not.toContain('o|ne');
+        expect(docText(editor)).not.toContain('<!--ins q4gt-->|');
+        const parsedRows = newestView(editor.getDoc()).text.split('\n');
+        expect(parsedRows[2]).toBe('| o\\|ne | two |');
+        undo(editor.view);
+        expect(editor.getDoc()).toBe(doc);
+      });
+    }
+
+    it('leaves a pipe that is escaped already, and text outside a cell', async () => {
+      const at = doc.indexOf('one') + 1;
+      const editor = load(doc, { tracking: false });
+      editor.view.dispatch({ changes: { from: at, insert: '\\' } });
+      composing(editor, true);
+      compose(editor, at + 1, at + 1, '|', true);
+      await tick();
+      await finish(editor);
+      expect(docText(editor)).toContain('o\\|ne');
+      expect(docText(editor)).not.toContain('\\\\|');
+      const prose = load('Hello world.\n', { tracking: false });
+      composing(prose, true);
+      compose(prose, 5, 5, '|', true);
+      await tick();
+      await finish(prose);
+      expect(prose.getDoc()).toBe('Hello| world.\n');
+    });
   });
 
   it('puts composed text that Track Changes refuses back as it was', async () => {

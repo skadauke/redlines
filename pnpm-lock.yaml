@@ -74,6 +74,9 @@ importers:
       '@redlines/review':
         specifier: workspace:*
         version: link:../../plugins/review
+      '@redlines/tables':
+        specifier: workspace:*
+        version: link:../../plugins/tables
       '@redlines/themes':
         specifier: workspace:*
         version: link:../../plugins/themes
@@ -370,6 +373,24 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/tables:
+    dependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api

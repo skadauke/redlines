@@ -3,9 +3,18 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { forceParsing } from '@codemirror/language';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { accept, applyChanges, newestView, parse, reject } from '@redlines/format';
+import {
+  accept,
+  applyChanges,
+  newestView,
+  parse,
+  reject,
+  suggestReplace,
+  trackedEdit,
+} from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEditor,
@@ -38,6 +47,9 @@ function load(doc: string, options: Partial<EditorOptions> = {}): Editor {
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author: ada, ...options });
   open.push(editor);
+  // The whole parse, as the editor's parse worker finishes it: a busy machine stops the first
+  // parse early, and what these tests read follows the tree.
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   return editor;
 }
 
@@ -400,22 +412,6 @@ describe('line break marks', () => {
     expect(struck(load(hardBreak, shown))).toBe('  ¶');
   });
 
-  it('keeps a deleted paragraph apart from the one beside it, while the marks are hidden', () => {
-    // A whole paragraph deleted, in the middle, drawn at the start of the block below, and at the
-    // end, after the paragraph above (format §3.4): its paragraph break is a space.
-    for (const [body, hidden, marked] of [
-      ['One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.', 'Two. ', 'Two.¶¶'],
-      ['One.\n\nTwo.<!--del b2b2 \\n\\nThree.-->', ' Three.', '¶¶Three.'],
-    ] as const) {
-      const doc = withLedger(body, { b2b2: 'bo' });
-      const editor = load(doc);
-      expect(struck(editor)).toBe(hidden);
-      const line = editor.view.contentDOM.querySelector('.rl-del')?.closest('.cm-line');
-      expect(line?.textContent).toBe('Two. Three.');
-      expect(struck(load(doc, shown))).toBe(marked);
-    }
-  });
-
   it('draws the pilcrow at the break in a list line too, which hangs', () => {
     // A break after an item's text, and one in front of it, as Enter there leaves them.
     for (const body of [
@@ -497,6 +493,353 @@ describe('line break marks', () => {
   });
 });
 
+describe('Deleted blocks', () => {
+  /** The blocks drawn as struck blocks: their classes and text. */
+  const blocksOf = (editor: Editor) =>
+    [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')].map((block) => ({
+      classes: block.className.split(' ').filter((c) => c !== 'rl-struck'),
+      text: block.textContent,
+      mark: block.dataset['mark'],
+    }));
+  /** The text of each line of the page, struck blocks included, in order. */
+  const page = (editor: Editor) =>
+    [...editor.view.contentDOM.children]
+      .filter((el) => el.matches('.cm-line, .rl-struck-blocks'))
+      .flatMap((el) =>
+        el.matches('.rl-struck-blocks')
+          ? [...el.children].map((block) => `~${block.textContent}~`)
+          : [el.textContent],
+      );
+  const lines = (editor: Editor) => page(editor).filter((text) => !text?.startsWith('~'));
+
+  it('draws a paragraph deleted whole as a block of its own, where it was', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(page(editor)).toEqual(['One.', '~Two.~', 'Three.']);
+    // Struck in its author's color, with its bar, and the next paragraph's line is its own text.
+    expect(blocksOf(editor)).toEqual([
+      { classes: ['rl-bar', 'rl-author-3', 'rl-space-block'], text: 'Two.', mark: 'b2b2' },
+    ]);
+    expect(
+      editor.view.contentDOM.querySelector('.rl-struck .rl-del.rl-author-3')?.textContent,
+    ).toBe('Two.');
+    // The line below has no bar of the deletion, and no deleted text in it.
+    expect(lineClasses(editor, editor.view.state.doc.lineAt(doc.indexOf('Three.')).number)).toEqual(
+      [],
+    );
+    expect(editor.view.contentDOM.querySelector('.cm-line .rl-del')).toBeNull();
+    // The hidden lines around it stay hidden: no blank line is drawn.
+    expect(lines(editor)).toEqual(['One.', 'Three.']);
+  });
+
+  it('draws a paragraph deleted at the end of the text after the block above', () => {
+    const doc = withLedger('One.\n\nTwo.<!--del b2b2 \\n\\nThree.-->', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(page(editor)).toEqual(['One.', 'Two.', '~Three.~']);
+    expect(blocksOf(editor)[0]?.mark).toBe('b2b2');
+    // Only the last line of the document is the block above's.
+    expect(editor.view.contentDOM.querySelector('.cm-line .rl-del')).toBeNull();
+  });
+
+  it('draws a block of its own kind: a heading at its level, an item with its bullet, a quote', () => {
+    const heading = load(withLedger('<!--del b2b2 ## Head\\n\\n-->\n\nPara.', { b2b2: 'bo' }));
+    expect(blocksOf(heading)).toEqual([
+      { classes: ['rl-bar', 'rl-author-3', 'rl-h2', 'rl-space-block'], text: 'Head', mark: 'b2b2' },
+    ]);
+    const item = load(withLedger('- one\n- <!--del b2b2 two\\n- -->\n  three', { b2b2: 'bo' }));
+    // A struck item with its bullet, between "one" and "three".
+    expect(page(item)).toEqual(['- one', '~•two~', '•three']);
+    expect(blocksOf(item)[0]?.classes).toEqual(
+      expect.arrayContaining(['rl-li', 'rl-hang', 'rl-bar', 'rl-space-item']),
+    );
+    expect(
+      item.view.contentDOM
+        .querySelector<HTMLElement>('.rl-struck')
+        ?.style.getPropertyValue('--rl-hang'),
+    ).toBe('2');
+    const quote = load(
+      withLedger('One.\n\n<!--del b2b2 > quoted\\n\\n-->\n\nAfter.', { b2b2: 'bo' }),
+    );
+    expect(blocksOf(quote)[0]?.classes).toEqual(
+      expect.arrayContaining(['rl-quote', 'rl-bar', 'rl-space-block']),
+    );
+    // A numbered item keeps its number.
+    const numbered = load(
+      withLedger('1. one\n2. <!--del b2b2 two\\n3. -->\n   three', { b2b2: 'bo' }),
+    );
+    expect(blocksOf(numbered)[0]?.text).toBe('2.two');
+  });
+
+  it('draws a last item deleted after the item above, and several blocks as several', () => {
+    const last = load(withLedger('- one\n- two<!--del b2b2 \\n- three-->', { b2b2: 'bo' }));
+    expect(page(last)).toEqual(['- one', '•two', '~•three~']);
+    const several = load(
+      withLedger('One.\n\n<!--del b2b2 Two.\\n\\n## Three\\n\\nFour.\\n\\n-->\n\nFive.', {
+        b2b2: 'bo',
+      }),
+    );
+    expect(page(several)).toEqual(['One.', '~Two.~', '~Three~', '~Four.~', 'Five.']);
+    expect(blocksOf(several).map((block) => block.mark)).toEqual(['b2b2', 'b2b2', 'b2b2']);
+  });
+
+  it('draws a table deleted whole as a block of its source, struck', () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 | a | b |\\n| - | - |\\n| 1 | 2 |\\n\\n-->\n\nAfter.',
+      {
+        b2b2: 'bo',
+      },
+    );
+    const editor = load(doc);
+    expect(page(editor)).toEqual(['One.', '~| a | b | | - | - | | 1 | 2 |~', 'After.']);
+  });
+
+  it('draws a deleted fenced code block as code, its fences hidden', () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 ```js\\nlet a = 1;\\n\\n  b();\\n```\\n\\n-->\n\nAfter.',
+      {
+        b2b2: 'bo',
+      },
+    );
+    const editor = load(doc);
+    const [code] = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+    expect(code?.classList).toContain('rl-codeblock');
+    expect(code?.style.whiteSpace).toBe('pre-wrap');
+    // Lines apart, indentation kept, no fence.
+    expect(code?.textContent).toBe('let a = 1;\n\n  b();');
+    expect(code?.textContent).not.toContain('`');
+  });
+
+  it('draws an empty pair of fences as a struck code block a line high', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 ```\\n```\\n\\n-->\n\nAfter.', { b2b2: 'bo' });
+    const editor = load(doc);
+    const code = editor.view.contentDOM.querySelector<HTMLElement>('.rl-struck.rl-codeblock');
+    expect(code).not.toBeNull();
+    // Not an empty element with only its bar: it holds a character, so it has a line's height.
+    expect(code?.textContent).toBe('​');
+    expect(code?.dataset['mark']).toBe('b2b2');
+    expect(page(editor)).toEqual(['One.', '~​~', 'After.']);
+  });
+
+  it("draws another person's change in a deleted code block as part of it, in their color", () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 ```js\\nlet a = -->\n\n<!--del c3c3 1;-->\n\n<!--del b2b2 \\n```\\n\\n-->\n\nAfter.',
+      { b2b2: 'bo', c3c3: 'ada' },
+    );
+    const editor = load(doc);
+    const [code] = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+    expect(code?.classList).toContain('rl-codeblock');
+    expect(code?.textContent).toBe('let a = 1;');
+    expect(
+      [...code!.querySelectorAll('.rl-del')].map((run) => [run.className, run.textContent]),
+    ).toEqual([
+      ['rl-del rl-author-3', 'let a = '],
+      ['rl-del rl-author-1', '1;'],
+    ]);
+    expect(code?.classList).toContain('rl-bar-mixed');
+  });
+
+  it('keeps a deletion across blocks inline, with a space, or a pilcrow when marks are shown', () => {
+    const doc = withLedger(
+      'Alpha one <!--del b2b2 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.',
+      { b2b2: 'bo' },
+    );
+    expect(load(doc).view.contentDOM.querySelector('.rl-struck')).toBeNull();
+    const editor = load(doc, { showLineBreakMarks: true });
+    expect(editor.view.contentDOM.querySelector('.cm-line .rl-del')?.textContent).toBe(
+      'two three.¶¶## Middle heading¶¶Gamma four ',
+    );
+  });
+
+  it('ends each deleted block with a struck pilcrow when line break marks are shown', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 Two.\\n\\nThree.\\n\\n-->\n\nFour.', {
+      b2b2: 'bo',
+    });
+    const editor = load(doc, { showLineBreakMarks: true });
+    expect(blocksOf(editor).map((block) => block.text)).toEqual(['Two.¶', 'Three.¶']);
+    expect(blocksOf(load(doc)).map((block) => block.text)).toEqual(['Two.', 'Three.']);
+  });
+
+  it("draws another person's deletion inside a deleted block as part of it, in their color", () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 Two -->\n\n<!--del c3c3 words-->\n\n<!--del b2b2  end.\\n\\n-->\n\nThree.',
+      { b2b2: 'bo', c3c3: 'ada' },
+    );
+    const editor = load(doc);
+    expect(page(editor)).toEqual(['One.', '~Two words end.~', 'Three.']);
+    const runs = [...editor.view.contentDOM.querySelectorAll('.rl-struck .rl-del')].map((run) => [
+      run.className,
+      run.textContent,
+    ]);
+    expect(runs).toEqual([
+      ['rl-del rl-author-3', 'Two '],
+      ['rl-del rl-author-1', 'words'],
+      ['rl-del rl-author-3', ' end.'],
+    ]);
+    // Their colors both on the bar: gray for several.
+    expect(blocksOf(editor)[0]?.classes).toContain('rl-bar-mixed');
+  });
+
+  it('draws two deletions side by side as two blocks, each with its own mark', () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 Two.\\n\\n-->\n\n<!--del c3c3 Three.\\n\\n-->\n\nFour.',
+      { b2b2: 'bo', c3c3: 'ada' },
+    );
+    const editor = load(doc);
+    expect(blocksOf(editor).map((block) => [block.text, block.mark])).toEqual([
+      ['Two.', 'b2b2'],
+      ['Three.', 'c3c3'],
+    ]);
+    expect(lines(editor)).toEqual(['One.', 'Four.']);
+  });
+
+  it('keeps a comment on a deleted block, and the block struck', () => {
+    const doc = withLedger(
+      'One.\n\n<!--cmt c3c3-->\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.<!--/c3c3-->',
+      { b2b2: 'bo', c3c3: 'ada' },
+    ).replace(
+      '-->\n',
+      '-->\ncomments:\n  c3c3:\n    by: ada\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
+    );
+    const editor = load(doc);
+    expect(blocksOf(editor).map((block) => block.mark)).toEqual(['b2b2']);
+    expect(editor.view.contentDOM.querySelector('.cm-line')?.textContent).toBe('One.');
+  });
+
+  it('draws no struck block in Simple or Clean, and Simple puts the bar on the block after it', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.', { b2b2: 'bo' });
+    for (const view of ['simple', 'clean', 'raw'] as const) {
+      const editor = load(doc, { view });
+      expect(editor.view.contentDOM.querySelector('.rl-struck'), view).toBeNull();
+    }
+    const simple = load(doc, { view: 'simple' });
+    expect(lineClasses(simple, simple.view.state.doc.lineAt(doc.indexOf('Three.')).number)).toEqual(
+      ['rl-bar', 'rl-author-3'],
+    );
+    expect(lines(simple)).toEqual(['One.', 'Three.']);
+  });
+
+  it('draws the blocks again when the view comes back to Redlines', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.', { b2b2: 'bo' });
+    const editor = load(doc);
+    editor.setViewMode('clean');
+    expect(editor.view.contentDOM.querySelector('.rl-struck')).toBeNull();
+    editor.setViewMode('redlines');
+    expect(page(editor)).toEqual(['One.', '~Two.~', 'Three.']);
+  });
+});
+
+describe('Replaced blocks', () => {
+  const claude = { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' };
+  const SENTENCE = 'The importer reads every file in the folder and writes one record per file.';
+  const NEXT = 'Records are produced by a batch job nightly.';
+  /** The text after an agent's `str_replace`, as its tool writes it. */
+  const rewritten = (doc: string, oldStr: string, newStr: string) =>
+    applyChanges(
+      doc,
+      suggestReplace(doc, oldStr, newStr, { author: claude, time: '2026-11-10T10:00Z' }).changes,
+    );
+  /** The line holding some text, in the page. */
+  const lineWith = (editor: Editor, text: string) =>
+    [...editor.view.contentDOM.querySelectorAll('.cm-line')].find((line) =>
+      line.textContent?.includes(text),
+    );
+
+  it('draws a rewritten paragraph as its old text ending a line, and the new text below', () => {
+    const doc = rewritten(`Intro.\n\n${SENTENCE}\n\nEnd.\n`, SENTENCE, NEXT);
+    // One substitution, from the start of the paragraph to its end.
+    expect(parse(doc).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    const editor = load(doc);
+    const line = lineWith(editor, NEXT)!;
+    // In the same line element: the struck old text, a line break, the new text underlined.
+    expect(line.textContent).toBe(SENTENCE + NEXT);
+    const old = line.querySelector<HTMLElement>('.rl-del')!;
+    expect(old.className).toBe('rl-del rl-author-4');
+    expect(old.querySelector('br')).not.toBeNull();
+    expect(old.dataset['mark']).toBe(parse(doc).marks[0]!.id);
+    const added = line.querySelector('.rl-ins')!;
+    expect(added.textContent).toBe(NEXT);
+    expect(old.compareDocumentPosition(added) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The one line break is no ¶, with the marks shown.
+    const marked = load(doc, { showLineBreakMarks: true });
+    expect(lineWith(marked, NEXT)?.querySelector('.rl-del')?.textContent).toBe(SENTENCE);
+  });
+
+  it('draws a rewritten heading at its size, an item beside its bullet, a quote with its bar', () => {
+    const heading = load(
+      rewritten(
+        'Intro.\n\n## Launch plan for March\n\nEnd.\n',
+        'Launch plan for March',
+        'Schedule of releases',
+      ),
+    );
+    const h2 = heading.view.contentDOM.querySelector('.rl-h2')!;
+    expect(h2.textContent).toBe('Launch plan for MarchSchedule of releases');
+    expect(h2.querySelector('.rl-del br')).not.toBeNull();
+    const item = load(
+      rewritten(
+        '- one\n- the old item text here\n- three\n',
+        'the old item text here',
+        'something else entirely',
+      ),
+    );
+    const li = lineWith(item, 'something else')!;
+    expect(li.classList).toContain('rl-hang');
+    expect(li.textContent).toBe('•the old item text heresomething else entirely');
+    expect(li.querySelectorAll('.rl-list-mark')).toHaveLength(1);
+    expect(li.querySelector('.rl-del br')).not.toBeNull();
+    const quote = load(
+      rewritten(
+        '> the old quote text here now\n\nEnd.\n',
+        'the old quote text here now',
+        'something else entirely',
+      ),
+    );
+    const q = lineWith(quote, 'something else')!;
+    expect(q.classList).toContain('rl-quote');
+    expect(q.querySelector('.rl-del br')).not.toBeNull();
+  });
+
+  it('draws a block someone typed over whole the same way', () => {
+    const base = 'Intro.\n\nThe old paragraph here.\n\nEnd.\n';
+    const from = base.indexOf('The old');
+    const typed = applyChanges(
+      base,
+      trackedEdit(
+        base,
+        { from, to: from + 'The old paragraph here.'.length, insert: 'A new one.' },
+        {
+          author: ada,
+          time: '2026-11-10T10:00Z',
+        },
+      ),
+    );
+    const editor = load(typed);
+    const line = lineWith(editor, 'A new one.')!;
+    expect(line.querySelector('.rl-del')?.textContent).toBe('The old paragraph here.');
+    expect(line.querySelector('.rl-del br')).not.toBeNull();
+  });
+
+  it('leaves a substitution of part of a block inline, and a smaller one in a cell', () => {
+    const part = load(
+      rewritten('Intro.\n\nWe will ship the importer in March.\n\nEnd.\n', 'March', 'April'),
+    );
+    expect(part.view.contentDOM.querySelector('.rl-del br')).toBeNull();
+    expect(lineWith(part, 'April')?.textContent).toBe('We will ship the importer in MarchApril.');
+    // A word of a sentence of a block that is not all of it, in a list.
+    const item = load(rewritten('- one two three\n- four\n', 'two', 'deux'));
+    expect(item.view.contentDOM.querySelector('.rl-del br')).toBeNull();
+  });
+
+  it('draws only the new text in Simple and Clean', () => {
+    const doc = rewritten(`Intro.\n\n${SENTENCE}\n\nEnd.\n`, SENTENCE, NEXT);
+    for (const view of ['simple', 'clean'] as const) {
+      const editor = load(doc, { view });
+      expect(editor.view.contentDOM.querySelector('.rl-del, br'), view).toBeNull();
+      expect(lineWith(editor, NEXT)?.textContent, view).toBe(NEXT);
+    }
+  });
+});
+
 describe('Clean', () => {
   it('Clean shows the newest text', () => {
     const editor = load(fixture);
@@ -504,6 +847,127 @@ describe('Clean', () => {
     expect(visibleText(editor)).toBe(withoutBlankLines(newestView(fixture).text));
     const drawn = list(editor).flatMap(classes);
     expect(drawn.filter((c) => /^rl-(ins|del|cmt|bar)/.test(c))).toEqual([]);
+  });
+});
+
+describe('Simple', () => {
+  const comment =
+    'comments:\n  c3c3:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n';
+  /** Every kind of change the layer draws, each alone on a line or two, and a comment. */
+  const kinds = withLedger(
+    [
+      'An <!--ins h8h8-->inserted<!--/h8h8--> word.',
+      '',
+      'A thing<!--del b2b2 deleted words-->gone.',
+      '',
+      'Kept above.',
+      '',
+      '<!--del d4d4 A paragraph removed whole.\\n\\n-->',
+      '',
+      'It was <!--sub j9j9 older-->old<!--/j9j9-->.',
+      '',
+      'One tw<!--split f6f6-->',
+      'o three.',
+      '',
+      'Plain <!--fmt g7g7 +bold-->**words**<!--/g7g7--> here.',
+      '',
+      '<!--fmt q2hw was=p-->',
+      '',
+      '## Heading<!--/q2hw-->',
+      '',
+      '- [x] Buy milk<!--fmt k3x9 +check-->',
+      '',
+      'A <!--cmt c3c3-->comment<!--/c3c3--> and a point<!--cmt p4p4--> here.',
+      '',
+      'Unchanged.',
+    ].join('\n'),
+    {
+      h8h8: 'ada',
+      b2b2: 'bo',
+      d4d4: 'ada',
+      j9j9: 'claude-ada',
+      f6f6: 'bo',
+      g7g7: 'bo',
+      q2hw: 'bo',
+      k3x9: 'bo',
+    },
+    `${comment}  p4p4:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Here\n`,
+  );
+  const bars = (editor: Editor) =>
+    list(editor)
+      .filter((d) => d.kind === 'line' && classes(d).includes('rl-bar'))
+      .map((d) => [d.from, d.className]);
+
+  it('draws no .rl-ins, .rl-del, .rl-fmt, .rl-split or .rl-comment in Simple', () => {
+    const editor = load(kinds + '\n<!-- TODO -->\n', { view: 'simple', showLineBreakMarks: true });
+    const drawn = (): string[] =>
+      list(editor).flatMap((d) => [...classes(d), ...(d.widget ? classes(d.widget) : [])]);
+    expect(drawn().filter((c) => /^rl-(ins|del|fmt|split|comment)$/.test(c))).toEqual([]);
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del, .rl-fmt, .rl-split')).toBeNull();
+    expect(editor.view.dom.classList).toContain('rl-view-simple');
+    // The same document in Redlines does draw them.
+    editor.setViewMode('redlines');
+    expect(drawn()).toEqual(expect.arrayContaining(['rl-ins', 'rl-del', 'rl-fmt']));
+  });
+
+  it('draws comment tints and pins in Simple, as in Redlines', () => {
+    const editor = load(kinds, { view: 'simple' });
+    const simple = list(editor).filter((d) =>
+      /rl-cmt/.test(d.className + (d.widget?.className ?? '')),
+    );
+    expect(simple.length).toBeGreaterThanOrEqual(2);
+    editor.setViewMode('redlines');
+    const redlines = list(editor).filter((d) =>
+      /rl-cmt/.test(d.className + (d.widget?.className ?? '')),
+    );
+    expect(simple).toEqual(redlines);
+    expect(simple.some((d) => classes(d).includes('rl-cmt'))).toBe(true);
+    expect(simple.some((d) => d.widget?.className.includes('rl-cmt-point'))).toBe(true);
+  });
+
+  it('puts the same bar classes on the same lines in Simple as in Redlines, for every kind of change', () => {
+    // But for a block deleted whole: Redlines draws it as a block with its own bar (Part 3), and
+    // Simple, which doesn't, puts the bar on the block after it.
+    const doc = kinds.replace('<!--del d4d4 A paragraph removed whole.\\n\\n-->\n\n', '');
+    expect(doc).not.toBe(kinds);
+    const editor = load(doc, { view: 'simple' });
+    const simple = bars(editor);
+    editor.setViewMode('redlines');
+    expect(simple.length).toBeGreaterThanOrEqual(5);
+    expect(simple).toEqual(bars(editor));
+  });
+
+  it('puts the same bar classes on the same lines in Simple as in Redlines, for a table row', () => {
+    const doc = withLedger(
+      'Intro\n\n| Milestone | When |\n| --- | --- |\n| M3 | <!--sub r4tn January-->February<!--/r4tn--> |',
+      { r4tn: 'claude-ada' },
+    );
+    const editor = load(doc, { view: 'simple' });
+    const cell = () => editor.view.contentDOM.querySelectorAll('.rl-tc')[3]!;
+    expect(cell().textContent).toBe('February');
+    const row = editor.view.contentDOM.querySelectorAll('.rl-trow')[1]!;
+    expect([...row.classList]).toEqual(['cm-line', 'rl-bar', 'rl-author-4', 'rl-trow']);
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
+  });
+
+  it("shows the text Clean shows, and has Clean's atoms", () => {
+    for (const doc of [fixture, kinds]) {
+      const editor = load(doc, { view: 'clean' });
+      const text = visibleText(editor);
+      const atoms = atomic(editor);
+      editor.setViewMode('simple');
+      expect(visibleText(editor)).toBe(text);
+      expect(atomic(editor)).toEqual(atoms);
+    }
+  });
+
+  it('hides ordinary HTML comments and line break marks in Simple', () => {
+    const doc = withLedger('One tw<!--split b2b2-->\no <!-- TODO --> three.', { b2b2: 'bo' });
+    const editor = load(doc, { view: 'simple', showLineBreakMarks: true });
+    expect(visibleText(editor)).not.toContain('TODO');
+    expect(visibleText(editor)).not.toContain('¶');
+    expect(classed(editor, 'rl-comment')).toEqual([]);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
   });
 });
 
@@ -592,6 +1056,7 @@ describe('ui state', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
       view: 'clean',
+      markupView: 'redlines',
       tracking: false,
       hasRedlines: false,
       changes: [],
@@ -848,17 +1313,17 @@ describe('tables', () => {
     { r4tn: 'claude-ada' },
   );
 
-  it('table widgets render cell marks the same way', () => {
+  it('draws cell marks in the cell, as anywhere', () => {
     const editor = load(doc);
-    const cell = () => editor.view.contentDOM.querySelectorAll('td')[1]!;
+    const cells = () => editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc');
+    const cell = () => cells()[3]!;
     expect(cell().textContent).toBe('JanuaryFebruary');
     expect(cell().querySelector('.rl-del.rl-author-4')?.textContent).toBe('January');
     expect(cell().querySelector('.rl-ins.rl-author-4')?.textContent).toBe('February');
-    // The row's change bar, on its first cell.
-    expect([...editor.view.contentDOM.querySelectorAll('td')[0]!.classList]).toEqual([
-      'rl-bar',
-      'rl-author-4',
-    ]);
+    // The row's change bar, on its line: its first cell draws it.
+    const row = cells()[2]!.closest('.cm-line')!;
+    expect([...row.classList]).toContain('rl-bar');
+    expect([...row.classList]).toContain('rl-author-4');
 
     editor.setViewMode('clean');
     expect(cell().textContent).toBe('February');

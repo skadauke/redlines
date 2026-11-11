@@ -10,31 +10,31 @@ import { EditorSelection, EditorState, type Extension, Prec, Transaction } from 
 import { EditorView } from '@codemirror/view';
 import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
-import { type KeyEdit, moveTo, textEnd, textStart } from './edits.ts';
+import { hardBreakAt, type KeyEdit, moveTo, nothing, textEnd, textStart } from './edits.ts';
 import { type Block, blockAt, neighbours, NO_TEXT } from './structure.ts';
 
 /** The block before `block` that the caret can rest in: past thematic breaks, which it skips. */
-function restingBefore(state: EditorState, block: Block): Block | null {
+export function restingBefore(state: EditorState, block: Block): Block | null {
   let prev = neighbours(state, block).prev;
   while (prev?.kind === 'rule') prev = neighbours(state, prev).prev;
   return prev;
 }
 
-function restingAfter(state: EditorState, block: Block): Block | null {
+export function restingAfter(state: EditorState, block: Block): Block | null {
   let next = neighbours(state, block).next;
   while (next?.kind === 'rule') next = neighbours(state, next).next;
   return next;
 }
 
 /** The end of a block's text, or of its last line for one that takes no text. */
-const endOf = (state: EditorState, block: Block) =>
+export const endOf = (state: EditorState, block: Block) =>
   NO_TEXT.has(block.kind) ? state.doc.lineAt(block.lines.to).to : textEnd(state, block);
 
 /**
  * The start of a block's text, on the left of any hidden markers in front of it (as CodeMirror's
  * → stops there), or the block's own start for one that takes no text.
  */
-const startOf = (_state: EditorState, block: Block) => block.text.from;
+export const startOf = (_state: EditorState, block: Block) => block.text.from;
 
 /**
  * ← at the start of a block's text (or in its prefix, showing or not): the end of the text above,
@@ -45,6 +45,12 @@ export function planArrowLeft(state: EditorState): KeyEdit | null {
   if (!main.empty || state.selection.ranges.length > 1) return null;
   const block = blockAt(state, main.head);
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
+  // A hard line break is one character: ← from the start of the line after it goes to the end of
+  // the text before it, past the syntax the break hides.
+  const hard = hardBreakAt(state, block, main.head);
+  if (hard && main.head > hard.from && main.head <= hard.to) {
+    return moveTo(outOfHidden(state, hard.from, false));
+  }
   const first = state.doc.lineAt(block.lines.from);
   if (main.head > textStart(state, block) || main.head < first.from) return null;
   const prev = restingBefore(state, block);
@@ -56,7 +62,7 @@ export function planArrowLeft(state: EditorState): KeyEdit | null {
 }
 
 /** A position strictly inside text the caret steps over, moved to its start, or its end. */
-function outOfHidden(state: EditorState, pos: number, forward: boolean): number {
+export function outOfHidden(state: EditorState, pos: number, forward: boolean): number {
   let at = pos;
   atomsOf(state).between(pos, pos, (from, to) => {
     if (from < pos && pos < to) at = forward ? to : from;
@@ -70,12 +76,98 @@ export function planArrowRight(state: EditorState): KeyEdit | null {
   if (!main.empty || state.selection.ranges.length > 1) return null;
   const block = blockAt(state, main.head);
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
+  // → in front of a hard line break's syntax, or in it: the start of the next line's text.
+  const hard = hardBreakAt(state, block, main.head);
+  if (hard && main.head >= hard.from && main.head < hard.to) {
+    return moveTo(outOfHidden(state, hard.to, true));
+  }
   if (main.head < textEnd(state, block)) return null;
   const next = restingAfter(state, block);
-  if (!next) return null;
+  // At the end of the last block there is nowhere to go: CodeMirror's → would step into the closers
+  // and the ledger that follow it, which are hidden.
+  if (!next) return nothing(state);
   const at = outOfHidden(state, startOf(state, next), true);
   return at > main.head ? moveTo(at) : null;
 }
+
+/**
+ * ⌥↑ and ⌥↓ (with ⇧, selecting): ⌥↑ goes to the start of the paragraph, or of the one before when
+ * it is there already, and ⌥↓ to the end, or the end of the next one's, as in other Mac apps. A
+ * paragraph is a block's text; CodeMirror's keys move the source line instead, which would move a
+ * block's markers and other blocks' syntax. A caret that no block holds stays.
+ */
+export function planParagraphMotion(
+  state: EditorState,
+  forward: boolean,
+  extend: boolean,
+): KeyEdit | null {
+  if (state.selection.ranges.length > 1) return null;
+  const { anchor, head } = state.selection.main;
+  const block = blockAt(state, head);
+  let target = head;
+  if (block && block.kind !== 'rule') {
+    const own = forward ? endOf(state, block) : startOf(state, block);
+    // The paragraph's own edge, or where the caret already is, the next one's.
+    const there = forward ? head >= own : head <= own;
+    const next = there
+      ? forward
+        ? restingAfter(state, block)
+        : restingBefore(state, block)
+      : null;
+    target = next ? (forward ? endOf(state, next) : startOf(state, next)) : own;
+  }
+  const at = outOfHidden(state, target, forward);
+  return {
+    changes: [],
+    selection: extend ? EditorSelection.single(anchor, at) : EditorSelection.single(at),
+    userEvent: 'input.break',
+  };
+}
+
+/** The text of the block at `pos` that a triple-click there selects: not its line break. */
+export function blockTextAt(state: EditorState, pos: number): { from: number; to: number } | null {
+  const block = blockAt(state, pos);
+  if (!block || block.kind === 'rule') return null;
+  // A block that takes no text (code, a table row, HTML) has its lines: the line's text.
+  if (NO_TEXT.has(block.kind)) {
+    const line = state.doc.lineAt(pos);
+    return { from: line.from, to: line.to };
+  }
+  const from = textStart(state, block);
+  return { from, to: Math.max(from, textEnd(state, block)) };
+}
+
+/**
+ * Triple-click: the block's text, without its line break (CodeMirror's selects the source line with
+ * its line break, and typing over that would join two blocks). Dragging on selects whole blocks'
+ * text, as dragging after a triple-click selects whole lines.
+ */
+const tripleClicks = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (event.button !== 0 || event.detail < 3 || event.shiftKey) return null;
+  if (view.state.field(viewModeField, false) === 'raw') return null;
+  const start = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  // A table's triple-click selects the cell's text: the table's own presses decide it.
+  if (blockAt(view.state, start)?.kind === 'table') return null;
+  const first = blockTextAt(view.state, start);
+  if (!first) return null;
+  return {
+    get(current, _extend, multiple) {
+      const pos = view.posAtCoords({ x: current.clientX, y: current.clientY }, false);
+      const last = blockTextAt(view.state, pos) ?? first;
+      const forward = pos >= start;
+      const from = Math.min(first.from, last.from);
+      const to = Math.max(first.to, last.to);
+      const range = forward ? EditorSelection.range(from, to) : EditorSelection.range(to, from);
+      return multiple
+        ? EditorSelection.create(
+            [...view.state.selection.ranges, range],
+            view.state.selection.ranges.length,
+          )
+        : EditorSelection.create([range]);
+    },
+    update() {},
+  };
+});
 
 /**
  * Where ⌘← (and ⌃A) goes from `head`, given the start of its visual line `boundary`: on a block's
@@ -255,5 +347,5 @@ export function blockMotion(run: {
   paragraph: (view: EditorView) => boolean;
   line: (view: EditorView) => boolean;
 }): Extension {
-  return [gapClicks, hiddenBreaks, beforeInput(run)];
+  return [gapClicks, tripleClicks, hiddenBreaks, beforeInput(run)];
 }

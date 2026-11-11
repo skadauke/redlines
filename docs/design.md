@@ -137,7 +137,10 @@ otherwise.
   plain edit. A correction never crosses a hidden marker: the text on either side is corrected
   apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
   apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
-  isn't corrected.
+  isn't corrected. A word ended with Return or Shift-Return is corrected too, though the editor
+  handles those keys itself: it asks the system for the word's correction, makes the break at once,
+  and makes the correction as a step of its own (⌘Z takes it back before the Return) only if the
+  word is still there when the answer comes; Tab, the arrows, clicks and ⌘ keys correct nothing.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -175,7 +178,8 @@ The window, on the desktop:
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
-  document in light ink, whatever the window shows.
+  document in light ink and prints the view as it shows, without the rail: Simple prints the newest
+  text with its change bars.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
@@ -253,34 +257,43 @@ Redlines covers everything in the Markdown Guide's
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
-- **Table cells** with line breaks and lists.
+- **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
-### 5.3 Views: Clean, Redlines, Raw
+### 5.3 Views: Clean, Simple, Redlines, Raw
 
 The View menu, under the eye at the top right (§5.1), sets how the document is shown:
 
-- **Clean:** the document as it reads with every pending change accepted, without markup (Word's
-  No Markup).
-- **Redlines:** the document with its tracked changes and comments (Word's All Markup). It is always
-  there, with its shortcut, whatever the document holds and whether Track Changes is on or off, so
-  the View menu always offers the same three views. A document without redlines looks nearly the
-  same as in Clean.
-- **Raw:** the Markdown source, markers and ledger included, with syntax highlighting. It is the
-  same editor with its decorations turned off.
+- **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
+  (Word's No Markup).
+- **Simple** (⌥⌘2): the same text as Clean, with a change bar beside each line that has a pending
+  change, in its author's color, and the comments with their notes: deletions are hidden, and
+  inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches
+  to Redlines, and in Redlines back to Simple, with the line where it was.
+- **Redlines** (⌥⌘3): the document with its tracked changes and comments (Word's All Markup). It is
+  always there, with its shortcut, whatever the document holds and whether Track Changes is on or
+  off, so the View menu always offers the same four views. A document without redlines looks nearly
+  the same as in Clean.
+- **Raw** (⌥⌘4): the Markdown source, markers and ledger included, with syntax highlighting. It is
+  the same editor with its decorations turned off.
 
-Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
-Raw shows them.
+Clean, Simple and Redlines draw the blank lines between blocks as the space between them, never as
+lines; Raw shows them.
 
-A document with redlines (pending changes, highlights or comment threads) opens in Redlines; one
-without opens in Clean. Making a tracked change in Clean switches the view to Redlines, so
-suggestions are never invisible to their author. Otherwise the view stays as you chose it: deciding
-the last change doesn't switch it. The view is each person's own and is never saved in the file. The
-View menu also previews the original (every change rejected) and one person's changes alone
-(everyone else's rejected). The previews are read-only. Raw can be edited while Track Changes is
-off; while it is on, or locked on, Raw is read-only, because typing there could forge or break
-markers.
+Simple and Redlines are the markup views, and Redlines remembers the one you chose last, Redlines at
+first. A document with redlines (pending changes, highlights or comment threads) opens in it; one
+without opens in Clean. Making a tracked change in Clean, or adding a comment there, switches to
+it, so suggestions are never invisible to their author, and so does a document shown Clean that
+gains redlines; a tracked change made in Simple stays in Simple, where its bar shows it. Reviewing
+(§5.6) switches to Redlines, where each change shows. Otherwise the view stays as you chose it:
+deciding the last change doesn't switch it. The view, and the markup view remembered, are each
+person's own and are never saved in the file; the markup view is kept in the app's settings and
+reaches every window for the documents each opens next, without changing the view any of them
+shows. The View menu also previews the original (every change rejected) and one person's changes
+alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
+Changes is off; while it is on, or locked on, Raw is read-only, because typing there could forge
+or break markers.
 
 ### 5.4 Track Changes
 
@@ -321,7 +334,9 @@ mode has no counterpart in the desktop app.
   their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
   colors repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
-  or gray when several people changed the line.
+  or gray when several people changed the line. In Simple and Redlines a click on a bar switches
+  between them: the bar is a target 24 px wide, it widens under the pointer, and its hint names
+  the view a click gives. Printing draws the bars as a left border, which prints.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");
@@ -332,6 +347,17 @@ mode has no counterpart in the desktop app.
     a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
     small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
     each line break deleted.
+- **Deleted blocks show as blocks.** In Redlines, a paragraph, heading, list item, quote or other
+  block that was deleted whole is drawn where it was, as a block of its own, its text struck in its
+  author's color, with the look of what it was (a heading at its level, an item with its bullet, a
+  quote with its bar) and its own change bar. A block rewritten whole, by an agent or by typing over
+  it, is not deleted: the old text is struck above the new, in the same block (a rewritten heading
+  at the heading's size, an item beside its one bullet), and a rewritten table cell shows its old
+  text struck above the new inside the cell. Words deleted inside a block, a substitution of part of
+  one, and a deletion that runs from one block into another stay inline. The caret steps over a
+  struck block, as over deleted text, and its card opens on hover and pins on a click; a click on
+  its bar switches to Simple, which doesn't draw it, and the block below keeps the place. Simple
+  and Clean show the newest text only.
 - **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
   new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
   paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
@@ -343,8 +369,8 @@ mode has no counterpart in the desktop app.
   and hovering over Accept or Reject previews the result. Clicking a change pins its card. Cards
   can be turned off.
 - **Ordinary HTML comments,** such as an author's `<!-- TODO -->`, show as small dimmed notes in
-  the Redlines view and are saved as written. The ledger never shows as text; its contents appear
-  in cards and the rail.
+  the Redlines view, are hidden in Clean and Simple, and are saved as written. The ledger never
+  shows as text; its contents appear in cards and the rail.
 - **The inspector** shows and edits one mark's raw markup.
 - **Broken markup,** for example after a bad merge, shows a warning badge and is otherwise treated
   as text, so the document still opens.
@@ -353,7 +379,9 @@ mode has no counterpart in the desktop app.
 ### 5.6 Reviewing
 
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
-  next-change shortcut (⌘⌥]). It floats at the bottom of the window and closes with Esc or its
+  next-change shortcut (⌘⌥]). Opening it, or moving it to a change, switches to Redlines from
+  Clean, Simple and Raw, so that each change shows while you decide it; choosing Simple closes it,
+  because a person who chooses to read has stopped deciding. It floats at the bottom of the window and closes with Esc or its
   close button; without it, a change's card still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
@@ -392,8 +420,11 @@ mode has no counterpart in the desktop app.
     Reject, like the hover card's of any of its marks, decide every mark in one Undo step, or none
     if one can't be decided. The `redlines str-replace` command gives the marks of one call a
     group, so that the skill route shows the same.
-  - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
-    a tracked change does.
+  - The rail shows in the Simple and Redlines views, the notes of changes among the comments.
+    Adding a comment in Clean switches to your markup view, as a tracked change does. In Simple
+    a change's card doesn't open on hover or on a click in the text, because the text reads as
+    accepted; the bar, the note and the review bar are the ways in. Accept and Reject on a note
+    in Simple show the change in Redlines; nothing is decided where its old text is hidden.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
@@ -433,7 +464,7 @@ mode has no counterpart in the desktop app.
     where that is the only place it is. A document with no file keeps nothing until it is saved.
   - **Coming back:** when the document opens again, in any window, its drafts come back as they
     were left: the boxes open, the caret at the end of the one last typed in, and a document shown
-    Clean switches to Redlines to show them. A window opened at a line, as from a citation, stays
+    Clean switches to your markup view to show them. A window opened at a line, as from a citation, stays
     at that line, with the keyboard in the text. A new comment is on the same text: where it was, if
     the document is unchanged; else found by its text as a reload finds it; else on what replaced
     it, with its text kept and a line saying that the text it pointed to changed. A comment set
@@ -491,12 +522,66 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   selects the row or column; dragging moves it to any position, including the last.
 - **Selection:** rectangles of cells, whole rows and whole columns. Delete clears every selected
   cell, and menus count the selection ("Delete 2 rows").
-- **Pasting** a spreadsheet range into cells grows the table.
+- **Pasting** a spreadsheet range into cells grows the table by rows (§5.8 below, "Cells").
 - **Tracked changes look as in Word:** inserted rows and columns tinted, deleted ones shown as
   struck-through ghosts, and moves with Word's double underline and double strikethrough. Word
   draws moves in green; Redlines draws them in the author's color, because color means a person
   (§6.6). Unlike in Google Docs, a move can be suggested, and new empty cells are tinted.
 - **Edits to the source are minimal.** A table is never re-padded unless you ask.
+- **A table stays its source, and is drawn as a table.** A block wrapper is the table, each line a
+  row, each cell a mark; pipes, padding and the delimiter row are hidden, and the caret steps over
+  them, stopping only in cells. Raw shows the source. A table inside a quote or a list item stays
+  source. Column widths are computed from every row and held while the caret is in the table; a
+  table never reaches past the text column, and scrolls sideways in its own box.
+- **Typing in a cell.** Return and ⇧Return write a line break in the cell (`<br>`, drawn as a line
+  break and deleted by one ⌫); ⌫ at a cell's start and ⌦ at its end do nothing, so cells never
+  merge and the table keeps its shape; a typed `|` is written `\|`, and text pasted or dropped on a
+  cell goes in as its text. A cell is one line of the file, and the format refuses an edit that
+  adds, takes away or splits a cell (format §3.7).
+- **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
+  above or below at the same x (an empty cell too), and out of the table at its first and last
+  row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
+  Docs keep one). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
+  adds a row; ⌘↩ is Insert Row Below, in the Table menu. To leave the table by keyboard, press
+  Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
+  (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
+  in a cell lands in that cell, also in an empty one.
+- **A selection that reaches into a table** from outside it clears the cells of the rows it reaches
+  and deletes the text outside the table as a selection is deleted, never joining across the
+  table; one that covers a whole table deletes it as a block. Delete, Backspace, Return and typing
+  all work, the last two writing after the deleting. The reached cells are drawn in the system's
+  selection color.
+- **Cells.** A selection whose two ends are in two different cells of one table is a rectangle of
+  cells: every cell in the rows and columns between, both included. It is the ordinary selection and
+  keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
+  in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
+  all work. The cells are drawn in the system's selection color with the text highlight hidden;
+  Simple and Redlines draw them the same. Esc puts the caret in the cell where the selection
+  ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
+  then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
+  rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
+  cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
+  staying selected); typing clears them and types into the top-left one; ⌘B, ⌘I and the Format
+  menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
+  cells' text in one row and on the whole rows across rows.
+- **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
+  that holds a tab, a line break or a quote in quotes) and an HTML table of the cells' newest text
+  on the clipboard, the header row as `th` when it is the table's, and never markers; cut also
+  clears the cells. A selection that reaches into a table copies the text outside it and the cells
+  of the rows it reaches. A range (an HTML table from Sheets, Excel, Numbers, Word or Docs, or text
+  with tabs) pastes over the cells from the caret's rightward and down, or from the selection's
+  top-left cell, adding the rows it needs; one value onto selected cells fills each; a range
+  wider than the table is refused whole ("The table has 3 columns and the pasted range has 5. Add
+  columns first.") until columns can be added. Tracked, each overwritten cell is a substitution
+  (an insertion in an empty one) and each added row an inserted row, all one group and one step to
+  undo. Text without tabs goes into the cell (line breaks as `<br>`, pipes escaped); Paste as
+  Plain Text puts anything into the cell with its tabs as spaces. A range pasted outside a table
+  is a new table, as an HTML table was.
+- **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
+  take the author's tint and its text is underlined in the author's color, with a change bar on the
+  row; Clean shows the plain row. The review bar, the cards ("Inserted row", "Inserted 2 rows") and
+  the notes list it, and Accept and Reject decide it. Row and column deletions, moves and the rest
+  of the commands in the list above arrive in the later stages.
 
 ### 5.9 Command palette and shortcuts
 
@@ -514,12 +599,17 @@ menus, shortcuts, the palette, plugins and agents.
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
+| Clean, Simple, Redlines, Raw   | ⌥⌘1, ⌥⌘2, ⌥⌘3, ⌥⌘4                                                                            | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
 | Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
+| In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
+| In a table: insert row below   | ⌘↩                                                                                            | Ctrl+Enter                |
+| In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
@@ -545,10 +635,11 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
-  existing link rather than nesting one. ⇧⌘V pastes plain text.
+  existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
+  text and an HTML table; pasting a range into cells is §5.8.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
-  someone else's change. Copy works the same way: Clean and Redlines copy the newest text, and Raw
+  someone else's change. Copy works the same way: Clean, Simple and Redlines copy the newest text, and Raw
   copies the source. With Track Changes on, the pasted text is the paster's own insertion.
 - **Fonts:** each of a theme's fonts has a twin with the same character widths that Word and
   Google Docs both have (§6.6). The PDF embeds Redlines' own fonts, and Copy for Word and exports
@@ -631,18 +722,26 @@ A document is a sequence of blocks: paragraphs, headings, list items, quotes, co
 person writes blocks; the editor writes the breaks between them, the line breaks, blank lines and
 syntax Markdown needs, and never shows them.
 
-- **Blank lines are the space between blocks.** Clean and Redlines draw no blank line, only the
+- **Blank lines are the space between blocks.** Clean, Simple and Redlines draw no blank line, only the
   space, by the kinds of the blocks either side (§6.6), whatever blank lines the file has.
 - **Return makes a block, Shift-Return a line break.** Return in a paragraph's text parts it in two;
   at its end it opens an empty paragraph below; at its start, one above, the caret staying with
   the text. In a list it makes an item, and in an empty item it goes up a level or out of the list.
-  Shift-Return writes a hard line break, a backslash and a line break. A heading and a table cell
+  Shift-Return writes a hard line break, a backslash and a line break (drawn as a break, the
+  backslash hidden and stepped over); at the end of a paragraph's text it opens an empty line in the
+  block, which is taken back when the caret leaves it, as the empty paragraph is. A heading and a table cell
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
+- **Typed syntax makes a block on the space.** In an empty paragraph `#` and a space is a heading,
+  `-` or `1.` and a space an item, `>` a quote at once, three backticks a code block closed at
+  once, `---` and Return a thematic break, and `| a | b |` and Return a table. A lone `#` or `-`
+  is drawn as body text until the space completes it. The Paragraph menu writes the same syntax on
+  an empty paragraph (Body does nothing); an empty heading, item, quote or code block stays when
+  the caret leaves it, an empty paragraph goes.
 - **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
   Returns pressed one after the other.
 - **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to
@@ -655,7 +754,8 @@ syntax Markdown needs, and never shows them.
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
 Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
 spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
-table; and Return in a table moves to the cell below, until tables are edited as tables.
+table; and Return in a table cell writes a line break in the cell (`<br>`), as the other word
+processors start a new paragraph there (§5.8).
 
 ## 6. Architecture
 
@@ -689,7 +789,7 @@ without the editor.
 | Package                | Contents                                                                                                                                   | Runs in                 |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
 | `@redlines/format`     | Parsing and serializing in each dialect; marks, ledger and history; views; accept and reject; the agent operations (§8.3); the conformance fixtures | Anywhere (no DOM, no Node APIs) |
-| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
+| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Simple, Redlines and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
 | `@redlines/plugin-api` | The plugin interface: manifest, contributions, capabilities. Versioned on its own and kept stable                                         | —                       |
 | `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
 | `@redlines/agent-process` | What the Claude and Codex providers share: finding an agent's program, asking it whether it is signed in, and following a run to its end | Anywhere (no DOM, no Node APIs) |
@@ -753,14 +853,14 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `agents` and the three
-providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `tables` (the Table menu), `agents` and
+the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
 | `review`     | The review bar, change cards, the comment rail and the Changes tab           | Document data, for drafts  |
-| `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
+| `tables`     | Table editing: the Table menu now; grips, selection, moves, pasting ranges to come | —                    |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
 | `code`       | Syntax colors in code blocks                                                 | —                          |
@@ -1271,5 +1371,5 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
-6. **Shortcuts for the views** (§5.3): not chosen yet. ⌥⌘1 to ⌥⌘3 are taken, as Word for Mac's
-   heading shortcuts.
+6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘4, in the menu's order. Word for Mac gives ⌥⌘1 to
+   ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real.

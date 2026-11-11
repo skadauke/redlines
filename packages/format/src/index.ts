@@ -2,6 +2,13 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { openerRange } from './blocks.ts';
+export { deletedBlocks } from './deleted-blocks.ts';
+export type {
+  DeletedBlock,
+  DeletedBlockKind,
+  DeletedBlocksContext,
+  DeletedPiece,
+} from './deleted-blocks.ts';
 export { readBlocks } from './block-read.ts';
 export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
@@ -41,3 +48,14 @@ export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
+export { readTables, tableAt } from './table.ts';
+export type {
+  TableAlign,
+  TableCellRead,
+  TableDeletionRead,
+  TableRead,
+  TableRowRead,
+} from './table.ts';
+export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export type { TableOp, TablePending } from './table-ops.ts';
+export { readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

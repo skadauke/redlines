@@ -141,10 +141,10 @@ describe('Backspace at the start of a block', () => {
         ...same('```⏎code‸⏎```⏎⏎Para.'),
       },
       {
-        name: 'the block above is a table: the caret goes to its end',
+        name: 'the block above is a table: the caret goes to the end of its last cell',
         doc: '| a | b |⏎| - | - |⏎| 1 | 2 |⏎⏎‸After.',
         keys: BS,
-        ...same('| a | b |⏎| - | - |⏎| 1 | 2 |‸⏎⏎After.'),
+        ...same('| a | b |⏎| - | - |⏎| 1 | 2‸ |⏎⏎After.'),
       },
       {
         name: 'the block above is an HTML block: the caret goes to its end',

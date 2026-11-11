@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor, undo } from '@redlines/editor';
+import { createEditor, type Editor, type MarkupView, undo } from '@redlines/editor';
 import { accept, applyChanges, newestView, reject } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFormatting, plugin } from './index.ts';
@@ -15,7 +15,10 @@ interface Mounted {
 const mounted: Mounted[] = [];
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 
-function mount(doc: string, options: { tracking?: boolean } = {}): Mounted {
+function mount(
+  doc: string,
+  options: { tracking?: boolean; markupView?: MarkupView } = {},
+): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
   const refused: string[] = [];
@@ -24,6 +27,7 @@ function mount(doc: string, options: { tracking?: boolean } = {}): Mounted {
     doc,
     author,
     tracking: options.tracking ?? false,
+    markupView: options.markupView,
     onNotice: (message) => refused.push(message),
   });
   const result = {
@@ -99,6 +103,25 @@ describe('inline formats', () => {
     expect(editor.getDoc()).toBe('One two three.\n');
   });
 
+  it.each(['simple', 'redlines'] as const)(
+    'a tracked format change made in Clean shows the markup view, %s',
+    (markupView) => {
+      const { editor } = mount('One two three.\n', { tracking: true, markupView });
+      editor.setViewMode('clean');
+      select(editor, 5, 8);
+      expect(editor.commands.run('format.bold')).toBe(true);
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('a tracked format change made in Simple stays in Simple', () => {
+    const { editor } = mount('One two three.\n', { tracking: true });
+    editor.setViewMode('simple');
+    select(editor, 5, 8);
+    expect(editor.commands.run('format.bold')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('turns it off as a tracked change with tracking on', () => {
     const { editor } = mount('One **two** three.\n', { tracking: true });
     select(editor, 7);
@@ -169,6 +192,24 @@ describe('blocks', () => {
     expect(editor.getDoc()).toBe('- One\n  - Two\n');
     editor.commands.run('block.outdent');
     expect(editor.getDoc()).toBe('- One\n- Two\n');
+  });
+
+  it('indents and outdents through the block layer, as Tab does', () => {
+    // A numbered item is numbered from 1 in its new sublist; the first item is refused in the
+    // format's words, and a top-level item can't be outdented, which does nothing.
+    const { editor, refused } = mount('1. One\n2. Two\n3. Three\n');
+    select(editor, editor.getDoc().indexOf('Three'));
+    expect(editor.commands.run('block.indent')).toBe(true);
+    expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
+    select(editor, 4);
+    editor.commands.run('block.indent');
+    expect(refused).toEqual([
+      "The first item of a list can't be indented: there is no item to put it under.",
+    ]);
+    refused.length = 0;
+    editor.commands.run('block.outdent');
+    expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
+    expect(refused).toEqual([]);
   });
 
   it('inserts a table and a rule as tracked insertions with tracking on', () => {
@@ -279,8 +320,11 @@ describe('blocks on an empty line (#167)', () => {
       expect(visible(editor)).toBe('One.\n\n| Column | Column |\n| --- | --- |\n|  |  |\n\nTwo.\n');
       expect(notices).toEqual([]);
       expect(refused).toEqual([]);
-      expect(editor.view.state.sliceDoc(caretAt(editor), caretAt(editor) + 6)).toBe('Column');
-      expect(editor.view.state.sliceDoc(caretAt(editor) - 2, caretAt(editor))).toBe('| ');
+      // The first header cell's text is selected, so that typing names the column.
+      const { from, to } = editor.view.state.selection.main;
+      expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
+      expect(editor.view.state.sliceDoc(from - 2, from)).toBe('| ');
+      expect(caretAt(editor)).toBe(to);
     },
   );
 
@@ -360,6 +404,111 @@ describe('blocks on an empty line (#167)', () => {
     select(editor, 10);
     expect(editor.commands.run('block.ol')).toBe(false);
     expect(notices.concat(refused)).toEqual(['Write the item first.']);
+  });
+});
+
+describe('a block right under a heading, a thematic break or a closing fence (format rule 2)', () => {
+  it.each([false, true])('changes its kind (tracking %s)', (tracking) => {
+    for (const [doc, at, id, after] of [
+      ['## Head\nText.\n', 10, 'block.h3', '## Head\n### Text.\n'],
+      ['Intro.\n\n---\nText.\n', 14, 'block.quote', 'Intro.\n\n---\n> Text.\n'],
+      ['```\ncode\n```\nText.\n', 18, 'block.ul', '```\ncode\n```\n- Text.\n'],
+    ] as const) {
+      const { editor, notices, refused } = mount(doc, { tracking });
+      select(editor, at);
+      expect(editor.commands.run(id), doc).toBe(true);
+      expect(notices.concat(refused), doc).toEqual([]);
+      expect(visible(editor).replace(/\n+$/, ''), doc).toBe(after.replace(/\n+$/, ''));
+    }
+  });
+});
+
+describe('the Paragraph menu on an empty paragraph (#170)', () => {
+  const caretAt = (editor: Editor) => editor.view.state.selection.main.head;
+  const SYNTAX = [
+    ['block.h1', '# '],
+    ['block.h2', '## '],
+    ['block.h3', '### '],
+    ['block.h4', '#### '],
+    ['block.h5', '##### '],
+    ['block.h6', '###### '],
+    ['block.quote', '> '],
+    ['block.ul', '- '],
+    ['block.ol', '1. '],
+    ['block.task', '- [ ] '],
+  ] as const;
+
+  it.each([false, true])(
+    'writes the block syntax, the caret after it (tracking %s)',
+    (tracking) => {
+      for (const [id, syntax] of SYNTAX) {
+        const { editor, refused, notices } = mount('One.\n\n\n\nTwo.\n', { tracking });
+        select(editor, 6);
+        expect(editor.commands.run(id), id).toBe(true);
+        expect(visible(editor), id).toBe(`One.\n\n${syntax}\n\nTwo.\n`);
+        expect(refused.concat(notices), id).toEqual([]);
+        expect(
+          editor.view.state.sliceDoc(caretAt(editor) - syntax.length, caretAt(editor)),
+          id,
+        ).toBe(syntax);
+      }
+    },
+  );
+
+  it.each([false, true])('keeps a blank line between the syntax and the text above (%s)', (t) => {
+    const { editor, refused } = mount('One.\n', { tracking: t });
+    select(editor, 5);
+    expect(editor.commands.run('block.h2')).toBe(true);
+    expect(visible(editor)).toBe('One.\n\n## ');
+    expect(refused).toEqual([]);
+  });
+
+  it.each([false, true])('does nothing for Body (tracking %s)', (tracking) => {
+    const { editor, refused, notices } = mount('One.\n\n\n\nTwo.\n', { tracking });
+    select(editor, 6);
+    const before = editor.getDoc();
+    expect(editor.commands.run('block.body')).toBe(true);
+    expect(editor.getDoc()).toBe(before);
+    expect(refused.concat(notices)).toEqual([]);
+  });
+
+  it.each([false, true])('writes a closed code block, the caret inside (tracking %s)', (t) => {
+    const { editor, refused } = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(editor, 6);
+    expect(editor.commands.run('block.code')).toBe(true);
+    expect(refused).toEqual([]);
+    expect(visible(editor)).toMatch(/^One\.\n\n```\n\n```\n\n{1,2}Two\.\n$/);
+    expect(editor.view.state.sliceDoc(caretAt(editor) - 4, caretAt(editor))).toBe('```\n');
+  });
+
+  it.each([false, true])('writes a rule, and the table with the caret in its cell (%s)', (t) => {
+    const rule = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(rule.editor, 6);
+    expect(rule.editor.commands.run('block.rule')).toBe(true);
+    expect(visible(rule.editor)).toMatch(/^One\.\n\n---\n\n{1,2}Two\.\n$/);
+    expect(rule.refused).toEqual([]);
+    const table = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(table.editor, 6);
+    expect(table.editor.commands.run('block.table')).toBe(true);
+    expect(visible(table.editor)).toContain('| Column | Column |\n| --- | --- |\n|  |  |');
+    const { from, to } = table.editor.view.state.selection.main;
+    expect(table.editor.view.state.sliceDoc(from, to)).toBe('Column');
+  });
+
+  it('changes the type of a block that has text, as before', () => {
+    const { editor } = mount('One.\n\nSome text.\n');
+    select(editor, 8);
+    expect(editor.commands.run('block.h2')).toBe(true);
+    expect(editor.getDoc()).toBe('One.\n\n## Some text.\n');
+  });
+
+  it('takes the empty quote it wrote away only when the person does', () => {
+    const { editor } = mount('One.\n\n\n\nTwo.\n');
+    select(editor, 6);
+    editor.commands.run('block.quote');
+    // The caret leaves: an empty quote is a block that stays, an empty paragraph goes.
+    select(editor, 0);
+    expect(editor.getDoc()).toContain('> ');
   });
 });
 
@@ -507,5 +656,61 @@ describe('registration', () => {
     const { editor } = mount('x\n');
     const ids = editor.commands.list().map((command) => command.id);
     expect(plugin.manifest.contributes?.commands?.map((command) => command.id)).toEqual(ids);
+  });
+});
+
+describe('commands in a table', () => {
+  const T = 'Intro.\n\n| a | b |\n| - | - |\n| one | two |\n\nAfter.\n';
+  const BLOCKS = [
+    'block.body',
+    'block.h1',
+    'block.h2',
+    'block.h3',
+    'block.h4',
+    'block.h5',
+    'block.h6',
+    'block.quote',
+    'block.ul',
+    'block.ol',
+    'block.task',
+    'block.code',
+    'block.table',
+    'block.rule',
+    'block.indent',
+    'block.outdent',
+  ];
+
+  it('has no block command enabled with the caret in a cell, and all of them outside', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one') + 1);
+    const inside = editor.getUiState().enabledCommands;
+    for (const id of BLOCKS) expect(inside, id).not.toContain(id);
+    // The Format menu works on a cell's text.
+    expect(inside).toContain('format.bold');
+    select(editor, 3);
+    const outside = editor.getUiState().enabledCommands;
+    for (const id of BLOCKS) expect(outside, id).toContain(id);
+  });
+
+  it('does nothing when a block command is run in a cell', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one') + 1);
+    expect(editor.commands.run('block.h1')).toBe(false);
+    expect(editor.getDoc()).toBe(T);
+  });
+
+  it('bolds the text of a cell', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one'), T.indexOf('one') + 3);
+    expect(editor.commands.run('format.bold')).toBe(true);
+    expect(editor.getDoc()).toContain('| **one** | two |');
+  });
+
+  it('leaves the first header cell’s text selected after Insert Table', () => {
+    const { editor } = mount('One.\n\nTwo.\n');
+    select(editor, 2);
+    expect(editor.commands.run('block.table')).toBe(true);
+    const { from, to } = editor.view.state.selection.main;
+    expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
   });
 });

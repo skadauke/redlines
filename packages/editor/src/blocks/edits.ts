@@ -10,7 +10,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
-import { bodyEnd, parsedField } from '../tracked/field.ts';
+import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
@@ -43,8 +43,19 @@ export interface KeyEdit {
   caretAt?: number;
   /** The caret stays right before `caretBefore`, a position of the state's text (⌃O). */
   caretBefore?: number;
+  /**
+   * The selection's ends, positions of the state's text that the edits leave in place, which stay
+   * with their text: the start in front of what an edit writes there, the end behind it.
+   */
+  range?: { anchor: number; head: number };
   /** The caret goes to the end of the open block's line (`open`), wherever the edits put it. */
   caretInOpen?: boolean;
+  /**
+   * The caret goes `col` characters into the line `down` lines below the one that holds `at`, a
+   * position of the state's text: for a row of a table the key writes, whatever markers the
+   * tracked layer puts on the lines between.
+   */
+  caretOnLine?: { at: number; down: number; col: number };
   /**
    * The caret goes right after the first `text` the edits leave after the start-of-text position
    * `from`: for text a key writes again, as the second half of a code span.
@@ -573,7 +584,7 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
 }
 
 /** Return at the end of a block's text: an empty paragraph below it. */
-function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
   const cont = continuation(state, block);
@@ -846,15 +857,18 @@ export function planReturn(state: EditorState): KeyEdit | null {
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
-    if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
+    if (['code', 'table', 'html', 'rule'].includes(block.kind) && head === block.text.from) {
       const above: KeyEdit = { ...returnAtStart(state, block, head), caretInOpen: true };
       delete above.caretAt;
       return above;
     }
-    if (block.kind === 'table') return returnInTable(state, block, head);
     // At the end of an HTML block's last line: an empty paragraph after it. Inside it, a line
     // break in the block (CodeMirror's).
-    if (block.kind === 'html' && head === state.doc.lineAt(block.lines.to).to) {
+    // The same after a thematic break (typed `---` and Return).
+    if (
+      (block.kind === 'html' || block.kind === 'rule') &&
+      head === state.doc.lineAt(block.lines.to).to
+    ) {
       return returnAtEnd(state, block);
     }
     return null;
@@ -865,6 +879,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const start = textStart(state, block);
   const end = textEnd(state, block);
   const open = openBlock(state);
+  const table = head >= end && head > start ? tableFromRow(state, block, head) : null;
+  if (table) return table;
   if (head <= start) {
     // Again at the start of a block whose empty paragraph is open above it: nothing.
     if (open?.pressedIn && open.pressedIn.from <= start && open.empty.to < head) {
@@ -896,6 +912,59 @@ export function planReturn(state: EditorState): KeyEdit | null {
     return returnAtEnd(state, block);
   }
   return returnInMiddle(state, block, head);
+}
+
+/** A row of cells typed on a line of its own: pipes round at least one cell. */
+const TYPED_ROW = /^\|(?:[^|\n]+\|)+[ \t]*$/;
+
+/**
+ * Return at the end of a paragraph that is one row of cells, `| a | b |`, alone at the top level
+ * (typed syntax, design: block editing): the table's delimiter row, and a first row to type in,
+ * the caret in its first cell. Null elsewhere, where Return opens an empty paragraph.
+ */
+function tableFromRow(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const { doc } = state;
+  if (block.kind !== 'paragraph' || block.containers.length > 0) return null;
+  const first = doc.lineAt(block.lines.from);
+  const last = doc.lineAt(block.lines.to);
+  // The markers of the author's own insertion on the line (its closer) are no part of the row.
+  const row = first.text.replace(/<!--[^]*?-->/g, '');
+  if (first.number !== last.number || head < first.from + row.length) return null;
+  if (!TYPED_ROW.test(row) || state.sliceDoc(first.from, head) !== row) return null;
+  if (!blankBefore(state, first) || !blankAfter(state, last)) return null;
+  const cells = row.replace(/[ \t]+$/, '').split('|').length - 2;
+  const delimiter = `|${' --- |'.repeat(cells)}`;
+  const body = `|${'  |'.repeat(cells)}`;
+  const insert = `\n${delimiter}\n${body}`;
+  const tracking = state.field(trackingField, false);
+  if (tracking) {
+    // With Track Changes on the row must be the author's own pending insertion, and the rows join
+    // it as text, with no split and no mark of their own (format §3.7); on any other paragraph
+    // Return is an ordinary Return, and Paragraph › Table makes a table.
+    const handle = state.facet(authorFacet)?.handle;
+    const own = state
+      .field(parsedField)
+      .marks.some(
+        (mark) =>
+          mark.kind === 'ins' &&
+          mark.entry.by === handle &&
+          mark.segments.some(
+            (g) =>
+              g.close?.from === head &&
+              g.content.to === head &&
+              /^\n*$/.test(state.sliceDoc(g.content.from, first.from)),
+          ),
+      );
+    if (!own) return null;
+  }
+  return {
+    ...(tracking ? { final: true } : {}),
+    changes: [{ from: head, insert }],
+    selection: EditorSelection.single(head + insert.length),
+    userEvent: 'input.break',
+    record: false,
+    caretOnLine: { at: head, down: 2, col: 2 },
+  };
 }
 
 /** Whether a split's marker stands between the end of a block's text and the end of its line. */
@@ -1007,50 +1076,70 @@ function openAfterDeletion(state: EditorState): KeyEdit | null {
   return rest;
 }
 
-/** The offsets of a table row's cell separators: its unescaped pipes. */
-function pipes(text: string): number[] {
-  const found: number[] = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\\') i++;
-    else if (text[i] === '|') found.push(i);
-  }
-  return found;
-}
-
-/** A table's delimiter row: `| --- | :-: |`. */
-const DELIMITER_ROW = /^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+/** The no-break space a line holds until its first character is typed (design: Shift-Return). */
+export const EMPTY_LINE_HOLD = '\u00a0';
 
 /**
- * Return in a table, until tables are edited as tables (#176): the caret goes to the same cell of
- * the row below, which changes nothing; on the last row, an empty paragraph after the table.
+ * Shift-Return at the end of a paragraph's text: a hard break and an empty line after it, in the
+ * block, the caret on it. The line holds a no-break space until the first character is typed (a
+ * hard break with nothing after it is a literal backslash, and an empty line in a list would make
+ * it loose); like the empty paragraph it is taken back when the caret leaves, and the file never
+ * gets it. Null where the text before the caret can't take a hard break (it ends in a backslash or
+ * is not text): Return's.
  */
-function returnInTable(state: EditorState, block: Block, head: number): KeyEdit {
+function emptyLineAtEnd(state: EditorState, block: Block, head: number): KeyEdit | null {
   const { doc } = state;
   const line = doc.lineAt(head);
-  let n = line.number + 1;
-  const last = doc.lineAt(block.lines.to).number;
-  if (n <= last && DELIMITER_ROW.test(doc.line(n).text)) n++;
-  if (n > last) return returnAtEnd(state, block);
-  const cell = pipes(line.text).filter((at) => at < head - line.from).length;
-  const below = doc.line(n);
-  const separators = pipes(below.text);
-  const after = separators[cell - 1];
-  if (after === undefined) return moveTo(below.to);
-  let at = below.from + after + 1;
-  while (at < below.to && /[ \t]/.test(doc.sliceString(at, at + 1))) at++;
-  return moveTo(at);
+  if (head !== line.to || state.field(viewModeField, false) === 'raw') return null;
+  // After a backslash, or a hard break's spaces, the new break would not read as one.
+  if (/[\\ \t]$/.test(state.sliceDoc(Math.max(line.from, head - 1), head))) return null;
+  const insert = `\\\n${continuation(state, block)}${EMPTY_LINE_HOLD}`;
+  return {
+    changes: [{ from: head, insert }],
+    selection: EditorSelection.single(head + insert.length - 1),
+    userEvent: 'input.break.line',
+    open: { at: head, assoc: 1, down: 1, line: true },
+    caretInOpen: true,
+    fallback: planReturn(state) ?? undefined,
+  };
+}
+
+/**
+ * Backspace over the only character of the line after a hard break, at the end of a paragraph's
+ * text: the line goes back to the empty line Shift-Return opened, its no-break space in the
+ * character's place, since a hard break with nothing after it is a literal backslash. Null
+ * elsewhere.
+ */
+export function lastCharOfLine(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  if (block.kind !== 'paragraph' || line.number < 2 || line.from <= block.text.from) return null;
+  if (head < textEnd(state, block) || doc.lineAt(block.text.to).number !== line.number) return null;
+  const above = doc.line(line.number - 1);
+  if (!/(?<!\\)(?:\\\\)*(?:\\| {2,})$/.test(above.text)) return null;
+  const char = /(\P{M}\p{M}*)$/u.exec(doc.sliceString(line.from, head))?.[1];
+  if (!char || char === EMPTY_LINE_HOLD) return null;
+  const from = head - char.length;
+  const before = doc.sliceString(line.from, from).replace(/<!--[^]*?-->/g, '');
+  if (!/^[ \t>]*$/.test(before)) return null;
+  return {
+    changes: [{ from, to: head, insert: EMPTY_LINE_HOLD }],
+    selection: EditorSelection.single(from),
+    userEvent: 'delete.backward.block',
+    open: { at: from, assoc: 1, line: true },
+    caretInOpen: true,
+  };
 }
 
 const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
-const CELL_ONE_LINE = 'A table cell is one line in Markdown.';
 const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
 /**
  * Shift-Return at the caret (design: block editing, "Shift-Return"): in the middle of a block's
  * text a hard line break, a backslash and a line break, the next line at the block's text column;
  * at a soft line break the backslash alone, in front of the line break that is there; at a block's
- * start or end what Return does, in this stage. Refused inside a heading and in a table cell, which
- * are one line. Null declines: in code and front matter CodeMirror's line break.
+ * start or end what Return does, in this stage. Refused inside a heading, which is one line. Null
+ * declines: in code and front matter CodeMirror's line break.
  */
 export function planShiftReturn(state: EditorState): KeyEdit | null {
   const { selection } = state;
@@ -1070,11 +1159,11 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
-  if (block.kind === 'table') return refuse(CELL_ONE_LINE);
   if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
   const start = textStart(state, block);
   const end = textEnd(state, block);
-  if (head <= start || head >= end) return planReturn(state);
+  if (head <= start) return planReturn(state);
+  if (head >= end) return emptyLineAtEnd(state, block, head) ?? planReturn(state);
   const { doc } = state;
   const line = doc.lineAt(head);
   if (head === line.to && line.to < block.text.to) {

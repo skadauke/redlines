@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { checkBoxEffect, createEditor, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from './index.ts';
@@ -148,20 +149,105 @@ describe('task boxes, more cases', () => {
 });
 
 describe('a box refused for how much is pending', () => {
-  it('says so, not that Track Changes is the trouble (#167)', () => {
-    const doc = '- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n- [ ] f\n\nEnd.\n';
-    const notices: string[] = [];
+  /** A list of eight task items, `others` of them with a pending change after the item's text: with
+   * `syntax`, one that brings a backtick, which a decision could make code of the lines after it
+   * (rule 6); otherwise words, which are apart from a box change. */
+  const pending = (others: number, notices: string[], syntax = false) => {
+    const doc = `${'abcdefgh'
+      .split('')
+      .map((c) => `- [ ] ${c}`)
+      .join('\n')}\n\nEnd.\n`;
     const editor = mount(doc, true, notices);
-    // Five other pending changes in the list.
-    for (const line of [1, 2, 3, 4, 5]) {
-      const at = editor.view.state.doc.line(line).to;
-      editor.view.dispatch({ selection: { anchor: at } });
-      editor.view.dispatch(editor.view.state.replaceSelection(' x'), { userEvent: 'input.type' });
+    for (let line = 2; line < 2 + others; line++) {
+      const { to } = editor.view.state.doc.line(line);
+      editor.view.dispatch({ selection: { anchor: to } });
+      editor.view.dispatch(editor.view.state.replaceSelection(syntax ? ' x`' : ' x'), {
+        userEvent: 'input.type',
+      });
     }
+    return editor;
+  };
+
+  it.each([4, 5])('works with %i other pending changes in the list (rule 5)', (others) => {
+    const notices: string[] = [];
+    const editor = pending(others, notices, true);
     const before = editor.getDoc();
-    click(editor, 5);
+    click(editor, 0);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+    expect(editor.getDoc()).toContain('+check');
+  });
+
+  it('works with seven changes of words, which stay pending (rule 6)', () => {
+    const notices: string[] = [];
+    const editor = pending(7, notices);
+    const before = editor.getDoc();
+    click(editor, 0);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toContain('+check');
+    expect(editor.getDoc().match(/<!--ins /g)).toHaveLength(7);
+    expect(before.match(/<!--ins /g)).toHaveLength(7);
+  });
+
+  it('says so with six that bring a backtick, not that Track Changes is the trouble (#167)', () => {
+    const notices: string[] = [];
+    const editor = pending(6, notices, true);
+    const before = editor.getDoc();
+    click(editor, 0);
     expect(editor.getDoc()).toBe(before);
-    expect(notices).toEqual([expect.stringMatching(/^There are too many pending changes/)]);
+    expect(notices).toEqual([
+      expect.stringMatching(/^This box can't be changed while 6 changes in its list are pending/),
+    ]);
     expect(notices.join()).not.toMatch(/Turn off Track Changes/);
+  });
+});
+
+describe('a box clicked while an empty item is open (rule 6)', () => {
+  /** A bullet list with a task list under it: Return and Tab at the end of `two` open an item that
+   * Markdown can't hold under a line of text, which is not in the file while it is open. */
+  const withOpenItem = (tracking: boolean, pending: number, notices: string[]) => {
+    const items = 'abcdefgh'
+      .slice(0, pending)
+      .split('')
+      .map((c, i) => `- [ ] ${c} x${i}`);
+    const editor = mount(`- one\n- two\n${items.join('\n')}\n\nEnd.\n`, tracking, notices);
+    const { view } = editor;
+    for (let line = 3; tracking && line < 3 + pending; line++) {
+      view.dispatch({ selection: { anchor: view.state.doc.line(line).to } });
+      view.dispatch(view.state.replaceSelection(' y'), { userEvent: 'input.type' });
+    }
+    view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+    for (const key of ['Enter', 'Tab']) {
+      runScopeHandlers(
+        view,
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+        'editor',
+      );
+    }
+    expect(view.contentDOM.dataset['rlOpenBlock']).toBeDefined();
+    return editor;
+  };
+  const isOpen = (editor: Editor) => editor.view.contentDOM.dataset['rlOpenBlock'] !== undefined;
+
+  it.each([false, true])('checks the box and leaves the item open (tracking %s)', (tracking) => {
+    const notices: string[] = [];
+    const editor = withOpenItem(tracking, 3, notices);
+    click(editor, 1);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toContain('- [x] b x1');
+    expect(editor.getDoc()).not.toMatch(/\n {2}- *\n/);
+    expect(isOpen(editor)).toBe(true);
+  });
+
+  it('says so, and leaves the item open, where it can’t check the list: eight pending changes', () => {
+    const notices: string[] = [];
+    const editor = withOpenItem(true, 8, notices);
+    const before = editor.getDoc();
+    click(editor, 1);
+    expect(editor.getDoc()).toBe(before);
+    expect(notices).toEqual([
+      expect.stringMatching(/^This box can't be changed while \d+ changes/),
+    ]);
+    expect(isOpen(editor)).toBe(true);
   });
 });

@@ -14,6 +14,9 @@ import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
+import { insertedRows } from './table.ts';
+import type { InsertedRow } from './table.ts';
+import { rewritePositions } from './table-ops.ts';
 import type {
   DocView,
   Handle,
@@ -148,26 +151,41 @@ export interface Views {
   original(text: string): DocView;
 }
 
+/** The views of the last few texts, for every edit: the text an edit leaves is the text the next one
+ * starts from, so one keystroke's views of the text before it were worked out by the last. A file
+ * with an inserted row reads its tables for each view, and that is not done twice for the same text. */
+const recentNewest: Map<string, DocView> = new Map();
+const recentOriginal: Map<string, DocView> = new Map();
+const RECENT = 4;
+
 /** Views that are each worked out once, the first time they are asked for. */
 export function viewsOnce(): Views {
-  const once = (make: (text: string) => DocView) => {
-    const made = new Map<string, DocView>();
+  const once = (make: (text: string) => DocView, recent: Map<string, DocView>) => {
     return (text: string) => {
-      let view = made.get(text);
-      if (!view) {
-        view = make(text);
-        made.set(text, view);
+      let view = recent.get(text);
+      if (view) {
+        recent.delete(text);
+      } else view = make(text);
+      recent.set(text, view);
+      for (const old of recent.keys()) {
+        if (recent.size <= RECENT) break;
+        recent.delete(old);
       }
       return view;
     };
   };
-  return { newest: once(newestView), original: once(originalView) };
+  return { newest: once(newestView, recentNewest), original: once(originalView, recentOriginal) };
 }
 
 /** Every change accepted: no markers, no deleted text and no ledger. */
 export function newestView(text: string): DocView {
   const parsed = parse(text);
-  const changes = parsed.marks.flatMap((mark) => mark.segments.flatMap(hideMarkers));
+  const rows = insertedRows(text, parsed);
+  const changes = parsed.marks.flatMap((mark) => {
+    // An inserted row's marker goes with the space after it, as accepting it does.
+    const row = rows.find((candidate) => candidate.mark === mark);
+    return row ? [{ ...row.marker, insert: '' }] : mark.segments.flatMap(hideMarkers);
+  });
   return viewOf(
     text,
     withRewrites(text, parsed, parsed.marks, [...changes, ...ledgerChanges(parsed)]),
@@ -178,6 +196,25 @@ export function newestView(text: string): DocView {
  * text it brings back, for a deletion or a substitution. */
 export interface OriginalChange extends TextChange {
   opener?: Range;
+}
+
+/** The changes that take an inserted row out of the text, as rejecting it does (format §3.7). A
+ * header takes the delimiter row with it, and the old header gets one after it. */
+function removedRow(text: string, row: InsertedRow, eol: string): TextChange[] {
+  const { table, index } = row;
+  const old = table.rows[1];
+  if (index === 0 && old && !old.insertion) {
+    return [
+      { from: row.row.from, to: old.from, insert: '' },
+      {
+        from: old.to,
+        to: old.to,
+        insert: eol + text.slice(table.delimiter.from, table.delimiter.to),
+      },
+      ...rewritePositions(text, table, 0, -1),
+    ];
+  }
+  return [{ ...row.row, insert: '' }, ...rewritePositions(text, table, index, -1)];
 }
 
 /** The changes that make the original view of `text` (see `originalView`), sorted, outer ones
@@ -193,8 +230,14 @@ export function originalChanges(
   // Restored text has the file's line breaks, as rejecting writes it.
   const eol = eolOf(text, parsed.ledgerRange);
   const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
+  const rows = insertedRows(text, parsed);
   for (const mark of parsed.marks) {
     if (!formats && mark.kind === 'fmt') continue;
+    const row = rows.find((candidate) => candidate.mark === mark);
+    if (row) {
+      changes.push(...removedRow(text, row, eol));
+      continue;
+    }
     for (const segment of mark.segments) {
       if (mark.kind === 'ins' && segment.close) {
         // Everything inside an insertion goes with it, other people's marks included.
@@ -398,7 +441,15 @@ export function reviewView(text: string): string {
       held.set(outer.segment, marks);
     }
   }
+  // The ledger goes first among the changes: a note at the end of the body goes in front of it.
+  changes.push(...ledgerChanges(parsed));
+  const rows = insertedRows(text, parsed);
   for (const mark of parsed.marks) {
+    const row = rows.find((candidate) => candidate.mark === mark);
+    if (row) {
+      changes.push({ ...row.marker, insert: '' });
+      continue;
+    }
     for (const segment of mark.segments) {
       let { open, close } = notation(mark, segment, reviewEntries(parsed, mark.id));
       if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
@@ -410,7 +461,51 @@ export function reviewView(text: string): string {
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }
   }
-  return applyChanges(text, resolve([...changes, ...ledgerChanges(parsed)]));
+  // An inserted row's cells are inserted text, and a note follows the row (format §8).
+  for (const row of rows) {
+    const line = row.table.rows[row.index];
+    const tag = `[${row.mark.id} ${row.mark.entry.by}]`;
+    for (const cell of line?.cells.slice(0, row.table.aligns.length) ?? []) {
+      // CriticMarkup has no change inside another: the text between the changes in the cell is
+      // inserted text, in pieces, and the changes stand between them.
+      for (const piece of pieces(parsed, row.mark, cell.textFrom, cell.textTo)) {
+        writeAt(changes, piece.from, '{++');
+        writeAt(changes, piece.to, '++}');
+      }
+    }
+    writeAt(changes, row.table.rows[row.index]?.to ?? row.row.to, `{>>${tag} Inserted row<<}`);
+  }
+  return applyChanges(text, resolve(changes));
+}
+
+/** The stretches of `from`..`to` that no mark other than `row` has a marker in, outermost marks
+ * with all they hold left out, the empty ones too. */
+function pieces(parsed: Parsed, row: MarkRange, from: number, to: number): Range[] {
+  const spans: Range[] = [];
+  for (const mark of parsed.marks) {
+    if (mark === row) continue;
+    for (const segment of mark.segments) {
+      const end = (segment.close ?? segment.open).to;
+      if (segment.open.from < to && end > from) spans.push({ from: segment.open.from, to: end });
+    }
+  }
+  spans.sort((a, b) => a.from - b.from || b.to - a.to);
+  const out: Range[] = [];
+  let at = from;
+  for (const span of spans) {
+    if (span.from > at) out.push({ from: at, to: span.from });
+    at = Math.max(at, span.to);
+  }
+  if (to > at) out.push({ from: at, to });
+  return out.filter((piece) => piece.to > piece.from);
+}
+
+/** Writes `insert` at `at` among `changes`: in front of the change that starts there, which would
+ * otherwise cover it, or as a change of its own. */
+function writeAt(changes: TextChange[], at: number, insert: string): void {
+  const starts = changes.find((change) => change.from === at && change.to > at);
+  if (starts) starts.insert = insert + starts.insert;
+  else changes.push({ from: at, to: at, insert });
 }
 
 /** Whether a segment of a format change changes a block's type, indent or box, not its text. */

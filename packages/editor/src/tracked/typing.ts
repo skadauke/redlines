@@ -15,7 +15,7 @@
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
 import {
-  type Annotation,
+  Annotation,
   ChangeSet,
   EditorSelection,
   EditorState,
@@ -42,6 +42,8 @@ import {
   type EditContext,
   EditError,
   type FormatOp,
+  idsIn,
+  newId,
   openerRange,
   parse,
   type Parsed,
@@ -59,6 +61,8 @@ import { onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
   bodyEnd,
+  holdViewAnnotation,
+  markupViewFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -78,6 +82,10 @@ export const trackingField = StateField.define<boolean>({
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
+
+/** Marks a transaction whose several edits are one change by the author: the marks that Track
+ * Changes writes for them share a group, and are decided together (format §3.7). */
+export const editGroupAnnotation = Annotation.define<boolean>();
 
 export const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
@@ -99,7 +107,7 @@ export const editSourceFacet = Facet.define<EditSource, EditSource>({
 });
 
 /** The editing author, at the current minute (format §2.4). */
-function contextFor(state: EditorState): EditContext {
+export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
@@ -426,8 +434,12 @@ function trackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
+  grouped: boolean | string = false,
 ): Tracked {
-  const ctx = contextFor(state);
+  let ctx = contextFor(state);
+  // A group of its own for several edits, or the one a caller has made for them.
+  if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
+  else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -549,25 +561,55 @@ function refused(tr: Transaction, error: EditError): TransactionSpec {
   return tr.isUserEvent(AUTOCORRECTION) ? {} : { effects: refusedEditEffect.of(error.message) };
 }
 
+/**
+ * Edits of `text` (whose parse is `parsed`) as the author's, the way typing makes them: tracked
+ * changes with Track Changes on, plain text with it off, in the offsets of `text`. With `group`,
+ * the tracked marks share that group. For a change made of several edits and of more than the edits,
+ * such as a paste over cells that adds rows (`table/paste.ts`).
+ *
+ * @throws EditError when the format refuses an edit.
+ */
+export function authoredChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  group?: string,
+): ChangeSet {
+  const made = edits.map((edit): Edit => ({ ...edit, main: false }));
+  if (state.field(trackingField)) {
+    return trackEdits(state, text, parsed, made, false, group ?? made.length > 1).changes;
+  }
+  return untrackEdits(state, text, parsed, made, false).changes;
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
 function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): TransactionSpec {
   const start = tr.startState;
   let tracked: Tracked;
   try {
-    tracked = trackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
+    tracked = trackEdits(
+      start,
+      start.doc.toString(),
+      start.field(parsedField),
+      edits,
+      backward,
+      tr.annotation(editGroupAnnotation) === true,
+    );
   } catch (error) {
     if (error instanceof EditError) return refused(tr, error);
     throw error;
   }
   if (tracked.changes.empty) return {};
-  const toRedlines = suggests(start, start.doc, edits, tracked.changes)
-    ? [setViewModeEffect.of('redlines')]
-    : [];
+  const toRedlines =
+    tr.annotation(holdViewAnnotation) !== true && suggests(start, start.doc, edits, tracked.changes)
+      ? [setViewModeEffect.of(start.facet(markupViewFacet))]
+      : [];
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
 }
 
 /**
- * Whether a tracked edit made in Clean suggests something, which switches the view to Redlines so
+ * Whether a tracked edit made in Clean suggests something, which switches the view to the markup view so
  * that suggestions are never invisible to their author (design §5.3): whether the format wrote
  * more than the plain edit would have, unlike a line break at the end of a paragraph.
  */
@@ -611,6 +653,11 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   );
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }
+
+/** What text composed at `from` is written as, which a place can ask to change: a table's cell
+ * escapes a pipe (`table/escape.ts`). Each value gets the text the one before it made. */
+export const composedTextFacet =
+  Facet.define<(state: EditorState, from: number, text: string) => string>();
 
 /** Text an input method composes outside Raw (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
@@ -703,7 +750,12 @@ function finishComposition(view: EditorView): void {
   const { state } = view;
   const pending = state.field(compositionField, false);
   if (!pending || view.composing) return;
-  const composed = state.sliceDoc(pending.from, pending.to);
+  const composed = state
+    .facet(composedTextFacet)
+    .reduce(
+      (text, write) => write(state, pending.from, text),
+      state.sliceDoc(pending.from, pending.to),
+    );
   if (composed === pending.replaced) {
     view.dispatch({ effects: composedEffect.of(null) });
     return;
@@ -732,7 +784,7 @@ function finishComposition(view: EditorView): void {
     changes = back.compose(made.changes);
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
     if (tracking && suggests(state, base, edits, made.changes)) {
-      effects.push(setViewModeEffect.of('redlines'));
+      effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;

@@ -69,13 +69,10 @@ export function createCommandRegistry(editor: () => Editor, changed: () => void)
   const run = (command: EditorCommand) =>
     isEnabled(command, editor().view.state) && command.run(editor());
 
-  /** Keeps the key whatever the command does. */
+  /** Keeps the key whatever the command does, unless the command lets it go on. */
   const binding = (command: EditorCommand, key: string): KeyBinding => ({
     key,
-    run: () => {
-      run(command);
-      return true;
-    },
+    run: () => run(command) || !command.keyFallsThrough,
   });
   const bindings = (added: readonly EditorCommand[]) =>
     added.flatMap((command) => (command.shortcut ? [binding(command, command.shortcut)] : []));

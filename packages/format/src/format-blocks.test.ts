@@ -242,12 +242,50 @@ describe('block types (format §2.6)', () => {
     expect(message(() => changed(parent, rangeOf(parent, 'a'), block('ol')))).toMatch(
       /lines under it/,
     );
-    // More than five items at a time are too many to check together.
-    const six = '- a\n- b\n- c\n- d\n- e\n- f\n';
+    // More than six items at a time are too many to check together.
+    const six = '- a\n- b\n- c\n- d\n- e\n- f\n- g\n';
     const ids = ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'k3x9', 'b2c3');
     expect(message(() => changed(six, all(six), block('ol'), ids))).toMatch(
-      /Change up to five items at a time/,
+      /Change up to six items at a time/,
     );
+  });
+
+  it('changes a block right under a heading, a thematic break or a closing fence (rule 2)', () => {
+    const cases: [string, string][] = [
+      ['## Heading\nText under it.\n', 'Text'],
+      ['# Heading #\nText under it.\n\nNext.\n', 'Text'],
+      ['Intro.\n\n---\nText under it.\n', 'Text'],
+      ['Intro.\n\n* * *\nText under it.\n', 'Text'],
+      ['Intro.\n\n___\n> Quoted under it.\n', 'Quoted'],
+      ['```\ncode\n```\nText under it.\n', 'Text'],
+      ['~~~~ js\ncode\n~~~~~\nText under it.\n', 'Text'],
+      ['```\ncode\n```\n- item under it\n', 'item'],
+    ];
+    for (const [text, word] of cases) {
+      for (const to of ['p', 'h2', 'quote', 'ul', 'ol'] as const) {
+        const range = rangeOf(text, word);
+        const here = word === 'item' || word === 'Quoted';
+        if (to === 'p' && !here) continue;
+        if (to === 'quote' && word === 'Quoted') continue;
+        if (to === 'ul' && word === 'item') continue;
+        const label = `${JSON.stringify(text)} to ${to}`;
+        const after = changed(text, range, block(to));
+        const ids = parse(after).marks.map((mark) => mark.id);
+        expect(ids.length, label).toBe(1);
+        expect(rejected(after, ids[0]!), label).toBe(text);
+      }
+    }
+  });
+
+  it('still refuses a block that has text or a list item right above it (rule 2)', () => {
+    for (const [text, word] of [
+      ['Text\n- item\n', 'item'],
+      ['```\ncode\n``` js\nText in the fence.\n', 'Text'],
+      ['    code\nText under it.\n', 'Text'],
+    ] as const) {
+      const said = message(() => changed(text, rangeOf(text, word), block('quote')));
+      expect(said, JSON.stringify(text)).not.toBe('no error');
+    }
   });
 
   it('refuses a block that does not stand on its own, or that is in another block', () => {
@@ -1566,9 +1604,10 @@ describe('indent (format §2.6)', () => {
   it('refuses a numbered item that would land right after text, which would read it as text', () => {
     // An ordered item that doesn't start at 1 can't interrupt a paragraph.
     for (const [text, word, by] of [
-      ['1. a\n2. b\n', 'b', 1],
-      ['1) a\n2) b\n', 'b', 1],
       ['- a\n  1. x\n  2. y\n', 'y', -1],
+      // Not the first of a new sublist, and the sublist is not numbered alike.
+      ['1. a\n   - x\n2. b\n', 'b', 1],
+      ['1. a\n   1) x\n2. b\n', 'b', 1],
     ] as const) {
       expect(
         message(() => changed(text, rangeOf(text, word), indent(by))),
@@ -1683,5 +1722,198 @@ describe('a block change of your own new block is an edit of it (format §2.6, #
     expect(bodyOf(after)).toBe('- one\n- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->');
     expect(newestView(after).text).toBe('- one\n- two\n  - X\n');
     expect(originalView(after).text).toBe('- one\n- two\n');
+  });
+});
+
+describe('indenting a numbered item (format §2.6, rule 3, #171)', () => {
+  it('writes 1 and keeps the old number in the same mark, which rejecting writes back', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    const after = changed(text, rangeOf(text, 'three'), indent(1));
+    expect(body(after)).toBe(
+      '1. one\n2. two\n   1. <!--fmt m2bd was=indent=0 was=ol=3.\\x20-->\n      three<!--/m2bd-->\n',
+    );
+    expect(rejected(after, 'm2bd')).toBe(text);
+    expect(accepted(after, 'm2bd')).toBe('1. one\n2. two\n   1. three\n');
+    expect(newestView(after).text).toBe('1. one\n2. two\n   1. three\n');
+    expect(originalView(after).text).toBe(text);
+    expect(formatChange(parse(after), parse(after).marks[0]!)).toEqual([{ kind: 'indent', by: 1 }]);
+  });
+
+  it('joins a sublist of items numbered alike, with the number it has', () => {
+    const text = '1. a\n   1. b\n2. c\n';
+    const after = changed(text, rangeOf(text, 'c'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('1. a\n   1. b\n   2. c\n');
+    expect(body(after)).not.toContain('was=ol');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('keeps the delimiter, the spaces and the lines under the item', () => {
+    const text = '1) one\n2)  two\n   - sub\n';
+    const after = changed(text, rangeOf(text, 'two'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('1) one\n   1)  two\n      - sub\n');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('renumbers a tenth item, whose number is wider than the one it gets', () => {
+    const text = '9. nine\n10. ten\n\nEnd.\n';
+    const after = changed(text, rangeOf(text, 'ten'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('9. nine\n   1. ten\n\nEnd.\n');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('writes nothing of the kind where the item is already numbered 1, or has a blank line above', () => {
+    for (const text of ['1. a\n1. b\n', '1. a\n\n2. b\n']) {
+      const after = changed(text, rangeOf(text, 'b'), indent(1));
+      expect(body(after)).not.toContain('was=ol');
+      expect(rejected(after, 'm2bd')).toBe(text);
+    }
+  });
+
+  it('is taken back by outdenting it again, the number too', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    const once = changed(text, rangeOf(text, 'three'), indent(1));
+    const back = trackedFormat(once, rangeOf(once, 'three'), indent(-1), ctx('p7qd'));
+    expect(applyChanges(once, back.changes)).toBe(text);
+  });
+
+  it('indents with Track Changes off, as the same number', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    expect(typed(text, rangeOf(text, 'three'), indent(1))).toBe('1. one\n2. two\n   1. three\n');
+  });
+});
+
+describe('outdenting an item whose numbered sibling would become its child', () => {
+  it('refuses, in words that say why, and outdents where the child reads as an item', () => {
+    for (const text of ['1. one\n   1. a\n   2. b\n', '1) one\n   1) a\n   3) b\n']) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'a'), indent(-1))),
+        text,
+      ).toMatch(/would become its first child/);
+    }
+    // Numbered 1, after a blank line, a bullet, or its own child item: an item or a sibling.
+    for (const text of [
+      '1. one\n   1. a\n   1. b\n',
+      '1. one\n   1. a\n\n   2. b\n',
+      '1. one\n   1. a\n   - b\n',
+      '1. one\n   1. a\n      1. c\n   2. b\n',
+    ]) {
+      const after = changed(text, rangeOf(text, 'a'), indent(-1));
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+    }
+  });
+});
+
+describe('outdenting where a child is text already', () => {
+  it('refuses, and never turns the sibling into text', () => {
+    const text = '1. one\n   1. a\n      2. x\n   2. b\n';
+    expect(message(() => changed(text, rangeOf(text, 'a'), indent(-1)))).toMatch(
+      /would become its first child/,
+    );
+    expect(message(() => typed(text, rangeOf(text, 'a'), indent(-1)))).toMatch(
+      /would become its first child/,
+    );
+  });
+});
+
+describe('the region of a block change is the list CommonMark reads (rule 4, #172)', () => {
+  const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
+  const marks = Object.fromEntries(ids.map((id) => [id, 'bo']));
+  // Each insertion is at the first character of its item's text, which a decision could make reach
+  // the line's start: none is apart from a block change (rule 6), so each counts.
+  const pending = ids.map((id) => `<!--ins ${id}-->x <!--/${id}-->y`);
+
+  it('does not count the pending changes of another list, ended by a different marker', () => {
+    // The other list's changes are in its items' text, which no decision brings to a line's start;
+    // marks at the start of its items could make the lists one (below) and are counted.
+    const pending = ids.map((id) => `x <!--ins ${id}-->y<!--/${id}-->`);
+    for (const [other, first] of [
+      ['* ', '- '],
+      ['1. ', '- '],
+      ['1) ', '1. '],
+      ['- ', '* '],
+    ] as const) {
+      const text = file(
+        `${first}a\n${first}b\n\n${pending.map((line) => `${other}${line}`).join('\n')}\n`,
+        marks,
+      );
+      expect(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd'))).not.toThrow();
+    }
+  });
+
+  it('keeps the lists as one where a pending change could make them one', () => {
+    // Bo's deletion takes the start of the other list's first item, its space too, as it is decided.
+    const text = file(
+      `- a\n- b\n\n* <!--del k3x9-->z<!--/k3x9-->\n${pending
+        .slice(1)
+        .map((line) => `* ${line}`)
+        .join('\n')}\n`,
+      marks,
+    );
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toMatch(
+      /^There are 7 pending changes in this list/,
+    );
+  });
+
+  it('is one list across blank lines where the marker stays', () => {
+    const text = file(`- a\n- b\n\n${pending.map((line) => `- ${line}`).join('\n')}\n`, marks);
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toMatch(
+      /^There are 7 pending changes in this list/,
+    );
+  });
+});
+
+describe('a refusal says how many changes stand in the list (rule 5, #172)', () => {
+  it('names the count', () => {
+    const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
+    const text = file(
+      `- a\n- b\n${ids.map((id) => `- <!--ins ${id}-->x <!--/${id}-->y`).join('\n')}\n`,
+      Object.fromEntries(ids.map((id) => [id, 'bo'])),
+    );
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toBe(
+      'There are 7 pending changes in this list, too many to check this change against. Accept or reject some of them first.',
+    );
+    expect(
+      message(() => trackedFormat(text, rangeOf(text, 'b'), block('ol'), ctx('m2bd'))),
+    ).toMatch(/^There are 7 pending changes in this list, too many/);
+  });
+});
+
+describe('indenting and outdenting an item of a list in a quote (#171, #172)', () => {
+  const cases: [string, string, 1 | -1, string][] = [
+    ['> - one\n> - two\n', 'two', 1, '> - one\n>   - two\n'],
+    ['> - one\n>   - two\n', 'two', -1, '> - one\n> - two\n'],
+    ['> > - one\n> > - two\n', 'two', 1, '> > - one\n> >   - two\n'],
+    ['> > - one\n> >   - two\n', 'two', -1, '> > - one\n> > - two\n'],
+    ['> 1. one\n> 2. two\n> 3. three\n', 'three', 1, '> 1. one\n> 2. two\n>    1. three\n'],
+    [
+      '> - one\n> - two\n>   - sub\n> - three\n',
+      'two',
+      1,
+      '> - one\n>   - two\n>     - sub\n> - three\n',
+    ],
+    ['> - one\n>\n> - two\n', 'two', 1, '> - one\n>\n>   - two\n'],
+    ['Text.\n\n> - one\n> - two\n\nMore.\n', 'two', 1, 'Text.\n\n> - one\n>   - two\n\nMore.\n'],
+  ];
+
+  it('indents and outdents, in every order of decisions, tracked and not', () => {
+    for (const [text, word, by, accepted_] of cases) {
+      const after = changed(text, rangeOf(text, word), indent(by));
+      expect(accepted(after, 'm2bd'), text).toBe(accepted_);
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+      expect(typed(text, rangeOf(text, word), indent(by)), text).toBe(accepted_);
+    }
+  });
+
+  it('says why where a layout can’t be written, never that it is no item', () => {
+    for (const [text, word, by] of [
+      ['> - one\n> - two\n', 'one', 1],
+      ['> - one\n', 'one', -1],
+      ['> - one\n>\t- two\n', 'two', -1],
+      ['>- one\n>- two\n', 'two', 1],
+    ] as const) {
+      const said = message(() => changed(text, rangeOf(text, word), indent(by)));
+      expect(said, text).not.toMatch(/Only a list item/);
+      expect(said, text).not.toBe('no error');
+    }
   });
 });

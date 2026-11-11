@@ -3,7 +3,7 @@
 // anchor, pushed down past the note above it. At rest it shows who wrote what; the times and the
 // actions appear on hover, or while the note is selected: clicked, or with the cursor in its
 // anchor. A selected note's border takes its author's color, and its anchor's tint doubles. The
-// rail shows only in Redlines, where it moves the text column left, so that column and rail stay
+// rail shows in Simple and Redlines, where it moves the text column left, so that column and rail stay
 // centered together. In a narrow editor the rail shrinks to a dot in the author's color level with
 // each anchor, and the column takes its whole width back; hovering or clicking a dot shows its
 // note over the page. A new comment is written in a note of its own, level with what it is on, and
@@ -17,7 +17,6 @@ import {
   type Transaction,
 } from '@codemirror/state';
 import {
-  BlockType,
   Decoration,
   type DecorationSet,
   EditorView,
@@ -26,6 +25,8 @@ import {
 } from '@codemirror/view';
 import {
   colorsOf,
+  commentRangeOfRect,
+  markupViewFacet,
   parsedField,
   pastHidden,
   refusedEditEffect,
@@ -63,6 +64,8 @@ import {
   editContext,
   element,
   errorLine,
+  insertedRows,
+  isRowInsertion,
   openerEnd,
   readable,
   type ReviewContext,
@@ -223,6 +226,9 @@ const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to a
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
 function newCommentRange(state: EditorState): Range {
+  // Cells selected: the selected cells' text in one row, the whole rows across rows.
+  const cells = commentRangeOfRect(state);
+  if (cells) return cells;
   const { from, to, empty, head } = state.selection.main;
   if (!empty) return { from, to };
   // On screen, a caret beside a hidden marker is at the end of the word past it.
@@ -361,28 +367,10 @@ interface LineBox {
   bottom: number;
 }
 
-/**
- * The text in the table cell that holds `pos`. The editor draws a table as one widget and can only
- * say where the table starts; the cells carry their source offsets in `data-end`, as the table
- * widget writes them for clicks. Null when `pos` isn't in a table on screen.
- */
-function cellBox(view: EditorView, pos: number): LineBox | null {
-  for (const table of view.contentDOM.querySelectorAll<HTMLElement>('.rl-table')) {
-    const start = view.posAtDOM(table);
-    if (pos < start) continue;
-    for (const cell of table.querySelectorAll<HTMLElement>('[data-end]')) {
-      if (start + Number(cell.dataset['end']) < pos) continue;
-      return (cell.querySelector('[data-from]') ?? cell).getBoundingClientRect();
-    }
-  }
-  return null;
-}
-
 /** Where `pos` is on screen: its line of text, or off screen the editor's estimate. */
 function lineBox(view: EditorView, pos: number, documentTop: number): LineBox {
   const block = view.lineBlockAt(pos);
-  const found =
-    (block.type === BlockType.WidgetRange ? cellBox(view, pos) : null) ?? view.coordsAtPos(pos, 1);
+  const found = view.coordsAtPos(pos, 1);
   if (found) return found;
   const top = block.top + documentTop;
   return { top, bottom: top + view.defaultLineHeight };
@@ -601,10 +589,10 @@ class Rail {
       (given.replies ??= {})[id] = reply;
     }
     if (kept.last !== undefined) given.last = kept.last;
-    // The rail shows in Redlines, where a document shown Clean goes, as for a new comment.
+    // The rail shows in the markup view, where a document shown Clean goes, as for a new comment.
     const shows = range !== null || given.replies !== undefined;
     if (shows && state.field(viewModeField) === 'clean') {
-      effects.push(setViewModeEffect.of('redlines'));
+      effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
     if (effects.length) view.dispatch({ effects });
     this.sync(view.state);
@@ -672,7 +660,9 @@ class Rail {
   /** Draws the notes of `state`, and which is selected. */
   sync(state: EditorState): void {
     const parsed = state.field(parsedField);
-    const shown = state.field(viewModeField) === 'redlines';
+    // The rail shows in the markup views (design: the rail, cards and review bar in Simple).
+    const mode = state.field(viewModeField);
+    const shown = mode === 'redlines' || mode === 'simple';
     const range = state.field(newComment);
     this.views.get(NEW_COMMENT)?.setNotice(range?.changed ? ANCHOR_CHANGED : null);
     const writing: Note | null = range && {
@@ -974,7 +964,8 @@ class Rail {
     const aside = state.field(setAsideComment);
     const restored = !open?.written && aside && selectionOn(state, aside.range) ? aside : null;
     const effects: StateEffect<unknown>[] = [];
-    if (mode !== 'redlines') effects.push(setViewModeEffect.of('redlines'));
+    // Simple shows the rail and the notes already: only Clean goes to the markup view.
+    if (mode === 'clean') effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     if (restored) effects.push(setAside.of(null), setNewComment.of(restored.range));
     else if (!open?.written || open.refused || state.field(newComment)?.changed) {
       effects.push(setNewComment.of(newCommentRange(state)));
@@ -1052,7 +1043,7 @@ class Rail {
   }
 
   /**
-   * Shows a thread's note: Clean or Raw switch to Redlines, the note is selected and scrolled into
+   * Shows a thread's note: Clean or Raw switch to the markup view, the note is selected and scrolled into
    * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
    * nothing, when no note would be drawn for it.
    */
@@ -1066,8 +1057,8 @@ class Rail {
       this.keptThreads(parsed),
     );
     if (!notes.some((note) => note.id === id && note.thread)) return false;
-    if (state.field(viewModeField) !== 'redlines') {
-      this.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    if (state.field(viewModeField) === 'clean' || state.field(viewModeField) === 'raw') {
+      this.view.dispatch({ effects: setViewModeEffect.of(state.facet(markupViewFacet)) });
     }
     // `notesIn` said a note is drawn, so after the switch it has its view.
     if (this.compact) this.pin(id, false);
@@ -1145,6 +1136,7 @@ interface ChangeShown {
 }
 
 function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
+  if (isRowInsertion(change)) return { old: '', added: insertedRows(1) };
   const { old, added, label } = changeTexts(parsed, change);
   // A format change names what it did: `Bold`.
   if (label !== undefined) return { old: '', added: label };
@@ -1153,6 +1145,9 @@ function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
 
 /** What each change of a suggestion did, in order. */
 function changesShown(parsed: Parsed, changes: readonly MarkRange[]): ChangeShown[] {
+  if (changes.length > 1 && changes.every(isRowInsertion)) {
+    return [{ old: '', added: insertedRows(changes.length) }];
+  }
   return changes.map((change) => changeShown(parsed, change));
 }
 

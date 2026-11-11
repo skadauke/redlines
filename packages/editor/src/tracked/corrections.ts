@@ -54,7 +54,7 @@ const CLAIM_MS = 5000;
  * The stretches of `from`–`to` that the page shows as text, without the text it hides: markers,
  * which may draw deleted text, and the ledger.
  */
-function shownRuns(state: EditorState, from: number, to: number): Range[] {
+export function shownRuns(state: EditorState, from: number, to: number): Range[] {
   const runs: Range[] = [];
   let pos = from;
   atomsOf(state).between(from, to, (start, end) => {
@@ -65,14 +65,14 @@ function shownRuns(state: EditorState, from: number, to: number): Range[] {
   return runs;
 }
 
-const shownText = (state: EditorState, runs: readonly Range[]) =>
+export const shownText = (state: EditorState, runs: readonly Range[]) =>
   runs.map((run) => state.sliceDoc(run.from, run.to)).join('');
 
 /**
  * The position `n` characters into the shown text of `runs`: where one stretch ends and the next
  * starts, the end of the first (`side` -1) or the start of the next (1).
  */
-function pointAt(runs: readonly Range[], n: number, side: -1 | 1): number {
+export function pointAt(runs: readonly Range[], n: number, side: -1 | 1): number {
   let offset = 0;
   for (const [i, run] of runs.entries()) {
     const length = run.to - run.from;
@@ -134,6 +134,37 @@ export function correctionEdits(
     offset += length;
   }
   return pieces.map((piece, i) => ({ ...piece, insert: i === pieces.length - 1 ? insert : '' }));
+}
+
+/**
+ * Makes a correction of the text the page shows from `at.from` to `at.to`, which must read
+ * `replaced`, into `text`: the edits `correctionEdits` plans, as typing, in a step of their own.
+ * Unless `picked`, as a suggestion from the context menu is, it is made only where the Mac corrects
+ * on its own (`autocorrects`). Returns whether anything was changed.
+ */
+export function correctText(
+  view: EditorView,
+  at: Range,
+  replaced: string,
+  text: string,
+  picked: boolean,
+): boolean {
+  const { state } = view;
+  const edits =
+    picked || autocorrects(state, at.from, at.to)
+      ? correctionEdits(state, at.from, at.to, replaced, text)
+      : null;
+  if (!edits?.length) return false;
+  const changes = ChangeSet.of(edits, state.doc.length);
+  view.dispatch({
+    changes,
+    // A suggestion you picked leaves the caret after it, as typing over the word would.
+    selection: picked ? EditorSelection.cursor(changes.mapPos(edits.at(-1)!.to, 1)) : undefined,
+    userEvent: picked ? PICKED : AUTOCORRECTION,
+    annotations: isolateHistory.of('full'),
+    scrollIntoView: true,
+  });
+  return true;
 }
 
 /** A correction WebKit asked for, to be made once CodeMirror has read the page. */
@@ -307,24 +338,9 @@ class Corrections {
 
   private make(pending: Pending): void {
     const { view } = this;
-    const { state } = view;
-    const at = locate(state, pending);
-    const edits =
-      at && (pending.picked || autocorrects(state, at.from, at.to))
-        ? correctionEdits(state, at.from, at.to, pending.replaced, pending.text)
-        : null;
-    if (edits?.length) {
-      const changes = ChangeSet.of(edits, state.doc.length);
-      view.dispatch({
-        changes,
-        // A suggestion you picked leaves the caret after it, as typing over the word would.
-        selection: pending.picked
-          ? EditorSelection.cursor(changes.mapPos(edits.at(-1)!.to, 1))
-          : undefined,
-        userEvent: pending.picked ? PICKED : AUTOCORRECTION,
-        annotations: isolateHistory.of('full'),
-        scrollIntoView: true,
-      });
+    const at = locate(view.state, pending);
+    if (at) {
+      correctText(view, at, pending.replaced, pending.text, pending.picked);
     }
     if (!pending.picked) this.claimCaret();
   }

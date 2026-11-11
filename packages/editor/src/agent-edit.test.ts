@@ -221,6 +221,30 @@ describe('an agent’s edit', () => {
     }
   });
 
+  it('takes a rewritten paragraph back and brings it back, in Redlines and in Clean, the caret in visible text', () => {
+    const sentence = 'The importer reads every file in the folder and writes one record per file.';
+    const doc = `Intro.\n\n${sentence}\n\nEnd.\n`;
+    for (const view of ['redlines', 'clean', 'simple'] as const) {
+      const editor = load(doc);
+      const next = suggested(doc, sentence, 'Records are produced by a batch job nightly.');
+      expect(parse(next).marks.map((mark) => mark.kind)).toEqual(['sub']);
+      editor.applyAgentEdit(next, STEP);
+      // Taking it back and bringing it back may move the view (a document without redlines is
+      // Clean), and the caret is where the person sees it in the view they are reading.
+      editor.setViewMode(view);
+      expect(editor.getDoc()).toBe(next);
+      seesCaret(editor);
+      undoKey(editor);
+      editor.setViewMode(view);
+      expect(editor.getDoc()).toBe(doc);
+      seesCaret(editor);
+      redoKey(editor);
+      editor.setViewMode(view);
+      expect(editor.getDoc()).toBe(next);
+      seesCaret(editor);
+    }
+  });
+
   it('keeps an input method’s composition out of the agent’s step', async () => {
     const texts = new Set<string>();
     const editor = load(fixture, { onChange: (text) => texts.add(text) });

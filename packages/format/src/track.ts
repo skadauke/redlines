@@ -59,6 +59,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
+import { checkTableEdits, inOwnInsertedRow, leadingPipeAt, tableStartsAt } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -2018,6 +2019,14 @@ function emphasisKept(
   return sameEmphasis(unreadDelimiters(text + after), joints);
 }
 
+/** Whether `where`, the start of a deletion from `from` to `to`, is the first row of a table that
+ * the deletion covers whole: a table is deleted as a block (format §3.4, §3.7). */
+function coversTable(plan: Plan, where: number, from: number, to: number): boolean {
+  if (from >= to || !plan.text.includes('|')) return false;
+  const table = tableStartsAt(plan.text, plan.parsed, where);
+  return table !== null && from <= table.from && table.to <= to;
+}
+
 /**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
@@ -2152,25 +2161,30 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     // A prefix that the change takes away is no place for the marker, but what it leaves is.
     const where = from === start && at !== undefined ? at : from;
     const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
+    // A table that the deletion covers whole goes as a block, its first row an opener's place.
     if (open.kind === 'refuse') {
-      // Right after a backslash at the end of a line, which would escape the opener: the change
-      // takes the backslash in and starts in front of it (format §3.1).
-      const backslash = open.backslash;
-      if (open.trailing !== undefined && where === from) {
-        // Among the trailing spaces of a hard break: the change starts in front of them.
-        grow(open.trailing, to);
-      } else if (
-        backslash === undefined ||
-        where !== from ||
-        text.slice(backslash, from) !== '\\'
-      ) {
-        refuse(open.reason);
-      } else if (endsInPrefix(`\n${visibleBefore(plan, backslash)}`)) {
-        // The backslash starts its line's text: the opener in front of it would start the line.
-        refuse('A marker here would start a line.');
+      if (coversTable(plan, where, from, to)) {
+        // No marker stands in front of it.
       } else {
-        grew = true;
-        grow(backslash, to);
+        // Right after a backslash at the end of a line, which would escape the opener: the change
+        // takes the backslash in and starts in front of it (format §3.1).
+        const backslash = open.backslash;
+        if (open.trailing !== undefined && where === from) {
+          // Among the trailing spaces of a hard break: the change starts in front of them.
+          grow(open.trailing, to);
+        } else if (
+          backslash === undefined ||
+          where !== from ||
+          text.slice(backslash, from) !== '\\'
+        ) {
+          refuse(open.reason);
+        } else if (endsInPrefix(`\n${visibleBefore(plan, backslash)}`)) {
+          // The backslash starts its line's text: the opener in front of it would start the line.
+          refuse('A marker here would start a line.');
+        } else {
+          grew = true;
+          grow(backslash, to);
+        }
       }
     } else if (open.kind === 'construct') grow(open.from, open.to);
     else if (open.kind === 'flank') {
@@ -2647,6 +2661,35 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   return { from, to, insert: '' };
 }
 
+/**
+ * The deletion of a run of a quote's blank lines at the end of its text, in one edit: the line
+ * breaks, the quote markers and the spaces of lines that have nothing else on them, which leave
+ * the blocks around them reading as they did (`readsAlike`). The editor's Return in an empty
+ * paragraph of a quote takes the markers one quote at a time (`blankLineCut`); this is the same
+ * written at once, plain (format §3.4). Undefined for any other deletion: one that leaves a mark,
+ * a split or code in the run, or a quote that goes on after the run, which it would part.
+ */
+function quoteRunCut(plan: Plan, from: number, to: number): TextChange | undefined {
+  const { text, markers } = plan;
+  // The spaces left on the last line of the run go with it.
+  const end = lineEnd(text, to);
+  if (/^[ \t]*$/.test(text.slice(to, end))) to = end;
+  const cut = text.slice(from, to);
+  if (!/^(?:\r?\n[ \t>]*)+$/.test(cut) || !cut.includes('>')) return undefined;
+  const halved = (at: number) => text[at - 1] === '\r' && text[at] === '\n';
+  if (halved(from) || halved(to) || to !== end) return undefined;
+  // After a line of text, in a quote.
+  const before = text.slice(lineStart(text, from), from);
+  if (/^[ \t>]*$/.test(before)) return undefined;
+  if (markers.some((m) => m.role !== 'ledger' && m.from <= to && m.to >= from - 1)) {
+    return undefined;
+  }
+  if (splitUnits(plan).some((u) => u.marker.from <= to && from <= u.end)) return undefined;
+  if (blankLinesMatter(plan, from, to)) return undefined;
+  if (!readsAlike(plan, from, to, cut, '')) return undefined;
+  return { from, to, insert: '' };
+}
+
 /** How many lines above and below the place `readsAlike` reads, at most, to find the top level. */
 const READ_LINES = 200;
 
@@ -2773,9 +2816,89 @@ function withoutQuoteRuns(text: string): string {
   return kept.join('\n');
 }
 
-/** What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker
- * at the start of a line is code or raw text, not a quote. */
-const RAW_START = /^(?:`{3,}|~{3,}|<)/;
+/**
+ * What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker at
+ * the start of a line is code or raw text, not a quote. Of the HTML blocks only those CommonMark
+ * starts: a line that begins with a tag of its own, a comment, a declaration or the like, not any
+ * `<` (an autolink, or a tag with text after it on its line, is ordinary text).
+ */
+const FENCE_START = /^(`{3,}|~{3,})(.*)$/;
+const HTML_ENDS: readonly [RegExp, RegExp | 'blank'][] = [
+  [/^<(?:script|pre|style|textarea)(?=[\s>]|$)/i, /<\/(?:script|pre|style|textarea)>/i],
+  [/^<!--/, /-->/],
+  [/^<\?/, /\?>/],
+  [/^<!\[CDATA\[/, /\]\]>/],
+  [/^<![A-Za-z]/, />/],
+  [
+    /^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$)/i,
+    'blank',
+  ],
+  // Any other tag alone on its line, which only starts a block where a paragraph is not open.
+  [
+    /^(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|<\/[A-Za-z][A-Za-z0-9-]*\s*>)\s*$/,
+    'blank',
+  ],
+];
+
+/** A line of a block, as `rawAtEnd` reads it: how many quote markers it is in, and its text. */
+interface BlockLine {
+  depth: number;
+  text: string;
+}
+
+/**
+ * Whether a fence or an HTML block is open at the end of the last of `lines`, or that line starts
+ * one (it is not an ordinary line of text whose end Enter can read). A fence closes with a fence of
+ * its kind that is no shorter, an HTML block with its end (a comment's `-->`) or, for the kinds
+ * that go on to a blank line, with a line that has nothing in it after the quote markers it was
+ * opened in; a line with fewer quote markers ends either, and one with more has them as text.
+ */
+function rawAtEnd(lines: readonly BlockLine[]): boolean {
+  let fence: { mark: string; depth: number } | undefined;
+  let html: { end: RegExp | 'blank'; depth: number } | undefined;
+  let last = false;
+  /** Whether the line above is a line of text of a paragraph. */
+  let underText = false;
+  for (const [i, { depth, text: raw }] of lines.entries()) {
+    const own = raw.replace(/\r$/, '');
+    let starts = false;
+    if (fence && depth < fence.depth) fence = undefined;
+    if (html && depth < html.depth) html = undefined;
+    if (fence !== undefined) {
+      const line = '>'.repeat(depth - fence.depth) + own;
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length)
+        fence = undefined;
+      starts = true;
+    } else if (html !== undefined) {
+      const line = '>'.repeat(depth - html.depth) + own;
+      if (html.end === 'blank' ? line.trim() === '' : html.end.test(line)) html = undefined;
+      starts = html !== undefined || line.trim() !== '';
+    } else {
+      const text = own.trimStart();
+      const opens = FENCE_START.exec(text);
+      if (opens && !(opens[1]?.[0] === '`' && (opens[2] ?? '').includes('`'))) {
+        fence = { mark: opens[1] ?? '```', depth };
+        starts = true;
+      } else if (text.startsWith('<')) {
+        let kind = HTML_ENDS.find(([start]) => start.test(text));
+        // A tag alone on its line (the last kind) cannot interrupt a paragraph: under a line of
+        // text it is text of that paragraph.
+        if (kind === HTML_ENDS.at(-1) && underText) kind = undefined;
+        if (kind) {
+          starts = true;
+          const [, end] = kind;
+          // The kinds with an end condition may end on the line itself.
+          if (!(end !== 'blank' && end.test(text.slice(1)))) html = { end, depth };
+        }
+      }
+    }
+    underText = !starts && own.trim() !== '';
+    // A line that is code or raw text, or starts it, is not read as a line of a quote.
+    if (i === lines.length - 1) last = starts || fence !== undefined || html !== undefined;
+  }
+  return last;
+}
 
 /** Container markers that each stand no more than three columns in: a quote's, a list item's. */
 const OPENERS = /^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]{1,4}))*/;
@@ -2806,10 +2929,12 @@ function blockQuoteAt(
   const around = quote.slice(0, quote.lastIndexOf('>')).trimEnd();
   let opened = false;
   let opens = false;
+  /** The lines of the block from the position's line up, after their container syntax. */
+  const contents: BlockLine[] = [];
   for (let start = lineStart(text, position); ;) {
     const line = lineAt(start);
     const prefix = prefixOf(line);
-    if (RAW_START.test(line.slice(prefix.length))) return undefined;
+    contents.push({ depth: (prefix.match(/>/g) ?? []).length, text: line.slice(prefix.length) });
     if (!opened) {
       if (!quoteOf(line).startsWith(quote)) return undefined;
       // More than the one space after the last quote marker, and three more, is indented code.
@@ -2824,7 +2949,7 @@ function blockQuoteAt(
       opens = start === lineStart(text, position);
       opened = true;
     }
-    if (first) return { quote, opens };
+    if (first) return rawAtEnd(contents.toReversed()) ? undefined : { quote, opens };
     start = above ?? 0;
   }
 }
@@ -3573,7 +3698,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   // Line breaks taken out of blank lines that stay are taken out as they were put in.
   if (!past && from < to && typed === '') {
-    const cut = plainCut(plan, from, to);
+    const cut = plainCut(plan, from, to) ?? quoteRunCut(plan, from, to);
     if (cut) {
       plan.changes.push(cut);
       plan.plain = true;
@@ -4522,8 +4647,20 @@ function editsOnce(
       ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
       : edit,
   );
+  checkTableEdits(text, edits, plan.parsed);
+  // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
+  // plain one first, and make the edit after it.
+  const pipes = edits.flatMap((edit) => leadingPipeAt(text, edit, plan.parsed) ?? []);
+  if (pipes.length > 0) return withLeadingPipes(text, edits, ctx, [...new Set(pipes)]);
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
-  for (const edit of edits) planEdit(plan, edit);
+  for (const edit of edits) {
+    // Text typed in a row the author inserted is part of the row's insertion (format §3.7).
+    if (inOwnInsertedRow(text, edit, plan.parsed, ctx.author.handle)) {
+      const typed = inEol(edit.insert, plan.eol);
+      if (typed !== '') assertNoMarkup(typed);
+      plan.changes.push({ from: edit.from, to: edit.to, insert: typed });
+    } else planEdit(plan, edit);
+  }
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   // Widening an edit over a link or a break can make it reach into the next one. The changes of
   // one edit stand around the markers in its range, and another edit can fall between them: the
@@ -4603,6 +4740,49 @@ function editsOnce(
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
+}
+
+/** The edits of `text` made as they are after plain `| ` written at `pipes`, in order, and the
+ * changes mapped back, with the pipes written before them (format §3.7, rule 7). */
+function withLeadingPipes(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  pipes: readonly number[],
+): TrackedEdits {
+  const sorted = pipes.toSorted((a, b) => a - b);
+  const PIPE = '| ';
+  const written = sorted.map((at) => ({ from: at, to: at, insert: PIPE }));
+  const shifted = (at: number) => at + PIPE.length * sorted.filter((pipe) => pipe <= at).length;
+  const moved = edits.map((edit) => ({
+    ...edit,
+    from: shifted(edit.from),
+    to: shifted(edit.to),
+  }));
+  const done = trackedEdits(applyChanges(text, written), moved, ctx);
+  // A position of the text with the pipes in it, back in the text without them: those just after a
+  // pipe are where the pipe is written.
+  const back = (at: number) => {
+    let n = 0;
+    for (const [i, pipe] of sorted.entries()) {
+      if (pipe + PIPE.length * (i + 1) <= at) n = i + 1;
+    }
+    return at - PIPE.length * n;
+  };
+  const changes: TextChange[] = [];
+  const used = new Set<number>();
+  for (const change of done.changes) {
+    const from = back(change.from);
+    for (const at of sorted) {
+      if (at <= from && !used.has(at)) {
+        used.add(at);
+        changes.push({ from: at, to: at, insert: PIPE });
+      }
+    }
+    changes.push({ ...change, from, to: back(change.to) });
+  }
+  for (const at of sorted) if (!used.has(at)) changes.push({ from: at, to: at, insert: PIPE });
+  return { ...done, changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to) };
 }
 
 /**

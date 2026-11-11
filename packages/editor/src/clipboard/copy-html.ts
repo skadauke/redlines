@@ -108,6 +108,8 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
     },
   });
   const style = (stack: string) => ` style="font-family:${escape(stack)}"`;
+  /** Whether a table cell is being written. */
+  let inCell = false;
   const slice = (from: number, to: number) => src.slice(from, to);
 
   /** Text between nodes, as the Markdown it was written. */
@@ -203,6 +205,11 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
       }
       case 'HardBreak':
         return '<br>';
+      case 'HTMLTag':
+        // A line break in a table cell is written `<br>`; elsewhere HTML stays text.
+        return inCell && /^<br\s*\/?>$/i.test(slice(node.from, node.to))
+          ? '<br>'
+          : text(node.from, node.to);
       case 'Comment':
       case 'ProcessingInstruction':
       case 'QuoteMark':
@@ -214,6 +221,15 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
   }
 
   function cells(row: SyntaxNode, tag: string, aligns: string[]): string {
+    inCell = true;
+    try {
+      return cellsOf(row, tag, aligns);
+    } finally {
+      inCell = false;
+    }
+  }
+
+  function cellsOf(row: SyntaxNode, tag: string, aligns: string[]): string {
     return (
       '<tr>' +
       row
@@ -354,4 +370,39 @@ export function markdownToHtml(
   altOnly: (href: string) => boolean = () => false,
 ): string {
   return render(source, fonts, altOnly);
+}
+
+/**
+ * The HTML table of cells of Markdown text (each cell as written, a pipe as `\|`, a line break as
+ * `<br>`), the first row `th` when `header`. Alignments are per column: `''`, `left`, `center` or
+ * `right`.
+ */
+export function cellsToHtml(
+  rows: readonly (readonly string[])[],
+  header: boolean,
+  aligns: readonly string[] = [],
+  fonts: FontStacks = DEFAULT_FONTS,
+  altOnly: (href: string) => boolean = () => false,
+): string {
+  const width = Math.max(1, ...rows.map((row) => row.length));
+  const line = (row: readonly string[]) =>
+    `| ${Array.from({ length: width }, (_, i) => (row[i] ?? '').replace(/\r?\n/g, ' ')).join(' | ')} |`;
+  const delimiter = `| ${Array.from({ length: width }, (_, i) => {
+    const align = aligns[i];
+    return align === 'center' ? ':-:' : align === 'left' ? ':-' : align === 'right' ? '-:' : '-';
+  }).join(' | ')} |`;
+  const first = rows[0] ?? [];
+  const html = render(
+    [line(first), delimiter, ...rows.slice(1).map(line)].join('\n'),
+    fonts,
+    altOnly,
+  );
+  const table = /<table>.*<\/table>/s.exec(html)?.[0] ?? '<table></table>';
+  const open = /^<div[^>]*>/.exec(html)?.[0] ?? '<div data-redlines>';
+  if (header) return `${open}${table}</div>`;
+  // No header in the copy: the first row is a row of the body.
+  const head = /<thead>(.*?)<\/thead>/s.exec(table)?.[1] ?? '';
+  const body = /<tbody>(.*?)<\/tbody>/s.exec(table)?.[1] ?? '';
+  const data = head.replace(/<th(?=[ >])/g, '<td').replace(/<\/th>/g, '</td>');
+  return `${open}<table><tbody>${data}${body}</tbody></table></div>`;
 }

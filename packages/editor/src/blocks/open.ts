@@ -30,11 +30,18 @@ import {
   type TransactionSpec,
 } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditError, reject } from '@redlines/format';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
-import { doneDepth, dropStepsEffect } from '../history/index.ts';
+import { doneDepth, dropStepsEffect, startsOver } from '../history/index.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
-import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import {
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from '../tracked/field.ts';
+import { unsoundEmptyLine } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { blockAt, isGapLine, loose, type Span } from './structure.ts';
 
@@ -44,6 +51,17 @@ export interface OpenBlock {
   empty: Span;
   /** The lines of the block Return was pressed in, where the caret may be while it stays open. */
   pressedIn: Span | null;
+  /**
+   * An empty list item that Markdown can't hold at its level (`empty-item.ts`), open as an empty
+   * paragraph is: its line is the item's, marker and all, left out of the file with its line break.
+   */
+  item?: true;
+  /**
+   * An empty line Shift-Return opened at a block's end (`shift-line.ts`): a hard break and a line
+   * that holds a no-break space, left out of the file with them, as the empty paragraph is. Typing
+   * replaces the space.
+   */
+  line?: true;
 }
 
 /** What one Return did, kept so that it can be taken back exactly. */
@@ -82,6 +100,10 @@ export interface OpenRequest {
   down?: number;
   /** The block Return was pressed in, where the caret may be while it stays open. */
   pressedIn?: Span | null;
+  /** The line is an empty item's, not an empty paragraph's. */
+  item?: true;
+  /** The line is the empty line Shift-Return opened (`OpenBlock.line`). */
+  line?: true;
 }
 
 /** Marks a key's transaction that opens (or keeps) the empty block, and where. */
@@ -134,7 +156,12 @@ function mapOpen(open: OpenBlock, mapping: ChangeDesc): OpenBlock | null {
     from: mapping.mapPos(open.pressedIn.from, -1),
     to: mapping.mapPos(open.pressedIn.to, 1),
   };
-  return { empty, pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null };
+  return {
+    empty,
+    pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null,
+    ...(open.item ? { item: true as const } : {}),
+    ...(open.line ? { line: true as const } : {}),
+  };
 }
 
 /** The blocks whose blank lines are content: no empty paragraph opens in them. */
@@ -179,6 +206,14 @@ function emptyParagraphAt(state: EditorState): OpenBlock | null {
   if (!BLANK.test(line.text) || inHolder(state, line.from)) return null;
   const blankAt = (n: number) => n < 1 || n > doc.lines || gap(state, doc.line(n));
   if (!blankAt(line.number - 1) || !blankAt(line.number + 1)) return null;
+  // Quote markers with no line of the quote right above them open a quote of their own, which
+  // Markdown renders even with nothing in it: an empty quote stays when the caret leaves it.
+  if (
+    line.text.includes('>') &&
+    !(line.number > 1 && doc.line(line.number - 1).text.includes('>'))
+  ) {
+    return null;
+  }
   return { empty: { from: line.from, to: line.to }, pressedIn: null };
 }
 
@@ -215,9 +250,81 @@ function emptyParagraphAbove(tr: Transaction): OpenBlock | null {
   };
 }
 
+/**
+ * The documents that Tab (or Return) opened an empty item in, this session: the last few, kept
+ * so that Undo and Redo, which bring such a document back whole, open the item again. An unsound
+ * empty item that the file already holds, or that nothing of the person's made, is in none.
+ */
+const madeItems = StateField.define<readonly Text[]>({
+  create: () => [],
+  update(made, tr) {
+    // A reload that starts the history over leaves no step that could bring one of them back:
+    // what the file then holds is the file's own, even where it is the same text.
+    if (startsOver(tr)) return [];
+    const request = tr.annotation(openAnnotation);
+    return (request?.item || request?.line) && tr.docChanged
+      ? [...made.slice(-49), tr.newDoc]
+      : made;
+  },
+});
+
+/**
+ * The open empty item the caret is on after ⌘Z or ⇧⌘Z has brought back a document that the person's
+ * own Tab opened it in. Never found from the caret's place alone.
+ */
+function emptyItemAt(tr: Transaction): OpenBlock | null {
+  if (!tr.isUserEvent('undo') && !tr.isUserEvent('redo')) return null;
+  const { state } = tr;
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  if (!state.field(madeItems, false)?.some((doc) => doc.eq(state.doc))) return null;
+  const line = state.doc.lineAt(main.head);
+  if (!unsoundEmptyLine(state.doc, line.number) || inHolder(state, line.from)) return null;
+  return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
+}
+
+/** A line of a no-break space alone, after a container's syntax: the empty line of Shift-Return. */
+export const EMPTY_LINE = /^[ \t>]*\u00a0$/;
+
+/**
+ * The empty line Shift-Return opened, when ⌘Z or ⇧⌘Z has brought back a document that the person's
+ * own Shift-Return opened it in (typing in it, undone): open again, the caret in it.
+ */
+function emptyLineAt(tr: Transaction): OpenBlock | null {
+  if (!tr.isUserEvent('undo') && !tr.isUserEvent('redo')) return null;
+  const { state } = tr;
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  if (!state.field(madeItems, false)?.some((doc) => doc.eq(state.doc))) return null;
+  const line = state.doc.lineAt(main.head);
+  if (!hardBreakEndsAbove(state.doc, line) || inHolder(state, line.from)) return null;
+  const text = removableLine(state.doc, line);
+  return text ? { empty: { from: line.from, to: line.to }, pressedIn: null, line: true } : null;
+}
+
+/** Whether the line is an empty line (above) with the end of a hard break on the line before. */
+function hardBreakEndsAbove(doc: Text, line: Line): boolean {
+  return line.number > 1 && /(?<!\\)(?:\\\\)*(?:\\| {2,})$/.test(doc.line(line.number - 1).text);
+}
+
+/** Whether `line` holds an empty line's no-break space, alone but for the markers on it. */
+function removableLine(doc: Text, line: Line): boolean {
+  return EMPTY_LINE.test(line.text.replace(/<!--[^]*?-->/g, ''));
+}
+
 /** The line of the new document a key's open request names (`OpenRequest`). */
 export function requestedLine(tr: Transaction, request: OpenRequest): Line {
   const doc = tr.newDoc;
+  if (request.line) {
+    // The empty line is found by its no-break space, wherever the tracked layer wrote the break
+    // (inside a closer in front of the caret, or ahead of a ledger it adds).
+    let held = -1;
+    tr.changes.iterChanges((_fromA, _toA, fromB, _toB, text) => {
+      const at = text.toString().lastIndexOf('\u00a0');
+      if (at >= 0) held = fromB + at;
+    });
+    if (held >= 0) return doc.lineAt(held);
+  }
   if (request.down !== undefined) {
     const at = tr.changes.mapPos(request.at, -1);
     return doc.line(Math.min(doc.lines, doc.lineAt(at).number + request.down));
@@ -229,6 +336,12 @@ export function requestedLine(tr: Transaction, request: OpenRequest): Line {
 /** The open block a key asked for, in the transaction's new document. */
 function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
   const line = requestedLine(tr, request);
+  if (request.item) {
+    return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
+  }
+  if (request.line) {
+    return { empty: { from: line.from, to: line.to }, pressedIn: null, line: true };
+  }
   if (!gap(tr.state, line)) return null;
   let pressedIn: Span | null = null;
   if (request.pressedIn) {
@@ -260,7 +373,9 @@ export const openBlockField = StateField.define<OpenBlock | null>({
     // A change that leaves the caret on an empty line between blank lines opens it: ⌘Z of typing
     // in it, of a take-back, deleting all of a paragraph's text.
     if (tr.annotation(Transaction.remote)) return null;
-    return emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr);
+    return (
+      emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr) ?? emptyItemAt(tr) ?? emptyLineAt(tr)
+    );
   },
 });
 
@@ -286,7 +401,9 @@ export const recordField = StateField.define<readonly Taken[]>({
           caret: tr.newSelection.main.head,
           openBefore,
           opened: openBefore === null && openAfter !== null,
-          joined: tr.annotation(isolateHistory) === 'after',
+          // Whether the history added the Return to the step before it, which it does only for
+          // an edit next to that step's: a closer between them keeps the Return a step of its own.
+          joined: doneDepth(tr.state) === doneDepth(tr.startState),
           depth: doneDepth(tr.startState),
         },
       ];
@@ -317,6 +434,8 @@ function openers(state: EditorState): readonly Taken[] | null {
 function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
   const { doc } = state;
   const line = doc.lineAt(open.empty.from);
+  if (open.item) return itemRemoval(state, line);
+  if (open.line) return lineRemoval(state, line);
   if (!BLANK.test(line.text)) return null;
   const plainBlank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
   const n = line.number;
@@ -338,6 +457,78 @@ function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
     to = doc.length;
   }
   return from < to ? state.changes({ from, to }) : null;
+}
+
+/** What `itemRemoval` found for a document, so that a file read isn't a parse each time. */
+let lastItemRemoval: { doc: Text; line: number; changes: ChangeSet | null } | undefined;
+
+/**
+ * The changes that take an open empty item away: its line and the line break before it, and with
+ * Track Changes on the split of the author's own that made the break, rejected, which takes its
+ * ledger entry with it. Null when the line is no item's.
+ */
+function itemRemoval(state: EditorState, line: Line): ChangeSet | null {
+  const { doc } = state;
+  const hit = lastItemRemoval;
+  if (hit && hit.doc === doc && hit.line === line.from) return hit.changes;
+  let changes: ChangeSet | null = null;
+  if (line.number > 1 && /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(line.text)) {
+    const above = doc.line(line.number - 1);
+    const split = state
+      .field(parsedField, false)
+      ?.marks.find(
+        (mark) => mark.kind === 'split' && mark.segments.some((g) => g.open.to === above.to),
+      );
+    if (split) {
+      try {
+        changes = ChangeSet.of(reject(doc.toString(), split.id), doc.length);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    }
+    changes ??= state.changes({ from: above.to, to: line.to });
+  }
+  lastItemRemoval = { doc, line: line.from, changes };
+  return changes;
+}
+
+/**
+ * The changes that take an open empty line away: its line and the hard break before it. With Track
+ * Changes on the split of the author's own that made the break, rejected, which takes its ledger
+ * entry with it. Null when the line is no empty line's.
+ */
+function lineRemoval(state: EditorState, line: Line): ChangeSet | null {
+  const { doc } = state;
+  if (line.number < 2 || !removableLine(doc, line)) return null;
+  const above = doc.line(line.number - 1);
+  const parsed = state.field(parsedField, false);
+  // The insertion of the author's own that holds the break and the line, whole: its rejection
+  // takes the split and the ledger's entries with it.
+  const made = parsed?.marks.find(
+    (mark) =>
+      mark.kind === 'ins' &&
+      mark.segments.some(
+        (g) =>
+          g.open.from >= above.from &&
+          g.open.to <= above.to &&
+          g.close !== undefined &&
+          g.close.to <= line.to + 1 &&
+          /^(?:<!--[^]*?-->)*(?:\\| {2,})$/.test(doc.sliceString(g.open.to, above.to)),
+      ),
+  );
+  if (made) {
+    try {
+      return ChangeSet.of(reject(doc.toString(), made.id), doc.length);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  const syntax = /(?:\\| {2,})$/.exec(above.text)?.[0].length ?? 0;
+  const from = above.to - syntax;
+  // Not through the markers of a change, which it would leave in pieces.
+  return doc.sliceString(from, line.to).includes('<!--')
+    ? null
+    : state.changes({ from, to: line.to });
 }
 
 /**
@@ -520,6 +711,7 @@ export function takeBack(
   view: EditorView,
   userEvent = 'delete.backward.block',
   place?: (state: EditorState) => number | null,
+  isolate: 'full' | 'before' = 'full',
 ): boolean {
   const { state } = view;
   const record = state.field(recordField, false) ?? [];
@@ -543,7 +735,7 @@ export function takeBack(
     annotations: [
       trackedEditAnnotation.of(true),
       takeBackAnnotation.of(true),
-      isolateHistory.of('full'),
+      isolateHistory.of(isolate),
     ],
     userEvent,
     scrollIntoView: true,
@@ -621,6 +813,7 @@ const observable = EditorView.contentAttributes.compute(
 export function openBlocks(): Extension {
   return [
     openBlockField,
+    madeItems,
     recordField,
     pointerField,
     Prec.high(leaving),
@@ -683,7 +876,7 @@ export function throughOpen(state: EditorState, next: Text): ThroughOpen | null 
     });
     return whole;
   }
-  if (gone(above) || gone(below)) survives = false;
+  if (gone(above) || gone(below) || open.item || open.line) survives = false;
   diff.iterChangedRanges((fromA, toA) => {
     if (fromA < gap.to && toA > gap.from && (fromA !== toA || (fromA > gap.from && fromA < gap.to)))
       survives = false;

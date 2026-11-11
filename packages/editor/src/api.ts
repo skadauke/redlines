@@ -7,7 +7,14 @@ import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed } from '@redlines/format';
 
 /** How the document is shown (design §5.3). */
-export type ViewMode = 'clean' | 'redlines' | 'raw';
+export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
+
+/**
+ * The two views that show a review: Simple (deletions hidden, insertions plain, change bars and
+ * comments) and Redlines. The one chosen last is the one the editor switches to when it picks a
+ * view for you.
+ */
+export type MarkupView = 'simple' | 'redlines';
 
 /** The person editing, whose changes and comments carry this identity. */
 export interface Author {
@@ -21,6 +28,8 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
+  /** The markup view chosen last, which an automatic switch shows. */
+  markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
   /**
@@ -62,7 +71,7 @@ export interface EditorCommand {
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'view';
+  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**
@@ -70,6 +79,12 @@ export interface EditorCommand {
    * own box, which then handles its keys itself. Default: false.
    */
   runsInFields?: boolean;
+  /**
+   * Whether its key goes on to the core's binding when the command is disabled or did nothing, as
+   * ⌘↩ does outside a table, where it is Return at the end of a block. Default: false, a key
+   * belongs to its command.
+   */
+  keyFallsThrough?: boolean;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
@@ -108,8 +123,20 @@ export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
   author: Author;
-  /** Default: 'redlines' when the document has redlines, else 'clean' (design §5.3). */
+  /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
+  /**
+   * The keys that show Simple and Redlines, as the host writes them (⌥⌘2 and ⌥⌘3 in the desktop
+   * app), which the hint on a change bar names. Default: none, and the hint names no keys, as in
+   * an embed with no such shortcuts.
+   */
+  viewKeys?: { simple?: string; redlines?: string };
+  /**
+   * The markup view the editor shows where it picks one for you: when a document with redlines
+   * opens, and when a tracked change or a comment is made in Clean. Default: 'redlines'. The host
+   * is told when the person chooses another (`EditorUiState.markupView`).
+   */
+  markupView?: MarkupView;
   /**
    * Whether your edits start out tracked (design §5.4). Default: true when the ledger says
    * `tracking: everyone` (format §5.6).
@@ -120,6 +147,15 @@ export interface EditorOptions {
    * through the normal input path, so Track Changes records it like any typing.
    */
   typing?: EditorTyping;
+  /**
+   * Asks the host for the system's correction of a word that Return or Shift-Return ends (design
+   * §5.1): WebKit corrects only around text it types itself, and the editor handles these keys on
+   * its own. `before` is the text of the block up to the word, for its language. The answer is the
+   * corrected word, or null; it is made, as WebKit's corrections are, only if the word is still
+   * exactly where it was. Asked only while `typing.spellCheck` is on, of a word in prose, and
+   * never in Raw. Default: none, and nothing is asked.
+   */
+  correctWord?: (word: string, before: string) => Promise<string | null>;
   /**
    * Whether an inserted or a deleted line break shows its mark in Redlines (design §5.5): a small
    * pilcrow (¶) at the break, or a struck one for each line break deleted. Default: false, and the
@@ -242,7 +278,13 @@ export interface Editor {
    */
   getParsed(): Parsed;
   getUiState(): EditorUiState;
+  /** Shows a view. Choosing Simple or Redlines also makes it the markup view. */
   setViewMode(mode: ViewMode): void;
+  /**
+   * Changes the markup view that an automatic switch shows, such as when the person chose another
+   * in another window. It never changes the view that is shown: only a choice made here does.
+   */
+  setMarkupView(mode: MarkupView): void;
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format

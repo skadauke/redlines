@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// Shift-Return, Return in tables and at the end of an HTML block, and the Option variants (design:
-// block editing, "Shift-Return" and "Code, tables, front matter, HTML blocks and rules"), with
+// Shift-Return, Return at the end of an HTML block, and the Option variants (design:
+// block editing, "Shift-Return" and "Code, tables, front matter, HTML blocks and rules"; Return in a
+// table cell is `table/cell-edit.test.ts`), with
 // Track Changes off and on. A hard break is a backslash and a line break.
 import { describe } from 'vitest';
 import { type Script, scriptRows, type Step } from './script.ts';
@@ -46,13 +47,6 @@ const same = (caret: string) => ({ off: { caret }, on: { caret } });
 const SELECTION_TAKE_BACK =
   'Backspace right after a Return over a selection joins the blocks again and leaves the deleted text deleted';
 
-const TABLE = '| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | 4 |';
-
-/** Return in a table row only moves the caret: Backspace after it is in the row below. */
-const MOVES_ONLY = {
-  'take-back': 'Return in a table row writes nothing: there is nothing to take back',
-};
-
 const ALREADY = 'There is a line break here already. Return starts a new paragraph.';
 
 describe('Shift-Return', () => {
@@ -80,10 +74,100 @@ describe('Shift-Return', () => {
         on: { caret: '> One <split>\\⏎> ‸two.' },
       },
       {
-        name: "at the end of a block's text: what Return does, in this stage",
+        name: "at the end of a paragraph's text: an empty line, the caret on it",
         doc: 'One two.‸⏎⏎Next.',
         keys: ['Shift-Enter'],
+        off: { file: 'One two.⏎⏎Next.', caret: 'One two.\\⏎‸·⏎⏎Next.' },
+        on: { file: 'One two.⏎⏎Next.', caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'in a list item, at its end: an empty line at the text column',
+        doc: '- One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter'],
+        off: { file: '- One two.⏎⏎Next.', caret: '- One two.\\⏎  ‸·⏎⏎Next.' },
+        on: { file: '- One two.⏎⏎Next.', caret: '- One two.<ins><split>\\⏎  ‸·</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'in a quote, at its end: an empty line after the quote marker',
+        doc: '> One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter'],
+        off: { file: '> One two.⏎⏎Next.', caret: '> One two.\\⏎> ‸·⏎⏎Next.' },
+        on: { file: '> One two.⏎⏎Next.', caret: '> One two.<ins><split>\\⏎> ‸·</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'typing replaces the no-break space',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', { type: 'X' }],
+        off: { file: 'One two.\\⏎X⏎⏎Next.', caret: 'One two.\\⏎X‸⏎⏎Next.' },
+        on: { caret: 'One two.<ins><split>\\⏎X‸</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'in a list item, typing replaces the no-break space',
+        doc: '- One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', { type: 'X' }],
+        off: { file: '- One two.\\⏎  X⏎⏎Next.', caret: '- One two.\\⏎  X‸⏎⏎Next.' },
+        on: { caret: '- One two.<ins><split>\\⏎  X‸</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'Return on the empty line takes the Shift-Return back and opens an empty paragraph',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', 'Enter'],
         ...same('One two.⏎⏎‸⏎⏎Next.'),
+      },
+      {
+        name: 'Return on the empty line of a list item: a new empty item',
+        doc: '- One two.‸',
+        keys: ['Shift-Enter', 'Enter'],
+        off: { caret: '- One two.⏎- ‸' },
+        on: { caret: '- One two.<split>⏎- ‸' },
+      },
+      {
+        name: 'Backspace over the only character typed on the line: the empty line again',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', { type: 'X' }, 'Backspace'],
+        off: { file: 'One two.⏎⏎Next.', caret: 'One two.\\⏎‸·⏎⏎Next.' },
+        on: { file: 'One two.⏎⏎Next.', caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
+      },
+      {
+        // The tracked layer writes the break inside the closer in front of the caret: the empty
+        // line is found by its space, not by where the caret was (walk seed 148).
+        name: "at the end of an item that ends in another person's pending deletion",
+        doc: '- gamma <ins>a-b <del x beta></ins>‸',
+        keys: ['Shift-Enter'],
+        off: { caret: '- gamma <ins>a-b <del x beta></ins>\\⏎  ‸·' },
+        on: { caret: '- gamma <ins>a-b <del x beta><split>\\⏎  ‸·</ins>' },
+      },
+      {
+        name: 'Undo after the first character brings the empty line back, open',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', { type: 'X' }, 'Mod-z'],
+        off: { file: 'One two.⏎⏎Next.', caret: 'One two.\\⏎‸·⏎⏎Next.' },
+        on: { file: 'One two.⏎⏎Next.', caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
+      },
+      {
+        name: 'the caret moved down off the empty line takes it back',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', 'ArrowDown'],
+        ...same('One two.⏎⏎Next.‸'),
+      },
+      {
+        name: 'Backspace right after it takes it back',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', 'Backspace'],
+        ...same('One two.‸⏎⏎Next.'),
+      },
+      {
+        name: 'the caret leaving the empty line takes it back',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', 'ArrowUp'],
+        ...same('‸One two.⏎⏎Next.'),
+      },
+      {
+        name: 'in the empty line: Shift-Return does nothing',
+        doc: 'One two.‸⏎⏎Next.',
+        keys: ['Shift-Enter', 'Shift-Enter'],
+        off: { caret: 'One two.\\⏎‸·⏎⏎Next.' },
+        on: { caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
       },
       {
         name: 'at a soft line break: the backslash in front of the line break there',
@@ -178,13 +262,6 @@ describe('Shift-Return', () => {
         on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
       },
       {
-        name: 'in a table cell: refused',
-        doc: '| a | b |⏎| - | - |⏎| 1‸ | 2 |',
-        keys: ['Shift-Enter'],
-        off: { refusal: 'A table cell is one line in Markdown.' },
-        on: { refusal: 'A table cell is one line in Markdown.' },
-      },
-      {
         name: 'in code: a line break, as Return (refused in code with Track Changes on)',
         doc: '```⏎co‸de⏎```',
         keys: ['Shift-Enter'],
@@ -209,31 +286,9 @@ describe('Shift-Return', () => {
   );
 });
 
-describe('Return in a table and after an HTML block', () => {
+describe('Return after an HTML block', () => {
   scriptRows(
     both([
-      {
-        name: 'in a row: the same cell of the row below, nothing written',
-        doc: TABLE.replace('2 |⏎', '2‸ |⏎'),
-        keys: ['Enter'],
-        ...same('| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | ‸4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
-      },
-      {
-        name: 'in the header row: past the delimiter row, to the first row',
-        doc: TABLE.replace('| b |', '| b‸ |'),
-        keys: ['Enter'],
-        ...same('| a | b |⏎| - | - |⏎| 1 | ‸2 |⏎| 3 | 4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
-      },
-      {
-        name: 'at the end of the last row: an empty paragraph after the table',
-        doc: `${TABLE}‸⏎⏎After.`,
-        keys: ['Enter'],
-        ...same(`${TABLE}⏎⏎‸⏎⏎After.`),
-      },
       {
         name: "at the end of an HTML block's last line: an empty paragraph after it",
         doc: '<div>⏎hi⏎</div>‸⏎⏎After.',

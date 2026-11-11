@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Editor } from '@redlines/editor';
+import { barClickHandlers, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { barNarrow } from './bar.ts';
 import {
@@ -160,6 +160,81 @@ describe('review bar', () => {
     const { editor, review } = mount(doc);
     editor.setViewMode('clean');
     review.openBar();
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('opening the bar from Simple switches to Redlines, and leaves the markup view', () => {
+    const { editor, review } = mount(doc);
+    editor.setViewMode('simple');
+    review.openBar();
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+  });
+
+  it('closes the bar when Simple is chosen, and the view stays as chosen', () => {
+    const { editor, review, opened } = mount(doc);
+    review.openBar();
+    expect(editor.getUiState().view).toBe('redlines');
+    editor.setViewMode('simple');
+    expect(review.isBarOpen()).toBe(false);
+    expect(bar(editor)).toBeNull();
+    expect(opened).toEqual([true, false]);
+    expect(editor.getUiState().view).toBe('simple');
+    // Clean doesn't close it: only the choice to read does.
+    review.openBar();
+    editor.setViewMode('clean');
+    expect(review.isBarOpen()).toBe(true);
+  });
+
+  it('opens the card of the change instead of switching, when a bar is clicked with the bar open', () => {
+    const { editor, review } = mount(doc);
+    const handle = (pos: number) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos));
+    // Closed: the core's switch is left to do its work.
+    expect(handle(0)).toBe(false);
+    review.openBar();
+    expect(handle(0)).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+    expect(editor.getUiState().view).toBe('redlines');
+    // A line with no change: nothing opens, and nothing switches.
+    expect(handle(doc.indexOf('Second') - 1 + 1)).toBe(true);
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('pins the card of the clicked line, not of a change that ends the line above', () => {
+    const body = file(
+      'First <!--ins k3x9-->new<!--/k3x9-->\n\nSecond <!--ins w2rf-->other<!--/w2rf-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+      ],
+    );
+    const { editor, review } = mount(body);
+    review.openBar();
+    const handle = (pos: number) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos));
+    expect(handle(body.indexOf('Second'))).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “other”');
+  });
+
+  it('pins the card of a struck block’s change by its id, with the bar open', () => {
+    const body = file(
+      'First.\n\n<!--del w2rf Gone.\\n\\n-->\n\nSecond <!--ins k3x9-->new<!--/k3x9-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+      ],
+    );
+    const { editor, review } = mount(body);
+    review.openBar();
+    const handle = (pos: number, mark?: string) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos, mark));
+    // Whatever place the widget reports: the bar is the deletion's own.
+    expect(handle(body.indexOf('Second'), 'w2rf')).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Deleted “Gone.”');
     expect(editor.getUiState().view).toBe('redlines');
   });
 

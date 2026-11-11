@@ -202,6 +202,24 @@ describe('change cards', () => {
     }
   });
 
+  it('shows no card on hover and pins none on a click in Simple', async () => {
+    const { editor } = mount(doc);
+    editor.setViewMode('simple');
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
+    const at = doc.indexOf('new ');
+    activateHover(editor.view, at, 1);
+    expect(card(editor)).toBeNull();
+    // Nothing is drawn to click on; a click on the text pins none either.
+    const line = editor.view.contentDOM.querySelector('.cm-line')!;
+    click(line, editor.view.contentDOM);
+    await tick();
+    expect(card(editor)).toBeNull();
+    // In Redlines, the same position does show one.
+    editor.setViewMode('redlines');
+    activateHover(editor.view, at, 1);
+    expect(what(editor)).toBe('Inserted “new”');
+  });
+
   it('hovering a deleted paragraph shows its card', () => {
     // A whole paragraph's deletion: its opener on a line of its own, its text drawn at the start of
     // the block below.
@@ -215,6 +233,115 @@ describe('change cards', () => {
     // The editor reports a widget by its start and the side after it.
     activateHover(editor.view, editor.view.posAtDOM(struck), 1);
     expect(what(editor)).toBe('Deleted “Old paragraph text.”');
+  });
+
+  describe('a deleted block drawn as a block, and a block rewritten whole', () => {
+    // Two blocks that read the same, deleted by two people: the card is of the one pointed at.
+    const twins = file(
+      'First.\n\n<!--del w2rf Same words.\\n\\n-->\n\nMiddle.\n\n<!--del k3x9 Same words.\\n\\n-->\n\nLast.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+        '  k3x9: {by: ada, at: 2026-10-31T09:36Z}',
+      ],
+    );
+    const blocks = (editor: Editor) => [
+      ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck'),
+    ];
+    const name = (editor: Editor) => card(editor)?.querySelector('.rl-card-name')?.textContent;
+
+    it('opens the card of the right change on hover, found by its mark and not by its text', () => {
+      const { editor } = mount(twins);
+      expect(blocks(editor).map((block) => block.dataset['mark'])).toEqual(['w2rf', 'k3x9']);
+      for (const [i, who] of [
+        [1, 'Ada Lovelace'],
+        [0, 'Bo Chen'],
+      ] as const) {
+        const block = blocks(editor)[i]!;
+        // Over the block's text, or its padding.
+        const over = i === 0 ? block : block.querySelector('.rl-del')!;
+        over.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        activateHover(editor.view, editor.view.posAtDOM(block), 1);
+        expect(what(editor), who).toBe('Deleted “Same words.”');
+        expect(name(editor), who).toBe(who);
+      }
+    });
+
+    it('pins the card on a click and rejects the right block', async () => {
+      const { editor } = mount(twins);
+      click(blocks(editor)[1]!.querySelector('.rl-del')!, editor.view.contentDOM);
+      await tick();
+      expect(name(editor)).toBe('Ada Lovelace');
+      button(card(editor)!, 'Reject').click();
+      // Only Ada's block came back.
+      expect(blocks(editor).map((block) => block.dataset['mark'])).toEqual(['w2rf']);
+      expect(editor.getDoc()).toContain('Same words.');
+      expect(editor.getDoc()).not.toContain('k3x9');
+    });
+
+    it('opens the card of a block rewritten whole from its struck old text', () => {
+      const SENTENCE = 'The old paragraph here.';
+      const rewritten = file(
+        `Intro.\n\n<!--sub k3x9 ${SENTENCE}-->\n\nA new one entirely.<!--/k3x9-->\n\nEnd.`,
+        [...PEOPLE, 'marks:', '  k3x9: {by: claude-ada, at: 2026-10-31T09:36Z}'],
+      );
+      const { editor } = mount(rewritten);
+      const old = editor.view.contentDOM.querySelector<HTMLElement>('.rl-del')!;
+      expect(old.dataset['mark']).toBe('k3x9');
+      expect(old.querySelector('br')).not.toBeNull();
+      old.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, editor.view.posAtDOM(old), 1);
+      expect(what(editor)).toBe(`Replaced “${SENTENCE}” with “A new one entirely.”`);
+    });
+
+    it('stands against the block’s box, above it or below, covering neither it nor the new text', async () => {
+      const { editor } = mount(twins);
+      const block = blocks(editor)[0]!;
+      let asked = 0;
+      Object.assign(block, {
+        getBoundingClientRect: () => {
+          asked++;
+          return { left: 100, right: 500, top: 200, bottom: 240, width: 400, height: 40 };
+        },
+      });
+      block.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, editor.view.posAtDOM(block), 1);
+      editor.view.requestMeasure();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // The editor asked the block for its box to place the card against it.
+      expect(asked).toBeGreaterThan(0);
+      const tooltip = card(editor)!.closest<HTMLElement>('.cm-tooltip')!;
+      expect(tooltip.style.top).toMatch(/px$/);
+    });
+
+    it('keeps the card of a change with several segments from any of its struck parts', () => {
+      // Ada's deletion around Bo's insertion: three pieces of one change, in three widgets.
+      const spread = file(
+        'Start here. The <!--del jqwd quick--><!--ins hpvc--><!--del jqwd  red--><!--/hpvc--><!--del jqwd  brown -->fox jumps. End here.',
+        [
+          ...PEOPLE,
+          'marks:',
+          '  jqwd: {by: bo, at: 2026-10-31T09:35Z}',
+          '  hpvc: {by: ada, at: 2026-10-31T09:36Z}',
+        ],
+      );
+      const { editor } = mount(spread);
+      const parts = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-del')];
+      expect(parts.length).toBeGreaterThanOrEqual(2);
+      for (const part of parts) {
+        part.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        activateHover(editor.view, editor.view.posAtDOM(part), 1);
+        expect(card(editor)?.querySelector('.rl-card-name')?.textContent).toBe('Bo Chen');
+      }
+    });
+
+    it('shows no card in Simple, where the block is not drawn', () => {
+      const { editor } = mount(twins);
+      editor.setViewMode('simple');
+      expect(blocks(editor)).toEqual([]);
+      expect(card(editor)).toBeNull();
+    });
   });
 
   describe('a break whose marker is on a hidden line (#198)', () => {
@@ -345,6 +472,14 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 
+  it('puts a pinned card away when Simple is chosen', async () => {
+    const { editor } = mount(doc);
+    await clickOn(editor, '.rl-ins');
+    expect(card(editor)).not.toBeNull();
+    editor.setViewMode('simple');
+    expect(card(editor)).toBeNull();
+  });
+
   it('puts a pinned card away when asked', async () => {
     const { editor, review } = mount(doc);
     await clickOn(editor, '.rl-ins');
@@ -417,5 +552,56 @@ describe('format change cards', () => {
     expect(() => button(card(editor)!, 'Reject')).toThrow('No button');
     button(card(editor)!, 'Accept').click();
     expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
+  });
+});
+
+describe('an inserted table row', () => {
+  const ROW = file(
+    '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |\n| <!--ins k3x9 row--> Pears | 5 |\n| <!--ins m2bd row--> Plums | 7 |',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+      '  m2bd: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+    ],
+  );
+  const ONE = file('| Fruit | Count |\n| ----- | ----- |\n| <!--ins k3x9 row--> Pears | 5 |', [
+    ...PEOPLE,
+    'marks:',
+    '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+  ]);
+
+  it('is described as Inserted row, and Inserted 2 rows for rows inserted together', async () => {
+    const rows = parse(ROW);
+    expect(describeChange(rows, rows.marks[0]!)).toBe('Inserted row');
+    const { editor } = mount(ROW);
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    expect(what(editor)).toBe('Inserted 2 rows');
+  });
+
+  it('opens its card on a click on the row, and Accept writes the plain row', async () => {
+    const { editor, decided } = mount(ONE, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    expect(what(editor)).toBe('Inserted row');
+    button(card(editor)!, 'Accept').click();
+    expect(decided).toEqual([]);
+    expect(editor.getDoc()).toContain('| Pears | 5 |');
+    expect(editor.getDoc()).not.toContain('<!--ins');
+  });
+
+  it('Reject takes the row out', async () => {
+    const { editor } = mount(ONE, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    button(card(editor)!, 'Reject').click();
+    expect(editor.getDoc()).not.toContain('Pears');
+    expect(editor.getDoc()).toContain('| ----- | ----- |');
+  });
+
+  it('is listed in the review bar’s changes', () => {
+    const { editor } = mount(ONE);
+    expect(editor.getUiState().changes.map((change) => change.id)).toEqual(['k3x9']);
   });
 });

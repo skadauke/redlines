@@ -321,11 +321,19 @@ describe('where the markers go (format §3)', () => {
   });
 
   it('takes no marker on a line of nothing but syntax', () => {
-    for (const text of ['***\nbar\n', '*\nbar\n']) {
+    for (const text of ['*\nbar\n']) {
       expect(
         codeOf(() => trackedFormat(text, rangeOf(text, 'bar'), bold(true), ctx())),
         text,
       ).toBe('no-legal-placement');
+    }
+  });
+
+  it('formats the text under a thematic break, which takes no lazy line (rule 2)', () => {
+    for (const text of ['***\nbar\n', '---\nbar\n', '___\nbar\n']) {
+      const after = format(text, rangeOf(text, 'bar'), bold(true));
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+      expect(accepted(after, 'm2bd'), text).toBe(text.replace('bar', '**bar**'));
     }
   });
 
@@ -1134,7 +1142,7 @@ describe('next to pending changes', () => {
     );
     const selected = rangeOf(text, 'word');
     expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
-      'Accept or reject some of the changes in this paragraph first.',
+      'pending changes in this paragraph, too many to check this change against. Accept or reject some of them first.',
     );
     // In a list, the list is what is tried: the first words of five other items deleted, which
     // leave another word to start each item, are too many to try with the new mark.
@@ -1144,7 +1152,7 @@ describe('next to pending changes', () => {
       marks,
     );
     expect(() => trackedFormat(list, rangeOf(list, 'word'), bold(true), ctx('m2bd'))).toThrow(
-      'Accept or reject some of the changes in this list first.',
+      'pending changes in this list, too many to check this change against. Accept or reject some of them first.',
     );
     // Words deleted further in are apart from the change, and are not tried (format §2.6).
     const apart = file(
@@ -1153,6 +1161,33 @@ describe('next to pending changes', () => {
     );
     expect(() =>
       trackedFormat(apart, rangeOf(apart, 'word'), bold(true), ctx('m2bd')),
+    ).not.toThrow();
+  });
+
+  it('says its own limit: five items for an inline format, six for a block change', () => {
+    const items = (n: number) =>
+      `${Array.from({ length: n }, (_, i) => `- item ${i}`).join('\n')}\n`;
+    const all = (text: string) => ({ from: 0, to: text.length });
+    for (const n of [5, 6]) {
+      const text = items(n);
+      const run = () =>
+        trackedFormat(
+          text,
+          all(text),
+          bold(true),
+          ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw', 'j5mv'),
+        );
+      if (n === 5) expect(run).not.toThrow();
+      else expect(run).toThrow('Change up to five items at a time.');
+    }
+    const six = items(6);
+    expect(() =>
+      trackedFormat(
+        six,
+        all(six),
+        { kind: 'block', to: 'ol' },
+        ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw', 'j5mv'),
+      ),
     ).not.toThrow();
   });
 

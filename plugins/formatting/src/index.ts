@@ -6,15 +6,21 @@
 
 import { isolateHistory } from '@codemirror/commands';
 import { syntaxTree } from '@codemirror/language';
-import type { EditorState } from '@codemirror/state';
+import { ChangeSet, type EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
   type Author,
   checkBoxEffect,
   type Editor,
+  markupViewFacet,
   parsedField,
+  pastHidden,
+  rectOf,
+  selectedCells,
   type EditorCommand,
+  indentItems,
+  selectionInTable,
   setViewModeEffect,
   trackedEditAnnotation,
   trackingField,
@@ -23,6 +29,7 @@ import {
 import {
   type BlockType,
   EditError,
+  applyChanges,
   type FormatOp,
   type InlineFormat,
   type Person,
@@ -64,7 +71,35 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   strike: 'Strikethrough',
   code: 'InlineCode',
 };
+/** What a format makes text, for a sentence. */
+const INLINE_WORD: Record<InlineFormat, string> = {
+  bold: 'bold',
+  italic: 'italic',
+  strike: 'struck through',
+  code: 'code',
+};
+
+/** Whether the text of a cell is inside one node of `name` from end to end (hidden markers aside). */
+function wholeIn(state: EditorState, cell: { textFrom: number; textTo: number }, name: string) {
+  const start = around(state, pastHidden(state, cell.textFrom, true), 1).find(
+    (n) => n.name === name,
+  );
+  return !!start && start.to >= pastHidden(state, cell.textTo, false);
+}
 const HEADING = /^(?:ATX|Setext)Heading([1-6])$/;
+/** What the Paragraph menu writes on an empty paragraph for a block type, as typing it would. */
+const EMPTY_SYNTAX: Partial<Record<BlockType, string>> = {
+  h1: '# ',
+  h2: '## ',
+  h3: '### ',
+  h4: '#### ',
+  h5: '##### ',
+  h6: '###### ',
+  quote: '> ',
+  ul: '- ',
+  ol: '1. ',
+  task: '- [ ] ',
+};
 /** A line that is the marker of a list item (and its box) or quote and nothing else. */
 const EMPTY_MARKER = /^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(?:\[[ xX]\][ \t]*)?$/;
 /** A list item with no text, as Return leaves one. */
@@ -208,9 +243,9 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       userEvent,
       scrollIntoView: true,
     });
-    // A tracked change made in Clean shows in Redlines, as typing does.
+    // A tracked change made in Clean shows in the markup view, as typing does.
     if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
-      view.dispatch({ effects: setViewModeEffect.of('redlines') });
+      view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return view.state.doc !== before;
   };
@@ -247,9 +282,57 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const insert = (changes: readonly TextChange[]): boolean =>
     editable() && put(changes, 'input.format', false);
 
+  /**
+   * Changes the format of the text of every selected cell, as one change and one step to undo: from
+   * the last cell to the first, each on the text the ones after it left, composed into one set.
+   */
+  const formatCells = (op: FormatOp, userEvent: string): boolean => {
+    if (!editable()) return false;
+    const cells = selectedCells(view.state).filter((cell) => cell.textFrom < cell.textTo);
+    if (cells.length === 0) return false;
+    const person = personOf(options.author);
+    const tracked = view.state.field(trackingField);
+    let text = view.state.doc.toString();
+    let total = ChangeSet.empty(text.length);
+    try {
+      for (const cell of cells.toReversed()) {
+        const range = { from: total.mapPos(cell.textFrom, -1), to: total.mapPos(cell.textTo, 1) };
+        const made = tracked
+          ? trackedFormat(text, range, op, { author: person, time: ledgerTime(new Date()) }).changes
+          : untrackedFormat(text, range, op, { author: person });
+        const step = ChangeSet.of(
+          made.map(({ from, to, insert }) => ({ from, to, insert })),
+          text.length,
+        );
+        text = applyChanges(text, made);
+        total = total.compose(step);
+      }
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      notice(error.message);
+      return false;
+    }
+    const changes: TextChange[] = [];
+    total.iterChanges((from, to, _fromB, _toB, inserted) =>
+      changes.push({ from, to, insert: inserted.toString() }),
+    );
+    return put(changes, userEvent, true);
+  };
+
   const inline =
     (format_: InlineFormat): EditorCommand['run'] =>
     () => {
+      if (rectOf(view.state)) {
+        // Cells selected: on unless the text of every cell has the format already, as for a
+        // paragraph selection; with no text in any of them there is nothing to format.
+        const texts = selectedCells(view.state).filter((cell) => cell.textFrom < cell.textTo);
+        if (texts.length === 0) {
+          notice(`There is no text in the selected cells to make ${INLINE_WORD[format_]}.`);
+          return false;
+        }
+        const on = !texts.every((cell) => wholeIn(view.state, cell, INLINE_NODE[format_]));
+        return formatCells({ kind: 'inline', format: format_, on }, `format.${format_}`);
+      }
       const range = target();
       if (!range) return false;
       if (inMarker(view.state, range)) {
@@ -263,7 +346,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const block =
     (to: BlockType, id: string): EditorCommand['run'] =>
     () => {
-      const { from, to: end } = view.state.selection.main;
+      const { from, to: end, empty } = view.state.selection.main;
+      // On an empty paragraph there is no block to change: the menu writes the block's syntax
+      // there, as typing it does (#170). Body does nothing.
+      if (empty && onEmptyLine()) {
+        const syntax = EMPTY_SYNTAX[to];
+        return syntax === undefined ? to === 'p' : putOnEmptyLine(syntax, syntax, syntax.length);
+      }
       const toggledOff = to !== 'p' && activeBlocks(view.state).has(id);
       const what = /^h[1-6]$/.test(to) ? 'a heading' : to === 'quote' ? 'a quote' : null;
       if (what && !toggledOff && atSelection(view.state).some(({ name }) => name === 'ListItem')) {
@@ -296,7 +385,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * caret `caret` characters into the block, after `find` has located its start in the document.
    * One rule for every inserted block.
    */
-  const putOnEmptyLine = (text: string, find: string, caret: number): boolean => {
+  const putOnEmptyLine = (text: string, find: string, caret: number, selected = 0): boolean => {
     const { doc } = view.state;
     const line = doc.lineAt(view.state.selection.main.head);
     const above = line.number > 1 && doc.line(line.number - 1).text.trim() !== '';
@@ -310,20 +399,29 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     ]);
     if (done) {
       const start = view.state.doc.toString().indexOf(find, line.from);
-      if (start >= 0) view.dispatch({ selection: { anchor: start + caret } });
+      if (start >= 0) {
+        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+      }
     }
     return done;
   };
 
   /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
-  const insertBlock = (text: string, find: string, caret: number): boolean => {
-    if (onEmptyLine()) return putOnEmptyLine(text, find, caret);
+  const insertBlock = (text: string, find: string, caret: number, selected = 0): boolean => {
+    if (onEmptyLine()) return putOnEmptyLine(text, find, caret, selected);
     const { doc } = view.state;
     const { head } = view.state.selection.main;
     const line = doc.lineAt(head);
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
-    return insert([{ from: at, to: at, insert: `\n\n${text}` }]);
+    const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
+    if (done && selected > 0) {
+      const start = view.state.doc.toString().indexOf(find, at);
+      if (start >= 0) {
+        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+      }
+    }
+    return done;
   };
 
   const codeBlock = (): boolean => {
@@ -417,7 +515,15 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     menu: 'format' | 'paragraph',
     group: string,
     fields: Omit<EditorCommand, 'menu' | 'group'>,
-  ): EditorCommand => ({ menu, group, ...fields });
+  ): EditorCommand => ({
+    menu,
+    group,
+    // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
+    ...(menu === 'paragraph'
+      ? { isEnabled: (state: EditorState) => !selectionInTable(state) }
+      : {}),
+    ...fields,
+  });
 
   const inlineCommand = (
     id: string,
@@ -473,8 +579,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const line = view.state.doc.lineAt(pos);
     const rest = line.text.slice(line.text.search(/\[[ xX]\]/) + 3);
     // What the library says about changes pending in the paragraph is accurate for a box too.
-    if (/^(?:Accept or reject|There are too many pending)/.test(error.message))
-      return error.message;
+    if (/^Accept or reject/.test(error.message)) return error.message;
+    const many = /^There are (\d+) pending changes in this (\w+), too many/.exec(error.message);
+    const again = error.message.endsWith('would be read again.')
+      ? ' The lines below would be read again.'
+      : '';
+    if (many) {
+      return `This box can't be changed while ${many[1]} changes in its ${many[2]} are pending. Accept or reject some of them first.${again}`;
+    }
     if (/<!--/.test(rest)) return CHANGE_IN_WAY;
     return rest.trim() === '' ? WRITE_ITEM : BOX_STUCK;
   };
@@ -518,6 +630,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'format.link',
       title: 'Link…',
       shortcut: 'Mod-k',
+      // Cells selected have no one range to link.
+      isEnabled: (state) => !rectOf(state),
       run: openLink,
       isActive: (state) => linkAt(state) !== null,
     }),
@@ -526,6 +640,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Clear Formatting',
       shortcut: 'Mod-\\',
       run: () => {
+        if (rectOf(view.state)) return formatCells({ kind: 'clear' }, 'format.clear');
         const range = target();
         return !!range && format(range, { kind: 'clear' }, 'format.clear');
       },
@@ -550,7 +665,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      run: () => insertBlock(TABLE, '| Column', 2),
+      // The first header cell's text is selected, so that typing names the column.
+      run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
     }),
     command('paragraph', 'insert', {
       id: 'block.rule',
@@ -562,6 +678,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Indent',
       shortcut: 'Mod-]',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, false)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: 1 }, 'format.indent');
       },
@@ -571,6 +689,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Outdent',
       shortcut: 'Mod-[',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, true)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: -1 }, 'format.indent');
       },

@@ -11,38 +11,33 @@ import {
   type EditorState,
   type Extension,
   type Line,
-  Prec,
   type Range,
-  type SelectionRange,
   StateField,
 } from '@codemirror/state';
-import {
-  type Command,
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  keymap,
-  WidgetType,
-} from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
-import { pastHidden } from '../tracked/decorations.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
-import { isTableWidget, tableDecoration } from './table.ts';
 import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const HIDDEN = Decoration.replace({});
 
+/**
+ * A hard line break's syntax (a backslash, or two or more spaces, in front of the line break),
+ * hidden, and stepped over: the break is one character for the caret and for Backspace.
+ */
+const HARD_BREAK = Decoration.replace({ hardBreak: true });
+
 /** Text the spell check leaves alone. */
 const UNCHECKED = { spellcheck: 'false' };
 const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
-const BULLETS = ['•', '◦', '▪'] as const;
+export const BULLETS = ['•', '◦', '▪'] as const;
 
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {
@@ -220,6 +215,20 @@ class Builder {
   }
 }
 
+/**
+ * Whether a heading or a list item is only its mark, with nothing after it, not even the space:
+ * a `#` or a `-` being typed in an empty paragraph, which becomes a block on the space, as in Docs
+ * (design: block editing, "Typed syntax"). Until then the line is drawn as body text, so that it
+ * does not change kind with each character.
+ */
+function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
+  const first = node.getChild(mark);
+  if (!first) return false;
+  const line = state.doc.lineAt(first.from);
+  const rest = state.sliceDoc(first.to, line.to).replace(/<!--[^]*?-->/g, '');
+  return rest === '' && node.to <= line.to;
+}
+
 function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
   const line = b.state.doc.lineAt(node.from);
   b.lineClass(line, `rl-h${level}`);
@@ -238,6 +247,15 @@ function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
     } else {
       b.syntax(Math.max(hiddenTo, spaceBefore(line, mark.from)), mark.to, false);
     }
+  }
+}
+
+/** A hard line break: its syntax is hidden (the line break itself is drawn as the break). */
+function hardBreak(b: Builder, node: SyntaxNode): void {
+  // The node ends with the line break; the syntax is what comes before it.
+  const end = node.to - 1;
+  if (end > node.from && b.state.sliceDoc(end, node.to) === '\n') {
+    b.push(HARD_BREAK.range(node.from, end));
   }
 }
 
@@ -388,17 +406,6 @@ function image(b: Builder, node: SyntaxNode): void {
   if (decoration) b.push(decoration.range(node.from, node.to));
 }
 
-/** Returns false for a table drawn as a widget, whose source needs no other decorations. */
-function table(b: Builder, node: SyntaxNode): boolean {
-  const { doc } = b.state;
-  const first = doc.lineAt(node.from);
-  const last = doc.lineAt(node.to);
-  // A table inside a quote or list item stays source: its lines start with their prefix.
-  if (first.from !== node.from || touches(b.state, first.from, last.to)) return true;
-  b.push(tableDecoration(b.state, node, first.from, last.to));
-  return false;
-}
-
 /**
  * YAML front matter (`FrontMatter`, a node of the parse, #154), a `---` line that opens the
  * document through a closing `---` or `...` line: a dimmed monospace block, its delimiters hidden
@@ -449,16 +456,19 @@ export function previewDecorations(state: EditorState): DecorationSet {
         inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
         return name !== 'InlineCode';
       }
-      if (name.startsWith('ATXHeading')) atxHeading(b, node, name.slice(-1));
-      else if (name.startsWith('SetextHeading')) setextHeading(b, node, name.slice(-1));
+      if (name.startsWith('ATXHeading')) {
+        if (!loneMark(state, node, 'HeaderMark')) atxHeading(b, node, name.slice(-1));
+      } else if (name.startsWith('SetextHeading')) setextHeading(b, node, name.slice(-1));
       else if (name === 'Blockquote')
         b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
       else if (name === 'QuoteMark') quoteMark(b, node);
       else if (name === 'OrderedList' && live) countedNumbers(state, node, numbers);
-      else if (name === 'ListItem') listItem(b, node, numbers);
-      else if (name === 'HorizontalRule') horizontalRule(b, node);
+      else if (name === 'ListItem') {
+        if (!loneMark(state, node, 'ListMark')) listItem(b, node, numbers);
+      } else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
+      else if (name === 'HardBreak') hardBreak(b, node);
       else if (name === 'Image') {
         image(b, node);
         return false;
@@ -477,7 +487,6 @@ export function previewDecorations(state: EditorState): DecorationSet {
           : entityDecoration(state, node.from, node.to);
         if (decoration) b.push(decoration.range(node.from, node.to));
       } else if (name === 'TableDelimiter') b.syntax(node.from, node.to, true);
-      else if (name === 'Table') return table(b, node);
       else if (name === 'FencedCode' || name === 'CodeBlock') {
         codeBlock(b, node);
         return false;
@@ -497,7 +506,6 @@ export function previewDecorations(state: EditorState): DecorationSet {
 const previewField = StateField.define<DecorationSet>({
   create: previewDecorations,
   update(decorations, tr) {
-    // Tables draw tracked changes, which look different in each view.
     const changed =
       tr.docChanged ||
       tr.selection ||
@@ -507,78 +515,27 @@ const previewField = StateField.define<DecorationSet>({
       tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
     return changed ? previewDecorations(tr.state) : decorations;
   },
-  // From a state field rather than a view plugin, because table widgets replace whole lines.
-  provide: (field) => EditorView.decorations.from(field),
+  // From a state field rather than a view plugin, because it draws block decorations.
+  provide: (field) => [
+    EditorView.decorations.from(field),
+    EditorView.atomicRanges.of((view) => hardBreaksOf(view.state.field(field))),
+  ],
 });
 
-/** The rendered table whose first line starts at `pos` (`edge` 'from') or whose last ends there. */
-function renderedTable(
-  state: EditorState,
-  pos: number,
-  edge: 'from' | 'to',
-): { from: number; to: number } | null {
-  for (let it = state.field(previewField).iter(pos); it.value && it.from <= pos; it.next()) {
-    // The table's widget, not any block decoration: hidden lines are block decorations too.
-    const widget = (it.value.spec as { widget?: unknown }).widget;
-    if (isTableWidget(widget) && (edge === 'from' ? it.from : it.to) === pos) {
-      return { from: it.from, to: it.to };
-    }
-  }
-  return null;
-}
-
-/** Whether the caret is on its line's last visual row (going down) or its first (going up). */
-function onEdgeRow(view: EditorView, range: SelectionRange, line: Line, down: boolean): boolean {
-  if (!line.length) return true;
-  return view.moveToLineBoundary(range, down, true).head === (down ? line.to : line.from);
-}
-
-/**
- * An arrow key that would jump over a rendered table enters it instead: down or right from just
- * above puts the caret at the table's start, up or left from just below at its end. The table
- * then shows its source, as it does for a click.
- */
-function enterTable(key: 'ArrowDown' | 'ArrowRight' | 'ArrowUp' | 'ArrowLeft'): Command {
-  const forward = key === 'ArrowDown' || key === 'ArrowRight';
-  return (view) => {
-    const { state } = view;
-    const range = state.selection.main;
-    if (state.selection.ranges.length > 1 || !range.empty) return false;
-    const line = state.doc.lineAt(range.head);
-    // Past the blank lines between the line and the table, which are hidden.
-    const after = pastHidden(state, line.to, true);
-    const before = pastHidden(state, line.from, false);
-    const table = forward
-      ? after < state.doc.length &&
-        renderedTable(state, after === line.to ? line.to + 1 : after, 'from')
-      : before > 0 && renderedTable(state, before === line.from ? line.from - 1 : before, 'to');
-    if (!table) return false;
-    const beside =
-      key === 'ArrowRight'
-        ? range.head === line.to
-        : key === 'ArrowLeft'
-          ? range.head === line.from
-          : onEdgeRow(view, range, line, forward);
-    if (!beside) return false;
-    view.dispatch({
-      selection: { anchor: forward ? table.from : table.to },
-      scrollIntoView: true,
-      userEvent: 'select',
+/** The hard breaks' syntax among a set of decorations, as what the caret steps over. */
+const stepped = new WeakMap<DecorationSet, DecorationSet>();
+function hardBreaksOf(decorations: DecorationSet): DecorationSet {
+  let found = stepped.get(decorations);
+  if (!found) {
+    found = decorations.update({
+      filter: (_from, _to, value) => (value.spec as { hardBreak?: true }).hardBreak === true,
     });
-    return true;
-  };
+    stepped.set(decorations, found);
+  }
+  return found;
 }
-
-const tableKeys = Prec.high(
-  keymap.of(
-    (['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'] as const).map((key) => ({
-      key,
-      run: enterTable(key),
-    })),
-  ),
-);
 
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField, tableKeys];
+  return [previewField];
 }

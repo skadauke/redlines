@@ -15,6 +15,8 @@ import {
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
+  holdViewAnnotation,
+  markupViewFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -23,6 +25,7 @@ import {
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
+import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
   atBlockEnd,
@@ -33,10 +36,14 @@ import {
   lineText,
   planArrowLeft,
   planArrowRight,
+  planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
+import { blockAt } from './structure.ts';
+import { planTab } from './tab.ts';
 import {
   closeOpen,
+  openBlock,
   openAnnotation,
   type OpenRequest,
   requestedLine,
@@ -49,8 +56,10 @@ import {
 type KeyCaret =
   | { at: number }
   | { before: number }
+  | { range: { anchor: number; head: number } }
   | { inOpen: OpenRequest }
-  | { afterText: { from: number; text: string } };
+  | { afterText: { from: number; text: string } }
+  | { onLine: { at: number; down: number; col: number } };
 
 const caretAnnotation = Annotation.define<KeyCaret>();
 
@@ -90,9 +99,26 @@ const keyCaret = Prec.highest(
     const caret = tr.annotation(caretAnnotation);
     if (caret === undefined || !tr.docChanged) return tr;
     let pos: number;
+    if ('range' in caret) {
+      // Each end stays with its text: the start of the selection after what is written at it, the
+      // end before it.
+      const { anchor, head } = caret.range;
+      const forward = anchor <= head;
+      const a = tr.changes.mapPos(anchor, forward ? 1 : -1);
+      const h = tr.changes.mapPos(head, forward ? -1 : 1);
+      const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
+      return [tr, { selection, sequential: true }];
+    }
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('inOpen' in caret) {
+    else if ('onLine' in caret) {
+      const line = requestedLine(tr, {
+        at: caret.onLine.at,
+        assoc: -1,
+        down: caret.onLine.down,
+      });
+      pos = line.from + caret.onLine.col;
+    } else if ('inOpen' in caret) {
       // After the line's container syntax, in front of any markers on it.
       const line = requestedLine(tr, caret.inOpen);
       pos = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
@@ -132,23 +158,27 @@ export function applyKeyEdit(
   // A step that the next joins is isolated only from the step before it.
   const isolate = edit.isolateBefore ? 'before' : edit.join ? 'after' : 'full';
   const annotations: Annotation<unknown>[] = [isolateHistory.of(isolate)];
+  if (edit.join && !edit.isolateBefore) annotations.push(joinsStep.of(true));
   if (edit.record ?? edit.userEvent.startsWith('input.break')) {
     annotations.push(returnAnnotation.of(true));
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
+  if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
-  if (edit.caretBefore !== undefined) {
+  if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
+  else if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
     annotations.push(caretAnnotation.of({ inOpen: edit.open }));
+  else if (edit.caretOnLine) annotations.push(caretAnnotation.of({ onLine: edit.caretOnLine }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));
   }
   if (edit.final) {
     // A block change as the format wrote it: final, markers and all. Made in Clean, it shows in
-    // Redlines, as typing's tracked changes do.
+    // the markup view, as typing's tracked changes do.
     annotations.push(trackedEditAnnotation.of(true));
     const before = view.state.doc;
     const tracked = view.state.field(trackingField, false);
@@ -159,7 +189,7 @@ export function applyKeyEdit(
       scrollIntoView: true,
     });
     if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
-      view.dispatch({ effects: setViewModeEffect.of('redlines') });
+      view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return true;
   }
@@ -183,7 +213,39 @@ function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }
 
+/**
+ * Takes the open empty line back, from the record or, with none, as leaving it does, the caret at
+ * the end of the text above. False when it can't go.
+ */
+function takeBackEmptyLine(view: EditorView): boolean {
+  // The Return after it joins its step: one step to undo.
+  if (takeBack(view, 'delete.selection', undefined, 'before')) return true;
+  const { doc } = view.state;
+  const open = openBlock(view.state);
+  if (!open) return false;
+  const above = doc.line(doc.lineAt(open.empty.from).number - 1);
+  const syntax = /(?:\\| {2,})$/.exec(above.text)?.[0].length ?? 0;
+  return closeOpen(view, EditorSelection.single(above.to - syntax));
+}
+
 const returnKey = blockKey((view) => {
+  // In the open empty item Markdown can't hold at its level: out one level, where it can.
+  const open = openBlock(view.state);
+  const { main } = view.state.selection;
+  if (open?.item && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    const out = planTab(view.state, true);
+    if (out) return applyKeyEdit(view, out);
+  }
+  if (open?.line && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    // On the empty line Shift-Return opened: that is taken back, and Return opens an empty
+    // paragraph below the block (two steps: replacing the line break in one edit would leave the
+    // split pending).
+    if (!takeBackEmptyLine(view)) return true;
+    const again = planReturn(view.state);
+    return again
+      ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
+      : true;
+  }
   const over = planSelectionReturn(view.state);
   if (over) {
     const before = view.state.doc;
@@ -215,7 +277,7 @@ const shiftReturnKey = blockKey((view) => {
     if (view.state.selection.ranges.length > 1) return false;
     const before = view.state.doc;
     // Refused whole, before anything is deleted, where the line break would be refused after it
-    // (inside a heading, in a table cell).
+    // (inside a heading).
     const deleted = view.state.update({
       changes: [{ from: main.from, to: main.to }],
       selection: EditorSelection.single(main.from),
@@ -261,11 +323,67 @@ const deleteKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/** The kinds of block in which Tab does nothing, and keeps the focus in the document. */
+const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition']);
+
+/**
+ * Tab and Shift-Tab: in a list item the item moves (`planTab`); in a paragraph, a heading or a
+ * quote nothing does, and the focus stays in the document, as in a word processor, with Escape and
+ * then Tab (CodeMirror's `tabFocusMode`, which keydown handles before any key) or ⇧⌥M to leave.
+ * The blocks that give Tab a meaning of their own (code, tables, front matter) decline here.
+ */
+const tabKey = (outdent: boolean) =>
+  blockKey((view) => {
+    if (view.state.selection.ranges.length > 1) return false;
+    const edit = planTab(view.state, outdent);
+    if (edit) return applyKeyEdit(view, edit);
+    const block = blockAt(view.state, view.state.selection.main.head);
+    return !!block && TAB_DOES_NOTHING.has(block.kind);
+  });
+
+/**
+ * Indents or outdents the list items at the selection, as Tab and Shift-Tab do (the Paragraph
+ * menu's Indent and Outdent, ⌘] and ⌘[). False where the selection isn't in a list item.
+ */
+export function indentItems(view: EditorView, outdent: boolean): boolean {
+  const edit = planTab(view.state, outdent);
+  return edit ? applyKeyEdit(view, edit) : false;
+}
+
 /** A key that only moves the caret, as `plan` says, or declines. */
 const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
   blockKey((view) => {
     const edit = plan(view.state);
     return edit ? applyKeyEdit(view, edit) : false;
+  });
+
+/** ⌥↑ and ⌥↓ by paragraph, and with ⇧ selecting: never CodeMirror's, which move the source line. */
+const paragraphKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const edit = planParagraphMotion(view.state, forward, extend);
+    return edit ? applyKeyEdit(view, edit) : true;
+  });
+
+/**
+ * ⌥← and ⌥→ (with ⇧, selecting): by word, and at a block's edge across its break, as they cross a
+ * line break in other Mac apps: the word move goes on from the end of the text above, or the start
+ * of the text below, never resting in the hidden lines between. Inside the text it is CodeMirror's.
+ */
+const groupKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const { state } = view;
+    if (state.selection.ranges.length > 1) return false;
+    const { anchor, head } = state.selection.main;
+    const crossing = (forward ? planArrowRight : planArrowLeft)(
+      state.update({ selection: EditorSelection.cursor(head) }).state,
+    );
+    if (!crossing) return false;
+    const from = crossing.selection.main.head;
+    const at = view.moveByGroup(EditorSelection.cursor(from), forward).head;
+    return applyKeyEdit(view, {
+      ...crossing,
+      selection: extend ? EditorSelection.single(anchor, at) : EditorSelection.single(at),
+    });
   });
 
 /** ⌘← and ⌃A, ⌘→ and ⌃E: the visual line's start or end, the block's text on its first or last row. */
@@ -361,6 +479,16 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
+        { key: 'Alt-ArrowUp', run: paragraphKey(false, false) },
+        { key: 'Alt-ArrowDown', run: paragraphKey(true, false) },
+        { key: 'Shift-Alt-ArrowUp', run: paragraphKey(false, true) },
+        { key: 'Shift-Alt-ArrowDown', run: paragraphKey(true, true) },
+        { key: 'Alt-ArrowLeft', run: groupKey(false, false) },
+        { key: 'Alt-ArrowRight', run: groupKey(true, false) },
+        { key: 'Shift-Alt-ArrowLeft', run: groupKey(false, true) },
+        { key: 'Shift-Alt-ArrowRight', run: groupKey(true, true) },
+        { key: 'Tab', run: tabKey(false) },
+        { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
         // The Mac's own keys, CodeMirror's `emacsStyleKeymap` and its ⌘ line keys.

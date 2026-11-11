@@ -189,8 +189,9 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
-      ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Simple', 'Alt+CmdOrCtrl+2'],
+      ['Redlines', 'Alt+CmdOrCtrl+3'],
+      ['Raw', 'Alt+CmdOrCtrl+4'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -291,6 +292,10 @@ describe('the menu model', () => {
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
+    const simple = actionRow(model, 'View', 'Simple');
+    expect(simple.checked?.(state({ view: 'simple' }))).toBe(true);
+    expect(simple.checked?.(state({ view: 'redlines' }))).toBe(false);
+    expect(simple.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
     // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
     expect(redlines.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
 
@@ -371,6 +376,12 @@ describe('the menu model', () => {
           shortcut: 'Mod-b',
         }),
         command('block.h1', { title: 'Heading 1', menu: 'paragraph', shortcut: 'Mod-1' }),
+        command('table.insertRowBelow', {
+          title: 'Insert Row Below',
+          menu: 'table',
+          shortcut: 'Mod-Enter',
+          isEnabled: () => false,
+        }),
         command('format.italic', { title: 'Italic', menu: 'format', group: 'inline' }),
         command('format.link', {
           title: 'Link…',
@@ -394,6 +405,7 @@ describe('the menu model', () => {
       'Edit',
       'Format',
       'Paragraph',
+      'Table',
       'View',
       'Review',
       'Window',
@@ -408,6 +420,7 @@ describe('the menu model', () => {
       ['Clear Formatting', undefined],
     ]);
     expect(readsAll(model, 'Paragraph')).toEqual([['Heading 1', 'CmdOrCtrl+1']]);
+    expect(readsAll(model, 'Table')).toEqual([['Insert Row Below', 'CmdOrCtrl+Enter']]);
     // After what the menu already holds, set apart from it.
     expect(readsAll(model, 'Edit').slice(-3)).toEqual([
       'SelectAll',

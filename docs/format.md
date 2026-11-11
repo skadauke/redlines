@@ -269,6 +269,7 @@ applies its inverse:
 | `was=TYPE`                 | Block type changed; `TYPE` is the old type                                                    |
 | `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
 | `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
+| `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row                               |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
@@ -487,6 +488,80 @@ once a deletion next to it is decided, and a decision that one order refuses wor
 mark of the change's own paragraph is tried, as it reads with the change, and every state of the
 marks apart is shown to read as the state with them pending.
 
+**Marks apart for block changes.** A change of a block (its type, an item indented or outdented, a
+box checked or unchecked) leaves the marks that are apart from it pending too, in a list under
+review: words inserted, deleted, replaced or highlighted inside the text of other items, after the
+first character of the item's text. A mark is apart from a block change when it is apart as above,
+taking the edits of the change as those it makes. A mark that a decision could make reach a line's
+start or a line break (one at an item's first character, or one that holds a line break, a backtick,
+`<`, `>`, a backslash or `|`) is tried with the change, and counts toward the limit of the marks to
+try (rule 5, above): the refusals' numbers are of the marks tried, the new marks among them. So Tab
+in a list in which eight words are pending, none of them at an item's first character, is written;
+with six that a decision could make reach a line's start it is refused, in the words above, with
+Track Changes on, and with seven with it off.
+
+The proof of the marks apart above, for an inline change, does not carry over as it stands. An
+inline change writes inside a paragraph, and no line starts differently for it. A block change
+writes in the lines of its blocks: the syntax at the start of a line (a bullet, a number, a box, a
+`#`, a `> `, the indentation of an item and of the items in it), its opener alone on a line or after
+the bullet, and its closer at the end of the block. So the reading of the lines around it can
+change, and three things are different.
+
+- What the change writes counts as what changes: every edit it makes, in the lines of its blocks,
+  those of the items nested in an item it moves and of the items that an outdent makes its children
+  included. A paragraph that meets one is not apart. A line whose prefix, or first character, an
+  edit writes is no line whose start is known, and the reading of list items (the rule for a list
+  item above) takes it for none, wherever it consults it.
+- A paragraph is not apart where it stands against a line that the change writes without a line it
+  is sure of in between. The paragraph after a written item is apart where its own line starts an
+  item whatever stands above it: a bullet, or the number 1, less than four columns in, with its
+  prefix and its first character unwritten and unheld; or where a blank line that no mark or edit
+  touches is above it. The paragraph before a written item is apart only where such a blank line, or
+  such an item, stands after it: a line that the change writes is neither. So the marks of the item
+  right above the one that changes are tried, and so are those of an item right under it that starts
+  with a number other than 1, which reads its start from the lines above it; the others are left
+  pending.
+- A line that no mark tried and no edit holds reads in every state as it was written. Deciding a
+  mark of the walk writes only where its own markers stand or where its edits were: accepting takes
+  its markers away, and rejecting puts back what its edits took, the old syntax, the old indentation
+  and the old marker, in the lines it wrote and no others. So a line that nothing of this holds is
+  not written in any state, and a blank line that nothing touches is blank in every state.
+
+Why no decision of the marks apart can change what the walk finds. Take a state of the walk, in
+which the new marks and the marks tried are decided in some way and the marks apart are pending, and
+a mark apart in it, with its paragraph. (1) Its paragraph begins and ends where it does in every
+state. Its first line is the first line of the block that is tried, or follows a blank line that
+nothing touches, or starts an item whose prefix and first character nothing writes: such a line is
+an item whatever stands above it, unless that makes it code, a fence or an HTML block, and the
+change writes none of these (its syntax is the block's own, an opener that closes on its own line,
+an item's marker), nor can a state of the marks tried, which the walk reads as it goes. The line
+after its last is a blank line that nothing touches, or an item of this kind, which interrupts the
+paragraph, or, for a row, a row. A line that reads its start from the lines above it (a number other
+than 1, a line under a blank line) consults only lines whose prefix no edit writes, down to one that
+is an item by itself, so none of what it consults is a line of the change. (2) Its lines are no line
+of a block of the change, and no state of the change writes in one of them: the edits and the
+decisions of the change are in the lines of its own blocks. (3) The rest is the proof of the marks
+apart above. Deciding a mark apart takes its markers away and leaves its text, or puts back its old
+text, so it always works, alike in the file with the change and without it, and changes the words of
+its own paragraph, which begins and ends as (1) says, and nothing else. The walk checks each state
+as it goes, piece by piece, the paragraphs of marks apart one by one and the runs of the other
+paragraphs between them, and where a state reads otherwise than the same state without the change,
+or its pieces are alike only all together, it tries every mark instead. The check before the walk
+(the change reads as the file without it) is made with the marks apart pending too, so that a line
+which the change makes more of the paragraph before it, as lazy text, can't go unseen: the pieces
+differ, and the change is refused, as it is for any change.
+
+What the proof doesn't give. A numbered item with a number other than 1 right under a line that the
+change writes has no known start, so its marks are tried: in a numbered list under review, Tab on an
+item counts the marks of the items below it, and the list is refused with fewer pending changes than
+a bulleted one. The empty item that Markdown can't hold, which the person's own Tab or Return made
+(design: block editing, "The empty paragraph"), is open and is not in the file. The editor gives a
+block change the document with it, where it is a line that starts no known block (an empty item under
+a line of text), so every mark of the list is tried: the change leaves that item as it is, and a box
+clicked in a list with more than five changes pending while it is open is refused, in the words
+above. Where the limit applies because of either, the refusal ends with a sentence that says why:
+"The lines below would be read again."
+
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
 would show that syntax as words. Text in an HTML block or an indented code block is not formatted, as
@@ -565,8 +640,12 @@ away.
   digits, and rejecting refuses an indentation that would make the item an indented code block. A
   value that isn't one of these is kept as written and not decided, as an inline operation's is.
 - A paragraph, a heading, a list item or a block quote changes into another of these at the top
-  level, when it stands on its own, with a blank line or the start or end of the file before and
-  after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
+  level, when it stands on its own: before it a blank line, the start of the file, or a heading, a
+  thematic break or the closing fence of a fenced code block, which take no lazy line, and after it
+  a blank line or the end of the file. Markdown would otherwise read the new block into the one
+  next to it, as a lazy line. The same holds in the original text, with every pending change
+  rejected. A paragraph under a heading, a thematic break or a closing fence is a block of its own,
+  also for the marks of other changes (the line is not a line of the block above). A
   heading is one line, so a paragraph of more than one line doesn't become one. A quote of more than
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
@@ -611,17 +690,37 @@ away.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
   except where a numbered item after it and the lines under it would then be read into it, or where
   the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
-  start at 1 can't interrupt text: indenting or outdenting one right after text is refused. Changing
+  start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
+  an item that has no item under it when its old sibling, numbered otherwise than 1, would become
+  its first child right under its text; and so is indenting
+  one right after text where it would not be the first of a new sublist, unless the sublist above it
+  is numbered with the same delimiter, which it joins with the number it has. Indenting one that
+  becomes the first of a new sublist writes `1.` (the mark keeps the old number, below). Changing
   one item of a numbered list can renumber the items after it, as Markdown reads them; that is no
   change of their text.
 - Its markers go only where §3.1 lets a marker go: not after a backslash at the end of a line, not
   between a hard break and the line end, and not inside a link, a tag or a code span.
 - Indenting a list item moves it, and the lines under it, to the content column of the item before
-  it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
+  it, as that item's child. Outdenting moves it to its parent's column. In a quote (or a quote in a quote) the item is read behind its `>` markers: its indentation and
+  `N` are the spaces after them, each line moves by the same number after its own markers, and a
+  list whose `>` has no space after it is refused (the lines would need one the quote doesn't have).
+  The mark is `was=indent=N`,
   where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
   and closes at the end of the item's last line, its children included. Rejecting moves every line of
   the mark back by the same number of spaces. The first item of a list isn't indented, and lines
-  indented with tabs, or by less than an outdent takes away, are refused.
+  indented with tabs, or by less than an outdent takes away, are refused. A numbered item that
+  doesn't start at 1 and moves in right under the text of the item above it becomes the first
+  item of a new sublist, which Markdown reads as text unless it is numbered 1: the item is written
+  `1.`, with the same delimiter and spaces, and the same mark keeps the number it had,
+  `was=indent=0 was=ol=3.\x20`. Rejecting moves the lines back and writes that number again;
+  accepting takes the mark away and keeps `1.`. The change is one change of one list item: its
+  view name is Indent, and outdenting it again, with the mark still pending, takes the mark away.
+- The region of a block change is the list CommonMark reads, which is what the proof of decisions
+  tries: a list ends, across blank lines, where the next item's marker is of another type (another
+  bullet character, or `.` and `)`), so a bulleted, a numbered and a task list one after another
+  are not one region (a task list written with the same bullet as the list before it is one list).
+  Where a pending change stands at either marker, or in the blank lines between them, the two
+  are kept as one, as a decision of that change could make them one list.
 - Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
   (`-check=X` when it was `[X]`), and accepting takes the marker away.
@@ -661,8 +760,20 @@ away.
   that is decided, and a range over a block that can't change refuses the whole change. In the lines
   right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
-  order, as above: more than five items of one list at once are too many to try. A block change
-  leaves no mark apart: it changes the lines of its block.
+  order, as above. What limits a change is the number of marks to try, the new ones and the pending
+  changes of its region, and a region longer than about a thousand characters counts more, so these
+  numbers hold for a short list. An inline format works with four other pending changes in its
+  region and is refused with five, and with five items of one list at once and not six ("Change up
+  to five items at a time."). A block change has a larger budget, and leaves the marks apart from
+  it pending too (Marks apart for block changes, above). Of the marks that it tries, with Track
+  Changes on, where it adds a mark to try, it works with five other pending changes in its list
+  and is refused with six; with it off, where it adds none, it works with six and is refused with
+  seven; a change of up to six items at once is checked, and seven are too many ("Change up to six
+  items at a time."). A refusal for too many marks says how many stand in the region and where:
+  "There are 7 pending changes in this list, too many to check this change against. Accept or
+  reject some of them first."; a box click says "This box can't be changed while 7 changes in its
+  list are pending…". Whether a change is in the region counts every pending change there, apart
+  or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
 ## 3. Where markers go
@@ -1209,7 +1320,12 @@ A new paragraph.<!--split v2pc-->
   it is never written plain. Whether a line is in a quote is read from the first line of its block
   down: a `>` at the start of a line in an HTML block or in code is text of that block, and where
   the quote holds an HTML block, a fence or indented code, what a blank line does there is not read
-  either; there the edit is tracked as anywhere else. At the end of the last item of a list, Enter
+  either; there the edit is tracked as anywhere else. Only a fence or a raw block still open at the
+  line is code there, and only the lines that CommonMark starts an HTML block with (a tag of a
+  block element, a comment, a declaration, a tag alone on its line) are raw: a quote that holds a
+  closed fenced block, or an HTML block that a blank line of the quote ended, or a `<` that is an
+  autolink or a tag with text after it, is an ordinary quote, and Enter at the end of its last
+  line is plain (#130). At the end of the last item of a list, Enter
   types a bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart: with a blank line between them, or
@@ -1230,6 +1346,14 @@ A new paragraph.<!--split v2pc-->
   space of a blank line, but for the indentation in front of a quote marker, and over the quote
   markers of a blank line that goes on from the line above in its quote, one quote at a time: at the
   end of a quote, the quote ends a line earlier.
+- Taking out a whole run of a quote's blank lines at once, in one edit, is plain too: the line
+  breaks, the quote markers and the spaces of lines that have nothing else on them, at the end of
+  a line of the quote's text, where the blocks around them read the same without the run as with
+  it (the editor's Return in the empty paragraph at the end of a quote, a quote in a quote or in a
+  list item, writes them so). Backspace over them one quote at a time is the same text. Where the
+  quote goes on after the run, or the first line of it opens a quote of its own, the edit is
+  tracked or refused as below. The editor types a paragraph break as its two line breaks at once;
+  it is read as Enter twice is.
 - Where the quote goes on after such a line, taking its quote markers out parts the quote in two,
   which a reader sees, and no marker can stand in a prefix. Where the line is the quote's only blank
   line there, that is refused. Where it is one of a run of blank lines of the same quote, as deep,
@@ -1404,6 +1528,15 @@ been simulated yet.
 
 Text in cells takes inline marks, as anywhere else.
 
+**A table typed with Track Changes on.** The editor's Return at the end of a line of cells
+(`| a | b |`) alone in a paragraph writes the table's delimiter row and an empty first row, as one
+edit. Where the line is the author's own pending insertion, the two rows are written into that
+insertion as its text, with no split and no mark of their own: a table is no paragraph, and its
+rows are not paragraph breaks. Where the line is anything else (the file's own, or another person's),
+Return there is the ordinary Return, a new paragraph, and the line stays a paragraph: with Track
+Changes on only Paragraph › Table makes a table. With Track Changes off the rows are written
+as typed.
+
 **An inserted row** carries a marker at the start of its first cell, followed by one space:
 
 ```markdown
@@ -1430,6 +1563,8 @@ Text in cells takes inline marks, as anywhere else.
 **An inserted column** carries `<!--ins ID col-->` and one space at the start of its
 header cell. Its body cells and delimiter cell carry no marks. Rejecting it removes every cell of
 the column and its delimiter cell.
+Text typed in the cells of your own inserted column is part of its insertion too, and writes no
+marks: rejecting the column removes it.
 
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:
@@ -1466,12 +1601,49 @@ it, one per line:
 
 **Other table rules:**
 
-- Rows that hold markers have a leading `|`.
+- Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
+  that has none, because a change begins in its first cell, the editor writes a plain `| ` in
+  front of it first, in both versions, so that nothing reads differently. This holds for a row with
+  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
+  is still refused.
+- **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
+  a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
+  unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
+  "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
+  the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
+  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
+  front of the table's first row as it does in front of a paragraph's first line, and everything
+  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
+  of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
+  can unmake the table, as an edit of any line can unmake what it is).
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
 - A moved row or column is written at its new place with the in-row marker, and as a deletion at
   its old place. The ledger links the two with `move`.
+- Below a table, the deletion lines come first, in their order, then the closers of marks that end
+  with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
+  below the last row goes above all of them, at the end of that row.
+- A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
+  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  re-padded.
+- **Rows and columns don't change together,** because a deleted row keeps its cells as written and a
+  deleted column its cells top to bottom, so a change on the other axis while it is pending would
+  leave it the wrong number of cells. With Track Changes on, a pending change allows:
+
+  | Pending in the table      | Allowed                                   |
+  | ------------------------- | ----------------------------------------- |
+  | Rows inserted             | Any row change; inserting columns         |
+  | Rows deleted or moved     | Any row change                            |
+  | Columns inserted          | Any column change; inserting rows         |
+  | Columns deleted or moved  | Any column change                         |
+  | An alignment change       | Any row change                            |
+
+  Anything else is refused, and the refusal says what to decide first: "Accept or reject the column
+  changes in this table first." (or the row changes, or the alignment change). With Track Changes
+  off the same pairs are refused where a pending deletion or move would be left the wrong number of
+  cells, and the table allows what it allows with Track Changes on otherwise.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
@@ -1535,6 +1707,9 @@ The serializer always writes the same bytes for the same state:
 - adjacent deletions by the same author in one editing burst merge into one mark;
 - a change that covers whole blocks uses the block forms of §3.4;
 - whole-block insertions use own-line markers.
+- a row inserted into a table is written in the row form of §3.7, in the table's padding style;
+- text typed in a row its author inserted is written plain: it is part of the row's insertion, and
+  has no mark of its own (§3.7).
 
 The parser accepts the other valid forms, and warns.
 
@@ -1620,6 +1795,13 @@ insertion"), and the way around: accepting or rejecting that change first, or, w
 allowed, making the edit with Track Changes on, which writes it as a change of its own. Two line
 breaks side by side are refused with Track Changes on too, so that refusal offers only the first. In
 Raw, with Track Changes off, the editor edits the source as written, markers included.
+
+**Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
+no ledger entry, in the table's padding style (§3.7), and is refused where a pending column deletion
+or move would be left the wrong number of cells (the table of §3.7). Text typed in a row or a column
+that is pending insertion is part of that insertion, as §3.7 says, so it goes if the row or column is
+rejected: the original has no cell to put it in, and so §3.10's rule that typed text is never part
+of a pending change does not hold there.
 
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.
@@ -2225,6 +2407,27 @@ The library derives three read-only views of a document. None is ever stored.
   the ones it doesn't expect; a thread that is open has no such line. Replying to a resolved
   thread reopens it (§4), so the line is gone from the next view.
 
+  An inserted row (§3.7) is in the newest view without its marker and the space after it, and in the
+  original view not at all, its line break with it; the positions of the table's deleted rows move
+  up. In the review view each cell of the row that has text is inserted text, and a note follows the
+  row (another person's change inside a cell stands between pieces of its inserted text, `{++Plu++}{++x++}[m2bd bo]{++ms++}`,
+  as CriticMarkup has no change inside another):
+
+  ```text
+  | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}
+  ```
+
+  Accepting an inserted row removes the marker, and the space after it when text follows, so the
+  cell is as wide as it was written. Rejecting it removes the row with everything in it, other
+  people's changes included, and the line break before it, and moves the positions of the table's
+  deleted rows up. A new header is rejected by writing the delimiter row after the old header
+  again. Rejecting a row that holds a comment is refused for now ("Delete or resolve the comments
+  in this row first."): where the comment would stand is decided with deleted rows (§3.7).
+  Rejecting a row in a table that has row deletions pending is refused too ("Accept or reject the
+  row deletions in this table first."): the original view does not put a deleted row back in the
+  table yet. Reject all decides every other change and leaves such a row pending; Accept all
+  accepts it.
+
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
 
@@ -2386,6 +2589,9 @@ R users can still get full fidelity: the R package can run the TypeScript export
   and threads, and warnings: unknown keys, duplicate ids, markers at a line start, segments whose
   kinds disagree, marks without ledger entries, ledger entries without marks, and threads without
   anchors.
+- The test oracle, micromark 4.0.2, reads GitHub Flavored Markdown tables and strikethrough, as
+  the file is read (§9.1): a table is one block whose cells, row by row, the tests compare, so that
+  every allowed edit to a table's text can be judged by how the cells read.
 - Markup that breaks these rules, for example after a bad merge, is reported, shown with a warning
   and otherwise treated as text, so the document still opens.
 
