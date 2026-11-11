@@ -235,6 +235,94 @@ describe('change cards', () => {
     expect(what(editor)).toBe('Deleted “Old paragraph text.”');
   });
 
+  describe('a deleted block drawn as a block, and a block rewritten whole', () => {
+    // Two blocks that read the same, deleted by two people: the card is of the one pointed at.
+    const twins = file(
+      'First.\n\n<!--del w2rf Same words.\\n\\n-->\n\nMiddle.\n\n<!--del k3x9 Same words.\\n\\n-->\n\nLast.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+        '  k3x9: {by: ada, at: 2026-10-31T09:36Z}',
+      ],
+    );
+    const blocks = (editor: Editor) => [
+      ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck'),
+    ];
+    const name = (editor: Editor) => card(editor)?.querySelector('.rl-card-name')?.textContent;
+
+    it('opens the card of the right change on hover, found by its mark and not by its text', () => {
+      const { editor } = mount(twins);
+      expect(blocks(editor).map((block) => block.dataset['mark'])).toEqual(['w2rf', 'k3x9']);
+      for (const [i, who] of [
+        [1, 'Ada Lovelace'],
+        [0, 'Bo Chen'],
+      ] as const) {
+        const block = blocks(editor)[i]!;
+        // Over the block's text, or its padding.
+        const over = i === 0 ? block : block.querySelector('.rl-del')!;
+        over.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        activateHover(editor.view, editor.view.posAtDOM(block), 1);
+        expect(what(editor), who).toBe('Deleted “Same words.”');
+        expect(name(editor), who).toBe(who);
+      }
+    });
+
+    it('pins the card on a click and rejects the right block', async () => {
+      const { editor } = mount(twins);
+      click(blocks(editor)[1]!.querySelector('.rl-del')!, editor.view.contentDOM);
+      await tick();
+      expect(name(editor)).toBe('Ada Lovelace');
+      button(card(editor)!, 'Reject').click();
+      // Only Ada's block came back.
+      expect(blocks(editor).map((block) => block.dataset['mark'])).toEqual(['w2rf']);
+      expect(editor.getDoc()).toContain('Same words.');
+      expect(editor.getDoc()).not.toContain('k3x9');
+    });
+
+    it('opens the card of a block rewritten whole from its struck old text', () => {
+      const SENTENCE = 'The old paragraph here.';
+      const rewritten = file(
+        `Intro.\n\n<!--sub k3x9 ${SENTENCE}-->\n\nA new one entirely.<!--/k3x9-->\n\nEnd.`,
+        [...PEOPLE, 'marks:', '  k3x9: {by: claude-ada, at: 2026-10-31T09:36Z}'],
+      );
+      const { editor } = mount(rewritten);
+      const old = editor.view.contentDOM.querySelector<HTMLElement>('.rl-del')!;
+      expect(old.dataset['mark']).toBe('k3x9');
+      expect(old.querySelector('br')).not.toBeNull();
+      old.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, editor.view.posAtDOM(old), 1);
+      expect(what(editor)).toBe(`Replaced “${SENTENCE}” with “A new one entirely.”`);
+    });
+
+    it('stands against the block’s box, above it or below, covering neither it nor the new text', async () => {
+      const { editor } = mount(twins);
+      const block = blocks(editor)[0]!;
+      let asked = 0;
+      Object.assign(block, {
+        getBoundingClientRect: () => {
+          asked++;
+          return { left: 100, right: 500, top: 200, bottom: 240, width: 400, height: 40 };
+        },
+      });
+      block.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, editor.view.posAtDOM(block), 1);
+      editor.view.requestMeasure();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // The editor asked the block for its box to place the card against it.
+      expect(asked).toBeGreaterThan(0);
+      const tooltip = card(editor)!.closest<HTMLElement>('.cm-tooltip')!;
+      expect(tooltip.style.top).toMatch(/px$/);
+    });
+
+    it('shows no card in Simple, where the block is not drawn', () => {
+      const { editor } = mount(twins);
+      editor.setViewMode('simple');
+      expect(blocks(editor)).toEqual([]);
+      expect(card(editor)).toBeNull();
+    });
+  });
+
   describe('a break whose marker is on a hidden line (#198)', () => {
     // Enter behind Bo's paragraph break: Ada's split stands alone on its line, which is hidden with
     // the blank lines around it. Both breaks are drawn at the end of the text above.

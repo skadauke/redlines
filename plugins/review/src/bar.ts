@@ -389,9 +389,14 @@ class Bar {
 export function barClickHandler(
   ctx: ReviewContext,
   pin: (view: EditorView, id: string) => void,
-): (view: EditorView, pos: number) => boolean {
-  return (view, pos) => {
+): (view: EditorView, pos: number, mark?: string) => boolean {
+  return (view, pos, mark) => {
     if (!isBarOpen(view.state)) return false;
+    // The bar of a struck block is its change's own: found by its id, not by its place.
+    if (mark !== undefined) {
+      if (changesOf(ctx).some((change) => change.id === mark)) pin(view, mark);
+      return true;
+    }
     const line = view.state.doc.lineAt(pos);
     const changes = changesOf(ctx);
     const onLine = (change: MarkRange) =>

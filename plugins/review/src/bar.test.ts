@@ -218,6 +218,26 @@ describe('review bar', () => {
     expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “other”');
   });
 
+  it('pins the card of a struck block’s change by its id, with the bar open', () => {
+    const body = file(
+      'First.\n\n<!--del w2rf Gone.\\n\\n-->\n\nSecond <!--ins k3x9-->new<!--/k3x9-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+      ],
+    );
+    const { editor, review } = mount(body);
+    review.openBar();
+    const handle = (pos: number, mark?: string) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos, mark));
+    // Whatever place the widget reports: the bar is the deletion's own.
+    expect(handle(body.indexOf('Second'), 'w2rf')).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Deleted “Gone.”');
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
   it('a new document closes the bar', () => {
     const { editor, review, opened } = mount(doc);
     review.openBar();

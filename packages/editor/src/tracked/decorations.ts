@@ -762,16 +762,20 @@ class StruckWidget extends WidgetType {
   readonly deleted: readonly Struck[];
   /** Whether a list item stands right above, so that a struck item is the next of its list. */
   readonly afterItem: boolean;
+  /** Whether it stands after the last line of the text, below the line it belongs to. */
+  readonly after: boolean;
 
-  constructor(deleted: readonly Struck[], afterItem: boolean) {
+  constructor(deleted: readonly Struck[], afterItem: boolean, after = false) {
     super();
     this.deleted = deleted;
     this.afterItem = afterItem;
+    this.after = after;
   }
 
   override eq(other: StruckWidget): boolean {
     return (
       other.afterItem === this.afterItem &&
+      other.after === this.after &&
       other.deleted.length === this.deleted.length &&
       other.deleted.every(
         (item, i) =>
@@ -789,6 +793,7 @@ class StruckWidget extends WidgetType {
   override toDOM(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'rl-struck-blocks';
+    if (this.after) wrap.dataset['after'] = 'true';
     let item = this.afterItem;
     for (const deleted of this.deleted) {
       const bar = barClass(deleted.colors);
@@ -947,7 +952,7 @@ function display(state: EditorState): Display {
     }
   }
   for (const slot of slots.values()) {
-    const widget = new StruckWidget(slot.items, itemAbove(slot));
+    const widget = new StruckWidget(slot.items, itemAbove(slot), slot.side === 1);
     ranges.push(Decoration.widget({ block: true, widget, side: slot.side || -1 }).range(slot.at));
   }
   for (const { at, side, parts } of model.placed) {

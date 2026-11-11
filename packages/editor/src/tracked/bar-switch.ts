@@ -19,13 +19,16 @@ import { chooseViewEffects, viewModeField } from './field.ts';
  * first to return true has handled the click and nothing switches. A plugin that knows a mode of
  * its own, such as the review bar's, adds one.
  */
-export const barClickHandlers = Facet.define<(view: EditorView, pos: number) => boolean>();
+export const barClickHandlers =
+  Facet.define<(view: EditorView, pos: number, mark?: string) => boolean>();
 
 /** The bar a pointer is over: its line (or a table row's first cell), and where the line starts. */
 export interface LocatedBar {
   element: Element;
   /** The start of the bar's line. */
   pos: number;
+  /** The id of the change a struck block is of, when the bar is its own (Part 3). */
+  mark?: string;
   /** Where the element is on the screen, in the viewport's coordinates. */
   rect: { left: number; top: number; bottom: number };
 }
@@ -77,6 +80,23 @@ function scrollerOf(view: EditorView): HTMLElement {
   return view.scrollDOM;
 }
 
+/**
+ * A struck block (a block deleted whole, drawn as a block of its own) level with `y`: its bar is
+ * its own, and its element is a widget, not a line. Its position is where it stands, or for a
+ * block after the last line of the text, the position after that line.
+ */
+function struckAt(view: EditorView, y: number): LocatedBar | null {
+  for (const block of view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')) {
+    const rect = block.getBoundingClientRect();
+    if (y < rect.top || y > rect.bottom) continue;
+    const after = block.parentElement?.dataset['after'] === 'true';
+    const pos = Math.min(view.posAtDOM(block) + (after ? 1 : 0), view.state.doc.length);
+    const mark = block.dataset['mark'];
+    return { element: block, pos, ...(mark ? { mark } : {}), rect };
+  }
+  return null;
+}
+
 /** The real layout: found by the line at the pointer's height, or a table row's first cell. */
 const pageGeometry: BarGeometry = {
   locate(view, x, y) {
@@ -84,6 +104,8 @@ const pageGeometry: BarGeometry = {
     if (y < content.top || y > content.bottom) return null;
     // The cheap test first: a bar stands in the margin, a little left of the text's column.
     if (x > content.left + MARGIN_REACH) return null;
+    const struck = struckAt(view, y);
+    if (struck) return struck;
     const pos = view.posAtCoords({ x: Math.max(x, content.left + 1), y }, false);
     const line = view.domAtPos(pos);
     const node = line.node instanceof Element ? line.node : line.node.parentElement;
@@ -323,12 +345,17 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         if (mode !== 'simple' && mode !== 'redlines') return;
         this.unhover();
         for (const handler of view.state.facet(barClickHandlers)) {
-          if (handler(view, target.pos)) return;
+          if (handler(view, target.pos, target.mark)) return;
         }
         // The line under the pointer keeps its place: its distance from the top of the screen is
         // noted now and put back once the new view is measured. A line the new view doesn't draw
         // has the top of the one after it, which `lineTop` gives for its position.
-        const before = geometry.lineTop(view, target.pos);
+        // A struck block is no line: it is its own top, and Simple, which doesn't draw it, gives its
+        // place to the block after it (`target.pos` is where that begins).
+        const struck = target.element.classList.contains('rl-struck') && target.element.isConnected;
+        const before = struck
+          ? target.element.getBoundingClientRect().top
+          : geometry.lineTop(view, target.pos);
         const top = () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length));
         const keep = (after: number) => {
           // Chosen now, after the switch: a document that fits the window in Simple has no
