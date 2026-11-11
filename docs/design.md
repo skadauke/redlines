@@ -570,11 +570,11 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   clears the cells. A selection that reaches into a table copies the text outside it and the cells
   of the rows it reaches. A range (an HTML table from Sheets, Excel, Numbers, Word or Docs, or text
   with tabs) pastes over the cells from the caret's rightward and down, or from the selection's
-  top-left cell, adding the rows it needs; one value onto selected cells fills each; a range
-  wider than the table is refused whole ("The table has 3 columns and the pasted range has 5. Add
-  columns first.") until columns can be added. Tracked, each overwritten cell is a substitution
-  (an insertion in an empty one) and each added row an inserted row, all one group and one step to
-  undo. Text without tabs goes into the cell (line breaks as `<br>`, pipes escaped); Paste as
+  top-left cell, adding the rows and columns it needs (columns at the table's right); one value onto
+  selected cells fills each. Tracked, each overwritten cell is a substitution (an insertion in an
+  empty one) and each added row or column an inserted one, all one group and one step to undo; a
+  paste that needs rows while a column is deleted or moved, or columns while a row is, is refused
+  whole with its reason. Text without tabs goes into the cell (line breaks as `<br>`, pipes escaped); Paste as
   Plain Text puts anything into the cell with its tabs as spaces. A range pasted outside a table
   is a new table, as an HTML table was.
 - **Rows, tracked as Word tracks them.** The Table menu's row commands count the selection ("Insert 2
@@ -590,6 +590,21 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   marks the drop, the page scrolls near its edges, Esc cancels. A + shows within 8 px of a row
   boundary in the strip beside the table, with a thin line across it, and a press inserts a row
   there.
+- **Columns, the same.** Insert Column Left and Right (⌥⌘← and ⌥⌘→), Delete Column (⌃⌘⌫) and Move
+  Column Left and Right (no default key) count the columns the selection touches ("Insert 2 Columns
+  Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
+  new column, in its row. A column's grip (⋯) stands above the column in the strip above the table,
+  and never leaves it; a press selects the column (⇧ extends) and opens its menu (Insert Left and
+  Right, Delete, Move Left and Right, Clear Contents); a drag moves the columns, and the others
+  selected with them, to any boundary, the last included, with a vertical drop line and the page's
+  table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the strip
+  above the table and a press inserts a column there. **An inserted column** has its cells in the
+  author's tint and underlined with a bar on every row; a **deleted column** is a ghost cell in
+  every row at its place, struck, counted among the columns when the widths are found, and skipped by
+  the caret; a **moved column** has the double underline at its new place and a ghost with a double
+  strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
+  and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows. The
+  alignment of a column is a later stage.
 - **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
   take the author's tint and its text is underlined in the author's color, with a change bar on the
   row; Clean shows the plain row. A **deleted row** is kept below the table in the file and drawn in
@@ -603,7 +618,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
   Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
   but not deleted until those are decided; an agent that replaces a table with the table it wants
-  changes rows as these commands do (format §3.7, "Agents"). Column commands, deletions and moves
+  changes rows and columns as these commands do (format §3.7, "Agents"). The alignment of columns
   and the rest of the list above arrive in the later stages.
 
 ### 5.9 Command palette and shortcuts
@@ -633,6 +648,7 @@ menus, shortcuts, the palette, plugins and agents.
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
 | In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
+| In a table: insert column left, right; delete column | ⌥⌘← and ⌥⌘→; ⌃⌘⌫                                                                 | Ctrl+Alt+Left and Right; Ctrl+Win+Backspace |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |

@@ -1479,6 +1479,13 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-trow.rl-ghost': { display: 'table-row', cursor: 'default', userSelect: 'none' },
   '.rl-trow.rl-ghost > .rl-tc': { backgroundColor: 'var(--rl-color-tint)' },
   '.rl-trow.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
+  // A deleted column, a ghost cell in each row (`table/colghosts.ts`): the same, a cell among cells.
+  '.rl-tc.rl-ghost-col': {
+    backgroundColor: 'var(--rl-color-tint)',
+    cursor: 'default',
+    userSelect: 'none',
+  },
+  '.rl-tc.rl-ghost-col.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

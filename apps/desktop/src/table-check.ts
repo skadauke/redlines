@@ -5,7 +5,9 @@
 // and after a `<br>`, a selection that reaches into a table draws its cells, a rectangle of cells
 // (a drag across cells, a shift-press, shift-arrows, Select Row, Column and Table) draws exactly its
 // cells in Clean, Simple and Redlines, copy and cut put tab-separated text and an HTML table on the
-// pasteboard, a paste of a range lands in the cells and adds rows, and a keystroke in a 300-row
+// pasteboard, a paste of a range lands in the cells and adds the rows and columns it needs, deleted, inserted and
+// moved rows and columns are drawn (ghosts lined up to the pixel, tints, double marks, bars in Simple),
+// the grips, the + and the dragging of rows and columns work, and a keystroke in a 300-row
 // table stays within the budget. Serve the page with `VITE_TABLE_CHECK=1 pnpm dev` (or
 // `pnpm tauri dev`, for WKWebView) and open it in WebKit: it reads nothing in a release build.
 //
@@ -16,7 +18,7 @@
 
 import { EditorSelection } from '@codemirror/state';
 import type { Editor, Table, TableCell } from '@redlines/editor';
-import { rectOf, tablesOf, undo, wholeRect } from '@redlines/editor';
+import { rectOf, tablesOf, touchedCols, undo, wholeRect } from '@redlines/editor';
 import sample from './sample.md?raw';
 
 const FRUIT = [
@@ -340,6 +342,40 @@ async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> 
 
 /** A document with the table and a ledger, for the row checks: Track Changes decides what it writes. */
 const ROWS = GRID.replace('| Plums | 4 | a\\|b<br>x |', '| Plums | 4 | ok |');
+
+/** The ghost cells of deleted columns, as the page draws them. */
+const ghostCols = (editor: Editor): HTMLElement[] => [
+  ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl .rl-ghost-col'),
+];
+
+/** How far the cells of each row are from the cells of the first row, left edge by left edge, in px:
+ * ghosts and all, the columns must line up in every row. */
+function linedUp(editor: Editor): { cells: number[]; off: number } {
+  const grid = cellElements(editor).map((row) =>
+    row.map((cell) => cell.getBoundingClientRect().left),
+  );
+  const first = grid[0] ?? [];
+  let off = 0;
+  for (const row of grid) {
+    if (row.length !== first.length) return { cells: grid.map((r) => r.length), off: Infinity };
+    row.forEach((left, i) => (off = Math.max(off, Math.abs(left - (first[i] ?? 0)))));
+  }
+  return { cells: grid.map((r) => r.length), off };
+}
+
+/** Puts the pointer on column `col` of the header and returns the column grip that then shows. */
+async function colGripOf(editor: Editor, col: number): Promise<HTMLElement | null> {
+  const cell = cellElements(editor)[0]?.find((c) => c.dataset['col'] === String(col));
+  if (!cell) return null;
+  const box = await reveal(cell);
+  hover(editor, box.left + box.width / 2, box.top + box.height / 2);
+  await frames();
+  return editor.view.dom.querySelector<HTMLElement>('.rl-col-grip');
+}
+
+/** The header's real cells, left to right: ghosts are no column of the document. */
+const headerCells = (editor: Editor): HTMLElement[] =>
+  (cellElements(editor)[0] ?? []).filter((cell) => cell.dataset['col'] !== undefined);
 
 const CHECKS: Check[] = [
   {
@@ -882,11 +918,13 @@ const CHECKS: Check[] = [
       const rows = tablesOf(editor.view.state)[0]?.rows.length;
       if (rows !== 5 || !doc(editor).includes('| 4 | 5 | 6 |'))
         problems['grown'] = { rows, doc: doc(editor) };
-      // A range wider than the table is refused, and the file is left as it is.
-      const before = doc(editor);
+      // A range wider than the table adds the columns it needs, at the right.
       await place(editor, cellOf(editor, 1, 1).textFrom);
       pasteInto(editor, 'a\tb\tc\td');
-      if (doc(editor) !== before) problems['refused'] = 'a range wider than the table was pasted';
+      await frames();
+      const wide = tablesOf(editor.view.state)[0]?.columns;
+      if (wide !== 5 || !doc(editor).includes('| a | b | c | d |'))
+        problems['wide'] = { columns: wide, doc: doc(editor) };
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -1499,6 +1537,323 @@ const CHECKS: Check[] = [
         if (tops.size !== 1) problems[`cells-not-level-${r}`] = [...tops];
       }
       if (Object.keys(problems).length) problems['widths'] = widths;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // An inserted column: its cells in every row have the author's tint and an underline and a bar
+    // on every row in Redlines; Simple draws the bars and no tint or underline; Clean draws none;
+    // the columns line up in every row to the pixel; the caret is in the new column, in its row.
+    name: 'inserted-column-is-tinted-in-redlines-and-bars-in-simple',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.insertColumnRight'))
+        return { why: 'Insert Column Right did nothing' };
+      await frames();
+      if (!/<!--ins [a-z0-9]{4} col-->/.test(doc(editor))) problems['marker'] = doc(editor);
+      if (table(editor).columns !== 4) problems['columns'] = table(editor).columns;
+      if (!inText(cellOf(editor, 1, 2), head(editor))) problems['caret'] = head(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const rows = cellElements(editor);
+      const fresh = rows.map((row) => row[2]);
+      if (fresh.some((cell) => !cell?.classList.contains('rl-ins-col')))
+        problems['cells'] = fresh.map((cell) => cell?.className);
+      for (const cell of fresh) {
+        if (!cell) continue;
+        if (!painted(cell)) problems['tint'] = 'a cell has no tint';
+        if (!getComputedStyle(cell).textDecorationLine.includes('underline'))
+          problems['underline'] = getComputedStyle(cell).textDecorationLine;
+      }
+      if (lineElements(editor).some((line) => !line.classList.contains('rl-bar')))
+        problems['bars'] = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5) problems['lines-up'] = aligned;
+      editor.setViewMode('simple');
+      await frames();
+      if (
+        cellElements(editor).some((row) =>
+          row.some((cell) => cell.classList.contains('rl-ins-col')),
+        )
+      )
+        problems['simple-look'] = 'a cell is marked';
+      if (cellElements(editor).some((row) => row.some((cell) => painted(cell))))
+        problems['simple-tint'] = 'a cell is painted';
+      if (lineElements(editor).some((line) => !line.classList.contains('rl-bar')))
+        problems['simple-bars'] = 'a row has no bar';
+      editor.setViewMode('clean');
+      await frames();
+      if (lineElements(editor).some((line) => line.classList.contains('rl-bar')))
+        problems['clean-bars'] = 'a row has a bar';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A deleted column is a ghost cell in every row in Redlines, lined up with the real cells to the
+    // pixel, between its neighbors, struck and tinted; Clean and Simple draw none, Simple the bars.
+    name: 'deleted-column-is-a-ghost-in-every-row',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.deleteColumn')) return { why: 'Delete Column did nothing' };
+      await frames();
+      if (!/<!--del [a-z0-9]{4} col=2 /.test(doc(editor))) problems['deletion'] = doc(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const ghosts = ghostCols(editor);
+      if (ghosts.length !== 4) return { ...problems, ghosts: ghosts.length };
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3)) problems['lines-up'] = aligned;
+      for (const row of cellElements(editor)) {
+        const at = row.findIndex((cell) => cell.classList.contains('rl-ghost-col'));
+        if (at !== 1) problems['place'] = row.map((cell) => cell.className);
+      }
+      const struck = ghosts[1]?.querySelector('.rl-del');
+      if (!struck || !getComputedStyle(struck).textDecorationLine.includes('line-through'))
+        problems['struck'] = 'no line-through';
+      if (!painted(ghosts[1] ?? editor.view.dom)) problems['tint'] = 'no tint';
+      if (editor.view.contentDOM.textContent?.includes('<!--del'))
+        problems['hidden'] = 'the deletion line shows';
+      if (ghosts.map((g) => g.textContent).join('|') !== 'Count|3|4|5')
+        problems['ghost-text'] = ghosts.map((g) => g.textContent);
+      editor.setViewMode('simple');
+      await frames();
+      if (ghostCols(editor).length) problems['simple-ghost'] = ghostCols(editor).length;
+      if (cellElements(editor).some((row) => row.length !== 2))
+        problems['simple-cells'] = 'a ghost';
+      if (lineElements(editor).some((line) => !line.classList.contains('rl-bar')))
+        problems['simple-bars'] = 'a row has no bar';
+      editor.setViewMode('clean');
+      await frames();
+      if (editor.view.contentDOM.textContent?.includes('Count'))
+        problems['clean-text'] = 'the deleted column shows';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A moved column: a double underline and the tint at the new place, a ghost with a double
+    // strikethrough at the old; the arrows step over the ghost; Simple draws the bars and no tint.
+    name: 'moved-column-draws-double-marks-and-the-arrows-skip-ghosts',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 0).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.moveColumnRight'))
+        return { why: 'Move Column Right did nothing' };
+      await frames();
+      if (
+        !/<!--ins [a-z0-9]{4} col-->/.test(doc(editor)) ||
+        !/<!--del [a-z0-9]{4} col=/.test(doc(editor))
+      )
+        problems['marks'] = doc(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const moved = cellElements(editor).map((row) =>
+        row.find((c) => c.classList.contains('rl-moved-col')),
+      );
+      if (moved.some((cell) => !cell)) problems['moved-cells'] = moved.map((c) => c?.className);
+      const underline = moved[0];
+      if (!underline || getComputedStyle(underline).textDecorationStyle !== 'double')
+        problems['double-underline'] = underline && getComputedStyle(underline).textDecorationStyle;
+      const ghosts = ghostCols(editor);
+      const strike = ghosts[0]?.querySelector('.rl-del');
+      if (ghosts.length !== 4 || !ghosts[0]?.classList.contains('rl-ghost-moved'))
+        problems['ghosts'] = ghosts.length;
+      if (!strike || getComputedStyle(strike).textDecorationStyle !== 'double')
+        problems['double-strike'] = strike && getComputedStyle(strike).textDecorationStyle;
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5) problems['lines-up'] = aligned;
+      // → from the end of the first real cell goes into the next real cell, over the ghost.
+      await place(editor, cellOf(editor, 1, 0).textTo);
+      press(editor, 'ArrowRight');
+      await frames();
+      if (!inText(cellOf(editor, 1, 1), head(editor))) problems['right-skips-ghost'] = head(editor);
+      press(editor, 'ArrowLeft');
+      await frames();
+      if (!inText(cellOf(editor, 1, 0), head(editor))) problems['left-skips-ghost'] = head(editor);
+      editor.setViewMode('simple');
+      await frames();
+      if (ghostCols(editor).length) problems['simple-ghost'] = ghostCols(editor).length;
+      if (cellElements(editor).some((row) => row.some((c) => painted(c))))
+        problems['simple-look'] = 'tinted';
+      if (lineElements(editor).some((line) => !line.classList.contains('rl-bar')))
+        problems['simple-bars'] = 'none';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The column grip shows above the hovered column, in the strip above the table and inside the
+    // window, in Redlines and Simple; a press selects the column and opens the menu, whose Delete
+    // Column deletes it.
+    name: 'column-grip-and-its-menu',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, true);
+        editor.setViewMode(view);
+        await frames();
+        const grip = await colGripOf(editor, 1);
+        if (!grip) return { ...problems, [`${view}-grip`]: 'none shows' };
+        const box = grip.getBoundingClientRect();
+        const header = cellElements(editor)[0]?.find((c) => c.dataset['col'] === '1');
+        const cell = header?.getBoundingClientRect();
+        const top = Math.min(...lineElements(editor).map((l) => l.getBoundingClientRect().top));
+        if (box.top < 0) problems[`${view}-off-window`] = box.top;
+        if (cell && (box.right < cell.left || box.left > cell.right))
+          problems[`${view}-over-column`] = [box.left, box.right, cell.left, cell.right];
+        if (!(box.bottom <= top + 1 && box.top >= top - 30))
+          problems[`${view}-strip`] = [box.top, box.bottom, top];
+        if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
+          problems[`${view}-aria`] = 'not hidden';
+        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
+        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        await frames();
+        const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
+        if (
+          items.map((i) => i.textContent).join('|') !==
+          'Insert Column Left|Insert Column Right|Delete Column|Move Column Left|Move Column Right|Clear Contents'
+        )
+          problems[`${view}-items`] = items.map((i) => i.textContent);
+        const selected = touchedCols(editor.view.state);
+        if (!selected || selected.first !== 1 || selected.last !== 1)
+          problems[`${view}-selected`] = selected && [selected.first, selected.last];
+        const size = Math.min(...items.map((i) => parseFloat(getComputedStyle(i).fontSize)));
+        if (!(size >= 13)) problems[`${view}-menu-size`] = size;
+        const del = items.find((i) => i.textContent === 'Delete Column');
+        if (!del) return { ...problems, [`${view}-menu`]: 'no Delete Column' };
+        mouse(del, 'mousedown', 0, 0);
+        await frames();
+        if (!/<!--del [a-z0-9]{4} col=2 /.test(doc(editor)))
+          problems[`${view}-delete`] = doc(editor);
+        if (editor.view.dom.querySelector('.rl-grip-menu'))
+          problems[`${view}-menu-open`] = 'still open';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A + appears within 8 px of a column boundary in the strip above the table and not at 9, with a
+    // line down the table; a press inserts one column there (tracked: a marked column).
+    name: 'plus-between-columns-inserts-a-column',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, true);
+        editor.setViewMode(view);
+        await frames();
+        const cells = headerCells(editor);
+        const second = cells[1];
+        if (!second) return { why: 'no header drawn' };
+        const box = await reveal(second);
+        const y = box.top - 10;
+        hover(editor, box.left + 9, y);
+        await frames();
+        if (editor.view.dom.querySelector('.rl-col-plus'))
+          problems[`${view}-at-9`] = 'a + shows 9 px away';
+        hover(editor, box.left + 8, y);
+        await frames();
+        const plus = editor.view.dom.querySelector<HTMLElement>('.rl-col-plus');
+        if (!plus) return { ...problems, [`${view}-plus`]: 'none shows within 8 px' };
+        if (plus.dataset['boundary'] !== '1')
+          problems[`${view}-boundary`] = plus.dataset['boundary'];
+        if (!editor.view.dom.querySelector('.rl-col-plus-line'))
+          problems[`${view}-line`] = 'no line';
+        const columns = table(editor).columns;
+        mouse(plus, 'mousedown', 0, 0);
+        await frames();
+        if (table(editor).columns !== columns + 1)
+          problems[`${view}-inserted`] = table(editor).columns;
+        if (!/<!--ins [a-z0-9]{4} col-->/.test(doc(editor)))
+          problems[`${view}-marked`] = doc(editor);
+        const header = doc(editor).slice(table(editor).rows[0]?.from, table(editor).rows[0]?.to);
+        if (!/Fruit \|.*col-->.*\| Count/.test(header)) problems[`${view}-place`] = header;
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A drag on a column grip moves the column to the boundary under the pointer, the last included;
+    // the column dims and a vertical drop line shows while it goes; Esc cancels and writes nothing.
+    name: 'dragging-a-column-grip-moves-the-column',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const headerText = () =>
+        table(editor)
+          .rows[0]?.cells.map((c) => editor.view.state.doc.sliceString(c.textFrom, c.textTo))
+          .join(',');
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, false);
+        editor.setViewMode(view);
+        await frames();
+        const grip = await colGripOf(editor, 0);
+        if (!grip) return { ...problems, [`${view}-grip`]: 'none shows' };
+        const g = grip.getBoundingClientRect();
+        const start = { x: g.left + 3, y: g.top + 3 };
+        const edge = () => (headerCells(editor).at(-1)?.getBoundingClientRect().right ?? 0) - 2;
+        mouse(grip, 'mousedown', start.x, start.y);
+        hover(editor, start.x + 10, start.y);
+        hover(editor, edge(), start.y);
+        await frames();
+        const line = editor.view.dom.querySelector<HTMLElement>('.rl-drop-line');
+        if (!line) problems[`${view}-drop-line`] = 'none';
+        if (!editor.view.dom.querySelector('.rl-drag-copy')) problems[`${view}-copy`] = 'none';
+        if (!editor.view.dom.querySelector('.rl-row-dim')) problems[`${view}-dim`] = 'not dimmed';
+        const last = headerCells(editor).at(-1)?.getBoundingClientRect();
+        const at = line?.getBoundingClientRect();
+        if (at && last && Math.abs(at.left - last.right) > 3)
+          problems[`${view}-line-at`] = [at.left, last.right];
+        // Esc cancels, and nothing is written.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        mouse(window, 'mouseup', edge(), start.y);
+        await frames();
+        if (doc(editor) !== ROWS) problems[`${view}-esc`] = doc(editor);
+        const again = await colGripOf(editor, 0);
+        if (!again) return { ...problems, [`${view}-grip-again`]: 'none shows' };
+        const a = again.getBoundingClientRect();
+        mouse(again, 'mousedown', a.left + 3, a.top + 3);
+        hover(editor, a.left + 13, a.top + 3);
+        hover(editor, edge(), a.top + 3);
+        mouse(window, 'mouseup', edge(), a.top + 3);
+        await frames();
+        if (headerText() !== 'Count,Note,Fruit') problems[`${view}-moved`] = headerText();
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The widths hold: typing in a cell, with the caret in the table, leaves every column where it
+    // is, also after a column was inserted (the table's structure changed, and its widths were found
+    // again before the caret rested); and the columns line up in every row.
+    name: 'column-widths-are-held-while-the-caret-is-in-the-table',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.insertColumnLeft'))
+        return { why: 'Insert Column Left did nothing' };
+      await frames();
+      editor.setViewMode('redlines');
+      await frames();
+      const lefts = () =>
+        headerCells(editor).map((cell) => Math.round(cell.getBoundingClientRect().left * 10) / 10);
+      const before = lefts();
+      if (before.length !== 4) return { why: 'the column was not drawn', before };
+      for (let i = 0; i < 6; i++) {
+        editor.view.dispatch({
+          changes: { from: head(editor), insert: 'wide words go here ' },
+          selection: EditorSelection.cursor(head(editor) + 19),
+          userEvent: 'input.type',
+        });
+        await frames();
+      }
+      const after = lefts();
+      if (before.some((left, i) => Math.abs(left - (after[i] ?? -1e6)) > 0.5))
+        problems['moved'] = { before, after };
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5) problems['lines-up'] = aligned;
       return Object.keys(problems).length ? problems : null;
     },
   },
