@@ -818,6 +818,51 @@ const pointer: Check[] = [
     },
   },
   {
+    name: 'option-down-home-end-and-typing-next-to-a-struck-block-act-on-the-text-beside-it',
+    async run(editor) {
+      await open(editor, 'redlines', 'After the deleted paragraph.');
+      const problems: Problem = {};
+      const aboveEnd = endOf(editor, 'Before the deleted paragraph.');
+      const belowStart = at(editor, 'After the deleted paragraph.');
+      const keyed = async (key: string, altKey = false) => {
+        const event = new KeyboardEvent('keydown', {
+          key,
+          altKey,
+          bubbles: true,
+          cancelable: true,
+        });
+        editor.view.contentDOM.dispatchEvent(event);
+        await frames();
+        return event.defaultPrevented;
+      };
+      // ⌥↓ from the text above goes to the block below, past the struck one, and ⌥↑ back: the
+      // paragraph keys are the Mac's.
+      if (/Mac/.test(navigator.platform)) {
+        await place(editor, aboveEnd - 6);
+        await keyed('ArrowDown', true);
+        if (head(editor) < belowStart) problems['optionDown'] = [head(editor), belowStart];
+        await keyed('ArrowUp', true);
+        if (head(editor) > aboveEnd) problems['optionUp'] = head(editor);
+      }
+      // End and Home stay on their own line, in the text, never in the block.
+      await place(editor, belowStart + 4);
+      await keyed('Home');
+      if (head(editor) !== belowStart) problems['home'] = [head(editor), belowStart];
+      await place(editor, aboveEnd - 4);
+      await keyed('End');
+      if (head(editor) !== aboveEnd) problems['end'] = [head(editor), aboveEnd];
+      // A character typed at the start of the line below goes into it, and the block stays.
+      await place(editor, belowStart);
+      const before = editor.getDoc().length;
+      document.execCommand('insertText', false, 'x');
+      await frames();
+      const typed = editor.getDoc().slice(belowStart, belowStart + 12);
+      if (editor.getDoc().length <= before || !typed.includes('x')) problems['typed'] = typed;
+      if (!blockWith(editor, 'This paragraph was deleted whole.')) problems['blockGone'] = true;
+      return problemsOf(problems);
+    },
+  },
+  {
     name: 'no-card-opens-on-hover-in-simple',
     async run(editor) {
       await open(editor, 'simple', NEW_PARAGRAPH);

@@ -238,4 +238,42 @@ describe('struck blocks', () => {
     expect(all.from).toBe(0);
     expect(all.to).toBeLessThanOrEqual(editor.getParsed().ledgerRange!.from);
   });
+  it('does with ⌥↑, ⌥↓, Home, End and typing what it does with the block hidden', () => {
+    // The block draws in Redlines and not in Clean; each key leaves the same text and caret in both.
+    /** Types a character, as the keyboard does, at the caret. */
+    const type = (editor: Editor) => {
+      const at = head(editor);
+      editor.view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: { anchor: at + 1 },
+        userEvent: 'input.type',
+      });
+    };
+    const keys = (view: 'redlines' | 'clean', doc: string, start: number, key: string) => {
+      const editor = load(doc, { view, tracking: false });
+      caret(editor, start);
+      if (key === 'type') type(editor);
+      else press(editor, key);
+      return [editor.getDoc(), head(editor)];
+    };
+    // The keys do something here: ⌥↓ goes down to the start of the block below the struck one.
+    const [, down] = keys('redlines', between, where(between, 'One.') + 2, 'Alt-ArrowDown');
+    expect(down).toBeGreaterThan(where(between, 'One.') + 2);
+    for (const [doc, start, key] of [
+      [between, where(between, 'One.') + 2, 'Alt-ArrowDown'],
+      [between, where(between, 'Three.') + 2, 'Alt-ArrowUp'],
+      [between, where(between, 'One.') + 2, 'End'],
+      [between, where(between, 'Three.') + 2, 'Home'],
+      [between, where(between, 'Three.'), 'type'],
+      [between, where(between, 'One.') + 4, 'type'],
+      [atEnd, where(atEnd, 'Two.') + 2, 'End'],
+      [atEnd, where(atEnd, 'Two.') + 4, 'type'],
+      [items, where(items, 'three'), 'type'],
+      [items, where(items, 'three') + 2, 'Home'],
+    ] as const) {
+      expect(keys('redlines', doc, start, key), `${key} at ${start}`).toEqual(
+        keys('clean', doc, start, key),
+      );
+    }
+  });
 });
