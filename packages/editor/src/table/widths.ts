@@ -11,6 +11,7 @@
 // column changes, a paste, a change of the text size or the window's size, and when fonts load: a
 // column that widened with each keystroke would move every other column under the person's eyes.
 
+import { syntaxTree } from '@codemirror/language';
 import {
   type EditorState,
   Facet,
@@ -20,7 +21,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { viewModeField } from '../tracked/field.ts';
-import { type Table, tablesOf } from './model.ts';
+import { type Cell, type Table, tablesOf } from './model.ts';
 
 /** The widths of a text, in pixels: of its longest word, and of its longest line. */
 export interface Measured {
@@ -89,12 +90,70 @@ export function cellShows(text: string): string {
     .replace(/\\\|/g, '|');
 }
 
+interface Span {
+  from: number;
+  to: number;
+}
+
+/** The stretches of `from`..`to` that the preview hides when the caret is elsewhere: the marks of
+ * emphasis, code and strikethrough, a link's brackets and destination (its text shows), an image's
+ * syntax (its alt text stands in for the picture) and an autolink's angle brackets. */
+function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
+  const hidden: Span[] = [];
+  const hide = (a: number, b: number) => {
+    if (Math.min(b, to) > Math.max(a, from))
+      hidden.push({ from: Math.max(a, from), to: Math.min(b, to) });
+  };
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter: (node) => {
+      switch (node.name) {
+        case 'EmphasisMark':
+        case 'CodeMark':
+        case 'StrikethroughMark':
+          hide(node.from, node.to);
+          break;
+        case 'Link':
+        case 'Image': {
+          const marks = node.node.getChildren('LinkMark');
+          const open = marks[0];
+          const close = marks[1];
+          // A bracketed phrase with no destination or label stays text.
+          if (!open || !close || !(node.node.getChild('URL') || node.node.getChild('LinkLabel'))) {
+            break;
+          }
+          hide(node.from, open.to);
+          hide(close.from, node.to);
+          break;
+        }
+        case 'Autolink':
+          for (const mark of node.node.getChildren('LinkMark')) hide(mark.from, mark.to);
+          break;
+      }
+    },
+  });
+  return hidden.toSorted((a, b) => a.from - b.from || b.to - a.to);
+}
+
+/** What a cell shows with the caret elsewhere: its text without the syntax the preview hides, with
+ * what `cellShows` reads of the rest. */
+export function shownText(state: EditorState, cell: Cell): string {
+  let text = '';
+  let at = cell.textFrom;
+  for (const range of hiddenSyntax(state, cell.textFrom, cell.textTo)) {
+    if (range.to <= at) continue;
+    if (range.from > at) text += state.sliceDoc(at, range.from);
+    at = Math.max(at, range.to);
+  }
+  text += state.sliceDoc(at, cell.textTo);
+  return cellShows(text);
+}
+
 /** The text of every row of a table, as it reads. */
 function cellsOf(state: EditorState, table: Table): string[][] {
   return table.rows.map((row) =>
-    row.cells
-      .filter((cell) => cell.col < table.columns)
-      .map((cell) => cellShows(state.sliceDoc(cell.textFrom, cell.textTo))),
+    row.cells.filter((cell) => cell.col < table.columns).map((cell) => shownText(state, cell)),
   );
 }
 

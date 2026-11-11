@@ -2,7 +2,10 @@
 // Column widths (design: tables, "Column widths and wide tables"): the pure function, and the plugin
 // that measures and holds them, with a stubbed measure, because happy-dom has no layout. The widths a
 // browser lays out are checked in the WebKit script.
-import { forceParsing } from '@codemirror/language';
+import { markdown } from '@codemirror/lang-markdown';
+import { ensureSyntaxTree, forceParsing } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
+import { GFM } from '@lezer/markdown';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import {
@@ -12,9 +15,10 @@ import {
   type Measured,
   widthEnvironment,
   type WidthEnvironment,
+  shownText,
   widthsOf,
 } from './widths.ts';
-import { tablesOf } from './model.ts';
+import { tablesField, tablesOf } from './model.ts';
 
 /** Ten pixels a character. */
 const tenPx = (text: string): Measured => ({
@@ -98,6 +102,28 @@ describe('columnWidths', () => {
     );
     // The header's 'same' and 'other', and the body's.
     expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it('reads what a cell shows of its syntax: a link’s text, no emphasis, code or image path', () => {
+    const doc = [
+      '| a | b |',
+      '| - | - |',
+      '| [docs](https://example.com/a/very/long/address) | **bold** and *it* and `code` |',
+      '| ![the alt](images/photo-of-something.png "Title") | ~~old~~ <https://x.org/y> [sic] |',
+    ].join('\n');
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ extensions: GFM }), tablesField],
+    });
+    ensureSyntaxTree(state, doc.length, 5000);
+    const shown = tablesOf(state.update({}).state)[0]!.rows.map((row) =>
+      row.cells.map((cell) => shownText(state.update({}).state, cell)),
+    );
+    expect(shown).toEqual([
+      ['a', 'b'],
+      ['docs', 'bold and it and code'],
+      ['the alt', 'old https://x.org/y [sic]'],
+    ]);
   });
 
   it('reads what a cell shows: no markers, a break as a break, a pipe as a pipe', () => {
