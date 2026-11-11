@@ -1881,6 +1881,11 @@ it, one per line:
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
   typed in it since and its comments, and takes the deletion line away. Either half decides both. A
+  row with no pipe at its start (a table without outer pipes) is written at its new place with a
+  plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
+  same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
+  at its place reading as it did, whatever has been typed, commented or decided in it since (a mark
+  at the start of the row could not stand there without the pipe). A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first

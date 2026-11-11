@@ -21,6 +21,7 @@ import {
   everyOrder,
   bodyOf,
   expectEveryOrderAlike,
+  expectNoDecisionRefused,
   expectInOrder,
   file,
 } from './test-helpers.ts';
@@ -44,10 +45,21 @@ describe('rows, random', () => {
     let used = 0;
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
-      const row = (cells: string[]) => `| ${cells.join(' | ')} |`.replace(/ {2}/g, ' ');
+      // Half the tables have no outer pipes, or one of them (#289); a table of one column needs
+      // a pipe at one end, and `- | -` would be a list item, so a bare delimiter row is `--`.
+      const lead = random() < 0.5;
+      const trail = columns === 1 && !lead ? true : random() < 0.5;
+      // (An empty cell at a bare edge would read as the pipe of that edge.)
+      const row = (cells: string[]) => {
+        const filled = cells.map((c, i) =>
+          c === '' && ((i === 0 && !lead) || (i === cells.length - 1 && !trail)) ? 'x' : c,
+        );
+        return `${lead ? '| ' : ''}${filled.join(' | ')}${trail ? ' |' : ''}`.replace(/ {2}/g, ' ');
+      };
+      const dash = lead && trail ? '-' : '--';
       const lines = [
         row(Array.from({ length: columns }, () => pick(WORDS.slice(0, 4)))),
-        row(Array.from({ length: columns }, () => '-')),
+        row(Array.from({ length: columns }, () => dash)),
       ];
       for (let i = 0; i < 2 + Math.floor(random() * 3); i++) {
         lines.push(row(Array.from({ length: columns }, () => pick(WORDS))));
@@ -174,6 +186,12 @@ describe('rows, random', () => {
           .filter(([, r]) => r.size > 1)
           .map(([k, r]) => `${k}: ${[...r].map((x) => JSON.stringify(bodyOf(x))).join('  VS  ')}`);
         throw new Error(`${String(error)}\n${text}\n${lines.join('\n')}`, { cause: error });
+      }
+      // Every decision of a move, in a table without outer pipes, is possible in every order,
+      // where moves are all that is pending (#289).
+      const pending = Object.values(parse(text).ledger.marks);
+      if (!(lead && trail) && pending.length > 0 && pending.every((m) => m.move !== undefined)) {
+        expectNoDecisionRefused(label, text);
       }
       try {
         rejectAll(text);

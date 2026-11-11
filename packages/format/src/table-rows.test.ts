@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
@@ -10,11 +11,13 @@ import { trackedEdit } from './track.ts';
 import {
   ada,
   bo,
+  blockLeaves,
   bodyOf,
   context,
   exactly,
   expectEveryOrderAlike,
   expectInOrder,
+  expectNoDecisionRefused,
   file,
   thread,
 } from './test-helpers.ts';
@@ -181,6 +184,23 @@ describe('deleting rows, tracked (format §3.7)', () => {
   });
 });
 
+describe('deleting a row of a table without outer pipes', () => {
+  it('keeps the row without the end of a comment that started at the end of the line above', () => {
+    const text = file('a | b\n-- | --\n1 | 2\nx | y');
+    const at = text.indexOf('x | y');
+    const commented = applyChanges(
+      text,
+      addComment(text, { from: at, to: at + 1 }, 'A note.', context(bo, ['r4st'])).changes,
+    );
+    // (the comment starts at the end of the row above: a marker can't start a row with no pipe)
+    expect(trim(commented)).toContain('1 | 2<!--cmt r4st-->\nx<!--/r4st--> | y');
+    const done = edit(commented, { kind: 'deleteRows', rows: [2] });
+    expect(trim(done.after)).toContain('<!--del k3x9 row=2 x \\| y-->');
+    expect(trim(applyChanges(done.after, rejectAll(done.after)))).toContain('x | y');
+    expectEveryOrderAlike('comment across', done.after, exactly);
+  });
+});
+
 describe('deleting rows, plain', () => {
   it('takes the rows out as text, with no deletion and no ledger entry', () => {
     const done = edit(file(FRUIT), { kind: 'deleteRows', rows: [1, 3] }, null);
@@ -291,6 +311,50 @@ describe('moving rows (format §3.7)', () => {
     }
     expect(trim(applyChanges(moved, acceptAll(moved)))).toBe(expectNewest);
     expect(trim(applyChanges(moved, rejectAll(moved)))).toBe(FRUIT);
+  });
+
+  it('rejects a move of a row of a table without outer pipes, in every order (#289)', () => {
+    const forms = [
+      'a | b\n-- | --\n1 | 2\n3 | 4\n5 | 6',
+      'a | b |\n-- | --\n1 | 2 |\n3 | 4 |\n5 | 6 |',
+      '| a | b\n| -- | --\n| 1 | 2\n| 3 | 4\n| 5 | 6',
+      'a | b\n-- | --\n1 | 2\n| 3 | 4\n5 | 6',
+      '| a | b |\n| -- | -- |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |',
+    ];
+    for (const form of forms) {
+      const text = file(form);
+      const table = readTables(text, parse(text))[0];
+      const count = table?.rows.length ?? 0;
+      for (let row = 1; row < count; row++) {
+        for (let to = 0; to <= count; to++) {
+          let moved: string;
+          try {
+            moved = edit(text, { kind: 'moveRows', rows: [row], to }).after;
+          } catch (error) {
+            if (error instanceof EditError) continue;
+            throw error;
+          }
+          const label = `${JSON.stringify(form)} row ${row} to ${to}`;
+          // The pipe the move wrote in front of a row that had none is plain, and in both halves of
+          // the move: rejecting gives the row back at its place, reading as it did.
+          const lines = form.split('\n');
+          const line = lines[row + 1] ?? '';
+          lines[row + 1] = /^\|/.test(line) ? line : `| ${line}`;
+          const back = lines.join('\n');
+          for (const id of ['k3x9', 'w8nn']) {
+            expect(trim(applyChanges(moved, reject(moved, id))), label).toBe(back);
+          }
+          expect(trim(applyChanges(moved, rejectAll(moved))), label).toBe(back);
+          expect(trim(applyChanges(moved, acceptAll(moved))), label).toBe(
+            trim(newestView(moved).text),
+          );
+          const tables = (view: string) =>
+            blockLeaves(view).filter((leaf) => leaf.kind === 'table');
+          expect(tables(back), label).toEqual(tables(form));
+          expectNoDecisionRefused(label, moved);
+        }
+      }
+    }
   });
 
   it('with Track Changes off moves the rows as text', () => {

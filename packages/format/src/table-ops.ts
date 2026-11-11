@@ -332,10 +332,14 @@ export function originalRowText(text: string, parsed: Parsed, row: TableRowRead)
   const marked = parsed.marks.some((mark) =>
     mark.segments.some(
       (segment) =>
-        segment.open.to > row.from &&
-        segment.open.from < row.to &&
         // (an inserted row's own marker is no change in it that the original would undo)
-        !(mark.kind === 'ins' && mark.payload === 'row'),
+        !(mark.kind === 'ins' && mark.payload === 'row') &&
+        // The marker of either end: a comment of a row without outer pipes can start at the end
+        // of the line above, its marker not being allowed at the start of the row.
+        ((segment.open.to > row.from && segment.open.from < row.to) ||
+          (segment.close !== undefined &&
+            segment.close.to > row.from &&
+            segment.close.from < row.to)),
     ),
   );
   if (!marked && !row.insertion) return rowTextOf(text, row);
@@ -537,7 +541,13 @@ function moveRows(
       }
     }
     const position = anchor === -1 ? 0 : order.indexOf(anchor) + 1;
-    const payload = `row=${position} ${originalRowText(text, parsed, row)}`;
+    // A row with no pipe at its start is given a plain one in front of its marker, and the place it
+    // leaves is kept with the same pipe: the pipe is no change, both versions have it, and
+    // rejecting the move puts the row back as it reads, with a mark of a comment or of another
+    // person's typing at its start where a row without a pipe could have none (#289).
+    const original = originalRowText(text, parsed, row);
+    const lead = /^[ \t]*\|/.test(original) ? '' : '| ';
+    const payload = `row=${position} ${lead}${original}`;
     added.push({ order: index, line: `<!--del ${id} ${encodePayload(payload)}-->` });
   }
   const before = table.deletions.map((d) => d.position);
