@@ -36,7 +36,8 @@ import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts'
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import { checkTableEdits, inMovedCol } from './table-rules.ts';
+import { editMoveCopy } from './table-move-edit.ts';
+import { checkTableEdits, inMovedCol, movedCopyAt } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
@@ -402,6 +403,25 @@ export function untrackedEdit(
   edit: TextChange,
   ctx: UntrackedContext = {},
 ): TextChange[] {
+  return edited(text, edit, ctx, false);
+}
+
+/** `untrackedEdit` for the half of a pending move that the edit is in, which the original does not
+ * have there: not checked against the original, whose other half the caller writes (`table-move-edit.ts`). */
+export function untrackedEditHalf(
+  text: string,
+  edit: TextChange,
+  ctx: UntrackedContext = {},
+): TextChange[] {
+  return edited(text, edit, ctx, true);
+}
+
+function edited(
+  text: string,
+  edit: TextChange,
+  ctx: UntrackedContext,
+  half: boolean,
+): TextChange[] {
   if (edit.from < 0 || edit.to < edit.from || edit.to > text.length) {
     throw new RangeError(
       `The edit ${edit.from}-${edit.to} is out of order or outside the text (${text.length} characters)`,
@@ -411,6 +431,10 @@ export function untrackedEdit(
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
   checkTableEdits(text, [{ ...edit, insert: typed }], parsed);
+  // A cell of a pending move's copy: the edit is written in both halves of the move.
+  if (!half && movedCopyAt(text, { ...edit, insert: typed }, parsed)) {
+    return editMoveCopy(text, parsed, edit, ctx);
+  }
   const markers = markerRanges(parsed);
   let from: number;
   let to: number;
@@ -767,6 +791,6 @@ export function untrackedEdit(
       'no-legal-placement',
     );
   }
-  selfCheck(text, parsed, { from, to, typed }, result);
+  if (!half) selfCheck(text, parsed, { from, to, typed }, result);
   return result;
 }

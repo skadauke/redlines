@@ -12,7 +12,7 @@ import { lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import type { TableRead, TableRowRead } from './table.ts';
+import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
 import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 export const ONE_LINE_CELL = 'In a table, write a pipe as \\| and a line break as <br>.';
@@ -193,24 +193,51 @@ export function inOwnInsertedCol(
   return false;
 }
 
+/** A pending move that an edit reaches: the copy (the row or column at its new place), the deletion
+ * that keeps it at the old, the table, and the row or column index of the copy. */
+export interface MovedCopy {
+  copy: MarkRange;
+  twin: TableDeletionRead;
+  table: TableRead;
+  axis: 'row' | 'col';
+  index: number;
+}
+
 /**
- * Whether `edit` lies in a cell of a column that is the new place of a move not yet decided: what is
- * typed there with Track Changes off is not in the original, where the column stands at its old place,
- * and travels with the column when the move is rejected, which would change the original.
+ * The pending move whose copy `edit` lies in, a cell of a column or a row that is the new place of a
+ * move not yet decided. With Track Changes off the edit is written in both halves of the move (format
+ * §3.7), for the original has the cell at the old place and the kept copy is what it reads there.
  */
-export function inMovedCol(text: string, edit: TextChange, parsed: Parsed): boolean {
-  if (!parsed.marks.some((m) => m.kind === 'ins' && m.payload === 'col' && m.entry.move)) {
-    return false;
+export function movedCopyAt(text: string, edit: TextChange, parsed: Parsed): MovedCopy | null {
+  if (
+    !parsed.marks.some(
+      (m) => m.kind === 'ins' && m.entry.move && (m.payload === 'col' || m.payload === 'row'),
+    )
+  ) {
+    return null;
   }
   for (const table of tablesIn(text, parsed)) {
     if (edit.from < table.from || edit.to > table.to) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.to <= r.to);
-    const index = row ? cellIndexAt(row, edit.from) : -1;
-    const mark = table.colMarks.find((c) => c.col === index)?.mark;
-    if (mark?.entry.move !== undefined) return true;
+    if (!row) continue;
+    const twinOf = (copy: MarkRange) => table.deletions.find((d) => d.mark.id === copy.entry.move);
+    if (row.insertion?.entry.move !== undefined) {
+      const twin = twinOf(row.insertion);
+      if (twin) {
+        return { copy: row.insertion, twin, table, axis: 'row', index: table.rows.indexOf(row) };
+      }
+    }
+    const index = cellIndexAt(row, edit.from);
+    const copy = table.colMarks.find((c) => c.col === index)?.mark;
+    const twin = copy?.entry.move === undefined ? undefined : twinOf(copy);
+    if (copy && twin) return { copy, twin, table, axis: 'col', index };
   }
-  return false;
+  return null;
 }
+
+/** Whether `edit` lies in a cell of a pending move's copy. */
+export const inMovedCol = (text: string, edit: TextChange, parsed: Parsed): boolean =>
+  movedCopyAt(text, edit, parsed) !== null;
 
 /** The table whose first row starts at `position`, or null. */
 export function tableStartsAt(text: string, parsed: Parsed, position: number): TableRead | null {
@@ -335,6 +362,10 @@ export function commentsOf(
 /** The cell of a row that holds `at`, as its index: the cell whose range from the pipe in front of it
  * holds the position. */
 function cellIndexAt(row: TableRowRead, at: number): number {
+  // The text of a cell first (an empty cell's stop is at its pipe's edge, which the next cell's range
+  // also starts at), then the pipe and padding in front of it.
+  const inText = row.cells.findIndex((cell) => cell.textFrom <= at && at <= cell.textTo);
+  if (inText !== -1) return inText;
   return row.cells.findIndex(
     (cell, i) => cell.from <= at && (at < cell.to || i === row.cells.length - 1),
   );

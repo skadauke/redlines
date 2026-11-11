@@ -1596,9 +1596,7 @@ it, one per line:
   insertion or move can't be moved. A column that is your own pending insertion is moved plainly. A
   column that has no cell in some row of the table (a row shorter than the header) can't be deleted
   (with Track Changes on) or moved ("A row of this table has fewer cells than its header. Fill it in
-  first."). **With Track Changes off, typing in the cells of a moved column is refused** as any edit
-  is that the original would not follow (§3.10): the cells are not at their old place in the original,
-  and rejecting the move would carry the typed text back with them.
+  first."). **With Track Changes off, an edit in a cell of a pending move's copy (a moved column or a moved row) is written in both halves of the move:** the cell at its new place, and the same cell in the kept copy below the table, escaped as the payload is. A plain edit changes both views as it says, and the original reads the cell at the old place from the kept copy; so accepting the move keeps the text at the new place, rejecting gives it back at the old place, and the original view has it. The move is not decided for the person, and the key is not refused. If the edit can't be written into both halves so that the move can still be decided either way, it is refused: "Bo Chen's move of this column is pending. Decide it first, or turn on Track Changes."
 - **The header.** A row inserted above the header is the new header, with the marker in its first
   cell, and the old header the first body row; deleting the header makes the first body row the
   header; the delimiter row follows the first row in every state.

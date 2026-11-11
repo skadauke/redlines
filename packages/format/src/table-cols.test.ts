@@ -562,10 +562,15 @@ describe('moving columns (format §3.7)', () => {
     expectEveryOrderAlike('row marker, plain move', moved, exactly);
   });
 
-  it('refuses plain typing in a moved column, which the original does not have there', () => {
+  it('writes plain typing in a moved column into both halves of the move', () => {
     const done = edit(start, { kind: 'moveCols', cols: [0], to: 3 }).after;
     const at = done.indexOf('Apples') + 3;
-    expect(() => untrackedEdit(done, { from: at, to: at, insert: 'QQ' })).toThrow(EditError);
+    const typed = applyChanges(done, untrackedEdit(done, { from: at, to: at, insert: 'QQ' }));
+    expect(typed).toContain('AppQQles');
+    expect(parse(typed).marks.find((m) => m.payload?.startsWith('col='))?.payload).toContain(
+      'AppQQles',
+    );
+    expect(trim(applyChanges(typed, reject(typed, 'k3x9')))).toContain('| AppQQles');
   });
 });
 

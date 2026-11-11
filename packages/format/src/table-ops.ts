@@ -323,7 +323,7 @@ function markedRow(text: string, row: TableRowRead, marker: string): string {
 
 /** The row as it reads with every pending change in it rejected, format changes undone as well: its
  * line in the original view of the file, found from where the line starts (the row is one line). */
-function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
+export function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
   // A row that holds no marker reads as it is written, which is nearly every row.
   const marked = parsed.marks.some((mark) =>
     mark.segments.some(
@@ -696,7 +696,7 @@ const isShort = (grid: Grid): boolean =>
 /** The cells of column `col`, one per line, as they read with every pending change rejected: what a
  * deleted or moved column keeps (format §3.7). Found in the original view, in the column that is where
  * this one was. */
-function originalCells(text: string, parsed: Parsed, grid: Grid, col: number): string[] {
+export function originalCells(text: string, parsed: Parsed, grid: Grid, col: number): string[] {
   const { table } = grid;
   const raw = () =>
     grid.lines.map((line) => {
