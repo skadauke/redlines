@@ -1837,10 +1837,29 @@ const CHECKS: Check[] = [
       await frames();
       editor.setViewMode('redlines');
       await frames();
-      const lefts = () =>
-        headerCells(editor).map((cell) => Math.round(cell.getBoundingClientRect().left * 10) / 10);
-      const before = lefts();
-      if (before.length !== 4) return { why: 'the column was not drawn', before };
+      // The edges are taken from the table's own box: a table wider than its room scrolls sideways
+      // (WebKit scrolls it to the caret as typing goes), and then every edge moves by the scroll.
+      const wrapper = () => editor.view.contentDOM.querySelector<HTMLElement>('.rl-tbl');
+      const scrollers = () => {
+        const found: { name: string; el: HTMLElement }[] = [];
+        for (let el = wrapper()?.parentElement ?? null; el; el = el.parentElement) {
+          found.push({ name: `${el.tagName.toLowerCase()}.${el.className}`.slice(0, 60), el });
+        }
+        return found;
+      };
+      const snapshot = () => ({
+        edges: headerCells(editor).map(
+          (cell) =>
+            Math.round(
+              (cell.getBoundingClientRect().left - (wrapper()?.getBoundingClientRect().left ?? 0)) *
+                10,
+            ) / 10,
+        ),
+        wrapperLeft: Math.round((wrapper()?.getBoundingClientRect().left ?? 0) * 10) / 10,
+        scrolls: scrollers().map(({ name, el }) => ({ name, left: el.scrollLeft })),
+      });
+      const before = snapshot();
+      if (before.edges.length !== 4) return { why: 'the column was not drawn', before };
       for (let i = 0; i < 6; i++) {
         editor.view.dispatch({
           changes: { from: head(editor), insert: 'wide words go here ' },
@@ -1849,9 +1868,29 @@ const CHECKS: Check[] = [
         });
         await frames();
       }
-      const after = lefts();
-      if (before.some((left, i) => Math.abs(left - (after[i] ?? -1e6)) > 0.5))
+      const after = snapshot();
+      if (before.edges.some((left, i) => Math.abs(left - (after.edges[i] ?? -1e6)) > 0.5))
         problems['moved'] = { before, after };
+      // The table's left edge holds, unless a box around it scrolled sideways to the caret (that is
+      // the page doing its work); otherwise the failure names what took the room: the boxes around
+      // it, their padding, overflow and scroll.
+      const scrolledNow = after.scrolls.some((s, i) => s.left !== before.scrolls[i]?.left);
+      if (Math.abs(before.wrapperLeft - after.wrapperLeft) > 0.5 && !scrolledNow) {
+        problems['table-left'] = {
+          before: before.wrapperLeft,
+          after: after.wrapperLeft,
+          scrolled: after.scrolls.filter((s, i) => s.left !== before.scrolls[i]?.left),
+          boxes: scrollers().map(({ name, el }) => ({
+            name,
+            left: Math.round(el.getBoundingClientRect().left * 10) / 10,
+            width: Math.round(el.getBoundingClientRect().width * 10) / 10,
+            paddingLeft: getComputedStyle(el).paddingLeft,
+            overflowX: getComputedStyle(el).overflowX,
+            scrollWidth: el.scrollWidth,
+            clientWidth: el.clientWidth,
+          })),
+        };
+      }
       const aligned = linedUp(editor);
       if (aligned.off > 0.5) problems['lines-up'] = aligned;
       return Object.keys(problems).length ? problems : null;
