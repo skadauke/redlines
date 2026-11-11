@@ -790,6 +790,34 @@ const pointer: Check[] = [
     },
   },
   {
+    name: 'card-below-a-rewritten-paragraph-at-the-top-of-the-window-covers-neither-text',
+    async run(editor) {
+      await open(editor, 'redlines', NEW_PARAGRAPH);
+      const line = lineWith(editor, NEW_PARAGRAPH);
+      const del = line?.querySelector<HTMLElement>('.rl-del');
+      const ins = line?.querySelector<HTMLElement>('.rl-ins');
+      if (!line || !del || !ins) return { note: 'nothing drawn' };
+      // At the very top of the scroller, where a card has no room above.
+      line.scrollIntoView({ block: 'start' });
+      await frames();
+      const old = firstBox(del);
+      const x = old.left + 20;
+      const y = old.top + old.height / 2;
+      (document.elementFromPoint(x, y) ?? del).dispatchEvent(mouse('mousemove', x, y));
+      await wait(700);
+      const card = document.querySelector<HTMLElement>('.rl-card');
+      if (!card) return { note: 'no card opened' };
+      const box = card.getBoundingClientRect();
+      const top = Math.min(firstBox(del).top, firstBox(ins).top);
+      const bottom = Math.max(lastBox(del).bottom, lastBox(ins).bottom);
+      const problems: Problem = {};
+      if (box.top < bottom - 1)
+        problems['notBelow'] = { card: [box.top, box.bottom], text: [top, bottom] };
+      away(editor);
+      return problemsOf(problems);
+    },
+  },
+  {
     name: 'no-card-opens-on-hover-in-simple',
     async run(editor) {
       await open(editor, 'simple', NEW_PARAGRAPH);

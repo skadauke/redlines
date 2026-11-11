@@ -165,9 +165,23 @@ function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element):
   const change = marked?.dataset['mark']
     ? changes.find((mark) => mark.id === marked.dataset['mark'])
     : null;
-  const segment = change?.segments[0];
-  if (marked && change && segment) {
-    return { change, span: segmentSpan(segment), start: visibleStart(segment), box: marked };
+  if (marked && change) {
+    // Of its segments, the one drawn nearest where this is: a later segment of a change keeps its
+    // card, as a card found by the text does.
+    const at = view.posAtDOM(marked);
+    let segment = change.segments[0];
+    let distance = Infinity;
+    for (const candidate of change.segments) {
+      const span = segmentSpan(candidate);
+      const away = Math.max(span.from - at, at - span.to, 0);
+      if (away < distance) {
+        segment = candidate;
+        distance = away;
+      }
+    }
+    if (segment) {
+      return { change, span: segmentSpan(segment), start: visibleStart(segment), box: marked };
+    }
   }
   const pos = view.posAtDOM(el);
   const struck = el.classList.contains('rl-del') ? struckChange(changes, pos, el) : null;
@@ -252,18 +266,26 @@ class Card implements TooltipView {
       const rect = box.getBoundingClientRect();
       this.boxRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
     }
-    if (this.boxRect) return this.boxRect;
+    // A block deleted whole is a widget: its own box, whatever is under its hidden markers.
+    if (this.boxRect && box?.classList.contains('rl-struck')) return this.boxRect;
     const start = this.view.coordsAtPos(this.found.start, 1);
     const end = this.view.coordsAtPos(this.found.span.to, -1);
     const first = start ?? end;
     const last = end ?? start;
-    if (!first || !last) return OFF_SCREEN;
-    return {
+    if (!first || !last) return this.boxRect ?? OFF_SCREEN;
+    const rect = {
       left: first.left,
       right: first.right,
       top: Math.min(first.top, last.top),
       bottom: Math.max(first.bottom, last.bottom),
     };
+    // Struck old text drawn above its new text, as a block rewritten whole is: from the top of the
+    // old text to the bottom of the new, so that the card, above or below, covers neither.
+    if (this.boxRect) {
+      rect.top = Math.min(rect.top, this.boxRect.top);
+      rect.bottom = Math.max(rect.bottom, this.boxRect.bottom);
+    }
+    return rect;
   };
 }
 

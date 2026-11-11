@@ -315,6 +315,27 @@ describe('change cards', () => {
       expect(tooltip.style.top).toMatch(/px$/);
     });
 
+    it('keeps the card of a change with several segments from any of its struck parts', () => {
+      // Ada's deletion around Bo's insertion: three pieces of one change, in three widgets.
+      const spread = file(
+        'Start here. The <!--del jqwd quick--><!--ins hpvc--><!--del jqwd  red--><!--/hpvc--><!--del jqwd  brown -->fox jumps. End here.',
+        [
+          ...PEOPLE,
+          'marks:',
+          '  jqwd: {by: bo, at: 2026-10-31T09:35Z}',
+          '  hpvc: {by: ada, at: 2026-10-31T09:36Z}',
+        ],
+      );
+      const { editor } = mount(spread);
+      const parts = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-del')];
+      expect(parts.length).toBeGreaterThanOrEqual(2);
+      for (const part of parts) {
+        part.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        activateHover(editor.view, editor.view.posAtDOM(part), 1);
+        expect(card(editor)?.querySelector('.rl-card-name')?.textContent).toBe('Bo Chen');
+      }
+    });
+
     it('shows no card in Simple, where the block is not drawn', () => {
       const { editor } = mount(twins);
       editor.setViewMode('simple');
