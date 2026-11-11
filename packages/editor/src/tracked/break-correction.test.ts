@@ -303,6 +303,19 @@ describe('a word ended with Return', () => {
   });
 });
 
+describe('the text sent to the host', () => {
+  it('is cut between code points, never inside an emoji', () => {
+    // 301 UTF-16 units (an emoji is two) of context in front of the word: the cut at 300 falls inside the first one.
+    const { editor, questions } = load(`\u{1f600}${'a'.repeat(298)} teh`, { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    const { before } = questions[0]!;
+    expect(before.isWellFormed()).toBe(true);
+    expect(before.endsWith('a ')).toBe(true);
+    expect(before.length).toBeLessThanOrEqual(300);
+  });
+});
+
 describe('a Return that asks nothing', () => {
   const asks = (doc: string, caret?: number, view?: EditorOptions['view']) => {
     const { editor, correctWord } = load(doc, { tracking: false, ...(view ? { view } : {}) });

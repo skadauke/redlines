@@ -41,6 +41,13 @@ interface Ask extends Range {
   broke: Range;
 }
 
+/** The last `CONTEXT_CHARS` units of `text`, without half of a surrogate pair at the cut. */
+function lastChars(text: string): string {
+  const cut = text.slice(-CONTEXT_CHARS);
+  const first = cut.charCodeAt(0);
+  return text.length > CONTEXT_CHARS && first >= 0xdc00 && first < 0xe000 ? cut.slice(1) : cut;
+}
+
 /** The word before the caret and the block's text before it, or null where nobody is asked. */
 function wordBeforeCaret(
   view: EditorView,
@@ -65,7 +72,7 @@ function wordBeforeCaret(
     first--;
   }
   const before = shownText(state, shownRuns(state, state.doc.line(first).from, from));
-  return { ask: { from, to, word: found[0] }, before: before.slice(-CONTEXT_CHARS) };
+  return { ask: { from, to, word: found[0] }, before: lastChars(before) };
 }
 
 /**
