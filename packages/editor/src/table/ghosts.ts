@@ -9,7 +9,7 @@
 import { type EditorState, type Extension, StateField, type Range } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { readRowCells } from '@redlines/format';
-import type { MarkRange, Parsed } from '@redlines/format';
+import type { MarkRange } from '@redlines/format';
 import { colorClass, colorsOf } from '../tracked/colors.ts';
 import { isRowDeletion, parsedField, viewModeField } from '../tracked/field.ts';
 import { type Table, tablesField } from './model.ts';
@@ -131,13 +131,23 @@ class GhostWidget extends WidgetType {
   }
 }
 
+/** The widgets of every ghost, and the stretches of text they stand for (each table that has one, from
+ * its first row to the end of its last deletion line). */
+interface Ghosts {
+  set: DecorationSet;
+  spans: readonly { from: number; to: number }[];
+}
+
+const NONE: Ghosts = { set: Decoration.none, spans: [] };
+
 /** The widgets of every ghost of a state: nothing outside Redlines. */
-function ghostWidgets(state: EditorState): DecorationSet {
-  if (state.field(viewModeField, false) !== 'redlines') return Decoration.none;
+function ghostWidgets(state: EditorState): Ghosts {
+  if (state.field(viewModeField, false) !== 'redlines') return NONE;
   const ghosts = ghostsOf(state);
-  if (ghosts.length === 0) return Decoration.none;
+  if (ghosts.length === 0) return NONE;
   const out: Range<Decoration>[] = [];
   const count = new Map<string, number>();
+  const spans = new Map<number, { from: number; to: number }>();
   for (const ghost of ghosts) {
     const { table } = ghost;
     const row = table.rows[ghost.position];
@@ -146,6 +156,9 @@ function ghostWidgets(state: EditorState): DecorationSet {
     const key = `${at} ${row ? 'before' : 'after'}`;
     const k = count.get(key) ?? 0;
     count.set(key, k + 1);
+    const span = spans.get(table.id) ?? { from: table.from, to: table.to };
+    span.to = Math.max(span.to, state.doc.lineAt(ghost.line).to);
+    spans.set(table.id, span);
     out.push(
       Decoration.widget({
         widget: new GhostWidget(ghost),
@@ -155,23 +168,42 @@ function ghostWidgets(state: EditorState): DecorationSet {
       }).range(at),
     );
   }
-  return Decoration.set(out, true);
+  return { set: Decoration.set(out, true), spans: [...spans.values()] };
 }
 
-const ghostField = StateField.define<DecorationSet>({
+const ghostField = StateField.define<Ghosts>({
   create: ghostWidgets,
   update(value, tr) {
     const modeChanged =
       tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-    const parsed = (state: EditorState): Parsed => state.field(parsedField);
-    if (!tr.docChanged && !modeChanged && parsed(tr.startState) === parsed(tr.state)) return value;
-    if (value === Decoration.none && !modeChanged) {
-      // Nothing was drawn: look again only when a deleted row has come.
-      if (!parsed(tr.state).marks.some(isRowDeletion)) return value;
+    const tablesChanged =
+      tr.startState.field(tablesField, false) !== tr.state.field(tablesField, false);
+    if (!tr.docChanged) {
+      return modeChanged || (tablesChanged && value.spans.length > 0)
+        ? ghostWidgets(tr.state)
+        : value;
     }
-    return ghostWidgets(tr.state);
+    if (modeChanged) return ghostWidgets(tr.state);
+    // Only a change that touches a table with a deleted row, or writes one, looks at the ghosts
+    // again; every other keystroke only moves them.
+    let touched = false;
+    tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      if (touched) return;
+      if (inserted.length > 0 && inserted.toString().includes('row=')) touched = true;
+      else if (value.spans.some((span) => fromA <= span.to + 1 && toA >= span.from - 1))
+        touched = true;
+    });
+    if (touched) return ghostWidgets(tr.state);
+    if (value.spans.length === 0) return value;
+    return {
+      set: value.set.map(tr.changes),
+      spans: value.spans.map((span) => ({
+        from: tr.changes.mapPos(span.from, -1),
+        to: tr.changes.mapPos(span.to, 1),
+      })),
+    };
   },
-  provide: (field) => EditorView.decorations.from(field),
+  provide: (field) => EditorView.decorations.from(field, (value) => value.set),
 });
 
 /** A press on a ghost puts no caret there: the card the press opens is its only effect. */

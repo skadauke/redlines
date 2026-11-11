@@ -556,8 +556,7 @@ export function tableKeymap(): Extension {
         { key: 'Alt-ArrowDown', run: (view) => moveRows(view, false) },
         { key: 'Shift-Alt-ArrowUp', run: cellParagraph(false, true) },
         { key: 'Shift-Alt-ArrowDown', run: cellParagraph(true, true) },
-        // These would break the row (a line indented, commented, deleted or selected) and say so,
-        // until rows can be deleted as rows (Stage 3; ⌃L is Select Row, the Table menu's).
+        // These would break the row (a line indented or commented) and say so.
         { key: 'Mod-[', run: notInCell('Outdent') },
         { key: 'Mod-]', run: notInCell('Indent') },
         { key: 'Mod-/', run: notInCell('Toggle Comment') },

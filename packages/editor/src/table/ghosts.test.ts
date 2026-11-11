@@ -164,3 +164,17 @@ describe('Simple', () => {
     expect(dom(deleted).textContent).not.toContain('Pears');
   });
 });
+
+describe('ghosts and other changes', () => {
+  it('are moved, not drawn again, by a keystroke away from their table, and drawn again by one in it', () => {
+    const editor = load('redlines', `Intro.\n\n${DELETED}`);
+    const before = ghosts(editor)[0];
+    expect(before).toBeDefined();
+    editor.view.dispatch({ changes: { from: 3, insert: 'x' } });
+    expect(ghosts(editor)[0]).toBe(before);
+    // A keystroke in the table looks again, and the ghost is still there.
+    const at = editor.view.state.doc.toString().indexOf('Apples') + 2;
+    editor.view.dispatch({ changes: { from: at, insert: 'y' } });
+    expect(ghosts(editor)).toHaveLength(1);
+  });
+});

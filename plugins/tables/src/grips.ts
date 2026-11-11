@@ -28,7 +28,7 @@ import {
   type Table,
 } from '@redlines/editor';
 import { beginDrag, DRAG_SLOP, type Drag } from './drag.ts';
-import { boundariesOf, plusBoundary } from './plus.ts';
+import { boundariesOf, PLUS_REACH, plusBoundary } from './plus.ts';
 
 export const GRIPS_STYLE = `
 .rl-grips { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
@@ -89,21 +89,58 @@ function rowBox(line: HTMLElement): { top: number; bottom: number } {
   };
 }
 
-function drawnTables(view: EditorView): Drawn[] {
+/** What is measured of each table, kept until the text, the scroll or the table's place changes. */
+const measured = new WeakMap<
+  HTMLElement,
+  { doc: unknown; scroll: number; top: number; drawn: Drawn }
+>();
+
+/**
+ * The tables drawn, with their rows' boxes. With `near`, only a table whose box (and the strip beside
+ * it) holds the pointer is measured by its rows, the others by their box alone with no rows: the
+ * pointer moves over a document, and a table of 300 rows is 900 cells to read.
+ */
+function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[] {
   const tables = tablesOf(view.state);
   const drawn: Drawn[] = [];
   for (const wrapper of view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')) {
     const table = tables.find((t) => String(t.id) === wrapper.dataset['table']);
     if (!table) continue;
-    const lines = [...wrapper.querySelectorAll<HTMLElement>(':scope > .rl-trow:not(.rl-ghost)')];
     const box = wrapper.getBoundingClientRect();
-    drawn.push({
+    const reach = 24 + 44;
+    const here =
+      !near ||
+      (near.x >= box.left - reach &&
+        near.x <= box.right &&
+        near.y >= box.top - PLUS_REACH &&
+        near.y <= box.bottom + PLUS_REACH);
+    if (!here) continue;
+    const known = measured.get(wrapper);
+    if (
+      known &&
+      known.doc === view.state.doc &&
+      known.scroll === view.scrollDOM.scrollTop &&
+      known.top === box.top &&
+      known.drawn.table === table
+    ) {
+      drawn.push(known.drawn);
+      continue;
+    }
+    const lines = [...wrapper.querySelectorAll<HTMLElement>(':scope > .rl-trow:not(.rl-ghost)')];
+    const one: Drawn = {
       table,
       left: box.left,
       right: box.right,
       lines,
       rects: lines.map(rowBox),
+    };
+    measured.set(wrapper, {
+      doc: view.state.doc,
+      scroll: view.scrollDOM.scrollTop,
+      top: box.top,
+      drawn: one,
     });
+    drawn.push(one);
   }
   return drawn;
 }
@@ -159,11 +196,9 @@ class Grips {
     view.dom.append(this.layer);
     view.dom.addEventListener('mousemove', this.onMove);
     view.dom.addEventListener('mouseleave', this.onLeave);
-    view.dom.addEventListener('keydown', this.onKey, true);
     window.addEventListener('keydown', this.onKey, true);
     window.addEventListener('mouseup', this.onUp);
     window.addEventListener('mousedown', this.onAway, true);
-    view.scrollDOM.addEventListener('scroll', () => this.hide());
   }
 
   update(update: ViewUpdate): void {
@@ -171,9 +206,11 @@ class Grips {
   }
 
   destroy(): void {
+    // A drag in progress goes with the view: its timer would run on.
+    this.drag?.end(true);
+    this.drag = null;
     this.view.dom.removeEventListener('mousemove', this.onMove);
     this.view.dom.removeEventListener('mouseleave', this.onLeave);
-    this.view.dom.removeEventListener('keydown', this.onKey, true);
     window.removeEventListener('keydown', this.onKey, true);
     window.removeEventListener('mouseup', this.onUp);
     window.removeEventListener('mousedown', this.onAway, true);
@@ -205,7 +242,7 @@ class Grips {
       return;
     }
     if (this.menu) return;
-    const tables = drawnTables(this.view);
+    const tables = drawnTables(this.view, { x: event.clientX, y: event.clientY });
     const viewLeft = this.view.dom.getBoundingClientRect().left;
     const { clientX: x, clientY: y } = event;
     // A boundary near the pointer, in the strip: a + there.
@@ -432,6 +469,8 @@ export function tableGrips(): Extension {
   const plugin = ViewPlugin.fromClass(Grips);
   return [
     plugin,
+    // The page scrolls under a grip: it goes (the editor takes this listener away with the view).
+    EditorView.domEventObservers({ scroll: (_event, view) => view.plugin(plugin)?.hide() }),
     EditorView.decorations.of((view) => view.plugin(plugin)?.dimmed ?? Decoration.none),
   ];
 }
