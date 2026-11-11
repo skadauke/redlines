@@ -234,14 +234,28 @@ function emptyParagraphAbove(tr: Transaction): OpenBlock | null {
 }
 
 /**
- * The empty item Markdown can't hold that the caret is on after ⌘Z or ⇧⌘Z has put it back (the Tab
- * that made it, undone and redone): open again, since the file must not get it.
+ * The documents that Tab (or Return) opened an empty item in, this session: the last few, kept
+ * so that Undo and Redo, which bring such a document back whole, open the item again. An unsound
+ * empty item that the file already holds, or that nothing of the person's made, is in none.
+ */
+const madeItems = StateField.define<readonly Text[]>({
+  create: () => [],
+  update(made, tr) {
+    const request = tr.annotation(openAnnotation);
+    return request?.item && tr.docChanged ? [...made.slice(-49), tr.newDoc] : made;
+  },
+});
+
+/**
+ * The open empty item the caret is on after ⌘Z or ⇧⌘Z has brought back a document that the person's
+ * own Tab opened it in. Never found from the caret's place alone.
  */
 function emptyItemAt(tr: Transaction): OpenBlock | null {
   if (!tr.isUserEvent('undo') && !tr.isUserEvent('redo')) return null;
   const { state } = tr;
   const { main } = state.selection;
   if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  if (!state.field(madeItems, false)?.some((doc) => doc.eq(state.doc))) return null;
   const line = state.doc.lineAt(main.head);
   if (!unsoundEmptyLine(state.doc, line.number) || inHolder(state, line.from)) return null;
   return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
@@ -690,6 +704,7 @@ const observable = EditorView.contentAttributes.compute(
 export function openBlocks(): Extension {
   return [
     openBlockField,
+    madeItems,
     recordField,
     pointerField,
     Prec.high(leaving),

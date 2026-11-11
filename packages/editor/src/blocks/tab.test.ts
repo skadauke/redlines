@@ -480,6 +480,36 @@ describe('Escape, then Tab', () => {
   });
 });
 
+describe('an unsound empty item the file already holds is an ordinary line', () => {
+  // Undo and Redo bring it back as it was; the file never loses it, whatever the caret is on.
+  scriptRows(
+    both([
+      {
+        name: 'a nested empty bullet, typed in and Undone',
+        doc: '- one⏎  - ‸',
+        keys: [{ type: 'x' }, 'Mod-z'],
+        off: { file: '- one⏎  - ', caret: '- one⏎  - ‸' },
+        // The format takes no typing in a line of syntax alone, in a file that holds one already.
+        on: { file: '- one⏎  - ', refusal: 'A line that is only Markdown syntax takes no change.' },
+      },
+      {
+        name: 'a nested empty numbered item, typed in and Undone',
+        doc: '1. one⏎   1. ‸',
+        keys: [{ type: 'x' }, 'Mod-z'],
+        off: { file: '1. one⏎   1. ', caret: '1. one⏎   1. ‸' },
+        on: { file: '1. one⏎   1. ' },
+      },
+      {
+        name: 'typed in, Undone and Redone',
+        doc: '- one⏎  - ‸',
+        keys: [{ type: 'x' }, 'Mod-z', 'Mod-y'],
+        off: { file: '- one⏎  - x' },
+        on: { file: '- one⏎  - ', refusal: 'A line that is only Markdown syntax takes no change.' },
+      },
+    ]),
+  );
+});
+
 describe('the open empty item', () => {
   it('is read as an item at its level holding a character, and left out of the file', () => {
     const parent = document.createElement('div');
