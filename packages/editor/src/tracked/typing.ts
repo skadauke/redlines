@@ -433,10 +433,12 @@ function trackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
-  grouped = false,
+  grouped: boolean | string = false,
 ): Tracked {
   let ctx = contextFor(state);
-  if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
+  // A group of its own for several edits, or the one a caller has made for them.
+  if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
+  else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -556,6 +558,28 @@ function rewritten(
  */
 function refused(tr: Transaction, error: EditError): TransactionSpec {
   return tr.isUserEvent(AUTOCORRECTION) ? {} : { effects: refusedEditEffect.of(error.message) };
+}
+
+/**
+ * Edits of `text` (whose parse is `parsed`) as the author's, the way typing makes them: tracked
+ * changes with Track Changes on, plain text with it off, in the offsets of `text`. With `group`,
+ * the tracked marks share that group. For a change made of several edits and of more than the edits,
+ * such as a paste over cells that adds rows (`table/paste.ts`).
+ *
+ * @throws EditError when the format refuses an edit.
+ */
+export function authoredChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  group?: string,
+): ChangeSet {
+  const made = edits.map((edit): Edit => ({ ...edit, main: false }));
+  if (state.field(trackingField)) {
+    return trackEdits(state, text, parsed, made, false, group ?? made.length > 1).changes;
+  }
+  return untrackEdits(state, text, parsed, made, false).changes;
 }
 
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */

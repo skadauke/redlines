@@ -60,10 +60,32 @@ function editorFor(
   return editor;
 }
 
-// The budget for one update is a frame, 16 ms; doubled here for CI's slower machines. Measured
-// on a development Mac it takes about 2 ms, with the parse a few ms more in the first read of a
-// document and not at all in the update (the ledger is not read again, see `parsedField`).
-const BUDGET_MS = 32;
+// The timing tests run with REDLINES_COST=check, as CI's check job sets, since a busy machine
+// can't time them. Their bounds follow the machine: a multiple of what the markdown parse alone
+// takes for the whole document.
+const timed = it.skipIf(!process.env['REDLINES_COST']);
+
+/** The time of parsing `doc` from scratch with the markdown parse and nothing else: the median of
+ * several runs, the first (which warms the code) left out. */
+function parseTime(doc: string): number {
+  const runs: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const start = performance.now();
+    const view = new EditorView({
+      state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
+      parent: document.body,
+    });
+    forceParsing(view, doc.length, 10_000);
+    if (i > 0) runs.push(performance.now() - start);
+    view.destroy();
+  }
+  return median(runs);
+}
+
+/** What an update may take: twice what parsing the whole document takes, and two milliseconds for
+ * noise. It follows the machine, in both directions: the budget is a frame (16 ms), and the parse
+ * of this document about 8 ms on a development Mac. */
+const bound = (parse: number) => 2 * parse + 2;
 
 describe('a long document', () => {
   const { doc, firstMark } = longDocument();
@@ -97,22 +119,24 @@ describe('a long document', () => {
     expect(entities).toBe(45);
   });
 
-  it('updates decorations for one keystroke in under 16 ms on the long document', () => {
+  timed('updates decorations for one keystroke in under 16 ms on the long document', () => {
     const state = loaded();
     const keystroke = time(() => state.update({ changes: { from: mid, insert: 'x' } }).state);
     const afterAMark = time(
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
-    expect(keystroke).toBeLessThan(BUDGET_MS);
-    expect(afterAMark).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc)));
   });
 
-  it('updates decorations for a caret move in under 16 ms on the long document', () => {
+  timed('updates decorations for a caret move in under 16 ms on the long document', () => {
     const state = loaded();
-    expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(BUDGET_MS);
+    expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(
+      bound(parseTime(doc)),
+    );
   });
 
-  it('holds the same bounds in Simple, which draws every change as a bar', () => {
+  timed('holds the same bounds in Simple, which draws every change as a bar', () => {
     const state = loaded('simple');
     expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(200);
     const keystroke = time(() => state.update({ changes: { from: mid, insert: 'x' } }).state);
@@ -120,9 +144,9 @@ describe('a long document', () => {
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
     const caret = time(() => state.update({ selection: { anchor: mid } }).state);
-    expect(keystroke).toBeLessThan(BUDGET_MS);
-    expect(afterAMark).toBeLessThan(BUDGET_MS);
-    expect(caret).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc)));
+    expect(caret).toBeLessThan(bound(parseTime(doc)));
   });
 });
 
@@ -293,61 +317,59 @@ describe('a long document with a table', () => {
     expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(280);
   });
 
-  it('updates for one keystroke in a cell within the budget', () => {
+  timed('updates for one keystroke in a cell within the budget', () => {
     const state = loaded();
     const keystroke = time(() => state.update({ changes: { from: cell, insert: 'x' } }).state);
-    expect(keystroke).toBeLessThan(BUDGET_MS);
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
   });
 
-  it('updates for a caret move in the table within the budget', () => {
+  timed('updates for a caret move in the table within the budget', () => {
     const state = loaded();
-    expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(BUDGET_MS);
+    expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(
+      bound(parseTime(doc)),
+    );
   });
 
-  // A timing test: it runs with REDLINES_COST=check, as CI's check job sets, since a busy machine
-  // can't time it. The rows a change rebuilds are pinned by count elsewhere (`layoutStats`).
-  it.skipIf(!process.env['REDLINES_COST'])(
-    'keeps the table layer’s share of a row edit small',
-    () => {
-      // A state with the markdown parse and nothing else, and one that has the tables too: what they
-      // differ by is the layer's share.
-      const make = (extra: boolean) => {
-        const view = new EditorView({
-          state: EditorState.create({
-            doc,
-            extensions: [markdown({ extensions: [GFM] }), ...(extra ? [tablesField] : [])],
-          }),
-          parent: document.body,
-        });
-        forceParsing(view, doc.length, 10_000);
-        // The parse that went on is read by the field at the next transaction.
-        const state = view.state.update({ selection: { anchor: 0 } }).state;
-        view.destroy();
-        return state;
-      };
-      const apply = (state: EditorState) => {
-        const edit = () => state.update({ changes: { from: cell, insert: 'x' } }).state;
+  // The rows a change rebuilds are pinned by count elsewhere (`layoutStats`).
+  timed('keeps the table layer’s share of a row edit small', () => {
+    // A state with the markdown parse and nothing else, and one that has the tables too: what they
+    // differ by is the layer's share.
+    const make = (extra: boolean) => {
+      const view = new EditorView({
+        state: EditorState.create({
+          doc,
+          extensions: [markdown({ extensions: [GFM] }), ...(extra ? [tablesField] : [])],
+        }),
+        parent: document.body,
+      });
+      forceParsing(view, doc.length, 10_000);
+      // The parse that went on is read by the field at the next transaction.
+      const state = view.state.update({ selection: { anchor: 0 } }).state;
+      view.destroy();
+      return state;
+    };
+    const apply = (state: EditorState) => {
+      const edit = () => state.update({ changes: { from: cell, insert: 'x' } }).state;
+      edit();
+      const runs: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        const start = performance.now();
         edit();
-        const runs: number[] = [];
-        for (let i = 0; i < 60; i++) {
-          const start = performance.now();
-          edit();
-          runs.push(performance.now() - start);
-        }
-        return median(runs);
-      };
-      const withState = make(true);
-      expect(tablesOf(withState)[0]?.rows).toHaveLength(301);
-      const plain = apply(make(false));
-      const withTables = apply(withState);
-      console.log(
-        `table layer's share: ${(withTables - plain).toFixed(3)} ms (${plain.toFixed(2)} -> ${withTables.toFixed(2)})`,
-      );
-      // Under 1 ms here, and on a slower machine (CI's runners take about twice as long) under what the
-      // markdown parse alone takes for the same edit: never a table read whole.
-      expect(withTables - plain).toBeLessThan(Math.max(1, plain));
-    },
-  );
+        runs.push(performance.now() - start);
+      }
+      return median(runs);
+    };
+    const withState = make(true);
+    expect(tablesOf(withState)[0]?.rows).toHaveLength(301);
+    const plain = apply(make(false));
+    const withTables = apply(withState);
+    console.log(
+      `table layer's share: ${(withTables - plain).toFixed(3)} ms (${plain.toFixed(2)} -> ${withTables.toFixed(2)})`,
+    );
+    // Under 1 ms here, and on a slower machine (CI's runners take about twice as long) under what the
+    // markdown parse alone takes for the same edit: never a table read whole.
+    expect(withTables - plain).toBeLessThan(Math.max(1, plain));
+  });
 
   it('keeps the tables of the state equal to a rebuild after keystrokes', () => {
     let state = loaded();

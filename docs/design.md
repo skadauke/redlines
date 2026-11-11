@@ -522,8 +522,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   selects the row or column; dragging moves it to any position, including the last.
 - **Selection:** rectangles of cells, whole rows and whole columns. Delete clears every selected
   cell, and menus count the selection ("Delete 2 rows").
-- **Pasting** a spreadsheet range into cells grows the table (with selecting and copying cells, the
-  second stage of the table work).
+- **Pasting** a spreadsheet range into cells grows the table by rows (§5.8 below, "Cells").
 - **Tracked changes look as in Word:** inserted rows and columns tinted, deleted ones shown as
   struck-through ghosts, and moves with Word's double underline and double strikethrough. Word
   draws moves in green; Redlines draws them in the author's color, because color means a person
@@ -552,6 +551,32 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   table; one that covers a whole table deletes it as a block. Delete, Backspace, Return and typing
   all work, the last two writing after the deleting. The reached cells are drawn in the system's
   selection color.
+- **Cells.** A selection whose two ends are in two different cells of one table is a rectangle of
+  cells: every cell in the rows and columns between, both included. It is the ordinary selection and
+  keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
+  in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
+  all work. The cells are drawn in the system's selection color with the text highlight hidden;
+  Simple and Redlines draw them the same. Esc puts the caret in the cell where the selection
+  ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
+  then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
+  rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
+  cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
+  staying selected); typing clears them and types into the top-left one; ⌘B, ⌘I and the Format
+  menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
+  cells' text in one row and on the whole rows across rows.
+- **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
+  that holds a tab, a line break or a quote in quotes) and an HTML table of the cells' newest text
+  on the clipboard, the header row as `th` when it is the table's, and never markers; cut also
+  clears the cells. A selection that reaches into a table copies the text outside it and the cells
+  of the rows it reaches. A range (an HTML table from Sheets, Excel, Numbers, Word or Docs, or text
+  with tabs) pastes over the cells from the caret's rightward and down, or from the selection's
+  top-left cell, adding the rows it needs; one value onto selected cells fills each; a range
+  wider than the table is refused whole ("The table has 3 columns and the pasted range has 5. Add
+  columns first.") until columns can be added. Tracked, each overwritten cell is a substitution
+  (an insertion in an empty one) and each added row an inserted row, all one group and one step to
+  undo. Text without tabs goes into the cell (line breaks as `<br>`, pipes escaped); Paste as
+  Plain Text puts anything into the cell with its tabs as spaces. A range pasted outside a table
+  is a new table, as an HTML table was.
 - **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
   take the author's tint and its text is underlined in the author's color, with a change bar on the
   row; Clean shows the plain row. The review bar, the cards ("Inserted row", "Inserted 2 rows") and
@@ -584,6 +609,7 @@ menus, shortcuts, the palette, plugins and agents.
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row below   | ⌘↩                                                                                            | Ctrl+Enter                |
+| In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
@@ -609,7 +635,8 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
-  existing link rather than nesting one. ⇧⌘V pastes plain text.
+  existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
+  text and an HTML table; pasting a range into cells is §5.8.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean, Simple and Redlines copy the newest text, and Raw

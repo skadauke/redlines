@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import {
   cachedMeasure,
+  BOLD_OFF,
+  BOLD_ON,
   cellShows,
   columnWidths,
   type Measured,
@@ -124,6 +126,34 @@ describe('columnWidths', () => {
       ['docs', 'bold and it and code'],
       ['the alt', 'old https://x.org/y [sic]'],
     ]);
+  });
+
+  it('marks the bold stretches of a cell for a measure that sets them bold', () => {
+    const doc = ['| a | b |', '| - | - |', '| **bold** and *it* | x**y**z |'].join('\n');
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ extensions: GFM }), tablesField],
+    });
+    ensureSyntaxTree(state, doc.length, 5000);
+    const now = state.update({}).state;
+    const cells = tablesOf(now)[0]!.rows[1]!.cells;
+    expect(cells.map((cell) => shownText(now, cell, true))).toEqual([
+      `${BOLD_ON}bold${BOLD_OFF} and it`,
+      `x${BOLD_ON}y${BOLD_OFF}z`,
+    ]);
+    expect(cells.map((cell) => shownText(now, cell))).toEqual(['bold and it', 'xyz']);
+  });
+
+  it('takes the marking characters out of a cell’s own text', () => {
+    const doc = ['| a |', '| - |', '| x\uE000y\uE001z **b** |'].join('\n');
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ extensions: GFM }), tablesField],
+    });
+    ensureSyntaxTree(state, doc.length, 5000);
+    const now = state.update({}).state;
+    const cell = tablesOf(now)[0]!.rows[1]!.cells[0]!;
+    expect(shownText(now, cell, true)).toBe(`xyz ${BOLD_ON}b${BOLD_OFF}`);
   });
 
   it('reads what a cell shows: no markers, a break as a break, a pipe as a pipe', () => {

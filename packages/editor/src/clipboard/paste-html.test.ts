@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { htmlToMarkdown } from './paste-html.ts';
+import { htmlToMarkdown, htmlToRange } from './paste-html.ts';
 
 const GUID = 'docs-internal-guid-1a2b3c4d-7fff-1234-abcd-0123456789ab';
 const span = (style: string, text: string) => `<span style="${style}">${text}</span>`;
@@ -479,5 +479,31 @@ describe('htmlToMarkdown, from Word', () => {
     expect(htmlToMarkdown(html)).toBe(
       ['| Name | Role |', '| --- | --- |', '| Ada | Writer |'].join('\n'),
     );
+  });
+});
+
+describe('htmlToRange', () => {
+  it('reads the cells of the one table, formatting and line breaks as Markdown', () => {
+    const html =
+      '<table><tr><td><b>Bold</b> and <a href="https://example.com/x">link</a></td><td>a|b</td></tr>' +
+      '<tr><td>one<br>two</td><td></td></tr></table>';
+    expect(htmlToRange(html)).toEqual([
+      ['**Bold** and [link](https://example.com/x)', 'a\\|b'],
+      ['one<br>two', ''],
+    ]);
+  });
+
+  it('fills a colspan with empty cells and a rowspan down the column', () => {
+    const html =
+      '<table><tr><td colspan="2">wide</td><td rowspan="2">tall</td></tr><tr><td>a</td><td>b</td></tr></table>';
+    expect(htmlToRange(html)).toEqual([
+      ['wide', '', 'tall'],
+      ['a', 'b', ''],
+    ]);
+  });
+
+  it('is none for HTML without a table, and for more than the table', () => {
+    expect(htmlToRange('<p>text</p>')).toBeNull();
+    expect(htmlToRange('<p>a</p><table><tr><td>x</td></tr></table><p>b</p>')).toBeNull();
   });
 });

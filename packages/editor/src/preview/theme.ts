@@ -243,6 +243,11 @@ export const baseThemeSpec: ThemeSpec = {
     backgroundColor: 'Highlight',
     color: 'HighlightText',
   },
+  // The text highlight stays out of selected cells: the cell is the selection.
+  '.rl-sel::selection, .rl-sel *::selection': {
+    backgroundColor: 'transparent',
+    color: 'inherit',
+  },
   // The header row is quieter than the data, and sits on the darker rule.
   '.rl-th .rl-tc': {
     paddingTop: '0',

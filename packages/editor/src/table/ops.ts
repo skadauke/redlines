@@ -29,14 +29,16 @@ import type { Row, Table } from './model.ts';
 import { shownCellAt } from './stops.ts';
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
-function planned(
+export function planned(
   view: EditorView,
   op: TableOp,
+  group?: string,
 ): { changes: TextChange[]; caret: number } | { refusal: string } {
   const { state } = view;
   const text = state.doc.toString();
   try {
-    if (state.field(trackingField)) return tableEdit(text, op, contextFor(state));
+    if (state.field(trackingField))
+      return tableEdit(text, op, { ...contextFor(state), ...(group ? { group } : {}) });
     const { random } = state.facet(editSourceFacet);
     const editing = state.facet(authorFacet);
     const author = editing ? { handle: editing.handle, name: editing.name } : undefined;

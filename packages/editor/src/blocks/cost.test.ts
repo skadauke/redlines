@@ -6,10 +6,12 @@
 // process, Track Changes on and off. The recorded numbers are scaled by how fast this machine runs
 // a fixed piece of work next to the one they were recorded on (`CALIBRATION`), and a key may take
 // at most twice what main's takes (plus a millisecond for noise).
+import { forceParsing } from '@codemirror/language';
 import { EditorSelection } from '@codemirror/state';
 import { type EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
+import { selectedCells } from '../table/cells.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -182,7 +184,9 @@ const TABLE_MAIN: Record<string, number> = {
   'Track Changes off, cell, type': 14.19,
 };
 
-describe('the cost of a keystroke in a table', () => {
+// A timing test too: it runs with REDLINES_COST set, as CI's check job does, since a busy machine
+// can't time it.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a table', () => {
   it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
     const { doc } = longDocument({ table: true });
     const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
@@ -212,3 +216,82 @@ describe('the cost of a keystroke in a table', () => {
     if (record) console.log(`TABLE_CALIBRATION ${calibrate().toFixed(2)}`);
   }, 600_000);
 });
+
+// A rectangle of cells over the whole of the same table (tables, Stage 2): a selection from the first
+// cell to the last (1,500 cells drawn as selected), then the caret back. The selection is no state of
+// its own, so this is a selection transaction and the decorations of the cells, and it may cost no
+// more than the keystroke does: twice main's pair of keys in a cell, as above.
+describe('the cost of a rectangle selection in a table', () => {
+  it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      view.dispatch({ selection: EditorSelection.cursor(0) });
+      const text = view.state.doc.toString();
+      const first = text.indexOf('| item 0 |') + 2;
+      const last = text.indexOf('owner', text.indexOf('| item 299 |')) + 'owner'.length + 2;
+      const round = () => {
+        const start = performance.now();
+        for (let i = 0; i < ROUNDS; i++) {
+          view.dispatch({ selection: EditorSelection.range(first, last) });
+          view.dispatch({ selection: EditorSelection.cursor(first) });
+        }
+        return (performance.now() - start) / ROUNDS;
+      };
+      view.dispatch({ selection: EditorSelection.range(first, last) });
+      expect(selectedCells(view.state)).toHaveLength(1500);
+      view.dispatch({ selection: EditorSelection.cursor(first) });
+      round();
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) runs.push(round());
+      const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+      const ours = median(runs);
+      if (record) continue;
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      console.log(
+        `cost: rectangle over the table, ${label}: main's keystroke ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+      );
+      expect(ours, label).toBeLessThan(2 * main! * scale + 1);
+    }
+  }, 600_000);
+});
+
+// A tracked key in a hand-wrapped paragraph of 200 lines, in a file that has a table somewhere (so
+// a pipe is in the text): the format asks whether a table row can be pipe-less here, and must answer
+// from the paragraph and not from every table of the file. At most twice the same key in the same
+// paragraph in a file with no pipe at all (plus a millisecond).
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a tracked key in a long paragraph',
+  () => {
+    it('is not more for a file that has a pipe', () => {
+      const paragraph = Array.from({ length: 200 }, (_, n) => `${WORDS} line ${n}`).join('\n');
+      const table = '| a | b |\n| - | - |\n| 1 | 2 |';
+      const bare = `${paragraph}\n\nAfter.\n`;
+      const piped = `${table}\n\n${paragraph}\n\nAfter.\n`;
+      const measure = (doc: string) => {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking: true });
+        open.push(editor);
+        const at = editor.view.state.doc.toString().indexOf('line 100') + 'line 100'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        return median(runs);
+      };
+      const without = measure(bare);
+      const withPipe = measure(piped);
+      console.log(
+        `cost: 200-line paragraph, tracked key: no pipe ${without.toFixed(2)} ms, a pipe ${withPipe.toFixed(2)} ms`,
+      );
+      expect(withPipe).toBeLessThan(2 * without + 1);
+    }, 120_000);
+  },
+);

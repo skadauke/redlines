@@ -1,8 +1,8 @@
 import { markdown } from '@codemirror/lang-markdown';
-import { ensureSyntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, type ChangeSpec } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildTables, cellAt, type Table, tablesField, tablesOf } from './model.ts';
 
 const make = (doc: string) =>
@@ -58,6 +58,28 @@ describe('the tables of a state', () => {
   it('keeps a ragged row as written', () => {
     const [table] = tablesOf(make('| a | b |\n| - | - |\n| c |\n| d | e | f |\n'));
     expect(table?.rows.map((r) => r.cells.length)).toEqual([2, 1, 3]);
+  });
+});
+
+describe('read from the tree as its parse goes on', () => {
+  it('takes in the tables that an edit’s own parse reaches, past where the tree before it ended', () => {
+    // A busy machine stops the first parse early, so the tables are read from part of the text. The
+    // first edit's parse then goes on to the end in the same transaction: the tables it reaches are
+    // not near the edit, and must still be read.
+    const doc = `Intro words.\n\n${T}\nMiddle.\n\n| h |\n| - |\n| 1 |\n\n${T}`;
+    let now = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 1000));
+    let state: EditorState;
+    try {
+      state = make(doc);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(syntaxTree(state).length).toBeLessThan(state.doc.length);
+    state = state.update({ changes: { from: 0, insert: 'x' } }).state;
+    expect(syntaxTree(state).length).toBe(state.doc.length);
+    expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
+    expect(tablesOf(state)).toHaveLength(3);
   });
 });
 
@@ -187,4 +209,27 @@ describe('kept as the text changes', () => {
     expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
     expect(tablesOf(state)).toHaveLength(0);
   });
+});
+
+describe('a table indented by up to three spaces', () => {
+  for (const indent of [0, 1, 2, 3]) {
+    it(`is found in the tree, so an edit elsewhere rebuilds no table (indent ${indent})`, () => {
+      const pad = ' '.repeat(indent);
+      const first = `${pad}| a | b |\n${pad}| - | - |\n${pad}| cc | d |\n`;
+      const doc = `${first}\nBetween.\n\n${T}`;
+      const state = make(doc);
+      ensureSyntaxTree(state, doc.length, 5000);
+      const before = tablesOf(state.update({}).state);
+      expect(before).toHaveLength(2);
+      // A keystroke in the second table's cell.
+      const at = doc.lastIndexOf('cc') + 1;
+      let next = state.update({ changes: { from: at, insert: 'x' } }).state;
+      ensureSyntaxTree(next, next.doc.length, 5000);
+      next = next.update({}).state;
+      const after = tablesOf(next);
+      expect(after).toHaveLength(2);
+      // The first table is the one it was, moved with the text and not read again.
+      expect(after[0]).toBe(before[0]);
+    });
+  }
 });
