@@ -1040,7 +1040,13 @@ const ITEM_LINE = /^(?:[ \t]{0,3}>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|\r
  * list, it is code, and a row without the rows above it is no row of a table. A list goes on over
  * blank lines while the line after them is indented or another item. `limit` is where the body ends.
  */
-function blockAround(reader: FormatReader, range: Range, limit: number): Range {
+function blockAround(
+  reader: FormatReader,
+  range: Range,
+  limit: number,
+  spans: readonly Range[] = [],
+  byList = false,
+): Range {
   const { text, verbatim } = reader;
   const line = (start: number) => text.slice(start, lineEnd(text, start));
   const blank = (start: number) => line(start).trim() === '';
@@ -1068,6 +1074,38 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
     }
     return false;
   };
+  // The list CommonMark reads (format §2.6): a list ends where the next item's marker is of another
+  // type, a bullet character or `.` and `)`, unless a pending change stands where it could make the
+  // two one list. Only items at the line's start are compared: a nested list is its item's.
+  const kindOf = (start: number) => {
+    const found = /^(?:([-*+])|\d{1,9}([.)]))(?:[ \t]|\r?$)/.exec(line(start));
+    return found ? (found[1] ?? found[2]) : undefined;
+  };
+  /** The last item at the line's start in the lines from `a` to `b`, and its kind. */
+  const lastItem = (a: number, b: number) => {
+    for (let start = lineStart(text, b); start >= a; start = lineStart(text, start - 1)) {
+      const kind = kindOf(start);
+      if (kind !== undefined) return { start, kind };
+      if (start === 0) break;
+    }
+    return undefined;
+  };
+  /** Whether the item at `below` starts a list of its own after the lines `a` to `b`. */
+  const endsList = (a: number, b: number, below: number) => {
+    if (!byList) return false;
+    const kind = kindOf(below);
+    const above = kind === undefined ? undefined : lastItem(a, b);
+    if (!above || above.kind === kind) return false;
+    // A pending change at either marker, or between the two, could make them one list.
+    const markerEnd = above.start + line(above.start).search(/[ \t]|$/);
+    const gap = lineEnd(text, b);
+    const belowEnd = below + line(below).search(/[ \t]|$/) + 1;
+    return !spans.some(
+      (span) =>
+        (span.from <= markerEnd + 1 && span.to >= above.start) ||
+        (span.to >= gap && span.from <= belowEnd),
+    );
+  };
   let from = top(range.from);
   let last = bottom(range.to);
   let list = inList(from, last);
@@ -1082,6 +1120,7 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
       const run = top(above - 1);
       const listed = inList(run, lineStart(text, above - 1));
       if (!listed && !/^[ \t]/.test(line(run))) break;
+      if (endsList(run, lineStart(text, above - 1), from)) break;
       list ||= listed;
       from = run;
     }
@@ -1090,6 +1129,7 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
       let below = next(last);
       while (below !== undefined && blank(below)) below = next(below);
       if (below === undefined || !goesOn(below)) break;
+      if (endsList(from, last, below)) break;
       last = bottom(below);
     }
     for (const v of verbatim) {
@@ -1110,8 +1150,9 @@ function blockRegion(
   spans: readonly Range[],
   paragraph: Range,
   limit: number,
+  byList = false,
 ): Range {
-  return closed(paragraph, spans, (range) => blockAround(reader, range, limit));
+  return closed(paragraph, spans, (range) => blockAround(reader, range, limit, spans, byList));
 }
 
 /**
@@ -1327,7 +1368,7 @@ function planFormat(
           ? { kind: 'block', at: plan.at, write: plan.write }
           : { kind: 'edit', at: plan.at, changes: plan.changes, id: plan.id, kept: plan.kept };
       if (!block || lines.from < block.from || lines.to > block.to) {
-        block = blockRegion(planning, spans, lines, limit);
+        block = blockRegion(planning, spans, lines, limit, true);
       }
       blocks.push({ steps: [step], region: block, typing: false });
       continue;
@@ -1376,6 +1417,9 @@ const NEAR_PENDING =
  * a new mark and four other marks takes about 850. A decision on a region longer than `TRIAL_SIZE`
  * counts as more than one. */
 const TRIALS = 1500;
+/** A block change has a larger one: the walk of the new mark and five other marks takes about 3000
+ * decisions, and a list item can be indented with five other changes pending in its list (rule 5). */
+const BLOCK_TRIALS = 6000;
 const TRIAL_SIZE = 1000;
 
 /**
@@ -1645,6 +1689,8 @@ function proveDecisions(
 interface RegionSize {
   name: string;
   length: number;
+  /** How many decisions may be tried (`TRIALS`, or `BLOCK_TRIALS` for a block change). */
+  budget?: number;
 }
 
 /** The walk of `proveDecisions`: with the marks apart left pending, and if that does not show
@@ -1679,7 +1725,8 @@ function walkOrders(
   region: RegionSize,
   pending: Pending | undefined,
 ): void {
-  let trials = TRIALS;
+  const budget = region.budget ?? TRIALS;
+  let trials = budget;
   // A decision in a long region costs as much as several in a paragraph. The definitions copied
   // in from the rest of the file are not the region's.
   const cost = Math.max(1, region.length / TRIAL_SIZE);
@@ -1687,13 +1734,13 @@ function walkOrders(
   const tooMany = () =>
     refused(
       others.length === 0
-        ? 'This changes too many items of one list at once to check them. Change up to five items at a time.'
-        : `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
+        ? `This changes too many items of one list at once to check them. Change up to ${region.budget === undefined ? 'five' : 'six'} items at a time.`
+        : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.
   const marks = fresh.length + others.length;
-  if (marks > 0 && 2 * marks * 3 ** (marks - 1) * cost > TRIALS) throw tooMany();
+  if (marks > 0 && 2 * marks * 3 ** (marks - 1) * cost > budget) throw tooMany();
   const known = new Map<string, string | undefined>();
   const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
     const key = `${id}${action}${text}`;
@@ -1969,7 +2016,10 @@ function selfCheck(
     if (!alike) throw refused(READS_OTHERWISE);
     const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
     const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
-    const size = sizeOf(text, region);
+    const size = {
+      ...sizeOf(text, region),
+      ...(checking.blockChange ? { budget: BLOCK_TRIALS } : {}),
+    };
     proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
@@ -2002,6 +2052,8 @@ export function trackedFormat(
  * `everyMark`, every mark of its block tried in every order, as before they were. */
 interface Checking {
   everyMark: boolean;
+  /** The change is a block change, which has a larger budget of decisions to try. */
+  blockChange?: boolean;
 }
 
 const LEAVING_MARKS_APART: Checking = { everyMark: false };
@@ -2144,7 +2196,7 @@ function formatTracked(
     inCode: IN_VERBATIM,
   });
   // A block change leaves no mark apart: it changes the lines of its block.
-  const blockChecking = isBlockOp(op) ? { everyMark: true } : checking;
+  const blockChecking = isBlockOp(op) ? { everyMark: true, blockChange: true } : checking;
   selfCheck(text, parsed, changes, ledger, changed, created, blockChecking);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
@@ -2456,7 +2508,10 @@ function formatUntracked(
     const apart = inline ? pendingIn(local, region, touching) : undefined;
     const { alike, pending } = readsAsBefore(local, after, apart);
     if (!alike) throw refused(READS_OTHERWISE);
-    const size = sizeOf(text, region);
+    const size = {
+      ...sizeOf(text, region),
+      ...(isBlockOp(op) ? { budget: BLOCK_TRIALS } : {}),
+    };
     if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local) };

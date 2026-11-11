@@ -148,20 +148,40 @@ describe('task boxes, more cases', () => {
 });
 
 describe('a box refused for how much is pending', () => {
-  it('says so, not that Track Changes is the trouble (#167)', () => {
-    const doc = '- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n- [ ] f\n\nEnd.\n';
-    const notices: string[] = [];
+  /** A list of eight task items, `others` of them with a pending change after their text. */
+  const pending = (others: number, notices: string[]) => {
+    const doc = `${'abcdefgh'
+      .split('')
+      .map((c) => `- [ ] ${c}`)
+      .join('\n')}\n\nEnd.\n`;
     const editor = mount(doc, true, notices);
-    // Five other pending changes in the list.
-    for (const line of [1, 2, 3, 4, 5]) {
+    for (let line = 2; line < 2 + others; line++) {
       const at = editor.view.state.doc.line(line).to;
       editor.view.dispatch({ selection: { anchor: at } });
       editor.view.dispatch(editor.view.state.replaceSelection(' x'), { userEvent: 'input.type' });
     }
+    return editor;
+  };
+
+  it.each([4, 5])('works with %i other pending changes in the list (rule 5)', (others) => {
+    const notices: string[] = [];
+    const editor = pending(others, notices);
     const before = editor.getDoc();
-    click(editor, 5);
+    click(editor, 0);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+    expect(editor.getDoc()).toContain('+check');
+  });
+
+  it('says so with six, not that Track Changes is the trouble (#167)', () => {
+    const notices: string[] = [];
+    const editor = pending(6, notices);
+    const before = editor.getDoc();
+    click(editor, 0);
     expect(editor.getDoc()).toBe(before);
-    expect(notices).toEqual([expect.stringMatching(/^There are too many pending changes/)]);
+    expect(notices).toEqual([
+      expect.stringMatching(/^This box can't be changed while 6 changes in its list are pending/),
+    ]);
     expect(notices.join()).not.toMatch(/Turn off Track Changes/);
   });
 });

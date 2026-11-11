@@ -7,8 +7,9 @@
 // and open it in WebKit: it reads nothing in a release build. Each check loads its document,
 // presses its keys in Clean, and reports one console line, `BLOCK-CHECK <name> pass` or
 // `BLOCK-CHECK <name> FAIL <json>`, with the file, the caret and the hidden lines it found, then
-// `BLOCK-CHECK done <passed> passed, <failed> failed`. Tab is reported, not judged: until Stage 2
-// binds it, it is WebKit's own.
+// `BLOCK-CHECK done <passed> passed, <failed> failed`. Tab and Escape then Tab are judged by what
+// the page does with the key event (`BLOCK-CHECK tab`); a triple-click is a synthetic `mousedown`
+// with three clicks in its `detail`, aimed at the text's own coordinates.
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -17,7 +18,12 @@ import { newestView } from '@redlines/format';
 import sample from './sample.md?raw';
 
 /** A step: a key as CodeMirror names it, typed text, or a line break input. */
-type Step = string | { type: string } | { input: 'insertParagraph' | 'insertLineBreak' };
+type Step =
+  | string
+  | { type: string }
+  | { input: 'insertParagraph' | 'insertLineBreak' }
+  /** A triple-click on the text at the caret's start position. */
+  | { triple: true };
 
 interface Check {
   name: string;
@@ -31,6 +37,8 @@ interface Check {
   file?: string;
   /** The newest view of the file (Track Changes on). */
   newest?: string;
+  /** The text the selection holds after the steps. */
+  selected?: string;
   /** Whether an empty paragraph is open after the steps. */
   open?: boolean;
   /** A test of its own on the view after the steps, instead of the text. */
@@ -162,6 +170,174 @@ const CHECKS: Check[] = [
     tracking: true,
     file: 'One two.',
   },
+  {
+    name: 'tab-indents-item',
+    doc: '- one⏎- ‸two',
+    steps: ['Tab'],
+    caret: '- one⏎  - ‸two',
+    file: '- one⏎  - two',
+  },
+  {
+    name: 'tab-in-the-middle-of-item-text',
+    doc: '- one⏎- t‸wo',
+    steps: ['Tab'],
+    caret: '- one⏎  - t‸wo',
+    file: '- one⏎  - two',
+  },
+  {
+    name: 'shift-tab-outdents-item',
+    doc: '- one⏎  - ‸two',
+    steps: ['Shift-Tab'],
+    caret: '- one⏎- ‸two',
+    file: '- one⏎- two',
+  },
+  {
+    name: 'tab-numbered-item-from-1',
+    doc: '2. two⏎3. ‸three',
+    steps: ['Tab'],
+    file: '2. two⏎   1. three',
+  },
+  {
+    name: 'tab-in-first-item-changes-nothing',
+    doc: '- ‸one⏎- two',
+    steps: ['Tab'],
+    file: '- one⏎- two',
+  },
+  {
+    name: 'tab-in-paragraph-changes-nothing',
+    doc: 'One t‸wo.',
+    steps: ['Tab'],
+    file: 'One two.',
+  },
+  {
+    name: 'tab-on-item-after-return',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', { type: 'x' }],
+    file: '- one⏎- two⏎  - x',
+  },
+  {
+    name: 'tracked-tab-indents-item',
+    doc: '- one⏎- ‸two',
+    steps: ['Tab'],
+    tracking: true,
+    newest: '- one⏎  - two',
+    test: (editor) =>
+      editor.getDoc().includes('was=indent=0') ? null : { noMark: notation(editor.getDoc()) },
+  },
+  {
+    name: 'tracked-shift-tab-outdents-item',
+    doc: '- one⏎  - ‸two',
+    steps: ['Shift-Tab'],
+    tracking: true,
+    newest: '- one⏎- two',
+    test: (editor) =>
+      editor.getDoc().includes('was=indent=2') ? null : { noMark: notation(editor.getDoc()) },
+  },
+  {
+    name: 'tracked-tab-on-item-after-return',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', { type: 'x' }],
+    tracking: true,
+    newest: '- one⏎- two⏎  - x',
+    // The item is the break's own: no mark of its own beside the split.
+    test: (editor) =>
+      editor.getDoc().includes('was=indent') ? { fmt: notation(editor.getDoc()) } : null,
+  },
+  {
+    name: 'tab-after-return-opens-item-not-in-file',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    caret: '- one⏎- two⏎  - ‸',
+    file: '- one⏎- two',
+    open: true,
+  },
+  {
+    name: 'tab-after-return-then-leaving-takes-it-back',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', 'ArrowUp'],
+    file: '- one⏎- two',
+    open: false,
+    test: (editor) =>
+      editor.view.state.doc.toString() === '- one\n- two'
+        ? null
+        : { live: editor.view.state.doc.toString() },
+  },
+  {
+    name: 'tab-after-return-then-shift-tab-is-an-ordinary-item',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab', 'Shift-Tab'],
+    caret: '- one⏎- two⏎- ‸',
+    file: '- one⏎- two⏎- ',
+    open: false,
+  },
+  {
+    name: 'tracked-tab-after-return-opens-item-not-in-file',
+    doc: '- one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    tracking: true,
+    file: '- one⏎- two',
+    open: true,
+  },
+  {
+    name: 'tab-on-empty-item-of-the-file-is-refused',
+    doc: '- one⏎- two⏎- ‸',
+    steps: ['Tab'],
+    file: '- one⏎- two⏎- ',
+    open: false,
+  },
+  {
+    name: 'option-up-to-start-of-paragraph',
+    doc: 'One.⏎⏎Tw‸o three.',
+    steps: ['Alt-ArrowUp'],
+    caret: 'One.⏎⏎‸Two three.',
+    file: 'One.⏎⏎Two three.',
+  },
+  {
+    name: 'option-up-from-start-to-paragraph-before',
+    doc: 'One.⏎⏎‸Two three.',
+    steps: ['Alt-ArrowUp'],
+    caret: '‸One.⏎⏎Two three.',
+    file: 'One.⏎⏎Two three.',
+  },
+  {
+    name: 'option-down-to-end-of-paragraph',
+    doc: 'On‸e.⏎⏎Two three.',
+    steps: ['Alt-ArrowDown'],
+    caret: 'One.‸⏎⏎Two three.',
+    file: 'One.⏎⏎Two three.',
+  },
+  {
+    name: 'option-down-from-end-to-next-end',
+    doc: 'One.‸⏎⏎Two three.',
+    steps: ['Alt-ArrowDown'],
+    caret: 'One.⏎⏎Two three.‸',
+    file: 'One.⏎⏎Two three.',
+  },
+  {
+    name: 'option-down-in-list-never-moves-the-line',
+    doc: '- o‸ne⏎- two',
+    steps: ['Alt-ArrowDown'],
+    caret: '- one‸⏎- two',
+    file: '- one⏎- two',
+  },
+  {
+    name: 'shift-option-up-selects-to-paragraph-start',
+    doc: 'One.⏎⏎Tw‸o three.',
+    steps: ['Shift-Alt-ArrowUp'],
+    selected: 'Tw',
+  },
+  {
+    name: 'triple-click-selects-block-text-not-break',
+    doc: 'One.⏎⏎Tw‸o three.⏎⏎Four.',
+    steps: [{ triple: true }],
+    selected: 'Two three.',
+  },
+  {
+    name: 'triple-click-then-typing-keeps-break',
+    doc: 'One.⏎⏎Tw‸o three.⏎⏎Four.',
+    steps: [{ triple: true }, { type: 'X' }],
+    file: 'One.⏎⏎X⏎⏎Four.',
+  },
 ];
 
 const frames = async () => {
@@ -169,13 +345,17 @@ const frames = async () => {
   await new Promise((resolve) => setTimeout(resolve, 30));
 };
 
-/** Presses a key as a keyboard does, through CodeMirror's own key handling. */
-function press(editor: Editor, key: string): void {
+/** The key codes CodeMirror reads for Escape then Tab (`tabFocusMode`). */
+const KEY_CODES: Record<string, number> = { Tab: 9, Escape: 27 };
+
+/** Presses a key as a keyboard does, through CodeMirror's own key handling. Returns the event. */
+function press(editor: Editor, key: string): KeyboardEvent {
   const parts = key.split('-');
   const name = parts.pop() ?? key;
   const event = new KeyboardEvent('keydown', {
     key: name,
     code: name.length === 1 ? `Key${name.toUpperCase()}` : name,
+    keyCode: KEY_CODES[name] ?? 0,
     shiftKey: parts.includes('Shift'),
     altKey: parts.includes('Alt'),
     ctrlKey: parts.includes('Ctrl'),
@@ -184,6 +364,26 @@ function press(editor: Editor, key: string): void {
     cancelable: true,
   });
   editor.view.contentDOM.dispatchEvent(event);
+  return event;
+}
+
+/**
+ * A triple-click on the text at the caret, as the three `mousedown`s of one: the third has `detail`
+ * 3, which CodeMirror's mouse selection styles are asked about. The mouse goes up after.
+ */
+async function tripleClick(view: EditorView): Promise<void> {
+  const { head } = view.state.selection.main;
+  const box = view.coordsAtPos(head);
+  if (!box) throw new Error('the caret has no coordinates');
+  const x = box.left + 1;
+  const y = (box.top + box.bottom) / 2;
+  const target = document.elementFromPoint(x, y) ?? view.contentDOM;
+  for (const detail of [1, 2, 3]) {
+    const init = { clientX: x, clientY: y, detail, button: 0, bubbles: true, cancelable: true };
+    target.dispatchEvent(new MouseEvent('mousedown', init));
+    document.dispatchEvent(new MouseEvent('mouseup', init));
+    await frames();
+  }
 }
 
 /** The ranges the caret steps over that the caret is strictly inside. */
@@ -210,6 +410,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   const start = { head: view.state.selection.main.head };
   for (const step of check.steps) {
     if (typeof step === 'string') press(editor, step);
+    else if ('triple' in step) await tripleClick(view);
     else if ('type' in step) document.execCommand('insertText', false, step.type);
     else {
       // `execCommand` fires no `beforeinput`: the event dictation and the Mac's input methods send.
@@ -232,6 +433,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
     open: view.contentDOM.dataset['rlOpenBlock'] !== undefined,
     caretInHidden: hiddenAt(view),
     caretDrawn: view.coordsAtPos(head) !== null,
+    selected: state.sliceDoc(state.selection.main.from, state.selection.main.to),
   };
   const problems: string[] = [];
   if (check.test) {
@@ -243,25 +445,49 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   if (check.newest !== undefined && notation(newestView(editor.getDoc()).text) !== check.newest) {
     problems.push(`newest: ${notation(newestView(editor.getDoc()).text)}`);
   }
+  if (check.selected !== undefined && found.selected !== check.selected) {
+    problems.push(`selected: ${JSON.stringify(found.selected)}`);
+  }
   if (check.open !== undefined && found.open !== check.open) problems.push('open');
   if (found.caretInHidden.length) problems.push('caret in a hidden range');
   if (!found.caretDrawn) problems.push('caret not drawn');
   return problems.length ? { problems, ...found } : null;
 }
 
-/** What Tab does, until Stage 2 binds it: reported, so that a person can see it doesn't trap. */
+/**
+ * What the page does with Tab: it is taken in a list item (it indents) and in a paragraph (nothing),
+ * so the event's default is prevented, and after Escape it is the browser's, which moves the focus
+ * on: the default is left alone and the text unchanged. A synthetic Tab runs no browser default;
+ * press Tab by hand to see where the focus goes.
+ */
 async function tab(editor: Editor): Promise<unknown> {
-  editor.reloadDoc('One two.');
-  editor.view.focus();
-  await frames();
-  const before = editor.getDoc();
-  press(editor, 'Tab');
-  await frames();
-  return {
-    changed: editor.getDoc() !== before,
-    focusLeft: !editor.view.hasFocus,
-    note: 'a synthetic Tab runs no browser default: press Tab by hand to see where the focus goes',
+  const problems: string[] = [];
+  editor.setViewMode('clean');
+  editor.setTracking(false);
+  const load = async (doc: string) => {
+    const text = lf(doc);
+    editor.reloadDoc(text.replace('‸', ''));
+    editor.view.focus();
+    editor.view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')) });
+    await frames();
   };
+  await load('- one⏎- ‸two');
+  const inItem = press(editor, 'Tab');
+  await frames();
+  if (!inItem.defaultPrevented) problems.push('Tab in an item was left to the browser');
+  if (editor.getDoc() !== '- one\n  - two') problems.push('Tab in an item did not indent');
+  await load('One t‸wo.');
+  const inParagraph = press(editor, 'Tab');
+  await frames();
+  if (!inParagraph.defaultPrevented) problems.push('Tab in a paragraph was left to the browser');
+  if (editor.getDoc() !== 'One two.') problems.push('Tab in a paragraph changed the text');
+  await load('- one⏎- ‸two');
+  press(editor, 'Escape');
+  const after = press(editor, 'Tab');
+  await frames();
+  if (after.defaultPrevented) problems.push('Tab after Escape was taken by the page');
+  if (editor.getDoc() !== '- one\n- two') problems.push('Tab after Escape changed the text');
+  return problems.length ? { problems } : null;
 }
 
 export async function runBlockCheck(editor: Editor): Promise<void> {
@@ -282,7 +508,19 @@ export async function runBlockCheck(editor: Editor): Promise<void> {
       console.log(`BLOCK-CHECK ${check.name} FAIL ${JSON.stringify({ threw: String(error) })}`);
     }
   }
-  console.log(`BLOCK-CHECK tab pass ${JSON.stringify(await tab(editor))}`);
+  try {
+    const failure = await tab(editor);
+    if (failure) {
+      failed++;
+      console.log(`BLOCK-CHECK tab FAIL ${JSON.stringify(failure)}`);
+    } else {
+      passed++;
+      console.log('BLOCK-CHECK tab pass');
+    }
+  } catch (error) {
+    failed++;
+    console.log(`BLOCK-CHECK tab FAIL ${JSON.stringify({ threw: String(error) })}`);
+  }
   editor.setTracking(false);
   editor.reloadDoc(sample);
   console.log(`BLOCK-CHECK done ${passed} passed, ${failed} failed`);
