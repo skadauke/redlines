@@ -198,6 +198,51 @@ describe('bold over cells decides on and off from all the selected text', () => 
   });
 });
 
+describe('tracked bold over many cells (issue #267)', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  async function boldOver(cells: number, tracking: boolean) {
+    const { createFormatting } = await import('../../../../plugins/formatting/src/index.ts');
+    const rows = Array.from({ length: cells }, (_, n) => `| r${n} | s${n} |`);
+    const doc = ['| a | b |', '| - | - |', ...rows, ''].join('\n');
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const notices: string[] = [];
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada' }, tracking });
+    open.push(editor);
+    createFormatting(editor, {
+      author: { handle: 'ada', name: 'Ada' },
+      notice: (m) => notices.push(m),
+    });
+    editor.view.dispatch({
+      selection: { anchor: doc.indexOf('r0'), head: doc.lastIndexOf('s') + 2 },
+    });
+    return { editor, doc, notices, ran: editor.commands.run('format.bold') };
+  }
+
+  it('is refused with the format library’s words, and writes nothing', async () => {
+    // Twelve cells: each is one more pending change in the table for the next to be checked against.
+    const { editor, doc, notices, ran } = await boldOver(6, true);
+    expect(ran).toBe(false);
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatch(
+      /^There are \d+ pending changes in this table, too many to check this change against\. Accept or reject some of them first\.$/,
+    );
+  });
+
+  it('is made for a few cells, and with Track Changes off for as many as there are', async () => {
+    expect((await boldOver(2, true)).ran).toBe(true);
+    const plain = await boldOver(6, false);
+    expect(plain.ran).toBe(true);
+    expect(plain.notices).toEqual([]);
+  });
+});
+
 describe('a rectangle’s edits are one step to undo', () => {
   const open: Editor[] = [];
   afterEach(() => {
