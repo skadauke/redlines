@@ -2195,8 +2195,9 @@ function formatTracked(
     },
     inCode: IN_VERBATIM,
   });
-  // A block change leaves no mark apart: it changes the lines of its block.
-  const blockChecking = isBlockOp(op) ? { everyMark: true, blockChange: true } : checking;
+  // A block change has a larger budget, and leaves the marks apart from it pending too (format
+  // §2.6, "Marks apart for block changes"), unless every mark is asked for.
+  const blockChecking = isBlockOp(op) ? { ...checking, blockChange: true } : checking;
   selfCheck(text, parsed, changes, ledger, changed, created, blockChecking);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
@@ -2504,7 +2505,7 @@ function formatUntracked(
     const after = regionFile(text, before, region, touching);
     const marks = parse(after).marks;
     const others = marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id);
-    const inline = !checking.everyMark && !isBlockOp(op) && others.length > 0;
+    const inline = !checking.everyMark && others.length > 0;
     const apart = inline ? pendingIn(local, region, touching) : undefined;
     const { alike, pending } = readsAsBefore(local, after, apart);
     if (!alike) throw refused(READS_OTHERWISE);

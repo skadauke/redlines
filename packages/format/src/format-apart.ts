@@ -80,6 +80,17 @@
 // The warnings it counts, and the bytes once the new marks are rejected, change alike in both files
 // too.
 //
+// A block change (a type, an indentation, a box) leaves the marks apart pending too (format §2.6,
+// "Marks apart for block changes"), with its own proof, because it writes in the lines of its
+// blocks, at their starts, and not inside a paragraph. Nothing here is block specific, as the
+// definition already reads every edit of the change as `footprint`, and treats a line whose prefix
+// or first character an edit writes as one whose start is not known: `fixedAt` and `inPrefix` take
+// it out of the reading of list items (`listItemAt`), so a paragraph stands against a written line
+// only where it is sure of its own start: a blank line that nothing touches, or its own item (a
+// bullet or a 1, less than four columns in, with its prefix and first character unwritten). So the
+// marks of the item right above the one that changes, and of a numbered item under it, whose start
+// the reading takes from the lines above, are tried, and the others are not.
+//
 // The first shortcut of this kind, when format changes were new, left out the marks of the
 // change's own paragraph that did not stand next to its syntax, and tried them only all accepted
 // and all rejected. Both were wrong: a delimiter far off in the paragraph pairs with the new one

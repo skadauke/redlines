@@ -1780,9 +1780,14 @@ describe('outdenting where a child is text already', () => {
 describe('the region of a block change is the list CommonMark reads (rule 4, #172)', () => {
   const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
   const marks = Object.fromEntries(ids.map((id) => [id, 'bo']));
-  const pending = ids.map((id) => `x <!--ins ${id}-->y<!--/${id}-->`);
+  // Each insertion is at the first character of its item's text, which a decision could make reach
+  // the line's start: none is apart from a block change (rule 6), so each counts.
+  const pending = ids.map((id) => `<!--ins ${id}-->x <!--/${id}-->y`);
 
   it('does not count the pending changes of another list, ended by a different marker', () => {
+    // The other list's changes are in its items' text, which no decision brings to a line's start;
+    // marks at the start of its items could make the lists one (below) and are counted.
+    const pending = ids.map((id) => `x <!--ins ${id}-->y<!--/${id}-->`);
     for (const [other, first] of [
       ['* ', '- '],
       ['1. ', '- '],
@@ -1823,7 +1828,7 @@ describe('a refusal says how many changes stand in the list (rule 5, #172)', () 
   it('names the count', () => {
     const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
     const text = file(
-      `- a\n- b\n${ids.map((id) => `- x <!--ins ${id}-->y<!--/${id}-->`).join('\n')}\n`,
+      `- a\n- b\n${ids.map((id) => `- <!--ins ${id}-->x <!--/${id}-->y`).join('\n')}\n`,
       Object.fromEntries(ids.map((id) => [id, 'bo'])),
     );
     expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toBe(

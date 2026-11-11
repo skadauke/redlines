@@ -488,6 +488,79 @@ once a deletion next to it is decided, and a decision that one order refuses wor
 mark of the change's own paragraph is tried, as it reads with the change, and every state of the
 marks apart is shown to read as the state with them pending.
 
+**Marks apart for block changes.** A change of a block (its type, an item indented or outdented, a
+box checked or unchecked) leaves the marks that are apart from it pending too, in a list under
+review: words inserted, deleted, replaced or highlighted inside the text of other items, after the
+first character of the item's text. A mark is apart from a block change when it is apart as above,
+taking the edits of the change as those it makes. A mark that a decision could make reach a line's
+start or a line break (one at an item's first character, or one that holds a line break, a backtick,
+`<`, `>`, a backslash or `|`) is tried with the change, and counts toward the limit of the marks to
+try (rule 5, above): the refusals' numbers are of the marks tried, the new marks among them. So Tab
+in a list in which eight words are pending, none of them at an item's first character, is written;
+with six that a decision could make reach a line's start it is refused, in the words above, with
+Track Changes on, and with seven with it off.
+
+The proof of the marks apart above, for an inline change, does not carry over as it stands. An
+inline change writes inside a paragraph, and no line starts differently for it. A block change
+writes in the lines of its blocks: the syntax at the start of a line (a bullet, a number, a box, a
+`#`, a `> `, the indentation of an item and of the items in it), its opener alone on a line or after
+the bullet, and its closer at the end of the block. So the reading of the lines around it can
+change, and three things are different.
+
+- What the change writes counts as what changes: every edit it makes, in the lines of its blocks,
+  those of the items nested in an item it moves and of the items that an outdent makes its children
+  included. A paragraph that meets one is not apart. A line whose prefix, or first character, an
+  edit writes is no line whose start is known, and the reading of list items (the rule for a list
+  item above) takes it for none, wherever it consults it.
+- A paragraph is not apart where it stands against a line that the change writes without a line it
+  is sure of in between. The paragraph after a written item is apart where its own line starts an
+  item whatever stands above it: a bullet, or the number 1, less than four columns in, with its
+  prefix and its first character unwritten and unheld; or where a blank line that no mark or edit
+  touches is above it. The paragraph before a written item is apart only where such a blank line, or
+  such an item, stands after it: a line that the change writes is neither. So the marks of the item
+  right above the one that changes are tried, and so are those of an item right under it that starts
+  with a number other than 1, which reads its start from the lines above it; the others are left
+  pending.
+- A line that no mark tried and no edit holds reads in every state as it was written. Deciding a
+  mark of the walk writes only where its own markers stand or where its edits were: accepting takes
+  its markers away, and rejecting puts back what its edits took, the old syntax, the old indentation
+  and the old marker, in the lines it wrote and no others. So a line that nothing of this holds is
+  not written in any state, and a blank line that nothing touches is blank in every state.
+
+Why no decision of the marks apart can change what the walk finds. Take a state of the walk, in
+which the new marks and the marks tried are decided in some way and the marks apart are pending, and
+a mark apart in it, with its paragraph. (1) Its paragraph begins and ends where it does in every
+state. Its first line is the first line of the block that is tried, or follows a blank line that
+nothing touches, or starts an item whose prefix and first character nothing writes: such a line is
+an item whatever stands above it, unless that makes it code, a fence or an HTML block, and the
+change writes none of these (its syntax is the block's own, an opener that closes on its own line,
+an item's marker), nor can a state of the marks tried, which the walk reads as it goes. The line
+after its last is a blank line that nothing touches, or an item of this kind, which interrupts the
+paragraph, or, for a row, a row. A line that reads its start from the lines above it (a number other
+than 1, a line under a blank line) consults only lines whose prefix no edit writes, down to one that
+is an item by itself, so none of what it consults is a line of the change. (2) Its lines are no line
+of a block of the change, and no state of the change writes in one of them: the edits and the
+decisions of the change are in the lines of its own blocks. (3) The rest is the proof of the marks
+apart above. Deciding a mark apart takes its markers away and leaves its text, or puts back its old
+text, so it always works, alike in the file with the change and without it, and changes the words of
+its own paragraph, which begins and ends as (1) says, and nothing else. The walk checks each state
+as it goes, piece by piece, the paragraphs of marks apart one by one and the runs of the other
+paragraphs between them, and where a state reads otherwise than the same state without the change,
+or its pieces are alike only all together, it tries every mark instead. The check before the walk
+(the change reads as the file without it) is made with the marks apart pending too, so that a line
+which the change makes more of the paragraph before it, as lazy text, can't go unseen: the pieces
+differ, and the change is refused, as it is for any change.
+
+What the proof doesn't give. A numbered item with a number other than 1 right under a line that the
+change writes has no known start, so its marks are tried: in a numbered list under review, Tab on an
+item counts the marks of the items below it, and the list is refused with fewer pending changes than
+a bulleted one. The empty item that Markdown can't hold, which the person's own Tab or Return made
+(design: block editing, "The empty paragraph"), is open and is not in the file. The editor gives a
+block change the document with it, where it is a line that starts no known block (an empty item
+under a line of text), so every mark of the list is tried: the change leaves that item as it is, and
+a box clicked in a list with more than five changes pending while it is open is refused, in the
+words above.
+
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
 would show that syntax as words. Text in an HTML block or an indented code block is not formatted, as
@@ -686,11 +759,12 @@ away.
   changes of its region, and a region longer than about a thousand characters counts more, so these
   numbers hold for a short list. An inline format works with four other pending changes in its
   region and is refused with five, and with five items of one list at once and not six ("Change up
-  to five items at a time."). A block change leaves no mark apart (it changes the lines of its
-  block) and has a larger budget: with Track Changes on, where it adds a mark to try, it works with
-  five other pending changes in its list and is refused with six; with it off, where it adds none,
-  it works with six and is refused with seven; a change of up to six items at once is checked, and
-  seven are too many ("Change up to six items at a time."). A refusal for too many marks says how
+  to five items at a time."). A block change has a larger budget, and leaves the marks apart from
+  it pending too (Marks apart for block changes, above). Of the marks that it tries, with Track
+  Changes on, where it adds a mark to try, it works with five other pending changes in its list and
+  is refused with six; with it off, where it adds none, it works with six and is refused with
+  seven; a change of up to six items at once is checked, and seven are too many ("Change up to six
+  items at a time."). A refusal for too many marks says how
   many stand in the region and where: "There are 7 pending changes in this list, too many to check
   this change against. Accept or reject some of them first."; a box click says "This box can't be
   changed while 7 changes in its list are pending…". Whether a change is in the region counts
