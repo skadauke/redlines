@@ -8,12 +8,25 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, parsedField, type ViewMode } from '../index.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 import { buildTables, type Table, tablesField, tablesOf } from '../table/model.ts';
+import { trackedDecorations } from '../tracked/decorations.ts';
 import { previewDecorations } from './decorations.ts';
 
 /** Tables without their identities, which a rebuild gives new. */
 const bare = (tables: readonly Table[]) => tables.map((table) => ({ ...table, id: 0 }));
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
+const WORDS = 'the quick brown fox jumps over a lazy dog while reviewers read every line twice';
+
+/** The tracked layer's widgets in a state, by what they draw. */
+function list(state: EditorState): { widget: string }[] {
+  const found: { widget: string }[] = [];
+  trackedDecorations(state).between(0, state.doc.length, (_from, _to, value) => {
+    const widget = (value.spec as { widget?: { constructor: { name: string } } }).widget;
+    if (widget)
+      found.push({ widget: widget.constructor.name === 'StruckWidget' ? 'struck' : 'other' });
+  });
+  return found;
+}
 const open: Editor[] = [];
 
 afterEach(() => {
@@ -110,6 +123,69 @@ describe('a long document', () => {
     expect(keystroke).toBeLessThan(BUDGET_MS);
     expect(afterAMark).toBeLessThan(BUDGET_MS);
     expect(caret).toBeLessThan(BUDGET_MS);
+  });
+});
+
+describe('a long document with deleted blocks', () => {
+  // 150 KB and 200 marks, 50 of them paragraphs, headings and items deleted whole (design: Part 3),
+  // which Redlines draws as blocks. A keystroke and a caret move cost what they do on the same
+  // document without them.
+  const build = (deleted: boolean) => {
+    const ids = Array.from({ length: 200 }, (_, i) => idFor(2000 + i));
+    const paragraphs: string[] = [];
+    let inserted = 0;
+    let removed = 0;
+    for (let n = 0; n < 760; n++) {
+      let text = `${WORDS} ${n} with *emphasis* and **strong** and a [link](https://example.com/${n}) end, and words to fill the line out to a couple of hundred characters in all, so the document is long.`;
+      if (n % 5 === 0 && inserted < 150) {
+        const id = ids[inserted++];
+        text = text.replace('quick brown', `<!--ins ${id}-->quick brown<!--/${id}-->`);
+      }
+      paragraphs.push(text);
+      if (deleted && n % 15 === 7 && removed < 50) {
+        const id = ids[150 + removed++]!;
+        const block = [
+          'A paragraph that was deleted whole.',
+          '## A heading that was deleted',
+          'Another paragraph deleted, a little longer than the first one.',
+        ][removed % 3]!;
+        paragraphs.push(`<!--del ${id} ${block}\\n\\n-->`);
+      }
+    }
+    const marks = ids
+      .slice(0, deleted ? 200 : 150)
+      .map((id) => `  ${id}: {by: bo, at: 2026-10-31T09:30Z}\n`)
+      .join('');
+    return `${paragraphs.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${marks}-->\n`;
+  };
+  const withBlocks = build(true);
+  const without = build(false);
+
+  it('is the size the budget is measured for, with 50 blocks drawn in Redlines', () => {
+    expect(withBlocks.length).toBeGreaterThanOrEqual(150_000);
+    const editor = editorFor(withBlocks);
+    expect(editor.view.state.field(parsedField).marks.length).toBe(200);
+    // Every one of the 50 is drawn as a block, in view or not: the decorations hold them all.
+    const widgets = list(editor.view.state).filter((d) => d.widget === 'struck');
+    expect(widgets).toHaveLength(50);
+  });
+
+  it('holds the bound of Redlines without them, for a keystroke and a caret move', () => {
+    const state = editorFor(withBlocks).view.state;
+    const plain = editorFor(without).view.state;
+    const at = Math.floor(withBlocks.length / 2);
+    const atPlain = Math.floor(without.length / 2);
+    const keystroke = time(() => state.update({ changes: { from: at, insert: 'x' } }).state);
+    const keystrokePlain = time(
+      () => plain.update({ changes: { from: atPlain, insert: 'x' } }).state,
+    );
+    const caret = time(() => state.update({ selection: { anchor: at } }).state);
+    const caretPlain = time(() => plain.update({ selection: { anchor: atPlain } }).state);
+    expect(keystroke).toBeLessThan(BUDGET_MS);
+    expect(caret).toBeLessThan(BUDGET_MS);
+    // And near what it costs without them: the blocks are 50 widgets more among 150 marks.
+    expect(keystroke).toBeLessThan(Math.max(BUDGET_MS / 2, keystrokePlain * 2));
+    expect(caret).toBeLessThan(Math.max(BUDGET_MS / 2, caretPlain * 2));
   });
 });
 

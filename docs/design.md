@@ -347,6 +347,17 @@ mode has no counterpart in the desktop app.
     a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
     small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
     each line break deleted.
+- **Deleted blocks show as blocks.** In Redlines, a paragraph, heading, list item, quote or other
+  block that was deleted whole is drawn where it was, as a block of its own, its text struck in its
+  author's color, with the look of what it was (a heading at its level, an item with its bullet, a
+  quote with its bar) and its own change bar. A block rewritten whole, by an agent or by typing over
+  it, is not deleted: the old text is struck above the new, in the same block (a rewritten heading
+  at the heading's size, an item beside its one bullet), and a rewritten table cell shows its old
+  text struck above the new inside the cell. Words deleted inside a block, a substitution of part of
+  one, and a deletion that runs from one block into another stay inline. The caret steps over a
+  struck block, as over deleted text, and its card opens on hover and pins on a click; a click on
+  its bar switches to Simple, which doesn't draw it, and the block below keeps the place. Simple
+  and Clean show the newest text only.
 - **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
   new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
   paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
