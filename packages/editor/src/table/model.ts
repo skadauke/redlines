@@ -8,7 +8,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
-import type { Tree } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { readDelimiterRow, readRowCells } from '@redlines/format';
 
 export type Align = '' | 'left' | 'center' | 'right';
@@ -338,8 +338,16 @@ function inheritIds(fresh: Table[], olds: readonly Table[], changes?: ChangeDesc
 /** Whether the syntax tree has a top-level table that starts on the line `table` does (after up to
  * three spaces of indent). */
 function inTree(tree: Tree, table: Table): boolean {
-  const node = tree.topNode.childAfter(Math.max(0, table.from - 1));
-  return node?.name === 'Table' && node.from >= table.from && node.from - table.from <= 3;
+  // `resolve` descends the tree (logarithmic in its top-level nodes), where `childAfter` scans them.
+  // Three characters into the table is inside it, whatever the indent.
+  let node: SyntaxNode | null = tree.resolve(Math.min(table.from + 3, table.to), -1);
+  while (node && node.name !== 'Table') node = node.parent;
+  return (
+    node !== null &&
+    node.parent?.parent === null &&
+    node.from >= table.from &&
+    node.from - table.from <= 3
+  );
 }
 
 /** Tables by tree: the tree a field value was read from. */

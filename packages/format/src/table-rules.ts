@@ -95,16 +95,26 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
 /** Whether a line above `position`, in the lines of text that run up to it, holds a pipe: the
  * header, the delimiter row or a row of a table that a line without one can be a row of. */
 function pipeAbove(text: string, position: number): boolean {
+  // Walk up by line starts without cutting a string for each line. A run longer than the bound is
+  // answered "maybe" (true): the caller then reads the tables, which is exact.
   let start = lineStart(text, position);
-  while (start > 0) {
-    const previous = lineStart(text, start - 1);
-    const line = text.slice(previous, start - 1);
-    if (line.trim() === '') return false;
-    if (line.includes('|')) return true;
+  for (let lines = 0; start > 0; lines++) {
+    if (lines >= PIPE_ABOVE_LINES) return true;
+    const end = start - 1;
+    const previous = lineStart(text, end);
+    let blank = true;
+    for (let i = previous; i < end; i++) {
+      const c = text.charCodeAt(i);
+      if (c === 124) return true;
+      if (c !== 32 && c !== 9 && c !== 13) blank = false;
+    }
+    if (blank) return false;
     start = previous;
   }
   return false;
 }
+
+const PIPE_ABOVE_LINES = 8;
 
 /**
  * Where a plain `| ` goes so that a marker may stand at the start of a row (rule 7): at the start of
