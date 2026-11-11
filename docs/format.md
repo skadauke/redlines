@@ -1495,6 +1495,13 @@ Next paragraph.
   indented code that is not indented, or a line without the container's prefix ("This would end
   the code block it is typed in."). An edit that crosses a block's edge is an edit of the text
   around it and the block, and is refused as before.
+- Indented code that a pending deletion of a break joins to the text above (it is code in the
+  original text and text of that block in the newest) takes no key until it is decided: the edit
+  is refused, naming the person, as for a marker in the block. Text typed against the `$$` of
+  display math (`x` before the opening one or after the closing one) is refused, and line breaks
+  there are the text around the block. The line that Return at the end of indented code opens is
+  no part of the block until something that is not white space is typed on it; then it is code,
+  and the substitution's payload is the block without it.
 - A marker anywhere in a block's range, its fence or tag lines and what follows the closing tag on
   its line included, is a pending change in the code, and the edit is refused, naming the person
   ("Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
@@ -1516,7 +1523,10 @@ Next paragraph.
   refused in words that name the code ("A tracked change can't go in code that starts a list item
   yet. Turn off Track Changes to edit it."; "…in indented code in a list item or a quote yet…"):
   fenced code that starts an item of a list (`- ```js`), and indented code in a list item or a
-  quote. With Track Changes off every key works in them as in any code. A `title` element is raw
+  quote. With Track Changes off every key works in them as in any code. `pre` and `title` (and the
+  other raw-text elements) inside a quote or a list item are not read as raw text yet (#284): the
+  scan finds raw text only where it starts at the left edge, so a change there is written as in any
+  HTML block, and the promise that no marker goes inside them holds at the top level only. A `title` element is raw
   text like the others, where its closing tag comes before a blank line. Front matter is never
   touched by this rule (§3.8).
 
