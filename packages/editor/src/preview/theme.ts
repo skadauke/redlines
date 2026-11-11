@@ -31,9 +31,10 @@ type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
 function spaceRules(): ThemeSpec {
   const rules: ThemeSpec = {};
   for (const kind of Object.keys(SPACE) as (keyof typeof SPACE)[]) {
-    rules[`.cm-line.rl-space-${kind}`] = {
-      paddingTop: `calc(${space(kind)} + var(--rl-above, 0px))`,
-    };
+    // A struck block (tracked/decorations.ts) takes the space of the kind it was.
+    const above = { paddingTop: `calc(${space(kind)} + var(--rl-above, 0px))` };
+    rules[`.cm-line.rl-space-${kind}`] = above;
+    rules[`.rl-struck.rl-space-${kind}`] = above;
     rules[`.cm-line.rl-space-${kind}-below`] = { paddingBottom: space(kind) };
   }
   return rules;

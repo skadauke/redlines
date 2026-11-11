@@ -29,8 +29,16 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
+import {
+  type DeletedBlockKind,
+  deletedBlocks,
+  type MarkRange,
+  type Parsed,
+  type Segment,
+} from '@redlines/format';
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
+import { BULLETS } from '../preview/decorations.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -116,6 +124,35 @@ interface Model {
   rows: { at: number; className: string }[];
   /** Ordinary HTML comments, drawn dimmed. */
   comments: Span[];
+  /** Whole-block deletions drawn as blocks, in Redlines. */
+  struck: Struck[];
+}
+
+/** A stretch of a struck block's text and the color of whoever deleted it. */
+interface StruckRun {
+  text: string;
+  color: number;
+}
+
+interface StruckBlock {
+  kind: DeletedBlockKind;
+  runs: StruckRun[];
+}
+
+/**
+ * A whole-block deletion (format §3.4) drawn as the blocks it deleted, struck where they were.
+ * `lines` is its marker's own line, which the hidden lines around it hide (the widget replaces
+ * them); `before` is the line of the next item of a list, whose bullet the deletion leaves in
+ * front of its marker, and the blocks are drawn above it; `after` is the line above a block
+ * deleted at the end of the text, and the blocks are drawn below it.
+ */
+interface Struck {
+  id: string;
+  where: 'lines' | 'before' | 'after';
+  /** A position on the line the blocks belong to: the marker's. */
+  at: number;
+  colors: Set<number>;
+  blocks: StruckBlock[];
 }
 
 /** The span in `spans`, in document order and apart, that holds `pos`, ends included. */
@@ -154,8 +191,132 @@ const BLANK = /^[ \t>]*$/;
 const CONTAINER_PREFIX =
   /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
 
+/** A marker, whose text holds no `-->`. */
+const MARKER = /<!--(?:[^-]|-(?!->))*-->/g;
+
+/** A line of the next item of a list, or a list item at all. */
+const ITEM_LINE = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/;
+
+/**
+ * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
+ * other people that they hold, whose deleted text is part of the blocks. A deletion is whole when
+ * `deletedBlocks` reads its payload as whole blocks, and the file is in the form that goes with
+ * it: its marker alone on its line before a block, the line of a bullet when the next item's
+ * prefix stands in front of it, or the end of the text. Anything else live between its segments,
+ * as text of another person's insertion, leaves it to be drawn inline.
+ */
+function struckBlocks(
+  state: EditorState,
+  parsed: Parsed,
+  colors: ReadonlyMap<string, number>,
+  marks: boolean,
+): { struck: Map<MarkRange, Struck>; absorbed: Set<MarkRange> } {
+  const struck = new Map<MarkRange, Struck>();
+  const absorbed = new Set<MarkRange>();
+  const { doc } = state;
+  const end = parsed.ledgerRange?.from ?? doc.length;
+  const colorOf = (mark: MarkRange) => colors.get(mark.entry.by) ?? 0;
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'del' || !isDrawnChange(mark) || absorbed.has(mark)) continue;
+    const first = mark.segments[0];
+    const last = mark.segments.at(-1);
+    if (!first || !last || first.payload === undefined) continue;
+    const line = doc.lineAt(first.open.from);
+    const lead = doc.sliceString(line.from, first.open.from).replace(MARKER, '');
+    let where: Struck['where'];
+    let segments: { segment: Segment; mark: MarkRange }[] = mark.segments.map((segment) => ({
+      segment,
+      mark,
+    }));
+    const hold = new Set<MarkRange>();
+    if (first.carrier) {
+      if (!CONTAINER_PREFIX.test(lead)) continue;
+      where = BLANK.test(lead) ? 'lines' : 'before';
+      const lastLine = doc.lineAt(last.open.to);
+      // Nothing live between the segments: every line holds markers and blank lines alone.
+      let bare = true;
+      for (let n = line.number; n <= lastLine.number && bare; n++) {
+        const text = doc.line(n).text.replace(MARKER, '');
+        bare = where === 'before' ? n !== line.number || text === lead : BLANK.test(text);
+      }
+      if (!bare || (where === 'before' && mark.segments.length > 1)) continue;
+      if (where === 'lines') {
+        // Other people's deletions in the same lines belong to the blocks.
+        const inside = (segment: Segment) =>
+          segment.open.from >= line.from && segment.open.to <= lastLine.to;
+        segments = parsed.marks
+          .filter((other) => other.kind === 'del' && other.segments.some(inside))
+          .flatMap((other) => other.segments.map((segment) => ({ segment, mark: other })))
+          .sort((a, b) => a.segment.open.from - b.segment.open.from);
+        const outside = segments.some(
+          ({ segment, mark: other }) => !inside(segment) || !isDrawnChange(other),
+        );
+        if (outside || segments[0]?.segment !== first) continue;
+        for (const { mark: other } of segments) hold.add(other);
+      }
+    } else {
+      where = 'after';
+      if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
+        continue;
+    }
+    const blocks = deletedBlocks(
+      segments.map(({ segment }) => segment),
+      { lead, atEnd: where === 'after' },
+    );
+    if (!blocks) continue;
+    // Each stretch of the blocks' text in the color of the person who deleted it.
+    const owners: { to: number; color: number }[] = [];
+    let total = 0;
+    for (const { segment, mark: owner } of segments) {
+      total += segment.payload?.length ?? 0;
+      owners.push({ to: total, color: colorOf(owner) });
+    }
+    const drawn = new Set<number>();
+    const struckBlock = blocks.map((block): StruckBlock => {
+      const runs: StruckRun[] = [];
+      const add = (text: string, color: number) => {
+        const previous = runs.at(-1);
+        if (previous?.color === color) previous.text += text;
+        else runs.push({ text, color });
+      };
+      block.pieces.forEach((piece, index) => {
+        if (index > 0) add(' ', runs.at(-1)?.color ?? colorOf(mark));
+        let at = piece.at;
+        while (at < piece.at + piece.text.length) {
+          const owner = owners.find((candidate) => at < candidate.to) ?? owners.at(-1)!;
+          const to = Math.min(piece.at + piece.text.length, owner.to);
+          add(piece.text.slice(at - piece.at, to - piece.at), owner.color);
+          at = Math.max(to, at + 1);
+        }
+      });
+      if (marks) add('¶', runs.at(-1)?.color ?? colorOf(mark));
+      for (const run of runs) drawn.add(run.color);
+      return { kind: block.kind, runs };
+    });
+    drawn.add(colorOf(mark));
+    const item: Struck = {
+      id: mark.id,
+      where,
+      at: where === 'before' ? line.from : where === 'after' ? line.to : first.open.from,
+      colors: drawn,
+      blocks: struckBlock,
+    };
+    struck.set(mark, item);
+    for (const other of hold) if (other !== mark) absorbed.add(other);
+  }
+  return { struck, absorbed };
+}
+
 function analyze(state: EditorState, kept: number | null): Model {
-  const model: Model = { hidden: [], blocks: [], placed: [], layers: [], rows: [], comments: [] };
+  const model: Model = {
+    hidden: [],
+    blocks: [],
+    placed: [],
+    layers: [],
+    rows: [],
+    comments: [],
+    struck: [],
+  };
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
@@ -167,6 +328,11 @@ function analyze(state: EditorState, kept: number | null): Model {
   const marks = redlines && state.facet(lineBreakMarksFacet);
   const colors = colorsOf(state);
   const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread]));
+  // Blocks deleted whole are drawn as blocks, only in Redlines: Simple and Clean draw none.
+  const blocks = redlines
+    ? struckBlocks(state, parsed, colors, state.facet(lineBreakMarksFacet))
+    : null;
+  if (blocks) model.struck = [...blocks.struck.values()];
   for (const mark of parsed.marks) {
     const color = colors.get(mark.entry.by) ?? 0;
     const author = colorClass(color);
@@ -178,8 +344,12 @@ function analyze(state: EditorState, kept: number | null): Model {
       const { from, to } = segment.content;
       // A format change's payload is its operations, never deleted text.
       if (markup && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
+        // A block drawn as a block takes its own bar, and leaves the lines around it alone.
+        const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
         const text = redlines ? deletedText(segment.payload, marks) : '';
-        parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
+        if (!asBlock) {
+          parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
+        }
       }
       if (markup && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
@@ -523,6 +693,85 @@ class MarkupWidget extends WidgetType {
   }
 }
 
+/** The blocks of one or more whole-block deletions drawn as blocks, struck where they were. */
+class StruckWidget extends WidgetType {
+  readonly deleted: readonly Struck[];
+  /** Whether a list item stands right above, so that a struck item is the next of its list. */
+  readonly afterItem: boolean;
+
+  constructor(deleted: readonly Struck[], afterItem: boolean) {
+    super();
+    this.deleted = deleted;
+    this.afterItem = afterItem;
+  }
+
+  override eq(other: StruckWidget): boolean {
+    return (
+      other.afterItem === this.afterItem &&
+      other.deleted.length === this.deleted.length &&
+      other.deleted.every(
+        (item, i) =>
+          item.id === this.deleted[i]!.id &&
+          JSON.stringify(item.blocks) === JSON.stringify(this.deleted[i]!.blocks) &&
+          [...item.colors].join() === [...this.deleted[i]!.colors].join(),
+      )
+    );
+  }
+
+  override get estimatedHeight(): number {
+    return this.deleted.reduce((sum, item) => sum + item.blocks.length * 28, 0);
+  }
+
+  override toDOM(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'rl-struck-blocks';
+    let item = this.afterItem;
+    for (const deleted of this.deleted) {
+      const bar = barClass(deleted.colors);
+      for (const block of deleted.blocks) {
+        const { kind } = block;
+        const div = document.createElement('div');
+        div.dataset['mark'] = deleted.id;
+        const classes = ['rl-struck', bar];
+        if (kind.kind === 'heading') classes.push(`rl-h${kind.level}`);
+        else if (kind.kind === 'quote') classes.push('rl-quote');
+        else if (kind.kind === 'item') classes.push('rl-hang', 'rl-li');
+        classes.push(kind.kind === 'item' && item ? 'rl-space-item' : 'rl-space-block');
+        item = kind.kind === 'item';
+        div.className = classes.join(' ');
+        if (kind.kind === 'item') {
+          const depth = Math.min(Math.floor(kind.indent / 2) + 1, BULLETS.length);
+          const mark = document.createElement('span');
+          mark.className = 'rl-list-mark';
+          mark.style.setProperty('--rl-cols', String(kind.width));
+          mark.textContent = /^[-*+]$/.test(kind.marker) ? BULLETS[depth - 1]! : kind.marker;
+          div.style.setProperty('--rl-hang', String(kind.indent + kind.width));
+          if (kind.indent > 0) {
+            const indent = document.createElement('span');
+            indent.className = 'rl-indent';
+            indent.textContent = ' '.repeat(kind.indent);
+            div.append(indent);
+          }
+          div.append(mark);
+        }
+        for (const run of block.runs) {
+          const span = document.createElement('span');
+          span.className = `rl-del ${colorClass(run.color)}`;
+          span.textContent = run.text;
+          div.append(span);
+        }
+        wrap.append(div);
+      }
+    }
+    return wrap;
+  }
+
+  /** A click on a struck block puts the caret beside it: it is atomic. */
+  override ignoreEvent(): boolean {
+    return false;
+  }
+}
+
 const HIDDEN = Decoration.replace({});
 const HIDDEN_LINES = Decoration.replace({ block: true });
 const COMMENT = Decoration.mark({ class: 'rl-comment' });
@@ -603,7 +852,40 @@ function display(state: EditorState): Display {
     const widget = shown.length ? new MarkupWidget(shown) : null;
     ranges.push((widget ? Decoration.replace({ widget }) : HIDDEN).range(from, to));
   }
-  for (const { from, to } of model.blocks) ranges.push(HIDDEN_LINES.range(from, to));
+  // Whole blocks deleted, drawn as blocks: in the place of the hidden lines of their markers, above
+  // the line of the next item of a list, or below the line above the end of the text.
+  const slots = new Map<string, { at: number; to: number; side: -1 | 1 | 0; items: Struck[] }>();
+  for (const item of model.struck) {
+    const span = item.where === 'lines' ? spanAt(model.blocks, item.at) : undefined;
+    const slot = span
+      ? { at: span.from, to: span.to, side: 0 as const }
+      : item.where === 'after'
+        ? { at: item.at, to: item.at, side: 1 as const }
+        : { at: doc.lineAt(item.at).from, to: doc.lineAt(item.at).from, side: -1 as const };
+    const key = `${slot.at} ${slot.side}`;
+    const same = slots.get(key);
+    if (same) same.items.push(item);
+    else slots.set(key, { ...slot, items: [item] });
+  }
+  const itemAbove = (slot: { at: number; side: -1 | 1 | 0 }) => {
+    // The line the blocks follow: the nearest above them that shows text.
+    let n = doc.lineAt(slot.at).number - (slot.side === 1 ? 0 : 1);
+    while (n >= 1 && BLANK.test(doc.line(n).text)) n--;
+    return n >= 1 && ITEM_LINE.test(doc.line(n).text);
+  };
+  for (const { from, to } of model.blocks) {
+    const slot = slots.get(`${from} 0`);
+    if (!slot) ranges.push(HIDDEN_LINES.range(from, to));
+    else {
+      const widget = new StruckWidget(slot.items, itemAbove(slot));
+      ranges.push(Decoration.replace({ block: true, widget }).range(from, to));
+      slots.delete(`${from} 0`);
+    }
+  }
+  for (const slot of slots.values()) {
+    const widget = new StruckWidget(slot.items, itemAbove(slot));
+    ranges.push(Decoration.widget({ block: true, widget, side: slot.side || -1 }).range(slot.at));
+  }
   for (const { at, side, parts } of model.placed) {
     const shown = drawn(parts);
     if (!shown.length) continue;
