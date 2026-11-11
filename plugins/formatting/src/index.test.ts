@@ -636,6 +636,7 @@ describe('registration', () => {
       'block.ul': 'Mod-Alt-u',
       'block.ol': 'Mod-Alt-o',
       'block.task': 'Mod-Alt-x',
+      'block.check': 'Mod-Shift-u',
       'block.code': 'Mod-Alt-c',
       'block.table': 'Mod-Alt-t',
       'block.rule': undefined,

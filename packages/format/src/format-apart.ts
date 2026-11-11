@@ -108,6 +108,7 @@ import {
   splitEnd,
 } from './blocks.ts';
 import { isDecidable } from './decide.ts';
+import { opsOf } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, paragraphRange, visible } from './inline.ts';
 import type { MarkRange, Parsed, Range, Segment } from './types.ts';
@@ -445,6 +446,42 @@ interface Part extends Range {
 }
 
 /**
+ * The pending box changes (`+check` and `-check`) that are apart, with the position of the box's
+ * character that their decisions write: a point mark that ends its line, on the line of an item
+ * whose text, after its box, starts with a letter or a digit, with no other mark on the line.
+ * Accepting one takes its marker away, and rejecting it takes the marker away and writes the old
+ * character in the box: neither moves a line start or a line break, and the item is a task item
+ * with the same text either way, so no decision of it changes how another line reads.
+ */
+function boxChecks(
+  text: string,
+  parsed: Parsed,
+  markers: readonly { from: number; to: number; mark?: MarkRange }[],
+  parts: readonly Part[],
+): Map<MarkRange, Range> {
+  const found = new Map<MarkRange, Range>();
+  const limit = parsed.ledgerRange?.from ?? text.length;
+  for (const mark of parsed.marks) {
+    const [segment] = mark.segments;
+    if (mark.kind !== 'fmt' || mark.segments.length !== 1 || !segment) continue;
+    if (segment.close || segment.carrier || !isDecidable(mark)) continue;
+    const ops = opsOf(mark, segment);
+    if (ops.length === 0 || !ops.every((op) => op.name === 'check' && op.sign !== '')) continue;
+    const start = lineStart(text, segment.open.from);
+    const end = lineEnd(text, segment.open.from);
+    if (segment.open.to !== end || end > limit) continue;
+    const line = text.slice(start, segment.open.from);
+    const box = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(?=[\p{L}\p{N}])/u.exec(line);
+    if (!box || line.includes('<!--')) continue;
+    if (parts.some((p) => p.mark !== mark && p.from <= end && start <= p.to)) continue;
+    if (markers.some((m) => m.mark !== mark && m.from <= end && start <= m.to)) continue;
+    const at = start + box[0].lastIndexOf(']', box[0].length) - 1;
+    found.set(mark, { from: at, to: at + 1 });
+  }
+  return found;
+}
+
+/**
  * The marks of the region file `text` that a format change, which makes the edits `footprint`
  * there (in offsets of `text`), is not tried against: see the top of this module.
  */
@@ -475,8 +512,14 @@ export function marksApart(
           : (segment.close ?? openerRange(segment)).to,
     })),
   );
-  // Where the text can change: every mark but a comment, and the edits of the change.
-  const changing: Range[] = [...parts.filter((part) => part.mark.kind !== 'cmt'), ...footprint];
+  const boxes = boxChecks(text, parsed, markers, parts);
+  // Where the text can change: every mark but a comment, the box character of a checked box, and the
+  // edits of the change.
+  const changing: Range[] = [
+    ...parts.filter((part) => part.mark.kind !== 'cmt'),
+    ...boxes.values(),
+    ...footprint,
+  ];
   const isHidden = (at: number) => markers.some((marker) => marker.from <= at && at < marker.to);
   const isHeld = (at: number) => changing.some((range) => range.from <= at && at < range.to);
   /** Whether something that changes meets the closed stretch `[from, to]`. */
@@ -511,7 +554,7 @@ export function marksApart(
         return !parts.some((p) => p.mark !== mark && p.from <= part.from && part.to <= p.to);
       });
 
-  const apart = new Set(parsed.marks.filter(wordEdit));
+  const apart = new Set([...parsed.marks.filter(wordEdit), ...boxes.keys()]);
 
   /** Whether the runs of marks next to one another on the line `[start, end)`, whose text starts
    * at `at`, stand between characters that keep code and escapes as they are. */

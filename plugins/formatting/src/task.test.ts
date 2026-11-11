@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
 import { runScopeHandlers } from '@codemirror/view';
-import { checkBoxEffect, createEditor, type Editor } from '@redlines/editor';
+import { checkBoxEffect, createEditor, type Editor, undo } from '@redlines/editor';
+import { accept, applyChanges, newestView, originalView, parse, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from './index.ts';
 
@@ -249,5 +250,279 @@ describe('a box clicked while an empty item is open (rule 6)', () => {
       expect.stringMatching(/^This box can't be changed while \d+ changes/),
     ]);
     expect(isOpen(editor)).toBe(true);
+  });
+});
+
+describe('an empty task item (#198)', () => {
+  it.each([true, false])(
+    'says to write the item first when its box is clicked (tracking %s)',
+    (on) => {
+      for (const doc of [
+        '- [ ] one\n- [ ] \n\nEnd.\n',
+        '- one\n  - [ ] \n\nEnd.\n',
+        '1. [ ] one\n2. [ ] \n\nEnd.\n',
+      ]) {
+        const notices: string[] = [];
+        const editor = mount(doc, on, notices);
+        const boxes = editor.view.dom.querySelectorAll('.rl-box');
+        expect(boxes.length, doc).toBeGreaterThan(0);
+        click(editor, boxes.length - 1);
+        expect(notices, doc).toEqual(['Write the item first.']);
+        expect(editor.getDoc(), doc).toBe(doc);
+      }
+    },
+  );
+
+  it('draws the box a click on a pending change keeps, and the click on it again takes it back', () => {
+    const editor = mount(DOC, true);
+    click(editor, 0);
+    const wrap = editor.view.dom.querySelector('.rl-task');
+    expect(wrap?.querySelector('[aria-checked="true"]')).not.toBeNull();
+    expect(editor.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(true);
+    click(editor, 0);
+    expect(editor.getDoc()).toBe(DOC);
+    expect(editor.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(false);
+  });
+});
+
+describe('Paragraph › Check Item (⇧⌘U)', () => {
+  const LIST = '- [ ] one\n- [x] two\n- [ ] three\n- plain\n\nEnd.\n';
+
+  /** The selection from `from` to `to`, found by text. */
+  function select(editor: Editor, from: string, to = from): void {
+    const doc = editor.getDoc();
+    const anchor = doc.indexOf(from);
+    const head = doc.indexOf(to) + to.length;
+    editor.view.dispatch({ selection: { anchor, head } });
+  }
+
+  /** The key, as CodeMirror's Mod-Shift-u (Ctrl in the test's platform). */
+  function press(editor: Editor): void {
+    runScopeHandlers(
+      editor.view,
+      new KeyboardEvent('keydown', {
+        key: 'U',
+        code: 'KeyU',
+        keyCode: 85,
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+      'editor',
+    );
+  }
+
+  it('is the Paragraph menu command, with ⇧⌘U', () => {
+    const editor = mount(LIST, false);
+    const command = editor.commands.list().find(({ id }) => id === 'block.check');
+    expect(command).toMatchObject({
+      title: 'Check Item',
+      menu: 'paragraph',
+      shortcut: 'Mod-Shift-u',
+    });
+  });
+
+  it.each([
+    [false, 'one', '- [x] one\n- [x] two'],
+    [true, 'one', '- [x] one<!--fmt'],
+  ])('checks the item the caret is in (tracking %s)', (on, word, after) => {
+    const editor = mount(LIST, on);
+    select(editor, word);
+    editor.view.dispatch({ selection: { anchor: editor.getDoc().indexOf(word) + 1 } });
+    press(editor);
+    expect(editor.getDoc().startsWith(after)).toBe(true);
+    if (on) expect(editor.getDoc()).toMatch(/^- \[x\] one<!--fmt \w+ \+check-->\n- \[x\] two\n/);
+  });
+
+  it('checks several items at once, tracked as a box change on each, in one step to undo', () => {
+    const editor = mount(LIST, true);
+    select(editor, 'one', 'plain');
+    press(editor);
+    const doc = editor.getDoc();
+    // `two` was checked, `one` and `three` are, and the plain item is no task.
+    expect(doc).toMatch(
+      /^- \[x\] one<!--fmt \w+ \+check-->\n- \[x\] two\n- \[x\] three<!--fmt \w+ \+check-->\n- plain\n/,
+    );
+    expect(doc.match(/\+check/g)).toHaveLength(2);
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(LIST);
+  });
+
+  it('writes the boxes plainly with Track Changes off, and unchecks when all are checked', () => {
+    const editor = mount(LIST, false);
+    select(editor, 'one', 'three');
+    press(editor);
+    expect(editor.getDoc()).toBe('- [x] one\n- [x] two\n- [x] three\n- plain\n\nEnd.\n');
+    press(editor);
+    expect(editor.getDoc()).toBe('- [ ] one\n- [ ] two\n- [ ] three\n- plain\n\nEnd.\n');
+  });
+
+  it('checks again, tracked, to give back the original bytes', () => {
+    const editor = mount(LIST, true);
+    select(editor, 'one');
+    press(editor);
+    press(editor);
+    expect(editor.getDoc()).toBe(LIST);
+  });
+
+  it('checks a nested item together with its parent', () => {
+    const doc = '- [ ] a\n  - [ ] b\n    - [ ] c\n\nEnd.\n';
+    const editor = mount(doc, false);
+    select(editor, 'a', 'c');
+    press(editor);
+    expect(editor.getDoc()).toBe('- [x] a\n  - [x] b\n    - [x] c\n\nEnd.\n');
+  });
+
+  it('says so where there is no task item, and leaves the text alone', () => {
+    const notices: string[] = [];
+    const editor = mount(LIST, true, notices);
+    select(editor, 'plain');
+    press(editor);
+    expect(notices).toEqual([expect.stringMatching(/^Check Item works on a task list item/)]);
+    expect(editor.getDoc()).toBe(LIST);
+  });
+
+  it('says to write the item first on an item with no text', () => {
+    const doc = '- [ ] one\n- [ ] \n\nEnd.\n';
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('\n\n') - 1 } });
+    press(editor);
+    expect(notices).toEqual(['Write the item first.']);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('passes over an empty item among written ones', () => {
+    const doc = '- [ ] one\n- [ ] \n- [ ] three\n\nEnd.\n';
+    const notices: string[] = [];
+    const editor = mount(doc, false, notices);
+    select(editor, 'one', 'three');
+    press(editor);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toBe('- [x] one\n- [ ] \n- [x] three\n\nEnd.\n');
+  });
+
+  it('works in a list with other pending changes, as a click does (rule 6)', () => {
+    const notices: string[] = [];
+    const items = 'abcdefgh'.split('').map((c) => `- [ ] ${c}`);
+    const editor = mount(`${items.join('\n')}\n\nEnd.\n`, true, notices);
+    for (let line = 2; line < 9; line++) {
+      const { to } = editor.view.state.doc.line(line);
+      editor.view.dispatch({ selection: { anchor: to } });
+      editor.view.dispatch(editor.view.state.replaceSelection(' x'), { userEvent: 'input.type' });
+    }
+    editor.view.dispatch({ selection: { anchor: 5 } });
+    press(editor);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toMatch(/^- \[x\] a<!--fmt \w+ \+check-->\n/);
+    expect(editor.getDoc().match(/<!--ins /g)).toHaveLength(7);
+  });
+
+  it("refuses with the other person's name where their box change is pending", () => {
+    const doc = `- [x] item<!--fmt bbk2 +check-->\n- [ ] more\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    press(editor);
+    expect(notices).toEqual(["Accept or reject Bob's change to this box first."]);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('does nothing in a table cell, as the other Paragraph commands do', () => {
+    const doc = '| a | b |\n| - | - |\n| [ ] | 2 |\n\nEnd.\n';
+    const notices: string[] = [];
+    const editor = mount(doc, false, notices);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('[ ]') + 1 } });
+    press(editor);
+    expect(editor.getDoc()).toBe(doc);
+    const command = editor.commands.list().find(({ id }) => id === 'block.check');
+    expect(command?.isEnabled?.(editor.view.state)).toBe(false);
+  });
+
+  const TWELVE = `${'abcdefghijkl'
+    .split('')
+    .map((c) => `- [ ] ${c}`)
+    .join('\n')}\n\nEnd.\n`;
+
+  it('checks six items tracked in one step, and takes them back in one', () => {
+    const notices: string[] = [];
+    const editor = mount(TWELVE, true, notices);
+    select(editor, 'a', 'f');
+    press(editor);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc().match(/\+check/g)).toHaveLength(6);
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(TWELVE);
+  });
+
+  it('checks twelve boxes tracked as twelve clicks do, in one step to undo, whatever is decided', () => {
+    const notices: string[] = [];
+    const editor = mount(TWELVE, true, notices);
+    select(editor, 'a', 'l');
+    press(editor);
+    expect(notices).toEqual([]);
+    const written = editor.getDoc();
+    expect(written.match(/<!--fmt \w+ \+check-->/g)).toHaveLength(12);
+    expect(newestView(written).text).toBe(TWELVE.replaceAll('[ ]', '[x]'));
+    expect(originalView(written).text).toBe(TWELVE);
+    // Every box decided in a random order, each accepted or rejected: the box reads as decided.
+    let seed = 7;
+    const random = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+    for (let walk = 0; walk < 8; walk++) {
+      let text = written;
+      const expected = new Map<string, boolean>();
+      for (;;) {
+        const marks = parse(text).marks.filter((mark) => mark.kind === 'fmt');
+        if (marks.length === 0) break;
+        const mark = marks[Math.floor(random() * marks.length)];
+        if (!mark) break;
+        const on = random() < 0.5;
+        const line = text.slice(text.lastIndexOf('\n', mark.segments[0]?.open.from ?? 0) + 1);
+        expected.set(line.slice(6, 7), on);
+        text = applyChanges(text, on ? accept(text, mark.id) : reject(text, mark.id));
+      }
+      const doc = text.split('\n').slice(0, 12);
+      for (const [i, line] of doc.entries()) {
+        const letter = 'abcdefghijkl'[i] ?? '';
+        expect(line, `walk ${walk}`).toBe(`- [${expected.get(letter) ? 'x' : ' '}] ${letter}`);
+      }
+    }
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(TWELVE);
+  }, 30_000);
+
+  it('checks twelve items with Track Changes off, in one step to undo', () => {
+    const editor = mount(TWELVE, false);
+    select(editor, 'a', 'l');
+    press(editor);
+    expect(editor.getDoc()).toBe(TWELVE.replaceAll('[ ]', '[x]'));
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(TWELVE);
+  });
+
+  it('names the quote where a box is in one, for Check Item and for a click, tracked or not', () => {
+    const doc = '> - [ ] a\n> - [ ] b\n\nEnd.\n';
+    for (const on of [true, false]) {
+      const notices: string[] = [];
+      const editor = mount(doc, on, notices);
+      editor.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
+      press(editor);
+      select(editor, 'a', 'b');
+      press(editor);
+      click(editor, 0);
+      expect(notices, `tracking ${on}`).toEqual(
+        Array(3).fill("A box in a quote can't be checked yet."),
+      );
+      expect(editor.getDoc()).toBe(doc);
+    }
+  });
+
+  it('checks twelve boxes by twelve clicks as well', () => {
+    const notices: string[] = [];
+    const editor = mount(TWELVE, true, notices);
+    for (let i = 0; i < 12; i++) click(editor, i);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc().match(/\+check/g)).toHaveLength(12);
   });
 });

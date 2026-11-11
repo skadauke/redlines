@@ -9,7 +9,8 @@
 import type { EditorState } from '@codemirror/state';
 import { StateEffect } from '@codemirror/state';
 import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
-import { parsedField } from '../tracked/field.ts';
+import { colorClass, colorsOf } from '../tracked/colors.ts';
+import { boxChange, parsedField, viewModeField } from '../tracked/field.ts';
 
 /** A click on a task box: the start of the item (its list marker) and the state it wants. */
 export interface CheckBoxRequest {
@@ -19,51 +20,143 @@ export interface CheckBoxRequest {
 
 export const checkBoxEffect = StateEffect.define<CheckBoxRequest>();
 
-/** Whether a pending change covers any of `from`–`to`. Highlights and comments change no text. */
-export function pendingOver(state: EditorState, from: number, to: number): boolean {
-  for (const mark of state.field(parsedField).marks) {
+/**
+ * How a task box with a pending change is drawn: `source` where the change is one this can't
+ * draw (the box stays Markdown), otherwise the box in its new state: `color` is the class of its
+ * author's color in Redlines (empty in the other views, which draw the change's bar alone), and
+ * `note` says what is pending, for a screen reader ("checked by Bo, pending").
+ */
+export type PendingBox = 'source' | { color: string; note: string };
+
+/**
+ * What the pending changes make of the box whose marker is `from`–`to`: null where none touches
+ * it, a box in its new state for a box checked or unchecked (its point mark at the end of the
+ * item's first line) or one inserted whole, otherwise the source.
+ */
+export function pendingBox(state: EditorState, from: number, to: number): PendingBox | null {
+  const line = state.doc.lineAt(from);
+  const parsed = state.field(parsedField);
+  const colors = colorsOf(state);
+  const redlines = state.field(viewModeField, false) === 'redlines';
+  const look = (by: string, what: string): PendingBox => {
+    const name = parsed.ledger.people.find(({ handle }) => handle === by)?.name ?? by;
+    return {
+      color: redlines ? colorClass(colors.get(by) ?? 0) : '',
+      note: `${what} by ${name}, pending`,
+    };
+  };
+  let found: PendingBox | null = null;
+  for (const mark of parsed.marks) {
     if (mark.kind === 'hl' || mark.kind === 'cmt') continue;
     for (const { open, content, close, carrier } of mark.segments) {
+      const sign =
+        mark.kind === 'fmt' && !close && open.from >= line.from && open.to <= line.to
+          ? boxChange(state.sliceDoc(open.from, open.to))
+          : null;
+      if (sign !== null) {
+        found ??= look(mark.entry.by, sign === '+' ? 'checked' : 'unchecked');
+        continue;
+      }
       const end = Math.max(open.to, content.to, close?.to ?? 0, carrier?.to ?? 0);
-      if (open.from < to && end > from) return true;
+      if (open.from >= to || end <= from) continue;
+      // An insertion that holds the whole marker: the box is new, and drawn as it will be.
+      if (mark.kind === 'ins' && close && content.from <= from && content.to >= to) {
+        found ??= look(mark.entry.by, 'added');
+      } else return 'source';
     }
   }
-  return false;
+  return found;
+}
+
+const SVG = 'http://www.w3.org/2000/svg';
+
+/** The box: a 16-unit square drawn 0.8 em wide, so its stroke is 1.25 px at 16 px text. */
+function drawBox(checked: boolean, note: string | null): SVGSVGElement {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('class', checked ? 'rl-box rl-box-checked' : 'rl-box');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('role', 'checkbox');
+  svg.setAttribute('aria-checked', String(checked));
+  // A name a screen reader says, with what is pending; the keyboard reaches the box, and Space
+  // changes it (the ring is the theme's, on keyboard focus only).
+  svg.setAttribute('aria-label', `${checked ? 'Done' : 'To do'}${note ? `, ${note}` : ''}`);
+  svg.setAttribute('tabindex', '0');
+  const rect = document.createElementNS(SVG, 'rect');
+  rect.setAttribute('x', '0.78');
+  rect.setAttribute('y', '0.78');
+  rect.setAttribute('width', '14.44');
+  rect.setAttribute('height', '14.44');
+  rect.setAttribute('rx', '2.82');
+  svg.append(rect);
+  if (checked) {
+    const tick = document.createElementNS(SVG, 'path');
+    tick.setAttribute('d', 'M4.3 8.3 L7 11 L11.8 5.2');
+    svg.append(tick);
+  }
+  return svg;
 }
 
 /** The box of a task item, in the width of the list marker and space it replaces. */
 export class TaskBoxWidget extends WidgetType {
   readonly checked: boolean;
   readonly cols: number;
+  /** A pending change to the box: its author's color class ('' in views without colors), and what a
+   * screen reader is told of it. Null with none. */
+  readonly pending: { color: string; note: string } | null;
 
-  constructor(checked: boolean, cols: number) {
+  constructor(
+    checked: boolean,
+    cols: number,
+    pending: { color: string; note: string } | null = null,
+  ) {
     super();
     this.checked = checked;
     this.cols = cols;
+    this.pending = pending;
   }
 
   override eq(other: TaskBoxWidget): boolean {
-    return other.checked === this.checked && other.cols === this.cols;
+    return (
+      other.checked === this.checked &&
+      other.cols === this.cols &&
+      other.pending?.color === this.pending?.color &&
+      other.pending?.note === this.pending?.note
+    );
   }
 
   override toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = 'rl-list-mark rl-task';
+    if (this.pending) wrap.classList.add('rl-box-pending');
+    if (this.pending?.color) wrap.classList.add(this.pending.color);
     wrap.style.setProperty('--rl-cols', String(this.cols));
-    const box = document.createElement('span');
-    box.className = this.checked ? 'rl-box rl-box-checked' : 'rl-box';
-    box.setAttribute('role', 'checkbox');
-    box.setAttribute('aria-checked', String(this.checked));
-    box.textContent = this.checked ? '✓' : '';
+    const box = drawBox(this.checked, this.pending?.note ?? null);
     wrap.append(box);
+    const toggle = () => {
+      const pos = view.posAtDOM(wrap);
+      view.dispatch({ effects: checkBoxEffect.of({ pos, checked: !this.checked }) });
+      return pos;
+    };
     wrap.addEventListener('mousedown', (event) => {
       // The caret stays where it was: the click is on the box, not in the line's source.
       event.preventDefault();
       if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      view.dispatch({
-        effects: checkBoxEffect.of({ pos: view.posAtDOM(wrap), checked: !this.checked }),
+      toggle();
+    });
+    box.addEventListener('keydown', (event) => {
+      if (event.key !== ' ' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const pos = toggle();
+      // The change draws the box again: the focus goes to the new one, at the same item.
+      queueMicrotask(() => {
+        for (const other of view.contentDOM.querySelectorAll<HTMLElement>('.rl-task')) {
+          if (view.posAtDOM(other) === pos) other.querySelector<SVGElement>('.rl-box')?.focus();
+        }
       });
     });
     return wrap;

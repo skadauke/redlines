@@ -137,6 +137,7 @@ export {
   whole as wholeRect,
 } from './table/cells.ts';
 export {
+  boxChange,
   chooseViewEffects,
   isChange,
   markupViewFacet,

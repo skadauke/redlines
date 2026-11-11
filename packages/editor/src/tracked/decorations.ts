@@ -45,6 +45,7 @@ import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   authorFacet,
   bodyEnd,
+  boxChange,
   isDrawnChange,
   isColDeletion,
   isColInsertion,
@@ -483,6 +484,16 @@ function analyze(state: EditorState, kept: number | null): Model {
         for (const cell of insertedColumnCells(state, mark)) {
           model.layers.push({ from: cell.from, to: cell.from, className: '', color, change: true });
         }
+      }
+      // A box checked or unchecked: its point mark has no text, and its line has a change bar.
+      if (
+        markup &&
+        change &&
+        mark.kind === 'fmt' &&
+        !segment.close &&
+        boxChange(state.sliceDoc(segment.open.from, segment.open.to)) !== null
+      ) {
+        parts.push({ text: '', className: '', color, change: true });
       }
       if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
