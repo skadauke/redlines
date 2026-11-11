@@ -1886,6 +1886,7 @@ const CHECKS: Check[] = [
             width: Math.round(el.getBoundingClientRect().width * 10) / 10,
             paddingLeft: getComputedStyle(el).paddingLeft,
             overflowX: getComputedStyle(el).overflowX,
+            scrollbar: el.offsetWidth - el.clientWidth,
             scrollWidth: el.scrollWidth,
             clientWidth: el.clientWidth,
           })),
