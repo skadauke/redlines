@@ -274,6 +274,59 @@ describe('block types (format §2.6)', () => {
         ).toMatch(/can't get a narrower bullet/);
       }
     }
+    // What stands under the item at the columns between, in any block, is read at the column it
+    // starts at, quote markers included: a quote, a fence, HTML, a bullet after a child or a blank.
+    const under = [
+      '1. target\n  > q\n2. nx\n',
+      '1. target\n   - c\n  > q\n',
+      '1. target\n\n  > q\n',
+      '1. target\n  ```\n  code\n  ```\n',
+      '1. target\n  <div>\n  x\n  </div>\n',
+      '1. target\n  - a\n    - b\n',
+      '1. target\n  # h\n',
+      '1. target\n  ---\n',
+      '1. target\n\n  text after a blank\n',
+      '10. target\n   > q\n',
+      '10. target\n   - q\n',
+      '1. target\r\n  > q\r\n',
+    ];
+    for (const text of under) {
+      for (const to of ['ul', 'task'] as const) {
+        const label = `${JSON.stringify(text)} to ${to}`;
+        // HTML under the item is refused as HTML before it comes to columns: never written.
+        const says = text.includes('<div>') ? /./ : /narrower bullet/;
+        const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+        expect(tracked, label).not.toBe('no error');
+        expect(tracked, label).toMatch(says);
+        const off = message(() => untypedAt(text, 'target', to));
+        expect(off, `off: ${label}`).not.toBe('no error');
+        expect(off, `off: ${label}`).toMatch(says);
+      }
+    }
+    // The other way, a wider item loses what its content column takes in.
+    for (const text of ['- target\n  > q\n', '- target\n  ```\n  c\n  ```\n']) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'target'), block('ol'))),
+        text,
+      ).toMatch(/wider bullet/);
+    }
+    // Lines that read the same in both are no reason: a lazy line of a child, the fence and the
+    // HTML of a child, a quote at or past the old column, a line outside the item.
+    for (const text of [
+      '1. target\n   - child\n  lazy of child\n',
+      '1. target\n   ```\n  code\n   ```\n',
+      '1. target\n   <div>\n  x\n',
+      '1. target\n   > q\n',
+      '1. target\n\nafter\n',
+      '1. target\n2. next\n',
+      '1. target\n >q\n',
+    ]) {
+      // Other rules may still refuse some of these (HTML, a numbered item after); not this one.
+      expect(
+        message(() => untypedAt(text, 'target', 'ul')),
+        text,
+      ).not.toMatch(/narrower|wider/);
+    }
     // Lines at or past its text stay its own, and a bullet that is no wider changes as before.
     const inside = '1. a\n   - child\n';
     expect(accepted(changed(inside, rangeOf(inside, 'a'), block('task')), 'm2bd')).toBe(

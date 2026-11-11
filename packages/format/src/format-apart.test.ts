@@ -899,6 +899,52 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
     }
   });
 
+  it('changes the type of an item with lines under it at any column, and reads them as before (#263)', () => {
+    const UNDER = [
+      ['  > q'],
+      ['   > q'],
+      ['    > q'],
+      ['  ```', '  code', '  ```'],
+      ['   ```', '   code', '   ```'],
+      ['  <div>', '  x'],
+      ['  - sub'],
+      ['   - sub', '  lazy'],
+      ['  # h'],
+      ['', '  later'],
+      ['', '  > later'],
+      ['  1. sub'],
+      ['   - sub', '  > q'],
+    ];
+    const HEADS = ['1. ', '10. ', '- ', '* ', '- [ ] ', '1) ', ' 1. '];
+    const OPS = [block('ul'), block('task'), block('ol'), block('ul'), block('task')];
+    let written = 0;
+    let refused = 0;
+    for (let seed = 1; seed <= fuzzCount(300); seed++) {
+      const random = seeded(seed * 104729);
+      const below = (n: number) => Math.floor(random() * n);
+      const head = HEADS[below(HEADS.length)] ?? '- ';
+      const under = UNDER[below(UNDER.length)] ?? [];
+      const body = [`${head}target`, ...under, ...(below(2) === 0 ? ['2. next'] : [])].join('\n');
+      const text = below(3) === 0 ? file(body).replace(/\n/g, '\r\n') : file(body);
+      const op = OPS[below(OPS.length)] as FormatOp;
+      const label = `seed ${seed}: ${JSON.stringify(op)} in ${JSON.stringify(bodyOf(text))}`;
+      const at = text.indexOf('target');
+      const range = { from: at, to: at };
+      const off = outcomeOf(() => untrackedFormat(text, range, op, { author: ada }));
+      if (off.result && off.result.length > 0) {
+        expectBlocksAs(`off: ${label}`, applyChanges(text, off.result), text, op, Infinity);
+        written++;
+      } else if (off.error) refused++;
+      const on = outcomeOf(() => trackedFormat(text, range, op, ctx()));
+      if (on.result && on.result.changes.length > 0) {
+        const after = applyChanges(text, on.result.changes);
+        expectSampledDecisions(label, text, after, on.result.markIds, op, seeded(seed), 6);
+      }
+    }
+    expect(written, `${refused} refused`).toBeGreaterThan(0);
+    expect(refused).toBeGreaterThan(0);
+  });
+
   it('costs about what indenting does in a bulleted list, in a numbered one (#264)', () => {
     const rows = (numbered: boolean) =>
       mine(
@@ -1320,8 +1366,29 @@ describe(
                     : '- ';
       const quoted = below(5) === 0 ? '> ' : '';
       const loose = kind === 5 || kind === 7 ? `\n${quoted ? '>' : ''}\n` : '\n';
+      // Now and then a line or a block under an item, at an indentation of its own: a quote, a
+      // fence, a line of HTML, a bullet, a heading, text (#263: they are read at their own column).
+      const UNDER = [
+        ['  > q'],
+        ['   > q'],
+        [' > q'],
+        ['  ```', '  code', '  ```'],
+        ['   ```', '   code', '   ```'],
+        ['  <div>', '  x'],
+        ['  - sub'],
+        ['   - sub', '  lazy'],
+        ['  # h'],
+        ['', '  later'],
+        ['    - deep'],
+      ];
+      const under = items.map((_, i) => (below(i === target ? 2 : 5) === 0 ? pick(UNDER) : []));
       const body = items
-        .map((text, i) => `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}`)
+        .map(
+          (text, i) =>
+            `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}${(under[i] ?? [])
+              .map((line) => `\n${quoted}${line}`)
+              .join('')}`,
+        )
         .join(loose);
       return file(body, marks);
     }

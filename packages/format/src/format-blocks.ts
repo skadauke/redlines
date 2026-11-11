@@ -510,6 +510,75 @@ function linesIn(reader: BlockReader, from: number, to: number): number[] {
   return starts;
 }
 
+/** The columns that the spaces and tabs at the start of `line` come to, tab stops at four. */
+function columnsOf(line: string): number {
+  let column = 0;
+  for (const c of line) {
+    if (c === ' ') column++;
+    else if (c === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return column;
+}
+
+/**
+ * Whether a line under the item of `block` stands between the columns `from` and `to`, which a
+ * change of its type moves its content column across: that line is read as part of the item in one
+ * type and not in the other. Each line is read as written, at the column it starts at, quote
+ * markers and all, so a quote, a fence and a line of HTML count as a list does. Not those that read
+ * the same in both: a line of text right under a line of the item's own children, which goes on
+ * their paragraph either way, and what a fence or a block of HTML of a child holds.
+ */
+function changesMembership(reader: BlockReader, block: Block, from: number, to: number): boolean {
+  const { text } = reader;
+  const lead = block.indent - block.line;
+  // What can start a block of its own, after the indentation.
+  const starts =
+    /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|=+[ \t]*$|<[A-Za-z/!?])/;
+  let fence: string | undefined;
+  let html = false;
+  let above: string | undefined;
+  for (let at = nextLine(reader, block.end); at !== undefined; at = nextLine(reader, at)) {
+    const raw = lineAt(text, at);
+    if (raw.trim() === '') {
+      above = undefined;
+      html = false;
+      continue;
+    }
+    const column = columnsOf(raw);
+    if (column <= lead) break;
+    const content = raw.trimStart();
+    if (column >= to) {
+      // A child's own lines: a fence and a block of HTML keep what they hold.
+      if (fence !== undefined) {
+        if (
+          new RegExp(`^${fence[0] === '~' ? '~' : '`'}{${fence.length},}[ \\t]*$`).test(content)
+        ) {
+          fence = undefined;
+        }
+        above = content;
+        continue;
+      }
+      const opens = /^(`{3,}|~{3,})/.exec(content)?.[1];
+      if (opens !== undefined) fence = opens;
+      html = !html && content.startsWith('<') && starts.test(content) ? true : html;
+      above = content;
+      continue;
+    }
+    if (fence !== undefined || html) continue;
+    // Between the columns. Text under a line of a child's paragraph goes on it in both.
+    const lazy =
+      column >= from &&
+      above !== undefined &&
+      !starts.test(content) &&
+      !ENDS_ITSELF.test(above) &&
+      !/^(?:`{3,}|~{3,})/.test(above);
+    if (column >= from && !lazy) return true;
+    above = content;
+  }
+  return false;
+}
+
 /**
  * The plan of a change of a block's type, or undefined where the block has that type already.
  *
@@ -581,17 +650,17 @@ function planType(
     const children = subtreeEnd(reader, block) > block.end;
     const width = to === 'ol' ? 3 : 2;
     if (children && width > columnOf(block.syntax)) throw refused(UNDER_IT);
-    // And a narrower one takes in the lines under it that stand between the two columns: a bullet
-    // two columns in is a list of its own under `1. `, and an item of `- [ ] `.
-    if (children && width < columnOf(block.syntax)) {
-      const column = block.indent - block.line - quoteLength(text, block.line);
-      const between = (at: number) => {
-        const indent = /^[ \t]*/.exec(unquoted(text, at))?.[0].length ?? 0;
-        return indent >= column + width && indent < column + columnOf(block.syntax);
-      };
-      if (linesIn(reader, block.end, subtreeEnd(reader, block)).some(between)) {
-        throw refused(NARROWER);
-      }
+    // A line under it that stands between the two content columns is read as part of the item in
+    // one type and not in the other (a bullet two columns in is a list of its own under `1. `, and
+    // an item of `- [ ] `; so is a quote, a fence or a line of HTML): the change would read a line it
+    // does not write otherwise. Each line is read at the column it starts at, its quote markers
+    // included (#263).
+    const old = columnOf(block.syntax);
+    if (
+      width !== old &&
+      changesMembership(reader, block, lead + Math.min(width, old), lead + Math.max(width, old))
+    ) {
+      throw refused(width < old ? NARROWER : UNDER_IT);
     }
     const after = nextLine(reader, block.end);
     if (after !== undefined) {
