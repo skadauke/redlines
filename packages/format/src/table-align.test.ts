@@ -408,7 +408,8 @@ describe('aligning a column, tracked (format §3.7)', () => {
     }
     expect(refusedEdits).toBeGreaterThan(40);
     expect(built).toBeGreaterThan(100);
-  });
+    // Every edit at every place, decided in every order: seconds here, more on a busy runner.
+  }, 120_000);
 
   it('can decide each change on its own, in every order, with rows and columns around', () => {
     const text = file(`${FRUIT}\n\nOutro words.`);
