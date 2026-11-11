@@ -82,7 +82,7 @@ import {
   listGoesOnEveryWay,
   blankBetween,
 } from './list-run.ts';
-import { sameEmphasis } from './format-reader.ts';
+import { sameEmphasis, sameReading } from './format-reader.ts';
 import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
 import { codeSpanAt, inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
@@ -1983,6 +1983,19 @@ const BACKSLASH_BEFORE_SYNTAX =
 /** The characters of emphasis delimiters. */
 const DELIMITERS = /[*_~]/;
 
+/** Whether the lines of `from` and `to` start and end a paragraph: the lines around them are blank
+ * as they read, or there are none. */
+function aloneInBlock(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const blank = (a: number, b: number) => /^\s*$/.test(visibleText(text, markers, a, b));
+  const start = lineStart(text, from);
+  if (start > 0 && !blank(lineStart(text, start - 1), start - 1)) return false;
+  const end = lineEnd(text, to);
+  if (end >= text.length) return true;
+  const next = nextLineStart(text, end);
+  return next >= text.length || blank(next, lineEnd(text, next));
+}
+
 /**
  * Whether the markers of a change leave the emphasis in the text around it as it reads without them
  * (format §3.1, rule 5): `content` is the text the change writes, with a `SPLIT` in front of each
@@ -2016,7 +2029,14 @@ function emphasisKept(
   joints.add(text.length);
   const near = [before.at(-1), content[0], text.at(-1), after[0]];
   if (!near.some((c) => c !== undefined && DELIMITERS.test(c))) return true;
-  return sameEmphasis(unreadDelimiters(text + after), joints);
+  const read = unreadDelimiters(text + after);
+  // A paragraph of its own, a blank line or the document's edge on either side, with the change at
+  // its end, holds every pair its text can make: a run that no pair uses has nothing to open with, whatever the markers
+  // make of its flanks (a fence's tildes typed on a line of their own, with Track Changes on).
+  if (trail === '' && after === '' && !/\n/.test(content) && aloneInBlock(plan, from, to)) {
+    return sameReading(read, joints);
+  }
+  return sameEmphasis(read, joints);
 }
 
 /** Whether `where`, the start of a deletion from `from` to `to`, is the first row of a table that
