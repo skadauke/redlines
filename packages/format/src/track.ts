@@ -70,7 +70,6 @@ import {
   inEol,
   markerRanges,
   nameOf,
-  paragraphBreaks,
   snapOut,
   visibleText,
   workingLedger,
@@ -4684,35 +4683,17 @@ function codeEdits(
   const theirs = holders.find((holder) => !holder.own);
   if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);
   assertStillBlock(block, edited(text, block, typed));
-  // The newest view the edits make, and the original one, which they leave as it is.
-  const view = views.newest(text);
-  // Blank lines around the block are not compared: a closer alone on a line after the fence puts
-  // one where none was, which no reader sees.
-  const flat = (s: string) => paragraphBreaks(s).replace(/(?:\n[ \t>]*)+\n/g, '\n');
-  const intended = flat(
-    applyChanges(
-      view.text,
-      typed
-        .map((edit) => ({
-          from: view.map.fromSource(edit.from),
-          to: view.map.fromSource(edit.to),
-          insert: edit.insert,
-        }))
-        .sort((a, b) => a.from - b.from || a.to - b.to),
-    ),
-  );
-  const was = flat(views.original(text).text);
-  const verify = (after: string) => {
-    if (flat(views.newest(after).text) !== intended || flat(views.original(after).text) !== was) {
-      throw new EditError(SELF_CHECK, 'no-legal-placement');
-    }
-  };
+  const now = edited(text, block, typed);
   if (holders.length > 0) {
+    // The pending change already holds the block: the edits are the only change to the file.
+    const intended = applyChanges(text, typed);
     const changes = commitEdit(text, typed, plan.ledger, {
       parsed: plan.parsed,
       keepLedger: true,
       views,
-      verify,
+      verify: (after) => {
+        if (after !== intended) throw new EditError(SELF_CHECK, 'no-legal-placement');
+      },
     });
     const own = [...new Set(holders.map((holder) => holder.mark.id))];
     return { changes, markIds: [], extendedIds: own };
@@ -4726,21 +4707,46 @@ function codeEdits(
   // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
   const roomy = block.prefix === '' && text.startsWith(plan.eol + plan.eol, block.to);
   const closer = `<!--/${id}-->`;
+  const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
+  const tail = roomy ? block.to + plan.eol.length : block.to;
+  const content = now.slice(block.prefix.length) + (roomy ? plan.eol : plan.eol + block.prefix);
   const changes = commitEdit(
     text,
     [
       {
         from: block.from,
         to: block.from,
-        insert: `${block.prefix}<!--sub ${id} ${encodePayload(roomy ? old + plan.eol : old)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
+        insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
       ...typed,
       roomy
-        ? { from: block.to + plan.eol.length, to: block.to + plan.eol.length, insert: closer }
+        ? { from: tail, to: tail, insert: closer }
         : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
     ],
     plan.ledger,
-    { parsed: plan.parsed, created: [id], views, verify: (after) => verify(after) },
+    {
+      parsed: plan.parsed,
+      created: [id],
+      views,
+      // The substitution holds the old block as its payload and the newest code as its text, and
+      // the file is as it was around them: both views read as they did, but for the edits.
+      verify: (after, parsed) => {
+        const mark = parsed.marks.find((candidate) => candidate.id === id);
+        const segment = mark?.segments[0];
+        if (
+          mark?.kind !== 'sub' ||
+          mark.segments.length !== 1 ||
+          !segment?.close ||
+          !segment.carrier ||
+          mark.payload !== payload ||
+          after.slice(segment.carrier.to, segment.content.to) !== content ||
+          !after.startsWith(text.slice(0, block.from)) ||
+          !after.endsWith(text.slice(tail))
+        ) {
+          throw new EditError(SELF_CHECK, 'no-legal-placement');
+        }
+      },
+    },
   );
   return { changes, markIds: [id], extendedIds: [] };
 }

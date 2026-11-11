@@ -224,6 +224,20 @@ interface Memo {
  * blocks and code spans are skipped, and so is an escaped backtick.
  */
 export function scan(text: string): Scan {
+  for (const known of recent) if (known.text === text) return known.scanned;
+  const scanned = scanText(text);
+  recent.unshift({ text, scanned });
+  if (recent.length > RECENT) recent.pop();
+  return scanned;
+}
+
+/** The scans of the last few texts: an edit reads the file before it and after it more than once
+ * (the plan, the placement, the ledger, the editor's own parse), and a scan reads every line of a
+ * long code block and decodes every payload. A scan is read-only. */
+const recent: { text: string; scanned: Scan }[] = [];
+const RECENT = 4;
+
+function scanText(text: string): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
   const verbatim: Verbatim[] = [];
