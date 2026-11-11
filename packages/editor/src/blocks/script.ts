@@ -33,6 +33,7 @@ import { openBlock, textWithoutOpen } from './open.ts';
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
 export type KeyName =
   | 'Enter'
+  | 'Escape'
   | 'Shift-Enter'
   | 'Alt-Enter'
   | 'Backspace'

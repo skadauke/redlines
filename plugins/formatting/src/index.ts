@@ -6,7 +6,7 @@
 
 import { isolateHistory } from '@codemirror/commands';
 import { syntaxTree } from '@codemirror/language';
-import type { EditorState } from '@codemirror/state';
+import { ChangeSet, type EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
@@ -15,6 +15,9 @@ import {
   type Editor,
   markupViewFacet,
   parsedField,
+  pastHidden,
+  rectOf,
+  selectedCells,
   type EditorCommand,
   indentItems,
   selectionInTable,
@@ -26,6 +29,7 @@ import {
 import {
   type BlockType,
   EditError,
+  applyChanges,
   type FormatOp,
   type InlineFormat,
   type Person,
@@ -250,9 +254,57 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const insert = (changes: readonly TextChange[]): boolean =>
     editable() && put(changes, 'input.format', false);
 
+  /**
+   * Changes the format of the text of every selected cell, as one change and one step to undo: from
+   * the last cell to the first, each on the text the ones after it left, composed into one set.
+   */
+  const formatCells = (op: FormatOp, userEvent: string): boolean => {
+    if (!editable()) return false;
+    const cells = selectedCells(view.state).filter((cell) => cell.textFrom < cell.textTo);
+    if (cells.length === 0) return false;
+    const person = personOf(options.author);
+    const tracked = view.state.field(trackingField);
+    let text = view.state.doc.toString();
+    let total = ChangeSet.empty(text.length);
+    try {
+      for (const cell of cells.toReversed()) {
+        const range = { from: total.mapPos(cell.textFrom, -1), to: total.mapPos(cell.textTo, 1) };
+        const made = tracked
+          ? trackedFormat(text, range, op, { author: person, time: ledgerTime(new Date()) }).changes
+          : untrackedFormat(text, range, op, { author: person });
+        const step = ChangeSet.of(
+          made.map(({ from, to, insert }) => ({ from, to, insert })),
+          text.length,
+        );
+        text = applyChanges(text, made);
+        total = total.compose(step);
+      }
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      notice(error.message);
+      return false;
+    }
+    const changes: TextChange[] = [];
+    total.iterChanges((from, to, _fromB, _toB, inserted) =>
+      changes.push({ from, to, insert: inserted.toString() }),
+    );
+    return put(changes, userEvent, true);
+  };
+
   const inline =
     (format_: InlineFormat): EditorCommand['run'] =>
     () => {
+      if (rectOf(view.state)) {
+        // Cells selected: on unless every cell's text has the format already.
+        const on = !selectedCells(view.state)
+          .filter((cell) => cell.textFrom < cell.textTo)
+          .every((cell) =>
+            around(view.state, pastHidden(view.state, cell.textFrom, true), 1).some(
+              ({ name }) => name === INLINE_NODE[format_],
+            ),
+          );
+        return formatCells({ kind: 'inline', format: format_, on }, `format.${format_}`);
+      }
       const range = target();
       if (!range) return false;
       if (inMarker(view.state, range)) {
@@ -541,6 +593,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'format.link',
       title: 'Link…',
       shortcut: 'Mod-k',
+      // Cells selected have no one range to link.
+      isEnabled: (state) => !rectOf(state),
       run: openLink,
       isActive: (state) => linkAt(state) !== null,
     }),
@@ -549,6 +603,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Clear Formatting',
       shortcut: 'Mod-\\',
       run: () => {
+        if (rectOf(view.state)) return formatCells({ kind: 'clear' }, 'format.clear');
         const range = target();
         return !!range && format(range, { kind: 'clear' }, 'format.clear');
       },

@@ -101,6 +101,15 @@ export { tablesOf } from './table/model.ts';
 export type { Cell as TableCell, Row as TableRow, Table } from './table/model.ts';
 export { headInTable, selectionInTable } from './table/stops.ts';
 export {
+  type Rect as TableRect,
+  type Scope as TableScope,
+  commentRangeOfRect,
+  rectOf,
+  selectRect,
+  selectedCells,
+  whole as wholeRect,
+} from './table/cells.ts';
+export {
   chooseViewEffects,
   isChange,
   markupViewFacet,
