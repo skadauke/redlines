@@ -17,6 +17,10 @@
 //! A word ended with Return gets the system's correction, which WebKit never makes (the editor
 //! handles the key itself): `correct_word` asks `NSSpellChecker` for it, for the editor to make.
 
+// The query and the choice are the same everywhere and tested everywhere, but only the Mac's
+// checker uses them: elsewhere the command answers nothing.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 /// What the checker is asked: the context and the word as one text, and where the word is in it,
 /// in UTF-16 units, which is how `NSString` counts.
 #[derive(Debug, PartialEq, Eq)]
