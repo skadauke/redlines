@@ -141,6 +141,7 @@ function expectSampledDecisions(
   walks = 24,
   alsoChanged = 0,
   inPlace = false,
+  structure = true,
 ): number {
   const below = (n: number) => Math.floor(random() * n);
   const isFresh = new Set(fresh);
@@ -163,7 +164,7 @@ function expectSampledDecisions(
       states++;
       expect(reading(a), state).toEqual(reading(b));
       expect(micromarkText(a), state).toBe(micromarkText(b));
-      expectBlocksAs(state, a, b, op, fresh.length - rejected.size + alsoChanged);
+      if (structure) expectBlocksAs(state, a, b, op, fresh.length - rejected.size + alsoChanged);
       const marks = parse(a).marks.filter((mark) => mark.kind !== 'cmt');
       const freshLeft = marks.some((mark) => isFresh.has(mark.id));
       if (!inPlace && !freshLeft && !accepted) {
@@ -1116,7 +1117,7 @@ describe(
     /** A list of five to twelve items, one with the word `target`, in the others Bo's pending words,
      * each in a place of its own, mostly after the first character of the item's text and now and
      * then not; a bullet, numbered, task or nested list, tight or loose, in a quote now and then. */
-    function listDocument(random: () => number): string {
+    function listDocument(random: () => number): { text: string; irregular: boolean } {
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
       const count = 5 + below(8);
@@ -1171,7 +1172,7 @@ describe(
       const body = items
         .map((text, i) => `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}`)
         .join(loose);
-      return file(body, marks);
+      return { text: file(body, marks), irregular: kind === 6 };
     }
 
     /** A range around the word `target`, or from a view offset to another a few words on. */
@@ -1219,11 +1220,14 @@ describe(
       let sampled = 0;
       const histogram = new Map<string, number>();
       const isBlock = ops.some((op) => op.kind === 'block' || op.kind === 'indent');
-      for (let seed = 1; seed <= documents; seed++) {
+      for (let seed = Number(process.env['REDLINES_SEED'] ?? 1); seed <= documents; seed++) {
         const random = seeded(seed * step);
         const below = (n: number) => Math.floor(random() * n);
-        const plain =
-          lists && seed % 3 !== 0 ? listDocument(random) : regionDocument(random, kinds);
+        const made = lists && seed % 3 !== 0 ? listDocument(random) : undefined;
+        // Indentation at random: a block change there can move the lines under it into its item (a
+        // bullet two columns in under a number three wide), which is no matter of marks.
+        const irregular = made?.irregular ?? false;
+        const plain = made?.text ?? regionDocument(random, kinds);
         const text = seed % 2 === 0 ? plain.replace(/\r?\n/g, '\r\n') : plain;
         const caret = text.indexOf('target') + below(7);
         const range =
@@ -1283,6 +1287,8 @@ describe(
               seeded(seed * 31),
               12,
               result.extendedIds.length + reshaped,
+              false,
+              !irregular,
             );
             sampled++;
           }
@@ -1304,7 +1310,7 @@ describe(
         } else if (apartOff.result && apartOff.result.length > 0) {
           const after = applyChanges(text, apartOff.result);
           expectEveryDecision(`off: ${label}`, text, after, [], { inPlace: true, limit: 7 });
-          expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
+          if (!irregular) expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
         }
       }
       if (process.env['REDLINES_FUZZ'])
