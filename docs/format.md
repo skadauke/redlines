@@ -553,7 +553,7 @@ so none of what it consults is a line of the change. A numbered item with a numb
 numbers below the change among them, is read from the lines above it, the lines of the change
 included: it starts an item there if a list of its delimiter is open, and otherwise goes on the
 paragraph above it, where a number other than 1 can't interrupt one. That reading is the same in
-every state of the marks apart, which is all (1) needs of it: it consults the lines above, their
+every state of the marks apart, which is all (1) needs of it (for a flat list, below, it is read in one pass over the lines above, once for the list): it consults the lines above, their
 prefixes and the shape of their blocks (an item, a blank line, text), and every line of the
 paragraphs of the marks apart has a letter or a digit for its first character and holds nothing
 that decides a block (a marker, a backtick, `<`, `>`, a backslash, `|`), whatever is decided. So
@@ -576,24 +576,34 @@ or its pieces are alike only all together, it tries every mark instead. The chec
 which the change makes more of the paragraph before it, as lazy text, can't go unseen: the pieces
 differ, and the change is refused, as it is for any change.
 
-What the proof doesn't give. A numbered item four columns in or more, with a number other than 1,
-reads its start from the lines above it through the item it is in, and its marks are tried: in a
-list under review with such items, Tab on an item counts them, and the list is refused with fewer
-pending changes than a bulleted one. So is a numbered item under the item that a block change nests
-the one above it in, when the item above has a pending change at its first character that leaves a
-space where it is decided (`6. {--new --} beta`): the content column of the item above is 3 or 4
-by the decision, so the nested item is its child in one state and not in the other, and the number
-under it reads two ways. The walk finds that state and tries every mark, which is the shape that
-keeps the refusal with the count: a bullet or a 1 under it does not read from the lines above.
-(A numbered list in order, 1, 2, 3, or in any order, less than four columns in, is covered
-otherwise: Tab on an item with eight pending changes below it is written, at about the cost it has
-in a bulleted list.) The empty item that Markdown can't hold, which the
-person's own Tab or Return made (design: block editing, "The empty paragraph"), is open and is not
-in the file. The editor gives a block change the document with it, where it is a line that starts no
-known block (an empty item under a line of text), so every mark of the list is tried: the change
-leaves that item as it is, and a box clicked in a list with more than five changes pending while it
-is open is refused, in the words above. Where the limit applies because of one of these, the refusal ends
-with a sentence that says why: "The lines below would be read again."
+What the proof doesn't give. Four shapes keep marks tried, and a block change in a list under review
+with more than five changes pending is refused for their count, with "The lines below would be read
+again." at the end.
+
+- A numbered item with a number other than 1, four columns in or more.
+- A numbered item with a number other than 1 that is not the next item of a flat list: a list is flat
+  when every line above the item, down to the start of the region, is an item of one list less than
+  four columns in with one delimiter (`.` or `)`) and one quoting depth, a wrapped line of one, a
+  blank line, or a line in the text of the last item, whichever of them the item stands more or less
+  in than, so that right-aligned numbering (` 1.` to `10.`) and a list indented one, two or three
+  columns are covered. A list that is nested in another item, that mixes delimiters (`10.` then
+  `10)`, which Markdown reads as two lists) or that has an item whose own text starts a list or a
+  quote is not flat, and its numbers below an item that a change writes are read from the lines
+  above through the reading of list items (`listItemAt`), which is sure of them only in the cases
+  its comments name.
+- The empty item that Markdown can't hold, which the person's own Tab or Return made (design: block
+  editing, "The empty paragraph"), is open and is not in the file. The editor gives a block change
+  the document with it, where it is a line that starts no known block (an empty item under a line of
+  text), so every mark of the list is tried: the change leaves that item as it is, and a box
+  clicked in a list with more than five changes pending while it is open is refused, in the words
+  above.
+- A line that the editor reads as an item and Markdown as more of the paragraph above (#139).
+
+A numbered list in order (1, 2, 3), in any order, right-aligned or indented, that is flat is covered:
+Tab on an item with ten pending changes below it is written, at about the cost it has in a bulleted
+list (the same for twenty). A pending change at the first character of the item above that leaves a
+space (`6. {--new --} beta`) no longer reads two ways: in a flat list a number below is the next
+item whatever the content column of the item above is.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
@@ -724,10 +734,13 @@ away.
   except where a numbered item after it and the lines under it would then be read into it, where
   the lines under it would no longer be indented enough to be its own, or where a narrower bullet
   would take in lines under it that stand between the two content columns (a bullet two columns in,
-  under `1. `, is a list of its own, and an item of `- [ ] `): "This item can't get a narrower
-  bullet: lines under it that are not part of it now would be read as part of it." The change would
-  read a line it does not write otherwise, and it is refused, not repaired, with Track Changes off
-  as on. A numbered item that doesn't
+  under `1. `, is a list of its own, and an item of `- [ ] `; so are a quote, a fence and a line of
+  HTML there, each read at the column it starts at, its quote markers included): "This item can't
+  get a narrower bullet: lines under it that are not part of it now would be read as part of it."
+  (the wider direction has its own words, above). The change would read a line it does not write
+  otherwise, and it is refused, not repaired, with Track Changes off as on. A line of text under a
+  line of a child's paragraph, a child's fence and what its HTML holds read the same either way
+  and are no reason. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
   its first child right under its text; and so is indenting
