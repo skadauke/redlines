@@ -72,6 +72,11 @@ function breakBefore(text: string, start: number): number {
   return text[start - 2] === '\r' ? start - 2 : start - 1;
 }
 
+/** Line breaks and the prefixes of the container's lines (a quote's `>`, a list item's spaces): what
+ * Return types against a block. */
+const isBreak = (insert: string) =>
+  /^[ \t\r\n]*$/.test(insert) || /^(?:\r?\n[ \t>]*)+$/.test(insert);
+
 /** What `codeBlockOf` finds: the block the edits touch, the edits (a line break typed at the start of
  * the closing line moved to the end of the line before), and whether every one is in the code. */
 export interface Located {
@@ -133,8 +138,8 @@ export function codeBlockOf(
   if (
     within.kind !== 'indented' &&
     lo === hi &&
-    (lo === within.from || lo === within.to) &&
-    (within.kind !== 'math' || edits.every((edit) => /^[ \t\r\n]*$/.test(edit.insert)))
+    (lo === within.from || lo === within.from + within.prefix.length || lo === within.to) &&
+    (within.kind !== 'math' || edits.every((edit) => isBreak(edit.insert)))
   ) {
     return null;
   }

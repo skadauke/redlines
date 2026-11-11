@@ -593,3 +593,23 @@ describe('CRLF files (fix round 3)', () => {
     }
   }, 60_000);
 });
+
+describe('Return at the edges of display math in a quote (fix round 3)', () => {
+  it('writes a line break with the quote’s prefixes against the `$$`, and still refuses text', () => {
+    for (const [body, prefix] of [
+      ['> $$\n> x = 1\n> $$\n>\n> After.', '> '],
+      ['> > $$\n> > x = 1\n> > $$\n> >\n> > After.', '> > '],
+    ] as const) {
+      const text = file(body);
+      const end = text.indexOf('$$\n', text.indexOf('x = 1')) + 2;
+      const bar = prefix.trimEnd();
+      const broken = attempt(text, end, end, `\n${bar}\n${prefix}`);
+      expect(broken.error, body).toBeUndefined();
+      expect(parse(broken.after ?? '').marks, body).toEqual([]);
+      expect(attempt(text, end, end, 'x').error, body).toBeDefined();
+      // Before the opening `$$`, after the quote's markers.
+      const start = text.indexOf('$$');
+      expect(attempt(text, start, start, `\n${bar}\n${prefix}`).error, body).toBeUndefined();
+    }
+  });
+});

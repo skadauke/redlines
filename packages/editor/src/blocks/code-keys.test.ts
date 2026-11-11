@@ -498,3 +498,37 @@ describe('A lone space on the open indented line (fix round 2)', () => {
     ]),
   );
 });
+
+describe('Return at the edges of display math in a quote and a list item (fix round 3)', () => {
+  const docs: [string, string][] = [
+    ['quote', '> $$⏎> x = 1⏎> $$‸⏎>⏎> After.'],
+    ['quote, text under', '> $$⏎> x = 1⏎> $$‸⏎> After.'],
+    ['quote in a quote', '> > $$⏎> > x = 1⏎> > $$‸⏎> >⏎> > After.'],
+    ['list item', '- item⏎⏎  $$⏎  x = 1⏎  $$‸⏎⏎  After.'],
+    ['before the opening, in a quote', '> Intro.⏎>⏎> ‸$$⏎> x = 1⏎> $$⏎>⏎> After.'],
+  ];
+  /** Where the open line of display math in a quote is not read as open, with Track Changes off or on. */
+  const stray: Record<string, boolean> = {
+    'quote, text under': true,
+    'before the opening, in a quote': false,
+  };
+  for (const [where, doc] of docs) {
+    describe(where, () => {
+      const rows: Script[] = [false, true].map((tc) => ({
+        name: `Return is written, with no refusal, Track Changes ${tc ? 'on' : 'off'}`,
+        doc,
+        keys: ['Enter'],
+        tc,
+        expect: {},
+        ...(stray[where] === tc
+          ? {
+              skip: {
+                'stray-blank-line': 'the open line of display math in a quote is not read as open',
+              },
+            }
+          : {}),
+      }));
+      scriptRows(rows);
+    });
+  }
+});
