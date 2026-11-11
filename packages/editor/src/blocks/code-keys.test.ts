@@ -178,8 +178,38 @@ describe('Return in indented code, display math and raw-text HTML', () => {
         },
       },
       {
-        name: 'at the end of indented code leaves the block: it can’t end in an empty line',
+        name: 'at the end of indented code opens an indented line, which is not in the file',
         doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        off: {
+          file: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
+          caret: 'Intro.⏎⏎    let b = 2;⏎    ‸⏎⏎After.',
+        },
+        on: {
+          file: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
+          caret: 'Intro.⏎⏎    let b = 2;⏎    ‸⏎⏎After.',
+        },
+      },
+      {
+        name: 'at the end of indented code, then typing, writes the line with its indentation',
+        doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        keys: ['Enter', { type: 'c' }],
+        off: { file: 'Intro.⏎⏎    let b = 2;⏎    c⏎⏎After.' },
+        on: {
+          newest: 'Intro.⏎⏎    let b = 2;⏎    c⏎⏎After.',
+          original: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
+        },
+      },
+      {
+        name: 'at the end of indented code, then Backspace, takes the Return back',
+        doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        keys: ['Enter', 'Backspace'],
+        off: { file: 'Intro.⏎⏎    let b = 2;⏎⏎After.', caret: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.' },
+        on: { file: 'Intro.⏎⏎    let b = 2;⏎⏎After.', caret: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.' },
+      },
+      {
+        name: 'at the end of indented code, then Return again, leaves the block',
+        doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        keys: ['Enter', 'Enter'],
         off: {
           file: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
           caret: 'Intro.⏎⏎    let b = 2;⏎⏎‸⏎⏎After.',

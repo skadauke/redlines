@@ -479,3 +479,17 @@ describe('line breaks of a block (fix round 1)', () => {
     expect(attempt(text, at, at, 'x').error).toContain('line breaks');
   });
 });
+
+describe('the open line under indented code (fix round 1)', () => {
+  it('typed on, goes on the code: the block replaced is the one without the line', () => {
+    const body = 'Intro.\n\n    let b = 2;\n    \n\nAfter.';
+    const text = file(body);
+    const at = text.indexOf('\n    \n') + 5;
+    const result = attempt(text, at, at, 'c');
+    expect(result.error).toBeUndefined();
+    expect(bodyOf(result.after ?? '')).toContain('    let b = 2;\n    c\n<!--/m2bd-->\nAfter.');
+    // Rejecting gives the file as it was before the line was opened.
+    expect(back(result.after ?? '')).toBe('Intro.\n\n    let b = 2;\n\nAfter.');
+    expect(parse(result.after ?? '').marks.map((m) => m.kind)).toEqual(['sub']);
+  });
+});

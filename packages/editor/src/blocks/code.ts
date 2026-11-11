@@ -8,7 +8,8 @@
 
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import { blankOf, continuation, type KeyEdit, nothing, returnAtEnd } from './edits.ts';
-import { type Block } from './structure.ts';
+import { openBlock } from './open.ts';
+import { type Block, blockAt } from './structure.ts';
 
 /** The kinds of block that take code keys. */
 const CODE_KEYS = new Set(['code', 'math', 'html', 'front-matter']);
@@ -118,11 +119,39 @@ export function planCodeReturn(state: EditorState, block: Block, head: number): 
     return leave(state, block, line);
   }
   if (block.kind === 'code' && !shape.opens && head === last.to) {
-    // Indented code can't end in an empty line, which would be no part of it: a Return at its end
-    // is the Return that leaves, as the second one on a fence's empty last line is.
-    return returnAtEnd(state, block);
+    // The end of indented code: a line break with the line's indentation. A line of white space
+    // alone is no part of an indented block, so the new line is open, as the empty paragraph a
+    // Return opens is: drawn, with the caret on it, and not in the file until something is typed.
+    const edit = lineBreak(state, block, head, line);
+    return {
+      ...edit,
+      plain: true,
+      open: {
+        at: head,
+        assoc: 1,
+        down: 1,
+        pressedIn: { from: block.lines.from, to: block.lines.to },
+      },
+    };
   }
   return lineBreak(state, block, head, line);
+}
+
+/**
+ * The indented code above the open line of white space that Return at its end opened, when `head`
+ * is on it: a second Return there leaves the block.
+ */
+export function openIndentedLine(state: EditorState, head: number): Block | null {
+  const open = openBlock(state);
+  if (!open || open.item || open.line || head < open.empty.from || head > open.empty.to)
+    return null;
+  const { doc } = state;
+  const line = doc.lineAt(open.empty.from);
+  if (line.number < 2 || !/^[ \t]+$/.test(line.text)) return null;
+  const above = doc.line(line.number - 1);
+  const block = blockAt(state, above.from);
+  if (block?.kind !== 'code' || block.lines.to !== above.to) return null;
+  return OPEN_FENCE.test(doc.lineAt(block.lines.from).text) ? null : block;
 }
 
 /**

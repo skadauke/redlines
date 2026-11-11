@@ -34,6 +34,9 @@ export interface CodeBlock {
   /** Display math in a paragraph (`$$x = 1$$`, or `$$` lines with no blank line in them): the
    * edits fall between its two `$$`. */
   inline?: true;
+  /** Indented code and the line of white space under it that something is typed on (the open line
+   * that Return at its end opens): the block's end before that line, where the payload ends. */
+  oldTo?: number;
   /** What stands in front of its first line's fence or tag: the quote markers and the indentation
    * of its container, which every line of the block has too. */
   prefix: string;
@@ -323,7 +326,32 @@ function indentedBlock(
   markers: readonly Range[],
 ): CodeBlock | null {
   const blocks = indentedCodeBlocks(text);
-  const range = blocks.find((block) => block.from <= lo && hi <= block.to);
+  let range = blocks.find((block) => block.from <= lo && hi <= block.to);
+  let oldTo: number | undefined;
+  if (!range && lo === hi) {
+    // A line of white space right under the block, indented as code is, which something is typed
+    // at the end of: it goes on the block's code, and the block replaced is the one without it.
+    const line = text.slice(lineStart(text, lo), lineEnd(text, lo));
+    const under = blocks.find((block) => {
+      if (lineEnd(text, lo) !== lo || !/^(?: {4}|\t)[ \t]*$/.test(line)) return false;
+      const gap = text.slice(block.to, lineStart(text, lo));
+      return /^(?:[ \t]*\r?\n)+$/.test(gap);
+    });
+    if (under) {
+      oldTo = under.to;
+      range = { from: under.from, to: lo };
+    }
+  }
+  if (
+    range &&
+    lo === hi &&
+    lo === range.to &&
+    /^[ \t]*$/.test(text.slice(lineStart(text, lo), lo))
+  ) {
+    // The open line is read as the block's last line: the block replaced is the one without it.
+    const text0 = text.slice(range.from, range.to).replace(/[ \t\r\n]+$/, '');
+    if (text0.length > 0) oldTo = range.from + text0.length;
+  }
   if (!range) return null;
   // Indented code in a list item or a quote is not built.
   if (range.from !== lineStart(text, range.from))
@@ -339,6 +367,7 @@ function indentedBlock(
     kind: 'indented',
     from: range.from,
     to: range.to,
+    ...(oldTo === undefined ? {} : { oldTo }),
     editFrom: range.from,
     editTo: range.to,
     prefix: '',

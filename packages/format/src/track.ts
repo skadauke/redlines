@@ -4732,7 +4732,7 @@ function codeEdits(
   }
   const id = newMark(plan);
   // The first line's prefix stays in front of the opener's line and carries on in its carrier.
-  const old = text.slice(block.from + block.prefix.length, block.to);
+  const old = text.slice(block.from + block.prefix.length, block.oldTo ?? block.to);
   // Where a blank line follows the block, the closer takes its place, so that the line break after
   // the closing fence is the block's, and the file keeps as many blank lines as it had: the payload
   // ends with that line break, and the closer stands at the start of the blank line. Otherwise the

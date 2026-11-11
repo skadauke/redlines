@@ -24,7 +24,13 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
-import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
+import {
+  type KeyEdit,
+  planReturn,
+  planSelectionReturn,
+  planShiftReturn,
+  returnAtEnd,
+} from './edits.ts';
 import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
@@ -40,7 +46,7 @@ import {
   transposeCrosses,
 } from './motion.ts';
 import { blockAt } from './structure.ts';
-import { planCodeTab } from './code.ts';
+import { openIndentedLine, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -243,6 +249,16 @@ const returnKey = blockKey((view) => {
     // split pending).
     if (!takeBackEmptyLine(view)) return true;
     const again = planReturn(view.state);
+    return again
+      ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
+      : true;
+  }
+  // On the open line that Return at the end of indented code left: that Return is taken back, and
+  // the key opens the empty paragraph after the code.
+  const indented = main.empty ? openIndentedLine(view.state, main.head) : null;
+  if (indented && takeBack(view, 'delete.selection', undefined, 'before')) {
+    const code = blockAt(view.state, view.state.selection.main.head);
+    const again = code && returnAtEnd(view.state, code);
     return again
       ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
       : true;
