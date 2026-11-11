@@ -452,6 +452,8 @@ export function alignCols(view: EditorView, align: Align): boolean {
     { length: touched.last - touched.first + 1 },
     (_, i) => touched.first + i,
   );
+  // The alignment the columns have already: the menu's check mark says so, and nothing is written.
+  if (cols.every((col) => touched.table.aligns[col] === align)) return true;
   return perform(
     view,
     { kind: 'align', table: touched.table.from, cols, align },

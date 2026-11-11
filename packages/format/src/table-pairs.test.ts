@@ -11,7 +11,7 @@ import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import type { TableAlign } from './table.ts';
 import type { TextChange } from './types.ts';
-import { bo, ada, context, expectEveryOrderAlike, file, exactly } from './test-helpers.ts';
+import { bo, ada, bodyOf, context, expectEveryOrderAlike, file, exactly } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
 
 const BODY = [
@@ -22,6 +22,10 @@ const BODY = [
   '| a3 | b3 | c3 |',
 ];
 const START = file(BODY.join('\n'));
+// The same table with colons in its delimiter row: the pairs also start from one that is aligned.
+const COLON = file(
+  BODY.map((line) => line.replace('| - | - | - |', '| :- | -: | :-: |')).join('\n'),
+);
 const ROWS = 4;
 const COLUMNS = 3;
 
@@ -99,42 +103,54 @@ describe('the pair model for rows and columns', () => {
     ['plain', 'a second person, Track Changes off'],
     ['ada', 'the same person'],
   ] as const) {
-    it(`reads alike in every order: ${label}`, () => {
-      let allowed = 0;
-      for (const first of grid) {
-        const one = run(START, first, 'ada', ['k3x9', 'w8nn', 'p5qm', 'q6rs']);
-        if (one instanceof EditError) continue;
-        const read = readTables(one, parse(one))[0];
-        const rows = read?.rows.length ?? 0;
-        for (const second of shapes(rows, read?.aligns.length ?? 0)) {
-          const name = `${JSON.stringify(first)} then ${JSON.stringify(second)}`;
-          const two = run(one, second, secondBy, ['c2dd', 'f3gg', 'h4jj', 'm5nn']);
-          if (two instanceof EditError) {
-            expect(
-              REFUSALS.some((r) => r.test(two.message)),
-              `${name}: ${two.message}`,
-            ).toBe(true);
-            continue;
-          }
-          allowed++;
-          expectEveryOrderAlike(name, two, exactly);
-          const all = (decide: (text: string) => TextChange[]) => {
-            try {
-              return applyChanges(two, decide(two)).replace(/\s+$/, '');
-            } catch (error) {
-              throw new Error(`${name}: ${String(error)}\n${two}`, { cause: error });
+    for (const [from, where] of [
+      [START, 'a table with no alignment'],
+      [COLON, 'a table whose columns have one'],
+    ] as const) {
+      it(`reads alike in every order: ${label}, from ${where}`, () => {
+        let allowed = 0;
+        for (const first of grid) {
+          const one = run(from, first, 'ada', ['k3x9', 'w8nn', 'p5qm', 'q6rs']);
+          if (one instanceof EditError) continue;
+          const read = readTables(one, parse(one))[0];
+          const rows = read?.rows.length ?? 0;
+          for (const second of shapes(rows, read?.aligns.length ?? 0)) {
+            const name = `${JSON.stringify(first)} then ${JSON.stringify(second)}`;
+            const two = run(one, second, secondBy, ['c2dd', 'f3gg', 'h4jj', 'm5nn']);
+            if (two instanceof EditError) {
+              expect(
+                REFUSALS.some((r) => r.test(two.message)),
+                `${name}: ${two.message}`,
+              ).toBe(true);
+              continue;
             }
-          };
-          expect(all(acceptAll), `${name}: accept all`).toBe(
-            newestView(two).text.replace(/\s+$/, ''),
-          );
-          expect(all(rejectAll), `${name}: reject all`).toBe(
-            originalView(two).text.replace(/\s+$/, ''),
-          );
+            allowed++;
+            expectEveryOrderAlike(name, two, exactly);
+            const all = (decide: (text: string) => TextChange[]) => {
+              try {
+                return applyChanges(two, decide(two)).replace(/\s+$/, '');
+              } catch (error) {
+                throw new Error(`${name}: ${String(error)}\n${two}`, { cause: error });
+              }
+            };
+            expect(all(acceptAll), `${name}: accept all`).toBe(
+              newestView(two).text.replace(/\s+$/, ''),
+            );
+            expect(all(rejectAll), `${name}: reject all`).toBe(
+              originalView(two).text.replace(/\s+$/, ''),
+            );
+            // Every change tracked: the original view is the table it started as, alignment included, and
+            // the newest view's table is as wide as its header.
+            if (secondBy !== 'plain') {
+              expect(originalView(two).text.replace(/\s+$/, ''), `${name}: the original`).toBe(
+                bodyOf(from).replace(/\s+$/, ''),
+              );
+            }
+          }
         }
-      }
-      expect(allowed).toBeGreaterThan(100);
-      // Every pair at every place, decided in every order: a few seconds here, more on a busy runner.
-    }, 120_000);
+        expect(allowed).toBeGreaterThan(100);
+        // Every pair at every place, decided in every order: a few seconds here, more on a busy runner.
+      }, 120_000);
+    }
   }
 });

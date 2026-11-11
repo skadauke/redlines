@@ -595,6 +595,16 @@ describe('the alignment commands', () => {
     expect(delimiter(editor)).toBe('| - | --- | -: |');
   });
 
+  it('do nothing, and say nothing, for the alignment the columns have already', () => {
+    for (const tracking of [false, true]) {
+      const editor = mount(doc, tracking);
+      select(editor, at('12'));
+      expect(editor.commands.run('table.alignCenter')).toBe(true);
+      expect(editor.getDoc()).toBe(doc);
+      expect(editor.getUiState().undo).toBeNull();
+    }
+  });
+
   it('align every column the selection touches', () => {
     const editor = mount(doc);
     editor.view.dispatch({ selection: { anchor: at('11'), head: at('12') + 1 } });

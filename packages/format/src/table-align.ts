@@ -34,8 +34,8 @@ const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 const LOST =
   "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Raw with Track Changes off.";
 
-/** The alignment of a column that the old delimiter cell had no word for, in a card. */
-const WAS: Record<TableAlign, string> = {
+/** The words of an alignment, in a card: `column Count centered (was left)`. */
+const WORDS: Record<TableAlign, string> = {
   '': 'default',
   left: 'left',
   center: 'centered',
@@ -210,16 +210,10 @@ export function alignChange(parsed: Parsed, mark: MarkRange): AlignedColumn[] {
 /** An alignment change in the words of a card: `column Count centered (was left)`. */
 export function alignLabel(columns: readonly AlignedColumn[]): string {
   if (columns.length === 0) return 'alignment';
-  const NOW: Record<TableAlign, string> = {
-    '': 'default',
-    left: 'left',
-    center: 'centered',
-    right: 'right',
-  };
   return columns
     .map(({ col, name, now, was }) => {
       const who = name === '' ? `${col + 1}` : name;
-      return `column ${who} ${NOW[now]} (was ${WAS[was]})`;
+      return `column ${who} ${WORDS[now]} (was ${WORDS[was]})`;
     })
     .join(', ');
 }

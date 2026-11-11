@@ -68,10 +68,9 @@ export const GRIPS_STYLE = `
   color: var(--rl-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 0.22); border: 1px solid var(--rl-rule);
   font-size: var(--rl-size-ui);
 }
-.rl-grip-item { padding: 5px 10px; border-radius: 4px; cursor: default; white-space: nowrap; }
+.rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
 .rl-grip-item:hover { background: var(--rl-rule); }
 .rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
-.rl-grip-item[role="menuitemradio"] { position: relative; padding-left: 24px; }
 `;
 
 const STYLE_ID = 'rl-grips-style';

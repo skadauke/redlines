@@ -4,7 +4,6 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { isAlignOps, opsOf } from './format-ops.ts';
 import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
@@ -28,6 +27,7 @@ import {
 import { parse } from './parse.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
+import { isAlignMark } from './table-align.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 import { syntaxOnly } from './views.ts';
@@ -298,11 +298,6 @@ function emptiedAnnotations(
   }
   return extra;
 }
-
-/** An alignment change of a table (format §3.7): its closer stands below the table, after the deletion
- * lines, so it is decided last, on the text the others leave. */
-const isAlignMark = (mark: MarkRange) =>
-  mark.kind === 'fmt' && mark.segments.some((segment) => isAlignOps(opsOf(mark, segment)));
 
 /** Whether a mark is a half of a move of a row. */
 const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== undefined;
