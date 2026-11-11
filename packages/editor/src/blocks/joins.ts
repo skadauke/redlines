@@ -122,6 +122,10 @@ function endOfNoText(state: EditorState, block: Block): number {
   return last.to;
 }
 
+/** Why a marker inside another container can't be taken out of the first line of the file, tracked. */
+const DEEP_AT_START =
+  "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
+
 /** Whether a line below a paragraph is text of it, or makes a heading of it, once an item above goes. */
 const readsAsText = (row: string) =>
   /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
@@ -757,13 +761,26 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   const deleted = prev && onlyDeletedText(state, prev);
   if (deleted) return { ...nothing(state), refusal: deleted };
   const item = itemStartedBy(state, block, nodes);
-  if (item) return backspaceAtItem(state, block, item, nodes, prev);
-  if (isEmpty(state, block)) return removeEmpty(state, block, 'delete.backward.block');
+  let edit: KeyEdit;
   const inner = nodes.at(-1);
-  if (inner?.name === 'Blockquote' && (!prev || !within(prev, inner))) {
-    return unquote(state, block, inner);
+  if (item) edit = backspaceAtItem(state, block, item, nodes, prev);
+  else if (isEmpty(state, block)) edit = removeEmpty(state, block, 'delete.backward.block');
+  else if (inner?.name === 'Blockquote' && (!prev || !within(prev, inner))) {
+    edit = unquote(state, block, inner);
+  } else edit = joinOrMove(state, block, prev, 'delete.backward.block');
+  // A container inside another (a quote in a quote, a list in a quote) on the first line of the file:
+  // the format has no place for the mark in front of its marker; the words say what to do (#248).
+  if (
+    edit.changes.length &&
+    !edit.fallback &&
+    !prev &&
+    nodes.length > 1 &&
+    state.doc.lineAt(block.lines.from).number === 1 &&
+    state.field(trackingField, false)
+  ) {
+    return { ...edit, fallback: { ...nothing(state), refusal: DEEP_AT_START } };
   }
-  return joinOrMove(state, block, prev, 'delete.backward.block');
+  return edit;
 }
 
 /**

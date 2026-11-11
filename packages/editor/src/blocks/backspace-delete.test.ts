@@ -59,6 +59,10 @@ const UNTRACKED_TEXT =
 const BELOW_PENDING =
   'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
 
+/** Words for a marker inside another container on the file's first line. */
+const DEEP_AT_START =
+  "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
+
 /** Words for a join onto a setext heading: its underline can't be written again behind a marker. */
 const SETEXT_JOIN =
   "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
@@ -599,6 +603,20 @@ describe('At the start of the document, Track Changes on', () => {
           render:
             'The untracked key takes the bullet out in front of an item that a pending deletion empties, which reads as a heading (a known gap of the untracked keys, filed with the walk findings)',
         },
+      },
+      {
+        name: 'a quote inside a quote, and a list inside a quote, at the start of the document',
+        doc: '> > ‸One.⏎> >⏎> > Two.',
+        keys: BS,
+        off: { caret: '> ‸One.⏎> ⏎> > Two.' },
+        on: { caret: '> > ‸One.⏎> >⏎> > Two.', refusal: DEEP_AT_START },
+      },
+      {
+        name: 'the first item of a list in a quote',
+        doc: '> - ‸a⏎> - b',
+        keys: BS,
+        off: { caret: '> ‸a⏎> - b' },
+        on: { caret: '> - ‸a⏎> - b', refusal: DEEP_AT_START },
       },
       {
         name: 'an empty code block at the start of the document',
