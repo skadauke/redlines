@@ -495,8 +495,11 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     // What the library says about changes pending in the paragraph is accurate for a box too.
     if (/^Accept or reject/.test(error.message)) return error.message;
     const many = /^There are (\d+) pending changes in this (\w+), too many/.exec(error.message);
+    const again = error.message.endsWith('would be read again.')
+      ? ' The lines below would be read again.'
+      : '';
     if (many) {
-      return `This box can't be changed while ${many[1]} changes in its ${many[2]} are pending. Accept or reject some of them first.`;
+      return `This box can't be changed while ${many[1]} changes in its ${many[2]} are pending. Accept or reject some of them first.${again}`;
     }
     if (/<!--/.test(rest)) return CHANGE_IN_WAY;
     return rest.trim() === '' ? WRITE_ITEM : BOX_STUCK;

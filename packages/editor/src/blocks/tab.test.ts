@@ -285,37 +285,57 @@ describe('Tab and Shift-Tab in a list in a quote', () => {
 });
 
 describe('Tab in a list under review', () => {
+  /** Items with a pending insertion after the item's first character: no decision of it can reach
+   * a line's start or a line break, so it is apart from the change and not counted (rule 6). */
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => `- ${'abcdefg'[i]} <ins>${i}</ins>`).join('⏎');
+  /** Items with one at the item's first character, which a decision could make reach the start of
+   * the line (rule 6): each is tried with the change. */
+  const first = (n: number) =>
+    Array.from({ length: n }, (_, i) => `- <ins>${i}</ins>${'abcdefg'[i]}`).join('⏎');
   const many = (n: number) =>
     `There are ${n} pending changes in this list, too many to check this change against. Accept or reject some of them first.`;
+  const plain = (text: string) => text.replaceAll('<ins>', '').replaceAll('</ins>', '');
   scriptRows(
-    [4, 5]
+    [4, 5, 8]
       .flatMap((n) =>
         both([
           {
-            name: `with ${n} other pending changes in the list: works (rule 5)`,
+            name: `with ${n} other pending changes inside the items' text: works, they stay pending (rule 6)`,
             doc: `- one⏎- ‸two⏎${rows(n)}`,
             keys: ['Tab'],
-            off: {
-              newest: `- one⏎  - two⏎${rows(n).replaceAll('<ins>', '').replaceAll('</ins>', '')}`,
+            off: { file: `- one⏎  - two⏎${rows(n)}` },
+            on: {
+              file: `- one⏎  - <fmt was=indent=0>⏎    two</fmt>⏎${rows(n)}`,
+              newest: `- one⏎  - two⏎${plain(rows(n))}`,
+              original: `- one⏎- two⏎${rows(n).replaceAll(/<ins>.*?<\/ins>/g, '')}`,
             },
-            on: { original: `- one⏎- two⏎${rows(n).replaceAll(/<ins>.*?<\/ins>/g, '')}` },
+          },
+        ]),
+      )
+      .concat(
+        both([
+          {
+            name: 'with five at an item’s first character: works (rule 5)',
+            doc: `- one⏎- ‸two⏎${first(5)}`,
+            keys: ['Tab'],
+            off: { newest: `- one⏎  - two⏎${plain(first(5))}` },
+            on: { original: `- one⏎- two⏎${first(5).replaceAll(/<ins>.*?<\/ins>/g, '')}` },
           },
         ]),
       )
       .concat([
         {
-          name: 'with six other pending changes in the list: refused, with the count, Track Changes on',
-          doc: `- one⏎- ‸two⏎${rows(6)}`,
+          name: 'with six at an item’s first character: refused, with the count, Track Changes on',
+          doc: `- one⏎- ‸two⏎${first(6)}`,
           keys: ['Tab'],
           tc: true,
           expect: { refusal: many(6) },
         },
         {
           // Without Track Changes there is no new mark to try with them: one more works.
-          name: 'with seven other pending changes in the list: refused, with the count, Track Changes off',
-          doc: `- one⏎- ‸two⏎${rows(7)}`,
+          name: 'with seven at an item’s first character: refused, with the count, Track Changes off',
+          doc: `- one⏎- ‸two⏎${first(7)}`,
           keys: ['Tab'],
           tc: false,
           expect: { refusal: many(7) },

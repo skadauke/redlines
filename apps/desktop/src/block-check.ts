@@ -51,6 +51,32 @@ const notation = (text: string) => text.replaceAll('\n', '⏎');
 /** The line of `pos`, 1-based. */
 const lineOf = (editor: Editor, pos: number) => editor.view.state.doc.lineAt(pos).number;
 
+/** The ids of eight pending inline changes (a word inserted, deleted or replaced, inside an item's
+ * text), and a list that has them in its items after "one" and "two", with the ledger that goes
+ * with them: Tab in a list under review (format §2.6, rule 6). */
+const PENDING = ['kbx9', 'kcx9', 'kdx9', 'kfx9', 'kgx9', 'khx9', 'kjx9', 'kkx9'];
+const PENDING_ITEMS = PENDING.map((id, i) =>
+  i % 3 === 0
+    ? `- item ${i} <!--ins ${id}-->new <!--/${id}-->words`
+    : i % 3 === 1
+      ? `- item ${i} <!--del ${id} big -->words`
+      : `- item ${i} <!--sub ${id} old-->fresh<!--/${id}--> words`,
+);
+const PENDING_FILE = [
+  '- one',
+  '- ‸two',
+  ...PENDING_ITEMS,
+  '',
+  '<!-- redlines',
+  "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+  'version: 1',
+  'people:',
+  '  bo: {name: Bo Chen}',
+  'marks:',
+  ...PENDING.map((id) => `  ${id}: {by: bo, at: 2026-10-13T22:30Z}`),
+  '-->',
+].join('⏎');
+
 const CHECKS: Check[] = [
   {
     name: 'return-at-end',
@@ -190,6 +216,22 @@ const CHECKS: Check[] = [
     steps: ['Shift-Tab'],
     caret: '- one⏎- ‸two',
     file: '- one⏎- two',
+  },
+  {
+    // Eight pending changes in the list's other items, after their first character, are apart from
+    // the change (rule 6): Tab works, and every one of them is still pending.
+    name: 'tracked-tab-in-a-list-with-eight-pending-changes',
+    doc: PENDING_FILE,
+    steps: ['Tab'],
+    tracking: true,
+    test: (editor) => {
+      const file = editor.getDoc();
+      const left = PENDING.filter((id) => !new RegExp(`<!--(?:ins|del|sub) ${id}[ -]`).test(file));
+      if (left.length > 0 || !file.includes('was=indent=0')) {
+        return { decided: left, indented: file.includes('was=indent=0') };
+      }
+      return null;
+    },
   },
   {
     name: 'tab-numbered-item-from-1',
