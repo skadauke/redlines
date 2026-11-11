@@ -180,6 +180,13 @@ export const baseThemeSpec: ThemeSpec = {
   // A box with a pending change, in its new state: border and fill in its author's color.
   '.rl-box-pending .rl-box rect': { stroke: 'var(--rl-color)' },
   '.rl-box-pending .rl-box-checked rect': { fill: 'var(--rl-color)', stroke: 'var(--rl-color)' },
+  // The keyboard's focus: the ring every control has, on keyboard focus only.
+  '.rl-box:focus': { outline: 'none' },
+  '.rl-box:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '2px' },
+  '.rl-box-pending .rl-box-checked:hover rect': {
+    fill: 'color-mix(in srgb, var(--rl-color) 70%, var(--rl-ink))',
+    stroke: 'color-mix(in srgb, var(--rl-color) 70%, var(--rl-ink))',
+  },
   '.rl-box-pending .rl-box:hover rect': {
     stroke: 'color-mix(in srgb, var(--rl-color) 70%, var(--rl-ink))',
   },

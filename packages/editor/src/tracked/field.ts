@@ -91,6 +91,15 @@ export function hasRedlines(parsed: Parsed): boolean {
 }
 
 /**
+ * The check change a marker's text names: `+check` is a box checked, `-check` one unchecked (also
+ * `-check=X`). The one test for a box's point mark, as the format writes it (format §2.6).
+ */
+export function boxChange(markerText: string): '+' | '-' | null {
+  const sign = /([+-])check\b/.exec(markerText)?.[1];
+  return sign === '+' || sign === '-' ? sign : null;
+}
+
+/**
  * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution, an
  * inserted line break (a split, format §3.4), the two halves of a move included, or a format
  * change that accept and reject decide, and an inserted table row (format §3.7). Table column

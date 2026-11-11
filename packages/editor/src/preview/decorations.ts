@@ -329,7 +329,7 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     const widget = new TaskBoxWidget(
       checked,
       columns(line, mark.from, boxEnd),
-      pending === null || pending === 'source' ? null : pending.color,
+      pending === null || pending === 'source' ? null : pending,
     );
     b.push(Decoration.replace({ widget }).range(mark.from, boxEnd));
   } else {

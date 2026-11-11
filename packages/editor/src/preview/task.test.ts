@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { EditorView } from '@codemirror/view';
+import { EditorView, runScopeHandlers } from '@codemirror/view';
+import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { checkBoxEffect, createEditor, type Editor } from '../index.ts';
 import { decodeEntity } from './task.ts';
@@ -17,10 +18,11 @@ function editorAt(
   doc: string,
   cursor: number,
   mode?: 'raw' | 'redlines' | 'simple' | 'clean',
+  tracking = false,
 ): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author });
+  const editor = createEditor(parent, { doc, author, tracking });
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   if (mode) editor.setViewMode(mode);
   editor.view.dispatch({ selection: { anchor: cursor } });
@@ -188,6 +190,57 @@ describe('a box with a pending change', () => {
   });
 });
 
+describe('the box for the keyboard and a screen reader', () => {
+  const doc = '- [ ] Buy milk\n- [x] Call Ada\n\nEnd.\n';
+  const css = () => [...document.querySelectorAll('style')].map((e) => e.textContent).join('\n');
+
+  it('has a name, "To do" or "Done", and can be reached by the keyboard', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    const [open_, done] = boxes(editor);
+    expect(open_?.getAttribute('aria-label')).toBe('To do');
+    expect(done?.getAttribute('aria-label')).toBe('Done');
+    expect(open_?.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('is checked by Space, asking as a click does, and by no other key', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    const requests: unknown[] = [];
+    editor.addExtension(
+      EditorView.updateListener.of(({ transactions }) => {
+        for (const tr of transactions)
+          for (const e of tr.effects) if (e.is(checkBoxEffect)) requests.push(e.value);
+      }),
+    );
+    const key = (k: string) => {
+      const event = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      boxes(editor)[1]?.dispatchEvent(event);
+      return event;
+    };
+    expect(key('a').defaultPrevented).toBe(false);
+    expect(key('Enter').defaultPrevented).toBe(false);
+    expect(requests).toEqual([]);
+    expect(key(' ').defaultPrevented).toBe(true);
+    expect(requests).toEqual([{ pos: 15, checked: false }]);
+  });
+
+  it('draws the theme ring on keyboard focus, and a hover for a pending checked box', () => {
+    editorAt(doc, doc.length - 2);
+    expect(css()).toMatch(/\.rl-box:focus-visible[^{]*\{[^}]*outline: 2px solid var\(--rl-ink-3\)/);
+    expect(css()).toMatch(/\.rl-box-pending \.rl-box-checked:hover rect/);
+  });
+
+  it('says what is pending and by whom, in every view', () => {
+    const text = `- [x] Buy milk<!--fmt bbk2 +check-->\n- [ ] Call Ada<!--fmt bbk3 -check-->\n\nEnd.\n${LEDGER({ bbk2: 'bob', bbk3: 'bob' })}`;
+    for (const mode of ['redlines', 'simple', 'clean'] as const) {
+      const editor = editorAt(text, text.indexOf('End.'), mode);
+      expect(
+        boxes(editor).map((box) => box.getAttribute('aria-label')),
+        mode,
+      ).toEqual(['Done, checked by Bob, pending', 'To do, unchecked by Bob, pending']);
+    }
+  });
+});
+
 describe('an empty task item', () => {
   it('is an empty box at the item indent, not a bullet and its source', () => {
     const text = '- one\n  - [ ] \n\nEnd.\n';
@@ -211,6 +264,77 @@ describe('an empty task item', () => {
     const editor = editorAt(text, 4);
     expect(boxes(editor)).toHaveLength(0);
     expect(editor.view.dom.textContent).toContain('[ ]');
+  });
+});
+
+describe('keys on an empty task item (#198)', () => {
+  /** An editor on `doc`, with the caret at `‸`, after pressing `keys`, tracked or not. */
+  function pressed(doc: string, keys: string[], tracking: boolean): Editor {
+    const editor = editorAt(doc.replace('‸', ''), doc.indexOf('‸'), undefined, tracking);
+    for (const key of keys) {
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+        'editor',
+      );
+    }
+    return editor;
+  }
+  const filePart = (editor: Editor) => editor.getDoc().replace(/\n<!-- redlines[^]*$/, '');
+  const newest = (editor: Editor) => newestView(filePart(editor)).text.replace(/\n+$/, '');
+  const isOpen = (editor: Editor) => editor.view.contentDOM.dataset['rlOpenBlock'] !== undefined;
+  const text = (editor: Editor) => editor.view.dom.textContent ?? '';
+
+  it('is drawn as a box after Return, at the indent of the item above, tracked or not', () => {
+    for (const tracking of [false, true]) {
+      const editor = pressed('- [ ] one‸', ['Enter'], tracking);
+      expect(boxes(editor), `tracking ${tracking}`).toHaveLength(2);
+      expect(text(editor)).not.toContain('[ ]');
+      expect(newest(editor)).toBe('- [ ] one\n- [ ] ');
+    }
+  });
+
+  it('is taken away by one Backspace, box and bullet together, and the next takes a letter', () => {
+    const one = pressed('- [ ] one\n- [ ] ‸', ['Backspace'], false);
+    expect(filePart(one)).toBe('- [ ] one');
+    expect(boxes(one)).toHaveLength(1);
+    const two = pressed('- [ ] one\n- [ ] ‸', ['Backspace', 'Backspace'], false);
+    expect(filePart(two)).toBe('- [ ] on');
+  });
+
+  it('is taken away tracked by one Backspace, as a change, leaving one box drawn', () => {
+    const editor = pressed('- [ ] one\n- [ ] ‸', ['Backspace'], true);
+    expect(newest(editor).trimEnd()).toBe('- [ ] one');
+    expect(boxes(editor)).toHaveLength(1);
+    expect(filePart(editor)).toMatch(/<!--sub \w+ /);
+  });
+
+  it('leaves the checklist on a second Return: an empty paragraph is open, the file keeps the item', () => {
+    for (const tracking of [false, true]) {
+      const editor = pressed('- [ ] one‸\n\nEnd.', ['Enter', 'Enter'], tracking);
+      expect(isOpen(editor), `tracking ${tracking}`).toBe(true);
+      expect(boxes(editor)).toHaveLength(1);
+      expect(newest(editor)).toBe('- [ ] one\n- [ ] \n\nEnd.');
+    }
+  });
+
+  it('is nested by Tab, as an empty box one level in, in the file (its box is its content)', () => {
+    for (const tracking of [false, true]) {
+      const editor = pressed('- [ ] one‸', ['Enter', 'Tab'], tracking);
+      expect(isOpen(editor), `tracking ${tracking}`).toBe(false);
+      expect(boxes(editor)).toHaveLength(2);
+      expect(text(editor)).not.toContain('[ ]');
+      expect(newest(editor)).toBe('- [ ] one\n  - [ ] ');
+    }
+  });
+
+  it('leaves the open empty item of a checklist open, with its boxes drawn and the file without it', () => {
+    for (const tracking of [false, true]) {
+      const editor = pressed('- [ ] one\n- two‸', ['Enter', 'Tab'], tracking);
+      expect(isOpen(editor), `tracking ${tracking}`).toBe(true);
+      expect(boxes(editor)).toHaveLength(1);
+      expect(newest(editor)).toBe('- [ ] one\n- two');
+    }
   });
 });
 

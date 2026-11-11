@@ -29,6 +29,8 @@ type Step =
   | { triple: true }
   /** A click on the drawing of the task box with this index (from 0, in the order drawn). */
   | { click: number }
+  /** Space on the task box with this index, focused first: the keyboard's way to change it. */
+  | { space: number }
   /** Waits until the line of notices under the title bar is empty. */
   | { quiet: true };
 
@@ -104,6 +106,10 @@ const boxFill = (editor: Editor, index: number) => {
   const rect = boxesOf(editor)[index]?.querySelector('rect');
   return rect ? getComputedStyle(rect).fill : null;
 };
+
+/** The newest view of the file, in the notation, without the line breaks that end it. */
+const newestText = (editor: Editor) =>
+  notation(newestView(editor.getDoc()).text).replace(/⏎+$/, '');
 
 /** A task list with eight pending changes inside the items after "one" and "two" (rule 6). */
 const PENDING_TASK_FILE = PENDING_FILE.replace('- one', '- [ ] one')
@@ -637,6 +643,31 @@ const CHECKS: Check[] = [
     file: '- [ ] one⏎- [ ] two⏎⏎End.',
   },
   {
+    // The box is reached by the keyboard, has a name, and Space changes it as a click does.
+    name: 'box-space-checks-the-box-and-the-box-has-a-name',
+    doc: '- [ ] one⏎- [x] two‸',
+    steps: [{ space: 0 }],
+    file: '- [x] one⏎- [x] two',
+    test: (editor) => {
+      const [first, second] = boxesOf(editor);
+      return first?.getAttribute('aria-label') === 'Done' &&
+        second?.getAttribute('aria-label') === 'Done' &&
+        first.getAttribute('tabindex') === '0'
+        ? null
+        : { first: first?.getAttribute('aria-label'), second: second?.getAttribute('aria-label') };
+    },
+  },
+  {
+    name: 'tracked-box-space-names-the-pending-change',
+    doc: '- [ ] one⏎- [x] two‸',
+    steps: [{ space: 0 }],
+    tracking: true,
+    test: (editor) => {
+      const label = boxesOf(editor)[0]?.getAttribute('aria-label');
+      return /^Done, checked by .+, pending$/.test(label ?? '') ? null : { label };
+    },
+  },
+  {
     name: 'tracked-box-click-is-a-box-change',
     doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
     steps: [{ click: 0 }],
@@ -774,6 +805,94 @@ const CHECKS: Check[] = [
         ? null
         : { notice: notice(), file: notation(editor.getDoc()) },
   },
+  // The empty task item under the keys. Each row loads its own document.
+  {
+    // One Backspace takes the box and the bullet of the empty item together; the next takes a letter.
+    name: 'empty-task-item-backspace-takes-the-item',
+    doc: '- [ ] one⏎- [ ] ‸',
+    steps: ['Backspace'],
+    file: '- [ ] one',
+    test: (editor) => (boxesOf(editor).length === 1 ? null : { boxes: boxesOf(editor).length }),
+  },
+  {
+    name: 'empty-task-item-second-backspace-takes-a-letter',
+    doc: '- [ ] one⏎- [ ] ‸',
+    steps: ['Backspace', 'Backspace'],
+    file: '- [ ] on',
+  },
+  {
+    name: 'tracked-empty-task-item-backspace-is-a-change-and-leaves-one-box',
+    doc: '- [ ] one⏎- [ ] ‸',
+    steps: ['Backspace'],
+    tracking: true,
+    test: (editor) =>
+      newestText(editor).trimEnd() === '- [ ] one' &&
+      boxesOf(editor).length === 1 &&
+      /<!--sub \w+ /.test(editor.getDoc())
+        ? null
+        : { newest: newestText(editor), boxes: boxesOf(editor).length },
+  },
+  {
+    // A second Return leaves the checklist: an empty paragraph is open, the file keeps the item.
+    name: 'empty-task-item-second-return-leaves-the-checklist',
+    doc: '- [ ] one‸⏎⏎End.',
+    steps: ['Enter', 'Enter'],
+    file: '- [ ] one⏎- [ ] ⏎⏎End.',
+    open: true,
+    test: (editor) => (boxesOf(editor).length === 1 ? null : { boxes: boxesOf(editor).length }),
+  },
+  {
+    name: 'tracked-empty-task-item-second-return-leaves-the-checklist',
+    doc: '- [ ] one‸⏎⏎End.',
+    steps: ['Enter', 'Enter'],
+    tracking: true,
+    open: true,
+    test: (editor) =>
+      newestText(editor) === '- [ ] one⏎- [ ] ⏎⏎End.' && boxesOf(editor).length === 1
+        ? null
+        : { newest: newestText(editor), boxes: boxesOf(editor).length },
+  },
+  {
+    // The open empty item of Stage 2, in a checklist: the file has no item for it, the box above is
+    // still drawn.
+    name: 'open-empty-item-in-a-checklist-is-left-out-of-the-file',
+    doc: '- [ ] one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    file: '- [ ] one⏎- two',
+    open: true,
+    test: (editor) => (boxesOf(editor).length === 1 ? null : { boxes: boxesOf(editor).length }),
+  },
+  {
+    name: 'tracked-open-empty-item-in-a-checklist-is-left-out-of-the-file',
+    doc: '- [ ] one⏎- two‸',
+    steps: ['Enter', 'Tab'],
+    tracking: true,
+    open: true,
+    test: (editor) =>
+      newestText(editor) === '- [ ] one⏎- two' && boxesOf(editor).length === 1
+        ? null
+        : { newest: newestText(editor), boxes: boxesOf(editor).length },
+  },
+  {
+    name: 'tracked-empty-task-item-return-and-tab-is-a-nested-empty-box',
+    doc: '- [ ] one‸',
+    steps: ['Enter', 'Tab'],
+    tracking: true,
+    open: false,
+    test: (editor) => {
+      const first = boxLeft(editor, 0);
+      const second = boxLeft(editor, 1);
+      const text = editor.view.contentDOM.textContent ?? '';
+      return newestText(editor) === '- [ ] one⏎  - [ ] ' &&
+        boxesOf(editor).length === 2 &&
+        first !== null &&
+        second !== null &&
+        second > first + 4 &&
+        !text.includes('[ ]')
+        ? null
+        : { newest: newestText(editor), boxes: boxesOf(editor).length, first, second, text };
+    },
+  },
   {
     name: 'check-item-checks-the-item-at-the-caret',
     doc: '- [ ] one⏎- [ ] t‸wo⏎- [ ] three',
@@ -897,6 +1016,14 @@ function clickBox(editor: Editor, index: number): void {
   box.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
 }
 
+/** Space on the drawing of a task box, which has the focus first, as the keyboard has it. */
+function spaceOnBox(editor: Editor, index: number): void {
+  const box = boxesOf(editor)[index];
+  if (!(box instanceof SVGElement)) throw new Error(`there is no task box ${index}`);
+  box.focus();
+  box.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+}
+
 /** Waits until no notice is showing, so that a notice read after is the step's own. */
 async function quiet(): Promise<void> {
   for (let waited = 0; notice() !== null && waited < 3500; waited += 100) {
@@ -941,6 +1068,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
     if (typeof step === 'string') press(editor, step);
     else if ('triple' in step) await tripleClick(view);
     else if ('click' in step) clickBox(editor, step.click);
+    else if ('space' in step) spaceOnBox(editor, step.space);
     else if ('quiet' in step) await quiet();
     else if ('type' in step) document.execCommand('insertText', false, step.type);
     else if ('command' in step) editor.commands.run(step.command);

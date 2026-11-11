@@ -44,6 +44,7 @@ import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   authorFacet,
   bodyEnd,
+  boxChange,
   isDrawnChange,
   lineBreakMarksFacet,
   parsedField,
@@ -450,7 +451,7 @@ function analyze(state: EditorState, kept: number | null): Model {
         change &&
         mark.kind === 'fmt' &&
         !segment.close &&
-        /[+-]check\b/.test(state.sliceDoc(segment.open.from, segment.open.to))
+        boxChange(state.sliceDoc(segment.open.from, segment.open.to)) !== null
       ) {
         parts.push({ text: '', className: '', color, change: true });
       }
