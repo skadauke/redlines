@@ -35,6 +35,8 @@ import {
   planArrowRight,
   transposeCrosses,
 } from './motion.ts';
+import { blockAt } from './structure.ts';
+import { planTab } from './tab.ts';
 import {
   closeOpen,
   openAnnotation,
@@ -49,6 +51,7 @@ import {
 type KeyCaret =
   | { at: number }
   | { before: number }
+  | { range: { anchor: number; head: number } }
   | { inOpen: OpenRequest }
   | { afterText: { from: number; text: string } };
 
@@ -90,6 +93,16 @@ const keyCaret = Prec.highest(
     const caret = tr.annotation(caretAnnotation);
     if (caret === undefined || !tr.docChanged) return tr;
     let pos: number;
+    if ('range' in caret) {
+      // Each end stays with its text: the start of the selection after what is written at it, the
+      // end before it.
+      const { anchor, head } = caret.range;
+      const forward = anchor <= head;
+      const a = tr.changes.mapPos(anchor, forward ? 1 : -1);
+      const h = tr.changes.mapPos(head, forward ? -1 : 1);
+      const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
+      return [tr, { selection, sequential: true }];
+    }
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
     else if ('inOpen' in caret) {
@@ -138,7 +151,8 @@ export function applyKeyEdit(
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
-  if (edit.caretBefore !== undefined) {
+  if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
+  else if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
@@ -261,6 +275,33 @@ const deleteKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/** The kinds of block in which Tab does nothing, and keeps the focus in the document. */
+const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition']);
+
+/**
+ * Tab and Shift-Tab: in a list item the item moves (`planTab`); in a paragraph, a heading or a
+ * quote nothing does, and the focus stays in the document, as in a word processor, with Escape and
+ * then Tab (CodeMirror's `tabFocusMode`, which keydown handles before any key) or ⇧⌥M to leave.
+ * The blocks that give Tab a meaning of their own (code, tables, front matter) decline here.
+ */
+const tabKey = (outdent: boolean) =>
+  blockKey((view) => {
+    if (view.state.selection.ranges.length > 1) return false;
+    const edit = planTab(view.state, outdent);
+    if (edit) return applyKeyEdit(view, edit);
+    const block = blockAt(view.state, view.state.selection.main.head);
+    return !!block && TAB_DOES_NOTHING.has(block.kind);
+  });
+
+/**
+ * Indents or outdents the list items at the selection, as Tab and Shift-Tab do (the Paragraph
+ * menu's Indent and Outdent, ⌘] and ⌘[). False where the selection isn't in a list item.
+ */
+export function indentItems(view: EditorView, outdent: boolean): boolean {
+  const edit = planTab(view.state, outdent);
+  return edit ? applyKeyEdit(view, edit) : false;
+}
+
 /** A key that only moves the caret, as `plan` says, or declines. */
 const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
   blockKey((view) => {
@@ -361,6 +402,8 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
+        { key: 'Tab', run: tabKey(false) },
+        { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
         // The Mac's own keys, CodeMirror's `emacsStyleKeymap` and its ⌘ line keys.

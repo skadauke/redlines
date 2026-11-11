@@ -15,6 +15,7 @@ import {
   type Editor,
   parsedField,
   type EditorCommand,
+  indentItems,
   setViewModeEffect,
   trackedEditAnnotation,
   trackingField,
@@ -565,6 +566,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Indent',
       shortcut: 'Mod-]',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, false)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: 1 }, 'format.indent');
       },
@@ -574,6 +577,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Outdent',
       shortcut: 'Mod-[',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, true)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: -1 }, 'format.indent');
       },

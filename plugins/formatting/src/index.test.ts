@@ -171,6 +171,24 @@ describe('blocks', () => {
     expect(editor.getDoc()).toBe('- One\n- Two\n');
   });
 
+  it('indents and outdents through the block layer, as Tab does', () => {
+    // A numbered item is numbered from 1 in its new sublist; the first item is refused in the
+    // format's words, and a top-level item can't be outdented, which does nothing.
+    const { editor, refused } = mount('1. One\n2. Two\n3. Three\n');
+    select(editor, editor.getDoc().indexOf('Three'));
+    expect(editor.commands.run('block.indent')).toBe(true);
+    expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
+    select(editor, 4);
+    editor.commands.run('block.indent');
+    expect(refused).toEqual([
+      "The first item of a list can't be indented: there is no item to put it under.",
+    ]);
+    refused.length = 0;
+    editor.commands.run('block.outdent');
+    expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
+    expect(refused).toEqual([]);
+  });
+
   it('inserts a table and a rule as tracked insertions with tracking on', () => {
     const { editor } = mount('One.\n\nTwo.\n', { tracking: true });
     select(editor, 2);
