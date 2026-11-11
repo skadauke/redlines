@@ -1020,8 +1020,13 @@ describe('an edit in code (#153)', () => {
         ['Enter', type(text.indexOf('more') + 2, '\n')],
       ] as const) {
         const error = refusal(text, edit);
-        expect(error?.code, `${what}, ${how}`).toBe('inside-code');
-        expect(error?.message, `${what}, ${how}`).toBe(IN_CODE);
+        // A pending change of Bo's touches the code: refused, naming him; or the old words where the
+        // code is in one view only and nothing of his is near.
+        const named = error?.code === 'no-legal-placement';
+        expect(named || error?.code === 'inside-code', `${what}, ${how}`).toBe(true);
+        expect(error?.message, `${what}, ${how}`).toSatisfy((m: string) =>
+          named ? m.includes('pending change is in this code block') : m === IN_CODE,
+        );
       }
     }
   });
