@@ -507,6 +507,125 @@ describe('Clean', () => {
   });
 });
 
+describe('Simple', () => {
+  const comment =
+    'comments:\n  c3c3:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n';
+  /** Every kind of change the layer draws, each alone on a line or two, and a comment. */
+  const kinds = withLedger(
+    [
+      'An <!--ins h8h8-->inserted<!--/h8h8--> word.',
+      '',
+      'A thing<!--del b2b2 deleted words-->gone.',
+      '',
+      'Kept above.',
+      '',
+      '<!--del d4d4 A paragraph removed whole.\\n\\n-->',
+      '',
+      'It was <!--sub j9j9 older-->old<!--/j9j9-->.',
+      '',
+      'One tw<!--split f6f6-->',
+      'o three.',
+      '',
+      'Plain <!--fmt g7g7 +bold-->**words**<!--/g7g7--> here.',
+      '',
+      '<!--fmt q2hw was=p-->',
+      '',
+      '## Heading<!--/q2hw-->',
+      '',
+      '- [x] Buy milk<!--fmt k3x9 +check-->',
+      '',
+      'A <!--cmt c3c3-->comment<!--/c3c3--> and a point<!--cmt p4p4--> here.',
+      '',
+      'Unchanged.',
+    ].join('\n'),
+    {
+      h8h8: 'ada',
+      b2b2: 'bo',
+      d4d4: 'ada',
+      j9j9: 'claude-ada',
+      f6f6: 'bo',
+      g7g7: 'bo',
+      q2hw: 'bo',
+      k3x9: 'bo',
+    },
+    `${comment}  p4p4:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Here\n`,
+  );
+  const bars = (editor: Editor) =>
+    list(editor)
+      .filter((d) => d.kind === 'line' && classes(d).includes('rl-bar'))
+      .map((d) => [d.from, d.className]);
+
+  it('draws no .rl-ins, .rl-del, .rl-fmt, .rl-split or .rl-comment in Simple', () => {
+    const editor = load(kinds + '\n<!-- TODO -->\n', { view: 'simple', showLineBreakMarks: true });
+    const drawn = (): string[] =>
+      list(editor).flatMap((d) => [...classes(d), ...(d.widget ? classes(d.widget) : [])]);
+    expect(drawn().filter((c) => /^rl-(ins|del|fmt|split|comment)$/.test(c))).toEqual([]);
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del, .rl-fmt, .rl-split')).toBeNull();
+    expect(editor.view.dom.classList).toContain('rl-view-simple');
+    // The same document in Redlines does draw them.
+    editor.setViewMode('redlines');
+    expect(drawn()).toEqual(expect.arrayContaining(['rl-ins', 'rl-del', 'rl-fmt']));
+  });
+
+  it('draws comment tints and pins in Simple, as in Redlines', () => {
+    const editor = load(kinds, { view: 'simple' });
+    const simple = list(editor).filter((d) =>
+      /rl-cmt/.test(d.className + (d.widget?.className ?? '')),
+    );
+    expect(simple.length).toBeGreaterThanOrEqual(2);
+    editor.setViewMode('redlines');
+    const redlines = list(editor).filter((d) =>
+      /rl-cmt/.test(d.className + (d.widget?.className ?? '')),
+    );
+    expect(simple).toEqual(redlines);
+    expect(simple.some((d) => classes(d).includes('rl-cmt'))).toBe(true);
+    expect(simple.some((d) => d.widget?.className.includes('rl-cmt-point'))).toBe(true);
+  });
+
+  it('puts the same bar classes on the same lines in Simple as in Redlines, for every kind of change', () => {
+    const editor = load(kinds, { view: 'simple' });
+    const simple = bars(editor);
+    editor.setViewMode('redlines');
+    expect(simple.length).toBeGreaterThanOrEqual(5);
+    expect(simple).toEqual(bars(editor));
+  });
+
+  it('puts the same bar classes on the same lines in Simple as in Redlines, for a table row', () => {
+    const doc = withLedger(
+      'Intro\n\n| Milestone | When |\n| --- | --- |\n| M3 | <!--sub r4tn January-->February<!--/r4tn--> |',
+      { r4tn: 'claude-ada' },
+    );
+    const editor = load(doc, { view: 'simple' });
+    const cell = () => editor.view.contentDOM.querySelectorAll('td')[1]!;
+    expect(cell().textContent).toBe('February');
+    expect([...editor.view.contentDOM.querySelectorAll('td')[0]!.classList]).toEqual([
+      'rl-bar',
+      'rl-author-4',
+    ]);
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
+  });
+
+  it("shows the text Clean shows, and has Clean's atoms", () => {
+    for (const doc of [fixture, kinds]) {
+      const editor = load(doc, { view: 'clean' });
+      const text = visibleText(editor);
+      const atoms = atomic(editor);
+      editor.setViewMode('simple');
+      expect(visibleText(editor)).toBe(text);
+      expect(atomic(editor)).toEqual(atoms);
+    }
+  });
+
+  it('hides ordinary HTML comments and line break marks in Simple', () => {
+    const doc = withLedger('One tw<!--split b2b2-->\no <!-- TODO --> three.', { b2b2: 'bo' });
+    const editor = load(doc, { view: 'simple', showLineBreakMarks: true });
+    expect(visibleText(editor)).not.toContain('TODO');
+    expect(visibleText(editor)).not.toContain('¶');
+    expect(classed(editor, 'rl-comment')).toEqual([]);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+  });
+});
+
 describe('Raw', () => {
   it('Raw has no replace decorations', () => {
     const editor = load(fixture);
@@ -592,6 +711,7 @@ describe('ui state', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
       view: 'clean',
+      markupView: 'redlines',
       tracking: false,
       hasRedlines: false,
       changes: [],

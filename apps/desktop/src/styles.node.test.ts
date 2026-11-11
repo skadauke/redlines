@@ -108,6 +108,19 @@ describe('styles.css', () => {
     expect(css.indexOf(room?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
   });
 
+  it('prints change bars as a left border in their color, gray for several people', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    const bar = all.find(({ selector }) => selector === '#editor .rl-bar::before');
+    expect(bar?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    expect(bar?.declarations).toContain('background: none');
+    const mixed = all.find(({ selector }) => selector === '#editor .rl-bar-mixed::before');
+    expect(mixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    // Among the print rules, and the bars nothing else draws as a background there.
+    for (const rule of [bar, mixed]) {
+      expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
+    }
+  });
+
   it('draws the Track Changes switch in the ink colors, on and off', () => {
     const track = all.filter(({ selector }) => /\.rl-switch$/.test(selector));
     expect(track.map(({ selector }) => selector)).toEqual([

@@ -27,6 +27,7 @@ import type {
   MetPerson,
   EditorTyping,
   EditorUiState,
+  MarkupView,
   ViewMode,
 } from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
@@ -52,6 +53,7 @@ import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
+import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
@@ -59,12 +61,14 @@ import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
+  chooseViewEffects,
   hasRedlines,
   isChange,
   lineBreakMarksFacet,
+  markupViewCompartment,
+  markupViewFacet,
   parsedField,
   peopleFacet,
-  setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
@@ -82,9 +86,12 @@ export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './histor
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
+export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
+  chooseViewEffects,
   isChange,
+  markupViewFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -98,6 +105,7 @@ const sameIds = (a: readonly string[], b: readonly string[]) =>
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.view === b.view &&
+  a.markupView === b.markupView &&
   a.tracking === b.tracking &&
   a.hasRedlines === b.hasRedlines &&
   a.changes.length === b.changes.length &&
@@ -126,6 +134,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let author = options.author;
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
+  /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
+  let markupView: MarkupView = options.markupView ?? 'redlines';
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
   let told: string | null = null;
@@ -136,6 +146,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const extensions = [
     markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
+    barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
     trackedTyping(),
     openBlocks(),
     blockKeys(),
@@ -164,7 +175,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         }
       }
       const { startState, state } = update;
-      const viewChanged = startState.field(viewModeField) !== state.field(viewModeField);
+      markupView = state.facet(markupViewFacet);
+      const viewChanged =
+        startState.field(viewModeField) !== state.field(viewModeField) ||
+        startState.facet(markupViewFacet) !== markupView;
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
       // A command's state may read the syntax tree, which a background parse brings further along
       // in a transaction that changes nothing else.
@@ -190,6 +204,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       doc: loaded.doc,
       extensions: [
         loaded.extension,
+        markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
         extensions,
@@ -210,6 +225,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const parsed = state.field(parsedField);
     return {
       view: state.field(viewModeField),
+      markupView: state.facet(markupViewFacet),
       tracking: state.field(trackingField),
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
@@ -302,7 +318,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
-    setViewMode: (mode) => view.dispatch({ effects: setViewModeEffect.of(mode) }),
+    setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    setMarkupView: (mode) => {
+      if (mode === view.state.facet(markupViewFacet)) return;
+      view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
+    },
     setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
     setTyping: (next: EditorTyping) => {
       typing = next;

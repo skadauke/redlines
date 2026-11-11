@@ -2,9 +2,9 @@
 
 import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
-import type { Author, Editor } from '@redlines/editor';
+import { type Author, barClickHandlers, type Editor } from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
-import { closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
+import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
 import { cards } from './cards.ts';
 import { rail, type RailOptions } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
@@ -36,7 +36,7 @@ export interface ReviewController {
   previous(): void;
   /**
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
-   * under the caret, or else the caret. A document shown Clean switches to Redlines, and what Escape
+   * under the caret, or else the caret. A document shown Clean switches to the markup view, and what Escape
    * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
    * and says so through the editor's `onNotice`. With `initialText`, an empty box opens with it, the
    * caret after it and nothing posted; a draft that Escape set aside, or a box being written in,
@@ -73,7 +73,7 @@ export interface ReviewController {
   refreshThread(thread: string): void;
   /**
    * Shows a thread's note, as Show in a notification asks: a document shown Clean or Raw switches
-   * to Redlines, the note is selected and scrolled into view, and in a narrow editor it is pinned
+   * to the markup view, the note is selected and scrolled into view, and in a narrow editor it is pinned
    * over the page from its dot. Returns false, changing nothing, when the rail has no note for it:
    * no such thread, or a resolved one that isn't shown.
    */
@@ -130,6 +130,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     notes.extension,
     changeCards.extension,
     reviewBar(ctx, report),
+    barClickHandlers.of(barClickHandler(ctx, (view, id) => changeCards.pinChange(view, id))),
     reviewTheme,
     // Starts again with each document's state: a new document starts with the bar closed.
     ViewPlugin.define(() => {

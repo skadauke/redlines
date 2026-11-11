@@ -4,7 +4,7 @@
 // helps, whether line breaks show their marks, what agents may read), and the file sidebar. A
 // window that changes a setting tells the others through the `storage` event (`watchSettings`).
 
-import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
+import { meetPeople, type Author, type MarkupView, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
@@ -25,6 +25,12 @@ export interface Settings {
   sidebarOpen: boolean;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
+  /**
+   * The markup view chosen last, Simple or Redlines, which a window shows wherever it picks one
+   * for the person (design: Which markup view, when). Every window follows it for the documents it
+   * opens next and for its own switches, and none changes the view it shows for it.
+   */
+  markupView: MarkupView;
   /**
    * Whether the running app's icon shows a different mark of the icon family at every launch (the
    * Dock icon, or the window's where there is no Dock). Off keeps the caret, the installed icon.
@@ -74,6 +80,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   appearance: 'system',
   sidebarOpen: false,
   showResolved: false,
+  markupView: 'redlines',
   rotateIcon: true,
   checkForUpdates: true,
   identity: null,
@@ -115,6 +122,7 @@ export function loadSettings(): Settings {
       : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
     showResolved: flag('showResolved'),
+    markupView: value['markupView'] === 'simple' ? 'simple' : DEFAULT_SETTINGS.markupView,
     rotateIcon: flag('rotateIcon'),
     checkForUpdates: flag('checkForUpdates'),
     identity: identityOf(value['identity']),
