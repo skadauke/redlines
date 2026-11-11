@@ -9,7 +9,8 @@
 // `BLOCK-CHECK <name> FAIL <json>`, with the file, the caret and the hidden lines it found, then
 // `BLOCK-CHECK done <passed> passed, <failed> failed`. Tab and Escape then Tab are judged by what
 // the page does with the key event (`BLOCK-CHECK tab`); a triple-click is a synthetic `mousedown`
-// with three clicks in its `detail`, aimed at the text's own coordinates.
+// with three clicks in its `detail`, aimed at the text's own coordinates; a click on a task box is
+// a `mousedown` on its drawing.
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -25,7 +26,11 @@ type Step =
   /** A command of the editor's registry, as the Paragraph menu runs it. */
   | { command: string }
   /** A triple-click on the text at the caret's start position. */
-  | { triple: true };
+  | { triple: true }
+  /** A click on the drawing of the task box with this index (from 0, in the order drawn). */
+  | { click: number }
+  /** Waits until the line of notices under the title bar is empty. */
+  | { quiet: true };
 
 interface Check {
   name: string;
@@ -37,6 +42,8 @@ interface Check {
   caret?: string;
   /** The file, as `getDoc` gives it (Track Changes off). */
   file?: string;
+  /** A selection made after the load: from the start of the first text to the end of the second. */
+  select?: [string, string];
   /** The newest view of the file (Track Changes on). */
   newest?: string;
   /** The text the selection holds after the steps. */
@@ -78,6 +85,30 @@ const PENDING_FILE = [
   ...PENDING.map((id) => `  ${id}: {by: bo, at: 2026-10-13T22:30Z}`),
   '-->',
 ].join('⏎');
+
+/** The drawings of the task boxes, in the order drawn. */
+const boxesOf = (editor: Editor) => [...editor.view.contentDOM.querySelectorAll('.rl-box')];
+
+/** What the line of notices under the title bar says now, or null while it is empty. */
+const notice = () => {
+  const line = document.querySelector<HTMLElement>('.rl-notice');
+  return line && !line.hidden ? (line.textContent ?? '') : null;
+};
+
+/** The left edge of the drawing of a task box, or null without one. */
+const boxLeft = (editor: Editor, index: number) =>
+  boxesOf(editor)[index]?.getBoundingClientRect().left ?? null;
+
+/** The fill of a box's square, as WebKit resolves it. */
+const boxFill = (editor: Editor, index: number) => {
+  const rect = boxesOf(editor)[index]?.querySelector('rect');
+  return rect ? getComputedStyle(rect).fill : null;
+};
+
+/** A task list with eight pending changes inside the items after "one" and "two" (rule 6). */
+const PENDING_TASK_FILE = PENDING_FILE.replace('- one', '- [ ] one')
+  .replace('- ‸two', '- [ ] ‸two')
+  .replaceAll('⏎- item', '⏎- [ ] item');
 
 const CHECKS: Check[] = [
   {
@@ -585,6 +616,231 @@ const CHECKS: Check[] = [
     tracking: true,
     newest: 'One.⏎⏎## ⏎⏎Next.',
   },
+  // Stage 5: the task box, its pending state, the empty task item and Paragraph › Check Item.
+  // Each row loads its own document, and fails unless the behavior really happened.
+  {
+    name: 'box-click-checks-the-box',
+    doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    file: '- [x] one⏎- [x] two⏎⏎End.',
+    test: (editor) =>
+      boxesOf(editor)
+        .map((box) => box.getAttribute('aria-checked'))
+        .join() === 'true,true'
+        ? null
+        : { boxes: boxesOf(editor).length },
+  },
+  {
+    name: 'box-click-unchecks-the-box',
+    doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
+    steps: [{ click: 1 }],
+    file: '- [ ] one⏎- [ ] two⏎⏎End.',
+  },
+  {
+    name: 'tracked-box-click-is-a-box-change',
+    doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    newest: '- [x] one⏎- [x] two⏎⏎End.',
+    test: (editor) =>
+      /^- \[x\] one<!--fmt \w+ \+check-->⏎- \[x\] two⏎/.test(notation(editor.getDoc()))
+        ? null
+        : { file: notation(editor.getDoc()) },
+  },
+  {
+    name: 'tracked-box-click-twice-gives-the-file-back',
+    doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }, { click: 0 }],
+    tracking: true,
+    file: '- [ ] one⏎- [x] two⏎⏎End.',
+  },
+  {
+    // The box is drawn in its new state in its author's color, with the line's change bar: its
+    // fill is not the gray of the checked box beside it, and the other lines have no bar.
+    name: 'tracked-box-click-draws-the-pending-box',
+    doc: '- [ ] one⏎- [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    test: (editor) => {
+      const [pending, plain] = boxesOf(editor);
+      const lines = [...editor.view.contentDOM.querySelectorAll('.cm-line')];
+      const problems: Record<string, unknown> = {};
+      if (pending?.getAttribute('aria-checked') !== 'true') problems['checked'] = false;
+      if (!pending?.parentElement?.classList.contains('rl-box-pending'))
+        problems['pending'] = false;
+      if (boxFill(editor, 0) === boxFill(editor, 1)) problems['fill'] = boxFill(editor, 0);
+      if (!lines[0]?.classList.contains('rl-bar')) problems['bar'] = false;
+      if (lines[1]?.classList.contains('rl-bar')) problems['barBelow'] = true;
+      if (plain?.parentElement?.classList.contains('rl-box-pending')) problems['plain'] = true;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // 0.8 em square, centred on the x-height: as tall as 0.8 of the text's size, and its middle
+    // within a pixel of the middle of a lowercase letter in the same line.
+    name: 'box-is-a-small-square-on-the-x-height',
+    doc: '- [ ] xxxx‸',
+    steps: [],
+    test: (editor) => {
+      const box = boxesOf(editor)[0];
+      if (!box) return { noBox: true };
+      const size = parseFloat(getComputedStyle(box.closest('.cm-line') ?? box).fontSize);
+      const at = box.getBoundingClientRect();
+      const line = box.closest('.cm-line');
+      const text = line && document.createRange();
+      if (!line || !text) return { noLine: true };
+      text.selectNodeContents(line.lastChild ?? line);
+      const letters = text.getBoundingClientRect();
+      const squareness = Math.abs(at.width - at.height);
+      const ratio = at.height / size;
+      const xHeightMiddle = (at.top + at.bottom) / 2 - (letters.top + letters.bottom) / 2;
+      return squareness < 0.5 &&
+        Math.abs(ratio - 0.8) < 0.05 &&
+        Math.abs(xHeightMiddle) < size * 0.3
+        ? null
+        : { width: at.width, height: at.height, size, xHeightMiddle };
+    },
+  },
+  {
+    // The caret inside the marker shows the box's source (the second item only: the first is still
+    // drawn), and the item's text stays in its column when the source goes back to a box.
+    name: 'box-source-shows-while-the-caret-touches-the-marker',
+    doc: '- [ ] one⏎- [‸x] two',
+    steps: [],
+    test: (editor) => {
+      const { view } = editor;
+      const two = view.state.doc.toString().indexOf('two');
+      const shown = view.contentDOM.textContent?.includes('[x]');
+      const shownBoxes = boxesOf(editor).length;
+      const before = view.coordsAtPos(two)?.left ?? null;
+      view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) });
+      const after = view.coordsAtPos(two)?.left ?? null;
+      const drawn = boxesOf(editor).length;
+      const moved = before === null || after === null ? null : Math.abs(before - after);
+      return shown && shownBoxes === 1 && drawn === 2 && moved !== null && moved < 2
+        ? null
+        : { shown, shownBoxes, drawn, before, after };
+    },
+  },
+  {
+    // An item Return leaves is an empty box at its indent, the same as the one above it, and no
+    // `[ ]` shows as text. Clicking it says to write the item first and changes nothing.
+    name: 'empty-task-item-is-an-empty-box-at-the-indent',
+    doc: '- [ ] one‸',
+    steps: ['Enter', { quiet: true }, { click: 1 }],
+    file: '- [ ] one⏎- [ ] ',
+    test: (editor) => {
+      const first = boxLeft(editor, 0);
+      const second = boxLeft(editor, 1);
+      const text = editor.view.contentDOM.textContent ?? '';
+      const problems: Record<string, unknown> = {};
+      if (boxesOf(editor).length !== 2) problems['boxes'] = boxesOf(editor).length;
+      if (first === null || second === null || Math.abs(first - second) > 1) {
+        problems['left'] = { first, second };
+      }
+      if (text.includes('[ ]') || text.includes('•')) problems['text'] = text;
+      if (boxesOf(editor)[1]?.getAttribute('aria-checked') !== 'false') problems['checked'] = true;
+      if (notice() !== 'Write the item first.') problems['notice'] = notice();
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Return then Tab: the empty task item is nested, and drawn as an empty box one level in. Its
+    // box is text Markdown holds, so it is in the file (it is not an open empty item).
+    name: 'nested-empty-task-item-is-an-empty-box-one-level-in',
+    doc: '- [ ] one‸',
+    steps: ['Enter', 'Tab'],
+    file: '- [ ] one⏎  - [ ] ',
+    test: (editor) => {
+      const first = boxLeft(editor, 0);
+      const second = boxLeft(editor, 1);
+      const text = editor.view.contentDOM.textContent ?? '';
+      return boxesOf(editor).length === 2 &&
+        first !== null &&
+        second !== null &&
+        second > first + 4 &&
+        !text.includes('[ ]')
+        ? null
+        : { boxes: boxesOf(editor).length, first, second, text };
+    },
+  },
+  {
+    name: 'tracked-empty-task-item-click-changes-nothing',
+    doc: '- [ ] one‸',
+    steps: ['Enter', { quiet: true }, { click: 1 }],
+    tracking: true,
+    test: (editor) =>
+      notice() === 'Write the item first.' && !editor.getDoc().includes('+check')
+        ? null
+        : { notice: notice(), file: notation(editor.getDoc()) },
+  },
+  {
+    name: 'check-item-checks-the-item-at-the-caret',
+    doc: '- [ ] one⏎- [ ] t‸wo⏎- [ ] three',
+    steps: ['Mod-Shift-u'],
+    file: '- [ ] one⏎- [x] two⏎- [ ] three',
+  },
+  {
+    name: 'check-item-over-several-items-checks-them-all',
+    doc: '- [x] one⏎- [ ] two⏎- [ ] three⏎- plain⏎⏎End.‸',
+    select: ['one', 'plain'],
+    steps: ['Mod-Shift-u'],
+    file: '- [x] one⏎- [x] two⏎- [x] three⏎- plain⏎⏎End.',
+  },
+  {
+    name: 'check-item-over-checked-items-unchecks-them',
+    doc: '- [x] one⏎- [x] two⏎- [x] three‸',
+    select: ['one', 'three'],
+    steps: ['Mod-Shift-u'],
+    file: '- [ ] one⏎- [ ] two⏎- [ ] three',
+  },
+  {
+    name: 'tracked-check-item-over-several-items-is-a-box-change-on-each',
+    doc: '- [x] one⏎- [ ] two⏎- [ ] three⏎- plain⏎⏎End.‸',
+    select: ['one', 'plain'],
+    steps: ['Mod-Shift-u'],
+    tracking: true,
+    newest: '- [x] one⏎- [x] two⏎- [x] three⏎- plain⏎⏎End.',
+    test: (editor) => {
+      const file = editor.getDoc();
+      const marks = file.match(/<!--fmt \w+ \+check-->/g)?.length;
+      const bars = [...editor.view.contentDOM.querySelectorAll('.cm-line.rl-bar')].length;
+      return marks === 2 && bars === 2 ? null : { marks, bars, file: notation(file) };
+    },
+  },
+  {
+    name: 'check-item-is-one-step-to-undo',
+    doc: '- [ ] one⏎- [ ] two⏎- [ ] three‸',
+    select: ['one', 'three'],
+    steps: ['Mod-Shift-u', 'Mod-z'],
+    file: '- [ ] one⏎- [ ] two⏎- [ ] three',
+  },
+  {
+    name: 'tracked-check-item-in-a-list-with-eight-pending-changes',
+    doc: PENDING_TASK_FILE,
+    steps: ['Mod-Shift-u'],
+    tracking: true,
+    test: (editor) => {
+      const file = editor.getDoc();
+      const left = PENDING.filter((id) => !new RegExp(`<!--(?:ins|del|sub) ${id}[ -]`).test(file));
+      const checked = /- \[x\] ?two<!--fmt \w+ \+check-->/.test(file);
+      return left.length === 0 && checked ? null : { decided: left, checked };
+    },
+  },
+  {
+    name: 'check-item-on-a-plain-item-says-so',
+    doc: '- [ ] one⏎- pl‸ain',
+    steps: [{ quiet: true }, 'Mod-Shift-u'],
+    file: '- [ ] one⏎- plain',
+    test: () =>
+      notice()?.startsWith('Check Item works on a task list item') ? null : { notice: notice() },
+  },
+  {
+    name: 'check-item-does-nothing-in-a-table-cell',
+    doc: '| a | b |⏎| - | - |⏎| [ ‸] | 2 |',
+    steps: ['Mod-Shift-u'],
+    file: '| a | b |⏎| - | - |⏎| [ ] | 2 |',
+  },
 ];
 
 const frames = async () => {
@@ -600,9 +856,10 @@ function press(editor: Editor, key: string): KeyboardEvent {
   const parts = key.split('-');
   const name = parts.pop() ?? key;
   const event = new KeyboardEvent('keydown', {
-    key: name,
+    // A letter with Shift is the capital, as a keyboard sends it, and has its key code.
+    key: name.length === 1 && parts.includes('Shift') ? name.toUpperCase() : name,
     code: name.length === 1 ? `Key${name.toUpperCase()}` : name,
-    keyCode: KEY_CODES[name] ?? 0,
+    keyCode: KEY_CODES[name] ?? (name.length === 1 ? name.toUpperCase().charCodeAt(0) : 0),
     shiftKey: parts.includes('Shift'),
     altKey: parts.includes('Alt'),
     ctrlKey: parts.includes('Ctrl'),
@@ -633,6 +890,20 @@ async function tripleClick(view: EditorView): Promise<void> {
   }
 }
 
+/** A click on the drawing of a task box, as the `mousedown` the box listens to. */
+function clickBox(editor: Editor, index: number): void {
+  const box = boxesOf(editor)[index];
+  if (!box) throw new Error(`there is no task box ${index}`);
+  box.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+}
+
+/** Waits until no notice is showing, so that a notice read after is the step's own. */
+async function quiet(): Promise<void> {
+  for (let waited = 0; notice() !== null && waited < 3500; waited += 100) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 /** The ranges the caret steps over that the caret is strictly inside. */
 function hiddenAt(view: EditorView): string[] {
   const { head } = view.state.selection.main;
@@ -657,10 +928,20 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   view.focus();
   view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')), scrollIntoView: true });
   await frames();
+  if (check.select) {
+    const [from, to] = check.select;
+    const whole = view.state.doc.toString();
+    view.dispatch({
+      selection: EditorSelection.range(whole.indexOf(from), whole.indexOf(to) + to.length),
+    });
+    await frames();
+  }
   const start = { head: view.state.selection.main.head };
   for (const step of check.steps) {
     if (typeof step === 'string') press(editor, step);
     else if ('triple' in step) await tripleClick(view);
+    else if ('click' in step) clickBox(editor, step.click);
+    else if ('quiet' in step) await quiet();
     else if ('type' in step) document.execCommand('insertText', false, step.type);
     else if ('command' in step) editor.commands.run(step.command);
     else {
@@ -742,6 +1023,15 @@ async function tab(editor: Editor): Promise<unknown> {
   return problems.length ? { problems } : null;
 }
 
+const lines: string[] = [];
+
+/** A line reported: in the console, and in `data-block-check` on the page's root, for a driver. */
+const report = (line: string) => {
+  console.log(line);
+  lines.push(line);
+  document.documentElement.dataset['blockCheck'] = lines.join('\n');
+};
+
 export async function runBlockCheck(editor: Editor): Promise<void> {
   let passed = 0;
   let failed = 0;
@@ -750,30 +1040,30 @@ export async function runBlockCheck(editor: Editor): Promise<void> {
       const failure = await run(editor, check);
       if (failure) {
         failed++;
-        console.log(`BLOCK-CHECK ${check.name} FAIL ${JSON.stringify(failure)}`);
+        report(`BLOCK-CHECK ${check.name} FAIL ${JSON.stringify(failure)}`);
       } else {
         passed++;
-        console.log(`BLOCK-CHECK ${check.name} pass`);
+        report(`BLOCK-CHECK ${check.name} pass`);
       }
     } catch (error) {
       failed++;
-      console.log(`BLOCK-CHECK ${check.name} FAIL ${JSON.stringify({ threw: String(error) })}`);
+      report(`BLOCK-CHECK ${check.name} FAIL ${JSON.stringify({ threw: String(error) })}`);
     }
   }
   try {
     const failure = await tab(editor);
     if (failure) {
       failed++;
-      console.log(`BLOCK-CHECK tab FAIL ${JSON.stringify(failure)}`);
+      report(`BLOCK-CHECK tab FAIL ${JSON.stringify(failure)}`);
     } else {
       passed++;
-      console.log('BLOCK-CHECK tab pass');
+      report('BLOCK-CHECK tab pass');
     }
   } catch (error) {
     failed++;
-    console.log(`BLOCK-CHECK tab FAIL ${JSON.stringify({ threw: String(error) })}`);
+    report(`BLOCK-CHECK tab FAIL ${JSON.stringify({ threw: String(error) })}`);
   }
   editor.setTracking(false);
   editor.reloadDoc(sample);
-  console.log(`BLOCK-CHECK done ${passed} passed, ${failed} failed`);
+  report(`BLOCK-CHECK done ${passed} passed, ${failed} failed`);
 }
