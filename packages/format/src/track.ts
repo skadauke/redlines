@@ -3962,7 +3962,6 @@ export function trackedEdits(
       const typed = inEol(edit.insert, plan.eol);
       if (typed !== '') assertNoMarkup(typed);
       plan.changes.push({ from: edit.from, to: edit.to, insert: typed });
-      plan.plain = true;
     } else planEdit(plan, edit);
   }
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
