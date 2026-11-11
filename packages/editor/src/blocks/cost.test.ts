@@ -428,10 +428,10 @@ describe.skipIf(!process.env['REDLINES_COST'])(
 // time with the parse, before it fails.
 const bound = (parse: number) => 2 * parse + 2;
 
-function codeDocument(): string {
+function codeDocument(lines = 200): string {
   const paragraph = (n: number) => `${WORDS} ${n}, with *emphasis* and more.`;
   const code = Array.from(
-    { length: 200 },
+    { length: lines },
     (_, n) => `  const value${n} = compute(${n}, 'text ${n}'); // line ${n}`,
   );
   return [
@@ -470,7 +470,6 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
 
   it.each([
     ['Track Changes on, with the substitution made', true, false],
-    ['Track Changes on, the first key, which makes it', true, true],
     ['Track Changes off', false, false],
   ] as const)(
     'is at most twice the document’s parse plus 2 ms: %s',
@@ -501,5 +500,63 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
       expect(result.ours, label).toBeLessThan(result.limit);
     },
     120_000,
+  );
+});
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first key in code', () => {
+  /** Milliseconds per typed letter and Backspace, the file as it started before each pair: in the
+   * middle of the code (`where` finds it), or in a paragraph. */
+  function pair(editor: Editor, doc: string, find: (text: string) => number): number {
+    const { view } = editor;
+    let total = 0;
+    const rounds = 10;
+    for (let i = 0; i < rounds; i++) {
+      editor.reloadDoc(doc);
+      const at = find(view.state.doc.toString());
+      view.dispatch({ selection: EditorSelection.cursor(at) });
+      const start = performance.now();
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      press(view, 'Backspace');
+      total += performance.now() - start;
+    }
+    return total / rounds;
+  }
+
+  it.each([200, 2000])(
+    'is at most twice a key in a paragraph of the same document, plus 1 ms: %i lines',
+    (lines) => {
+      const doc = codeDocument(lines);
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      const inCode = (text: string) => text.lastIndexOf('line 100') + 'line 1'.length;
+      const inParagraph = (text: string) => text.indexOf('quick brown', 100) + 'quick '.length;
+      pair(editor, doc, inCode);
+      pair(editor, doc, inParagraph);
+      // The paragraph key is timed beside the code key, so that a slow moment slows both.
+      const attempt = (): Held => {
+        const code: number[] = [];
+        const paragraph: number[] = [];
+        for (let i = 0; i < 7; i++) {
+          code.push(pair(editor, doc, inCode));
+          paragraph.push(pair(editor, doc, inParagraph));
+        }
+        return { ours: median(code), limit: 2 * median(paragraph) + 1 };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: first key in code, ${lines} lines: bound ${result.limit.toFixed(2)} ms (twice a paragraph key plus 1), now ${result.ours.toFixed(2)} ms`,
+      );
+      pair(editor, doc, inCode);
+      expect(editor.view.state.doc.toString()).toContain('<!--sub ');
+      expect(result.ours, `${lines} lines`).toBeLessThan(result.limit);
+    },
+    300_000,
   );
 });

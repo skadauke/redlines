@@ -1029,6 +1029,9 @@ const CHECKS: Check[] = [
       for (const mode of ['simple', 'clean'] as const) {
         editor.setViewMode(mode);
         if (content.querySelector('.rl-struck')) problems[mode] = 'struck code drawn';
+        // Simple draws none of it, and keeps the change bar.
+        if (mode === 'simple' && !content.querySelector('.rl-bar'))
+          problems['bar'] = 'no bar in Simple';
       }
       return Object.keys(problems).length ? problems : null;
     },
