@@ -25,11 +25,17 @@ export function unsoundEmptyItem(
   marker: string,
 ): boolean {
   if (indent === 0) return false;
+  const same = quote.replaceAll(/[ \t]/g, '');
   for (let m = n - 1; m >= 1; m--) {
     const text = doc.line(m).text;
     const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(text)!;
-    if (above[1]!.replaceAll(/[ \t]/g, '') !== quote.replaceAll(/[ \t]/g, '')) return false;
-    if (above[3]!.trim() === '') return false;
+    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
+    if (above[3]!.trim() === '') {
+      // Right after a blank line the item is fine; further up, blank lines among deeper lines
+      // (the paragraphs of an item above) are part of what is read through.
+      if (m === n - 1) return false;
+      continue;
+    }
     const deep = above[2]!.length;
     if (deep > indent) continue;
     if (deep < indent) return true;
