@@ -111,16 +111,14 @@ describe('rows, random', () => {
             rows: [Math.floor(random() * rows)],
             to: Math.floor(random() * (rows + 1)),
           };
-        } else if (kind === 'comment' && !lead) {
-          // (a comment that starts a row without a leading pipe is written at the end of the line
-          // above, after its closing pipe: a header deleted or moved under it would be left with a
-          // cell too many; a known limit, not drawn here)
-          continue;
         } else if (kind === 'bold' || kind === 'comment') {
           // A format change or a comment on the text of a cell, or on a stretch of it.
           const target = pick(table.rows);
           const cell = pick(target.cells.slice(0, columns));
           if (cell.textTo - cell.textFrom < 1) continue;
+          // (a comment on the first cell of the header of a table with no leading pipe starts on a
+          // line of its own above the table: another rule's case, drawn in the column suites)
+          if (kind === 'comment' && !lead && target.header) continue;
           const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom));
           over = { from, to: Math.min(cell.textTo, from + 1 + Math.floor(random() * 3)), kind };
         } else {

@@ -31,6 +31,9 @@ import type { MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { parse } from './parse.ts';
+import { readTables } from './table.ts';
+import { commentAcrossRows } from './table-rules.ts';
+import { applyChanges } from './changes.ts';
 import { scan } from './scan.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
@@ -210,7 +213,31 @@ export function addComment(
     verify: (after) => checkAnchor(after, id, !point),
     inCode: IN_CODE,
   });
+  refuseAcrossMovedRows(applyChanges(text, changes), id);
   return { changes, id };
+}
+
+/**
+ * A comment that would run from one row of a table into another, in a table with a row move pending,
+ * is refused when it is made: the move could then be accepted but not rejected. (A row with no pipe
+ * at its start can't begin with a marker, so a comment on its first word starts at the end of the
+ * row above.) The words name the person who moved the rows.
+ */
+function refuseAcrossMovedRows(after: string, id: string): void {
+  if (!after.includes(' row-->')) return;
+  const parsed = parse(after);
+  for (const table of readTables(after, parsed)) {
+    const moved = table.rows.find((row) => row.insertion?.entry.move !== undefined);
+    if (!moved?.insertion) continue;
+    const across = commentAcrossRows(table, parsed);
+    if (across?.mark.id !== id) continue;
+    const by = moved.insertion.entry.by;
+    const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
+    throw new EditError(
+      `${name}'s move of rows in this table is pending, and this comment would run from one row into the next. Decide the move first, or comment inside one row.`,
+      'no-legal-placement',
+    );
+  }
 }
 
 /**

@@ -1886,11 +1886,19 @@ it, one per line:
   plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
   same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
   at its place reading as it did, whatever has been typed, commented or decided in it since (a mark
-  at the start of the row could not stand there without the pipe). A move that would leave the
-  table not reading as it did is refused when it is made ("A comment in this table can't move with
-  this row. Delete or resolve it first, or move another row."): a comment that starts a row with no
-  pipe at its start is written at the end of the row above, and a header that took it after its
-  closing pipe would have a cell too many. A
+  at the start of the row could not stand there without the pipe). A move is never refused once it is made, and
+  two kinds are refused when it is made. A row that would be the header, moved to the top, must have
+  as many cells as the header has columns ("This row has a different number of cells than the
+  header, so the table would stop reading as a table. Make its cells match the header first."),
+  tracked or not; a table whose header has another number of cells than its delimiter row is no
+  table. And with Track Changes on, a comment that runs from one row of the table into another is
+  refused, naming its author ("Bo Chen's comment runs from one row of this table into the next.
+  Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
+  at its start has its opener at the end of the row above, so it crosses the line break, and moving
+  rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
+  table with a row move pending is refused, naming the person who moved the rows. Deleting the header
+  is refused in the same two cases (the row that would be the header has another number of cells,
+  or a comment's marker after its closing pipe is a cell too many), tracked or not. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first
