@@ -284,8 +284,43 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
   it('refuses to reject a row that holds a comment, and says what to do', () => {
     const body = BODY.replace('Plums', '<!--cmt c9qf-->Plums<!--/c9qf-->');
     const withComment = file(body, { k3x9: 'ada' }, thread('c9qf'));
-    expect(() => reject(withComment, 'k3x9')).toThrow('Delete or resolve the comments in this row');
+    expect(() => reject(withComment, 'k3x9')).toThrow(
+      new EditError('Delete or resolve the comments in this row first.', 'no-legal-placement'),
+    );
     expect(trimmed(decide(withComment, accept, 'k3x9'))).toContain('| <!--cmt c9qf-->Plums');
+  });
+
+  describe('with row deletions pending in the table', () => {
+    const DELETED = '<!--del g5nb row=2 \\| Kiwi \\| 1 \\|-->';
+    const held = file(`${BODY}\n\n${DELETED}`, { k3x9: 'ada', g5nb: 'bo' });
+    const SAID = new EditError(
+      'Accept or reject the row deletions in this table first.',
+      'no-legal-placement',
+    );
+
+    it('refuses to reject the row with a sentence of its own, and accepts it', () => {
+      expect(() => reject(held, 'k3x9')).toThrow(SAID);
+      expect(() => rejectMarks(held, ['k3x9'])).toThrow(SAID);
+      expect(trimmed(decide(held, accept, 'k3x9'))).toContain('| Plums | 7     |');
+    });
+
+    it('lets rejectAll decide everything else, and leaves that row pending', () => {
+      const other = '<!--ins m2bd-->Zucchini<!--/m2bd-->';
+      const text = file(`${other}\n\n${BODY}\n\n${DELETED}`, {
+        k3x9: 'ada',
+        g5nb: 'bo',
+        m2bd: 'ada',
+      });
+      const after = applyChanges(text, rejectAll(text));
+      // The row deletion is not decided yet either (a table mark, Stage 3): both stay pending.
+      expect(Object.keys(parse(after).ledger.marks).sort()).toEqual(['g5nb', 'k3x9']);
+      expect(trimmed(after)).toContain('<!--ins k3x9 row-->');
+      expect(trimmed(after)).not.toContain('Zucchini');
+      // Accepting everything decides the row.
+      expect(Object.keys(parse(applyChanges(text, acceptAll(text))).ledger.marks)).toEqual([
+        'g5nb',
+      ]);
+    });
   });
 
   it('keeps the header and the delimiter row when the only body row is rejected', () => {

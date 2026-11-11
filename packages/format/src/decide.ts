@@ -162,8 +162,14 @@ function decisionChanges(
   return changes;
 }
 
-const ROW_HAS_COMMENT =
-  'Delete or resolve the comments in this row first, or decide the changes around it.';
+const ROW_HAS_COMMENT = 'Delete or resolve the comments in this row first.';
+const ROWS_DELETED = 'Accept or reject the row deletions in this table first.';
+
+/** Whether a table has row deletions pending: the original view cannot yet put a deleted row back in
+ * it, so an inserted row of it is not rejected until they are decided (format §3.7). */
+function hasRowDeletions(row: InsertedRow): boolean {
+  return row.table.deletions.some((deletion) => deletion.axis === 'row');
+}
 
 /**
  * The changes that decide an inserted row (format §3.7). Accepting takes the marker away, and the
@@ -184,6 +190,7 @@ function rowChanges(
   if (!row) throw new EditError(NOT_SUPPORTED, 'not-supported');
   if (action === 'accept') return [{ ...row.marker, insert: '' }];
   const { table, index } = row;
+  if (hasRowDeletions(row)) throw new EditError(ROWS_DELETED, 'no-legal-placement');
   const line = table.rows[index];
   const changes: TextChange[] = [];
   if (index === 0) {
@@ -458,13 +465,22 @@ export function rejectMarks(text: string, ids: readonly string[]): TextChange[] 
   return changes;
 }
 
-function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRange[] {
-  // A row mark that is in no table (a text merge can leave one) is left pending.
+function selected(
+  parsed: Parsed,
+  filter?: (mark: MarkRange) => boolean,
+  action: Action = 'accept',
+): MarkRange[] {
+  // A row mark that is in no table (a text merge can leave one) is left pending, and so is a row
+  // that rejecting cannot take away yet, in a table with row deletions pending.
   const rows = parsed.marks.some(isInsertedRow) ? insertedRows(parsed.text, parsed) : [];
+  const decidable = (mark: MarkRange) => {
+    const row = rows.find((candidate) => candidate.mark === mark);
+    return row !== undefined && (action === 'accept' || !hasRowDeletions(row));
+  };
   return parsed.marks.filter(
     (mark) =>
       isChange(mark) &&
-      (!isInsertedRow(mark) || rows.some((row) => row.mark === mark)) &&
+      (!isInsertedRow(mark) || decidable(mark)) &&
       (!filter || filter(mark)),
   );
 }
@@ -521,5 +537,5 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
  * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return rejectTogether(text, parsed, selected(parsed, filter));
+  return rejectTogether(text, parsed, selected(parsed, filter, 'reject'));
 }

@@ -2208,6 +2208,10 @@ The library derives three read-only views of a document. None is ever stored.
   deleted rows up. A new header is rejected by writing the delimiter row after the old header
   again. Rejecting a row that holds a comment is refused for now ("Delete or resolve the comments
   in this row first."): where the comment would stand is decided with deleted rows (§3.7).
+  Rejecting a row in a table that has row deletions pending is refused too ("Accept or reject the
+  row deletions in this table first."): the original view does not put a deleted row back in the
+  table yet. Reject all decides every other change and leaves such a row pending; Accept all
+  accepts it.
 
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
