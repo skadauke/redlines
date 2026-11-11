@@ -25,6 +25,7 @@ import {
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
+import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
   atBlockEnd,
@@ -157,6 +158,7 @@ export function applyKeyEdit(
   // A step that the next joins is isolated only from the step before it.
   const isolate = edit.isolateBefore ? 'before' : edit.join ? 'after' : 'full';
   const annotations: Annotation<unknown>[] = [isolateHistory.of(isolate)];
+  if (edit.join && !edit.isolateBefore) annotations.push(joinsStep.of(true));
   if (edit.record ?? edit.userEvent.startsWith('input.break')) {
     annotations.push(returnAnnotation.of(true));
   }

@@ -401,7 +401,9 @@ export const recordField = StateField.define<readonly Taken[]>({
           caret: tr.newSelection.main.head,
           openBefore,
           opened: openBefore === null && openAfter !== null,
-          joined: tr.annotation(isolateHistory) === 'after',
+          // Whether the history added the Return to the step before it, which it does only for
+          // an edit next to that step's: a closer between them keeps the Return a step of its own.
+          joined: doneDepth(tr.state) === doneDepth(tr.startState),
           depth: doneDepth(tr.startState),
         },
       ];
