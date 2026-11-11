@@ -550,6 +550,20 @@ export type LineStart =
   /** On a line that is only syntax, such as a setext underline or a table row. */
   | 'syntax';
 
+/** The readings of the lines of one text with one set of markers, which the readings of many of its
+ * lines share: a numbered item reads the lines above it, and a list of them is read once, not
+ * once for every item (a walk reads the same few texts again and again). Only while the text and
+ * the markers are the same; the markers are the array `markerRanges` gave for a parse. */
+const MEMOS = new WeakMap<readonly Range[], { text: string; memo: ListMemo }>();
+
+function memoFor(text: string, hidden: readonly Range[]): ListMemo {
+  const known = MEMOS.get(hidden);
+  if (known && known.text === text) return known.memo;
+  const memo: ListMemo = { kinds: new Map(), holders: new Map(), unsure: new Set() };
+  if (hidden.length > 0) MEMOS.set(hidden, { text, memo });
+  return memo;
+}
+
 /**
  * Whether `position` is at the start of its line's content, after the container prefix, and if so
  * whether a block starts there (a marker may stand alone on the line before it) or a wrapped line
@@ -561,7 +575,7 @@ export function lineStartKind(
   position: number,
   hidden: readonly Range[] = [],
   depth = 0,
-  memo: ListMemo = { kinds: new Map(), holders: new Map(), unsure: new Set() },
+  memo: ListMemo = memoFor(text, hidden),
 ): LineStart {
   const start = lineStart(text, position);
   const before = text.slice(start, position);
