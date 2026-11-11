@@ -240,10 +240,13 @@ export function newCellContent(
   line: number,
   shape: { dashes: number; empty: string },
   marker: string | null,
+  text?: string,
 ): string {
   if (line === 1) return ` ${'-'.repeat(shape.dashes)} `;
-  if (line === 0 && marker !== null) return ` ${marker} ${shape.empty.slice(1)}`;
-  return shape.empty;
+  // Text a new column is given (an agent's) stands in the cell as wide as the shape says.
+  const inner = text ? text.padEnd(shape.empty.length - 2) : ' '.repeat(shape.empty.length - 2);
+  if (line === 0 && marker !== null) return ` ${marker} ${inner} `;
+  return ` ${inner} `;
 }
 
 /** What deciding columns comes to: the changes, and the marks that are decided with them. */

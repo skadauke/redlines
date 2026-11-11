@@ -57,7 +57,14 @@ export type TableOp =
   | { kind: 'deleteRows'; table: number; rows: number[] }
   | { kind: 'moveRows'; table: number; rows: number[]; to: number }
   /** `after` counts the columns in front of the new ones: 0 puts them before the first column. */
-  | { kind: 'insertCols'; table: number; after: number; count: number }
+  | {
+      kind: 'insertCols';
+      table: number;
+      after: number;
+      count: number;
+      /** The text of the cells of each new column, the header's first: an agent's columns. */
+      texts?: readonly (readonly string[])[];
+    }
   | { kind: 'deleteCols'; table: number; cols: number[] }
   /** `to` is the boundary the columns go to: 0 before the first column, up to the number of columns. */
   | { kind: 'moveCols'; table: number; cols: number[]; to: number };
@@ -658,6 +665,10 @@ export function untrackedTableEdit(
 const NO_SUCH_COL = 'There is no such column in this table.';
 const SHORT_ROW = 'A row of this table has fewer cells than its header. Fill it in first.';
 
+/** The text of a new column's cell in a line of the table: the header's, the delimiter's (none), or a body row's. */
+const textOf = (cells: readonly string[] | undefined, line: number): string | undefined =>
+  line === 1 ? undefined : cells?.[line === 0 ? 0 : line - 1];
+
 /** The columns an operation names, sorted and apart. */
 function colsOf(table: TableRead, cols: readonly number[]): number[] {
   const sorted = [...new Set(cols)].sort((a, b) => a - b);
@@ -765,7 +776,13 @@ function insertCols(
     }
   }
   const news: ColItem[] = Array.from({ length: op.count }, (_, i) => ({
-    text: (line: number) => newCellContent(line, shape, ctx ? `<!--ins ${ids[i]} col-->` : null),
+    text: (line: number) =>
+      newCellContent(
+        line,
+        shape,
+        ctx ? `<!--ins ${ids[i]} col-->` : null,
+        textOf(op.texts?.[i], line),
+      ),
   }));
   const final = [...staying(0, op.after), ...news, ...staying(op.after, columns)];
   const positions = indexesOf(table).map((p, i) =>
