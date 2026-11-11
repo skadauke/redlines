@@ -68,6 +68,7 @@ import {
   tableStartsAt,
 } from './table-rules.ts';
 import type { PipeWrite } from './table-rules.ts';
+import { checkAlignGap } from './table-align.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -4676,6 +4677,7 @@ function editsOnce(
       : edit,
   );
   checkTableEdits(text, edits, plan.parsed);
+  checkAlignGap(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
   // plain one first, and make the edit after it.
   const pipes: PipeWrite[] = edits.flatMap((edit) => {

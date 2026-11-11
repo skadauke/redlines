@@ -362,6 +362,8 @@ const WITH_ALIGN = [
   '',
   '<!-- redlines',
   'version: 1',
+  'people:',
+  '  bo: {name: Bo Chen}',
   'marks:',
   '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
   '-->',
@@ -1930,69 +1932,72 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Align Center from the Table menu's command, tracked: a format change around the table, the new
-    // alignment in every row of the column, a dotted underline under its header text and a bar on the
-    // header row in Redlines, the bar alone in Simple, nothing in Clean; its card names the column and
-    // the old alignment; the columns still line up and the markers show nowhere.
-    name: 'align-center-from-the-menu-tracked-draws-and-cards-the-change',
+    // Align Center from the Table menu's command with Track Changes off: the delimiter row alone, the
+    // new alignment in every row of the column in Clean, Simple and Redlines, no marker, no bar, no
+    // underline; the columns still line up.
+    name: 'align-center-from-the-menu-writes-the-delimiter-row',
     async run(editor) {
-      await load(editor, ROWS, true);
+      await load(editor, ROWS, false);
       await place(editor, cellOf(editor, 1, 1).textFrom);
       const problems: Record<string, unknown> = {};
       if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
       await frames();
-      if (!/<!--fmt [a-z0-9]{4} align=/.test(doc(editor))) problems['change'] = doc(editor);
+      if (doc(editor).includes('<!--')) problems['marks'] = doc(editor);
       if (!/\| :-+: \|/.test(doc(editor))) problems['delimiter'] = doc(editor);
-      editor.setViewMode('redlines');
+      for (const view of ['clean', 'simple', 'redlines'] as const) {
+        editor.setViewMode(view);
+        await frames();
+        if (alignedAs(editor, 1).some((a) => a !== 'center'))
+          problems[`${view}-centered`] = alignedAs(editor, 1);
+        if (alignedAs(editor, 0).some((a) => a === 'center'))
+          problems[`${view}-others`] = alignedAs(editor, 0);
+        if (editor.view.contentDOM.querySelector('.rl-fmt'))
+          problems[`${view}-underline`] = 'drawn';
+        if (lineElements(editor).some((line) => line.classList.contains('rl-bar')))
+          problems[`${view}-bars`] = 'a row has a bar';
+        const aligned = linedUp(editor);
+        if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3))
+          problems[`${view}-lines-up`] = aligned;
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Align with Track Changes on is refused, in words on the page's notice, and writes nothing: never a
+    // silent no-op, from the command and from the column grip's menu.
+    name: 'align-with-track-changes-on-is-refused-in-words',
+    async run(editor) {
+      const WORDS =
+        "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
+      const problems: Record<string, unknown> = {};
+      const shown = () => {
+        const box = document.querySelector<HTMLElement>('.rl-notice');
+        return box && !box.hidden ? (box.textContent ?? '').trim() : null;
+      };
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      const before = doc(editor);
+      if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
       await frames();
-      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
-      if (marked.map((el) => el.textContent).join('|') !== 'Count')
-        problems['underlined'] = marked.map((el) => el.textContent);
-      const underline = marked[0] && getComputedStyle(marked[0]);
-      if (
-        !underline?.textDecorationLine.includes('underline') ||
-        underline.textDecorationStyle !== 'dotted'
-      )
-        problems['dotted'] = underline && [
-          underline.textDecorationLine,
-          underline.textDecorationStyle,
-        ];
-      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
-      if (bars.join() !== 'true,false,false,false') problems['bars'] = bars;
-      if (alignedAs(editor, 1).some((a) => a !== 'center'))
-        problems['centered'] = alignedAs(editor, 1);
-      if (alignedAs(editor, 0).some((a) => a === 'center'))
-        problems['others'] = alignedAs(editor, 0);
-      const text = editor.view.contentDOM.textContent ?? '';
-      if (/align=|<!--|:---:/.test(text)) problems['markers'] = text.slice(0, 120);
-      const aligned = linedUp(editor);
-      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3)) problems['lines-up'] = aligned;
-      // The card: a press on the underlined header text.
-      const target = marked[0];
-      if (!target) return { ...problems, card: 'nothing to press' };
-      const box = await reveal(target);
-      const x = box.left + box.width / 2;
-      const y = box.top + box.height / 2;
-      mouse(target, 'mousedown', x, y);
-      mouse(window, 'mouseup', x, y);
+      if (doc(editor) !== before) problems['written'] = doc(editor);
+      if (shown() !== WORDS) problems['notice'] = shown();
+      // From the column grip's menu.
+      await load(editor, ROWS, true);
+      const grip = await colGripOf(editor, 1);
+      if (!grip) return { ...problems, grip: 'none shows' };
+      const box = grip.getBoundingClientRect();
+      mouse(grip, 'mousedown', box.left + 3, box.top + 3);
+      mouse(window, 'mouseup', box.left + 3, box.top + 3);
       await frames();
+      const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
+        (i) => i.textContent === 'Align Right',
+      );
+      if (!item) return { ...problems, menu: 'no Align Right' };
+      const text = doc(editor);
+      mouse(item, 'mousedown', 0, 0);
       await frames();
-      const card = editor.view.dom.ownerDocument.querySelector('.rl-card .rl-card-what');
-      if (card?.textContent !== 'Formatted: column Count centered (was default)')
-        problems['card'] = card?.textContent ?? 'no card';
-      editor.setViewMode('simple');
-      await frames();
-      if (editor.view.contentDOM.querySelector('.rl-fmt')) problems['simple-underline'] = 'drawn';
-      const simpleBars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
-      if (simpleBars.join() !== 'true,false,false,false') problems['simple-bars'] = simpleBars;
-      if (alignedAs(editor, 1).some((a) => a !== 'center'))
-        problems['simple-centered'] = alignedAs(editor, 1);
-      editor.setViewMode('clean');
-      await frames();
-      if (lineElements(editor).some((line) => line.classList.contains('rl-bar')))
-        problems['clean-bars'] = 'a row has a bar';
-      if (alignedAs(editor, 1).some((a) => a !== 'center'))
-        problems['clean-centered'] = alignedAs(editor, 1);
+      if (doc(editor) !== text) problems['menu-written'] = doc(editor);
+      if (shown() !== WORDS) problems['menu-notice'] = shown();
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -2034,6 +2039,60 @@ const CHECKS: Check[] = [
       const again = await open();
       if (!again || checked(again).join() !== 'Align Right')
         problems['checked-after'] = again && checked(again);
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Someone else's pending alignment change in Redlines: the new alignment, a dotted underline under the
+    // header text of the column changed and a bar on the header row; its card names the column and the old
+    // alignment; and with Track Changes on a letter typed right under its table is refused, in words
+    // naming the person, and writes nothing.
+    name: 'pending-alignment-change-in-redlines-is-drawn-carded-and-guards-the-gap',
+    async run(editor) {
+      await load(editor, WITH_ALIGN, false);
+      editor.setViewMode('redlines');
+      await frames();
+      const problems: Record<string, unknown> = {};
+      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+      if (marked.map((el) => el.textContent).join('|') !== 'Count')
+        problems['underlined'] = marked.map((el) => el.textContent);
+      const style = marked[0] && getComputedStyle(marked[0]);
+      if (
+        !style?.textDecorationLine.includes('underline') ||
+        style.textDecorationStyle !== 'dotted'
+      )
+        problems['dotted'] = style && [style.textDecorationLine, style.textDecorationStyle];
+      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['centered'] = alignedAs(editor, 1);
+      const target = marked[0];
+      if (!target) return { ...problems, card: 'nothing to press' };
+      const box = await reveal(target);
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      mouse(target, 'mousedown', x, y);
+      mouse(window, 'mouseup', x, y);
+      await frames();
+      await frames();
+      const card = editor.view.dom.ownerDocument.querySelector('.rl-card .rl-card-what');
+      if (card?.textContent !== 'Formatted: column Count centered (was default)')
+        problems['card'] = card?.textContent ?? 'no card';
+      // A letter typed on the line under the table, tracked.
+      editor.setTracking(true);
+      const at = doc(editor).indexOf('Below.');
+      const before = doc(editor);
+      editor.view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: { anchor: at + 1 },
+        userEvent: 'input.type',
+      });
+      await frames();
+      if (doc(editor) !== before) problems['gap-written'] = doc(editor).slice(at - 20, at + 20);
+      const notice = document.querySelector<HTMLElement>('.rl-notice');
+      const said = notice && !notice.hidden ? (notice.textContent ?? '').trim() : null;
+      if (!said?.startsWith("Bo Chen's alignment change to the table above is pending."))
+        problems['gap-notice'] = said;
       return Object.keys(problems).length ? problems : null;
     },
   },

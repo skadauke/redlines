@@ -440,14 +440,22 @@ export function caretAlign(state: EditorState): Align | null {
   return touched.table.aligns[col] ?? null;
 }
 
+export const ALIGN_NOT_READY =
+  "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
+
 /**
- * Aligns the columns the selection touches: a format change around the table with Track Changes on, the
- * delimiter row as it says with it off (format §3.7). The selection stays where it is. A refusal is
- * told (an alignment change of another person pending, a column pending, columns already so).
+ * Aligns the columns the selection touches: the delimiter row as it says, with Track Changes off
+ * (format §3.7); with it on, a refusal in words. The selection stays where it is.
  */
 export function alignCols(view: EditorView, align: Align): boolean {
   const touched = touchedCols(view.state);
   if (!touched) return false;
+  // A tracked alignment change is not written yet: where its closer should stand is open (#281). A
+  // refusal in words, never a silent no-op; a pending one from another tool is still decided.
+  if (view.state.field(trackingField)) {
+    view.dispatch({ effects: refusedEditEffect.of(ALIGN_NOT_READY) });
+    return true;
+  }
   const cols = Array.from(
     { length: touched.last - touched.first + 1 },
     (_, i) => touched.first + i,

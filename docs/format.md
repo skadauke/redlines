@@ -1744,7 +1744,12 @@ it, one per line:
   otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
   re-padded.
 - **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
-  Changing it with Track Changes on is a block format change around the table, `align=SPEC`, whose
+  **Redlines writes alignment changes with Track Changes off only** (the Align commands are refused with
+  Track Changes on: "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to
+  align it."), and an agent's edit that changes alignment is a cell edit as it is on main. A tracked
+  alignment change that another tool wrote is read, drawn, carded and decided as below, and edits right
+  under its table are refused while it is pending (the closer's line, #281). The form is a block format
+  change around the table, `align=SPEC`, whose
   `SPEC` is the old delimiter row as written, as a value (§2.6: a space is `\x20`, a pipe `\|`).
   Its opener stands alone on the line before the table, with the blank line after it (§3.3), and its
   closer after one blank line below the table and its deletion lines, in front of the closers that
@@ -1770,6 +1775,14 @@ it, one per line:
     `SPEC` back as the delimiter row, so that every byte is as it was. It is decided after the other
     marks of the table, on the text they leave, so that every order of decisions writes the same
     bytes.
+  - **Edits under the table.** While an alignment change is pending, a tracked edit on the lines between
+    the table's last line (its deletion lines and the closers included) and the first character of the next
+    block is refused, in words that name the person: "Bo Chen's alignment change to the table above is
+    pending. Decide it first, or turn off Track Changes." The closer stands on a line of its own there, and
+    a mark of an edit that shared its line would read otherwise in some order of decisions. An edit at the
+    end of the last row is the cell's, and an edit further into the next block is its own; neither is
+    refused, nor is any edit with Track Changes off. Every single decision of such a file is possible in
+    every order, which the pair model and the random suites hold the format to.
   - **One change per table.** The author's own pending alignment change is changed in place, and is
     taken away, with its old row written back as it was, when the new alignments are the old ones.
     Another person's pending alignment change refuses yours: "Bo Chen's alignment change is pending.

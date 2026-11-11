@@ -104,12 +104,6 @@ export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undef
   });
 }
 
-/** What may follow a closer on its line and leave it its blank line: openers of other marks. */
-const OPENERS_ONLY = /^(?:<!--(?!\/)(?:[^-]|-(?!->))*-->)*[ \t]*$/;
-
-/** A deletion of just the blank line in front of a closer, as a payload writes it (`\n\n`). */
-const LEAD_DELETED = /<!--del [a-z0-9]{4} \\n\\n-->$/;
-
 /** The range that the closer of an alignment change takes with it: the line break and the blank line
  * before it, back to the end of the table or its last deletion line, when it is alone on its line. A
  * closer with others after it on its line leaves them their line, and one with text on the next
@@ -117,17 +111,7 @@ const LEAD_DELETED = /<!--del [a-z0-9]{4} \\n\\n-->$/;
 export function closerRange(text: string, close: Range): Range {
   const start = lineStart(text, close.from);
   const end = lineEnd(text, close.to);
-  // The blank line in front of it, which a tracked deletion of the paragraph below the table took as
-  // deleted text (the break stands in front of the hidden closer, and the deletion goes in two pieces
-  // around it): the piece goes with the closer, as the blank line does when nothing took it, so that
-  // deciding the deletion and the alignment change in either order writes the same bytes.
-  const taken = LEAD_DELETED.exec(text.slice(Math.max(0, close.from - 40), close.from));
-  if (taken && OPENERS_ONLY.test(text.slice(close.to, end))) {
-    return { from: close.from - taken[0].length, to: close.to };
-  }
-  // Alone on its line, or with only the openers of other marks after it (a deletion that starts right
-  // behind it, of the paragraph below the table): a closer after it keeps the blank line for its own.
-  if (start !== close.from || !OPENERS_ONLY.test(text.slice(close.to, end))) return close;
+  if (start !== close.from || text.slice(close.to, end).trim() !== '') return close;
   const after = text.indexOf('\n', close.to);
   if (after !== -1) {
     const next = lineEnd(text, after + 1);
@@ -395,4 +379,34 @@ function applyLine(line: string, changes: readonly TextChange[], base: number): 
     at = change.to - base;
   }
   return out + line.slice(at);
+}
+
+/**
+ * Refuses a tracked edit on the lines between a table's last line and the next block's first character
+ * while an alignment change of the table is pending (format §3.7, #281): its closer stands there, on a
+ * line of its own, and a mark of the edit would share the line, which some order of decisions reads
+ * otherwise. An edit at the end of the last row is the cell's, and is not refused.
+ *
+ * @throws EditError naming the person whose change is pending.
+ */
+export function checkAlignGap(text: string, edits: readonly TextChange[], parsed: Parsed): void {
+  const marks = parsed.marks.filter(isAlignMark);
+  if (marks.length === 0) return;
+  const end = parsed.ledgerRange?.from ?? text.length;
+  for (const mark of marks) {
+    const segment = mark.segments[0];
+    const table = segment ? tableOfSegment(parsed, segment) : undefined;
+    if (!segment?.close || !table) continue;
+    let gapEnd = segment.close.to;
+    while (gapEnd < end && /\s/.test(text.charAt(gapEnd))) gapEnd++;
+    for (const edit of edits) {
+      const reaches = edit.from === edit.to ? edit.from > table.to : edit.to > table.to;
+      if (!reaches || edit.from > gapEnd) continue;
+      const name =
+        parsed.ledger.people.find((p) => p.handle === mark.entry.by)?.name ?? mark.entry.by;
+      throw refused(
+        `${name}'s alignment change to the table above is pending. Decide it first, or turn off Track Changes.`,
+      );
+    }
+  }
 }

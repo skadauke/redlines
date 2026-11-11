@@ -463,7 +463,7 @@ The forms are format §3.7's; this design adds no mark kind.
 | Deleting a row | The row leaves the table, and is kept as `<!--del ID row=N …-->` below it, after one blank line |
 | Deleting a column | Its cells leave every row, kept as `<!--del ID col=N …-->` below, its cells top to bottom, delimiter cell included |
 | Moving a row or column | A deletion at the old place and an insertion at the new one, linked by `move` in the ledger |
-| Aligning a column | A block format change around the table, `align=SPEC`, `SPEC` the old delimiter row |
+| Aligning a column | Track Changes off: the delimiter row, plain. Track Changes on: refused for now (#281: where the closer of the tracked form stands is open); a block format change around the table, `align=SPEC`, `SPEC` the old delimiter row, that another tool wrote is read, drawn and decided, and edits right under its table are refused while it is pending |
 | Pasting a range | Substitutions and insertions in cells, row and column insertions, one `group` |
 | Deleting the table | A whole-block deletion (format §3.4) of the table and its deletion lines |
 

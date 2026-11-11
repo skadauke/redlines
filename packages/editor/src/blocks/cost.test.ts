@@ -12,6 +12,7 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyChanges, parse, readTables, tableEdit } from '@redlines/format';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
 import { tablesOf } from '../table/model.ts';
@@ -539,15 +540,14 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
 });
 
 // A column aligned in the same table (tables, alignment): the third column centered and back to what it
-// was. It is one command, a format change written around the table (the opener, the closer and a cell of
-// the delimiter row), and the editor reads the table again; it is held to what a column move is, the
-// document's parse 10 times and two milliseconds, with the bound found the same way. With Track Changes on
-// the second step takes the author's own change away, with off both are plain. A timing test: it runs
+// was. It is one command, a cell of the delimiter row, and the editor reads the table again; it is held to what a column move is, the
+// document's parse 10 times and two milliseconds, with the bound found the same way. Only with Track Changes
+// off: with it on the command is refused for now (#281). A timing test: it runs
 // with REDLINES_COST set, and a run over the bound is timed twice more, each time with the parse.
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in a table', () => {
   it('costs at most 10 times the document’s parse, in a 300-row table', () => {
     const { doc } = longDocument({ table: true });
-    for (const tracking of [true, false]) {
+    for (const tracking of [false]) {
       const parent = document.createElement('div');
       document.body.append(parent);
       const editor = createEditor(parent, { doc, author: ada, tracking });
@@ -560,7 +560,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
         for (let i = 0; i < 4; i++) {
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, 'center');
-          if (i === 0 && tracking) expect(view.state.doc.toString()).toMatch(/<!--fmt \w+ align=/);
+          if (i === 0) expect(view.state.doc.toString()).toMatch(/\| :-+: \|/);
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, '');
         }
@@ -582,27 +582,37 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
   }, 600_000);
 });
 
-// The keystroke in the same cell while an alignment change is pending in the table: the tracked layer
-// finds the change and draws its bar and underline on every update, and it must cost what a keystroke
-// costs on main (twice it, as the table's own does). A timing test.
+// The keystroke in the same cell while an alignment change that another tool wrote is pending in the table:
+// the tracked layer finds the change and draws its bar and underline on every update, and a tracked
+// keystroke asks whether it is under the table (#281); it must cost what a keystroke costs on main (twice
+// it, as the table's own does). A timing test.
 describe.skipIf(!process.env['REDLINES_COST'])(
   'the cost of a keystroke in a table with an alignment change pending',
   () => {
     it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
-      const { doc } = longDocument({ table: true });
+      const plain = longDocument({ table: true }).doc;
+      // Another tool's change, written by the format.
+      const table = readTables(plain, parse(plain))[0]!.from;
+      const doc = applyChanges(
+        plain,
+        tableEdit(
+          plain,
+          { kind: 'align', table, cols: [1], align: 'center' },
+          {
+            author: { handle: 'bo', name: 'Bo Chen' },
+            time: '2026-11-01T10:00Z',
+          },
+        ).changes,
+      );
+      expect(doc).toMatch(/<!--fmt \w+ align=/);
       const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
-        const editor = createEditor(parent, { doc, author: ada, tracking: true });
+        const editor = createEditor(parent, { doc, author: ada, tracking });
         open.push(editor);
         const { view } = editor;
         forceParsing(view, view.state.doc.length, 10_000);
-        const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
-        view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
-        alignCols(view, 'center');
-        expect(view.state.doc.toString()).toMatch(/<!--fmt \w+ align=/);
-        editor.setTracking(tracking);
         const text = view.state.doc.toString();
         const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
         time(editor, at, 'type');

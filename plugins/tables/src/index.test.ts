@@ -10,6 +10,8 @@ interface Mounted {
   remove: () => void;
 }
 const mounted: Mounted[] = [];
+/** What the editor told the person, in words. */
+const notices: string[] = [];
 
 function mount(doc: string, tracking = false): Editor {
   const parent = document.createElement('div');
@@ -18,6 +20,7 @@ function mount(doc: string, tracking = false): Editor {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
     tracking,
+    onNotice: (message) => notices.push(message),
   });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
   mounted.push({ editor, remove: createTables(editor) });
@@ -25,6 +28,7 @@ function mount(doc: string, tracking = false): Editor {
 }
 
 afterEach(() => {
+  notices.length = 0;
   for (const { editor, remove } of mounted.splice(0)) {
     remove();
     editor.destroy();
@@ -596,13 +600,12 @@ describe('the alignment commands', () => {
   });
 
   it('do nothing, and say nothing, for the alignment the columns have already', () => {
-    for (const tracking of [false, true]) {
-      const editor = mount(doc, tracking);
-      select(editor, at('12'));
-      expect(editor.commands.run('table.alignCenter')).toBe(true);
-      expect(editor.getDoc()).toBe(doc);
-      expect(editor.getUiState().undo).toBeNull();
-    }
+    const editor = mount(doc, false);
+    select(editor, at('12'));
+    expect(editor.commands.run('table.alignCenter')).toBe(true);
+    expect(editor.getDoc()).toBe(doc);
+    expect(editor.getUiState().undo).toBeNull();
+    expect(notices).toEqual([]);
   });
 
   it('align every column the selection touches', () => {
@@ -612,40 +615,34 @@ describe('the alignment commands', () => {
     expect(delimiter(editor)).toBe('| -: | --: | -: |');
   });
 
-  it('are a format change around the table with Track Changes on, one step to undo', () => {
-    const editor = mount(doc, true);
-    select(editor, at('12'));
-    const { head } = editor.view.state.selection.main;
-    const before = editor.getDoc();
-    expect(editor.commands.run('table.alignRight')).toBe(true);
-    const text = editor.getDoc();
-    expect(text).toMatch(/^Intro\.\n\n<!--fmt \w{4} align=\\\|/);
-    expect(text).toMatch(/\| 21 \| 22 \| 23 \|\n\n<!--\/\w{4}-->\n\nAfter\./);
-    expect(delimiter(editor)).toBe('| - | --: | -: |');
-    // The caret is in the cell it was in.
-    expect(editor.getDoc().slice(editor.view.state.selection.main.head - 1)).toMatch(/^12 /);
-    expect(editor.view.state.selection.main.head).toBeGreaterThan(head);
-    editor.undo();
-    expect(editor.getDoc()).toBe(before);
-    expect(editor.view.state.selection.main.head).toBe(head);
+  it('are refused with Track Changes on, in words, and write nothing', () => {
+    const READY =
+      "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
+    for (const id of [
+      'table.alignLeft',
+      'table.alignCenter',
+      'table.alignRight',
+      'table.alignDefault',
+    ]) {
+      const editor = mount(doc, true);
+      // A column that already has the alignment too: never a silent no-op.
+      for (const where of ['11', '12', '13']) {
+        notices.length = 0;
+        select(editor, at(where));
+        expect(editor.commands.run(id), id).toBe(true);
+        expect(editor.getDoc(), id).toBe(doc);
+        expect(notices, id).toEqual([READY]);
+      }
+      expect(editor.getUiState().undo).toBeNull();
+    }
   });
 
-  it('is refused, with nothing written, while a column is pending', () => {
-    const editor = mount(doc, true);
-    select(editor, at('12'));
-    editor.commands.run('table.insertColumnRight');
-    const text = editor.getDoc();
-    select(editor, at('11'));
-    editor.commands.run('table.alignCenter');
-    expect(editor.getDoc()).toBe(text);
-  });
-
-  it('is refused while another change of the table’s alignment is pending, and column commands with it', () => {
+  it("are refused from the grip menu's command too, and column commands still work", () => {
     const editor = mount(doc, true);
     select(editor, at('12'));
     editor.commands.run('table.alignRight');
-    const text = editor.getDoc();
+    expect(editor.getDoc()).toBe(doc);
     editor.commands.run('table.insertColumnRight');
-    expect(editor.getDoc()).toBe(text);
+    expect(editor.getDoc()).toMatch(/<!--ins \w+ col-->/);
   });
 });

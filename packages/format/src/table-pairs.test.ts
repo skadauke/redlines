@@ -11,7 +11,16 @@ import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import type { TableAlign } from './table.ts';
 import type { TextChange } from './types.ts';
-import { bo, ada, bodyOf, context, expectEveryOrderAlike, file, exactly } from './test-helpers.ts';
+import {
+  bo,
+  ada,
+  bodyOf,
+  context,
+  expectEveryOrderAlike,
+  expectNoDecisionRefused,
+  file,
+  exactly,
+} from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
 
 const BODY = [
@@ -126,6 +135,7 @@ describe('the pair model for rows and columns', () => {
             }
             allowed++;
             expectEveryOrderAlike(name, two, exactly);
+            expectNoDecisionRefused(name, two);
             const all = (decide: (text: string) => TextChange[]) => {
               try {
                 return applyChanges(two, decide(two)).replace(/\s+$/, '');

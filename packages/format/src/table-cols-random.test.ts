@@ -23,6 +23,7 @@ import {
   bodyOf,
   expectEveryOrderAlike,
   expectInOrder,
+  expectNoDecisionRefused,
   file,
 } from './test-helpers.ts';
 import { addComment } from './comments.ts';
@@ -55,6 +56,7 @@ describe('rows and columns, random', () => {
     let refusals = 0;
     let withColumns = 0;
     let withAlign = 0;
+    const refusedWithout = { count: 0 };
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
       const bare = columns > 1 && random() < 0.15;
@@ -341,33 +343,6 @@ describe('rows and columns, random', () => {
           ).toBe(true);
         }
       }
-      // Last, the paragraph below the table with the break in front of it deleted, as a person who removes
-      // it writes it (the table's own operations come before it: a table joined to a paragraph is not
-      // one that rows and columns are drawn on).
-      if (around && random() < 0.5) {
-        const view = newestView(text);
-        const at = view.text.indexOf('Outro');
-        if (
-          at > 1 &&
-          view.text.slice(at - 2, at) === '\n\n' &&
-          view.text.startsWith('Outro words.', at)
-        ) {
-          const from = view.map.toSource(at - 2, 1);
-          const to = Math.max(from, view.map.toSource(at + 'Outro words.'.length, -1));
-          const person = pick([ada, bo]);
-          try {
-            text = applyChanges(
-              text,
-              pick([true, false])
-                ? trackedEdit(text, { from, to, insert: '' }, context(person, ids()))
-                : untrackedEdit(text, { from, to, insert: '' }),
-            );
-            steps.push(`last: delete the break and the paragraph ${from}-${to}`);
-          } catch (error) {
-            if (!(error instanceof EditError)) throw error;
-          }
-        }
-      }
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
       const marks = parse(text).marks.length;
       if (marks === 0 || marks > 5) continue;
@@ -376,6 +351,10 @@ describe('rows and columns, random', () => {
       if (/<!--fmt \w{4} align=/.test(text)) withAlign++;
       try {
         expectEveryOrderAlike(label, text, exactly);
+        // With an alignment change pending, every single decision is possible in every order.
+        if (/<!--fmt \w{4} align=/.test(text)) {
+          expectNoDecisionRefused(label, text, { unlessWithout: true, refusedWithout });
+        }
       } catch (error) {
         const { outcomes } = everyOrder(text, exactly);
         const lines = [...outcomes]

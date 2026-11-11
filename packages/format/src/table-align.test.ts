@@ -2,7 +2,6 @@
 // block format change around the table whose `align=` keeps the old delimiter row.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import type { TextChange } from './types.ts';
 import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { formatChange } from './format-blocks.ts';
@@ -22,6 +21,7 @@ import {
   context,
   exactly,
   expectEveryOrderAlike,
+  expectNoDecisionRefused,
   expectInOrder,
   file,
   problemsOf,
@@ -286,55 +286,155 @@ describe('aligning a column, tracked (format §3.7)', () => {
     }
   });
 
-  it('reads alike in every order whatever is deleted or typed in the paragraph below the table', () => {
+  it('refuses a tracked edit right under the table while the change is pending, naming the person', () => {
     const text = file(`${FRUIT}\n\nOutro words.\n\nMore.`);
     const one = align(text, [1], 'center').after;
     const view = newestView(one);
     const at = view.text.indexOf('Outro words.');
     const end = at + 'Outro words.'.length;
+    const WORDS =
+      "Ada Lovelace's alignment change to the table above is pending. Decide it first, or turn off Track Changes.";
     // Written as the editor writes them: from the newest view, mapped into the file.
-    const shapes: [string, number, number, string][] = [
-      ['the paragraph', at, end, ''],
+    const refused: [string, number, number, string][] = [
+      ['typing on the blank line', at - 1, at - 1, 'q'],
+      ['deleting a break', at - 2, at - 1, ''],
       ['the break and the paragraph', at - 2, end, ''],
+      ['the paragraph', at, end, ''],
       ['the word Outro', at, at + 5, ''],
-      ['the break and the word', at - 2, at + 5, ''],
-      ['typing at its end', end, end, 'q'],
-      ['a new paragraph after it', end, end, '\n\nNew.'],
       ['typing at its start', at, at, 'q'],
+      ['a new paragraph in front of it', at - 2, at - 2, '\n\nNew.'],
     ];
-    let checked = 0;
     for (const who of [bo, ada]) {
-      for (const [name, a, b, insert] of shapes) {
+      for (const [name, a, b, insert] of refused) {
         const from = view.map.toSource(a, 1);
         const to = Math.max(from, view.map.toSource(b, -1));
-        let edited: string;
-        try {
-          edited = applyChanges(
-            one,
+        expect(
+          said(() =>
             trackedEdit(one, { from, to, insert }, context(who, ['c2dd', 'f3gg', 'h4jj'])),
-          );
-        } catch (error) {
-          if (error instanceof EditError) continue;
-          throw error;
-        }
-        checked++;
-        expectEveryOrderAlike(`${who.handle}: ${name}`, edited, exactly);
-        // Both decided as the views say: the alignment kept, the edit kept, or both undone.
-        const all = (decide: (t: string) => TextChange[]) => {
-          try {
-            return applyChanges(edited, decide(edited));
-          } catch (error) {
-            throw new Error(`${who.handle}: ${name}: ${String(error)}\n${edited}`, {
-              cause: error,
-            });
-          }
-        };
-        expect(trim(all(acceptAll)), `${name}: accept all`).toBe(trim(newestView(edited).text));
-        expect(trim(all(rejectAll)), `${name}: reject all`).toBe(trim(originalView(edited).text));
-        expect(trim(originalView(edited).text), `${name}: original`).toBe(trim(text));
+          ),
+          `${who.handle}: ${name}`,
+        ).toBe(WORDS);
       }
     }
-    expect(checked).toBeGreaterThanOrEqual(8);
+    // Allowed: the end of the last cell, typing further into the paragraph, a paragraph elsewhere, and Track
+    // Changes off (it writes no mark).
+    const inCell = one.indexOf('0.90') + 4;
+    for (const [name, edit] of [
+      ['the end of the last cell', { from: inCell, to: inCell, insert: 'q' }],
+      [
+        'the middle of the paragraph',
+        { from: one.indexOf('words.'), to: one.indexOf('words.'), insert: 'q' },
+      ],
+      [
+        'the paragraph after it',
+        { from: one.indexOf('More.') + 4, to: one.indexOf('More.') + 4, insert: 'q' },
+      ],
+    ] as const) {
+      expect(
+        said(() => trackedEdit(one, edit, context(bo, ['c2dd']))),
+        name,
+      ).toBe('no error');
+    }
+    const under = one.indexOf('Outro');
+    expect(said(() => untrackedEdit(one, { from: under, to: under, insert: 'q' }))).toBe(
+      'no error',
+    );
+    // The words follow the person: Bo's change names Bo.
+    const bos = align(text, [1], 'center', bo).after;
+    const at2 = bos.indexOf('Outro');
+    expect(
+      said(() => trackedEdit(bos, { from: at2, to: at2, insert: 'q' }, context(ada, ['c2dd']))),
+    ).toMatch(/^Bo Chen's alignment change to the table above is pending\./);
+  });
+
+  it('refuses every tracked edit right under the table, or leaves every decision possible', () => {
+    // Every range from the end of the last row to a little into the paragraph, typed over or deleted by
+    // Bo or Ada, with a row deleted or not and a comment on the paragraph or not: either the edit is refused
+    // in words, or each change can be decided on its own in every order.
+    const bodies = [
+      `${FRUIT}\n\nOutro words.\n\nMore.`,
+      `${FRUIT}\n\n<!--cmt c9qf-->Outro<!--/c9qf--> words.`,
+    ];
+    let built = 0;
+    let refusedEdits = 0;
+    for (const [n, body] of bodies.entries()) {
+      const start =
+        n === 1
+          ? file(body, {}, [
+              '  c9qf:',
+              '    by: bo',
+              '    at: 2026-10-13T22:40Z',
+              '    text: |-',
+              '      A note.',
+            ])
+          : file(body);
+      for (const deleted of [false, true]) {
+        const base = deleted
+          ? edit(start, { kind: 'deleteRows', rows: [2] }, ada, ['m5nn']).after
+          : start;
+        const one = align(base, [0], 'center', ada, ['k3x9']).after;
+        const view = newestView(one);
+        const first = view.text.indexOf('0.90') + 4;
+        for (const who of [bo, ada]) {
+          for (let a = first; a <= first + 20; a++) {
+            for (const b of [a, a + 1, a + 2, a + 8]) {
+              for (const insert of ['', 'q']) {
+                if ((a === b && insert === '') || b > view.text.length - 1) continue;
+                const from = view.map.toSource(a, 1);
+                const to = Math.max(from, view.map.toSource(b, -1));
+                let edited: string;
+                try {
+                  edited = applyChanges(
+                    one,
+                    trackedEdit(one, { from, to, insert }, context(who, ['c2dd', 'f3gg', 'h4jj'])),
+                  );
+                } catch (error) {
+                  if (!(error instanceof EditError)) throw error;
+                  if (/alignment change to the table above is pending/.test(error.message)) {
+                    refusedEdits++;
+                  }
+                  continue;
+                }
+                built++;
+                expectNoDecisionRefused(
+                  `${who.handle} ${a}-${b} ${JSON.stringify(insert)}`,
+                  edited,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(refusedEdits).toBeGreaterThan(40);
+    expect(built).toBeGreaterThan(100);
+  });
+
+  it('can decide each change on its own, in every order, with rows and columns around', () => {
+    const text = file(`${FRUIT}\n\nOutro words.`);
+    let states = 0;
+    for (const first of [
+      { kind: 'deleteRows', rows: [1] },
+      { kind: 'insertRows', after: 1 },
+      { kind: 'moveRows', rows: [2], to: 0 },
+      { kind: 'insertCols', after: 1 },
+      { kind: 'moveCols', cols: [0], to: 3 },
+      { kind: 'deleteCols', cols: [1] },
+    ] satisfies Shape[]) {
+      const rowOp = first.kind.endsWith('Rows');
+      const base = edit(text, first, bo, ['c2dd', 'f3gg']).after;
+      // Another person's alignment change beside a row change (column changes refuse it), and the
+      // same person's, and a plain edit in the paragraph below.
+      const withAlign = rowOp ? align(base, [1], 'center', ada, ['k3x9']).after : base;
+      const plainBelow = (t: string) => {
+        const o = t.indexOf('Outro');
+        return applyChanges(t, untrackedEdit(t, { from: o + 5, to: o + 5, insert: 'q' }));
+      };
+      for (const t of [withAlign, plainBelow(withAlign)]) {
+        states += expectNoDecisionRefused(JSON.stringify(first), t);
+      }
+    }
+    expect(states).toBeGreaterThan(20);
   });
 
   it('rejects all, and accepts all, with the header moved and a row put above it under the change', () => {
