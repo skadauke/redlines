@@ -2555,8 +2555,11 @@ function longerBreak(
 function blankLinesMatter(plan: Plan, from: number, to: number): boolean {
   const { text, markers } = plan;
   const verbatim = (plan.verbatim ??= scan(text).verbatim);
+  // A range ends at the line break of its last line, which a CRLF's `\r` is part of: a place at the
+  // end of that line, before the `\r`, is not in the block.
+  const ends = (range: Range) => (text[range.to - 1] === '\r' ? range.to - 1 : range.to);
   return (
-    verbatim.some((range) => range.from < to && from < range.to) ||
+    verbatim.some((range) => range.from < to && from < ends(range)) ||
     betweenIndentedCode(text, from, markers)
   );
 }
@@ -4684,6 +4687,14 @@ export function trackedEdits(
   // As typed first; where that reads otherwise next to another mark, each way of writing the change
   // again by a character, until one reads alike in every order of decisions, or none does.
   for (let mode = 0; ; mode++) {
+    // Each way of writing the change is tried once; a change that reads otherwise in all of them is
+    // refused, never tried again.
+    if (mode > MOST_MODES) {
+      throw new EditError(
+        'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
+        'no-legal-placement',
+      );
+    }
     try {
       return editsOnce(text, edits, mode === 0 ? first : again(), mode);
     } catch (error) {
@@ -4831,6 +4842,9 @@ function codeEdits(
   );
   return { changes, markIds: [id], extendedIds: [] };
 }
+
+/** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
+const MOST_MODES = 8;
 
 /** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
 class ReadsOtherwise extends Error {}

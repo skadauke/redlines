@@ -543,3 +543,53 @@ describe('the exact start and end of display math (fix round 2)', () => {
     }
   });
 });
+
+describe('CRLF files (fix round 3)', () => {
+  const cases: [string, string, string, string][] = [
+    ['top, text under', 'Intro.\n\n```js\na\n```\nAfter.', '```\nAfter', '\n\n\n'],
+    ['top, blank under', 'Intro.\n\n```js\na\n```\n\nAfter.', '```\n\nAfter', '\n\n'],
+    ['quote, text under', '> ```js\n> a\n> ```\n> After.', '> ```\n> After', '\n>\n> \n>'],
+    ['quote, blank under', '> ```js\n> a\n> ```\n>\n> After.', '> ```\n>\n> After', '\n>\n> '],
+    [
+      'list item, text under',
+      '- item\n\n  ```js\n  a\n  ```\n  After.',
+      '  ```\n  After',
+      '\n\n  \n',
+    ],
+  ];
+
+  it('writes Return at the end of a closing fence as it does with LF line breaks, and returns', () => {
+    for (const [name, body, find, insert] of cases) {
+      const done: string[] = [];
+      for (const crlf of [false, true]) {
+        const conv = (s: string) => (crlf ? s.replace(/\n/g, '\r\n') : s);
+        const text = conv(file(body));
+        const at = text.indexOf(conv(find)) + conv(find).indexOf(crlf ? '\r\n' : '\n');
+        const result = attempt(text, at, at, conv(insert));
+        expect(result.error, `${name} ${crlf}`).toBeUndefined();
+        done.push((result.after ?? '').replace(/\r\n/g, '\n'));
+        // A letter there is refused or written, and either way it returns.
+        attempt(text, at, at, 'x');
+      }
+      expect(done[1], name).toBe(done[0]);
+    }
+  }, 20_000);
+
+  it('returns for a letter, a line break and a selection at the edges of every kind of block', () => {
+    for (const body of [
+      'Intro.\n\n```js\na\n```\nAfter.',
+      'Intro.\n\n    code\nAfter.',
+      'Intro.\n\n$$\nx\n$$\nAfter.',
+      'Intro.\n\n<pre>\nx\n</pre>\nAfter.',
+      '> ```js\n> a\n> ```\n> After.',
+      '- item\n\n  ```js\n  a\n  ```\n  After.',
+    ]) {
+      for (const eol of ['\n', '\r\n', 'mixed']) {
+        const text = file(eol === 'mixed' ? body.replace('\n', '\r\n') : body.replace(/\n/g, eol));
+        for (let at = 0; at <= text.length; at += 3) {
+          for (const insert of ['x', '\n']) attempt(text, at, at, insert);
+        }
+      }
+    }
+  }, 60_000);
+});
