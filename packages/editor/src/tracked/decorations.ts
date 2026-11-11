@@ -1436,14 +1436,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // A deleted row, a ghost at its place (`table/ghosts.ts`): struck text in the author's color on
   // the author's tint; a moved row's old place has a double strikethrough. Not editable.
   '.rl-trow.rl-ghost': { display: 'table-row', cursor: 'default', userSelect: 'none' },
-  '.rl-trow.rl-ghost > .rl-tc': {
-    backgroundColor: 'var(--rl-color-tint)',
-    color: 'var(--rl-color)',
-    textDecoration: 'line-through',
-    textDecorationColor: 'var(--rl-color)',
-    textDecorationThickness: '1.5px',
-  },
-  '.rl-trow.rl-ghost-moved > .rl-tc': { textDecorationStyle: 'double' },
+  '.rl-trow.rl-ghost > .rl-tc': { backgroundColor: 'var(--rl-color-tint)' },
+  '.rl-trow.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

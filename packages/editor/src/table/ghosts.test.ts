@@ -50,6 +50,7 @@ function load(view: ViewMode, doc: string): Editor {
 const dom = (editor: Editor) => editor.view.contentDOM;
 const ghosts = (editor: Editor) => [...dom(editor).querySelectorAll<HTMLElement>('.rl-ghost')];
 const text = (el: Element) => [...el.querySelectorAll('.rl-tc')].map((c) => c.textContent);
+// (The struck text is a `.rl-del` span in each cell, as a deleted block's is.)
 
 describe('ghost rows', () => {
   it('draws a deleted row at its place in Redlines, inside the table, as a row of cells', () => {

@@ -115,7 +115,11 @@ class GhostWidget extends WidgetType {
       cell.setAttribute('role', 'cell');
       cell.dataset['col'] = String(col);
       cell.dataset['align'] = ghost.table.aligns[col] || 'default';
-      cell.textContent = text === '' ? '​' : text;
+      // The text is struck as a deleted block's is (`rl-del`), on the author's tint.
+      const struck = document.createElement('span');
+      struck.className = 'rl-del';
+      struck.textContent = text === '' ? '​' : text;
+      cell.append(struck);
       row.append(cell);
     });
     return row;
