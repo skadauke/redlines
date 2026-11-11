@@ -1313,6 +1313,18 @@ function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
   // A marker right after it (another mark's, which the deletion would join, or a comment's) would
   // stand at the start of the line, with the text after it on the line: refused as before.
   if (plan.markers.some((marker) => marker.from === to || marker.from < to)) return undefined;
+  // A line below it, before the next blank line, that is an item which can't interrupt a paragraph
+  // (an ordered item that isn't numbered 1, or an empty one), would become a line of the text above
+  // it, which reads otherwise in the newest view than the hidden spaces and markers in the file may
+  // let it.
+  for (let at = lineEnd(text, from) + 1; at <= text.length; at = lineEnd(text, at) + 1) {
+    const below = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(below)) break;
+    const item = /^[ \t>]*(?:(\d{1,9})[.)]|[-+*])(?:[ \t]|$)/.exec(below);
+    if (item?.[1] !== undefined ? item[1] !== '1' : item && /^[ \t>]*[-+*][ \t]*$/.test(below)) {
+      return undefined;
+    }
+  }
   return { from, to, at: to };
 }
 

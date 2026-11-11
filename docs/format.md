@@ -1071,10 +1071,12 @@ as the file does in CommonMark, in every order, with one mark. It is written onl
 else could stand against it: with no other marker in front of the text or among the prefix, which
 the deletion would join, or the opener would start a line that has text after it. A heading's `#`s
 and the first line's indentation alone are not a prefix of this kind, and are refused as before.
-The newest view reads what is asked, and no more: the next item of a numbered list that is not
-numbered 1, right under the text, is a line of its text (`1. one\n2. two` leaves `one\n2. two`),
-which is why the editor does not take the first numbered item out of its list while Track Changes
-is on.
+It is refused where a line below the first, before the next blank line, is an item that can't
+interrupt a paragraph (an ordered item that isn't numbered 1, or an empty one): it would become a
+line of the text above it in the newest view (`1. one\n2. two` leaves `one\n2. two`, one
+paragraph), which the file's own spaces and markers can read otherwise than the view does, so that
+the editor does not take the first numbered item out of its list while Track Changes is on, with
+words that say so.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the

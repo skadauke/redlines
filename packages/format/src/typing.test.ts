@@ -3740,7 +3740,6 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
       ['* one\n+ two', 2],
       ['1. one\n1. two', 3],
       ['1) one\n1) two', 3],
-      ['1. one\n2. two', 3],
       ['> One.\n>\n> Two.', 2],
       ['> One.\n> Two.', 2],
       ['  - one\n  - two', 4],
@@ -3756,10 +3755,13 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
     }
   });
 
-  it('is not written next to another mark, or in a heading or a paragraph', () => {
+  it('is not written next to another mark, in a heading, or over an item that could not interrupt', () => {
     for (const [body, to] of [
       ['- <!--del k3x9 x-->one\n- two', 2],
       ['## One\n\nTwo', 3],
+      // The next numbered item would become a line of the text above it.
+      ['1. one\n2. two', 3],
+      ['- one\n- ', 2],
     ] as const) {
       const before = file(body, { k3x9: 'bo' });
       expect(

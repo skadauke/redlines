@@ -1196,7 +1196,7 @@ describe('a change inside the prefix of a block keeps the break before it (forma
 
   it('writes the deletion of the whole first prefix, with the text after it staying (#248)', () => {
     for (const [body, to, form, newest] of [
-      ['1. one\n2. two', 3, '<!--del k3x9 1. -->\n\none\n2. two', 'one\n2. two'],
+      ['1. one\n1. two', 3, '<!--del k3x9 1. -->\n\none\n1. two', 'one\n1. two'],
       ['- one\n- two', 2, '<!--del k3x9 - -->\n\none\n- two', 'one\n- two'],
       ['> One.\n>\n> Two.', 2, '<!--del k3x9 > -->\n\nOne.\n>\n> Two.', 'One.\n>\n> Two.'],
       ['  - one\n  - two', 4, '<!--del k3x9   - -->\n\none\n  - two', 'one\n  - two'],
