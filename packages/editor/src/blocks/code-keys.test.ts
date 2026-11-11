@@ -370,3 +370,44 @@ describe('Return and typing over a selection in code', () => {
     ]),
   );
 });
+
+describe('Return at the end of code in a quote (fix round 1)', () => {
+  for (const depth of [1, 2]) {
+    const q = '> '.repeat(depth);
+    const bar = q.trimEnd();
+    const doc = (code: string) =>
+      `${q}Intro.⏎${bar}⏎${q}\`\`\`js⏎${q}let a = 1;⏎${code}${q}\`\`\`⏎${bar}⏎${q}After.`;
+    describe(`depth ${depth}`, () => {
+      scriptRows(
+        both([
+          {
+            name: 'Return at the end of the closing fence opens the empty paragraph after it',
+            doc: `${q}Intro.⏎${bar}⏎${q}\`\`\`js⏎${q}let a = 1;⏎${q}\`\`\`‸⏎${bar}⏎${q}After.`,
+            off: {
+              file: doc('').replace('‸', ''),
+              caret: `${q}Intro.⏎${bar}⏎${q}\`\`\`js⏎${q}let a = 1;⏎${q}\`\`\`⏎${bar}⏎${q}‸⏎${bar}⏎${q}After.`,
+            },
+            on: {
+              file: doc('').replace('‸', ''),
+              caret: `${q}Intro.⏎${bar}⏎${q}\`\`\`js⏎${q}let a = 1;⏎${q}\`\`\`⏎${bar}⏎${q}‸⏎${bar}⏎${q}After.`,
+            },
+          },
+          {
+            name: 'Return on the empty last line leaves the block',
+            doc: doc(`${q}‸⏎`),
+            on: { file: doc(`${q}⏎`).replace('‸', '') },
+            off: { file: doc(`${q}⏎`).replace('‸', '') },
+          },
+          {
+            name: 'Return on the empty last line, then a letter, writes the letter after the block',
+            doc: doc(`${q}‸⏎`),
+            keys: ['Enter', { type: 'X' }],
+            // Every order of decisions reads alike, the Return is taken back exactly: the harness.
+            on: {},
+            off: {},
+          },
+        ]),
+      );
+    });
+  }
+});

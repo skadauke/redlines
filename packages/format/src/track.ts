@@ -2893,13 +2893,17 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
   for (const [i, { depth, text: raw }] of lines.entries()) {
     const own = raw.replace(/\r$/, '');
     let starts = false;
+    /** The line is the closing fence: code, but a break after it is outside the code. */
+    let closes = false;
     if (fence && depth < fence.depth) fence = undefined;
     if (html && depth < html.depth) html = undefined;
     if (fence !== undefined) {
       const line = '>'.repeat(depth - fence.depth) + own;
       const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
-      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length)
+      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length) {
         fence = undefined;
+        closes = true;
+      }
       starts = true;
     } else if (html !== undefined) {
       const line = '>'.repeat(depth - html.depth) + own;
@@ -2926,7 +2930,9 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
     }
     underText = !starts && own.trim() !== '';
     // A line that is code or raw text, or starts it, is not read as a line of a quote.
-    if (i === lines.length - 1) last = starts || fence !== undefined || html !== undefined;
+    if (i === lines.length - 1) {
+      last = (starts && !closes) || fence !== undefined || html !== undefined;
+    }
   }
   return last;
 }
