@@ -1070,7 +1070,10 @@ in the newest view, and rejecting the split takes the underline away with the re
 (review I6). A marker after the underline would make a paragraph of it (§3.1). So a line of `=` or
 `-` with a blank line after it, typed or in the text, is never a line of its own behind a split, and
 a line break typed in front of a `===` that ends a paragraph, which would make that paragraph a
-setext heading, is refused with Track Changes on. A line break typed inside a paragraph is
+setext heading, is refused with Track Changes on. So is the join of the block below onto a setext heading, which
+would write the underline again behind the joined text, as an insertion whose closer ends the
+underline's line, and no order of the marks gives a line of only `=` or `-` there: a renderer reads
+that line as text, and the newest view as a heading. A line break typed inside a paragraph is
 a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
 which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
 so that its closer does not start a line. When the new text of an insertion ends with a line break

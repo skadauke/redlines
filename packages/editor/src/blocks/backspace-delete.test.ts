@@ -56,6 +56,10 @@ const DEL: Step[] = ['Delete'];
 const LINE_BREAK_TAKES =
   'A line break at the end of this text would take the start of the block that follows it.';
 
+/** Words for a join onto a setext heading: its underline can't be written again behind a marker. */
+const SETEXT_JOIN =
+  "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
+
 const AT_THE_START =
   "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
@@ -93,11 +97,28 @@ describe('Backspace at the start of a block', () => {
         doc: 'Head⏎===⏎⏎‸Two.',
         keys: BS,
         off: { caret: 'Head‸Two.⏎===' },
-        on: { caret: 'Head‸<del ⏎===⏎⏎>Two.<ins><split>⏎===</ins>', newest: 'HeadTwo.⏎===' },
-        skipOn: {
-          render:
-            "The format writes the moved underline as an insertion whose closer ends its line, which micromark doesn't read as an underline (chunk C's setext row, a format issue)",
-        },
+        on: { caret: 'Head⏎===⏎⏎‸Two.', refusal: SETEXT_JOIN },
+      },
+      {
+        name: 'Delete at the end of a setext heading, a paragraph after it',
+        doc: 'Head‸⏎---⏎⏎Two.',
+        keys: DEL,
+        off: { caret: 'Head‸Two.⏎---' },
+        on: { caret: 'Head‸⏎---⏎⏎Two.', refusal: SETEXT_JOIN },
+      },
+      {
+        name: 'a paragraph after a setext heading in a quote',
+        doc: '> Head⏎> ===⏎>⏎> ‸Two.',
+        keys: BS,
+        off: { caret: '> Head‸Two.⏎> ===' },
+        on: { caret: '> Head⏎> ===⏎>⏎> ‸Two.', refusal: SETEXT_JOIN },
+      },
+      {
+        name: 'a paragraph after a setext heading in an item',
+        doc: '- Head⏎  ===⏎⏎  ‸Two.',
+        keys: BS,
+        off: { caret: '- Head‸Two.⏎  ===' },
+        on: { caret: '- Head⏎  ===⏎⏎  ‸Two.', refusal: SETEXT_JOIN },
       },
       {
         name: 'a setext heading after a paragraph: its underline goes too',

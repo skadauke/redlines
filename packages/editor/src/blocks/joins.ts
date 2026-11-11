@@ -122,6 +122,10 @@ function endOfNoText(state: EditorState, block: Block): number {
   return last.to;
 }
 
+/** Words for a join onto a setext heading with Track Changes on. */
+const SETEXT_JOIN =
+  "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
+
 /**
  * The join of `below` onto `above`: the break between them goes, and `above` keeps its kind. A
  * setext heading's underline goes with the text joined to it, so that neither block turns into
@@ -136,6 +140,12 @@ function join(
   const { doc } = state;
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
+  if (above.kind === 'heading' && above.setext && state.field(trackingField, false)) {
+    // The underline would be written again after the text joined to it, as an insertion, whose
+    // closer ends the underline's line: micromark reads that line as text, and the newest view as
+    // a heading. No other order of the marks puts a clean `===` line there (format §3.4).
+    return { ...nothing(state), refusal: SETEXT_JOIN };
+  }
   if (above.kind === 'heading' && above.setext) {
     // `Head⏎===` takes the text below before its underline.
     from = above.text.to;
