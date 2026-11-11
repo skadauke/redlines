@@ -221,6 +221,8 @@ export const baseThemeSpec: ThemeSpec = {
   '.cm-line.rl-trow': { display: 'table-row', padding: '0' },
   '.rl-tc': {
     display: 'table-cell',
+    // The widths (`table/widths.ts`) are of the whole cell, its padding in them.
+    boxSizing: 'border-box',
     padding: `${s(10)} ${s(16)} ${s(10)} 0`,
     textAlign: 'left',
     verticalAlign: 'top',
