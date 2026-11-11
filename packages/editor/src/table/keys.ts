@@ -235,12 +235,23 @@ function selectCell(view: EditorView, cell: Cell): boolean {
   return true;
 }
 
+/** The cell that holds the head of the selection, with one selection in a view that draws tables. */
+function cellOfHead(state: EditorState): Here | null {
+  if (state.field(viewModeField, false) === 'raw' || state.selection.ranges.length > 1) return null;
+  const { head } = state.selection.main;
+  const found = shownCellAt(state, head);
+  const row = found && found.table.rows.find((r) => r.cells.includes(found.cell));
+  return found && row ? { table: found.table, row, cell: found.cell, head } : null;
+}
+
 /** Tab and ⇧Tab: the next or previous cell, its text selected; Tab in the last cell adds a row, and
  * ⇧Tab in the first does nothing. */
 function tab(forward: boolean): Command {
   return (view) => {
-    const here = cellOfSelection(view.state);
-    if (!here) return false;
+    // A selection that reaches out of its cell acts on the cell of its head, as Tab there would, and
+    // never moves the focus out of the document with the selection in a table.
+    const here = cellOfSelection(view.state) ?? cellOfHead(view.state);
+    if (!here) return selectionInTable(view.state);
     const to = nextCell(here, forward);
     if (to) return selectCell(view, to);
     if (!forward) return true;

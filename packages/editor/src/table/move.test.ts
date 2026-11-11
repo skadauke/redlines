@@ -413,3 +413,77 @@ describe('keys that would break a row', () => {
     expect(raw.notices).toEqual([]);
   });
 });
+
+describe('Tab in a table', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+  const doc = `Intro.\n\n| a | b |\n| - | - |\n| 12 | 34 |\n| 56 | 78 |\n\nAfter.`;
+  function load(anchor: number, head = anchor): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada' } });
+    open.push(editor);
+    forceParsing(editor.view, doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor, head } });
+    return editor;
+  }
+  /** A Tab through the page's key handling: whether it was kept from the browser. */
+  function tab(editor: Editor, shiftKey = false): boolean {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.view.contentDOM.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+  const selection = (editor: Editor) => {
+    const { from, to } = editor.view.state.selection.main;
+    return [from, to];
+  };
+  const at = (find: string, n = 0) => doc.indexOf(find) + n;
+
+  it('acts on the head’s cell when the selection reaches out of its cell, and keeps the focus', () => {
+    // From the paragraph above into the last cell: the head's cell is 78; Tab there adds a row.
+    const editor = load(at('Intro') + 2, at('78', 1));
+    expect(tab(editor)).toBe(true);
+    expect(editor.view.state.doc.toString()).toContain('| 78 |\n|  |  |');
+    // Backwards: the cell before the head's, its text selected.
+    const back = load(at('After') + 2, at('56', 1));
+    expect(tab(back, true)).toBe(true);
+    expect(selection(back)).toEqual([at('34'), at('34') + 2]);
+  });
+
+  it('is a no-op, not a move of the focus, when the head is outside every cell', () => {
+    const editor = load(at('34', 1), at('Intro') + 3);
+    expect(tab(editor)).toBe(true);
+    expect(editor.view.state.doc.toString()).toBe(doc);
+    expect(selection(editor)).toEqual([at('Intro') + 3, at('34', 1)]);
+    // Away from tables, it is the browser's.
+    const outside = load(2);
+    expect(tab(outside)).toBe(false);
+  });
+
+  it('leaves the document after Escape, as CodeMirror’s own Tab does', () => {
+    const editor = load(at('78', 1));
+    // CodeMirror reads the key codes.
+    const key = (name: string, keyCode: number) => {
+      const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'keyCode', { value: keyCode });
+      editor.view.contentDOM.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    key('Escape', 27);
+    // In the last cell, Tab would have added a row.
+    expect(key('Tab', 9)).toBe(false);
+    expect(editor.view.state.doc.toString()).toBe(doc);
+    // Any other key ends it: the next Tab is the table's again.
+    key('ArrowLeft', 37);
+    expect(key('Tab', 9)).toBe(true);
+    expect(editor.view.state.doc.toString()).not.toBe(doc);
+  });
+});
