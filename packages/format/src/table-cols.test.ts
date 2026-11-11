@@ -685,4 +685,37 @@ describe('a comment that starts above a table without pipes at its edges', () =>
     expect(trim(back)).toContain('e |');
     expectEveryOrderAlike('a row left as a pipe', typed, exactly);
   });
+
+  it('writes nothing into a row that is one pipe when it inserts a column: rejecting gives every byte back', () => {
+    // Bare, piped and padded tables, LF and CRLF, tracked and plain: 12 combinations.
+    const styles = {
+      bare: 'a | b\n--|--\n|\nc | d',
+      piped: '| a | b |\n| - | - |\n|\n| c | d |',
+      padded: '| a   | b   |\n| --- | --- |\n|\n| c   | d   |',
+    };
+    let checked = 0;
+    for (const body of Object.values(styles)) {
+      for (const crlf of [false, true]) {
+        const start = file(crlf ? body.replace(/\n/g, '\r\n') : body);
+        for (const who of [ada, null]) {
+          const after = edit(start, { kind: 'insertCols', after: 1 }, who).after;
+          checked++;
+          // The lone row is as it was, in the file and in both views.
+          const lone = (text: string) =>
+            bodyOf(text)
+              .split(/\r?\n/)
+              .filter((l) => l.trim() === '|');
+          expect(lone(after), `${who ? 'tracked' : 'plain'}, ${crlf ? 'CRLF' : 'LF'}`).toEqual([
+            '|',
+          ]);
+          if (who) {
+            const rejected = applyChanges(after, rejectAll(after));
+            expect(trim(rejected), 'rejected').toBe(trim(start));
+            expect(trim(originalView(after).text)).toBe(trim(start));
+          }
+        }
+      }
+    }
+    expect(checked).toBe(12);
+  });
 });

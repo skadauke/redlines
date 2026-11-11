@@ -814,7 +814,7 @@ function insertCols(
     table.deletions[i]?.axis === 'col' && p > op.after ? p + op.count : p,
   );
   const body = joinPoints([
-    ...columnChanges(text, grid, final),
+    ...columnChanges(text, grid, final, true),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
   const changes = ctx
