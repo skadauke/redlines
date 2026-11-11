@@ -2334,8 +2334,7 @@ const HTML_ENDS: readonly [RegExp, RegExp | 'blank'][] = [
     /^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$)/i,
     'blank',
   ],
-  // Any other tag alone on its line, which only starts a block where a paragraph is not open: read
-  // as one wherever it stands.
+  // Any other tag alone on its line, which only starts a block where a paragraph is not open.
   [
     /^(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|<\/[A-Za-z][A-Za-z0-9-]*\s*>)\s*$/,
     'blank',
@@ -2359,6 +2358,8 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
   let fence: { mark: string; depth: number } | undefined;
   let html: { end: RegExp | 'blank'; depth: number } | undefined;
   let last = false;
+  /** Whether the line above is a line of text of a paragraph. */
+  let underText = false;
   for (const [i, { depth, text: raw }] of lines.entries()) {
     const own = raw.replace(/\r$/, '');
     let starts = false;
@@ -2381,7 +2382,10 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
         fence = { mark: opens[1] ?? '```', depth };
         starts = true;
       } else if (text.startsWith('<')) {
-        const kind = HTML_ENDS.find(([start]) => start.test(text));
+        let kind = HTML_ENDS.find(([start]) => start.test(text));
+        // A tag alone on its line (the last kind) cannot interrupt a paragraph: under a line of
+        // text it is text of that paragraph.
+        if (kind === HTML_ENDS.at(-1) && underText) kind = undefined;
         if (kind) {
           starts = true;
           const [, end] = kind;
@@ -2390,6 +2394,7 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
         }
       }
     }
+    underText = !starts && own.trim() !== '';
     // A line that is code or raw text, or starts it, is not read as a line of a quote.
     if (i === lines.length - 1) last = starts || fence !== undefined || html !== undefined;
   }

@@ -532,6 +532,21 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     }
   });
 
+  it('writes Enter plain after a tag alone on a line that cannot interrupt a paragraph (rule 8)', () => {
+    for (const body of [
+      '> a\n> <br>\n\nNext.',
+      '> a\n> <span>\n\nNext.',
+      '> a\n>\n> b\n> <br>\n\nNext.',
+    ]) {
+      const at = body.indexOf('\n\nNext.');
+      const before = file(body);
+      const after = typed(body, at, '\n> ');
+      expect(bodyText(after), body).toBe(body.slice(0, at) + '\n> ' + body.slice(at));
+      expect(parse(after).marks, body).toEqual([]);
+      expect(rendered(after), body).toBe(rendered(before));
+    }
+  });
+
   it('still tracks Enter where the quote is code or raw text at the line (rule 8)', () => {
     for (const [body, word] of [
       ['> ```\n> one two\n\nNext.', 'two'],
