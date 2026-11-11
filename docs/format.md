@@ -686,35 +686,44 @@ at the outer edge of a whole inline construct. A marker never goes:
    fine;
 3. directly before `www.`;
 4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`.
-   A change whose text would end in a backslash right in front of its closer takes the text after
-   it into its change, as a substitution, so that the closer follows that text instead: the next
-   character, which the backslash escapes or stands in front of
-   (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
-   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`)
-   and past a code span or a whole construct that the word is in, and past a backslash that the
-   word ends in, with the character after it; at the end of a block, the paragraph break and the
-   next block's first word; at the end of the document, where nothing follows, the line break that ends it (below). Your own insertion
-   or substitution that a backslash typed at its end, or a deletion of what follows one there,
-   would leave so is changed the same way: the insertion becomes a substitution of the same id, and
-   the substitution takes in more. Line breaks typed right after a backslash in your own
-   substitution or insertion, as Return or Shift-Return there types them (with a hard break's
-   backslash, and the next line's prefix, a list item's bullet or number among it), are written as
-   they are in its text, with no split. Once its
-   new text is text of yours and then its old text, with no backslash at the end of yours, as when
-   you type on after the backslash or Backspace takes it, it is an insertion of the same id again,
-   in front of the old text. Nothing can follow in front of a line that is only syntax or takes no
-   closer: a thematic break, a setext underline, an empty heading, a fence, a table row, a link
-   reference definition, one of CommonMark's seven starts of an HTML block (the seventh, a whole tag
-   alone on its line, only after a blank line, or as the first line of a quote or an item, where it
-   is the first block of that container and no paragraph goes on), a line that starts with a
-   marker, or indented code: the backslash (typed, or left by a deletion) is refused with Track
-   Changes on, in words that say so. A line that starts with an inline tag or an autolink is text,
-   and the change takes in its first word. A deletion is refused too where the next thing is another
-   change's marker. No edit leaves a marker right after an unescaped backslash, in the file or in
-   any order of decisions: where the old text of a substitution ends in one and a marker of the
-   edit follows its closer, or text that ends in one is replaced by more than one substitution, so
-   that deciding the changes in another order gives the backslash back in front of a marker, the
-   edit is refused, in words that say so or name the change whose marker it is;
+   The change takes in what follows instead, so that its closer does not stand there:
+
+   - A change whose text would end in a backslash right in front of its closer takes the text after
+     it into its change, as a substitution, so that the closer follows that text. In front of
+     a character, that character, which the backslash escapes or stands in front of
+     (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`).
+   - In front of a line break, the line break and the first word of the next line, past its prefix
+     (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`), past a code span or a whole
+     construct that the word is in, and past a backslash that the word ends in, with the character
+     after it. At the end of a block, the paragraph break and the next block's first word. At the
+     end of the document, where nothing follows, the line break that ends it (§3.4).
+   - Your own insertion or substitution that a backslash typed at its end, or a deletion of what
+     follows one there, would leave so is changed the same way: the insertion becomes a
+     substitution of the same id, and the substitution takes in more. Once its new text is text of
+     yours and then its old text, with no backslash at the end of yours, as when you type on after
+     the backslash or Backspace takes it, it is an insertion of the same id again, in front of the
+     old text.
+   - Line breaks typed right after a backslash, as Return or Shift-Return type them (with a hard
+     break's backslash, and the next line's prefix, a list item's bullet or number among it), are
+     written as they are in the text of the change, with no split, in your own substitution or
+     insertion and in a new change (§3.4).
+
+   Nothing can follow in front of a line that is only syntax or takes no closer: a thematic break,
+   a setext underline, an empty heading, a fence, a table row, a link reference definition, one of
+   CommonMark's seven starts of an HTML block (the seventh, a whole tag alone on its line, only
+   after a blank line, or as the first line of a quote or an item, where it is the first block of
+   that container and no paragraph goes on), a line that starts with a marker, or indented code.
+   The backslash (typed, or left by a deletion) is refused with Track Changes on, in words that say
+   so; where another person's marker is what follows, the words name their change. A line that
+   starts with an inline tag or an autolink is text, and the change takes in its first word. A
+   backslash typed at the end of a link reference definition is refused too, whatever follows. A
+   deletion is refused where the next thing is another change's marker.
+
+   No edit leaves a marker right after an unescaped backslash, in the file or in any order of
+   decisions. Where the old text of a substitution ends in one and a marker of the edit follows
+   its closer, or text that ends in one is replaced by more than one substitution, so that
+   deciding the changes in another order gives the backslash back in front of a marker, the edit is
+   refused, in words that say so or name the change whose marker it is;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit. A renderer reads a marker next to a run as
@@ -761,6 +770,9 @@ middle of a paragraph it splits the paragraph.
   second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
   the break by itself and the new text, so that both views keep the break.
 - A table row that holds a marker is written with a leading `|`.
+- A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
+  HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
+  break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
 
 ### 3.3 Marks that start or end a block
 
@@ -789,7 +801,9 @@ The importer ships in April.
   (§2.6). Marks that start one block stand one after the other, each
   alone on its line. The closers of marks that end where the block starts may stand in front of
   the opener on its line (`<!--/k3x9--><!--del w2rf …-->`), which keeps a closer from starting a
-  line of its own. A closer never stands at the start of a line that has text after it. An edit
+  line of its own. A closer never stands at the start of a line that has text after it. (A closer alone on
+  a line, with nothing after it, is allowed: after a closing fence, and after the line break that a
+  change brings at the end of the document, §3.1.) An edit
   is widened until none would (§3.2), or refused. A decision that takes away the opener in front
   of a closer (accepting or rejecting the mark, or deleting a thread) leaves no more of them than
   the file had either: the closer of a comment or a highlight goes back to the end of the line
