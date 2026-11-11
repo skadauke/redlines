@@ -29,6 +29,7 @@ function mount(doc: string, tracking: boolean, notices: string[] = []): Editor {
 }
 
 function click(editor: Editor, index: number): void {
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   const box = editor.view.dom.querySelectorAll('.rl-box')[index];
   box?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
 }
@@ -298,6 +299,9 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
 
   /** The key, as CodeMirror's Mod-Shift-u (Ctrl in the test's platform). */
   function press(editor: Editor): void {
+    // Parsed to the end first: a busy machine stops the parse of an update early, and Check Item
+    // reads the items from the tree.
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
     runScopeHandlers(
       editor.view,
       new KeyboardEvent('keydown', {
