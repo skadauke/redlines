@@ -21,6 +21,7 @@ import {
 import { tableMarkerEnd } from '@redlines/format';
 import { viewModeField } from '../tracked/field.ts';
 import { type Cell, type Row, type Table, tablesField } from './model.ts';
+import { BR } from './stops.ts';
 
 /** What the layout builds for a state. */
 export interface Layout {
@@ -67,7 +68,6 @@ class BreakWidget extends WidgetType {
 const HIDDEN = Decoration.replace({});
 const FILLER = Decoration.widget({ widget: new FillerWidget(), side: 1 });
 const BREAK = Decoration.replace({ widget: new BreakWidget() });
-const BR = /<br\s*\/?>/gi;
 
 /** The data-align attribute of a cell, the delimiter row's alignment of its column. */
 function alignOf(table: Table, col: number): string {

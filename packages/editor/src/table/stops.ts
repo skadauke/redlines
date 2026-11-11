@@ -39,6 +39,19 @@ class StopAtom extends RangeValue {
 
 const ATOM = new StopAtom();
 
+/** A `<br>` in a cell's text, as the layout draws it: `<br>`, `<br/>` or `<br />`. */
+export const BR = /<br\s*\/?>/gi;
+
+/** The line breaks of a cell's text, as ranges of the document. */
+function breaksIn(state: EditorState, cell: Cell): { from: number; to: number }[] {
+  if (cell.textTo - cell.textFrom < 4) return [];
+  const text = state.sliceDoc(cell.textFrom, cell.textTo);
+  return [...text.matchAll(BR)].map((found) => ({
+    from: cell.textFrom + found.index,
+    to: cell.textFrom + found.index + found[0].length,
+  }));
+}
+
 /** The cells of a table that GFM shows, in order of the document. */
 function shownCells(table: Table): Cell[] {
   return table.rows.flatMap((row) => row.cells.filter((cell) => cell.col < table.columns));
@@ -62,6 +75,8 @@ export function stopAtoms(state: EditorState): RangeSet<StopAtom> {
       }
     }
     spans.push({ from: last.textTo, to: Math.min(state.doc.length, table.to + 1) });
+    // A line break is one atom: the caret never rests inside it.
+    for (const cell of cells) spans.push(...breaksIn(state, cell));
   }
   return RangeSet.of(
     spans.filter((span) => span.to > span.from).map((span) => ATOM.range(span.from, span.to)),
@@ -94,14 +109,19 @@ export function shownCellAt(state: EditorState, pos: number): { table: Table; ce
 /** Whether `pos` is a stop: in the text of a cell, ends included. Positions outside tables are. */
 export function isStop(state: EditorState, pos: number): boolean {
   const found = shownCellAt(state, pos);
-  return !found || (found.cell.textFrom <= pos && pos <= found.cell.textTo);
+  if (!found) return true;
+  if (pos < found.cell.textFrom || pos > found.cell.textTo) return false;
+  return !breaksIn(state, found.cell).some((br) => br.from < pos && pos < br.to);
 }
 
 /** `pos` if it is a stop, or the nearest stop of the nearest cell. */
 export function nearestStop(state: EditorState, pos: number): number {
   const found = shownCellAt(state, pos);
   if (!found) return pos;
-  return Math.min(Math.max(pos, found.cell.textFrom), found.cell.textTo);
+  const inCell = Math.min(Math.max(pos, found.cell.textFrom), found.cell.textTo);
+  // Inside a line break, the nearer end of it (the start, when they are as near).
+  const br = breaksIn(state, found.cell).find((b) => b.from < inCell && inCell < b.to);
+  return br ? (inCell - br.from <= br.to - inCell ? br.from : br.to) : inCell;
 }
 
 /**

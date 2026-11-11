@@ -182,4 +182,48 @@ describe('the caret in a table', () => {
     });
     expect(editor.view.state.doc.toString()).toContain('c<!--ins ');
   });
+
+  describe('a line break in a cell is one atom', () => {
+    for (const br of ['<br>', '<br/>', '<br />']) {
+      const doc = `| a | b |\n| - | - |\n| c${br}d | e |`;
+      const start = at(doc, 'c') + 1;
+      const end = start + br.length;
+
+      it(`${br}: the arrows step over it, and the caret never rests inside`, () => {
+        const editor = load(doc, start);
+        const seen: number[] = [];
+        for (let i = 0; i < 3; i++) {
+          press(editor, 'ArrowRight');
+          seen.push(head(editor));
+        }
+        expect(seen).toEqual([end, end + 1, at(doc, 'e')]);
+        for (let pos = start + 1; pos < end; pos++) {
+          expect(isStop(editor.view.state, pos)).toBe(false);
+        }
+        press(editor, 'ArrowLeft');
+        press(editor, 'ArrowLeft');
+        expect(head(editor)).toBe(end);
+        press(editor, 'ArrowLeft');
+        expect(head(editor)).toBe(start);
+      });
+
+      it(`${br}: Backspace and Delete next to it remove it whole`, () => {
+        const back = load(doc, end);
+        press(back, 'Backspace');
+        expect(back.view.state.doc.toString()).toBe(doc.replace(br, ''));
+        expect(head(back)).toBe(start);
+        const forward = load(doc, start);
+        press(forward, 'Delete');
+        expect(forward.view.state.doc.toString()).toBe(doc.replace(br, ''));
+      });
+
+      it(`${br}: a selection set inside it moves to its nearer end`, () => {
+        const editor = load(doc, start);
+        editor.view.dispatch({ selection: { anchor: start + 1 } });
+        expect(head(editor)).toBe(start);
+        editor.view.dispatch({ selection: { anchor: end - 1 } });
+        expect(head(editor)).toBe(end);
+      });
+    }
+  });
 });
