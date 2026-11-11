@@ -89,10 +89,10 @@ function rowBox(line: HTMLElement): { top: number; bottom: number } {
   };
 }
 
-/** What is measured of each table, kept until the text, the scroll or the table's place changes. */
+/** What is measured of each table, kept until the state (the text, the selection, a decoration), the scroll or the table's place changes. */
 const measured = new WeakMap<
   HTMLElement,
-  { doc: unknown; scroll: number; top: number; drawn: Drawn }
+  { state: unknown; scroll: number; top: number; drawn: Drawn }
 >();
 
 /**
@@ -118,7 +118,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
     const known = measured.get(wrapper);
     if (
       known &&
-      known.doc === view.state.doc &&
+      known.state === view.state &&
       known.scroll === view.scrollDOM.scrollTop &&
       known.top === box.top &&
       known.drawn.table === table
@@ -135,7 +135,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
       rects: lines.map(rowBox),
     };
     measured.set(wrapper, {
-      doc: view.state.doc,
+      state: view.state,
       scroll: view.scrollDOM.scrollTop,
       top: box.top,
       drawn: one,
