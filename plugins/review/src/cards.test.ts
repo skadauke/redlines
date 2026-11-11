@@ -580,6 +580,35 @@ describe('an inserted table row', () => {
     expect(what(editor)).toBe('Inserted 2 rows');
   });
 
+  const DELETED_ROW = file(
+    '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |\n\n<!--del g5nb row=2 \\| Pears \\| 5 \\|-->',
+    [...PEOPLE, 'marks:', '  g5nb: {by: bo, at: 2026-10-31T09:30Z}'],
+  );
+  const MOVED_ROW = file(
+    '| Fruit | Count |\n| ----- | ----- |\n| <!--ins h6nb row--> Plums | 7 |\n| Apples | 3 |\n\n<!--del j7nb row=3 \\| Plums \\| 7 \\|-->',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  h6nb: {by: bo, at: 2026-10-31T09:30Z, move: j7nb}',
+      '  j7nb: {by: bo, at: 2026-10-31T09:30Z, move: h6nb}',
+    ],
+  );
+
+  it('is described as Deleted row and Moved row, and a click on a ghost opens the card', async () => {
+    const deleted = parse(DELETED_ROW);
+    expect(describeChange(deleted, deleted.marks[0]!)).toBe('Deleted row');
+    const moved = parse(MOVED_ROW);
+    expect(describeChange(moved, moved.marks[0]!)).toBe('Moved row');
+    const { editor } = mount(DELETED_ROW);
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ghost');
+    expect(what(editor)).toBe('Deleted row');
+    const again = mount(MOVED_ROW);
+    again.editor.setViewMode('redlines');
+    await clickOn(again.editor, '.rl-ghost');
+    expect(what(again.editor)).toBe('Moved row');
+  });
+
   it('opens its card on a click on the row, and Accept writes the plain row', async () => {
     const { editor, decided } = mount(ONE, { real: true });
     editor.setViewMode('redlines');

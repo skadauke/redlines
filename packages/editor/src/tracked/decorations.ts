@@ -45,6 +45,7 @@ import {
   authorFacet,
   bodyEnd,
   isDrawnChange,
+  isRowDeletion,
   lineBreakMarksFacet,
   parsedField,
   peopleFacet,
@@ -278,7 +279,9 @@ function struckBlocks(
     return low;
   };
   for (const mark of parsed.marks) {
-    if (mark.kind !== 'del' || !isDrawnChange(mark) || absorbed.has(mark)) continue;
+    if (mark.kind !== 'del' || !isDrawnChange(mark) || isRowDeletion(mark) || absorbed.has(mark)) {
+      continue;
+    }
     const first = mark.segments[0];
     const last = mark.segments.at(-1);
     if (!first || !last || first.payload === undefined) continue;
@@ -415,7 +418,15 @@ function analyze(state: EditorState, kept: number | null): Model {
       const parts: Part[] = [];
       const { from, to } = segment.content;
       // A format change's payload is its operations, never deleted text.
-      if (markup && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
+      // A deleted row is drawn as a ghost row of its table (`table/ghosts.ts`), never as text.
+      if (
+        markup &&
+        change &&
+        mark.kind !== 'ins' &&
+        mark.kind !== 'fmt' &&
+        segment.payload &&
+        !isRowDeletion(mark)
+      ) {
         // A block drawn as a block takes its own bar, and leaves the lines around it alone.
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
         const text = redlines ? deletedText(segment.payload, marks) : '';
@@ -442,7 +453,10 @@ function analyze(state: EditorState, kept: number | null): Model {
       // tint and underline.
       if (markup && mark.kind === 'ins' && mark.payload === 'row') {
         parts.push({ text: '', className: '', color, change: true });
-        if (redlines) model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
+        if (redlines) {
+          const moved = mark.entry.move === undefined ? '' : ' rl-moved-row';
+          model.rows.push({ at: segment.open.from, className: `rl-ins-row${moved} ${author}` });
+        }
       }
       if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
@@ -1417,6 +1431,13 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     textUnderlineOffset: '3px',
     textDecorationSkipInk: 'none',
   },
+  // The new place of a moved row: a double underline.
+  '.rl-trow.rl-moved-row > .rl-tc': { textDecorationStyle: 'double' },
+  // A deleted row, a ghost at its place (`table/ghosts.ts`): struck text in the author's color on
+  // the author's tint; a moved row's old place has a double strikethrough. Not editable.
+  '.rl-trow.rl-ghost': { display: 'table-row', cursor: 'default', userSelect: 'none' },
+  '.rl-trow.rl-ghost > .rl-tc': { backgroundColor: 'var(--rl-color-tint)' },
+  '.rl-trow.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

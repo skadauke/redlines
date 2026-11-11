@@ -3,6 +3,7 @@
 // browser, into key handling. Add a row here for what the app does itself; a plugin's commands come
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
+import { baseTitle } from '@redlines/editor';
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
 
 export interface MenuCommands {
@@ -76,6 +77,8 @@ export interface MenuState {
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
   enabledCommands: readonly string[];
+  /** The editor's `EditorUiState.commandTitles`: the titles that count the selection. */
+  commandTitles: Readonly<Record<string, string>>;
   /** The editor's `EditorUiState.undo`: what Undo would take back, or null for nothing or no name. */
   undo: string | null;
   /** The editor's `EditorUiState.redo`. */
@@ -198,7 +201,10 @@ const SEPARATOR: StandardRow = { item: 'Separator' };
 function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRow {
   const { id } = command;
   return {
-    text: command.title,
+    text: baseTitle(command),
+    ...(typeof command.title === 'function'
+      ? { textFor: (state: MenuState) => state.commandTitles[id] ?? baseTitle(command) }
+      : {}),
     accelerator: command.shortcut ? acceleratorFor(command.shortcut) : undefined,
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,

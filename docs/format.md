@@ -1548,7 +1548,8 @@ as typed.
 
 - The payload `row` makes this a point form of `ins`, with no closer. An ordinary insertion opener
   never has a payload, so the two can't be confused. In an empty first cell, the marker stands
-  alone: `| <!--ins … row--> | 5 |`.
+  alone but for its space: `| <!--ins … row-->  | 5 |`, written with the space the cell's width asks for
+  after the marker's own.
 - The marker has no position, so a text merge can't attach it to the wrong row.
 - The row's own text carries no marks. Every character outside other people's marks belongs to
   the row's insertion, including text its author types later. Other people's typing, deletions
@@ -1586,14 +1587,45 @@ it, one per line:
   the delimiter row nor deleted rows count. Columns count from 1. A deletion names the position
   the row or column takes when restored. The serializer rewrites positions whenever the table
   changes, and several deletions at one position keep their order.
-- **Deleting a pending row:** if its author deletes it and nobody else's pending marks are inside,
-  the row is removed. Otherwise it becomes a tracked deletion of a pending insertion, as in Word,
-  with the row as written in the payload, marker escaped:
-  `<!--del m2bd row=2 \| <!-\-ins k3x9 row-\-> Pears \| 5 \|-->`.
-  Rejecting the deletion restores the pending row, and accepting it removes the row with every mark
-  in it. Rejecting the insertion removes both, and accepting it leaves an ordinary deleted row.
-- Pending marks inside a deleted row, column or table stay live inside the payload, escaped.
-  Rejecting the deletion restores them as pending; accepting it drops them.
+- **Rule 3, deleting a row with Track Changes on.** Another person's pending changes stay theirs. A
+  row with another person's pending change in it can't be deleted until that change is decided
+  ("Bo Chen's pending change is in this row. Decide it first."), and nor can a row that is another
+  person's pending insertion or move ("Bo Chen's inserted row is pending. Decide it first."). Your own
+  pending row is removed outright, as rejecting it would, and your own pending changes in a row you
+  delete fold into the deletion, which keeps the row as it reads with them rejected, as deleting your
+  own insertion removes it. Deleting your own moved row removes the row at its new place and leaves
+  the old place a plain deletion. With Track Changes off the row goes as text, and what was pending in
+  it goes with it.
+- **Rule 4, comments in a deleted row.** A comment in a row that leaves the table, deleted or
+  rejected, becomes a point comment at the start of the text of the first cell of the row below, or at
+  the end of the text of the last cell of the row above for the last row. A comment with a part that
+  stays loses only the part in the row, and one with an end in the row keeps its other end, the end
+  that left standing where the point goes. A highlight has no point form and goes.
+- **Order and positions.** The deletion lines are kept in the order of their positions, those at one
+  position in the order the rows had. A row is written back at its position when its deletion is
+  rejected, in front of the row that is at that position then; the deletions at the same position
+  that come after it move down with the rows below it, so that every order of decisions writes the
+  rows in the order they had. Deleting a row at index N takes the positions above N up by one;
+  writing one at N, inserted, restored or moved, takes those above N, and those of a row at N whose
+  line comes after it, down by one. A moved row's deletion counts the table with the row at its new
+  place in it, so that taking that row away and writing the deletion back puts the row where it was.
+- **Moving rows.** A row (or rows) moved to a boundary of the table (0 above the header, up to the
+  number of rows below the last) is written there as the row, in its current text, with the in-row
+  marker `<!--ins ID row-->`, and kept below the table as `<!--del ID2 row=N …-->` at its old place
+  (the row as it reads with every pending change in it rejected, comments left out); the ledger
+  links the two with `move`, each entry naming the other, and rows moved together share a `group`.
+  Another person's pending changes in the row travel with it, and so do comments, and what is typed in
+  it afterwards, by anyone, is a change like any other, because the row at its new place is a move and
+  no row of its own (typing in your own new row is part of the row's insertion, §3.7 above); their pending
+  insertion or move can't be moved. A row that is your own pending insertion is moved plainly. A row
+  moved to the top is the new header, the delimiter row following it in every state. Accepting a move
+  takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
+  typed in it since and its comments, and takes the deletion line away. Either half decides both. A
+  text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
+  row.
+- **The header.** A row inserted above the header is the new header, with the marker in its first
+  cell, and the old header the first body row; deleting the header makes the first body row the
+  header; the delimiter row follows the first row in every state.
 - A table keeps at least one row. Deleting the last one, or rejecting the insertion of the last
   one, is refused.
 - A text merge can leave a deletion's position stale, so that rejecting it would restore the row in
@@ -1641,11 +1673,14 @@ it, one per line:
   | An alignment change       | Any row change                            |
 
   Anything else is refused, and the refusal says what to decide first: "Accept or reject the column
-  changes in this table first." (or the row changes, or the alignment change). With Track Changes
-  off the same pairs are refused where a pending deletion or move would be left the wrong number of
-  cells, and the table allows what it allows with Track Changes on otherwise.
+  changes in this table first." (or the row changes, or the alignment change). Deleting or moving a
+  row is a row change that keeps the row as written, so it is refused with a column pending insertion
+  too (rejecting the column would leave the kept row a cell too long). With Track Changes off the
+  same pairs are refused where a pending deletion or move would be left the wrong number of cells,
+  and the table allows what it allows with Track Changes on otherwise.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
+- **An agent's `str_replace` over a table.** When the old and the new text hold the same table, with the text around it as it was, the two are compared as tables: rows are matched by their text, so an added row is a row insertion (with its cells), a removed one a deletion and a reordered one a move, and a row that stays with some cells changed gets word-by-word marks in them, all one group. An edit of cells alone is written as any edit in cells is. A replacement that changes rows and columns together is refused: "Make the row changes now and leave the column changes until the person has decided them." A change of columns alone is not compared yet.
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
   cells.
 - Pandoc's `markdown` reader gives a pipe table relative column widths once a line is longer than
@@ -1798,7 +1833,10 @@ Raw, with Track Changes off, the editor edits the source as written, markers inc
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
 no ledger entry, in the table's padding style (§3.7), and is refused where a pending column deletion
-or move would be left the wrong number of cells (the table of §3.7). Text typed in a row or a column
+or move would be left the wrong number of cells (the table of §3.7). Deleting and moving rows with
+it off takes them out and writes them again as text; what was pending in a deleted row goes, a
+moved row's changes go with it, and deleting the row at the new place of a pending move removes the
+move's deletion too. Text typed in a row or a column
 that is pending insertion is part of that insertion, as §3.7 says, so it goes if the row or column is
 rejected: the original has no cell to put it in, and so §3.10's rule that typed text is never part
 of a pending change does not hold there.
@@ -2417,16 +2455,29 @@ The library derives three read-only views of a document. None is ever stored.
   | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}
   ```
 
-  Accepting an inserted row removes the marker, and the space after it when text follows, so the
-  cell is as wide as it was written. Rejecting it removes the row with everything in it, other
+  Accepting an inserted row removes the marker and the one space after it, whatever the cell holds
+  (what follows must not decide, or deciding the row and a change in its cell would write different
+  bytes in different orders), and a new row is written with that space, so the cell is as wide as
+  its neighbors'. Rejecting it removes the row with everything in it, other
   people's changes included, and the line break before it, and moves the positions of the table's
-  deleted rows up. A new header is rejected by writing the delimiter row after the old header
-  again. Rejecting a row that holds a comment is refused for now ("Delete or resolve the comments
-  in this row first."): where the comment would stand is decided with deleted rows (§3.7).
-  Rejecting a row in a table that has row deletions pending is refused too ("Accept or reject the
-  row deletions in this table first."): the original view does not put a deleted row back in the
-  table yet. Reject all decides every other change and leaves such a row pending; Accept all
-  accepts it.
+  deleted rows up. A new header is rejected by writing the delimiter row after the next row, which
+  becomes the header. Comments in the row become point comments (§3.7, rule 4).
+
+  A deleted row (§3.7) is in the newest view not at all, its line and the blank line before the
+  deletion lines gone with it when it was the last, and in the original view at its position, the
+  inserted rows and the new places of moves gone. In the review view it is written back at its
+  place, each cell that has text deleted text, with a note after it (a deleted first row stands under
+  the header, whose place is kept); a moved row's notes say where from and to:
+
+  ```text
+  | {--Pears--} | {--5--} |{>>[g5nb bo] Deleted row<<}
+  | {++Plums++} | {++7++} |{>>[k3x9 ada] Moved row from row 4<<}
+  | {--Plums--} | {--7--} |{>>[w8nn ada] Moved row to row 2<<}
+  ```
+
+  Accepting a deleted row takes its line away, and the blank line before the deletion lines when it
+  was the last; rejecting it writes the row back at its position and takes the line away. Accept all
+  and Reject all decide rows and deletions with the other changes.
 
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.

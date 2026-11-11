@@ -412,7 +412,7 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
       rows,
       delimiter: { from: delimiterLine.start, to: delimiterLine.end },
       aligns,
-      deletions: deletionsOf(text, parsed, lastRow.to),
+      deletions: deletionsOf(text, parsed, Math.max(lastRow.to, delimiterLine.end)),
       padded: isPadded(text, rows, delimiterLine),
     });
     i = last - 1;
@@ -474,7 +474,7 @@ export function tableAt(text: string, parsed: Parsed, pos: number): TableRead | 
  * inserted row reads its tables for each. */
 const recent: { text: string; tables: TableRead[] }[] = [];
 
-function tablesOfText(text: string, parsed: Parsed): TableRead[] {
+export function tablesOfText(text: string, parsed: Parsed): TableRead[] {
   const known = recent.find((entry) => entry.text === text);
   if (known) return known.tables;
   const tables = readTables(text, parsed);
@@ -517,9 +517,8 @@ export function insertedRows(text: string, parsed: Parsed): InsertedRow[] {
       const cell = row.cells[0];
       const open = read?.segments[0]?.open;
       if (!mark || !cell || !open) return;
-      const after = text.slice(open.to, cell.textTo > open.to ? cell.textTo : open.to);
       let to = open.to;
-      if (/\S/.test(after) && /^[ \t]/.test(after)) to++;
+      if (open.to < cell.to && /^[ \t]/.test(text.charAt(open.to))) to++;
       const before = index <= 1 ? table.delimiter.to : (table.rows[index - 1]?.to ?? row.from);
       found.push({
         mark,

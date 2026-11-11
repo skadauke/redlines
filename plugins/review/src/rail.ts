@@ -64,8 +64,7 @@ import {
   editContext,
   element,
   errorLine,
-  insertedRows,
-  isRowInsertion,
+  rowsDone,
   openerEnd,
   readable,
   type ReviewContext,
@@ -1136,7 +1135,8 @@ interface ChangeShown {
 }
 
 function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
-  if (isRowInsertion(change)) return { old: '', added: insertedRows(1) };
+  const row = rowsDone([change]);
+  if (row !== null) return { old: '', added: row };
   const { old, added, label } = changeTexts(parsed, change);
   // A format change names what it did: `Bold`.
   if (label !== undefined) return { old: '', added: label };
@@ -1145,9 +1145,8 @@ function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
 
 /** What each change of a suggestion did, in order. */
 function changesShown(parsed: Parsed, changes: readonly MarkRange[]): ChangeShown[] {
-  if (changes.length > 1 && changes.every(isRowInsertion)) {
-    return [{ old: '', added: insertedRows(changes.length) }];
-  }
+  const rows = changes.length > 1 ? rowsDone(changes) : null;
+  if (rows !== null) return [{ old: '', added: rows }];
   return changes.map((change) => changeShown(parsed, change));
 }
 
