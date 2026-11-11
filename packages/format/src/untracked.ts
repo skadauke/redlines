@@ -37,7 +37,13 @@ import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import { editMoveCopy } from './table-move-edit.ts';
-import { checkTableEdits, inMovedCol, movedCopyAt } from './table-rules.ts';
+import {
+  checkTableEdits,
+  inMovedCol,
+  movedCopyAt,
+  outerPipeWrites,
+  throughPipes,
+} from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
@@ -431,6 +437,24 @@ function edited(
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
   checkTableEdits(text, [{ ...edit, insert: typed }], parsed);
+  // A deletion that takes all the text of a bare row's first or last cell needs the row's outer pipe,
+  // written plain, or the table loses a cell (format §3.7, rule 7).
+  const pipes = half ? [] : outerPipeWrites(text, { ...edit, insert: typed }, parsed);
+  if (pipes.length > 0) {
+    const through = throughPipes(
+      pipes,
+      edit,
+      (shifted) => {
+        const written = applyChanges(
+          text,
+          pipes.map(({ at, insert }) => ({ from: at, to: at, insert })),
+        );
+        return edited(written, shifted, ctx, false);
+      },
+      text,
+    );
+    return through.changes;
+  }
   // A cell of a pending move's copy: the edit is written in both halves of the move.
   const copy = half ? null : movedCopyAt(text, { ...edit, insert: typed }, parsed);
   if (copy) return editMoveCopy(text, parsed, edit, ctx, copy);

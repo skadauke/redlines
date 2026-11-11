@@ -1626,6 +1626,13 @@ it, one per line:
   front of it first, in both versions, so that nothing reads differently. This holds for a row with
   no pipe at all too (the first under the delimiter row, say). A format change in a row without one
   is still refused.
+  The same is written when an edit takes all the text of the first cell of a row that has no leading
+  pipe, or of the last cell of one that has no trailing pipe (a deletion, tracked or not): the pipe
+  beside the cell would become the row's outer pipe, the row would have a cell less, a header one
+  too few for the delimiter row, and the table would be none. The editor writes `| ` in front of the
+  first cell or ` |` after the last, plain, in both versions, and the table reads as it did with the
+  cell empty, in every order of decisions. An edit that takes only part of the text, or replaces it,
+  writes nothing.
 - **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:

@@ -11,7 +11,7 @@
 import { lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { readTables } from './table.ts';
+import { readLine, readTables } from './table.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
 import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
@@ -508,4 +508,101 @@ export function commentFromAbove(
     }
   }
   return null;
+}
+
+/** A pipe written plain beside an edit (format §3.7, rule 7): where, what, and whether text at that
+ * place stays after it (a leading pipe) or before it (a trailing one). */
+export interface PipeWrite {
+  at: number;
+  insert: string;
+  leading: boolean;
+}
+
+/**
+ * The outer pipes an edit needs so that a table keeps its cells (format §3.7, rule 7). A row of a table
+ * with no leading pipe starts with its first cell's text, and one with no trailing pipe ends with its
+ * last cell's: an edit that takes all the text of that cell away (a deletion, tracked or not) would leave
+ * the pipe beside it at the edge of the row, where GFM reads it as the row's own and the row has a cell
+ * less, a header one too few for the delimiter row, and the table is none. A pipe is written plain, in
+ * both versions, in its place: `| ` in front of the first cell, ` |` after the last. Empty when the edit
+ * takes some other text, replaces, or is in no such row. Looks at the edited line first, and at the
+ * tables only when that line could be one.
+ */
+export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed): PipeWrite[] {
+  if (edit.from === edit.to || edit.insert.trim() !== '' || !text.includes('|')) return [];
+  const start = lineStart(text, edit.from);
+  const end = lineEnd(text, edit.from);
+  if (edit.to > end) return [];
+  const line = readLine(text, start, end);
+  if (line.lone || line.cells.length < 2) return [];
+  // The cell's text is all in the edit, and none of it is a mark.
+  const emptied = (index: number): boolean => {
+    const cell = line.cells[index];
+    if (!cell) return false;
+    const content = text.slice(cell.contentFrom, cell.contentTo);
+    if (content.trim() === '' || content.includes('<!--')) return false;
+    const first = cell.contentFrom + (content.length - content.trimStart().length);
+    const last = cell.contentTo - (content.length - content.trimEnd().length);
+    return edit.from <= first && last <= edit.to;
+  };
+  const writes: PipeWrite[] = [];
+  if (!line.leadingPipe && emptied(0)) writes.push({ at: start, insert: '| ', leading: true });
+  if (!line.trailingPipe && emptied(line.cells.length - 1)) {
+    writes.push({ at: end, insert: ' |', leading: false });
+  }
+  if (writes.length === 0) return [];
+  // Only a row of a table has cells.
+  const table = tablesIn(text, parsed).find((t) => t.from <= start && end <= t.to);
+  const row = table?.rows.find((r) => r.from === start);
+  return row ? writes : [];
+}
+
+/** A position of a text after `writes` are made in it. Text at the place of a leading pipe moves after
+ * it, text at a trailing one stays before it. */
+export function pipeShifted(writes: readonly PipeWrite[], at: number): number {
+  return (
+    at +
+    writes
+      .filter((write) => (write.leading ? write.at <= at : write.at < at))
+      .reduce((sum, write) => sum + write.insert.length, 0)
+  );
+}
+
+/** The edit `edit` of a text as an edit of the text after `writes`, and the changes that edit then
+ * makes there as changes of the text before them, with the pipes written first. */
+export function throughPipes(
+  writes: readonly PipeWrite[],
+  edit: TextChange,
+  make: (edit: TextChange) => TextChange[],
+  text: string,
+): { text: string; changes: TextChange[] } {
+  const sorted = writes.toSorted((a, b) => a.at - b.at || Number(b.leading) - Number(a.leading));
+  let written = text;
+  let offset = 0;
+  for (const write of sorted) {
+    const at = write.at + offset;
+    written = written.slice(0, at) + write.insert + written.slice(at);
+    offset += write.insert.length;
+  }
+  const done = make({
+    ...edit,
+    from: pipeShifted(sorted, edit.from),
+    to: pipeShifted(sorted, edit.to),
+  });
+  const back = (at: number) => {
+    let shift = 0;
+    let passed = 0;
+    for (const write of sorted) {
+      if (write.at + shift + write.insert.length <= at) passed += write.insert.length;
+      shift += write.insert.length;
+    }
+    return at - passed;
+  };
+  const changes: TextChange[] = sorted.map(({ at, insert }) => ({ from: at, to: at, insert }));
+  for (const change of done)
+    changes.push({ ...change, from: back(change.from), to: back(change.to) });
+  return {
+    text: written,
+    changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to),
+  };
 }
