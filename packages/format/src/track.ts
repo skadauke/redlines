@@ -2606,7 +2606,11 @@ function plainBreakAt(
   let at: number | undefined;
   let found = blocks.find((b) => b.start <= after && after <= lineStart(text, b.end));
   const original = (from: number, to: number) => originalBetween(plan, from, to);
-  if (found) at = position;
+  // The end of the closing fence of code in a container (the block reading of the breaks does not
+  // see it): the break after it is between two blocks.
+  const fenceEnd = !skip && position === lineEnd(text, position) && endsFenceAt(plan, position);
+  if (fenceEnd) at = position;
+  else if (found) at = position;
   else {
     // At the end of the last line of a block, with only markers after it on that line, and no
     // text of the original in them: the block would go on in the original text.
@@ -2939,6 +2943,15 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
 
 /** Container markers that each stand no more than three columns in: a quote's, a list item's. */
 const OPENERS = /^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]{1,4}))*/;
+
+/** Whether the line that holds `position` is the closing line of a fenced block, in a container. */
+function endsFenceAt(plan: Plan, position: number): boolean {
+  const end = lineEnd(plan.text, position);
+  const verbatim = (plan.verbatim ??= scan(plan.text).verbatim);
+  return verbatim.some(
+    (range) => range.kind === 'fence' && (range.to === end || range.to === end + 1),
+  );
+}
 
 /**
  * The quote that the line holding `position` is a line of, as a renderer reads the blocks, or
@@ -3719,7 +3732,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     const marked = breaks && lines.some((line) => line.includes('>'));
     const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;
     let quoted =
-      quote !== undefined && (quoteEndsAt(text, from) || blankQuoteLineAfter(text, from, quote));
+      quote !== undefined &&
+      (quoteEndsAt(text, from) ||
+        blankQuoteLineAfter(text, from, quote) ||
+        // After the closing fence of code, the quote goes on with the text under it, and the blank
+        // lines of the break are blank lines of the quote between two of its blocks.
+        endsFenceAt(plan, from));
     const plain =
       breaks &&
       lines.every((line) => {
@@ -4069,7 +4087,11 @@ function selfCheck(
   const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
   const was = lf(views.original(text).text);
   const is = lf(views.original(after).text);
-  const quiet = (s: string) => blank(withoutQuoteEnds(withoutQuoteRuns(s)));
+  // Blank lines of a quote right under a fence line: between a block of code and the block under
+  // it, which no reader sees.
+  const underFence = (s: string) =>
+    s.replace(/^([ \t>]*(?:`{3,}|~{3,})[ \t]*\n)(?:[ \t]*>[ \t>]*\n)+/gm, '$1');
+  const quiet = (s: string) => blank(underFence(withoutQuoteEnds(withoutQuoteRuns(s))));
   const quietly = () => {
     const [a, b] = differingBlocks(is, was);
     return quiet(a) === quiet(b);

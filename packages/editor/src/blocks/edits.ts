@@ -598,20 +598,30 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   } else {
     insert = `\n${blankOf(cont)}\n${cont}`;
   }
+  const caret = at + insert.length;
+  let merged = false;
   changes.push({ from: at, insert });
   if (!isAlertLine(state, block) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';
-    changes.push({ from: last.to + 1, insert: `${below}\n` });
+    // Under code that is one insertion at the end of its closing line (the same text): the
+    // format writes it as one break there, where two edits would part a quote or an item.
+    if (block.kind === 'code' && last.to < state.doc.length) {
+      changes[0] = { from: at, insert: `${insert}\n${below}` };
+      merged = true;
+    } else changes.push({ from: last.to + 1, insert: `${below}\n` });
   }
   return {
     changes,
-    selection: EditorSelection.single(at + insert.length),
+    selection: EditorSelection.single(caret),
     userEvent: 'input.break',
+    ...(merged ? { caretAfterText: { from: at, text: insert } } : {}),
     open: {
       at,
       assoc: 1,
+      // The merged insertion ends on the blank line below the empty one.
+      ...(merged ? { up: 1 } : {}),
       pressedIn: { from: block.lines.from, to: block.lines.to },
     },
   };

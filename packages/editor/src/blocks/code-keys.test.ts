@@ -441,3 +441,33 @@ describe('Return at the end of code in a quote (fix round 1)', () => {
     });
   }
 });
+
+describe('Return at the end of a closing fence with text right under it (fix round 2)', () => {
+  const docs: [string, string][] = [
+    ['at the top level', 'Intro.⏎⏎```js⏎let a = 1;⏎```‸⏎After.'],
+    ['in a quote', '> ```js⏎> let a = 1;⏎> ```‸⏎> After.'],
+    ['in a quote in a quote', '> > ```js⏎> > let a = 1;⏎> > ```‸⏎> > After.'],
+    ['in a list item', '- item⏎⏎  ```js⏎  let a = 1;⏎  ```‸⏎  After.'],
+  ];
+  for (const [where, doc] of docs) {
+    describe(where, () => {
+      scriptRows(
+        both([
+          {
+            name: 'Return opens the empty paragraph, which is not in the file',
+            doc,
+            off: { file: doc.replace('‸', '') },
+            on: { file: doc.replace('‸', '') },
+          },
+          {
+            name: 'Return, then a letter, writes the letter between the fence and the text',
+            doc,
+            keys: ['Enter', { type: 'X' }],
+            off: {},
+            on: {},
+          },
+        ]),
+      );
+    });
+  }
+});
