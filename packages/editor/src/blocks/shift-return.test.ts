@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// Shift-Return, Return in tables and at the end of an HTML block, and the Option variants (design:
-// block editing, "Shift-Return" and "Code, tables, front matter, HTML blocks and rules"), with
+// Shift-Return, Return at the end of an HTML block, and the Option variants (design:
+// block editing, "Shift-Return" and "Code, tables, front matter, HTML blocks and rules"; Return in a
+// table cell is `table/cell-edit.test.ts`), with
 // Track Changes off and on. A hard break is a backslash and a line break.
 import { describe } from 'vitest';
 import { type Script, scriptRows, type Step } from './script.ts';
@@ -45,13 +46,6 @@ const same = (caret: string) => ({ off: { caret }, on: { caret } });
 /** The design's: Backspace right after a Return over a selection joins, the text stays deleted. */
 const SELECTION_TAKE_BACK =
   'Backspace right after a Return over a selection joins the blocks again and leaves the deleted text deleted';
-
-const TABLE = '| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | 4 |';
-
-/** Return in a table row only moves the caret: Backspace after it is in the row below. */
-const MOVES_ONLY = {
-  'take-back': 'Return in a table row writes nothing: there is nothing to take back',
-};
 
 const ALREADY = 'There is a line break here already. Return starts a new paragraph.';
 
@@ -178,13 +172,6 @@ describe('Shift-Return', () => {
         on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
       },
       {
-        name: 'in a table cell: refused',
-        doc: '| a | b |⏎| - | - |⏎| 1‸ | 2 |',
-        keys: ['Shift-Enter'],
-        off: { refusal: 'A table cell is one line in Markdown.' },
-        on: { refusal: 'A table cell is one line in Markdown.' },
-      },
-      {
         name: 'in code: a line break, as Return (refused in code with Track Changes on)',
         doc: '```⏎co‸de⏎```',
         keys: ['Shift-Enter'],
@@ -209,31 +196,9 @@ describe('Shift-Return', () => {
   );
 });
 
-describe('Return in a table and after an HTML block', () => {
+describe('Return after an HTML block', () => {
   scriptRows(
     both([
-      {
-        name: 'in a row: the same cell of the row below, nothing written',
-        doc: TABLE.replace('2 |⏎', '2‸ |⏎'),
-        keys: ['Enter'],
-        ...same('| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | ‸4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
-      },
-      {
-        name: 'in the header row: past the delimiter row, to the first row',
-        doc: TABLE.replace('| b |', '| b‸ |'),
-        keys: ['Enter'],
-        ...same('| a | b |⏎| - | - |⏎| 1 | ‸2 |⏎| 3 | 4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
-      },
-      {
-        name: 'at the end of the last row: an empty paragraph after the table',
-        doc: `${TABLE}‸⏎⏎After.`,
-        keys: ['Enter'],
-        ...same(`${TABLE}⏎⏎‸⏎⏎After.`),
-      },
       {
         name: "at the end of an HTML block's last line: an empty paragraph after it",
         doc: '<div>⏎hi⏎</div>‸⏎⏎After.',

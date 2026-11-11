@@ -257,7 +257,7 @@ Redlines covers everything in the Markdown Guide's
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
-- **Table cells** with line breaks and lists.
+- **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
@@ -511,12 +511,41 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   selects the row or column; dragging moves it to any position, including the last.
 - **Selection:** rectangles of cells, whole rows and whole columns. Delete clears every selected
   cell, and menus count the selection ("Delete 2 rows").
-- **Pasting** a spreadsheet range into cells grows the table.
+- **Pasting** a spreadsheet range into cells grows the table (with selecting and copying cells, the
+  second stage of the table work).
 - **Tracked changes look as in Word:** inserted rows and columns tinted, deleted ones shown as
   struck-through ghosts, and moves with Word's double underline and double strikethrough. Word
   draws moves in green; Redlines draws them in the author's color, because color means a person
   (§6.6). Unlike in Google Docs, a move can be suggested, and new empty cells are tinted.
 - **Edits to the source are minimal.** A table is never re-padded unless you ask.
+- **A table stays its source, and is drawn as a table.** A block wrapper is the table, each line a
+  row, each cell a mark; pipes, padding and the delimiter row are hidden, and the caret steps over
+  them, stopping only in cells. Raw shows the source. A table inside a quote or a list item stays
+  source. Column widths are computed from every row and held while the caret is in the table; a
+  table never reaches past the text column, and scrolls sideways in its own box.
+- **Typing in a cell.** Return and ⇧Return write a line break in the cell (`<br>`, drawn as a line
+  break and deleted by one ⌫); ⌫ at a cell's start and ⌦ at its end do nothing, so cells never
+  merge and the table keeps its shape; a typed `|` is written `\|`, and text pasted or dropped on a
+  cell goes in as its text. A cell is one line of the file, and the format refuses an edit that
+  adds, takes away or splits a cell (format §3.7).
+- **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
+  above or below at the same x (an empty cell too), and out of the table at its first and last
+  row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
+  Docs keep one). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
+  adds a row; ⌘↩ is Insert Row Below, in the Table menu. To leave the table by keyboard, press
+  Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
+  (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
+  in a cell lands in that cell, also in an empty one.
+- **A selection that reaches into a table** from outside it clears the cells of the rows it reaches
+  and deletes the text outside the table as a selection is deleted, never joining across the
+  table; one that covers a whole table deletes it as a block. Delete, Backspace, Return and typing
+  all work, the last two writing after the deleting. The reached cells are drawn in the system's
+  selection color.
+- **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
+  take the author's tint and its text is underlined in the author's color, with a change bar on the
+  row; Clean shows the plain row. The review bar, the cards ("Inserted row", "Inserted 2 rows") and
+  the notes list it, and Accept and Reject decide it. Row and column deletions, moves and the rest
+  of the commands in the list above arrive in the later stages.
 
 ### 5.9 Command palette and shortcuts
 
@@ -541,6 +570,9 @@ menus, shortcuts, the palette, plugins and agents.
 | Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
+| In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
+| In a table: insert row below   | ⌘↩                                                                                            | Ctrl+Enter                |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
@@ -676,7 +708,8 @@ syntax Markdown needs, and never shows them.
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
 Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
 spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
-table; and Return in a table moves to the cell below, until tables are edited as tables.
+table; and Return in a table cell writes a line break in the cell (`<br>`), as the other word
+processors start a new paragraph there (§5.8).
 
 ## 6. Architecture
 
@@ -774,14 +807,14 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `agents` and the three
-providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `tables` (the Table menu), `agents` and
+the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
 | `review`     | The review bar, change cards, the comment rail and the Changes tab           | Document data, for drafts  |
-| `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
+| `tables`     | Table editing: the Table menu now; grips, selection, moves, pasting ranges to come | —                    |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
 | `code`       | Syntax colors in code blocks                                                 | —                          |

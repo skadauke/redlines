@@ -58,6 +58,7 @@ function userName(event: string | null): string | null {
   // Return and Shift-Return, which the Mac's own apps name with the typing around them.
   if (is(event, 'input.break')) return 'Typing';
   if (is(event, 'input.paste')) return 'Paste';
+  if (is(event, 'table.insert.row')) return 'Insert Row';
   if (is(event, 'input.drop') || is(event, 'move.drop')) return 'Drag';
   if (is(event, 'format') || is(event, 'input.format')) return 'Formatting';
   if (is(event, 'input.replace.all')) return 'Replace All';

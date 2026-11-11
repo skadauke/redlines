@@ -518,17 +518,19 @@ Starts only when #167 has merged (`gh pr list`/`git log origin/main`); if not, d
 - [ ] **Step 4: Run** — PASS; gate.
 - [ ] **Step 5: Commit** `Editor: Return and Tab in code (#168)`.
 
-### Task 6.3: Tables and front matter
+### Task 6.3: Front matter
+
+(Tables' Return, Tab and new row are the tables plan's Tasks 1.11 and 1.12, which replace them: struck here.)
 
 **Files:**
 - Modify: `packages/editor/src/blocks/edits.ts`, `packages/editor/src/blocks/keys.ts`
-- Test: `packages/editor/src/blocks/table-keys.test.ts`
+- Test: `packages/editor/src/blocks/front-matter-keys.test.ts`
 
-- [ ] **Step 1: Write the failing tests**: Return in a table row moves to the same cell of the row below, on the last row adds a new row (shown), on an empty last row leaves the table (the row goes, an empty paragraph opens); Tab to the next cell, in the last cell a new row, Shift-Tab the cell before; Return in front matter is a line break with the line's indentation; Tab in front matter inserts two spaces; with Track Changes on front matter edits are refused with format §3.8's words; End of front matter's closing line opens an empty paragraph at the start of the body.
+- [ ] **Step 1: Write the failing tests**: Return in front matter is a line break with the line's indentation; Tab in front matter inserts two spaces; with Track Changes on front matter edits are refused with format §3.8's words; End of front matter's closing line opens an empty paragraph at the start of the body.
 - [ ] **Step 2: Run** — FAIL.
 - [ ] **Step 3: Implement**.
 - [ ] **Step 4: Run** — PASS; gate.
-- [ ] **Step 5: Commit** `Editor: Return and Tab in tables and front matter (#168)`.
+- [ ] **Step 5: Commit** `Editor: Return and Tab in front matter (#168)`.
 
 **STAGE 6 ENDS HERE. PR, merge.**
 

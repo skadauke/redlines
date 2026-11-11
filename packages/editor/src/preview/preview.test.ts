@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
@@ -355,98 +354,14 @@ describe('markdownPreview', () => {
   });
 
   describe('tables', () => {
-    const doc = 'Intro\n\n| Name | Score |\n| --- | ---: |\n| Ada | **12** |\n\nEnd';
-    const table = { from: 7, to: doc.indexOf('\n\nEnd') };
-
-    it('renders a table as a widget away from the caret', () => {
-      const editor = editorAt(doc, 0);
-      const widgets = decorations(editor).filter((d) => d.block);
-      expect(widgets.map((d) => [d.from, d.to])).toEqual([[table.from, table.to]]);
-
-      const rendered = editor.view.contentDOM.querySelector('table');
-      expect([...rendered!.querySelectorAll('th')].map((th) => th.textContent)).toEqual([
-        'Name',
-        'Score',
-      ]);
-      expect(rendered!.querySelector('td .rl-strong')?.textContent).toBe('12');
-      expect(rendered!.querySelectorAll('td')[1]!.style.textAlign).toBe('right');
-    });
-
-    it('shows the source, pipes in the syntax color, with the caret inside', () => {
-      const editor = editorAt(doc, table.from + 3);
+    it('draws no widget for a table: its source is laid out as one (table/layout.ts)', () => {
+      const editor = editorAt(
+        'Intro\n\n| Name | Score |\n| --- | ---: |\n| Ada | **12** |\n\nEnd',
+        0,
+      );
       expect(decorations(editor).filter((d) => d.block)).toEqual([]);
       expect(editor.view.contentDOM.querySelector('table')).toBeNull();
-      expect(classed(editor, 'rl-syntax')).toContainEqual([table.from, table.from + 1]);
-      expect(classed(editor, 'rl-syntax')).toContainEqual([
-        doc.indexOf('| ---'),
-        doc.indexOf('\n| Ada'),
-      ]);
-    });
-
-    it('puts the caret in the table when it is clicked', () => {
-      const editor = editorAt(doc, 0);
-      const cell = editor.view.contentDOM.querySelectorAll('td')[0]!;
-      cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-      expect(editor.view.state.selection.main.head).toBe(doc.indexOf('Ada') + 3);
-      expect(editor.view.contentDOM.querySelector('table')).toBeNull();
-    });
-
-    it('ignores other buttons and modified clicks', () => {
-      const editor = editorAt(doc, 0);
-      const cell = editor.view.contentDOM.querySelectorAll('td')[0]!;
-      for (const init of [
-        { button: 2 },
-        { shiftKey: true },
-        { metaKey: true },
-        { ctrlKey: true },
-      ]) {
-        const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, ...init });
-        cell.dispatchEvent(event);
-        // The browser's own handling would move the caret to the table's edge.
-        expect(event.defaultPrevented).toBe(true);
-      }
-      expect(editor.view.state.selection.main.head).toBe(0);
-      expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
-    });
-
-    describe('from the keyboard', () => {
-      const keyDoc = 'Intro line\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nEnd line';
-      const keyTable = { from: 12, to: 41 };
-      const press = (editor: Editor, key: string) =>
-        runScopeHandlers(editor.view, new KeyboardEvent('keydown', { key }), 'editor');
-
-      it.each([
-        ['ArrowDown', 11, keyTable.from],
-        ['ArrowRight', 11, keyTable.from],
-        ['ArrowUp', 42, keyTable.to],
-        ['ArrowLeft', 42, keyTable.to],
-      ])('%s from next to the table enters it', (key, from, to) => {
-        const editor = editorAt(keyDoc, from);
-        expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
-        expect(press(editor, key)).toBe(true);
-        expect(editor.view.state.selection.main.head).toBe(to);
-        expect(editor.view.contentDOM.querySelector('table')).toBeNull();
-      });
-
-      it('leaves other movement to the editor', () => {
-        const head = (editor: Editor) => editor.view.state.selection.main.head;
-        const editor = editorAt(keyDoc, 5);
-        press(editor, 'ArrowRight');
-        expect(head(editor)).toBe(6);
-        editor.view.dispatch({ selection: { anchor: 46 } });
-        press(editor, 'ArrowLeft');
-        expect(head(editor)).toBe(45);
-      });
-
-      it.each([
-        ['ArrowDown', 5, keyTable.from],
-        ['ArrowUp', 46, keyTable.to],
-      ])('%s from the line beside it enters it, past the hidden blank line', (key, from, to) => {
-        // The blank line between is hidden, so the line above or below is next to the table.
-        const editor = editorAt(keyDoc, from);
-        expect(press(editor, key)).toBe(true);
-        expect(editor.view.state.selection.main.head).toBe(to);
-      });
+      expect(editor.view.contentDOM.querySelectorAll('.rl-trow')).toHaveLength(2);
     });
   });
 

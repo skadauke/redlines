@@ -406,7 +406,8 @@ describe('the text sent to the host', () => {
   });
 });
 
-const TABLE = '| a | b |\n| - | - |\n| 1 | teh |';
+const HEADING = '# Hello teh now';
+const IN_HEADING = HEADING.indexOf('teh') + 3;
 
 describe('a Return that asks nothing', () => {
   const asks = (doc: string, caret?: number, view?: EditorOptions['view']) => {
@@ -482,9 +483,9 @@ describe('a Return that asks nothing', () => {
   });
 
   it('for a break after an Enter that made none, however the next transaction comes', () => {
-    // Shift-Return in a table cell is refused: the key makes no break, only a notice.
-    const { editor, correctWord } = load(TABLE, { tracking: false });
-    editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+    // Shift-Return in a heading is refused: the key makes no break, only a notice.
+    const { editor, correctWord } = load(HEADING, { tracking: false });
+    editor.view.dispatch({ selection: { anchor: IN_HEADING } });
     editor.view.contentDOM.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: 'Enter',
@@ -493,19 +494,19 @@ describe('a Return that asks nothing', () => {
         cancelable: true,
       }),
     );
-    expect(docText(editor)).toBe(TABLE);
+    expect(docText(editor)).toBe(HEADING);
     expect(correctWord).not.toHaveBeenCalled();
     // The key's lost key up, and then a break from anywhere, or a pasted line break.
     editor.view.dispatch({
-      changes: { from: TABLE.indexOf('teh') + 3, insert: '\n\n' },
+      changes: { from: IN_HEADING, insert: '\n\n' },
       userEvent: 'input.break',
     });
     expect(correctWord).not.toHaveBeenCalled();
   });
 
   it('for a pasted line break after an Enter that made none', () => {
-    const { editor, correctWord } = load(TABLE, { tracking: false });
-    editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+    const { editor, correctWord } = load(HEADING, { tracking: false });
+    editor.view.dispatch({ selection: { anchor: IN_HEADING } });
     editor.view.contentDOM.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: 'Enter',
@@ -515,7 +516,7 @@ describe('a Return that asks nothing', () => {
       }),
     );
     editor.view.dispatch({
-      changes: { from: TABLE.indexOf('teh') + 3, insert: '\n' },
+      changes: { from: IN_HEADING, insert: '\n' },
       userEvent: 'input.paste',
     });
     expect(correctWord).not.toHaveBeenCalled();

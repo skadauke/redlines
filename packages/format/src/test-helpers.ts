@@ -608,6 +608,8 @@ export interface Leaf {
   chain: string[];
   kind: string;
   text: string;
+  /** For a table: the rendered text of each cell, row by row, the header row first. */
+  rows?: string[][];
 }
 
 /**
@@ -656,6 +658,7 @@ export function blockLeaves(text: string): Leaf[] {
           chain: [...stack],
           kind: 'table',
           text: table.map((row) => row.join(' | ')).join(' || '),
+          rows: table,
         });
         table = undefined;
       } else if (tag === 'tr' && slash !== '/') table.push([]);

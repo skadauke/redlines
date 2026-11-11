@@ -2245,6 +2245,61 @@ describe('composition', () => {
     expect(editor.getDoc()).toBe(doc);
   });
 
+  describe('a pipe composed in a table cell is written as \\|, as a typed one is', () => {
+    const doc = '| a | b |\n| - | - |\n| one | two |\n';
+    const finish = async (editor: Editor) => {
+      composing(editor, false);
+      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      await tick();
+    };
+
+    for (const tracking of [true, false]) {
+      it(`at the end of the composition, Track Changes ${tracking ? 'on' : 'off'}`, async () => {
+        const at = doc.indexOf('one') + 1;
+        const notices: string[] = [];
+        const editor = load(doc, {
+          tracking,
+          ids: ['q4gt'],
+          onNotice: (message) => notices.push(message),
+        });
+        composing(editor, true);
+        compose(editor, at, at, '¨', true);
+        compose(editor, at, at + 1, '|');
+        await tick();
+        await finish(editor);
+        // Never refused, never taken back.
+        expect(notices).toEqual([]);
+        expect(docText(editor)).toContain(
+          tracking ? 'o<!--ins q4gt-->\\|<!--/q4gt-->ne' : 'o\\|ne',
+        );
+        expect(docText(editor)).not.toContain('o|ne');
+        expect(docText(editor)).not.toContain('<!--ins q4gt-->|');
+        const parsedRows = newestView(editor.getDoc()).text.split('\n');
+        expect(parsedRows[2]).toBe('| o\\|ne | two |');
+        undo(editor.view);
+        expect(editor.getDoc()).toBe(doc);
+      });
+    }
+
+    it('leaves a pipe that is escaped already, and text outside a cell', async () => {
+      const at = doc.indexOf('one') + 1;
+      const editor = load(doc, { tracking: false });
+      editor.view.dispatch({ changes: { from: at, insert: '\\' } });
+      composing(editor, true);
+      compose(editor, at + 1, at + 1, '|', true);
+      await tick();
+      await finish(editor);
+      expect(docText(editor)).toContain('o\\|ne');
+      expect(docText(editor)).not.toContain('\\\\|');
+      const prose = load('Hello world.\n', { tracking: false });
+      composing(prose, true);
+      compose(prose, 5, 5, '|', true);
+      await tick();
+      await finish(prose);
+      expect(prose.getDoc()).toBe('Hello| world.\n');
+    });
+  });
+
   it('puts composed text that Track Changes refuses back as it was', async () => {
     const notices: string[] = [];
     const doc = 'Run `make` now.\n';

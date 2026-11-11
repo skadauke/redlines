@@ -59,6 +59,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
+import { checkTableEdits, inOwnInsertedRow, leadingPipeAt, tableStartsAt } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -1700,6 +1701,14 @@ function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
 
+/** Whether `where`, the start of a deletion from `from` to `to`, is the first row of a table that
+ * the deletion covers whole: a table is deleted as a block (format §3.4, §3.7). */
+function coversTable(plan: Plan, where: number, from: number, to: number): boolean {
+  if (from >= to || !plan.text.includes('|')) return false;
+  const table = tableStartsAt(plan.text, plan.parsed, where);
+  return table !== null && from <= table.from && table.to <= to;
+}
+
 /**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
@@ -1763,8 +1772,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     // A prefix that the change takes away is no place for the marker, but what it leaves is.
     const where = from === start && at !== undefined ? at : from;
     const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
-    if (open.kind === 'refuse') refuse(open.reason);
-    else if (open.kind === 'construct') grow(open.from, open.to);
+    // A table that the deletion covers whole goes as a block, its first row an opener's place.
+    if (open.kind === 'refuse') {
+      if (!coversTable(plan, where, from, to)) refuse(open.reason);
+    } else if (open.kind === 'construct') grow(open.from, open.to);
     else if (open.kind === 'flank') {
       const p = stepLeft(text, markers, from);
       if (p === from || /[\r\n]/.test(text.slice(p, from))) {
@@ -3939,8 +3950,20 @@ export function trackedEdits(
       ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
       : edit,
   );
+  checkTableEdits(text, edits, plan.parsed);
+  // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
+  // plain one first, and make the edit after it.
+  const pipes = edits.flatMap((edit) => leadingPipeAt(text, edit, plan.parsed) ?? []);
+  if (pipes.length > 0) return withLeadingPipes(text, edits, ctx, [...new Set(pipes)]);
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
-  for (const edit of edits) planEdit(plan, edit);
+  for (const edit of edits) {
+    // Text typed in a row the author inserted is part of the row's insertion (format §3.7).
+    if (inOwnInsertedRow(text, edit, plan.parsed, ctx.author.handle)) {
+      const typed = inEol(edit.insert, plan.eol);
+      if (typed !== '') assertNoMarkup(typed);
+      plan.changes.push({ from: edit.from, to: edit.to, insert: typed });
+    } else planEdit(plan, edit);
+  }
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   // Widening an edit over a link or a break can make it reach into the next one. The changes of
   // one edit stand around the markers in its range, and another edit can fall between them: the
@@ -3990,6 +4013,49 @@ export function trackedEdits(
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
+}
+
+/** The edits of `text` made as they are after plain `| ` written at `pipes`, in order, and the
+ * changes mapped back, with the pipes written before them (format §3.7, rule 7). */
+function withLeadingPipes(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  pipes: readonly number[],
+): TrackedEdits {
+  const sorted = pipes.toSorted((a, b) => a - b);
+  const PIPE = '| ';
+  const written = sorted.map((at) => ({ from: at, to: at, insert: PIPE }));
+  const shifted = (at: number) => at + PIPE.length * sorted.filter((pipe) => pipe <= at).length;
+  const moved = edits.map((edit) => ({
+    ...edit,
+    from: shifted(edit.from),
+    to: shifted(edit.to),
+  }));
+  const done = trackedEdits(applyChanges(text, written), moved, ctx);
+  // A position of the text with the pipes in it, back in the text without them: those just after a
+  // pipe are where the pipe is written.
+  const back = (at: number) => {
+    let n = 0;
+    for (const [i, pipe] of sorted.entries()) {
+      if (pipe + PIPE.length * (i + 1) <= at) n = i + 1;
+    }
+    return at - PIPE.length * n;
+  };
+  const changes: TextChange[] = [];
+  const used = new Set<number>();
+  for (const change of done.changes) {
+    const from = back(change.from);
+    for (const at of sorted) {
+      if (at <= from && !used.has(at)) {
+        used.add(at);
+        changes.push({ from: at, to: at, insert: PIPE });
+      }
+    }
+    changes.push({ ...change, from, to: back(change.to) });
+  }
+  for (const at of sorted) if (!used.has(at)) changes.push({ from: at, to: at, insert: PIPE });
+  return { ...done, changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to) };
 }
 
 /**

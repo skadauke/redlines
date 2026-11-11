@@ -17,6 +17,7 @@ import {
   parsedField,
   type EditorCommand,
   indentItems,
+  selectionInTable,
   setViewModeEffect,
   trackedEditAnnotation,
   trackingField,
@@ -298,7 +299,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * caret `caret` characters into the block, after `find` has located its start in the document.
    * One rule for every inserted block.
    */
-  const putOnEmptyLine = (text: string, find: string, caret: number): boolean => {
+  const putOnEmptyLine = (text: string, find: string, caret: number, selected = 0): boolean => {
     const { doc } = view.state;
     const line = doc.lineAt(view.state.selection.main.head);
     const above = line.number > 1 && doc.line(line.number - 1).text.trim() !== '';
@@ -312,20 +313,29 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     ]);
     if (done) {
       const start = view.state.doc.toString().indexOf(find, line.from);
-      if (start >= 0) view.dispatch({ selection: { anchor: start + caret } });
+      if (start >= 0) {
+        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+      }
     }
     return done;
   };
 
   /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
-  const insertBlock = (text: string, find: string, caret: number): boolean => {
-    if (onEmptyLine()) return putOnEmptyLine(text, find, caret);
+  const insertBlock = (text: string, find: string, caret: number, selected = 0): boolean => {
+    if (onEmptyLine()) return putOnEmptyLine(text, find, caret, selected);
     const { doc } = view.state;
     const { head } = view.state.selection.main;
     const line = doc.lineAt(head);
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
-    return insert([{ from: at, to: at, insert: `\n\n${text}` }]);
+    const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
+    if (done && selected > 0) {
+      const start = view.state.doc.toString().indexOf(find, at);
+      if (start >= 0) {
+        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+      }
+    }
+    return done;
   };
 
   const codeBlock = (): boolean => {
@@ -419,7 +429,15 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     menu: 'format' | 'paragraph',
     group: string,
     fields: Omit<EditorCommand, 'menu' | 'group'>,
-  ): EditorCommand => ({ menu, group, ...fields });
+  ): EditorCommand => ({
+    menu,
+    group,
+    // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
+    ...(menu === 'paragraph'
+      ? { isEnabled: (state: EditorState) => !selectionInTable(state) }
+      : {}),
+    ...fields,
+  });
 
   const inlineCommand = (
     id: string,
@@ -555,7 +573,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      run: () => insertBlock(TABLE, '| Column', 2),
+      // The first header cell's text is selected, so that typing names the column.
+      run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
     }),
     command('paragraph', 'insert', {
       id: 'block.rule',

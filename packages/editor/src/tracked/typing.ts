@@ -15,7 +15,7 @@
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
 import {
-  type Annotation,
+  Annotation,
   ChangeSet,
   EditorSelection,
   EditorState,
@@ -42,6 +42,8 @@ import {
   type EditContext,
   EditError,
   type FormatOp,
+  idsIn,
+  newId,
   openerRange,
   parse,
   type Parsed,
@@ -80,6 +82,10 @@ export const trackingField = StateField.define<boolean>({
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
 
+/** Marks a transaction whose several edits are one change by the author: the marks that Track
+ * Changes writes for them share a group, and are decided together (format §3.7). */
+export const editGroupAnnotation = Annotation.define<boolean>();
+
 export const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
@@ -100,7 +106,7 @@ export const editSourceFacet = Facet.define<EditSource, EditSource>({
 });
 
 /** The editing author, at the current minute (format §2.4). */
-function contextFor(state: EditorState): EditContext {
+export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
@@ -427,8 +433,10 @@ function trackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
+  grouped = false,
 ): Tracked {
-  const ctx = contextFor(state);
+  let ctx = contextFor(state);
+  if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -555,7 +563,14 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
   const start = tr.startState;
   let tracked: Tracked;
   try {
-    tracked = trackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
+    tracked = trackEdits(
+      start,
+      start.doc.toString(),
+      start.field(parsedField),
+      edits,
+      backward,
+      tr.annotation(editGroupAnnotation) === true,
+    );
   } catch (error) {
     if (error instanceof EditError) return refused(tr, error);
     throw error;
@@ -612,6 +627,11 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   );
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }
+
+/** What text composed at `from` is written as, which a place can ask to change: a table's cell
+ * escapes a pipe (`table/escape.ts`). Each value gets the text the one before it made. */
+export const composedTextFacet =
+  Facet.define<(state: EditorState, from: number, text: string) => string>();
 
 /** Text an input method composes outside Raw (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
@@ -704,7 +724,12 @@ function finishComposition(view: EditorView): void {
   const { state } = view;
   const pending = state.field(compositionField, false);
   if (!pending || view.composing) return;
-  const composed = state.sliceDoc(pending.from, pending.to);
+  const composed = state
+    .facet(composedTextFacet)
+    .reduce(
+      (text, write) => write(state, pending.from, text),
+      state.sliceDoc(pending.from, pending.to),
+    );
   if (composed === pending.replaced) {
     view.dispatch({ effects: composedEffect.of(null) });
     return;

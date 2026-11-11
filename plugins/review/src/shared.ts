@@ -210,6 +210,14 @@ export interface ChangeTexts {
   label?: string;
 }
 
+/** Whether a change is an inserted table row (format §3.7). */
+export const isRowInsertion = (change: MarkRange) =>
+  change.kind === 'ins' && change.payload === 'row';
+
+/** What rows inserted together did, in the words of a card and a note: `Inserted 2 rows`. */
+export const insertedRows = (count: number) =>
+  count === 1 ? 'Inserted row' : `Inserted ${count} rows`;
+
 /** What a change took out and what it put in: the one reading of a change's kind. A format change
  * changed no text, and has its label instead. */
 export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
