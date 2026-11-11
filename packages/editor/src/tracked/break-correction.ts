@@ -14,6 +14,8 @@
 import { ChangeSet, type EditorState, type Extension } from '@codemirror/state';
 import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Range } from '@redlines/format';
+import { takesCodeKeys } from '../blocks/code.ts';
+import { blockAt } from '../blocks/structure.ts';
 import { tablesField } from '../table/model.ts';
 import { correctText, pointAt, shownRuns, shownText } from './corrections.ts';
 import { autocorrects } from './smart-typing.ts';
@@ -67,6 +69,10 @@ function wordBeforeCaret(
   if (state.selection.ranges.length !== 1 || !state.selection.main.empty) return null;
   const { head } = state.selection.main;
   const line = state.doc.lineAt(head);
+  // In code, display math, an HTML block or front matter the Mac corrects nothing, at the edges of
+  // the block too.
+  const block = blockAt(state, head);
+  if (block && takesCodeKeys(block)) return null;
   // In a table cell the text is the cell's, not the row's with its pipes: a cell is a paragraph.
   const cell = cellText(state, head);
   const runs = shownRuns(state, cell?.from ?? line.from, head);

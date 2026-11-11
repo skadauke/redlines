@@ -406,11 +406,11 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
   it('is decidable, and counted as a change by accept all and reject all', () => {
     const mark = parse(text).marks.find((m) => m.id === 'k3x9');
     expect(mark && isDecidable(mark)).toBe(true);
-    // A column's marker is not, until columns are.
+    // A column's marker is, as a row's.
     const col = file('| a | <!--ins k3x9 col--> b |\n| - | - |\n| c | d |', { k3x9: 'ada' });
     const colMark = parse(col).marks.find((m) => m.id === 'k3x9');
-    expect(colMark && isDecidable(colMark)).toBe(false);
-    expect(applyChanges(col, acceptAll(col))).toBe(col);
+    expect(colMark && isDecidable(colMark)).toBe(true);
+    expect(parse(applyChanges(col, acceptAll(col))).marks).toEqual([]);
   });
 
   it('reads the same in every order of three people’s rows and a text insertion beside them', () => {

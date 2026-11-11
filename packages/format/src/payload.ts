@@ -59,27 +59,16 @@ export function encodePayload(text: string): string {
   return out;
 }
 
+/** The escapes of `encodePayload`, and what each stands for. */
+const ESCAPE = /\\(?:n|[\\|{%-]|x[0-9a-fA-F]{2})/g;
+
 /** Decodes a payload written by `encodePayload`. */
 export function decodePayload(written: string): string {
-  let out = '';
-  for (let i = 0; i < written.length; i++) {
-    const c = written.charAt(i);
-    const next = written.charAt(i + 1);
-    if (c !== '\\') {
-      out += c;
-    } else if (next === 'n') {
-      out += '\n';
-      i++;
-    } else if (next === '\\' || next === '-' || next === '|' || next === '{' || next === '%') {
-      out += next;
-      i++;
-    } else if (next === 'x' && /^[0-9a-f]{2}$/i.test(written.slice(i + 2, i + 4))) {
-      out += String.fromCharCode(parseInt(written.slice(i + 2, i + 4), 16));
-      i += 3;
-    } else {
-      // Any other backslash is literal.
-      out += c;
-    }
-  }
-  return out;
+  if (!written.includes('\\')) return written;
+  // Left to right, an escape and then what follows it: `\\` is one backslash, so the `n` after it
+  // is a letter. Any other backslash is literal.
+  return written.replace(ESCAPE, (escape) => {
+    const c = escape.charAt(1);
+    return c === 'n' ? '\n' : c === 'x' ? String.fromCharCode(parseInt(escape.slice(2), 16)) : c;
+  });
 }

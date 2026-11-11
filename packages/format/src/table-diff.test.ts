@@ -45,11 +45,52 @@ describe('diffTables', () => {
     ]);
   });
 
-  it('says nothing for one cell changed, and for columns alone, and refuses both together', () => {
+  it('finds a column added to every row, one taken from every row, and columns in another order', () => {
+    const add = diffTables(
+      T(APPLES),
+      '| Fruit | Count | Color |\n| - | - | - |\n| Apples | 3 | red |',
+    );
+    expect(add && 'ops' in add && add.ops).toEqual([
+      { kind: 'insertCols', table: 0, after: 2, count: 1, texts: [['Color', 'red']] },
+    ]);
+    const first = diffTables(
+      T(APPLES),
+      '| Color | Fruit | Count |\n| - | - | - |\n| red | Apples | 3 |',
+    );
+    expect(first && 'ops' in first && first.ops).toEqual([
+      { kind: 'insertCols', table: 0, after: 0, count: 1, texts: [['Color', 'red']] },
+    ]);
+    const del = diffTables(
+      '| Fruit | Count | Color |\n| - | - | - |\n| Apples | 3 | red |',
+      T(APPLES),
+    );
+    expect(del && 'ops' in del && del.ops).toEqual([{ kind: 'deleteCols', table: 0, cols: [2] }]);
+    const move = diffTables(
+      '| Fruit | Count | Color |\n| - | - | - |\n| Apples | 3 | red |',
+      '| Color | Fruit | Count |\n| - | - | - |\n| red | Apples | 3 |',
+    );
+    expect(move && 'ops' in move && move.ops).toEqual([
+      { kind: 'moveCols', table: 0, cols: [2], to: 0 },
+    ]);
+  });
+
+  it('changes the cells of a column that stays word by word', () => {
+    const change = diffTables(
+      '| Fruit | Count | Note |\n| - | - | - |\n| Apples | 3 | red apple |\n| Pears | 5 | green |',
+      '| Fruit | Note | Size | Weight |\n| - | - | - | - |\n| Apples | red apples | big | 2 |\n| Pears | green | big | 3 |',
+    );
+    expect(change && 'ops' in change && change.ops.map((op) => op.kind)).toEqual([
+      'deleteCols',
+      'insertCols',
+      'insertCols',
+    ]);
+    expect(change && 'ops' in change && change.cells).toEqual([
+      { row: 1, column: 2, from: 'red apple', to: 'red apples' },
+    ]);
+  });
+
+  it('says nothing for one cell changed, and refuses rows and columns together', () => {
     expect(diffTables(T(APPLES), T('| Apples | 4 |'))).toBeNull();
-    expect(
-      diffTables(T(APPLES), '| Fruit | Count | Color |\n| - | - | - |\n| Apples | 3 | red |'),
-    ).toBeNull();
     expect(
       diffTables(
         T(APPLES),
@@ -125,5 +166,61 @@ describe('an agent’s str_replace over a table', () => {
     const cell = suggestReplace(text, T(APPLES), T('| Apples | 4 |'), ctx());
     expect(applyChanges(text, cell.changes)).toContain('<!--sub');
     expect(accept).toBeDefined();
+  });
+});
+
+describe('an agent’s edit of a table’s columns', () => {
+  const COLS = ['| Fruit | Count |', '| ----- | ----- |', '| Apples | 3 |', '| Pears | 5 |'].join(
+    '\n',
+  );
+  const WIDE = [
+    '| Fruit | Count | Color |',
+    '| ----- | ----- | ----- |',
+    '| Apples | 3 | red |',
+    '| Pears | 5 | green |',
+  ].join('\n');
+
+  it('adds a column as an inserted column with its text, in the agent’s name', () => {
+    const { text, after, done } = run(COLS, COLS, WIDE);
+    expect(done.markIds).toHaveLength(1);
+    expect(bodyOf(after)).toContain('<!--ins');
+    expect(after).toMatch(/\| <!--ins \w+ col--> Color/);
+    expect(after).toContain('red');
+    expect(parse(after).marks.filter((m) => m.kind === 'ins' && m.payload === 'col')).toHaveLength(
+      1,
+    );
+    expectEveryOrderAlike('a column from an agent', after, exactly);
+    expect(bodyOf(applyChanges(after, rejectAll(after))).replace(/\s+$/, '')).toBe(
+      bodyOf(text).replace(/\s+$/, ''),
+    );
+    expect(newestView(after).text).toContain('| Apples | 3');
+  });
+
+  it('removes a column as a deleted column, and moves columns as a move', () => {
+    const removed = run(WIDE, WIDE, COLS);
+    expect(bodyOf(removed.after)).toMatch(/<!--del \w+ col=3 /);
+    expectEveryOrderAlike('a column removed by an agent', removed.after, exactly);
+    expect(bodyOf(originalView(removed.after).text).replace(/\s+$/, '')).toBe(
+      bodyOf(removed.text).replace(/\s+$/, ''),
+    );
+    const swapped = [
+      '| Color | Fruit | Count |',
+      '| ----- | ----- | ----- |',
+      '| red | Apples | 3 |',
+      '| green | Pears | 5 |',
+    ].join('\n');
+    const moved = run(WIDE, WIDE, swapped);
+    expect(moved.after).toMatch(/<!--ins \w+ col--> Color/);
+    expectEveryOrderAlike('columns moved by an agent', moved.after, exactly);
+    expect(bodyOf(applyChanges(moved.after, rejectAll(moved.after))).replace(/\s+$/, '')).toBe(
+      bodyOf(moved.text).replace(/\s+$/, ''),
+    );
+  });
+
+  it('refuses rows and columns changed together, with the message', () => {
+    const both = [WIDE, '| Plums | 7 | purple |'].join('\n');
+    const text = file(`Intro.\n\n${COLS}\n\nAfter.`);
+    expect(() => suggestReplace(text, COLS, both, ctx())).toThrow(ROWS_AND_COLUMNS);
+    expect(() => suggestReplace(text, COLS, both, ctx())).toThrow(EditError);
   });
 });

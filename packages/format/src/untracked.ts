@@ -36,7 +36,14 @@ import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts'
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import { checkTableEdits } from './table-rules.ts';
+import { editMoveCopy } from './table-move-edit.ts';
+import {
+  checkTableEdits,
+  inMovedCol,
+  movedCopyAt,
+  outerPipeWrites,
+  throughPipes,
+} from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
@@ -318,6 +325,8 @@ function awayFromMarks(
   const start = lineStart(text, edit.from);
   const end = lineEnd(text, edit.to);
   const touches = (range: Range) => range.from <= end && start <= range.to;
+  // A cell of a moved column is not where the original has it (format §3.7).
+  if (inMovedCol(text, edit, parsed)) return undefined;
   // The ledger, which starts at the end of the body's last line, only when the edit reaches into it.
   const ledger = parsed.ledgerRange;
   if (ledger && edit.from < ledger.to && ledger.from < edit.to) return undefined;
@@ -400,6 +409,25 @@ export function untrackedEdit(
   edit: TextChange,
   ctx: UntrackedContext = {},
 ): TextChange[] {
+  return edited(text, edit, ctx, false);
+}
+
+/** `untrackedEdit` for the half of a pending move that the edit is in, which the original does not
+ * have there: not checked against the original, whose other half the caller writes (`table-move-edit.ts`). */
+export function untrackedEditHalf(
+  text: string,
+  edit: TextChange,
+  ctx: UntrackedContext = {},
+): TextChange[] {
+  return edited(text, edit, ctx, true);
+}
+
+function edited(
+  text: string,
+  edit: TextChange,
+  ctx: UntrackedContext,
+  half: boolean,
+): TextChange[] {
   if (edit.from < 0 || edit.to < edit.from || edit.to > text.length) {
     throw new RangeError(
       `The edit ${edit.from}-${edit.to} is out of order or outside the text (${text.length} characters)`,
@@ -409,6 +437,27 @@ export function untrackedEdit(
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
   checkTableEdits(text, [{ ...edit, insert: typed }], parsed);
+  // A deletion that takes all the text of a bare row's first or last cell needs the row's outer pipe,
+  // written plain, or the table loses a cell (format §3.7, rule 7).
+  const pipes = half ? [] : outerPipeWrites(text, { ...edit, insert: typed }, parsed);
+  if (pipes.length > 0) {
+    const through = throughPipes(
+      pipes,
+      edit,
+      (shifted) => {
+        const written = applyChanges(
+          text,
+          pipes.map(({ at, insert }) => ({ from: at, to: at, insert })),
+        );
+        return edited(written, shifted, ctx, false);
+      },
+      text,
+    );
+    return through.changes;
+  }
+  // A cell of a pending move's copy: the edit is written in both halves of the move.
+  const copy = half ? null : movedCopyAt(text, { ...edit, insert: typed }, parsed);
+  if (copy) return editMoveCopy(text, parsed, edit, ctx, copy);
   const markers = markerRanges(parsed);
   let from: number;
   let to: number;
@@ -765,6 +814,6 @@ export function untrackedEdit(
       'no-legal-placement',
     );
   }
-  selfCheck(text, parsed, { from, to, typed }, result);
+  if (!half) selfCheck(text, parsed, { from, to, typed }, result);
   return result;
 }

@@ -382,7 +382,7 @@ export function cards(ctx: ReviewContext): {
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
         const drawn = target?.closest(
-          '.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-struck, .rl-ghost',
+          '.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
         );
         if (event.button !== 0 || !drawn || !redlines(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);

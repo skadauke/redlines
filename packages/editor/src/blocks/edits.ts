@@ -12,6 +12,7 @@ import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
 import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
+import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
 import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
@@ -598,6 +599,10 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   if (!above || !higher || !BLANK.test(above.text) || isGapLine(state, higher)) {
     return nothing(state);
   }
+  // Under code: the empty paragraph after it, as at the top level, which Markdown keeps no second
+  // one of; taking the quote's markers out there would part the quote around the code.
+  const before = blockAt(state, higher.from);
+  if (before?.kind === 'code' || before?.kind === 'math') return nothing(state);
   const quote = syntax.lastIndexOf('>');
   const cont = syntax.slice(0, quote) + syntax.slice(quote + 1).replace(/^[ \t]/, '');
   // Each line's quote marker taken out on its own, as Backspace over them one at a time would:
@@ -640,20 +645,30 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   } else {
     insert = `\n${blankOf(cont)}\n${cont}`;
   }
+  const caret = at + insert.length;
+  let merged = false;
   changes.push({ from: at, insert });
   if (!isAlertLine(state, block) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';
-    changes.push({ from: last.to + 1, insert: `${below}\n` });
+    // Under code that is one insertion at the end of its closing line (the same text): the
+    // format writes it as one break there, where two edits would part a quote or an item.
+    if (block.kind === 'code' && last.to < state.doc.length) {
+      changes[0] = { from: at, insert: `${insert}\n${below}` };
+      merged = true;
+    } else changes.push({ from: last.to + 1, insert: `${below}\n` });
   }
   return {
     changes,
-    selection: EditorSelection.single(at + insert.length),
+    selection: EditorSelection.single(caret),
     userEvent: 'input.break',
+    ...(merged ? { caretAfterText: { from: at, text: insert } } : {}),
     open: {
       at,
       assoc: 1,
+      // The merged insertion ends on the blank line below the empty one.
+      ...(merged ? { up: 1 } : {}),
       pressedIn: { from: block.lines.from, to: block.lines.to },
     },
   };
@@ -897,6 +912,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const block = blockAt(state, head);
   if (!block) return null;
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
+    // The very start of front matter: nothing goes before it.
+    if (block.kind === 'front-matter' && head === block.text.from) return nothing(state);
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
@@ -914,7 +931,9 @@ export function planReturn(state: EditorState): KeyEdit | null {
     ) {
       return returnAtEnd(state, block);
     }
-    return null;
+    // In code, display math, an HTML block and front matter: a line break in the block, with the
+    // line's indentation; the fence's and the closing line's own keys are `planCodeReturn`'s.
+    return planCodeReturn(state, block, head);
   }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
     return returnInItem(state, block, head);
@@ -1202,7 +1221,9 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
-  if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
+  if (block.kind !== 'paragraph') {
+    return ['html', 'code', 'math', 'front-matter'].includes(block.kind) ? planReturn(state) : null;
+  }
   const start = textStart(state, block);
   const end = textEnd(state, block);
   if (head <= start) return planReturn(state);

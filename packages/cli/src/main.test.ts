@@ -425,20 +425,27 @@ describe('str-replace', () => {
     expect(result.writes).toEqual([]);
   });
 
-  it('refuses a change inside indented code, as inside fenced code, and leaves the file (#153)', async () => {
-    for (const text of [
-      '# Plan\n\n    make all\n    make test\n',
-      '- Step:\n\n      make all\n      make test\n',
-      '# Plan\n\n```\nmake all\nmake test\n```\n',
-    ]) {
+  it('replaces code whole (format §3.5), and refuses it in a list item, in the words of fenced code (#153)', async () => {
+    const refused =
+      "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.\n";
+    for (const [text, whole] of [
+      ['# Plan\n\n    make all\n    make test\n', true],
+      ['- Step:\n\n      make all\n      make test\n', false],
+      ['# Plan\n\n```\nmake all\nmake test\n```\n', true],
+    ] as const) {
       const result = await redlines(
         ['str-replace', 'plan.md', ...['--old', 'make test', '--new', 'make check'], ...AS_CLAUDE],
         { 'plan.md': text },
       );
+      if (whole) {
+        // The block is the old text of a substitution, and the code holds the new.
+        expect(result.code, text).toBe(0);
+        expect(fileAt(result), text).toContain('<!--sub ');
+        expect(fileAt(result), text).toContain('make check');
+        continue;
+      }
       expect(result.code, text).toBe(1);
-      expect(result.stderr, text).toBe(
-        "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.\n",
-      );
+      expect(result.stderr, text).toBe(refused);
       expect(result.writes, text).toEqual([]);
     }
   });

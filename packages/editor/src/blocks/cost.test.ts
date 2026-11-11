@@ -12,9 +12,11 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+import { trackedFormat } from '@redlines/format';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
-import { deleteRows, moveRows } from '../table/ops.ts';
+import { tablesOf } from '../table/model.ts';
+import { deleteCols, deleteRows, insertCols, moveCols, moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -259,6 +261,104 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
   }, 600_000);
 });
 
+// The same keystroke in the same cell while a deleted column and an inserted one are pending in the table
+// (tables, Stage 3b): the ghosts and the tinted cells are looked for on every update, and must cost what a
+// keystroke costs on main (twice it, as the table's own does). A timing test.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a keystroke in a table with columns pending',
+  () => {
+    it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
+      const { doc } = longDocument({ table: true });
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      for (const tracking of [true, false]) {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking });
+        open.push(editor);
+        const { view } = editor;
+        forceParsing(view, view.state.doc.length, 10_000);
+        const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
+        // A deleted column and an inserted one (with Track Changes off the columns go as text, so the
+        // table is as wide as it was and the cell is the same).
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+        insertCols(view, true);
+        if (tracking) {
+          expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+          expect(view.state.doc.toString()).toMatch(/<!--ins \w+ col-->/);
+        }
+        const text = view.state.doc.toString();
+        const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+        const ours = median(runs);
+        if (record) continue;
+        const main = TABLE_MAIN[label];
+        expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+          const more: number[] = [];
+          for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
+          return { ours: median(more), limit };
+        });
+        console.log(
+          `cost: columns pending, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+        );
+        expect(result.ours, label).toBeLessThan(result.limit);
+      }
+    }, 600_000);
+  },
+);
+
+// A letter typed and deleted with Track Changes off in a cell of a pending move's copy (tables, Stage 3b):
+// the edit is written in both halves of the move (the cell and the kept copy), and must cost what a
+// keystroke in any other cell costs on main. A timing test: it runs with REDLINES_COST set, and a run over
+// the bound is timed twice more, each time with the calibration, before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a moved cell', () => {
+  it('costs at most twice what main’s build costs, in a moved column and a moved row', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const axis of ['column', 'row'] as const) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const cellOf = (row: number, col: number) => tablesOf(view.state)[0]!.rows[row]!.cells[col]!;
+      if (axis === 'column') {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 2).textFrom) });
+        moveCols(view, true);
+      } else {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 0).textFrom) });
+        moveRows(view, true);
+      }
+      expect(view.state.doc.toString()).toMatch(axis === 'column' ? /col=\d+ / : /row=\d+ /);
+      editor.setTracking(false);
+      // The copy: the moved column, in row 150, or the moved row, which is row 149 now.
+      const target = axis === 'column' ? cellOf(150, 1) : cellOf(149, 1);
+      const at = target.textFrom + 1;
+      time(editor, at, 'type');
+      const label = 'Track Changes off, cell, type';
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      const attempt = (yardstick: number): Held => {
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        return { ours: median(runs), limit: 2 * main! * yardstick + 1 };
+      };
+      const result = held(attempt(scale), () => attempt(calibrate() / TABLE_CALIBRATION));
+      console.log(
+        `cost: moved ${axis}, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, `a moved ${axis}`).toBeLessThan(result.limit);
+    }
+  }, 600_000);
+});
+
 // A rectangle of cells over the whole of the same table (tables, Stage 2): a selection from the first
 // cell to the last (1,500 cells drawn as selected), then the caret back. The selection is no state of
 // its own, so this is a selection transaction and the decorations of the cells, and it may cost no
@@ -383,6 +483,62 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
   }, 600_000);
 });
 
+// A column moved in the same table (tables, Stage 3b): the third column one place left and back. A
+// column is a cell in each of the 301 lines, so a move writes every line, and the editor reads and
+// draws the table again; it is held to the document's parse as a row move is, with a bound found
+// the same way: a column move measures about 7 times the parse (the format plans it in about 13 ms,
+// and the editor writes it as one change, since 301 scattered changes made the syntax tree read the
+// table 301 times, 130 ms, and draws it again in about 17), so the bound is 10 parses and two
+// milliseconds. With Track Changes on, the table has a deleted column, whose ghosts (a cell in every
+// row) are drawn and looked for on every update. A timing test: it runs with REDLINES_COST set, and a
+// run over the bound is timed twice more, each time with the parse, before it fails.
+const COLUMN_PARSES = 10;
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a table', () => {
+  it('costs at most 10 times the document’s parse, in a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const inColumn = (col: number) => {
+        const table = tablesOf(view.state)[0]!;
+        return table.rows[150]!.cells[col]!.textFrom;
+      };
+      if (tracking) {
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+      }
+      const pair = () => {
+        const start = performance.now();
+        for (let i = 0; i < 4; i++) {
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
+          moveCols(view, true);
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+          moveCols(view, false);
+        }
+        return (performance.now() - start) / 8;
+      };
+      pair();
+      const attempt = (): Held => {
+        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
+        const runs: number[] = [];
+        for (let i = 0; i < 5; i++) runs.push(pair());
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: column move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(result.limit);
+    }
+  }, 600_000);
+});
+
 // A tracked key in a hand-wrapped paragraph of 200 lines, in a file that has a table somewhere (so
 // a pipe is in the text): the format asks whether a table row can be pipe-less here, and must answer
 // from the paragraph and not from every table of the file. At most twice the same key in the same
@@ -418,3 +574,200 @@ describe.skipIf(!process.env['REDLINES_COST'])(
     }, 120_000);
   },
 );
+
+// Tab on an item of a list under review, in a list numbered 1, 2, 3 and in a bulleted one, with 20
+// pending changes in the items below it (format §2.6, rule 6): a numbered item with a number other
+// than 1 reads the lines above it, and the marks of the items below must not be tried for it, nor
+// read again once for each of them. At most twice the bulleted list's time (plus a millisecond).
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered list', () => {
+  it('is at most twice what it is in a bulleted list, with 20 pending changes below', () => {
+    const ids = Array.from(
+      { length: 20 },
+      (_, i) => `k${'bcdfghjkmnpqrstvwxz'[i % 19]}${'ab'[Math.floor(i / 19)]}x9`,
+    );
+    const list = (numbered: boolean) => {
+      const rows = [
+        numbered ? '1. one' : '- one',
+        numbered ? '2. two' : '- two',
+        ...ids.map(
+          (id, i) =>
+            `${numbered ? `${i + 3}.` : '-'} item ${i} <!--ins ${id}-->new <!--/${id}-->words`,
+        ),
+      ];
+      const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-10-13T22:30Z}\n`).join('');
+      return `${rows.join('\n')}\n\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo}\n  ada: {name: Ada}\nmarks:\n${marks}-->\n`;
+    };
+    const tab = (text: string) => {
+      const at = text.indexOf('two');
+      const start = performance.now();
+      trackedFormat(
+        text,
+        { from: at, to: at },
+        { kind: 'indent', by: 1 },
+        {
+          author: ada,
+          time: '2026-10-31T09:00Z',
+          random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+        },
+      );
+      return performance.now() - start;
+    };
+    const measure = (text: string) => {
+      for (let i = 0; i < 5; i++) tab(text);
+      const runs: number[] = [];
+      for (let i = 0; i < 15; i++) runs.push(tab(text));
+      return median(runs);
+    };
+    const attempt = (): Held => {
+      const bulleted = measure(list(false));
+      return { ours: measure(list(true)), limit: 2 * bulleted + 1 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: Tab with 20 changes below: bulleted ${((result.limit - 1) / 2).toFixed(2)} ms, numbered ${result.ours.toFixed(2)} ms`,
+    );
+    expect(result.ours).toBeLessThan(result.limit);
+  }, 120_000);
+});
+
+// A typed letter and Backspace in the middle of a fenced code block of 200 lines, in a document with
+// paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
+// block whole, and the keys after it edit the newest code, which the block's own pending substitution
+// holds. Each case is held to what the long-document tests hold an update to: twice the document's
+// markdown parse and two milliseconds for noise (`bound`, as in `preview/long-document.test.ts`).
+// A timing test: it runs with REDLINES_COST set, and a run over the bound is timed twice more, each
+// time with the parse, before it fails.
+const bound = (parse: number) => 2 * parse + 2;
+
+function codeDocument(lines = 200): string {
+  const paragraph = (n: number) => `${WORDS} ${n}, with *emphasis* and more.`;
+  const code = Array.from(
+    { length: lines },
+    (_, n) => `  const value${n} = compute(${n}, 'text ${n}'); // line ${n}`,
+  );
+  return [
+    ...Array.from({ length: 6 }, (_, n) => paragraph(n)),
+    ['```ts', ...code, '```'].join('\n'),
+    ...Array.from({ length: 6 }, (_, n) => paragraph(n + 6)),
+  ].join('\n\n');
+}
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code', () => {
+  const doc = codeDocument();
+
+  /** Milliseconds per typed letter and Backspace in the middle of the code. `fresh`: the file is
+   * the one it started from before each pair, so that the letter is the first key in the block. */
+  function codeTime(editor: Editor, fresh: boolean): number {
+    const { view } = editor;
+    const rounds = fresh ? 10 : ROUNDS;
+    let total = 0;
+    for (let i = 0; i < rounds; i++) {
+      // The file as it started (a reload keeps Track Changes on, as `setDoc` does not).
+      if (fresh) editor.reloadDoc(doc);
+      // The last one: a substitution's payload, in its marker, has the line too.
+      const at = view.state.doc.toString().lastIndexOf('line 100') + 'line 1'.length;
+      view.dispatch({ selection: EditorSelection.cursor(at) });
+      const start = performance.now();
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      press(view, 'Backspace');
+      total += performance.now() - start;
+    }
+    return total / rounds;
+  }
+
+  it.each([
+    ['Track Changes on, with the substitution made', true, false],
+    ['Track Changes off', false, false],
+  ] as const)(
+    'is at most twice the document’s parse plus 2 ms: %s',
+    (label, tracking, fresh) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      expect(editor.view.state.doc.toString()).toContain('line 100');
+      // The case with the substitution made starts with the first key made.
+      if (tracking && !fresh) codeTime(editor, true);
+      codeTime(editor, fresh);
+      const attempt = (): Held => {
+        const limit = bound(parseTime(doc));
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(codeTime(editor, fresh));
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: code, ${label}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      if (tracking) {
+        const marks = (editor.view.state.doc.toString().match(/<!--sub /g) ?? []).length;
+        expect(marks, 'one substitution for the block').toBe(1);
+      }
+      expect(result.ours, label).toBeLessThan(result.limit);
+    },
+    120_000,
+  );
+});
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first key in code', () => {
+  /** Milliseconds per typed letter and Backspace, the file as it started before each pair: in the
+   * middle of the code (`where` finds it), or in a paragraph. */
+  function pair(editor: Editor, doc: string, find: (text: string) => number): number {
+    const { view } = editor;
+    let total = 0;
+    const rounds = 10;
+    for (let i = 0; i < rounds; i++) {
+      editor.reloadDoc(doc);
+      const at = find(view.state.doc.toString());
+      view.dispatch({ selection: EditorSelection.cursor(at) });
+      const start = performance.now();
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      press(view, 'Backspace');
+      total += performance.now() - start;
+    }
+    return total / rounds;
+  }
+
+  it.each([200, 2000])(
+    'is at most twice a key in a paragraph of the same document, plus 1 ms: %i lines',
+    (lines) => {
+      const doc = codeDocument(lines);
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      const inCode = (text: string) => text.lastIndexOf('line 100') + 'line 1'.length;
+      const inParagraph = (text: string) => text.indexOf('quick brown', 100) + 'quick '.length;
+      pair(editor, doc, inCode);
+      pair(editor, doc, inParagraph);
+      // The paragraph key is timed beside the code key, so that a slow moment slows both.
+      const attempt = (): Held => {
+        const code: number[] = [];
+        const paragraph: number[] = [];
+        for (let i = 0; i < 7; i++) {
+          code.push(pair(editor, doc, inCode));
+          paragraph.push(pair(editor, doc, inParagraph));
+        }
+        return { ours: median(code), limit: 2 * median(paragraph) + 1 };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: first key in code, ${lines} lines: bound ${result.limit.toFixed(2)} ms (twice a paragraph key plus 1), now ${result.ours.toFixed(2)} ms`,
+      );
+      pair(editor, doc, inCode);
+      expect(editor.view.state.doc.toString()).toContain('<!--sub ');
+      expect(result.ours, `${lines} lines`).toBeLessThan(result.limit);
+    },
+    300_000,
+  );
+});

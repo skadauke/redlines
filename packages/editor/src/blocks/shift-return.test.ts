@@ -297,15 +297,11 @@ describe('Shift-Return', () => {
         on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
       },
       {
-        name: 'in code: a line break, as Return (refused in code with Track Changes on)',
+        name: 'in code: a line break, as Return (a substitution of the block with Track Changes on)',
         doc: '```⏎co‸de⏎```',
         keys: ['Shift-Enter'],
         off: { caret: '```⏎co⏎‸de⏎```' },
-        on: {
-          caret: '```⏎co‸de⏎```',
-          refusal:
-            "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
-        },
+        on: { caret: '<sub ```⏎code⏎```>⏎⏎```⏎co⏎‸de⏎```⏎</sub>' },
       },
       {
         name: 'in front matter: a line break (refused with Track Changes on, format §3.8)',

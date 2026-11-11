@@ -29,6 +29,7 @@ function mount(doc: string, tracking: boolean, notices: string[] = []): Editor {
 }
 
 function click(editor: Editor, index: number): void {
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   const box = editor.view.dom.querySelectorAll('.rl-box')[index];
   box?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
 }
@@ -298,6 +299,9 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
 
   /** The key, as CodeMirror's Mod-Shift-u (Ctrl in the test's platform). */
   function press(editor: Editor): void {
+    // Parsed to the end first: a busy machine stops the parse of an update early, and Check Item
+    // reads the items from the tree.
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
     runScopeHandlers(
       editor.view,
       new KeyboardEvent('keydown', {
@@ -501,20 +505,56 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     expect(editor.getDoc()).toBe(TWELVE);
   });
 
-  it('names the quote where a box is in one, for Check Item and for a click, tracked or not', () => {
-    const doc = '> - [ ] a\n> - [ ] b\n\nEnd.\n';
-    for (const on of [true, false]) {
-      const notices: string[] = [];
-      const editor = mount(doc, on, notices);
-      editor.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
-      press(editor);
-      select(editor, 'a', 'b');
-      press(editor);
-      click(editor, 0);
-      expect(notices, `tracking ${on}`).toEqual(
-        Array(3).fill("A box in a quote can't be checked yet."),
-      );
-      expect(editor.getDoc()).toBe(doc);
+  it('checks a box in a quote by a click and by Check Item, at depths 1 and 2, tracked or not', () => {
+    for (const quote of ['> ', '> > ']) {
+      const doc = `${quote}- [ ] a\n${quote}- [x] b\n\nEnd.\n`;
+      for (const on of [true, false]) {
+        const label = `${quote} tracking ${on}`;
+        const notices: string[] = [];
+        // A click.
+        const clicked = mount(doc, on, notices);
+        click(clicked, 0);
+        click(clicked, 1);
+        const flip = doc.replace('[ ] a', '[x] a').replace('[x] b', '[ ] b');
+        expect(notices, label).toEqual([]);
+        if (on) {
+          expect(clicked.getDoc().match(/<!--fmt \w+ [+-]check-->/g), label).toHaveLength(2);
+          expect(newestView(clicked.getDoc()).text, label).toBe(flip);
+          expect(originalView(clicked.getDoc()).text, label).toBe(doc);
+        } else expect(clicked.getDoc(), label).toBe(flip);
+        // Check Item on the caret's item, then on both items.
+        const keyed = mount(doc, on, notices);
+        keyed.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
+        press(keyed);
+        expect(notices, label).toEqual([]);
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replace('[ ] a', '[x] a'));
+        select(keyed, 'a', 'b');
+        press(keyed);
+        expect(notices, label).toEqual([]);
+        // Both are checked now: Check Item takes both boxes back.
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replaceAll('[x]', '[ ]'));
+        undo(keyed.view);
+        undo(keyed.view);
+        expect(keyed.getDoc(), label).toBe(doc);
+      }
+    }
+  });
+
+  it('decides a box checked in a quote in every order', () => {
+    const doc = '> - [ ] a\n> - [ ] b\n> - [ ] c\n\nEnd.\n';
+    const editor = mount(doc, true);
+    select(editor, 'a', 'c');
+    press(editor);
+    const written = editor.getDoc();
+    const ids = parse(written).marks.map((mark) => mark.id);
+    expect(ids).toHaveLength(3);
+    for (const order of [ids, [...ids].reverse()]) {
+      for (const accepting of [true, false]) {
+        let text = written;
+        for (const id of order)
+          text = applyChanges(text, accepting ? accept(text, id) : reject(text, id));
+        expect(text).toBe(accepting ? doc.replaceAll('[ ]', '[x]') : doc);
+      }
     }
   });
 

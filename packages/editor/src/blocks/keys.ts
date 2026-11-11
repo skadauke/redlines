@@ -24,7 +24,13 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
-import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
+import {
+  type KeyEdit,
+  planReturn,
+  planSelectionReturn,
+  planShiftReturn,
+  returnAtEnd,
+} from './edits.ts';
 import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
@@ -40,6 +46,7 @@ import {
   transposeCrosses,
 } from './motion.ts';
 import { blockAt } from './structure.ts';
+import { openIndentedLine, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -246,6 +253,16 @@ const returnKey = blockKey((view) => {
       ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
       : true;
   }
+  // On the open line that Return at the end of indented code left: that Return is taken back, and
+  // the key opens the empty paragraph after the code.
+  const indented = main.empty ? openIndentedLine(view.state, main.head) : null;
+  if (indented && takeBack(view, 'delete.selection', undefined, 'before')) {
+    const code = blockAt(view.state, view.state.selection.main.head);
+    const again = code && returnAtEnd(view.state, code);
+    return again
+      ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
+      : true;
+  }
   const over = planSelectionReturn(view.state);
   if (over) {
     const before = view.state.doc;
@@ -338,6 +355,9 @@ const tabKey = (outdent: boolean) =>
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);
+    // Code, display math, HTML blocks and front matter indent by their own unit.
+    const code = block && planCodeTab(view.state, block, outdent);
+    if (code) return applyKeyEdit(view, code);
     return !!block && TAB_DOES_NOTHING.has(block.kind);
   });
 
@@ -507,5 +527,6 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
+    Prec.lowest(openLineSpaces),
   ];
 }

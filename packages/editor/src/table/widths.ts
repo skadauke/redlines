@@ -21,6 +21,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { viewModeField } from '../tracked/field.ts';
+import { colGhostField, ghostColumnsOf } from './colghosts.ts';
 import { type Cell, type Table, tablesOf } from './model.ts';
 
 /** The widths of a text, in pixels: of its longest word, and of its longest line. */
@@ -190,13 +191,19 @@ export function shownText(state: EditorState, cell: Cell, bold = false): string 
   return cellShows(text);
 }
 
-/** The text of every row of a table, as it reads. */
+/** The text of every row of a table, as it reads, a deleted column's cells (drawn in Redlines)
+ * among them, in their places. */
 function cellsOf(state: EditorState, table: Table): string[][] {
-  return table.rows.map((row) =>
-    row.cells
+  const ghosts = ghostColumnsOf(state, table.id);
+  return table.rows.map((row) => {
+    const texts = row.cells
       .filter((cell) => cell.col < table.columns)
-      .map((cell) => shownText(state, cell, true)),
-  );
+      .map((cell) => shownText(state, cell, true));
+    ghosts.forEach((ghost, i) => {
+      texts.splice(Math.min(ghost.position + i, texts.length), 0, ghost.cells[row.index] ?? '');
+    });
+    return texts;
+  });
 }
 
 /** What the plugin asks of the page: how wide a text is, and the room there is. Replaced by tests,
@@ -369,7 +376,7 @@ function rulesFor(widths: readonly TableWidths[]): string {
       // Fills the text column; when the columns can't fit it, as wide as they are, and scrolls.
       const size = scrolls ? `width:${sum}px;` : '';
       const cells = columns
-        .map((_w, i) => `.rl-tbl[data-table="${id}"] .rl-tc[data-col="${i}"]{width:var(--w${i})}`)
+        .map((_w, i) => `.rl-tbl[data-table="${id}"] .rl-tc[data-vcol="${i}"]{width:var(--w${i})}`)
         .join('');
       return `.rl-tbl[data-table="${id}"]{${vars}${size}}${cells}`;
     })
@@ -412,12 +419,15 @@ class WidthPlugin {
         const old = was.find((w) => w.id === t.id);
         return !old || t.rows.length !== old.rows.length || t.columns !== old.columns;
       });
+    const ghosts =
+      update.state.field(colGhostField, false)?.key !==
+      update.startState.field(colGhostField, false)?.key;
     const left = tableOfCaret(update.startState);
     const leaves = left >= 0 && tableOfCaret(update.state) !== left;
     const mode =
       update.startState.field(viewModeField, false) !== update.state.field(viewModeField, false);
     const pasted = update.transactions.some(isPaste);
-    if (!this.measured || structure || leaves || mode || pasted) this.measure();
+    if (!this.measured || structure || ghosts || leaves || mode || pasted) this.measure();
     else if (update.geometryChanged) this.checkEnvironment();
   }
 

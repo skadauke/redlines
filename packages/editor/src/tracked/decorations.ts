@@ -39,6 +39,7 @@ import {
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS } from '../preview/decorations.ts';
+import { insertedColumnCells, tableAbove } from '../table/columns.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -46,7 +47,9 @@ import {
   bodyEnd,
   boxChange,
   isDrawnChange,
-  isRowDeletion,
+  isColDeletion,
+  isColInsertion,
+  isTableDeletion,
   lineBreakMarksFacet,
   parsedField,
   peopleFacet,
@@ -107,6 +110,8 @@ interface Layer {
   className: string;
   color: number;
   change: boolean;
+  /** The change the layer draws, which a card is found by (`data-mark`). */
+  mark?: string;
 }
 
 interface Span {
@@ -243,6 +248,35 @@ function replacesBlock(doc: Text, segment: Segment, bodyEnd: number): boolean {
 }
 
 /**
+ * The block a substitution of code, display math or raw text replaced whole (format §3.5), drawn
+ * as the code it was: its lines apart, in the code font, with no fence. Null for a payload that is
+ * anything else, which is drawn as the text it is.
+ */
+function replacedCode(
+  payload: string,
+): { kind: DeletedBlockKind; pieces: { text: string; at: number }[] } | null {
+  const text = payload.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  // A payload of white space alone is no code to draw.
+  if (text.trim() === '') return null;
+  const lines = text.split('\n');
+  const first = lines[0] ?? '';
+  const fenced = /^[ \t>]*(`{3,}|~{3,})/.test(first) && lines.length > 1;
+  let code: string[];
+  let language = '';
+  if (fenced) {
+    const fence = /^[ \t>]*(`{3,}|~{3,})(.*)$/.exec(first);
+    language = (fence?.[2] ?? '').trim();
+    code = lines.slice(1, /^[ \t>]*(`{3,}|~{3,})[ \t]*$/.test(lines.at(-1) ?? '') ? -1 : undefined);
+  } else if (lines.every((line) => /^(?: {4}|\t)/.test(line) || /^[ \t]*$/.test(line))) {
+    code = lines.map((line) => line.replace(/^(?: {4}|\t)/, ''));
+  } else if (/^[ \t]{0,3}(?:\$\$|<(?:script|pre|style|textarea)[\s>])/i.test(first)) {
+    code = lines;
+  } else return null;
+  const body = code.join('\n');
+  return { kind: { kind: 'code', language }, pieces: [{ text: body, at: 0 }] };
+}
+
+/**
  * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
  * other people that they hold, whose deleted text is part of the blocks. A deletion is whole when
  * `deletedBlocks` reads its payload as whole blocks, and the file is in the form that goes with
@@ -280,7 +314,17 @@ function struckBlocks(
     return low;
   };
   for (const mark of parsed.marks) {
-    if (mark.kind !== 'del' || !isDrawnChange(mark) || isRowDeletion(mark) || absorbed.has(mark)) {
+    // A deletion of whole blocks, or a substitution of one block of code (format §3.5).
+    const replaced =
+      mark.kind === 'sub' && mark.segments.length === 1 && !!mark.segments[0]?.carrier
+        ? replacedCode(mark.segments[0].payload ?? '')
+        : null;
+    if (
+      (mark.kind !== 'del' && !replaced) ||
+      !isDrawnChange(mark) ||
+      isTableDeletion(mark) ||
+      absorbed.has(mark)
+    ) {
       continue;
     }
     const first = mark.segments[0];
@@ -305,7 +349,7 @@ function struckBlocks(
         bare = where === 'before' ? n !== line.number || text === lead : BLANK.test(text);
       }
       if (!bare || (where === 'before' && mark.segments.length > 1)) continue;
-      if (where === 'lines') {
+      if (where === 'lines' && !replaced) {
         // Other people's deletions in the same lines belong to the blocks: found among the
         // segments of all deletions, in file order, by search (not by a scan of every mark).
         const inside = (segment: Segment) =>
@@ -334,10 +378,12 @@ function struckBlocks(
       if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
         continue;
     }
-    const blocks = deletedBlocks(
-      segments.map(({ segment }) => segment),
-      { lead, atEnd: where === 'after' },
-    );
+    const blocks = replaced
+      ? [replaced]
+      : deletedBlocks(
+          segments.map(({ segment }) => segment),
+          { lead, atEnd: where === 'after' },
+        );
     if (!blocks) continue;
     // Each stretch of the blocks' text in the color of the person who deleted it.
     const owners: { to: number; color: number }[] = [];
@@ -426,12 +472,12 @@ function analyze(state: EditorState, kept: number | null): Model {
         mark.kind !== 'ins' &&
         mark.kind !== 'fmt' &&
         segment.payload &&
-        !isRowDeletion(mark)
+        !isTableDeletion(mark)
       ) {
         // A block drawn as a block takes its own bar, and leaves the lines around it alone.
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
-        const text = redlines ? deletedText(segment.payload, marks) : '';
         if (!asBlock) {
+          const text = redlines ? deletedText(segment.payload, marks) : '';
           const whole =
             redlines &&
             text !== '' &&
@@ -457,6 +503,22 @@ function analyze(state: EditorState, kept: number | null): Model {
         if (redlines) {
           const moved = mark.entry.move === undefined ? '' : ' rl-moved-row';
           model.rows.push({ at: segment.open.from, className: `rl-ins-row${moved} ${author}` });
+        }
+      }
+      // A deleted table column: a change bar on each row of its table, in Simple too; the ghost cells
+      // are drawn by the layout.
+      if (markup && isColDeletion(mark)) {
+        const table = tableAbove(state, segment.open.from);
+        for (const row of table?.rows ?? []) {
+          model.layers.push({ from: row.from, to: row.from, className: '', color, change: true });
+        }
+      }
+      // An inserted table column: a change bar on each row, and in Redlines its cells have the
+      // author's tint and underline.
+      if (markup && isColInsertion(mark)) {
+        // (The cells are tinted and underlined by the layout, which has the cell: `rl-ins-col`.)
+        for (const cell of insertedColumnCells(state, mark)) {
+          model.layers.push({ from: cell.from, to: cell.from, className: '', color, change: true });
         }
       }
       // A box checked or unchecked: its point mark has no text, and its line has a change bar.
@@ -1025,9 +1087,11 @@ function display(state: EditorState): Display {
     if (!shown.length) continue;
     ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side }).range(at));
   }
-  for (const { from, to, className } of model.layers) {
+  for (const { from, to, className, mark } of model.layers) {
     // A layer with no class, a change in Simple, only takes a bar.
-    if (className) ranges.push(Decoration.mark({ class: className }).range(from, to));
+    if (!className) continue;
+    const attributes = mark === undefined ? undefined : { 'data-mark': mark };
+    ranges.push(Decoration.mark({ class: className, attributes }).range(from, to));
   }
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
   for (const { at, className } of model.rows) {
@@ -1444,11 +1508,31 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   // The new place of a moved row: a double underline.
   '.rl-trow.rl-moved-row > .rl-tc': { textDecorationStyle: 'double' },
+  // An inserted table column: the author's tint behind its cells, the text underlined and in the
+  // author's color, as an inserted row's.
+  '.rl-tc.rl-ins-col': {
+    backgroundColor: 'var(--rl-color-tint)',
+    color: 'var(--rl-color)',
+    textDecoration: 'underline',
+    textDecorationColor: 'var(--rl-color)',
+    textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px',
+    textDecorationSkipInk: 'none',
+  },
+  // The new place of a moved column: a double underline.
+  '.rl-tc.rl-ins-col.rl-moved-col': { textDecorationStyle: 'double' },
   // A deleted row, a ghost at its place (`table/ghosts.ts`): struck text in the author's color on
   // the author's tint; a moved row's old place has a double strikethrough. Not editable.
   '.rl-trow.rl-ghost': { display: 'table-row', cursor: 'default', userSelect: 'none' },
   '.rl-trow.rl-ghost > .rl-tc': { backgroundColor: 'var(--rl-color-tint)' },
   '.rl-trow.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
+  // A deleted column, a ghost cell in each row (`table/colghosts.ts`): the same, a cell among cells.
+  '.rl-tc.rl-ghost-col': {
+    backgroundColor: 'var(--rl-color-tint)',
+    cursor: 'default',
+    userSelect: 'none',
+  },
+  '.rl-tc.rl-ghost-col.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 
