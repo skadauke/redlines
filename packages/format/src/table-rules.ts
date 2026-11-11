@@ -168,6 +168,50 @@ export function inOwnInsertedRow(
   return false;
 }
 
+/**
+ * Whether `edit` lies in the text of a cell of a column that `handle` inserted and nobody has decided
+ * (format §3.7): like the text of the author's own new row, it is part of the insertion and is written
+ * as it is. The column of a move is not one of its own: what is typed in it is a change.
+ */
+export function inOwnInsertedCol(
+  text: string,
+  edit: TextChange,
+  parsed: Parsed,
+  handle: string,
+): boolean {
+  if (!parsed.marks.some((mark) => mark.kind === 'ins' && mark.payload === 'col')) return false;
+  for (const table of tablesIn(text, parsed)) {
+    if (edit.from < table.from || edit.to > table.to) continue;
+    const row = table.rows.find((r) => r.from <= edit.from && edit.to <= r.to);
+    if (!row) continue;
+    const cell = row.cells.find((c) => c.textFrom <= edit.from && edit.to <= c.textTo);
+    if (!cell) continue;
+    const index = row.cells.indexOf(cell);
+    const mark = table.colMarks.find((c) => c.col === index)?.mark;
+    if (mark && mark.entry.by === handle && mark.entry.move === undefined) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `edit` lies in a cell of a column that is the new place of a move not yet decided: what is
+ * typed there with Track Changes off is not in the original, where the column stands at its old place,
+ * and travels with the column when the move is rejected, which would change the original.
+ */
+export function inMovedCol(text: string, edit: TextChange, parsed: Parsed): boolean {
+  if (!parsed.marks.some((m) => m.kind === 'ins' && m.payload === 'col' && m.entry.move)) {
+    return false;
+  }
+  for (const table of tablesIn(text, parsed)) {
+    if (edit.from < table.from || edit.to > table.to) continue;
+    const row = table.rows.find((r) => r.from <= edit.from && edit.to <= r.to);
+    const index = row ? cellIndexAt(row, edit.from) : -1;
+    const mark = table.colMarks.find((c) => c.col === index)?.mark;
+    if (mark?.entry.move !== undefined) return true;
+  }
+  return false;
+}
+
 /** The table whose first row starts at `position`, or null. */
 export function tableStartsAt(text: string, parsed: Parsed, position: number): TableRead | null {
   if (!text.includes('|')) return null;
@@ -286,4 +330,123 @@ export function commentsOf(
     }
   }
   return [...writes].map(([at, markers]) => ({ from: at, to: at, insert: markers.join('') }));
+}
+
+/** The cell of a row that holds `at`, as its index: the cell whose range from the pipe in front of it
+ * holds the position. */
+function cellIndexAt(row: TableRowRead, at: number): number {
+  return row.cells.findIndex(
+    (cell, i) => cell.from <= at && (at < cell.to || i === row.cells.length - 1),
+  );
+}
+
+/** The rows of `table` with the markers of a mark in column `col`. */
+function inColumn(table: TableRead, mark: MarkRange, cols: ReadonlySet<number>): boolean {
+  return mark.segments.some((segment) =>
+    [segment.open, segment.close].some((range) => {
+      if (range === undefined) return false;
+      const row = table.rows.find((r) => r.from <= range.from && range.to <= r.to);
+      if (!row) return false;
+      const col = cellIndexAt(row, range.from);
+      return col !== -1 && cols.has(col);
+    }),
+  );
+}
+
+/**
+ * Rule 3 (format §3.7) for columns, as `ruleThree` is for rows: another person's pending changes stay
+ * theirs. A column with another person's pending change in it can't be deleted until it is decided;
+ * a column that is another person's pending insertion or move can't be deleted or moved. A column that
+ * is moved takes the changes in it along. Returns the refusal, which names the person, or null.
+ */
+export function ruleThreeCols(
+  table: TableRead,
+  parsed: Parsed,
+  cols: readonly number[],
+  author: Person | string,
+  operation: 'delete' | 'move',
+): string | null {
+  const me = typeof author === 'string' ? author : author.handle;
+  for (const col of cols) {
+    const insertion = table.colMarks.find((c) => c.col === col)?.mark;
+    if (insertion && insertion.entry.by !== me) {
+      const what = insertion.entry.move !== undefined ? 'moved' : 'inserted';
+      return `${nameOf(parsed, insertion.entry.by)}'s ${what} column is pending. Decide it first.`;
+    }
+    if (operation === 'move') continue;
+    for (const mark of parsed.marks) {
+      if (mark.kind === 'cmt' || mark.kind === 'hl' || mark.entry.by === me) continue;
+      if (mark.kind === 'ins' && (mark.payload === 'row' || mark.payload === 'col')) continue;
+      if (inColumn(table, mark, new Set([col]))) {
+        return `${nameOf(parsed, mark.entry.by)}'s pending change is in this column. Decide it first.`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Rule 4 (format §3.7) for columns: comments in columns that leave the table become point comments
+ * where they were: at the start of the text of the cell after, in the same row, or the end of the text
+ * of the cell before for the last column. A comment with a part that stays loses only the part in the
+ * columns; one with an end in them keeps its other end. Highlights have no point form and go. Gives the
+ * points to write and the comments and highlights that have a marker in the columns that leave, which
+ * the changes deal with.
+ */
+export function commentsOfCols(
+  parsed: Parsed,
+  table: TableRead,
+  leaving: ReadonlySet<number>,
+): { writes: TextChange[]; anchored: Set<string> } {
+  const columns = table.aligns.length;
+  const point = (row: TableRowRead, col: number): number | null => {
+    for (let i = col + 1; i < Math.min(row.cells.length, columns); i++) {
+      const cell = row.cells[i];
+      if (!leaving.has(i) && cell) return cell.textFrom;
+    }
+    for (let i = Math.min(col, row.cells.length) - 1; i >= 0; i--) {
+      const cell = row.cells[i];
+      if (!leaving.has(i) && cell) return cell.textTo;
+    }
+    return null;
+  };
+  const place = (at: number): { row: TableRowRead; col: number } | null => {
+    const row = table.rows.find((r) => r.from <= at && at <= r.to);
+    const col = row ? cellIndexAt(row, at) : -1;
+    return row && col !== -1 ? { row, col } : null;
+  };
+  const writes = new Map<number, string[]>();
+  const write = (found: { row: TableRowRead; col: number }, marker: string) => {
+    const at = point(found.row, found.col);
+    if (at === null) return;
+    writes.set(at, [...(writes.get(at) ?? []), marker]);
+  };
+  const anchored = new Set<string>();
+  const inside = (range: Range | undefined) => {
+    const found = range === undefined ? null : place(range.from);
+    return found !== null && leaving.has(found.col) ? found : null;
+  };
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'cmt' && mark.kind !== 'hl') continue;
+    if (mark.segments.some((s) => inside(s.open) || inside(s.close))) anchored.add(mark.id);
+    if (mark.kind !== 'cmt') continue;
+    const staying = mark.segments.some((s) => !inside(s.open) && !inside(s.close));
+    let pointed = staying;
+    for (const segment of mark.segments) {
+      const opens = inside(segment.open);
+      const closes = inside(segment.close);
+      if (!opens && !closes) continue;
+      if (opens && closes) {
+        if (!pointed) {
+          write(opens, `<!--cmt ${mark.id}-->`);
+          pointed = true;
+        }
+      } else if (opens) write(opens, `<!--cmt ${mark.id}-->`);
+      else if (closes) write(closes, `<!--/${mark.id}-->`);
+    }
+  }
+  return {
+    writes: [...writes].map(([at, markers]) => ({ from: at, to: at, insert: markers.join('') })),
+    anchored,
+  };
 }

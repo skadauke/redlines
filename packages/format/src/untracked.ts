@@ -36,7 +36,7 @@ import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts'
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import { checkTableEdits } from './table-rules.ts';
+import { checkTableEdits, inMovedCol } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
@@ -318,6 +318,8 @@ function awayFromMarks(
   const start = lineStart(text, edit.from);
   const end = lineEnd(text, edit.to);
   const touches = (range: Range) => range.from <= end && start <= range.to;
+  // A cell of a moved column is not where the original has it (format §3.7).
+  if (inMovedCol(text, edit, parsed)) return undefined;
   // The ledger, which starts at the end of the body's last line, only when the edit reaches into it.
   const ledger = parsed.ledgerRange;
   if (ledger && edit.from < ledger.to && ledger.from < edit.to) return undefined;
