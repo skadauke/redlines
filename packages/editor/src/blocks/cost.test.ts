@@ -12,6 +12,7 @@ import { type EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
+import { moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -257,6 +258,48 @@ describe('the cost of a rectangle selection in a table', () => {
       expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
       console.log(
         `cost: rectangle over the table, ${label}: main's keystroke ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+      );
+      expect(ours, label).toBeLessThan(2 * main! * scale + 1);
+    }
+  }, 600_000);
+});
+
+// A row moved in the same table (tables, Stage 3a): the row in the middle one place up and back, a
+// pair of operations, each the format's work on the table (it reads the table, plans the move and
+// the editor reads and draws the table again). It may cost no more than the keystroke does: twice
+// main's pair of keys in a cell, as above.
+describe('the cost of moving a row in a table', () => {
+  it('costs at most twice what main’s keystroke costs, in a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const at = () => view.state.doc.toString().indexOf('item 150 |') + 2;
+      const pair = () => {
+        const start = performance.now();
+        for (let i = 0; i < 4; i++) {
+          view.dispatch({ selection: EditorSelection.cursor(at()) });
+          moveRows(view, true);
+          view.dispatch({ selection: EditorSelection.cursor(at()) });
+          moveRows(view, false);
+        }
+        return (performance.now() - start) / 8;
+      };
+      pair();
+      const runs: number[] = [];
+      for (let i = 0; i < 5; i++) runs.push(pair());
+      const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+      const ours = median(runs);
+      if (record) continue;
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      console.log(
+        `cost: row move, ${label}: main's keystroke ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
       );
       expect(ours, label).toBeLessThan(2 * main! * scale + 1);
     }

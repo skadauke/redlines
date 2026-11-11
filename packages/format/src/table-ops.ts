@@ -370,7 +370,22 @@ function deleteRows(
     ),
     ...removeDeletionLines(text, table, twins),
   ]);
-  const changes = commitEdit(text, body, ledger, { parsed, created, removes: true });
+  // Rows that hold no marks and no twin of a move leave the ledger as it is (the common plain delete).
+  const marked = parsed.marks.some((mark) =>
+    mark.segments.some((segment) =>
+      rows.some((index) => {
+        const row = table.rows[index];
+        return row !== undefined && row.from <= segment.open.from && segment.open.to <= row.to;
+      }),
+    ),
+  );
+  const plainLedger = ctx === null && !marked && twins.size === 0;
+  const changes = commitEdit(
+    text,
+    body,
+    ledger,
+    plainLedger ? { parsed, keepLedger: true } : { parsed, created, removes: true },
+  );
   const after = applyChanges(text, changes);
   const read = tableAfter(after, table);
   // The caret goes to the row that now sits where the first deleted one did.
@@ -470,7 +485,8 @@ function moveRows(
     text,
     body,
     ledger,
-    ctx ? { parsed, created } : { parsed, removes: true },
+    // A plain move keeps every marker it writes again, so the ledger is as it was.
+    ctx ? { parsed, created } : { parsed, keepLedger: true },
   );
   const read = tableAfter(applyChanges(text, changes), table);
   const moved = rows.map((index) => order.indexOf(index));
