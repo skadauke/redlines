@@ -14,6 +14,7 @@ import { EditError } from './errors.ts';
 import { nameOf } from './edit-support.ts';
 import { indentedCodeBlocks } from './indented-code.ts';
 import type { Verbatim } from './scan.ts';
+import type { MarkerRange } from './markers.ts';
 import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 /** The kinds of block a change replaces whole. */
@@ -37,6 +38,8 @@ export interface CodeBlock {
   /** Indented code and the line of white space under it that something is typed on (the open line
    * that Return at its end opens): the block's end before that line, where the payload ends. */
   oldTo?: number;
+  /** Indented code: the marks in it or just above it. */
+  near?: MarkRange[];
   /** What stands in front of its first line's fence or tag: the quote markers and the indentation
    * of its container, which every line of the block has too. */
   prefix: string;
@@ -95,7 +98,7 @@ export function codeBlockOf(
   verbatim: readonly Verbatim[],
   edits: readonly TextChange[],
   frontEnd: number,
-  markers: readonly Range[],
+  markers: readonly MarkerRange[],
 ): Located | null {
   const first = edits[0];
   if (!first || edits.length === 0) return null;
@@ -323,7 +326,7 @@ function indentedBlock(
   text: string,
   lo: number,
   hi: number,
-  markers: readonly Range[],
+  markers: readonly MarkerRange[],
 ): CodeBlock | null {
   const blocks = indentedCodeBlocks(text);
   let range = blocks.find((block) => block.from <= lo && hi <= block.to);
@@ -362,9 +365,15 @@ function indentedBlock(
     above = start;
     if (text.slice(start, lineEnd(text, start)).trim() !== '') break;
   }
-  if (markers.some((marker) => marker.from < range.to && above < marker.to)) return null;
+  // A marker in the block, or in the blank lines and the line of text above it, is a pending change
+  // that could make it code in one view and text in the other: the key is refused, by the marks
+  // (which the substitution that holds the block is not).
+  const near = markers
+    .filter((marker) => marker.mark !== undefined && marker.from < range.to && above < marker.to)
+    .map((marker) => marker.mark as MarkRange);
   return {
     kind: 'indented',
+    ...(near.length > 0 ? { near } : {}),
     from: range.from,
     to: range.to,
     ...(oldTo === undefined ? {} : { oldTo }),

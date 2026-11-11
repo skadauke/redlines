@@ -493,3 +493,34 @@ describe('the open line under indented code (fix round 1)', () => {
     expect(parse(result.after ?? '').marks.map((m) => m.kind)).toEqual(['sub']);
   });
 });
+
+describe('a marker above indented code (fix round 2)', () => {
+  it('refuses a key in the code, naming the person, and writes nothing', () => {
+    const text = file('## Head<!--del k3x9 \\n\\n-->    indented one\n    indented two\n\nAfter.', {
+      k3x9: 'bo',
+    });
+    const words =
+      "Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
+    const end = text.indexOf('indented one') + 'indented one'.length;
+    for (const [from, to, insert] of [
+      [end, end, '\n'],
+      [end, end, 'x'],
+      [end + 1, end + 1, '\n'],
+    ] as const) {
+      expect(attempt(text, from, to, insert), insert).toMatchObject({
+        error: words,
+        code: 'no-legal-placement',
+      });
+    }
+  });
+
+  it('goes on in the block your own substitution holds', () => {
+    const text = file('Intro.\n\n    one\n    two\n\nAfter.');
+    const at = text.indexOf('one') + 3;
+    const first = attempt(text, at, at, 'x').after ?? '';
+    const again = first.indexOf('onex') + 4;
+    const result = attempt(first, again, again, 'y');
+    expect(result.error).toBeUndefined();
+    expect(parse(result.after ?? '').marks).toHaveLength(1);
+  });
+});

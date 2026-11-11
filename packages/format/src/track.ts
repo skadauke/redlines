@@ -4713,7 +4713,26 @@ function codeEdits(
     plan.frontEnd,
     plan.markers,
   );
-  if (!found) return undefined;
+  if (!found) {
+    // Text that follows a pending deletion of a break, indented as code is: code in the original
+    // text, text of the block before it in the newest. No key goes there until it is decided.
+    const first = edits[0];
+    if (first && edits.length === 1) {
+      const start = lineStart(text, first.from);
+      const marker = plan.markers.find(
+        (m) =>
+          m.role === 'open' &&
+          m.mark !== undefined &&
+          m.from >= start &&
+          m.to <= first.from &&
+          lineEnd(text, m.to) >= first.from &&
+          /\n/.test(m.segment?.payload ?? '') &&
+          /^(?: {4}|\t)/.test(text.slice(m.to, m.to + 4)),
+      );
+      if (marker?.mark) throw markInCode(plan.parsed, marker.mark, ctx.author);
+    }
+    return undefined;
+  }
   const { block, edits: typed } = found;
   const holders = holdersOf(block, plan.containers);
   // A marker in the block's range, its fence or tag lines included, is a change in the code: the
@@ -4727,6 +4746,10 @@ function codeEdits(
         (close !== undefined && close.from < block.to && close.to > block.from),
     );
     if (inside) throw markInCode(plan.parsed, mark, ctx.author);
+  }
+  for (const mark of block.near ?? []) {
+    if (!holders.some((holder) => holder.mark === mark))
+      throw markInCode(plan.parsed, mark, ctx.author);
   }
   const theirs = holders.find((holder) => !holder.own);
   if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);
