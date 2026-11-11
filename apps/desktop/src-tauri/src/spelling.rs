@@ -169,13 +169,18 @@ pub fn window_closed(window: &str) {
 /// checker is meant to be used. Elsewhere it answers nothing.
 #[tauri::command]
 pub fn correct_word(window: tauri::WebviewWindow, word: String, before: String) -> Option<String> {
+    correct_word_in(window.label(), &word, &before)
+}
+
+/// `correct_word` for the window labelled `window`, whose spell document it uses.
+fn correct_word_in(window: &str, word: &str, before: &str) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        let tag = macos::tag_of(window.label());
+        let tag = macos::tag_of(window);
         correction(
             macos::automatic_correction_enabled,
-            &word,
-            &before,
+            word,
+            before,
             |query| macos::check(query, tag),
             |query| macos::suggest(query, tag),
         )
@@ -483,7 +488,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn elsewhere_the_command_answers_nothing() {
-        assert_eq!(correct_word("teh".into(), "Hello ".into()), None);
+        assert_eq!(correct_word_in("main", "recieving", "Hello "), None);
     }
     #[test]
     fn run_registers_the_defaults_before_it_builds_the_app() {
