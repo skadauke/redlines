@@ -937,6 +937,20 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
     expect(attempt(seven, 'two', indent(1), false).error).toBe(many(7));
   });
 
+  it('says why the limit applies where the lines below would be read again', () => {
+    const again = ' The lines below would be read again.';
+    const numbered = mine(
+      ['3. one', '4. two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${i + 5}. ${edited(i)}`)].join(
+        '\n',
+      ),
+    );
+    expect(attempt(numbered, 'two', indent(1)).error).toBe(many(8) + again);
+    const bullets = mine(
+      ['- one', '- two', ...[0, 1, 2, 3, 4, 5].map((i) => `- ${edited(i, 'start')}`)].join('\n'),
+    );
+    expect(attempt(bullets, 'two', indent(1)).error).toBe(many(6));
+  });
+
   it('allows what trying every mark allows, with the marks beside the written lines tried', () => {
     // The item above the one that moves, and the numbered items under it, stand against its lines.
     const text = (rows: readonly string[]) => mine(rows.join('\n'));

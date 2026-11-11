@@ -1413,6 +1413,9 @@ const SELF_CHECK =
 const NEAR_PENDING =
   "This formatting can't be written next to these pending changes: deciding them could leave stray syntax. Accept or reject them first.";
 
+/** Why a block change counts marks that a bulleted list would leave apart. */
+const REREAD = ' The lines below would be read again.';
+
 /** How many decisions may be tried in one region, which bounds the work of a change: every order of
  * a new mark and four other marks takes about 850. A decision on a region longer than `TRIAL_SIZE`
  * counts as more than one. */
@@ -1691,6 +1694,9 @@ interface RegionSize {
   length: number;
   /** How many decisions may be tried (`TRIALS`, or `BLOCK_TRIALS` for a block change). */
   budget?: number;
+  /** A block change whose region has lines that its marks apart can't be left out of, as the
+   * numbers below it or an empty item would be read again (format §2.6): the refusal says so. */
+  reread?: boolean;
 }
 
 /** The walk of `proveDecisions`: with the marks apart left pending, and if that does not show
@@ -1735,7 +1741,7 @@ function walkOrders(
     refused(
       others.length === 0
         ? `This changes too many items of one list at once to check them. Change up to ${region.budget === undefined ? 'five' : 'six'} items at a time.`
-        : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.`,
+        : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.${region.reread ? REREAD : ''}`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.
@@ -1963,6 +1969,15 @@ function readsAsBefore(
   return { alike: readsTheSame(local, after), pending: undefined };
 }
 
+/** Whether `local` has a numbered item with a number other than 1, or a line that the reading of
+ * list items can't place (an empty item under a line of text): the lines below a block change
+ * there are read again, and their marks are tried (format §2.6). */
+function readAgain(local: string): boolean {
+  if (/^[ \t>]*(?:[02-9]|\d{2,})\d*[.)](?:[ \t]|$)/m.test(local)) return true;
+  const parsed = parse(local);
+  return holdsMisreadItem(local, markerRanges(parsed), parsed.ledgerRange?.from ?? local.length);
+}
+
 /** The marks of `local`, the file of `region` before a change whose edits there are `touching` (in
  * offsets of the file), that are apart from the change (format-apart.ts), to leave pending; none
  * when there are none. */
@@ -2018,7 +2033,7 @@ function selfCheck(
     const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
     const size = {
       ...sizeOf(text, region),
-      ...(checking.blockChange ? { budget: BLOCK_TRIALS } : {}),
+      ...(checking.blockChange ? { budget: BLOCK_TRIALS, reread: readAgain(local) } : {}),
     };
     proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {

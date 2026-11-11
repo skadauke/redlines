@@ -559,7 +559,8 @@ a bulleted one. The empty item that Markdown can't hold, which the person's own 
 block change the document with it, where it is a line that starts no known block (an empty item under
 a line of text), so every mark of the list is tried: the change leaves that item as it is, and a box
 clicked in a list with more than five changes pending while it is open is refused, in the words
-above.
+above. Where the limit applies because of either, the refusal ends with a sentence that says why:
+"The lines below would be read again."
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
