@@ -248,6 +248,16 @@ function tab(forward: boolean): Command {
   };
 }
 
+/** ⌘A: in a cell, the cell's text; with that selected already, or in an empty cell, the document
+ * (CodeMirror's Select All, which this declines). Outside a cell, and in Raw, not for this. */
+export const selectAllInCell: Command = (view) => {
+  const here = cellOfSelection(view.state);
+  if (!here || here.cell.textFrom === here.cell.textTo) return false;
+  const { from, to } = view.state.selection.main;
+  if (from === here.cell.textFrom && to === here.cell.textTo) return false;
+  return selectCell(view, here.cell);
+};
+
 /** ↩ and ⇧↩: a `<br>` at the caret, over a selection in the cell, and the caret after it. */
 const lineBreak: Command = (view) => {
   if (deleteReach(view, 'return')) return true;
@@ -394,6 +404,7 @@ export function tableKeymap(): Extension {
         { key: 'Tab', run: tab(true) },
         { key: 'Shift-Tab', run: tab(false) },
         { key: 'Mod-Enter', run: insertRowBelow },
+        { key: 'Mod-a', run: selectAllInCell },
         { key: 'Enter', run: lineBreak },
         { key: 'Shift-Enter', run: lineBreak },
         { key: 'Alt-Enter', run: lineBreak },

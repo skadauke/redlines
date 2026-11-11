@@ -3,10 +3,11 @@
 // ⌘-arrows as keystroke scripts, with Track Changes off and on. Movement writes nothing. What needs
 // layout, a move between cells at the same x, is checked in the WebKit script.
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor } from '../index.ts';
-import { macTableCommands } from './keys.ts';
+import { macTableCommands, selectAllInCell } from './keys.ts';
 
 interface Row {
   name: string;
@@ -246,4 +247,71 @@ describe('↓ from a table before the ledger', () => {
       expect: { caret: `${T}⏎⏎‸⏎` },
     },
   ]);
+});
+
+describe('⌘A in a table', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+  const doc = `Intro.\n\n| a | b |\n| - | - |\n| 12 | 34 |\n|  | 78 |\n\nAfter.`;
+  function load(caret: number, raw = false): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada' } });
+    open.push(editor);
+    forceParsing(editor.view, doc.length, 10_000);
+    if (raw) editor.setViewMode('raw');
+    editor.view.dispatch({ selection: { anchor: caret } });
+    return editor;
+  }
+  /** The key, as the platform names it: ⌘ on a Mac, Ctrl elsewhere. */
+  function press(editor: Editor): boolean {
+    return [{ metaKey: true }, { ctrlKey: true }].some((init) =>
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'a', ...init, cancelable: true }),
+        'editor',
+      ),
+    );
+  }
+  const selection = (editor: Editor) => {
+    const { from, to } = editor.view.state.selection.main;
+    return [from, to];
+  };
+  const cell = [doc.indexOf('12'), doc.indexOf('12') + 2];
+
+  it('selects the cell’s text, and the document the second time', () => {
+    const editor = load(doc.indexOf('12') + 1);
+    expect(press(editor)).toBe(true);
+    expect(selection(editor)).toEqual(cell);
+    // The second press is CodeMirror's Select All: the document.
+    expect(press(editor)).toBe(true);
+    expect(selection(editor)).toEqual([0, doc.length]);
+  });
+
+  it('selects the document at once in an empty cell', () => {
+    const editor = load(doc.indexOf('|  |') + 2);
+    expect(selectAllInCell(editor.view)).toBe(false);
+    expect(press(editor)).toBe(true);
+    expect(selection(editor)).toEqual([0, doc.length]);
+  });
+
+  it('leaves a selection that reaches out of the cell to Select All, and a caret outside a table', () => {
+    const editor = load(doc.indexOf('12'));
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('12'), head: doc.indexOf('78') } });
+    expect(selectAllInCell(editor.view)).toBe(false);
+    const outside = load(2);
+    expect(selectAllInCell(outside.view)).toBe(false);
+    expect(press(outside)).toBe(true);
+    expect(selection(outside)).toEqual([0, doc.length]);
+  });
+
+  it('is not bound in Raw', () => {
+    const editor = load(doc.indexOf('12') + 1, true);
+    expect(selectAllInCell(editor.view)).toBe(false);
+    expect(press(editor)).toBe(true);
+    expect(selection(editor)).toEqual([0, doc.length]);
+  });
 });
