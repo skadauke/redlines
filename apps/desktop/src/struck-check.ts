@@ -835,14 +835,20 @@ const pointer: Check[] = [
         await frames();
         return event.defaultPrevented;
       };
-      // ⌥↓ from the text above goes to the block below, past the struck one, and ⌥↑ back: the
+      // ⌥↓ goes to the end of the paragraph the caret is in, then to the end of the next one's, past
+      // the struck block; ⌥↑ goes to the start of that paragraph, then of the one before it. The
       // paragraph keys are the Mac's.
       if (/Mac/.test(navigator.platform)) {
+        const belowEnd = endOf(editor, 'After the deleted paragraph.');
+        const aboveStart = at(editor, 'Before the deleted paragraph.');
         await place(editor, aboveEnd - 6);
-        await keyed('ArrowDown', true);
-        if (head(editor) < belowStart) problems['optionDown'] = [head(editor), belowStart];
-        await keyed('ArrowUp', true);
-        if (head(editor) > aboveEnd) problems['optionUp'] = head(editor);
+        const seen: number[] = [];
+        for (const down of [true, true, false, false]) {
+          await keyed(down ? 'ArrowDown' : 'ArrowUp', true);
+          seen.push(head(editor));
+        }
+        const wanted = [aboveEnd, belowEnd, belowStart, aboveStart];
+        if (seen.join() !== wanted.join()) problems['option'] = { seen, wanted };
       }
       // End and Home stay on their own line, in the text, never in the block.
       await place(editor, belowStart + 4);

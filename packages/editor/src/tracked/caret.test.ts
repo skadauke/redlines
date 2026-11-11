@@ -276,4 +276,20 @@ describe('struck blocks', () => {
       );
     }
   });
+  it('takes ⌥↓ to the end of the paragraph, then the next one’s end, and ⌥↑ back, past the struck block', () => {
+    // As beside any block: the first press goes to the end of the paragraph the caret is in (not
+    // past the block below it), the second to the end of the next one's, and never inside struck text.
+    const one = where(between, 'One.');
+    const three = where(between, 'Three.');
+    for (const view of ['redlines', 'clean'] as const) {
+      const editor = load(between, { view });
+      caret(editor, one + 2);
+      const seen: number[] = [];
+      for (const key of ['Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowUp', 'Alt-ArrowUp']) {
+        press(editor, key);
+        seen.push(head(editor));
+      }
+      expect(seen, view).toEqual([one + 4, three + 6, three, one]);
+    }
+  });
 });
