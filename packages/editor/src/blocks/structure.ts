@@ -283,6 +283,11 @@ function containersOf(state: EditorState, node: SyntaxNode, line: Line): Contain
       if (mark) {
         const space = state.sliceDoc(mark.to, mark.to + 1);
         prefix = { from: mark.from, to: mark.to + (space === ' ' || space === '\t' ? 1 : 0) };
+      } else {
+        // On a later line the parse gives every marker of a nested quote to the innermost one: the
+        // outer quotes find theirs in the text, one after the other.
+        const text = /^[ \t]{0,3}>[ \t]?/.exec(state.sliceDoc(pos, line.to))?.[0];
+        if (text) prefix = { from: pos + text.search(/>/), to: pos + text.length };
       }
       pos = prefix.to;
       containers.push({ kind: 'quote', prefix, depth: quotes });

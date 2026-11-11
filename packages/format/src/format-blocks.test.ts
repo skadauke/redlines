@@ -67,6 +67,10 @@ function typed(text: string, range: Range, op: FormatOp): string {
   return after;
 }
 
+/** A block change with Track Changes off, at the word `at`. */
+const untypedAt = (text: string, at: string, to: BlockType) =>
+  typed(text, rangeOf(text, at), block(to));
+
 const message = (run: () => unknown): string => {
   try {
     run();
@@ -247,6 +251,163 @@ describe('block types (format §2.6)', () => {
     const ids = ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'k3x9', 'b2c3');
     expect(message(() => changed(six, all(six), block('ol'), ids))).toMatch(
       /Change up to six items at a time/,
+    );
+  });
+
+  it('refuses a narrower bullet that would take in a list two columns in (#263)', () => {
+    // The bullet at two columns is a list of its own under `1. ` (text at three), and an item of
+    // the item once it is `- ` or `- [ ] `: a line the change does not write would be read otherwise.
+    for (const [head, word] of [
+      ['1. _f_ k, target', 'target'],
+      ['10. word', 'word'],
+    ] as const) {
+      const text = `${head}\n  - alpha (b)\n`;
+      for (const to of ['ul', 'task'] as const) {
+        const label = `${head} to ${to}`;
+        expect(
+          message(() => changed(text, rangeOf(text, word), block(to))),
+          label,
+        ).toMatch(/can't get a narrower bullet/);
+        expect(
+          message(() => untypedAt(text, word, to)),
+          `off: ${label}`,
+        ).toMatch(/can't get a narrower bullet/);
+      }
+    }
+    // What stands under the item at the columns between, in any block, is read at the column it
+    // starts at, quote markers included: a quote, a fence, HTML, a bullet after a child or a blank.
+    const under = [
+      '1. target\n  > q\n2. nx\n',
+      '1. target\n   - c\n  > q\n',
+      '1. target\n\n  > q\n',
+      '1. target\n  ```\n  code\n  ```\n',
+      '1. target\n  <div>\n  x\n  </div>\n',
+      '1. target\n  - a\n    - b\n',
+      '1. target\n  # h\n',
+      '1. target\n  ---\n',
+      '1. target\n\n  text after a blank\n',
+      '10. target\n   > q\n',
+      '10. target\n   - q\n',
+      '1. target\r\n  > q\r\n',
+    ];
+    for (const text of under) {
+      for (const to of ['ul', 'task'] as const) {
+        const label = `${JSON.stringify(text)} to ${to}`;
+        // HTML under the item is refused as HTML before it comes to columns: never written.
+        const says = text.includes('<div>') ? /./ : /narrower bullet/;
+        const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+        expect(tracked, label).not.toBe('no error');
+        expect(tracked, label).toMatch(says);
+        const off = message(() => untypedAt(text, 'target', to));
+        expect(off, `off: ${label}`).not.toBe('no error');
+        expect(off, `off: ${label}`).toMatch(says);
+      }
+    }
+    // A lazy line of the item's own paragraph is the line it is: text now, a block in the new item.
+    // At every indent of the item, with Track Changes on and off (the lazy line stands a column
+    // short of the old text and at the new one).
+    for (const pad of ['', ' ', '  ', '   ']) {
+      for (const lazy of ['- a', '> q', '```', '1. a']) {
+        for (const wide of [false, true]) {
+          const old = wide ? '10. ' : '1. ';
+          const text = `${pad}${old}target\n${' '.repeat(pad.length + 2)}${lazy}\n`;
+          for (const to of ['ul', 'task'] as const) {
+            const label = `${JSON.stringify(text)} to ${to}`;
+            const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+            expect(tracked, label).not.toBe('no error');
+            const off = message(() => untypedAt(text, 'target', to));
+            expect(off, `off: ${label}`).not.toBe('no error');
+          }
+        }
+      }
+    }
+    for (const pad of ['  ', '   ']) {
+      const text = `${pad}1. target\n${pad}  - a\n`;
+      expect(
+        message(() => untypedAt(text, 'target', 'ul')),
+        JSON.stringify(text),
+      ).toMatch(/narrower bullet/);
+      expect(
+        message(() => changed(text, rangeOf(text, 'target'), block('ul'))),
+        'tracked',
+      ).toMatch(/narrower bullet/);
+    }
+    // A child that stands three columns past the old text of `1. ` (or `10. `) is four past the new
+    // one: code or more of the paragraph there, so the child would be lost. A list, a quote and a
+    // fence, at every indent of the item, tracked and off; and two columns past it stays a child.
+    for (const pad of ['', ' ', '  ', '   ']) {
+      for (const [head, width] of [
+        ['1. ', 3],
+        ['10. ', 4],
+      ] as const) {
+        for (const child of ['- a', '> q', '```\nc\n```', '1. a']) {
+          const at = (past: number) =>
+            child
+              .split('\n')
+              .map((line) => `${pad}${' '.repeat(width + past)}${line}`)
+              .join('\n');
+          for (const to of ['ul', 'task'] as const) {
+            const label = `${pad}${head}target / ${child} to ${to}`;
+            const text = `${pad}${head}target\n${at(3)}\n`;
+            const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+            expect(tracked, label).toMatch(/narrower bullet/);
+            expect(
+              message(() => untypedAt(text, 'target', to)),
+              `off: ${label}`,
+            ).toMatch(/narrower bullet/);
+            // Two columns past the old text (one past `10. `) it is a child in both.
+            const near = `${pad}${head}target\n${at(width === 3 ? 2 : 1)}\n`;
+            expect(
+              message(() => untypedAt(near, 'target', to)),
+              `near ${label}`,
+            ).not.toMatch(/narrower bullet/);
+          }
+        }
+      }
+    }
+    // A child's own children are the child's: their column says nothing about the item's.
+    const nested = '1. target\n   - a\n        - b\n';
+    expect(message(() => untypedAt(nested, 'target', 'ul'))).not.toMatch(/narrower bullet/);
+    // A number other than 1 can't interrupt a paragraph: a lazy `2. a` reads alike in both.
+    for (const pad of ['', ' ', '  ', '   ']) {
+      const lazy = `${pad}1. target\n${pad}    2. a\n`;
+      expect(
+        message(() => untypedAt(lazy, 'target', 'ul')),
+        JSON.stringify(lazy),
+      ).not.toMatch(/narrower bullet/);
+    }
+    // The other way, a wider item loses what its content column takes in.
+    for (const text of ['- target\n  > q\n', '- target\n  ```\n  c\n  ```\n']) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'target'), block('ol'))),
+        text,
+      ).toMatch(/wider bullet/);
+    }
+    // Lines that read the same in both are no reason: a lazy line of a child, the fence and the
+    // HTML of a child, a quote at or past the old column, a line outside the item.
+    for (const text of [
+      '1. target\n   - child\n  lazy of child\n',
+      '1. target\n   ```\n  code\n   ```\n',
+      '1. target\n   <div>\n  x\n',
+      '1. target\n   > q\n',
+      '1. target\n\nafter\n',
+      '1. target\n2. next\n',
+      '1. target\n >q\n',
+    ]) {
+      // Other rules may still refuse some of these (HTML, a numbered item after); not this one.
+      expect(
+        message(() => untypedAt(text, 'target', 'ul')),
+        text,
+      ).not.toMatch(/narrower|wider/);
+    }
+    // Lines at or past its text stay its own, and a bullet that is no wider changes as before.
+    const inside = '1. a\n   - child\n';
+    expect(accepted(changed(inside, rangeOf(inside, 'a'), block('task')), 'm2bd')).toBe(
+      '- [ ] a\n   - child\n',
+    );
+    const same = '- a\n  - child\n';
+    expect(accepted(changed(same, rangeOf(same, 'a'), block('task')), 'm2bd')).toBe(
+      '- [ ] a\n  - child\n',
     );
   });
 
@@ -1565,6 +1726,46 @@ describe('task boxes (format §2.6)', () => {
     const text = '- [ ] Buy milk\n';
     const after = changed(text, all(text), check(true));
     expect(changed(after, all(after), check(false), ctx('n8fx'))).toBe(text);
+  });
+
+  it('checks and unchecks a box in a quote, at depths 1 and 2, in every order of decisions', () => {
+    for (const quote of ['> ', '> > ']) {
+      for (const marker of ['- ', '* ', '1. ']) {
+        const text = [
+          `${quote}${marker}[ ] milk`,
+          `${quote}${marker.replace('1', '2')}[x] eggs`,
+          '',
+        ].join('\n');
+        const checked = changed(text, rangeOf(text, 'milk'), check(true));
+        expect(body(checked), quote + marker).toContain(`[x] milk<!--fmt m2bd +check-->`);
+        expect(rejected(checked, 'm2bd')).toBe(text);
+        expect(accepted(checked, 'm2bd')).toBe(text.replace('[ ] milk', '[x] milk'));
+        // Unchecked again, a box of the author's own goes back, and one that was there is a mark.
+        expect(changed(checked, rangeOf(checked, 'milk'), check(false), ctx('n8fx'))).toBe(text);
+        const open = changed(text, rangeOf(text, 'eggs'), check(false));
+        expect(body(open), quote + marker).toContain('[ ] eggs<!--fmt m2bd -check-->');
+        expect(rejected(open, 'm2bd')).toBe(text);
+        expect(typed(text, rangeOf(text, 'milk'), check(true))).toBe(
+          text.replace('[ ] milk', '[x] milk'),
+        );
+        // Both boxes by one change, and the two decided in every order.
+        const both = changed(checked, all(checked), check(true), ctx('n8fx', 'p7qd'));
+        expect(both).toBe(checked);
+        const twice = changed(text, all(text), check(true), ctx('n8fx', 'p7qd'));
+        expect(parse(twice).marks).toHaveLength(1);
+      }
+    }
+  });
+
+  it("checks a box in a quote beside another person's pending changes", () => {
+    const text = file('> - [ ] milk\n> - [ ] eggs <!--ins k3x9-->and <!--/k3x9-->bread', {
+      k3x9: 'bo',
+    });
+    const after = changed(text, rangeOf(text, 'milk'), check(true));
+    expect(body(after)).toContain('> - [x] milk<!--fmt m2bd +check-->');
+    // A change in its own item is in the way, in a quote as anywhere.
+    const own = file('> - [ ] mi<!--ins k3x9-->l<!--/k3x9-->k', { k3x9: 'bo' });
+    expect(message(() => changed(own, rangeOf(own, 'mi'), check(true)))).toBe(IN_PARAGRAPH);
   });
 
   it("refuses another person's change in the item, and checks with Track Changes off", () => {

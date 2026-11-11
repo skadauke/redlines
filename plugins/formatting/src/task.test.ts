@@ -4,6 +4,7 @@ import { runScopeHandlers } from '@codemirror/view';
 import { checkBoxEffect, createEditor, type Editor, undo } from '@redlines/editor';
 import { accept, applyChanges, newestView, originalView, parse, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { editSourceFacet } from '../../../packages/editor/src/tracked/typing.ts';
 import { createFormatting } from './index.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
@@ -17,10 +18,30 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function mount(doc: string, tracking: boolean, notices: string[] = []): Editor {
+/** Random bytes from a seed (mulberry32), for the ids of new marks. */
+function seededBytes(seed: number): (n: number) => Uint8Array {
+  let state = seed >>> 0;
+  return (n) =>
+    Uint8Array.from({ length: n }, () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) & 255;
+    });
+}
+
+function mount(doc: string, tracking: boolean, notices: string[] = [], seed?: number): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author, tracking });
+  const editor = createEditor(parent, {
+    doc,
+    author,
+    tracking,
+    ...(seed === undefined
+      ? {}
+      : { extensions: [editSourceFacet.of({ now: () => new Date(), random: seededBytes(seed) })] }),
+  });
   const remove = createFormatting(editor, { author, notice: (m) => notices.push(m) });
   mounted.push({ editor, remove });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
@@ -29,6 +50,7 @@ function mount(doc: string, tracking: boolean, notices: string[] = []): Editor {
 }
 
 function click(editor: Editor, index: number): void {
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   const box = editor.view.dom.querySelectorAll('.rl-box')[index];
   box?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
 }
@@ -291,13 +313,23 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
   /** The selection from `from` to `to`, found by text. */
   function select(editor: Editor, from: string, to = from): void {
     const doc = editor.getDoc();
-    const anchor = doc.indexOf(from);
-    const head = doc.indexOf(to) + to.length;
+    // The item's text, which ends its line or stands in front of a marker: a mark's id holds letters
+    // too (a `b` in it ended the selection inside the marker in about one run in five).
+    const find = (text: string) => {
+      const escaped = text.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+      const at = doc.search(new RegExp(`${escaped}(?=<!--|\n)`));
+      return at >= 0 ? at : doc.indexOf(text);
+    };
+    const anchor = find(from);
+    const head = find(to) + to.length;
     editor.view.dispatch({ selection: { anchor, head } });
   }
 
   /** The key, as CodeMirror's Mod-Shift-u (Ctrl in the test's platform). */
   function press(editor: Editor): void {
+    // Parsed to the end first: a busy machine stops the parse of an update early, and Check Item
+    // reads the items from the tree.
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
     runScopeHandlers(
       editor.view,
       new KeyboardEvent('keydown', {
@@ -501,20 +533,75 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     expect(editor.getDoc()).toBe(TWELVE);
   });
 
-  it('names the quote where a box is in one, for Check Item and for a click, tracked or not', () => {
-    const doc = '> - [ ] a\n> - [ ] b\n\nEnd.\n';
-    for (const on of [true, false]) {
-      const notices: string[] = [];
-      const editor = mount(doc, on, notices);
-      editor.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
-      press(editor);
-      select(editor, 'a', 'b');
-      press(editor);
-      click(editor, 0);
-      expect(notices, `tracking ${on}`).toEqual(
-        Array(3).fill("A box in a quote can't be checked yet."),
-      );
-      expect(editor.getDoc()).toBe(doc);
+  it('checks a box in a quote by a click and by Check Item, at depths 1 and 2, tracked or not', () => {
+    for (const quote of ['> ', '> > ']) {
+      const doc = `${quote}- [ ] a\n${quote}- [x] b\n\nEnd.\n`;
+      for (const on of [true, false]) {
+        const label = `${quote} tracking ${on}`;
+        const notices: string[] = [];
+        // A click.
+        const clicked = mount(doc, on, notices);
+        click(clicked, 0);
+        click(clicked, 1);
+        const flip = doc.replace('[ ] a', '[x] a').replace('[x] b', '[ ] b');
+        expect(notices, label).toEqual([]);
+        if (on) {
+          expect(clicked.getDoc().match(/<!--fmt \w+ [+-]check-->/g), label).toHaveLength(2);
+          expect(newestView(clicked.getDoc()).text, label).toBe(flip);
+          expect(originalView(clicked.getDoc()).text, label).toBe(doc);
+        } else expect(clicked.getDoc(), label).toBe(flip);
+        // Check Item on the caret's item, then on both items.
+        const keyed = mount(doc, on, notices);
+        keyed.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
+        press(keyed);
+        expect(notices, label).toEqual([]);
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replace('[ ] a', '[x] a'));
+        select(keyed, 'a', 'b');
+        press(keyed);
+        expect(notices, label).toEqual([]);
+        // Both are checked now: Check Item takes both boxes back.
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replaceAll('[x]', '[ ]'));
+        undo(keyed.view);
+        undo(keyed.view);
+        expect(keyed.getDoc(), label).toBe(doc);
+      }
+    }
+  });
+
+  it('gives the same file whatever the ids of the marks are (50 seeds, depths 1 and 2)', () => {
+    // The keys are the same for every seed: only the ids differ, and some hold the letters of the
+    // items' texts, which a search of the file for an item would find inside a marker.
+    for (const quote of ['> ', '> > ']) {
+      const doc = `${quote}- [ ] a\n${quote}- [x] b\n\nEnd.\n`;
+      for (let seed = 1; seed <= 50; seed++) {
+        const label = `${quote} seed ${seed}`;
+        const keyed = mount(doc, true, [], seed);
+        keyed.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
+        press(keyed);
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replace('[ ] a', '[x] a'));
+        select(keyed, 'a', 'b');
+        press(keyed);
+        expect(newestView(keyed.getDoc()).text, label).toBe(doc.replaceAll('[x]', '[ ]'));
+        expect(originalView(keyed.getDoc()).text, label).toBe(doc);
+      }
+    }
+  });
+
+  it('decides a box checked in a quote in every order', () => {
+    const doc = '> - [ ] a\n> - [ ] b\n> - [ ] c\n\nEnd.\n';
+    const editor = mount(doc, true);
+    select(editor, 'a', 'c');
+    press(editor);
+    const written = editor.getDoc();
+    const ids = parse(written).marks.map((mark) => mark.id);
+    expect(ids).toHaveLength(3);
+    for (const order of [ids, [...ids].reverse()]) {
+      for (const accepting of [true, false]) {
+        let text = written;
+        for (const id of order)
+          text = applyChanges(text, accepting ? accept(text, id) : reject(text, id));
+        expect(text).toBe(accepting ? doc.replaceAll('[ ]', '[x]') : doc);
+      }
     }
   });
 

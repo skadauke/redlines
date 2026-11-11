@@ -64,6 +64,8 @@ const NEXT_ITEM =
   "This item can't change its list type: the numbered item after it would then be read as part of it. Turn off Track Changes to renumber this list.";
 const UNDER_IT =
   "This item can't get a wider bullet: the lines under it would no longer be indented enough to be its own.";
+const NARROWER =
+  "This item can't get a narrower bullet: lines under it that are not part of it now would be read as part of it.";
 const AT_START =
   'A pending change or a comment starts this block, and would have to move. Decide it first.';
 const OWN_FIRST = 'Accept or reject your other change to this block first.';
@@ -516,6 +518,103 @@ function linesIn(reader: BlockReader, from: number, to: number): number[] {
   return starts;
 }
 
+/** The columns that the spaces and tabs at the start of `line` come to, tab stops at four. */
+function columnsOf(line: string): number {
+  let column = 0;
+  for (const c of line) {
+    if (c === ' ') column++;
+    else if (c === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return column;
+}
+
+/**
+ * Whether a line under the item of `block` stands between the columns `from` and `to`, which a
+ * change of its type moves its content column across: that line is read as part of the item in one
+ * type and not in the other. Each line is read as written, at the column it starts at, quote
+ * markers and all, so a quote, a fence and a line of HTML count as a list does. Not those that read
+ * the same in both: a line of text right under a line of the item's own children, which goes on
+ * their paragraph either way, and what a fence or a block of HTML of a child holds.
+ */
+function changesMembership(reader: BlockReader, block: Block, from: number, to: number): boolean {
+  const { text } = reader;
+  const lead = block.indent - block.line;
+  // What can start a block of its own, after the indentation.
+  const starts =
+    /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|=+[ \t]*$|<[A-Za-z/!?])/;
+  // Whether a line starts a block: a number other than 1 can't interrupt the paragraph above it.
+  const begins = (content: string, paragraph: boolean) =>
+    starts.test(content) && !(paragraph && /^(?!0*1[.)])\d{1,9}[.)]/.test(content));
+  // Where the text of the last child of the item starts: a line past it is the child's own.
+  let inner = Infinity;
+  let fence: string | undefined;
+  let html = false;
+  // The lines of the item's own paragraph count as the lines they are: a lazy line is text now, and
+  // a block in the new item, where it stands at a column that the item's text reaches.
+  const own = new Set(block.lines);
+  let above: string | undefined = lineAt(text, block.line).trim();
+  for (let at = nextLine(reader, block.line); at !== undefined; at = nextLine(reader, at)) {
+    const raw = lineAt(text, at);
+    if (raw.trim() === '') {
+      above = undefined;
+      html = false;
+      continue;
+    }
+    const column = columnsOf(raw);
+    if (column <= lead) {
+      if (!own.has(at)) break;
+      above = raw.trimStart();
+      continue;
+    }
+    const content = raw.trimStart();
+    if (column >= to) {
+      // A child's own lines: a fence and a block of HTML keep what they hold.
+      if (fence !== undefined) {
+        if (
+          new RegExp(`^${fence[0] === '~' ? '~' : '`'}{${fence.length},}[ \\t]*$`).test(content)
+        ) {
+          fence = undefined;
+        }
+        above = content;
+        continue;
+      }
+      // A child of the item (not of a child) that stands four columns or more past the content
+      // column of one type and less than four past the other's is a block in one and indented
+      // code or more of the paragraph above in the other.
+      if (column < inner) {
+        if (
+          column >= from + 4 &&
+          column < to + 4 &&
+          (begins(content, above !== undefined) || above === undefined)
+        ) {
+          return true;
+        }
+        const marker = /^(?:[-*+]|\d{1,9}[.)])( +)/.exec(content);
+        if (marker)
+          inner = column + marker[0].length - (marker[1]!.length > 4 ? marker[1]!.length - 1 : 0);
+        else if (content.startsWith('>')) inner = column + (content[1] === ' ' ? 2 : 1);
+      }
+      const opens = /^(`{3,}|~{3,})/.exec(content)?.[1];
+      if (opens !== undefined) fence = opens;
+      html = !html && content.startsWith('<') && starts.test(content) ? true : html;
+      above = content;
+      continue;
+    }
+    if (fence !== undefined || html) continue;
+    // Between the columns. Text under a line of a child's paragraph goes on it in both.
+    const lazy =
+      column >= from &&
+      above !== undefined &&
+      !begins(content, true) &&
+      !ENDS_ITSELF.test(above) &&
+      !/^(?:`{3,}|~{3,})/.test(above);
+    if (column >= from && !lazy) return true;
+    above = content;
+  }
+  return false;
+}
+
 /**
  * The plan of a change of a block's type, or undefined where the block has that type already.
  *
@@ -587,6 +686,18 @@ function planType(
     const children = subtreeEnd(reader, block) > block.end;
     const width = to === 'ol' ? 3 : 2;
     if (children && width > columnOf(block.syntax)) throw refused(UNDER_IT);
+    // A line under it that stands between the two content columns is read as part of the item in
+    // one type and not in the other (a bullet two columns in is a list of its own under `1. `, and
+    // an item of `- [ ] `; so is a quote, a fence or a line of HTML): the change would read a line it
+    // does not write otherwise. Each line is read at the column it starts at, its quote markers
+    // included (#263).
+    const old = columnOf(block.syntax);
+    if (
+      width !== old &&
+      changesMembership(reader, block, lead + Math.min(width, old), lead + Math.max(width, old))
+    ) {
+      throw refused(width < old ? NARROWER : UNDER_IT);
+    }
     const after = nextLine(reader, block.end);
     if (after !== undefined) {
       const next = lineAt(text, after);
@@ -676,8 +787,12 @@ function planType(
 
 /** The box of a task item on the line at `line`: where its mark goes is the character in it. */
 function boxAt(text: string, line: number): number | undefined {
-  const match = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[[ xX]\]/.exec(lineAt(text, line));
-  return match ? line + match[0].length - 2 : undefined;
+  // Past the quote markers: a box in a quote is the box of its item.
+  const quoted = quoteLength(text, line);
+  const match = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[[ xX]\]/.exec(
+    lineAt(text, line).slice(quoted),
+  );
+  return match ? line + quoted + match[0].length - 2 : undefined;
 }
 
 function planCheck(
@@ -956,7 +1071,7 @@ export function planBlock(
   tracked: boolean,
   range: Range,
 ): BlockPlan | undefined {
-  const block = readBlock(reader, paragraph, op.kind === 'indent');
+  const block = readBlock(reader, paragraph, op.kind === 'indent' || op.kind === 'check');
   switch (op.kind) {
     case 'block':
       return planType(reader, block, op.to, tracked, range);

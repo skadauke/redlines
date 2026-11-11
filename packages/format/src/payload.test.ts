@@ -93,4 +93,13 @@ describe('decodePayload', () => {
   it('reads \\xHH as that character and any other backslash as itself', () => {
     expect(decodePayload('\\x41\\x2D \\x4 \\xzz \\q \\')).toBe('A- \\x4 \\xzz \\q \\');
   });
+
+  it('reads an escape and then what follows it, left to right', () => {
+    // `\\` is one backslash, so the `n` after it is a letter; a lone `\n` is a line break.
+    expect(decodePayload('\\\\n \\n \\\\\\n \\{\\% \\| \\-')).toBe('\\n \n \\\n {% | -');
+    expect(decodePayload('no escapes')).toBe('no escapes');
+    expect(decodePayload('\\x60\\x60\\x60js\\nlet a = 1;\\n\\x60\\x60\\x60')).toBe(
+      '```js\nlet a = 1;\n```',
+    );
+  });
 });

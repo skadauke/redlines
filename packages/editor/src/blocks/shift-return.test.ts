@@ -178,6 +178,41 @@ describe('Shift-Return', () => {
         // after it with the backslash in front.
         on: { caret: 'One two<sub ⏎three.>\\⏎‸three.</sub>', newest: 'One two\\⏎three.' },
       },
+      // #248: the caret in front of a pending deletion that ends the line is at the soft break's end
+      // as well (the caret steps over the deletion): the backslash goes behind its marker, in front
+      // of the break, as the change that takes the break and the word after it.
+      {
+        name: 'at a soft line break, in front of a pending deletion at the end of the line (#248)',
+        doc: 'one alph‸<del a>⏎x café',
+        keys: ['Shift-Enter'],
+        off: { caret: 'one alph<del a>\\⏎‸x café', newest: 'one alph\\⏎x café' },
+        on: {
+          caret: 'one alph<del a><sub ⏎x>\\⏎‸x</sub> café',
+          newest: 'one alph\\⏎x café',
+          original: 'one alpha⏎x café',
+        },
+      },
+      {
+        name: 'the same behind two deletions, in an item, and in a quote (#248)',
+        doc: '- one alph‸<del a><del b>⏎  x café',
+        keys: ['Shift-Enter'],
+        off: { caret: '- one alph<del a><del b>\\⏎‸  x café' },
+        on: { caret: '- one alph<del a><del b><sub ⏎  x>\\⏎‸  x</sub> café' },
+      },
+      {
+        name: "the same behind another person's deletion (#248)",
+        doc: 'one alph‸<del a>⏎x café',
+        keys: ['Shift-Enter'],
+        others: 'bo',
+        off: { caret: 'one alph<del a>\\⏎‸x café' },
+        on: { caret: 'one alph<del a><sub ⏎x>\\⏎‸x</sub> café', newest: 'one alph\\⏎x café' },
+      },
+      {
+        name: 'the same in a quote, then text typed, and taken back (#248)',
+        doc: '> one alph‸<del a>⏎> x café',
+        keys: ['Shift-Enter', { type: 'y' }, 'Mod-z', 'Mod-z'],
+        ...same('> one alph‸<del a>⏎> x café'),
+      },
       {
         name: 'inside emphasis: a hard break inside it',
         doc: '**bold ‸text**',
@@ -262,15 +297,11 @@ describe('Shift-Return', () => {
         on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
       },
       {
-        name: 'in code: a line break, as Return (refused in code with Track Changes on)',
+        name: 'in code: a line break, as Return (a substitution of the block with Track Changes on)',
         doc: '```⏎co‸de⏎```',
         keys: ['Shift-Enter'],
         off: { caret: '```⏎co⏎‸de⏎```' },
-        on: {
-          caret: '```⏎co‸de⏎```',
-          refusal:
-            "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
-        },
+        on: { caret: '<sub ```⏎code⏎```>⏎⏎```⏎co⏎‸de⏎```⏎</sub>' },
       },
       {
         name: 'in front matter: a line break (refused with Track Changes on, format §3.8)',

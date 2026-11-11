@@ -249,6 +249,35 @@ function replacesBlock(doc: Text, segment: Segment, bodyEnd: number): boolean {
 }
 
 /**
+ * The block a substitution of code, display math or raw text replaced whole (format §3.5), drawn
+ * as the code it was: its lines apart, in the code font, with no fence. Null for a payload that is
+ * anything else, which is drawn as the text it is.
+ */
+function replacedCode(
+  payload: string,
+): { kind: DeletedBlockKind; pieces: { text: string; at: number }[] } | null {
+  const text = payload.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  // A payload of white space alone is no code to draw.
+  if (text.trim() === '') return null;
+  const lines = text.split('\n');
+  const first = lines[0] ?? '';
+  const fenced = /^[ \t>]*(`{3,}|~{3,})/.test(first) && lines.length > 1;
+  let code: string[];
+  let language = '';
+  if (fenced) {
+    const fence = /^[ \t>]*(`{3,}|~{3,})(.*)$/.exec(first);
+    language = (fence?.[2] ?? '').trim();
+    code = lines.slice(1, /^[ \t>]*(`{3,}|~{3,})[ \t]*$/.test(lines.at(-1) ?? '') ? -1 : undefined);
+  } else if (lines.every((line) => /^(?: {4}|\t)/.test(line) || /^[ \t]*$/.test(line))) {
+    code = lines.map((line) => line.replace(/^(?: {4}|\t)/, ''));
+  } else if (/^[ \t]{0,3}(?:\$\$|<(?:script|pre|style|textarea)[\s>])/i.test(first)) {
+    code = lines;
+  } else return null;
+  const body = code.join('\n');
+  return { kind: { kind: 'code', language }, pieces: [{ text: body, at: 0 }] };
+}
+
+/**
  * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
  * other people that they hold, whose deleted text is part of the blocks. A deletion is whole when
  * `deletedBlocks` reads its payload as whole blocks, and the file is in the form that goes with
@@ -286,8 +315,13 @@ function struckBlocks(
     return low;
   };
   for (const mark of parsed.marks) {
+    // A deletion of whole blocks, or a substitution of one block of code (format §3.5).
+    const replaced =
+      mark.kind === 'sub' && mark.segments.length === 1 && !!mark.segments[0]?.carrier
+        ? replacedCode(mark.segments[0].payload ?? '')
+        : null;
     if (
-      mark.kind !== 'del' ||
+      (mark.kind !== 'del' && !replaced) ||
       !isDrawnChange(mark) ||
       isTableDeletion(mark) ||
       absorbed.has(mark)
@@ -316,7 +350,7 @@ function struckBlocks(
         bare = where === 'before' ? n !== line.number || text === lead : BLANK.test(text);
       }
       if (!bare || (where === 'before' && mark.segments.length > 1)) continue;
-      if (where === 'lines') {
+      if (where === 'lines' && !replaced) {
         // Other people's deletions in the same lines belong to the blocks: found among the
         // segments of all deletions, in file order, by search (not by a scan of every mark).
         const inside = (segment: Segment) =>
@@ -345,10 +379,12 @@ function struckBlocks(
       if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
         continue;
     }
-    const blocks = deletedBlocks(
-      segments.map(({ segment }) => segment),
-      { lead, atEnd: where === 'after' },
-    );
+    const blocks = replaced
+      ? [replaced]
+      : deletedBlocks(
+          segments.map(({ segment }) => segment),
+          { lead, atEnd: where === 'after' },
+        );
     if (!blocks) continue;
     // Each stretch of the blocks' text in the color of the person who deleted it.
     const owners: { to: number; color: number }[] = [];
@@ -441,8 +477,8 @@ function analyze(state: EditorState, kept: number | null): Model {
       ) {
         // A block drawn as a block takes its own bar, and leaves the lines around it alone.
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
-        const text = redlines ? deletedText(segment.payload, marks) : '';
         if (!asBlock) {
+          const text = redlines ? deletedText(segment.payload, marks) : '';
           const whole =
             redlines &&
             text !== '' &&

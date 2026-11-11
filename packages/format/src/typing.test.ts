@@ -197,7 +197,7 @@ describe('Enter where a blank line would change the document is not plain (forma
     return after === undefined ? undefined : bodyOf(after).slice(0, -1);
   }
 
-  it('is refused inside fenced code, where a blank line is code', () => {
+  it('is a line of the code inside fenced code, a substitution of the block (format §3.5)', () => {
     // The second review: each of these was written with no mark, and reject could not remove it.
     const cases: [string, string, (body: string) => number][] = [
       [
@@ -254,12 +254,19 @@ describe('Enter where a blank line would change the document is not plain (forma
     ];
     for (const [what, body, position] of cases) {
       for (const insert of ['\n', '\n\n']) {
-        // Markers inside code are not read, so there is no way to track the break: it is refused.
-        const { after, code } = enter(body, position(body), insert);
+        // Markers inside code are not read, so the break is a line of the code and the change
+        // replaces the block whole (format §3.5): a substitution, never a break with no mark.
+        // In a quote every line of the code keeps its `> `, as the editor types them.
+        const typed = what.includes('quote') ? insert.replace(/\n/g, '\n> ') : insert;
+        const { before, after, code } = enter(body, position(body), typed);
+        expect(code, `${what}: ${JSON.stringify(after)}`).toBeUndefined();
         expect(
-          ['inside-code', 'no-legal-placement'],
-          `${what}: ${JSON.stringify(after)}`,
-        ).toContain(code);
+          parse(after ?? '').marks.map((mark) => mark.kind),
+          what,
+        ).toEqual(['sub']);
+        expect(bodyText(applyChanges(after ?? '', rejectAll(after ?? ''))), what).toBe(
+          bodyText(before),
+        );
       }
     }
   });
@@ -272,16 +279,18 @@ describe('Enter where a blank line would change the document is not plain (forma
     );
   });
 
-  it('is refused inside an HTML comment and a pre block, where a blank line is content', () => {
+  it('is refused inside an HTML comment, and a substitution of the block in a pre block', () => {
     const comment = 'Intro.\n\n<!--\nnote\n\nmore\n-->\n\nAfter.';
     expect(enter(comment, endOf(comment, 'note\n')).code).toBeDefined();
     const pre = 'Intro.\n\n<pre>\nline one\n\nline two\n</pre>\n\nAfter.';
-    expect(enter(pre, endOf(pre, 'line one\n')).code).toBeDefined();
+    const { after } = enter(pre, endOf(pre, 'line one\n'));
+    expect(parse(after ?? '').marks.map((mark) => mark.kind)).toEqual(['sub']);
   });
 
-  it('is refused inside indented code', () => {
+  it('is a substitution of the block inside indented code', () => {
     const body = 'Intro.\n\n    code one\n\n    code two\n\nAfter.';
-    expect(enter(body, endOf(body, 'code one')).code).toBeDefined();
+    const inside = enter(body, endOf(body, 'code one'));
+    expect(parse(inside.after ?? '').marks.map((mark) => mark.kind)).toEqual(['sub']);
     // But not in front of it, or after it.
     expect(enter(body, endOf(body, 'Intro.')).after).toBeDefined();
     expect(enter(body, endOf(body, 'code two')).after).toBeDefined();
@@ -404,10 +413,12 @@ describe('Backspace over line breaks that Enter typed (format §3.4)', () => {
     expect(parse(soft).marks.map((mark) => mark.kind)).toEqual(['del']);
   });
 
-  it('does not take line breaks out of code', () => {
+  it('takes a blank line out of code as a substitution of the block (format §3.5)', () => {
     const body = 'Intro.\n\n```\nline one\n\n\nline two\n```\n\nAfter.';
     const at = endOf(body, 'line one\n');
-    expect(() => remove(body, at, at + 1)).toThrow(EditError);
+    const removed = remove(body, at, at + 1);
+    expect(parse(removed).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expect(bodyText(applyChanges(removed, rejectAll(removed)))).toBe(body);
   });
 });
 
@@ -3615,5 +3626,174 @@ describe('a change that ends with the line break in front of a list item (review
     expect(bodyText(applyChanges(before, untrackedEdit(before, edit)))).toBe(
       '1. one\n\nX\n\n3. two\n\nAfter.',
     );
+  });
+});
+
+describe('a blank line and an item typed at the end of an item’s text (#248)', () => {
+  // Return at the start of a nested list's first item, under its parent's text: the new empty item
+  // can't start a list under a line of text, so a blank line goes between them, and the item
+  // above becomes loose in the newest view as in the file. It is one insertion at the end of the
+  // line above, which the format writes as a split whose break holds the blank line and the item.
+  it('is a split, and every order of decisions reads alike', () => {
+    for (const [body, anchor, insert, form] of [
+      [
+        '- One\n  Beta\n  + delta',
+        'Beta',
+        '\n\n  + ',
+        '- One\n  Beta<!--split m2bd-->\n\n  + \n  + delta',
+      ],
+      ['- One\n  + delta', 'One', '\n\n  + ', '- One<!--split m2bd-->\n\n  + \n  + delta'],
+      [
+        '- One\n  Beta\n  + delta\n  + two',
+        'Beta',
+        '\n\n  + ',
+        '- One\n  Beta<!--split m2bd-->\n\n  + \n  + delta\n  + two',
+      ],
+      [
+        '1. One\n   Beta\n   1. delta',
+        'Beta',
+        '\n\n   2. ',
+        '1. One\n   Beta<!--split m2bd-->\n\n   2. \n   1. delta',
+      ],
+      [
+        '> - One\n>   Beta\n>   + delta',
+        'Beta',
+        '\n>\n>   + ',
+        '> - One\n>   Beta<!--split m2bd-->\n>\n>   + \n>   + delta',
+      ],
+      [
+        '- a\n  - b\n    c\n    * d',
+        'c',
+        '\n\n    * ',
+        '- a\n  - b\n    c<!--split m2bd-->\n\n    * \n    * d',
+      ],
+    ] as const) {
+      const before = file(body);
+      const at = endOf(body, anchor);
+      const edit: TextChange = { from: at, to: at, insert };
+      const result = trackedEdits(before, [edit], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('the deletion of a first line that holds a list marker alone (#248)', () => {
+  // Return in an empty first item at the start of a file takes the item away: the format has no
+  // place for a marker in front of the item's marker, and writes the deletion of the line as the
+  // join it reads as. One mark, so every order of decisions reads alike.
+  it('is written as the join, and reads alike in every order', () => {
+    for (const [body, form] of [
+      ['- \n- two', '- <!--del m2bd \\n- -->\n  two'],
+      ['1. \n2. two', '1. <!--del m2bd \\n2. -->\n   two'],
+      ['  - \n  - two', '  - <!--del m2bd \\n  - -->\n    two'],
+      ['- \n- two\n- three', '- <!--del m2bd \\n- -->\n  two\n- three'],
+      ['- \n\n- two', '- <!--del m2bd \\n\\n- -->\n  two'],
+    ] as const) {
+      const before = file(body);
+      const to = body.indexOf('\n');
+      const result = trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('a backslash typed at the end of a line that ends in a pending deletion (#248)', () => {
+  it('goes behind the marker, in front of the soft break, and reads alike in every order', () => {
+    for (const [body, form] of [
+      [
+        'one alph<!--del k3x9 a-->\nx café',
+        'one alph<!--del k3x9 a--><!--sub m2bd \\nx-->\\\nx<!--/m2bd--> café',
+      ],
+      [
+        '> one alph<!--del k3x9 a-->\n> x café',
+        '> one alph<!--del k3x9 a--><!--sub m2bd \\n> x-->\\\n> x<!--/m2bd--> café',
+      ],
+      [
+        '- one alph<!--del k3x9 a--><!--del n8fx b-->\n  x café',
+        '- one alph<!--del k3x9 a--><!--del n8fx b--><!--sub m2bd \\n  x-->\\\n  x<!--/m2bd--> café',
+      ],
+    ] as const) {
+      const marks = Object.fromEntries(
+        ['k3x9', 'n8fx'].filter((id) => body.includes(id)).map((id) => [id, 'bo']),
+      );
+      const before = file(body, marks);
+      const at = body.indexOf('\n');
+      const edit: TextChange = { from: at, to: at, insert: '\\' };
+      const result = trackedEdits(before, [edit], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('the deletion of the prefix of a file’s first line, its text staying (#248)', () => {
+  // Taking the first block of a longer list or quote out of it: the prefix is the mark's text, and
+  // its opener stands alone on the first line, with the break and blank line the block after it
+  // needs (format §3.3). One mark, so every order of decisions reads alike, and micromark reads
+  // the file as the newest view.
+  it('reads as the newest view in the file and in every order of decisions', () => {
+    for (const [body, to] of [
+      ['- one\n- two', 2],
+      ['- one\n\n- two', 2],
+      ['- one\n  - two\n- three', 2],
+      ['* one\n+ two', 2],
+      ['1. one\n1. two', 3],
+      ['1) one\n1) two', 3],
+      ['> One.\n>\n> Two.', 2],
+      ['> One.\n> Two.', 2],
+      ['  - one\n  - two', 4],
+      ['- **one** two\n- three', 2],
+      // Items that can't interrupt a paragraph, with no mark among them: read alike in every view.
+      ['1. one\n2. two', 3],
+      ['- one\n- ', 2],
+      ['- one\n2. two', 2],
+      ['1. one\r\n2. two', 3],
+      ['- one\r\n- two', 2],
+      ['- [ ] one\n- two', 6],
+      ['- [x] one\n- [ ] two', 6],
+    ] as const) {
+      const before = file(body);
+      const result = trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(newestView(after).text, body).toBe(`${body.slice(to)}\n`.replace(/^\s+/, ''));
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is not written next to another mark, in a heading, or over an item that could not interrupt', () => {
+    for (const [body, to] of [
+      ['- <!--del k3x9 x-->one\n- two', 2],
+      ['## One\n\nTwo', 3],
+      // A pending deletion empties the item below: the file reads it as an item with text, the view
+      // as an empty one, which can't interrupt a paragraph (#248 review C1).
+      ['- one\n- <!--del k3x9 two-->', 2],
+      ['1. one\n1. <!--del k3x9 two-->', 3],
+      ['- one\n- <!--del k3x9 two-->\n- three', 2],
+      ['- one\n- <!--ins k3x9-->two<!--/k3x9-->\n- ', 2],
+      // An underline below would make a heading of the text.
+      ['- one\n---', 2],
+      ['- one\r\n- <!--del k3x9 two-->\r\n', 2],
+      ['1. one\r\n1. <!--del k3x9 two-->\r\n', 3],
+    ] as const) {
+      const before = file(body, { k3x9: 'bo' });
+      expect(
+        () => trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd'])),
+        body,
+      ).toThrow(EditError);
+    }
   });
 });

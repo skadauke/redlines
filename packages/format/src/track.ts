@@ -98,7 +98,18 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
-import { viewsOnce } from './views.ts';
+import type { Verbatim } from './scan.ts';
+import {
+  assertStillBlock,
+  codeBlockOf,
+  edited,
+  holdersOf,
+  markInCode,
+  MIXED_BREAKS,
+  NOT_CODE,
+  theirChange,
+} from './code-edit.ts';
+import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type {
   DocView,
@@ -180,7 +191,7 @@ interface Plan {
   /** Line breaks were written as they are, with no mark: the original text has more of them. */
   plain: boolean;
   /** Where a blank line is content (`Scan.verbatim`), once asked for. */
-  verbatim?: readonly Range[];
+  verbatim?: readonly Verbatim[];
   /** The marks this call made or changed. */
   readonly touched: string[];
   /** The range each edit replaces once it is widened, a point for typing. */
@@ -1305,6 +1316,84 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
 }
 
 /**
+ * A deletion of the prefix of the first line of the body alone, a list marker or a quote's `>`
+ * with the text after it staying (taking a longer list's or quote's first block out of it, #248):
+ * the deleted prefix is the mark's text, and its opener stands where the prefix was, alone on the
+ * line, for the text that stays is the block it starts, which the opener's line break and blank
+ * line carry (format §3.3). Undefined for any other range.
+ */
+function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
+  const { text } = plan;
+  if (from !== plan.bodyStart || prefixEnd(plan, from) !== to) return undefined;
+  const line = text.slice(from, lineEnd(text, from));
+  const prefix = text.slice(from, to);
+  if (!FIRST_PREFIX.test(prefix) || line.length === prefix.length) return undefined;
+  // A marker right after it (another mark's, which the deletion would join, or a comment's) would
+  // stand at the start of the line, with the text after it on the line.
+  if (plan.markers.some((marker) => marker.from === to || marker.from < to)) {
+    throw new EditError(FIRST_PREFIX_MARK, 'no-legal-placement');
+  }
+  // The lines below it, up to the next blank line, as the file reads them and as the newest and the
+  // original view do: an item that can't interrupt a paragraph (an ordered item that isn't numbered
+  // 1, an empty one) or an underline would become a line of the text above it, or make a heading of
+  // it. Where the three disagree about those lines (a pending deletion that empties an item reads
+  // as text in the file and as an empty item in the view), nothing is written. Where a mark is on
+  // them the item's reading is not the file's to rely on either, so only plain lines are let through.
+  const reads = [below(text), below(newestView(text).text), below(originalView(text).text)];
+  const classes = reads.map((lines) => lines.map(lineClass));
+  const agree = classes.every((one) => one.join(' ') === (classes[0] ?? []).join(' '));
+  const all = classes.flat();
+  if (!agree || all.includes('rule') || (all.includes('unlike') && markedBelow(plan, from))) {
+    throw new EditError(FIRST_PREFIX_BELOW, 'no-legal-placement');
+  }
+  return { from, to, at: to };
+}
+
+/** The first prefix of a body that is taken out of it: a marker, and a task item's box. */
+const FIRST_PREFIX = /^[ \t]*(?:[-+*]|\d{1,9}[.)]|>)[ \t]*(?:\[[ xX]\][ \t]+)?$/;
+
+/** Why a first prefix with another mark right after it can't be taken out. */
+const FIRST_PREFIX_MARK =
+  'This line starts with a pending change, which would be left at the start of the line. Accept or reject it first, or take the marker out with Track Changes off.';
+
+/** Why a first prefix can't be taken out over the lines below it. */
+const FIRST_PREFIX_BELOW =
+  'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
+
+/** The lines of a view after its first line, up to the next blank line, without their CRs. */
+function below(view: string): string[] {
+  const lines = view.split('\n').map((l) => l.replace(/\r$/, ''));
+  const found: string[] = [];
+  for (const l of lines.slice(1)) {
+    if (/^[ \t>]*$/.test(l)) break;
+    found.push(l);
+  }
+  return found;
+}
+
+/** How a line below reads: an item that can't interrupt a paragraph, an underline or rule, other. */
+function lineClass(line: string): 'unlike' | 'rule' | 'other' {
+  if (/^[ \t>]*(?:=+|-{2,}|[*_]{3,})[ \t]*$/.test(line)) return 'rule';
+  const item = /^[ \t>]*(?:(\d{1,9})[.)]|[-+*])(?:[ \t]|$)/.exec(line);
+  if (!item) return 'other';
+  // An empty item, of any number, can't interrupt a paragraph either.
+  if (/^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(line)) return 'unlike';
+  return item[1] !== undefined && item[1] !== '1' ? 'unlike' : 'other';
+}
+
+/** Whether a marker stands on the lines after the first one, up to the next blank line. */
+function markedBelow(plan: Plan, from: number): boolean {
+  const { text } = plan;
+  let at = nextLineStart(text, from);
+  for (; at < text.length; at = nextLineStart(text, at)) {
+    const row = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(row)) return false;
+    if (row.includes('<!--')) return true;
+  }
+  return false;
+}
+
+/**
  * A deletion of the whole first line of a block that goes on takes the line break after it, with the
  * indentation of the next line. A marker that is alone on its line in front of the lines of a block
  * is the opener of the mark that starts the block (format §3.3), and would take the line break for
@@ -1482,6 +1571,22 @@ interface Placed {
   to: number;
   left: string;
   right: string;
+}
+
+/** Whether a line that starts with a number, indented `indent`, is left of the content column of the
+ * nearest list item above it in the same block: an item of that list, not text of its paragraph. */
+function isSiblingNumber(text: string, line: number, indent: number): boolean {
+  let at = line;
+  for (let n = 0; n < 50 && at > 0; n++) {
+    at = lineStart(text, at - 1);
+    const above = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(above)) return false;
+    const item = /^([ \t>]*)(\d{1,9}[.)]|[-+*])([ \t]+)/.exec(above);
+    if (item) {
+      return indent < (item[1]?.length ?? 0) + (item[2]?.length ?? 0) + (item[3]?.length ?? 0);
+    }
+  }
+  return false;
 }
 
 /**
@@ -2553,8 +2658,11 @@ function longerBreak(
 function blankLinesMatter(plan: Plan, from: number, to: number): boolean {
   const { text, markers } = plan;
   const verbatim = (plan.verbatim ??= scan(text).verbatim);
+  // A range ends at the line break of its last line, which a CRLF's `\r` is part of: a place at the
+  // end of that line, before the `\r`, is not in the block.
+  const ends = (range: Range) => (text[range.to - 1] === '\r' ? range.to - 1 : range.to);
   return (
-    verbatim.some((range) => range.from < to && from < range.to) ||
+    verbatim.some((range) => range.from < to && from < ends(range)) ||
     betweenIndentedCode(text, from, markers)
   );
 }
@@ -2604,7 +2712,11 @@ function plainBreakAt(
   let at: number | undefined;
   let found = blocks.find((b) => b.start <= after && after <= lineStart(text, b.end));
   const original = (from: number, to: number) => originalBetween(plan, from, to);
-  if (found) at = position;
+  // The end of the closing fence of code in a container (the block reading of the breaks does not
+  // see it): the break after it is between two blocks.
+  const fenceEnd = !skip && position === lineEnd(text, position) && endsFenceAt(plan, position);
+  if (fenceEnd) at = position;
+  else if (found) at = position;
   else {
     // At the end of the last line of a block, with only markers after it on that line, and no
     // text of the original in them: the block would go on in the original text.
@@ -2891,13 +3003,17 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
   for (const [i, { depth, text: raw }] of lines.entries()) {
     const own = raw.replace(/\r$/, '');
     let starts = false;
+    /** The line is the closing fence: code, but a break after it is outside the code. */
+    let closes = false;
     if (fence && depth < fence.depth) fence = undefined;
     if (html && depth < html.depth) html = undefined;
     if (fence !== undefined) {
       const line = '>'.repeat(depth - fence.depth) + own;
       const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
-      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length)
+      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length) {
         fence = undefined;
+        closes = true;
+      }
       starts = true;
     } else if (html !== undefined) {
       const line = '>'.repeat(depth - html.depth) + own;
@@ -2924,13 +3040,24 @@ function rawAtEnd(lines: readonly BlockLine[]): boolean {
     }
     underText = !starts && own.trim() !== '';
     // A line that is code or raw text, or starts it, is not read as a line of a quote.
-    if (i === lines.length - 1) last = starts || fence !== undefined || html !== undefined;
+    if (i === lines.length - 1) {
+      last = (starts && !closes) || fence !== undefined || html !== undefined;
+    }
   }
   return last;
 }
 
 /** Container markers that each stand no more than three columns in: a quote's, a list item's. */
 const OPENERS = /^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]{1,4}))*/;
+
+/** Whether the line that holds `position` is the closing line of a fenced block, in a container. */
+function endsFenceAt(plan: Plan, position: number): boolean {
+  const end = lineEnd(plan.text, position);
+  const verbatim = (plan.verbatim ??= scan(plan.text).verbatim);
+  return verbatim.some(
+    (range) => range.kind === 'fence' && (range.to === end || range.to === end + 1),
+  );
+}
 
 /**
  * The quote that the line holding `position` is a line of, as a renderer reads the blocks, or
@@ -3557,7 +3684,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   let typed = inEol(edit.insert, plan.eol);
   if (typed !== '') assertNoMarkup(typed);
-  if (plan.frontEnd >= 0 && edit.from <= plan.frontEnd) {
+  // Front matter takes no change (format §3.8), but line breaks put at the end of its closing line
+  // are the body's: the empty paragraph that Enter opens there.
+  const afterFront =
+    edit.from === plan.frontEnd && edit.to === edit.from && /^(?:\r?\n)+$/.test(typed);
+  if (plan.frontEnd >= 0 && edit.from <= plan.frontEnd && !afterFront) {
     throw new EditError(FRONT_MATTER, 'front-matter');
   }
   let from: number;
@@ -3707,7 +3838,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     const marked = breaks && lines.some((line) => line.includes('>'));
     const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;
     let quoted =
-      quote !== undefined && (quoteEndsAt(text, from) || blankQuoteLineAfter(text, from, quote));
+      quote !== undefined &&
+      (quoteEndsAt(text, from) ||
+        blankQuoteLineAfter(text, from, quote) ||
+        // After the closing fence of code, the quote goes on with the text under it, and the blank
+        // lines of the break are blank lines of the quote between two of its blocks.
+        endsFenceAt(plan, from));
     const plain =
       breaks &&
       lines.every((line) => {
@@ -3749,7 +3885,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
     typed === '' &&
     !inOwnBreak(plan, from, to) &&
     !ownTextOnly(plan, from, to)
-      ? coverBlocks(plan, from, to)
+      ? (coverBlocks(plan, from, to) ?? firstPrefix(plan, from, to))
       : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
   let lead = '';
@@ -3958,6 +4094,19 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
 function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
+  // A list number with a marker right behind it and text after it is text to a reader that doesn't
+  // know the markers, and a sibling item in the view when it stands at or left of the content of the
+  // item above it: the edit wrote one where there was none (a change that took the line break and the
+  // number of the next item, #248, walk seed 511). Typed numbers are the person's own.
+  const bare = /^([ \t>]*)\d{1,9}[.)]<!--\/[a-z0-9]+--> /gm;
+  const wrote = (re: RegExp, text: string) =>
+    [...text.matchAll(re)].filter((m) => isSiblingNumber(text, m.index, m[1]?.length ?? 0)).length;
+  if (wrote(bare, after) > wrote(bare, plan.text)) {
+    throw new EditError(
+      'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+      'no-legal-placement',
+    );
+  }
   const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const had = new Map(plan.parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const split = new Map<string, number>();
@@ -4057,7 +4206,11 @@ function selfCheck(
   const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
   const was = lf(views.original(text).text);
   const is = lf(views.original(after).text);
-  const quiet = (s: string) => blank(withoutQuoteEnds(withoutQuoteRuns(s)));
+  // Blank lines of a quote right under a fence line: between a block of code and the block under
+  // it, which no reader sees.
+  const underFence = (s: string) =>
+    s.replace(/^([ \t>]*(?:`{3,}|~{3,})[ \t]*\n)(?:[ \t]*>[ \t>]*\n)+/gm, '$1');
+  const quiet = (s: string) => blank(underFence(withoutQuoteEnds(withoutQuoteRuns(s))));
   const quietly = () => {
     const [a, b] = differingBlocks(is, was);
     return quiet(a) === quiet(b);
@@ -4650,6 +4803,14 @@ export function trackedEdits(
   // As typed first; where that reads otherwise next to another mark, each way of writing the change
   // again by a character, until one reads alike in every order of decisions, or none does.
   for (let mode = 0; ; mode++) {
+    // Each way of writing the change is tried once; a change that reads otherwise in all of them is
+    // refused, never tried again.
+    if (mode > MOST_MODES) {
+      throw new EditError(
+        'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
+        'no-legal-placement',
+      );
+    }
     try {
       return editsOnce(text, edits, mode === 0 ? first : again(), mode);
     } catch (error) {
@@ -4657,6 +4818,154 @@ export function trackedEdits(
     }
   }
 }
+
+/**
+ * Edits inside one block of code, display math or raw text (format §3.5, rule 9): a substitution of
+ * the whole block, with the old block as its payload and the newest code in the file. Edits in a
+ * block that the author's own pending insertion or substitution holds edit the code and make no
+ * mark; in one that another person's holds they are refused. Undefined when the edits are not in
+ * the code of one block.
+ */
+function codeEdits(
+  plan: Plan,
+  edits: readonly TextChange[],
+  views: Views,
+): TrackedEdits | undefined {
+  const { text, ctx } = plan;
+  plan.verbatim ??= scan(text).verbatim;
+  const found = codeBlockOf(
+    text,
+    plan.verbatim,
+    edits.map((edit) => ({ ...edit, insert: inEol(edit.insert, plan.eol) })),
+    plan.frontEnd,
+    plan.markers,
+  );
+  if (!found) {
+    // Text that follows a pending deletion of a break, indented as code is: code in the original
+    // text, text of the block before it in the newest. No key goes there until it is decided.
+    const first = edits[0];
+    if (first && edits.length === 1) {
+      const start = lineStart(text, first.from);
+      const marker = plan.markers.find(
+        (m) =>
+          m.role === 'open' &&
+          m.mark !== undefined &&
+          m.from >= start &&
+          m.to <= first.from &&
+          lineEnd(text, m.to) >= first.from &&
+          // Another person's deletion of a blank line: the text after it is code in the original.
+          m.mark.entry.by !== ctx.author.handle &&
+          /\n[ \t]*\r?\n[ \t]*$/.test(m.segment?.payload ?? '') &&
+          /^(?: {4}|\t)/.test(text.slice(m.to, m.to + 4)),
+      );
+      if (marker?.mark) throw markInCode(plan.parsed, marker.mark, ctx.author);
+    }
+    return undefined;
+  }
+  const { block, edits: typed } = found;
+  const holders = holdersOf(block, plan.containers);
+  // A marker in the block's range, its fence or tag lines included, is a change in the code: the
+  // block would go whole into the payload with it. Only the substitution that holds the block is
+  // the author's own to edit through.
+  for (const mark of plan.parsed.marks) {
+    if (holders.some((holder) => holder.mark === mark)) continue;
+    const inside = mark.segments.some(
+      ({ open, close }) =>
+        (open.from < block.to && open.to > block.from) ||
+        (close !== undefined && close.from < block.to && close.to > block.from),
+    );
+    if (inside) throw markInCode(plan.parsed, mark, ctx.author);
+  }
+  // Another person's pending change that the block or the blank line that opens it holds or touches.
+  // Your own marks never refuse a key here.
+  for (const mark of block.near ?? []) {
+    if (mark.entry.by !== ctx.author.handle && !holders.some((holder) => holder.mark === mark)) {
+      throw markInCode(plan.parsed, mark, ctx.author);
+    }
+  }
+  const theirs = holders.find((holder) => !holder.own);
+  if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);
+  if (!found.inCode) throw new EditError(NOT_CODE, 'no-legal-placement');
+  const raw = text.slice(block.from, block.to);
+  if (plan.eol === '\r\n' ? /(?<!\r)\n/.test(raw) : /\r\n/.test(raw)) {
+    throw new EditError(MIXED_BREAKS, 'no-legal-placement');
+  }
+  for (const edit of typed) if (edit.insert !== '') assertNoMarkup(edit.insert);
+  assertStillBlock(block, edited(text, block, typed));
+  const now = edited(text, block, typed);
+  if (holders.length > 0) {
+    // The pending change already holds the block: the edits are the only change to the file.
+    const intended = applyChanges(text, typed);
+    const changes = commitEdit(text, typed, plan.ledger, {
+      parsed: plan.parsed,
+      keepLedger: true,
+      views,
+      verify: (after) => {
+        if (after !== intended) throw new EditError(SELF_CHECK, 'no-legal-placement');
+      },
+    });
+    const own = [...new Set(holders.map((holder) => holder.mark.id))];
+    return { changes, markIds: [], extendedIds: own };
+  }
+  const id = newMark(plan);
+  // The first line's prefix stays in front of the opener's line and carries on in its carrier.
+  const old = text.slice(block.from + block.prefix.length, block.oldTo ?? block.to);
+  // Where a blank line follows the block, the closer takes its place, so that the line break after
+  // the closing fence is the block's, and the file keeps as many blank lines as it had: the payload
+  // ends with that line break, and the closer stands at the start of the blank line. Otherwise the
+  // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
+  const body = plan.parsed.ledgerRange?.from ?? text.length;
+  const roomy =
+    block.prefix === '' &&
+    text.startsWith(plan.eol + plan.eol, block.to) &&
+    block.to + 2 * plan.eol.length <= body;
+  const closer = `<!--/${id}-->`;
+  const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
+  const tail = roomy ? block.to + plan.eol.length : block.to;
+  const content = now.slice(block.prefix.length) + (roomy ? plan.eol : plan.eol + block.prefix);
+  const changes = commitEdit(
+    text,
+    [
+      {
+        from: block.from,
+        to: block.from,
+        insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
+      },
+      ...typed,
+      roomy
+        ? { from: tail, to: tail, insert: closer }
+        : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
+    ],
+    plan.ledger,
+    {
+      parsed: plan.parsed,
+      created: [id],
+      views,
+      // The substitution holds the old block as its payload and the newest code as its text, and
+      // the file is as it was around them: both views read as they did, but for the edits.
+      verify: (after, parsed) => {
+        const mark = parsed.marks.find((candidate) => candidate.id === id);
+        const segment = mark?.segments[0];
+        if (
+          mark?.kind !== 'sub' ||
+          mark.segments.length !== 1 ||
+          !segment?.close ||
+          !segment.carrier ||
+          mark.payload !== payload ||
+          after.slice(segment.carrier.to, segment.content.to) !== content ||
+          !after.startsWith(text.slice(0, block.from)) ||
+          !after.endsWith(text.slice(tail))
+        ) {
+          throw new EditError(SELF_CHECK, 'no-legal-placement');
+        }
+      },
+    },
+  );
+  return { changes, markIds: [id], extendedIds: [] };
+}
+
+/** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
+const MOST_MODES = 8;
 
 /** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
 class ReadsOtherwise extends Error {}
@@ -4676,6 +4985,10 @@ function editsOnce(
       ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
       : edit,
   );
+  // Code, display math and raw text take no markers: a change inside one replaces the block whole
+  // (format §3.5).
+  const code = codeEdits(plan, edits, views);
+  if (code) return code;
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a

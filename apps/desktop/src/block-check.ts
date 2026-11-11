@@ -686,6 +686,37 @@ const CHECKS: Check[] = [
     file: '- [ ] one⏎- [x] two⏎⏎End.',
   },
   {
+    // A box behind a `>` is checked like any other, at both depths, by a click and by Space (#274).
+    name: 'tracked-box-in-a-quote-click-is-a-box-change',
+    doc: '> - [ ] one⏎> - [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    newest: '> - [x] one⏎> - [x] two⏎⏎End.',
+    test: (editor) =>
+      /^> - \[x\] one<!--fmt \w+ \+check-->⏎> - \[x\] two⏎/.test(notation(editor.getDoc())) &&
+      notice() === null
+        ? null
+        : { file: notation(editor.getDoc()), notice: notice() },
+  },
+  {
+    name: 'tracked-box-in-a-quote-space-is-a-box-change',
+    doc: '> - [ ] one⏎> - [x] two‸',
+    steps: [{ space: 0 }],
+    tracking: true,
+    newest: '> - [x] one⏎> - [x] two',
+    test: (editor) =>
+      /^> - \[x\] one<!--fmt \w+ \+check-->⏎/.test(notation(editor.getDoc())) && notice() === null
+        ? null
+        : { file: notation(editor.getDoc()), notice: notice() },
+  },
+  {
+    name: 'tracked-box-in-a-quote-at-depth-two-click-is-a-box-change',
+    doc: '> > - [ ] one⏎> > - [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    newest: '> > - [x] one⏎> > - [x] two⏎⏎End.',
+  },
+  {
     // The box is drawn in its new state in its author's color, with the line's change bar: its
     // fill is not the gray of the checked box beside it, and the other lines have no bar.
     name: 'tracked-box-click-draws-the-pending-box',
@@ -959,6 +990,164 @@ const CHECKS: Check[] = [
     doc: '| a | b |⏎| - | - |⏎| [ ‸] | 2 |',
     steps: ['Mod-Shift-u'],
     file: '| a | b |⏎| - | - |⏎| [ ] | 2 |',
+  },
+  // #248: keys that were refused with Track Changes on.
+  {
+    name: 'tracked-delete-at-the-end-of-a-list-before-a-numbered-list',
+    doc: '- b‸⏎⏎3. c',
+    steps: ['Delete'],
+    tracking: true,
+    newest: '- bc',
+  },
+  {
+    name: 'tracked-backspace-first-item-at-the-start-of-the-file',
+    doc: '- ‸one⏎- two',
+    steps: ['Backspace'],
+    tracking: true,
+    newest: 'one⏎- two',
+  },
+  {
+    name: 'tracked-backspace-first-paragraph-of-a-quote-at-the-start-of-the-file',
+    doc: '> ‸One.⏎>⏎> Two.',
+    steps: ['Backspace'],
+    tracking: true,
+    newest: 'One.⏎>⏎> Two.',
+  },
+  {
+    name: 'tracked-return-in-the-empty-first-item-at-the-start-of-the-file',
+    doc: '- ‸⏎- two',
+    steps: ['Enter', { type: 'x' }],
+    tracking: true,
+    newest: 'x⏎⏎- two',
+  },
+  {
+    name: 'tracked-return-at-the-start-of-a-nested-first-item-under-text',
+    doc: '- One⏎  Beta⏎  + ‸delta',
+    steps: ['Enter'],
+    tracking: true,
+    newest: '- One⏎  Beta⏎⏎  + ⏎  + delta',
+  },
+  {
+    // The caret is in front of the marker of a pending deletion at the end of the line.
+    name: 'tracked-shift-return-in-front-of-a-pending-deletion-at-the-end-of-a-line',
+    doc: [
+      'one alph‸<!--del kbx9 a-->',
+      'x café',
+      '',
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  bo: {name: Bo Chen}',
+      'marks:',
+      '  kbx9: {by: bo, at: 2026-10-13T22:30Z}',
+      '-->',
+    ].join('⏎'),
+    steps: ['Shift-Enter'],
+    tracking: true,
+    test: (editor) =>
+      newestText(editor) === 'one alph\\⏎x café' ? null : { newest: newestText(editor) },
+  },
+  // Code, display math and front matter (Stage 6): the keys through WebKit's own editing.
+  {
+    name: 'code-return-keeps-the-lines-indentation',
+    doc: 'Intro.⏎⏎```js⏎  let a = 1;‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ‸⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-return-on-the-empty-last-line-leaves-the-block',
+    doc: 'Intro.⏎⏎```js⏎let a = 1;⏎‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎let a = 1;⏎```⏎⏎‸⏎⏎After.',
+    open: true,
+  },
+  {
+    name: 'code-return-at-the-end-of-the-opening-fence-goes-into-the-code',
+    doc: 'Intro.⏎⏎```js‸⏎let a = 1;⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎‸⏎let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎⏎let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-tab-puts-in-the-languages-unit',
+    doc: 'Intro.⏎⏎```js⏎‸let a = 1;⏎```⏎⏎After.',
+    steps: ['Tab'],
+    caret: 'Intro.⏎⏎```js⏎  ‸let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-shift-tab-takes-one-unit-away',
+    doc: 'Intro.⏎⏎```js⏎    ‸let a = 1;⏎```⏎⏎After.',
+    steps: ['Shift-Tab'],
+    caret: 'Intro.⏎⏎```js⏎  ‸let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    // The old code struck above the new, in the author's color, as a code block's look (format §3.5).
+    name: 'code-tracked-key-draws-the-old-code-struck-above-the-new',
+    doc: 'Intro.⏎⏎```js⏎let a = 1‸;⏎```⏎⏎After.',
+    steps: [{ type: '0' }],
+    tracking: true,
+    newest: 'Intro.⏎⏎```js⏎let a = 10;⏎```⏎⏎After.',
+    test: (editor) => {
+      editor.setViewMode('redlines');
+      const content = editor.view.contentDOM;
+      const struck = content.querySelector<HTMLElement>('.rl-struck.rl-codeblock');
+      const line = [...content.querySelectorAll<HTMLElement>('.cm-line')].find((el) =>
+        el.textContent?.includes('let a = 10;'),
+      );
+      if (!struck || !line) return { struck: struck?.textContent ?? null, line: line?.textContent };
+      const problems: Record<string, unknown> = {};
+      if (struck.textContent !== 'let a = 1;') problems['old'] = struck.textContent;
+      if (!struck.querySelector('.rl-del')) problems['struck'] = 'no struck run';
+      if (
+        getComputedStyle(struck.querySelector('.rl-del')!).textDecorationLine !== 'line-through'
+      ) {
+        problems['line'] = getComputedStyle(struck.querySelector('.rl-del')!).textDecorationLine;
+      }
+      if (!(struck.getBoundingClientRect().bottom <= line.getBoundingClientRect().top + 1)) {
+        problems['above'] = [
+          struck.getBoundingClientRect().bottom,
+          line.getBoundingClientRect().top,
+        ];
+      }
+      if (content.textContent?.includes('<!--')) problems['marker'] = 'a marker is drawn';
+      for (const mode of ['simple', 'clean'] as const) {
+        editor.setViewMode(mode);
+        if (content.querySelector('.rl-struck')) problems[mode] = 'struck code drawn';
+        // Simple draws none of it, and keeps the change bar.
+        if (mode === 'simple' && !content.querySelector('.rl-bar'))
+          problems['bar'] = 'no bar in Simple';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    name: 'code-return-tracked-is-a-line-of-the-new-code',
+    doc: 'Intro.⏎⏎```js⏎  let a = 1;‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    tracking: true,
+    newest: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ⏎```⏎⏎After.',
+    test: (editor) =>
+      /<!--sub \w+ /.test(editor.getDoc()) && !editor.getDoc().includes('<!--split')
+        ? null
+        : { file: notation(editor.getDoc()) },
+  },
+  {
+    name: 'front-matter-return-keeps-the-lines-indentation',
+    doc: '---⏎tags:⏎  - a‸⏎---⏎⏎Body.',
+    steps: ['Enter'],
+    caret: '---⏎tags:⏎  - a⏎  ‸⏎---⏎⏎Body.',
+  },
+  {
+    name: 'front-matter-end-of-the-closing-line-then-return',
+    doc: '---⏎title: x⏎‸---⏎⏎Body.',
+    steps: ['End', 'Enter'],
+    caret: '---⏎title: x⏎---⏎⏎‸⏎⏎Body.',
+    file: '---⏎title: x⏎---⏎⏎Body.',
+    open: true,
   },
 ];
 

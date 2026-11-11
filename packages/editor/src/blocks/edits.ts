@@ -12,6 +12,7 @@ import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
 import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
+import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
 import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
@@ -306,6 +307,22 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
   const ledgerless = tracking && !state.field(parsedField, false)?.ledgerRange;
   const tail = (end: number) =>
     ledgerless && end === doc.length && insert.endsWith('\n') ? '\n' : '';
+  // The first line of the file, an empty item's marker alone on it: nothing is in front of it for
+  // the format to write a mark around, so the empty item's deletion alone is tracked (the format
+  // takes the break after it with it, and a following item's marker), and the empty paragraph's
+  // line breaks go in front of it as they are (#248).
+  const atFileStart: KeyEdit | null =
+    tracking &&
+    !nested &&
+    line.from === 0 &&
+    /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]*)?$/.test(line.text)
+      ? {
+          changes: [{ from: line.from, to: line.to }],
+          selection: EditorSelection.single(line.from),
+          userEvent: 'input.break',
+          openPlain: { insert: '\n\n', down: 0, at: 0 },
+        }
+      : null;
   const changes: ChangeSpec[] = [];
   let at: number;
   let caret: number;
@@ -351,6 +368,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
                 userEvent: 'input.break',
                 open: { at: from, assoc: 1, down: lineBreaks(insert) },
                 caretInOpen: true,
+                ...(atFileStart ? { fallback: atFileStart } : {}),
               },
             }
           : {}),
@@ -376,7 +394,9 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
             openPlain: { insert, down: lineBreaks(insert) },
           },
         }
-      : {}),
+      : atFileStart
+        ? { fallback: atFileStart }
+        : {}),
   };
 }
 
@@ -416,6 +436,10 @@ function itemDepth(state: EditorState, line: Line): number {
 const NEEDS_BLANK_LINE =
   "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.";
 
+/** Why Return at the start of a nested list's first item, under a line that ends in a hard break, is refused. */
+const NEEDS_BLANK_AFTER_HARD_BREAK =
+  "A blank line can't be put right after a hard line break while Track Changes is on. Take the hard break out first (Backspace at the start of the next line), or turn Track Changes off.";
+
 /** Return in a paragraph of a list item. */
 function returnInItem(state: EditorState, block: Block, head: number): KeyEdit | null {
   const items = itemsAround(state, block);
@@ -451,7 +475,27 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1) return refuse(NEEDS_BLANK_LINE);
+    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above.text)) {
+      // A hard break above: the break typed after its backslash would put a marker right behind it.
+      return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
+    }
+    if (under && tracking && items.length > 1) {
+      // In the text of an item the blank line is one insertion with the new item's line, at the end
+      // of the line above: the format writes it as a split whose break is the blank line and the
+      // item, which reads alike in every order (a blank line of its own, with the closer of an
+      // insertion on it, would be no blank line to a reader that doesn't know the markers; #248).
+      // The new item takes the first item's own number: the list starts where it did and reads, by
+      // position, as it did with one more item (the next number would put it ahead of `1.`).
+      const same = `${between}\n${item.indent}${item.marker}${item.after}`;
+      const joined = `\n${blankOf(item.indent)}${same}`;
+      return {
+        changes: [{ from: above.to, insert: joined }],
+        selection: EditorSelection.single(start + joined.length),
+        userEvent: 'input.break',
+        caretAt: start,
+        fallback: refuse(NEEDS_BLANK_LINE),
+      };
+    }
     const apart = above && under ? [{ from: above.to, insert: `\n${blankOf(item.indent)}` }] : [];
     const added = apart.reduce((total, change) => total + change.insert.length, 0);
     return {
@@ -555,6 +599,10 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   if (!above || !higher || !BLANK.test(above.text) || isGapLine(state, higher)) {
     return nothing(state);
   }
+  // Under code: the empty paragraph after it, as at the top level, which Markdown keeps no second
+  // one of; taking the quote's markers out there would part the quote around the code.
+  const before = blockAt(state, higher.from);
+  if (before?.kind === 'code' || before?.kind === 'math') return nothing(state);
   const quote = syntax.lastIndexOf('>');
   const cont = syntax.slice(0, quote) + syntax.slice(quote + 1).replace(/^[ \t]/, '');
   // Each line's quote marker taken out on its own, as Backspace over them one at a time would:
@@ -597,20 +645,30 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   } else {
     insert = `\n${blankOf(cont)}\n${cont}`;
   }
+  const caret = at + insert.length;
+  let merged = false;
   changes.push({ from: at, insert });
   if (!isAlertLine(state, block) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';
-    changes.push({ from: last.to + 1, insert: `${below}\n` });
+    // Under code that is one insertion at the end of its closing line (the same text): the
+    // format writes it as one break there, where two edits would part a quote or an item.
+    if (block.kind === 'code' && last.to < state.doc.length) {
+      changes[0] = { from: at, insert: `${insert}\n${below}` };
+      merged = true;
+    } else changes.push({ from: last.to + 1, insert: `${below}\n` });
   }
   return {
     changes,
-    selection: EditorSelection.single(at + insert.length),
+    selection: EditorSelection.single(caret),
     userEvent: 'input.break',
+    ...(merged ? { caretAfterText: { from: at, text: insert } } : {}),
     open: {
       at,
       assoc: 1,
+      // The merged insertion ends on the blank line below the empty one.
+      ...(merged ? { up: 1 } : {}),
       pressedIn: { from: block.lines.from, to: block.lines.to },
     },
   };
@@ -854,6 +912,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const block = blockAt(state, head);
   if (!block) return null;
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
+    // The very start of front matter: nothing goes before it.
+    if (block.kind === 'front-matter' && head === block.text.from) return nothing(state);
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
@@ -871,7 +931,9 @@ export function planReturn(state: EditorState): KeyEdit | null {
     ) {
       return returnAtEnd(state, block);
     }
-    return null;
+    // In code, display math, an HTML block and front matter: a line break in the block, with the
+    // line's indentation; the fence's and the closing line's own keys are `planCodeReturn`'s.
+    return planCodeReturn(state, block, head);
   }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
     return returnInItem(state, block, head);
@@ -1159,25 +1221,32 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
-  if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
+  if (block.kind !== 'paragraph') {
+    return ['html', 'code', 'math', 'front-matter'].includes(block.kind) ? planReturn(state) : null;
+  }
   const start = textStart(state, block);
   const end = textEnd(state, block);
   if (head <= start) return planReturn(state);
   if (head >= end) return emptyLineAtEnd(state, block, head) ?? planReturn(state);
   const { doc } = state;
   const line = doc.lineAt(head);
-  if (head === line.to && line.to < block.text.to) {
+  // Right before only hidden text that ends the line (the marker of a pending deletion, `alph‸<del
+  // a>⏎`) is the soft break's end as well: the backslash goes behind the marker, in front of the
+  // break, where the format writes it as the change that takes the break and the word after it
+  // (#248). In front of the marker it would be a line break typed in the middle of the text.
+  if ((head === line.to || onlyHidden(state, head, line.to)) && line.to < block.text.to) {
     // At a soft line break: the backslash makes it a hard one.
-    if (hardBreakAt(state, block, head)) return refuse(ALREADY_A_BREAK);
+    const brk = line.to;
+    if (hardBreakAt(state, block, brk)) return refuse(ALREADY_A_BREAK);
     const next = doc.line(line.number + 1);
     const text = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
     // After the hard break, however the format writes the backslash (a line break is never in a
     // marker's payload as it is).
     return {
-      changes: [{ from: head, insert: '\\' }],
+      changes: [{ from: brk, insert: '\\' }],
       selection: EditorSelection.single(text + 1),
       userEvent: 'input.break.line',
-      caretAfterText: { from: head, text: '\\\n' },
+      caretAfterText: { from: brk, text: '\\\n' },
     };
   }
   // Right next to a hard break already: a second one would be a paragraph, which Return makes.

@@ -8,6 +8,7 @@
 // step that Undo can't take back. Not part of the package.
 
 import { isolateHistory } from '@codemirror/commands';
+import { forceParsing } from '@codemirror/language';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
   EditError,
@@ -310,6 +311,9 @@ const mac = /Mac/.test(navigator.platform);
 
 /** Presses a key through the editor's keymaps, as a keyboard would. */
 function press(view: EditorView, key: string): boolean {
+  // The whole document parsed first: a busy machine stops a parse early, and a key reads its block
+  // from the tree.
+  forceParsing(view, view.state.doc.length, 5000);
   const parts = key.split('-');
   // `Alt--` and the like: the key itself may be a `-`.
   const name = key.endsWith('--') ? '-' : (parts.pop() ?? key);
@@ -575,8 +579,11 @@ export function runScript(script: Script): ScriptResult {
       const again = mount(script, expanded);
       try {
         play(again.editor, 'Enter');
-        play(again.editor, 'Backspace');
-        result.takenBack = again.editor.getDoc();
+        // A Return the key refused made no line break to take back: Backspace then is Backspace.
+        if (!again.refusals.length) {
+          play(again.editor, 'Backspace');
+          result.takenBack = again.editor.getDoc();
+        }
       } finally {
         again.destroy();
       }

@@ -78,15 +78,22 @@ describe('keystroke scripts', () => {
   });
 
   it('takes a refusal only where the script expects it, in its words', () => {
-    const IN_CODE =
-      "A tracked change can't go inside code or an HTML comment, where its markers would not be " +
-      'read. Change the whole code span or comment instead.';
-    const script = { name: 'code', doc: '```⏎co‸de⏎```', keys: [{ type: 'x' }], tc: true };
-    checkInvariants(runScript({ ...script, expect: { file: '```⏎code⏎```', refusal: IN_CODE } }));
-    expect(() => checkInvariants(runScript({ ...script, expect: {} }))).toThrow(/code: refusals/);
+    const FRONT = "Front matter can't be edited with Track Changes on yet.";
+    const script = {
+      name: 'front matter',
+      doc: '---⏎title: ‸x⏎---⏎⏎Body.',
+      keys: [{ type: 'x' }],
+      tc: true,
+    };
+    checkInvariants(
+      runScript({ ...script, expect: { file: '---⏎title: x⏎---⏎⏎Body.', refusal: FRONT } }),
+    );
+    expect(() => checkInvariants(runScript({ ...script, expect: {} }))).toThrow(
+      /front matter: refusals/,
+    );
     expect(() =>
       checkInvariants(runScript({ ...script, expect: { refusal: 'Other words.' } })),
-    ).toThrow(/code: refusals/);
+    ).toThrow(/front matter: refusals/);
   });
 
   it('skips only the invariants a script names', () => {

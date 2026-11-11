@@ -15,6 +15,7 @@ import {
   lineStart,
   lineStartKind,
   linePrefixAt,
+  listMemo,
   listStep,
   loosensList,
   nextLineStart,
@@ -727,5 +728,125 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     expect(nextLineStart('one\r\ntwo', 1)).toBe(5);
     expect(nextLineStart('one\r\ntwo', 4)).toBe(5);
     expect(nextLineStart('one', 1)).toBe(4);
+  });
+});
+
+describe('the readings that calls of lineStartKind share', () => {
+  /** A text of lines that read from the lines above them, with a comment at its end whose markers
+   * are hidden (a non-empty `hidden` is what lets the calls share what they read). */
+  const layout = (random: () => number) => {
+    const below = (n: number) => Math.floor(random() * n);
+    const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
+    const lines: string[] = [];
+    // Now and then a paragraph with a run of numbered lines under it: each reads from the lines
+    // above, further than the depth the reading goes (a number other than 1 is text there).
+    if (below(2) === 0) {
+      lines.push(pick(['para', '# h', '---', '']));
+      const first = 2 + below(3);
+      for (let i = 0; i < 9 + below(8); i++) lines.push(`${first + i}. x${i}`);
+    }
+    for (let n = 3 + below(40); n > 0; n--) {
+      const run = below(8) === 0 ? 8 + below(8) : 1;
+      for (let i = 0; i < run; i++) {
+        lines.push(
+          pick([
+            `${below(12)}. x`,
+            `${2 + below(9)}. x`,
+            `${2 + below(9)}) x`,
+            ' '.repeat(below(5)) + `${below(12)}. x`,
+            ' '.repeat(below(5)) + '- x',
+            '1. x',
+            'para text',
+            '  more text',
+            '> q',
+            '> 2. q',
+            '',
+            '# h',
+            '---',
+            '```',
+            '    code',
+            '- 1. x',
+            ' 2. x',
+          ]),
+        );
+      }
+    }
+    const body = lines.join('\n');
+    const text = `${body}\n<!--x-->`;
+    return { text, hidden: [{ from: body.length + 1, to: text.length }] };
+  };
+
+  it('answer as a fresh reading does, in any order of the calls', () => {
+    let compared = 0;
+    let differing = 0;
+    for (let seed = 1; seed <= fuzzCount(300); seed++) {
+      const random = seeded(seed * 7919);
+      const { text, hidden } = layout(random);
+      const starts: number[] = [];
+      for (let at = 0; at < text.length; at = text.indexOf('\n', at) + 1 || text.length) {
+        starts.push(at);
+        for (const extra of [1, 2, 3]) if (text[at + extra] !== undefined) starts.push(at + extra);
+      }
+      const fresh = (at: number) => lineStartKind(text, at, hidden, 0, listMemo(text, []));
+      const orders = [
+        starts,
+        [...starts].reverse(),
+        starts
+          .map((at) => ({ at, key: random() }))
+          .sort((a, b) => a.key - b.key)
+          .map(({ at }) => at),
+      ];
+      for (const order of orders) {
+        // The markers as a new array each time: what is shared is not carried between orders.
+        const markers = hidden.map((range) => ({ ...range }));
+        for (const at of order) {
+          compared++;
+          const shared = lineStartKind(text, at, markers);
+          if (shared !== fresh(at)) {
+            differing++;
+            expect(shared, `seed ${seed} at ${at} in ${JSON.stringify(text)}`).toBe(fresh(at));
+          }
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(1000);
+    expect(differing).toBe(0);
+  });
+
+  it('never share an answer between two different sets of ranges in one array', () => {
+    // A run of numbered lines under a paragraph, with a comment after it at the end; the same array
+    // is changed in place to every set of ranges that hides some of the lines, and each answer is the
+    // one a fresh reading gives: the check is the ranges themselves, not a sum of them.
+    const body = ['para', ...Array.from({ length: 12 }, (_, i) => `${i + 2}. x${i}`)].join('\n');
+    const text = `${body}\n<!--x-->`;
+    const starts: number[] = [];
+    for (let at = 0; at < text.length; at = text.indexOf('\n', at) + 1 || text.length)
+      starts.push(at);
+    const markers: { from: number; to: number }[] = [];
+    for (let seed = 1; seed <= 300; seed++) {
+      const random = seeded(seed);
+      markers.length = 0;
+      for (let n = 1 + Math.floor(random() * 4); n > 0; n--) {
+        const at = starts[Math.floor(random() * starts.length)] ?? 0;
+        markers.push({ from: at, to: Math.min(text.length, at + Math.floor(random() * 4)) });
+      }
+      markers.sort((a, b) => a.from - b.from);
+      for (const at of starts) {
+        expect(lineStartKind(text, at, markers), `seed ${seed} at ${at}`).toBe(
+          lineStartKind(text, at, markers, 0, listMemo(text, [])),
+        );
+      }
+    }
+  });
+
+  it('read afresh the markers that a caller changed', () => {
+    const text = 'para\n2. x0\n<!--x-->';
+    const markers = [{ from: 13, to: text.length }];
+    const before = lineStartKind(text, 5, markers);
+    markers[0] = { from: 0, to: 4 };
+    expect(lineStartKind(text, 5, markers)).toBe(
+      lineStartKind(text, 5, [{ from: 0, to: 4 }], 0, listMemo(text, [])),
+    );
+    expect(before).toBe('continuation');
   });
 });

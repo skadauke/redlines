@@ -1514,7 +1514,7 @@ function pendingOf(apart: Apart): Pending {
     // A state with a line that the editor reads as a list item and CommonMark as more of the
     // paragraph above (#139) is walked with every mark, as a region with one is.
     if (holdsMisreadItem(text, hidden, parsed.ledgerRange?.from ?? text.length)) {
-      throw new TryEveryMark();
+      throw new TryEveryMark(true);
     }
     const paragraphs = plainParagraphs(
       text,
@@ -1618,7 +1618,14 @@ function readsApart(a: string, b: string, pending: Pending): Reading {
 
 /** Thrown by a walk that leaves marks apart pending where it can't show that deciding them makes
  * no difference: every mark is tried instead. */
-class TryEveryMark extends Error {}
+class TryEveryMark extends Error {
+  /** Whether a state had lines read otherwise (`holdsMisreadItem`): the refusal says so. */
+  misread: boolean;
+  constructor(misread = false) {
+    super();
+    this.misread = misread;
+  }
+}
 
 /** Warnings that a decision must not add: marks that don't fit together, and a marker that starts a
  * line. */
@@ -1717,6 +1724,10 @@ function walkDecisions(
       return;
     } catch (error) {
       if (!(error instanceof TryEveryMark)) throw error;
+      // The walk found a state in which the lines below the change are read otherwise: say so if
+      // that is why every mark is tried (a numbered item under a nested one, whose item above
+      // reads two ways, as a pending change at its start leaves a space).
+      if (error.misread && region.budget !== undefined) region = { ...region, reread: true };
     }
   }
   walkOrders(baseline, after, fresh, others, region, undefined);
@@ -1958,22 +1969,26 @@ function readsAsBefore(
   local: string,
   after: string,
   pending: Pending | undefined,
-): { alike: boolean; pending: Pending | undefined } {
+): { alike: boolean; pending: Pending | undefined; misread: boolean } {
   if (pending) {
     try {
-      return { alike: readsTheSame(local, after, pending), pending };
+      return { alike: readsTheSame(local, after, pending), pending, misread: false };
     } catch (error) {
       if (!(error instanceof TryEveryMark)) throw error;
+      return { alike: readsTheSame(local, after), pending: undefined, misread: error.misread };
     }
   }
-  return { alike: readsTheSame(local, after), pending: undefined };
+  return { alike: readsTheSame(local, after), pending: undefined, misread: false };
 }
 
-/** Whether `local` has a numbered item with a number other than 1, or a line that the reading of
- * list items can't place (an empty item under a line of text): the lines below a block change
- * there are read again, and their marks are tried (format §2.6). */
+/** Whether `local` has a numbered item with a number other than 1 four columns in or more, or a
+ * line that the reading of list items can't place (an empty item under a line of text): the lines
+ * below a block change there are read again, and their marks are tried (format §2.6). A numbered
+ * item less than four columns in reads from the lines above it, and its marks are left pending. */
 function readAgain(local: string): boolean {
-  if (/^[ \t>]*(?:[02-9]|\d{2,})\d*[.)](?:[ \t]|$)/m.test(local)) return true;
+  if (/^(?: {0,3}>[ \t]?)*(?: {4,}|[ ]*\t)[ \t]*(?:[02-9]|\d{2,})\d*[.)](?:[ \t]|$)/m.test(local)) {
+    return true;
+  }
   const parsed = parse(local);
   return holdsMisreadItem(local, markerRanges(parsed), parsed.ledgerRange?.from ?? local.length);
 }
@@ -2027,13 +2042,15 @@ function selfCheck(
       .map((mark) => mark.id);
     const apart =
       !checking.everyMark && others.length > 0 ? pendingIn(local, region, touching) : undefined;
-    const { alike, pending } = readsAsBefore(local, after, apart);
+    const { alike, pending, misread } = readsAsBefore(local, after, apart);
     if (!alike) throw refused(READS_OTHERWISE);
     const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
     const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
     const size = {
       ...sizeOf(text, region),
-      ...(checking.blockChange ? { budget: BLOCK_TRIALS, reread: readAgain(local) } : {}),
+      ...(checking.blockChange
+        ? { budget: BLOCK_TRIALS, reread: misread || readAgain(local) }
+        : {}),
     };
     proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
