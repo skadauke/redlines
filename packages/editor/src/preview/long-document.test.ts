@@ -189,6 +189,59 @@ describe('a long document with deleted blocks', () => {
   });
 });
 
+describe('a long document with many deleted blocks', () => {
+  // 1,000 marks, 200 of them blocks deleted whole. The same document with those 200 deletions made
+  // inside their paragraphs (no block drawn) is what main costs for the marks alone: a keystroke
+  // costs what that does, not deletions times marks. A timing test, run with REDLINES_COST=check.
+  const build = (whole: boolean) => {
+    const ids = Array.from({ length: 1000 }, (_, i) => idFor(3000 + i));
+    const paragraphs: string[] = [];
+    let inserted = 0;
+    let deleted = 0;
+    for (let n = 0; n < 1600; n++) {
+      let text = `${WORDS} ${n} with *emphasis* and a [link](https://example.com/${n}) end.`;
+      if (n % 2 === 0) {
+        const id = ids[inserted++];
+        text = text.replace('quick brown', `<!--ins ${id}-->quick brown<!--/${id}-->`);
+      }
+      paragraphs.push(text);
+      if (n % 8 === 3) {
+        const id = ids[800 + deleted++];
+        paragraphs.push(
+          whole
+            ? `<!--del ${id} Deleted paragraph ${n}.\\n\\n-->`
+            : `Kept ${n}<!--del ${id} gone-->.`,
+        );
+      }
+    }
+    const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-10-31T09:30Z}\n`).join('');
+    return `${paragraphs.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${marks}-->\n`;
+  };
+  const withBlocks = build(true);
+  const inline = build(false);
+
+  it.skipIf(!process.env['REDLINES_COST'])(
+    'costs a keystroke what the same marks cost without a block drawn',
+    () => {
+      const state = editorFor(withBlocks).view.state;
+      const plain = editorFor(inline).view.state;
+      expect(state.field(parsedField).marks.length).toBe(1000);
+      expect(plain.field(parsedField).marks.length).toBe(1000);
+      const widgets = list(state).filter((d) => d.widget === 'struck');
+      expect(widgets).toHaveLength(200);
+      const at = Math.floor(withBlocks.length / 2);
+      const atPlain = Math.floor(inline.length / 2);
+      const struck = time(() => state.update({ changes: { from: at, insert: 'x' } }).state, 40);
+      const base = time(() => plain.update({ changes: { from: atPlain, insert: 'x' } }).state, 40);
+      console.log(
+        `200 deleted blocks among 1,000 marks: ${struck.toFixed(2)} ms against ${base.toFixed(2)} ms`,
+      );
+      // Relative: the blocks add 200 widgets to 1,000 marks, never a scan of the marks for each.
+      expect(struck).toBeLessThan(Math.max(BUDGET_MS / 2, base * 2));
+    },
+  );
+});
+
 describe('a long document with a table', () => {
   const { doc } = longDocument({ table: true });
   /** A position in the text of the cell in column 3 of row 150, and its row's start. */

@@ -256,6 +256,24 @@ function struckBlocks(
   const { doc } = state;
   const end = parsed.ledgerRange?.from ?? doc.length;
   const colorOf = (mark: MarkRange) => colors.get(mark.entry.by) ?? 0;
+  // The segments of the deletions in file order, made once and only when a deletion needs them.
+  let sorted: { segment: Segment; mark: MarkRange }[] | null = null;
+  const deletions = () =>
+    (sorted ??= parsed.marks
+      .filter((other) => other.kind === 'del')
+      .flatMap((other) => other.segments.map((segment) => ({ segment, mark: other })))
+      .sort((a, b) => a.segment.open.from - b.segment.open.from));
+  /** The index of the first segment that opens at or after `from`. */
+  const firstFrom = (list: readonly { segment: Segment }[], from: number) => {
+    let low = 0;
+    let high = list.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (list[middle]!.segment.open.from < from) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
   for (const mark of parsed.marks) {
     if (mark.kind !== 'del' || !isDrawnChange(mark) || absorbed.has(mark)) continue;
     const first = mark.segments[0];
@@ -281,11 +299,20 @@ function struckBlocks(
       }
       if (!bare || (where === 'before' && mark.segments.length > 1)) continue;
       if (where === 'lines') {
-        // Other people's deletions in the same lines belong to the blocks.
+        // Other people's deletions in the same lines belong to the blocks: found among the
+        // segments of all deletions, in file order, by search (not by a scan of every mark).
         const inside = (segment: Segment) =>
           segment.open.from >= line.from && segment.open.to <= lastLine.to;
-        segments = parsed.marks
-          .filter((other) => other.kind === 'del' && other.segments.some(inside))
+        const held = new Set<MarkRange>();
+        for (
+          let i = firstFrom(deletions(), line.from);
+          i < deletions().length && deletions()[i]!.segment.open.from <= lastLine.to;
+          i++
+        ) {
+          const found = deletions()[i]!;
+          if (inside(found.segment)) held.add(found.mark);
+        }
+        segments = [...held]
           .flatMap((other) => other.segments.map((segment) => ({ segment, mark: other })))
           .sort((a, b) => a.segment.open.from - b.segment.open.from);
         const outside = segments.some(
