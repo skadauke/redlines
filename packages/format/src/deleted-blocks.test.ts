@@ -63,6 +63,13 @@ describe('deletedBlocks', () => {
     ]);
   });
 
+  it('reads an empty pair of fences as a code block with no lines', () => {
+    const blocks = blocksOf('<!--del k3x9 ```\\n```\\n\\n-->\n\nAfter.');
+    expect(blocks?.map((block) => [block.kind, block.text])).toEqual([
+      [{ kind: 'code', language: '' }, ''],
+    ]);
+  });
+
   it('gives several blocks as several', () => {
     expect(
       summary(

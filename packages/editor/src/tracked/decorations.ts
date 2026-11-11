@@ -859,6 +859,10 @@ class StruckWidget extends WidgetType {
           }
           div.append(mark);
         }
+        // A block with no text, an empty pair of fences, still stands a line high.
+        if (block.runs.every((run) => run.text === '' || run.text === '¶')) {
+          div.append(document.createTextNode('\u200b'));
+        }
         for (const run of block.runs) {
           const span = document.createElement('span');
           span.className = `rl-del ${colorClass(run.color)}`;

@@ -292,4 +292,23 @@ describe('struck blocks', () => {
       expect(seen, view).toEqual([one + 4, three + 6, three, one]);
     }
   });
+  it('steps over a struck code block, which is no text to enter', () => {
+    const code = `One.\n\n<!--del k3x9 \`\`\`\\nlet a = 1;\\n\`\`\`\\n\\n-->\n\nThree.\n${LEDGER}`;
+    const one = where(code, 'One.') + 4;
+    const three = where(code, 'Three.');
+    const inside = (pos: number) => pos > where(code, '<!--del') && pos < three;
+    for (const view of ['redlines', 'simple'] as const) {
+      const editor = load(code, { view });
+      caret(editor, one);
+      press(editor, 'ArrowRight');
+      expect(head(editor), view).toBe(three);
+      press(editor, 'ArrowLeft');
+      expect(head(editor), view).toBe(one);
+      for (let at = where(code, '<!--del'); at < three; at++) {
+        const state = editor.view.state.update({ selection: { anchor: at } }).state;
+        expect(inside(visibleSelection(state).main.head), String(at)).toBe(false);
+      }
+    }
+    expect(load(code).view.contentDOM.querySelector('.rl-struck.rl-codeblock')).not.toBeNull();
+  });
 });

@@ -605,6 +605,35 @@ describe('Deleted blocks', () => {
     expect(code?.textContent).not.toContain('`');
   });
 
+  it('draws an empty pair of fences as a struck code block a line high', () => {
+    const doc = withLedger('One.\n\n<!--del b2b2 ```\\n```\\n\\n-->\n\nAfter.', { b2b2: 'bo' });
+    const editor = load(doc);
+    const code = editor.view.contentDOM.querySelector<HTMLElement>('.rl-struck.rl-codeblock');
+    expect(code).not.toBeNull();
+    // Not an empty element with only its bar: it holds a character, so it has a line's height.
+    expect(code?.textContent).toBe('​');
+    expect(code?.dataset['mark']).toBe('b2b2');
+    expect(page(editor)).toEqual(['One.', '~​~', 'After.']);
+  });
+
+  it("draws another person's change in a deleted code block as part of it, in their color", () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 ```js\\nlet a = -->\n\n<!--del c3c3 1;-->\n\n<!--del b2b2 \\n```\\n\\n-->\n\nAfter.',
+      { b2b2: 'bo', c3c3: 'ada' },
+    );
+    const editor = load(doc);
+    const [code] = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+    expect(code?.classList).toContain('rl-codeblock');
+    expect(code?.textContent).toBe('let a = 1;');
+    expect(
+      [...code!.querySelectorAll('.rl-del')].map((run) => [run.className, run.textContent]),
+    ).toEqual([
+      ['rl-del rl-author-3', 'let a = '],
+      ['rl-del rl-author-1', '1;'],
+    ]);
+    expect(code?.classList).toContain('rl-bar-mixed');
+  });
+
   it('keeps a deletion across blocks inline, with a space, or a pilcrow when marks are shown', () => {
     const doc = withLedger(
       'Alpha one <!--del b2b2 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.',

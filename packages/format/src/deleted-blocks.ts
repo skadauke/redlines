@@ -274,5 +274,9 @@ export function deletedBlocks(
   }
   const blocks = blocksOf(body);
   // A break and a prefix alone, with no text, are a join.
-  return blocks.length > 0 && blocks.every((block) => block.text !== '') ? blocks : null;
+  // (An empty fence pair is a code block with no lines.)
+  return blocks.length > 0 &&
+    blocks.every((block) => block.text !== '' || block.kind.kind === 'code')
+    ? blocks
+    : null;
 }
