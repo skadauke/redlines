@@ -13,6 +13,8 @@ import { GFM } from '@lezer/markdown';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyChanges, parse, readTables, tableEdit, trackedFormat } from '@redlines/format';
+import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
+import { undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
 import { tablesOf } from '../table/model.ts';
@@ -869,4 +871,52 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first key in cod
     },
     300_000,
   );
+});
+
+// ⌘B over the 300 cells of a column of the 300-row table, Track Changes on (format §3.7, "Cells
+// apart"; issue #267): each cell is checked against its own marks, and the table is read once. The
+// whole column may cost at most 40 times one cell's bold, plus 5 ms, timed beside it (a check of
+// the whole table for each cell would cost 300 times). A timing test: it runs with REDLINES_COST
+// set, and a run over the bound is timed twice more, each time with its yardstick, before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of ⌘B over a column of cells', () => {
+  it('costs at most 40 times one cell’s bold, plus 5 ms, in the 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: ada, tracking: true });
+    open.push(editor);
+    createFormatting(editor, { author: ada, notice: () => {} });
+    const { view } = editor;
+    forceParsing(view, view.state.doc.length, 60_000);
+    const text = view.state.doc.toString();
+    const first = text.indexOf('Item |');
+    const last = text.indexOf('item 299 |') + 'item 299'.length;
+    const one = text.indexOf('item 150 |');
+    /** ⌘B over the text from `anchor` to `head`, in milliseconds; then Undo, which is not timed. */
+    const bold = (anchor: number, head: number): number => {
+      view.dispatch({ selection: { anchor, head } });
+      const start = performance.now();
+      const ran = editor.commands.run('format.bold');
+      const took = performance.now() - start;
+      expect(ran).toBe(true);
+      expect(undo(view)).toBe(true);
+      expect(view.state.doc.toString()).toBe(text);
+      return took;
+    };
+    const measure = (anchor: number, head: number, rounds: number) => {
+      bold(anchor, head);
+      const runs: number[] = [];
+      for (let i = 0; i < rounds; i++) runs.push(bold(anchor, head));
+      return median(runs);
+    };
+    const attempt = (): Held => {
+      const cell = measure(one, one + 'item 150'.length, 9);
+      return { ours: measure(first, last, 3), limit: 40 * cell + 5 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: ⌘B over 300 cells: bound ${result.limit.toFixed(2)} ms (40 times one cell's ${((result.limit - 5) / 40).toFixed(2)} ms plus 5), now ${result.ours.toFixed(2)} ms`,
+    );
+    expect(result.ours).toBeLessThan(result.limit);
+  }, 600_000);
 });
