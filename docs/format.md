@@ -1737,6 +1737,14 @@ comments were decided in every order, against micromark 4.0.2 with GFM tables.
 
 Text in cells takes inline marks, as anywhere else.
 
+**What reads as a table.** The reader agrees with micromark 4.0.2 with GFM tables on the whitespace
+that leads a line, a header row, the delimiter row and every row below. Leading whitespace is counted
+in columns, a tab going to the next multiple of four, so a tab anywhere in it makes four columns or
+more. A header row or delimiter row of four columns or more is indented code, and makes no table;
+a row of four columns or more ends the table's rows. Spaces up to three, in front of any row, are no
+part of its first cell. (Before this, the reader counted a tab as one character and read a delimiter
+row led by a tab as a table's, where micromark reads a paragraph.)
+
 **A table typed with Track Changes on.** The editor's Return at the end of a line of cells
 (`| a | b |`) alone in a paragraph writes the table's delimiter row and an empty first row, as one
 edit. Where the line is the author's own pending insertion, the two rows are written into that
@@ -1831,7 +1839,8 @@ it, one per line:
   it goes with it.
 - **Rule 4, comments in a deleted row.** A comment in a row that leaves the table, deleted or
   rejected, becomes a point comment at the start of the text of the first cell of the row below, or at
-  the end of the text of the last cell of the row above for the last row. A comment with a part that
+  the end of the text of the last cell of the row above for the last row (and where the row below has
+  no pipe at its start, which could not hold the marker, there too). A comment with a part that
   stays loses only the part in the row, and one with an end in the row keeps its other end, the end
   that left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it can't be
@@ -1873,6 +1882,23 @@ it, one per line:
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
   typed in it since and its comments, and takes the deletion line away. Either half decides both. A
+  row with no pipe at its start (a table without outer pipes) is written at its new place with a
+  plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
+  same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
+  at its place reading as it did, whatever has been typed, commented or decided in it since (a mark
+  at the start of the row could not stand there without the pipe). A move is never refused once it is made, and
+  two kinds are refused when it is made. A row that would be the header, moved to the top, must have
+  as many cells as the header has columns ("This row has a different number of cells than the
+  header, so the table would stop reading as a table. Make its cells match the header first."),
+  tracked or not; a table whose header has another number of cells than its delimiter row is no
+  table. And with Track Changes on, a comment that runs from one row of the table into another is
+  refused, naming its author ("Bo Chen's comment runs from one row of this table into the next.
+  Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
+  at its start has its opener at the end of the row above, so it crosses the line break, and moving
+  rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
+  table with a row move pending is refused, naming the person who moved the rows. Deleting the header
+  is refused in the same two cases (the row that would be the header has another number of cells,
+  or a comment's marker after its closing pipe is a cell too many), tracked or not. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first

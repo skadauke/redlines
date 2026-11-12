@@ -109,6 +109,68 @@ describe('ghost columns', () => {
     expect(dom(editor).textContent).not.toContain('---');
   });
 
+  // A table with no pipe at an edge of its rows draws the ghost of the column that was there, in
+  // every row, as one with the pipes does (#282): the first place has no pipe to stand in for, and
+  // the last none after the cell.
+  it('draws a ghost at the first, a middle and the last place of a table without outer pipes', () => {
+    const rowsOf = (cells: string[][], lead: boolean, trail: boolean) =>
+      cells.map((row) => `${lead ? '| ' : ''}${row.join(' | ')}${trail ? ' |' : ''}`);
+    for (const [lead, trail] of [
+      [false, false],
+      [false, true],
+      [true, false],
+      [true, true],
+    ] as const) {
+      for (const at of [0, 1, 2]) {
+        const kept = [
+          ['Fruit', 'Price'],
+          ['-----', '-----'],
+          ['Apples', '1.20'],
+          ['Plums', '2.50'],
+        ];
+        const doc = [
+          ...rowsOf(kept, lead, trail),
+          '',
+          `<!--del g5nb col=${at + 1} Count\\n-\\-\\-\\n3\\n7-->`,
+          '',
+        ].join('\n');
+        LEDGERS[doc] = LEDGER(['g5nb']);
+        const editor = load('redlines', doc);
+        const label = `${lead ? '|' : '.'}${trail ? '|' : '.'} at ${at}`;
+        expect(
+          ghosts(editor).map((g) => g.textContent),
+          label,
+        ).toEqual(['Count', '3', '7']);
+        const rows = lines(editor);
+        expect(rows, label).toHaveLength(3);
+        for (const [i, line] of rows.entries()) {
+          const cells = cellsOf(line);
+          const real = kept[i === 0 ? 0 : i + 1] ?? [];
+          const want = [...real];
+          want.splice(at, 0, ['Count', '3', '7'][i] ?? '');
+          expect(
+            cells.map((c) => c.textContent?.trim()),
+            label,
+          ).toEqual(want);
+          expect(cells[at]?.classList.contains('rl-ghost-col'), label).toBe(true);
+          expect(
+            cells.map((c) => c.dataset['vcol']),
+            label,
+          ).toEqual(['0', '1', '2']);
+          // (nothing of the row is left out of a cell: the pipes are hidden, not drawn)
+          expect(line.textContent?.includes('|'), label).toBe(false);
+        }
+        expect(dom(editor).textContent, label).not.toContain('---');
+        // The columns of Clean and Simple are the real ones, as before.
+        for (const view of ['clean', 'simple'] as const) {
+          const plain = load(view, doc);
+          expect(ghosts(plain), label).toHaveLength(0);
+          for (const line of lines(plain)) expect(cellsOf(line), label).toHaveLength(2);
+        }
+      }
+    }
+  });
+
   it('draws none in Clean or Simple', () => {
     for (const view of ['clean', 'simple'] as const) {
       const editor = load(view, DELETED);

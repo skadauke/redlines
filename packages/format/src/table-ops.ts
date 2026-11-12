@@ -23,6 +23,7 @@ import {
 } from './table-cols.ts';
 import type { ColItem, Grid } from './table-cols.ts';
 import {
+  commentAcrossRows,
   commentFromAbove,
   commentsOf,
   commentsOfCols,
@@ -332,10 +333,14 @@ export function originalRowText(text: string, parsed: Parsed, row: TableRowRead)
   const marked = parsed.marks.some((mark) =>
     mark.segments.some(
       (segment) =>
-        segment.open.to > row.from &&
-        segment.open.from < row.to &&
         // (an inserted row's own marker is no change in it that the original would undo)
-        !(mark.kind === 'ins' && mark.payload === 'row'),
+        !(mark.kind === 'ins' && mark.payload === 'row') &&
+        // The marker of either end: a comment of a row without outer pipes can start at the end
+        // of the line above, its marker not being allowed at the start of the row.
+        ((segment.open.to > row.from && segment.open.from < row.to) ||
+          (segment.close !== undefined &&
+            segment.close.to > row.from &&
+            segment.close.from < row.to)),
     ),
   );
   if (!marked && !row.insertion) return rowTextOf(text, row);
@@ -377,6 +382,11 @@ function deleteRows(
   }
   const eol = eolOf(text, parsed.ledgerRange);
   const leaving = new Set(rows);
+  // The first row that stays is the header, when the header goes: a row of another width unreads the table.
+  const newHeader = table.rows.find((_, i) => !leaving.has(i));
+  if (rows.includes(0) && newHeader && newHeader.cells.length !== table.aligns.length) {
+    throw new EditError(unreadRefusal(table, parsed, newHeader), 'no-legal-placement');
+  }
   const final: RowItem[] = table.rows.flatMap((_, src) => (leaving.has(src) ? [] : [{ src }]));
   const before = table.deletions.map((d) => d.position);
   const positions = positionsAfterLeaving(table, rows);
@@ -449,10 +459,46 @@ function deleteRows(
   );
   const after = applyChanges(text, changes);
   const read = tableAfter(after, table);
+  if (!read || read.rows.length !== remaining) {
+    throw new EditError(unreadRefusal(table, parsed, newHeader), 'no-legal-placement');
+  }
   // The caret goes to the row that now sits where the first deleted one did.
   const target = Math.min(rows[0] ?? 0, (read?.rows.length ?? 1) - 1);
   const row = read?.rows[target];
   return { changes, caret: row?.cells[0]?.textFrom ?? table.from };
+}
+
+/**
+ * The words for an operation on rows that would leave the table unread as a table (a row that is the
+ * header, or a header that a comment's marker is after the closing pipe of, so that it has a cell
+ * too many), refused when it is made and not when it is decided (format §3.7). `header` is the row
+ * that would be the header.
+ */
+function unreadRefusal(table: TableRead, parsed: Parsed, header: TableRowRead | undefined): string {
+  // A comment's marker after the closing pipe of the row is a cell too many.
+  const inHeader = header
+    ? parsed.marks.find(
+        (mark) =>
+          mark.kind === 'cmt' &&
+          mark.segments.some((seg) =>
+            [seg.open, seg.close].some(
+              (r) => r !== undefined && header.from <= r.from && r.to <= header.to,
+            ),
+          ),
+      )
+    : undefined;
+  if (inHeader) {
+    const name = parsed.ledger.people.find((p) => p.handle === inHeader.entry.by)?.name;
+    return `${name ?? inHeader.entry.by}'s comment is at the end of this row, which would make a cell too many in the header. Delete or resolve it first.`;
+  }
+  if (header && header.cells.length !== table.aligns.length) {
+    return 'This row has a different number of cells than the header, so the table would stop reading as a table. Make its cells match the header first.';
+  }
+  const across = commentAcrossRows(table, parsed);
+  if (across) {
+    return `${across.name}'s comment runs from one row of this table into the next, and this would leave the table unread. Delete or resolve it first.`;
+  }
+  return 'This would leave the table unread as a table.';
 }
 
 /** Moving rows (format §3.7). */
@@ -483,6 +529,21 @@ function moveRows(
   const order = [...others.slice(0, at), ...rows, ...others.slice(at)];
   if (order.every((index, i) => index === i)) {
     throw new EditError('The rows are already there.', 'no-legal-placement');
+  }
+  // A comment that runs from one row into another (a row with no pipe at its start can't start with
+  // a marker, and the comment's opener stands at the end of the row above) can't be kept with a
+  // move that can be rejected: refused now, naming its author, and not when the move is decided.
+  const across = ctx ? commentAcrossRows(table, parsed) : null;
+  if (across) {
+    throw new EditError(
+      `${across.name}'s comment runs from one row of this table into the next. Delete or resolve it first, or turn off Track Changes.`,
+      'no-legal-placement',
+    );
+  }
+  // The row that becomes the header must have the header's cells: the table would be read no more.
+  const top = table.rows[order[0] ?? 0];
+  if (order[0] !== 0 && top && top.cells.length !== table.aligns.length) {
+    throw new EditError(unreadRefusal(table, parsed, top), 'no-legal-placement');
   }
   const eol = eolOf(text, parsed.ledgerRange);
   const ledger = workingLedger(parsed.ledger);
@@ -537,7 +598,13 @@ function moveRows(
       }
     }
     const position = anchor === -1 ? 0 : order.indexOf(anchor) + 1;
-    const payload = `row=${position} ${originalRowText(text, parsed, row)}`;
+    // A row with no pipe at its start is given a plain one in front of its marker, and the place it
+    // leaves is kept with the same pipe: the pipe is no change, both versions have it, and
+    // rejecting the move puts the row back as it reads, with a mark of a comment or of another
+    // person's typing at its start where a row without a pipe could have none (#289).
+    const original = originalRowText(text, parsed, row);
+    const lead = /^[ \t]*\|/.test(original) ? '' : '| ';
+    const payload = `row=${position} ${lead}${original}`;
     added.push({ order: index, line: `<!--del ${id} ${encodePayload(payload)}-->` });
   }
   const before = table.deletions.map((d) => d.position);
@@ -554,6 +621,10 @@ function moveRows(
     ctx ? { parsed, created } : { parsed, keepLedger: true },
   );
   const read = tableAfter(applyChanges(text, changes), table);
+  // The rows must still make the table they made, as a last guard: refused now, not on rejecting.
+  if (!read || read.rows.length !== table.rows.length) {
+    throw new EditError(unreadRefusal(table, parsed, top), 'no-legal-placement');
+  }
   const moved = rows.map((index) => order.indexOf(index));
   const first = read?.rows[moved[0] ?? 0];
   return { changes, caret: first?.cells[0]?.textFrom ?? table.from, rows: moved };

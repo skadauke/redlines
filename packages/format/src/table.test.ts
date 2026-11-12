@@ -289,34 +289,86 @@ function randomBody(random: () => number): string {
   );
 }
 
+/** Holds the tables of `text` to micromark's: how many, and the cells of every row. */
+function expectOracle(text: string): void {
+  const tables = tablesOf(text);
+  const oracle = blockLeaves(text).filter(
+    (leaf) => leaf.kind === 'table' && leaf.chain.length === 0,
+  );
+  expect(tables.length, JSON.stringify(text)).toBe(oracle.length);
+  tables.forEach((table, index) => {
+    const columns = table.aligns.length;
+    const mine = table.rows.map((row) => {
+      const cells = row.cells
+        .slice(0, columns)
+        .map((cell) =>
+          text.slice(cell.textFrom, cell.textTo).replaceAll('\\|', '|').replace(/\s+/g, ' ').trim(),
+        );
+      while (cells.length < columns) cells.push('');
+      return cells;
+    });
+    expect(mine, JSON.stringify(text)).toEqual(oracle[index]?.rows);
+  });
+}
+
 describe('readTables against the oracle', () => {
   it('reads the cells of random tables as micromark does', () => {
     const random = seeded(7);
     for (let n = 0; n < fuzzCount(500); n++) {
       const body = randomBody(random);
-      const text = random() < 0.2 ? body.replaceAll('\n', '\r\n') : body;
-      const tables = tablesOf(text);
-      const oracle = blockLeaves(text).filter(
-        (leaf) => leaf.kind === 'table' && leaf.chain.length === 0,
-      );
-      expect(tables.length, JSON.stringify(text)).toBe(oracle.length);
-      tables.forEach((table, index) => {
-        const columns = table.aligns.length;
-        const mine = table.rows.map((row) => {
-          const cells = row.cells
-            .slice(0, columns)
-            .map((cell) =>
-              text
-                .slice(cell.textFrom, cell.textTo)
-                .replaceAll('\\|', '|')
-                .replace(/\s+/g, ' ')
-                .trim(),
-            );
-          while (cells.length < columns) cells.push('');
-          return cells;
-        });
-        expect(mine, JSON.stringify(text)).toEqual(oracle[index]?.rows);
-      });
+      expectOracle(random() < 0.2 ? body.replaceAll('\n', '\r\n') : body);
+    }
+  });
+
+  // Leading whitespace is columns, and a tab goes to the next multiple of four: four columns make
+  // indented code, which starts no table, is no delimiter row and ends the table's rows (#290). Tabs
+  // and spaces around the pipes, CRLF and the blocks beside the table are drawn too.
+  it('reads leading tabs and spaces before every row as micromark does', () => {
+    const random = seeded(290);
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+    const white = () => {
+      let out = '';
+      for (let n = Math.floor(random() * 6); n > 0; n--) out += random() < 0.35 ? '\t' : ' ';
+      return out;
+    };
+    // (blocks that end before the blank line after them, so that the table is a top-level block)
+    const BEFORE = [
+      '',
+      '',
+      'Words.\n\n',
+      '# Heading\n\n',
+      '- item\n\n',
+      '> quote\n\n',
+      '```\ncode\n```\n\n',
+      '    code\n\n',
+      '<div>\nx\n</div>\n\n',
+    ];
+    const AFTER = [
+      '',
+      '',
+      '\n\nWords.',
+      '\n\n# Heading',
+      '\n\n- item',
+      '\n\n> quote',
+      '\n\n    code',
+    ];
+    const cases = Math.max(2000, fuzzCount(2000));
+    for (let n = 0; n < cases; n++) {
+      const bare = random() < 0.5;
+      const columns = 1 + Math.floor(random() * 3);
+      const gap = () => pick(['', ' ', ' ', '\t', ' \t']);
+      const cells = (word: (i: number) => string) =>
+        Array.from({ length: columns }, (_, i) => word(i)).join(`${gap()}|${gap()}`);
+      const wrap = (line: string) => (bare && columns > 1 ? line : `|${gap()}${line}${gap()}|`);
+      const lines = [
+        wrap(cells((i) => `h${i}`)),
+        wrap(cells(() => pick(['-', '---', ':-:', '--:']))),
+      ];
+      for (let r = Math.floor(random() * 4); r > 0; r--) lines.push(wrap(cells((i) => `c${i}`)));
+      const lead = () => (random() < 0.4 ? '' : white());
+      const table = lines.map((line) => `${lead()}${line}`).join('\n');
+      const text = `${pick(BEFORE)}${table}${pick(AFTER)}`;
+      expectOracle(random() < 0.2 ? text.replaceAll('\n', '\r\n') : text);
     }
   });
 });

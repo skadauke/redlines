@@ -250,6 +250,30 @@ function nameOf(parsed: Parsed, handle: string): string {
   return parsed.ledger.people.find((person) => person.handle === handle)?.name ?? handle;
 }
 
+/**
+ * A comment that runs from one row of the table into another: in a table whose rows have no pipe at
+ * their start, a comment that starts a row is written with its opener at the end of the row above
+ * (a marker can't start the row), so it crosses the line break. Moving rows beside such a comment,
+ * or deleting the header under it, can't be undone: the comment's refusal comes first. Returns the
+ * thread's author's name with the mark, or null.
+ */
+export function commentAcrossRows(
+  table: TableRead,
+  parsed: Parsed,
+): { mark: MarkRange; name: string } | null {
+  const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'cmt') continue;
+    for (const { open, close } of mark.segments) {
+      if (!close) continue;
+      const a = rowOf(open.from);
+      const b = rowOf(close.from);
+      if (a !== -1 && b !== -1 && a !== b) return { mark, name: nameOf(parsed, mark.entry.by) };
+    }
+  }
+  return null;
+}
+
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
 function changesIn(parsed: Parsed, row: TableRowRead): MarkRange[] {
   return parsed.marks.filter(
@@ -312,11 +336,8 @@ export function commentsOf(
 ): TextChange[] {
   const columns = table.aligns.length;
   const stays = (index: number) => !leaving.has(index) && table.rows[index] !== undefined;
-  const point = (row: number): number | null => {
-    for (let i = row + 1; i < table.rows.length; i++) {
-      const cell = table.rows[i]?.cells[0];
-      if (stays(i) && cell) return cell.textFrom;
-    }
+  // The end of the text of the last cell of the nearest row above `row` that stays.
+  const endAbove = (row: number): number | null => {
     for (let i = row - 1; i >= 0; i--) {
       const cells = table.rows[i]?.cells;
       const cell = cells?.[Math.min(cells.length, columns) - 1];
@@ -324,11 +345,25 @@ export function commentsOf(
     }
     return null;
   };
+  const point = (row: number): number | null => {
+    for (let i = row + 1; i < table.rows.length; i++) {
+      const cell = table.rows[i]?.cells[0];
+      if (!stays(i) || !cell) continue;
+      // The start of the text of a row with no pipe at its start can't hold a marker (a renderer
+      // would read the rest of the line as raw HTML): the point goes to the end of the row above.
+      if (!table.rows[i]?.leadingPipe) {
+        const above = endAbove(i);
+        if (above !== null) return above;
+      }
+      return cell.textFrom;
+    }
+    return endAbove(row);
+  };
   const rowOf = (at: number): number =>
     table.rows.findIndex((row) => row.from <= at && at <= row.to);
   const writes = new Map<number, string[]>();
-  const write = (row: number, marker: string, backwards = false) => {
-    const at = point(backwards ? row : row);
+  const write = (row: number, marker: string) => {
+    const at = point(row);
     if (at === null) return;
     writes.set(at, [...(writes.get(at) ?? []), marker]);
   };
@@ -353,7 +388,7 @@ export function commentsOf(
           pointed = true;
         }
       } else if (opens) write(openAt, `<!--cmt ${mark.id}-->`);
-      else write(rowOf(segment.close?.from ?? 0), `<!--/${mark.id}-->`, true);
+      else write(rowOf(segment.close?.from ?? 0), `<!--/${mark.id}-->`);
     }
   }
   return [...writes].map(([at, markers]) => ({ from: at, to: at, insert: markers.join('') }));

@@ -120,20 +120,32 @@ function rowDecorations(
   const ghosts = ghostColumnsOf(state, table.id);
   const inserted = insertedColumnsOf(state, table.id);
   const shownCount = Math.min(row.cells.length, table.columns);
-  let appended = false;
+  // How the ghosts that come back after the last column are drawn: in the place of the closing pipe;
+  // or, in a row that has none (a table without outer pipes), at the end of its text, with the
+  // header's delimiter row hidden under it.
+  let appended: 'pipe' | 'end' | null = null;
   const lastCell = row.cells[shownCount - 1];
   if (lastCell && ghosts.some((ghost) => ghost.position === shownCount)) {
     const tail = state.sliceDoc(lastCell.textTo, lastCell.to);
     const pipe = tail.lastIndexOf('|');
+    const here = ghosts.filter((ghost) => ghost.position === shownCount);
+    const visual = shownCount + ghosts.filter((g) => g.position < shownCount).length;
+    const widget = new GhostColsWidget(here, row.index, visual, table.aligns);
     if (pipe !== -1 && tail.slice(pipe + 1).trim() === '') {
-      const here = ghosts.filter((ghost) => ghost.position === shownCount);
-      const visual = shownCount + ghosts.filter((g) => g.position < shownCount).length;
       out.push(
-        Decoration.replace({
-          widget: new GhostColsWidget(here, row.index, visual, table.aligns),
-        }).range(lastCell.textTo + pipe, row.header ? table.delimiter.to : lastCell.to),
+        Decoration.replace({ widget }).range(
+          lastCell.textTo + pipe,
+          row.header ? table.delimiter.to : lastCell.to,
+        ),
       );
-      appended = true;
+      appended = 'pipe';
+    } else if (pipe === -1) {
+      out.push(
+        row.header
+          ? Decoration.replace({ widget }).range(lastCell.to, table.delimiter.to)
+          : Decoration.widget({ widget, side: 1 }).range(lastCell.to),
+      );
+      appended = 'end';
     }
   }
   // The delimiter row: its line break and the row, hidden in one piece with the header's end (or held
@@ -152,23 +164,28 @@ function rowDecorations(
     const behind = shown ? ghosts.filter((ghost) => ghost.position <= i).length : 0;
     const added = shown ? inserted.find((column) => column.col === i) : undefined;
     let start = cell.from;
-    if (here.length > 0 && state.sliceDoc(cell.from, cell.from + 1) === '|') {
-      out.push(
-        Decoration.replace({
-          widget: new GhostColsWidget(
-            here,
-            row.index,
-            cell.col + behind - here.length,
-            table.aligns,
-          ),
-        }).range(cell.from, cell.from + 1),
+    // The ghosts in front of a first cell that has no pipe of its own to stand in the place of
+    // (a row without a leading pipe) stand before the cell, which does not take them in.
+    let before = false;
+    if (here.length > 0) {
+      const widget = new GhostColsWidget(
+        here,
+        row.index,
+        cell.col + behind - here.length,
+        table.aligns,
       );
-      start = cell.from + 1;
+      if (state.sliceDoc(cell.from, cell.from + 1) === '|') {
+        out.push(Decoration.replace({ widget }).range(cell.from, cell.from + 1));
+        start = cell.from + 1;
+      } else if (i === 0) {
+        out.push(Decoration.widget({ widget, side: -1 }).range(cell.from));
+        before = true;
+      }
     }
     // The header's last cell holds the delimiter row too, hidden with the line break before it. Where
     // a ghost takes the closing pipe, the ghost holds them and the cell ends before it.
-    let end = row.header && i === last ? table.delimiter.to : cell.to;
-    if (appended && i === shownCount - 1) {
+    let end = row.header && i === last && appended !== 'end' ? table.delimiter.to : cell.to;
+    if (appended === 'pipe' && i === shownCount - 1) {
       const tail = state.sliceDoc(cell.textTo, cell.to);
       end = cell.textTo + tail.lastIndexOf('|');
     }
@@ -179,6 +196,9 @@ function rowDecorations(
             ? `rl-tc${added ? ` rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}` : ''}`
             : 'rl-tc rl-tc-hidden',
           inclusive: true,
+          // (a ghost before or after the cell is not in it)
+          inclusiveStart: !before,
+          inclusiveEnd: !(appended === 'end' && i === shownCount - 1),
           attributes: {
             ...(added ? { 'data-mark': added.id } : {}),
             role: row.header ? 'columnheader' : 'cell',
@@ -198,7 +218,7 @@ function rowDecorations(
       if (marker.from > start) out.push(HIDDEN.range(start, marker.from));
       if (cell.textFrom > marker.to) out.push(HIDDEN.range(marker.to, cell.textFrom));
     } else if (cell.textFrom > start) out.push(HIDDEN.range(start, cell.textFrom));
-    if (appended && i === shownCount - 1) {
+    if (appended === 'pipe' && i === shownCount - 1) {
       if (end > cell.textTo) out.push(HIDDEN.range(cell.textTo, end));
     } else if (cell.to > cell.textTo) out.push(HIDDEN.range(cell.textTo, cell.to));
     if (cell.textFrom === cell.textTo) out.push(FILLER.range(cell.textFrom));

@@ -9,7 +9,7 @@
 import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
 import type { SyntaxNode, Tree } from '@lezer/common';
-import { readDelimiterRow, readRowCells } from '@redlines/format';
+import { indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
 
 export type Align = '' | 'left' | 'center' | 'right';
 
@@ -82,7 +82,9 @@ function readTable(doc: Text, from: number, to: number): Table | null {
   const rows = [readRow(doc, first.from, first.to, 0)];
   for (let n = first.number + 2; n <= doc.lines; n++) {
     const line = doc.line(n);
-    if (line.from > to) break;
+    // A line indented four columns (a tab is to the next multiple of four) is no row of the table,
+    // where Lezer counts a tab as one character and reads it as one (#290).
+    if (line.from > to || indentOf(line.text) >= 4) break;
     rows.push(readRow(doc, line.from, line.to, rows.length));
   }
   const columns = rows[0]?.cells.length ?? 0;

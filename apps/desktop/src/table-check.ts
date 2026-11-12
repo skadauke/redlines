@@ -377,6 +377,27 @@ const alignedAs = (editor: Editor, col: number): string[] =>
     return cell ? getComputedStyle(cell).textAlign : 'no cell';
   });
 
+/** A table with no pipe at the edges of its rows, whose Count column (first, or last) was deleted by
+ * someone else and is kept below it, with its ledger. */
+const bareWithoutCount = (place: 'first' | 'last'): string =>
+  [
+    'Fruit | Price',
+    '----- | -----',
+    'Apples | 1.20',
+    'Plums | 2.50',
+    '',
+    `<!--del g5nb col=${place === 'first' ? 1 : 3} Count\\n-\\-\\-\\n3\\n7-->`,
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  bo: {name: Bo Chen}',
+    'marks:',
+    '  g5nb: {by: bo, at: 2026-11-01T10:00Z}',
+    '-->',
+    '',
+  ].join('\n');
+
 /** The ghost cells of deleted columns, as the page draws them. */
 const ghostCols = (editor: Editor): HTMLElement[] => [
   ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl .rl-ghost-col'),
@@ -2127,6 +2148,60 @@ const CHECKS: Check[] = [
       if (Math.abs(top - cleanTop) > 0.5) problems['gap'] = { simple: top, clean: cleanTop };
       const aligned = linedUp(editor);
       if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2)) problems['lines-up'] = aligned;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A deleted column in a table with no pipe at the edges of its rows is a ghost at its place all the
+    // same, the first and the last (#282): in every row, lined up with the real cells to the pixel,
+    // the header's delimiter row hidden under it; Simple draws none, and the real cells as before.
+    name: 'deleted-first-and-last-column-of-a-table-without-outer-pipes',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const place of ['first', 'last'] as const) {
+        await load(editor, bareWithoutCount(place), false);
+        editor.setViewMode('redlines');
+        await frames();
+        const ghosts = ghostCols(editor);
+        if (ghosts.length !== 3) {
+          problems[`${place}-ghosts`] = ghosts.length;
+          continue;
+        }
+        const aligned = linedUp(editor);
+        if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3))
+          problems[`${place}-lines-up`] = aligned;
+        const want = place === 'first' ? 0 : 2;
+        for (const row of cellElements(editor)) {
+          const at = row.findIndex((cell) => cell.classList.contains('rl-ghost-col'));
+          if (at !== want) problems[`${place}-place`] = row.map((cell) => cell.className);
+        }
+        if (ghosts.map((g) => g.textContent).join('|') !== 'Count|3|7')
+          problems[`${place}-text`] = ghosts.map((g) => g.textContent);
+        const struck = ghosts[0]?.querySelector('.rl-del');
+        if (!struck || !getComputedStyle(struck).textDecorationLine.includes('line-through'))
+          problems[`${place}-struck`] = 'no line-through';
+        const text = editor.view.contentDOM.textContent ?? '';
+        if (text.includes('|') || text.includes('---') || text.includes('<!--'))
+          problems[`${place}-source`] = text.slice(0, 120);
+        for (const line of lineElements(editor)) {
+          // Nothing but cells in a row (CodeMirror's own line-end `<br>` and widget buffers aside): a
+          // ghost nested in a cell would break the grid.
+          const stray = [...line.children].filter(
+            (el) =>
+              !el.classList.contains('rl-tc') &&
+              !el.classList.contains('cm-widgetBuffer') &&
+              el.tagName !== 'BR',
+          );
+          if (stray.length) problems[`${place}-stray`] = stray.map((el) => el.className);
+        }
+        editor.setViewMode('simple');
+        await frames();
+        if (ghostCols(editor).length) problems[`${place}-simple-ghost`] = ghostCols(editor).length;
+        if (cellElements(editor).some((row) => row.length !== 2))
+          problems[`${place}-simple-cells`] = cellElements(editor).map((row) => row.length);
+        const simple = linedUp(editor);
+        if (simple.off > 0.5) problems[`${place}-simple-lines-up`] = simple;
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },
