@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { undo, undoDepth } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
-import { newestView } from '@redlines/format';
+import { newestView, parse } from '@redlines/format';
 import { rectOf, whole } from './cells.ts';
 
 interface Row {
@@ -224,18 +224,19 @@ describe('tracked bold over many cells (issue #267)', () => {
     return { editor, doc, notices, ran: editor.commands.run('format.bold') };
   }
 
-  it('is refused with the format library’s words, and writes nothing', async () => {
-    // Twelve cells: each is one more pending change in the table for the next to be checked against.
-    const { editor, doc, notices, ran } = await boldOver(6, true);
-    expect(ran).toBe(false);
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatch(
-      /^There are \d+ pending changes in this table, too many to check this change against\. Accept or reject some of them first\.$/,
-    );
+  it('is made for as many cells as there are, as one change group, and writes no refusal', async () => {
+    // Twelve cells: each is checked against the marks of its own cell (format §3.7).
+    const { editor, notices, ran } = await boldOver(6, true);
+    expect(ran).toBe(true);
+    expect(notices).toEqual([]);
+    const marks = parse(editor.getDoc()).marks.filter((mark) => mark.kind === 'fmt');
+    expect(marks).toHaveLength(12);
+    const groups = new Set(marks.map((mark) => mark.entry.group));
+    expect(groups.size).toBe(1);
+    expect(groups.has(undefined)).toBe(false);
   });
 
-  it('is made for a few cells, and with Track Changes off for as many as there are', async () => {
+  it('is made with Track Changes off for as many as there are', async () => {
     expect((await boldOver(2, true)).ran).toBe(true);
     const plain = await boldOver(6, false);
     expect(plain.ran).toBe(true);

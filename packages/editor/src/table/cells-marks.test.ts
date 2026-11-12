@@ -54,14 +54,18 @@ describe('keys over a rectangle with another person’s marks, across their inse
   );
 
   // The format library refuses to format text with another person's pending change in it, as in a
-  // paragraph: the key says why and writes nothing.
+  // paragraph: the key names the cell and the person, and writes nothing. (A change in another
+  // cell is no matter: format §3.7, "Cells apart".)
   scriptRows(
     both(
       [
         { name: '⌘B is refused', keys: ['Mod-b'] },
         { name: '⌘I is refused', keys: ['Mod-i'] },
       ],
-      { refusal: 'Accept or reject the changes in this paragraph first.' },
+      {
+        refusal:
+          "Bo Chen's deletion is in the cell in row 3, column 3. Accept or reject it first, then format the cell.",
+      },
     ),
   );
 });
@@ -73,14 +77,17 @@ describe('formatting over a rectangle that crosses Bo’s inserted row', () => {
     '| 31 | 32 | 33] |',
     LEDGER_ROW,
   );
-  // A pending row of another person is a pending change in the paragraph, as the format reads it.
+  // A cell of a pending row of another person is theirs, as the format reads it.
   scriptRows(
     both(
       [
         { name: '⌘B is refused', keys: ['Mod-b'], doc: crossing },
         { name: '⌘I is refused', keys: ['Mod-i'], doc: crossing },
       ] satisfies Row[],
-      { refusal: 'Accept or reject the changes in this paragraph first.' },
+      {
+        refusal:
+          "Bo Chen's insertion is in the cell in row 2, column 3. Accept or reject it first, then format the cell.",
+      },
     ),
   );
 

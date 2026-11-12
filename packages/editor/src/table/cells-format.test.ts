@@ -3,6 +3,7 @@
 // change group however many cells, and read alike in every order of decisions, judged by micromark
 // (format §3.7, "Cells apart"). The 300-row table is judged by accepting all and rejecting all; the
 // small ones in every order.
+import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   EditError,
@@ -112,6 +113,7 @@ function run(doc: string, first: string, last: string, command: Command) {
     author: { handle: 'ada', name: 'Ada Lovelace' },
     notice: (message) => notices.push(message),
   });
+  forceParsing(editor.view, editor.view.state.doc.length, 60_000);
   const anchor = doc.indexOf(first);
   const head = doc.indexOf(last) + last.length;
   editor.view.dispatch({ selection: { anchor, head } });
@@ -167,19 +169,35 @@ describe.each(['format.bold', 'format.italic'] as const)('tracked %s over a colu
     expectEveryOrderAlike(`${command} over a column`, after);
   });
 
-  it('over cells that hold another person’s insertion, deletion and substitution', () => {
+  it('over cells whose neighbours hold another person’s insertion, deletion and substitution', () => {
+    const body = [
+      '| Item | Note |',
+      '| ---- | ---- |',
+      '| one | al<!--ins k3x9-->p<!--/k3x9-->ha |',
+      '| two | b<!--del m2bd-->e<!--/m2bd-->ta |',
+      '| three | <!--sub p5qm gam-->ga<!--/p5qm-->mma |',
+    ];
+    const doc = file(body.join('\n'), { k3x9: 'bo', m2bd: 'bo', p5qm: 'bo' });
+    const { ran, notices, after } = run(doc, 'Item', 'three', command);
+    expect(notices).toEqual([]);
+    expect(ran).toBe(true);
+    expect(written(doc, after).count).toBe(4);
+    expectEveryOrderAlike(`${command} beside cells with marks`, after);
+  });
+
+  it('refuses a cell that holds another person’s change, in words that name the cell and the person', () => {
     const body = [
       '| Item | Note |',
       '| ---- | ---- |',
       '| o<!--ins k3x9-->n<!--/k3x9-->e | alpha |',
-      '| t<!--del m2bd-->w<!--/m2bd-->o | beta |',
-      '| <!--sub p5qm thr-->fou<!--/p5qm-->r | gamma |',
+      '| two | beta |',
     ];
-    const doc = file(body.join('\n'), { k3x9: 'bo', m2bd: 'bo', p5qm: 'bo' });
-    const { ran, notices, after } = run(doc, 'Item', '/p5qm-->r', command);
-    expect(notices).toEqual([]);
-    expect(ran).toBe(true);
-    expect(written(doc, after).count).toBeGreaterThan(2);
-    expectEveryOrderAlike(`${command} over cells with marks`, after);
+    const doc = file(body.join('\n'), { k3x9: 'bo' });
+    const { ran, notices, after } = run(doc, 'Item', 'two', command);
+    expect(ran).toBe(false);
+    expect(after).toBe(doc);
+    expect(notices).toEqual([
+      "Bo Chen's insertion is in the cell in row 1, column 1. Accept or reject it first, then format the cell.",
+    ]);
   });
 });
