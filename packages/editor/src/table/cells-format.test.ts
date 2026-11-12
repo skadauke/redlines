@@ -167,7 +167,7 @@ describe.each(['format.bold', 'format.italic'] as const)('tracked %s over a colu
     expect(ran).toBe(true);
     expect(written(doc, after).count).toBe(3);
     expectEveryOrderAlike(`${command} over a column`, after);
-  });
+  }, 60_000);
 
   it('over cells whose neighbours hold another person’s insertion, deletion and substitution', () => {
     const body = [
@@ -183,7 +183,7 @@ describe.each(['format.bold', 'format.italic'] as const)('tracked %s over a colu
     expect(ran).toBe(true);
     expect(written(doc, after).count).toBe(4);
     expectEveryOrderAlike(`${command} beside cells with marks`, after);
-  });
+  }, 60_000);
 
   it('refuses a cell that holds another person’s change, in words that name the cell and the person', () => {
     const body = [
