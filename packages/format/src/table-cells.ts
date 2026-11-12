@@ -94,7 +94,6 @@ export function scopeOf(text: string, parsed: Parsed, spot: CellSpot | undefined
       : undefined;
   if (table.rows.some((one) => one.insertion) || parsed.marks.some(isAlignMark)) lines = undefined;
   const elsewhere = new Set<string>();
-  const read = new Map<number, ReturnType<typeof readLine>>();
   for (const mark of parsed.marks) {
     const spans = mark.segments.map((segment) => ({
       from: segment.open.from,
@@ -111,12 +110,10 @@ export function scopeOf(text: string, parsed: Parsed, spot: CellSpot | undefined
       lines = undefined;
     }
     if (mark.kind === 'cmt' || isStructural(mark) || from < table.from || to > table.to) continue;
-    const at = table.rows.findIndex((one) => one.from <= from && to <= one.to);
-    const found = table.rows[at];
-    if (!found) continue;
-    if (!read.has(at)) read.set(at, readLine(text, found.from, found.to));
-    const index = read.get(at)?.cells.findIndex((c) => c.contentFrom <= from && to <= c.contentTo);
-    if (index !== -1 && (at !== row || index !== col)) elsewhere.add(mark.id);
+    const there = cellAt(text, parsed, from, to);
+    if (there && there.table === table && (there.row !== row || there.col !== col)) {
+      elsewhere.add(mark.id);
+    }
   }
   return { elsewhere, lines };
 }

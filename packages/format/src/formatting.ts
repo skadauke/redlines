@@ -50,8 +50,7 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
-import { cellAt, cellName, cellOfEdits, isStructural, scopeOf } from './table-cells.ts';
-import type { CellSpot } from './table-cells.ts';
+import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
@@ -1727,9 +1726,6 @@ interface RegionSize {
   length: number;
   /** How many decisions may be tried (`TRIALS`, or `BLOCK_TRIALS` for a block change). */
   budget?: number;
-  /** The cell a change is confined to, where the marks of the other cells are left out of the walk
-   * (format §3.7, "Cells apart"): a refusal names it, and whose changes are in it. */
-  cell?: string;
   /** A block change whose region has lines that its marks apart can't be left out of, as the
    * numbers below it or an empty item would be read again (format §2.6): the refusal says so. */
   reread?: boolean;
@@ -1781,9 +1777,7 @@ function walkOrders(
     refused(
       others.length === 0
         ? `This changes too many items of one list at once to check them. Change up to ${region.budget === undefined ? 'five' : 'six'} items at a time.`
-        : region.cell
-          ? `There are ${others.length} pending changes in ${region.cell} and the rows and columns of this table, too many to check this change against. Accept or reject some of them first.`
-          : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.${region.reread ? REREAD : ''}`,
+        : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.${region.reread ? REREAD : ''}`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.
@@ -1912,18 +1906,6 @@ function withoutAnnotations(text: string): string {
   return applyChanges(text, inOrder(changes));
 }
 
-/** The cell as a refusal names it, with the people whose changes in it are tried. */
-function cellWords(parsed: Parsed, spot: CellSpot, tried: readonly string[]): string | undefined {
-  const by = new Set(
-    parsed.marks
-      .filter((mark) => tried.includes(mark.id) && !isStructural(mark))
-      .map(
-        ({ entry }) => parsed.ledger.people.find((p) => p.handle === entry.by)?.name ?? entry.by,
-      ),
-  );
-  return by.size > 0 ? `${cellName(spot)} (${[...by].join(', ')})` : undefined;
-}
-
 /** What a region is called in a refusal, by its lines, and how long it is. */
 function sizeOf(text: string, region: Range): RegionSize {
   const lines = text.slice(region.from, region.to).split('\n');
@@ -1954,7 +1936,7 @@ function regionFile(
 /**
  * `regionFile`, of the lines `parts` of the region (each with the edits that are in it), one under
  * the other: the header row, delimiter row and one row of a table whose other rows no change of a
- * cell can reach (`rowLines`).
+ * cell can reach (`scopeOf`).
  */
 function regionLines(
   text: string,
@@ -2127,7 +2109,6 @@ function selfCheck(
       const size = {
         ...sizeOf(text, region),
         ...(lines ? { length: lines.reduce((sum, line) => sum + line.to - line.from, 0) } : {}),
-        ...(spot ? { cell: cellWords(parsed, spot, others) } : {}),
         ...(checking.blockChange
           ? { budget: BLOCK_TRIALS, reread: misread || readAgain(local) }
           : {}),
