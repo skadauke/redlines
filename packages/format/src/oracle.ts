@@ -15,18 +15,22 @@ import { newestView } from './views.ts';
 
 /** The HTML micromark makes of a text, with GFM's tables and strikethrough, without the HTML
  * comments (the markers), and without the white space that Markdown does not show (before a line
- * break, a closing tag or a hard break). */
+ * break, a closing tag or a hard break, and at the start of a cell). */
 export function readAs(text: string): string {
-  return micromark(text, {
-    allowDangerousHtml: true,
-    extensions: [gfmStrikethrough(), gfmTable()],
-    htmlExtensions: [gfmStrikethroughHtml(), gfmTableHtml()],
-  })
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+(?=<\/|\n|<br \/>)/g, '')
-    .replace(/\n\s*\n/g, '\n')
-    .trim();
+  return (
+    micromark(text, {
+      allowDangerousHtml: true,
+      extensions: [gfmStrikethrough(), gfmTable()],
+      htmlExtensions: [gfmStrikethroughHtml(), gfmTableHtml()],
+    })
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+(?=<\/|\n|<br \/>)/g, '')
+      // A space at the start of a cell (after a marker that starts it) shows nowhere.
+      .replace(/(<t[dh](?: [^>]*)?>)[ \t]+/g, '$1')
+      .replace(/\n\s*\n/g, '\n')
+      .trim()
+  );
 }
 
 /** Whether the body of a file reads as its newest view does. */
