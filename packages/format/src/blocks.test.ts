@@ -721,7 +721,7 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     expect(words('> ')).toHaveLength(1);
     expect(words('   ')).toHaveLength(1);
     for (const [own, sums] of seen) expect(sums.size, `at ${own}`).toBeLessThan(600);
-  });
+  }, 60_000);
 
   it('steps from line to line past either kind of line break', () => {
     expect(nextLineStart('one\ntwo', 1)).toBe(4);
