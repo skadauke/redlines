@@ -300,7 +300,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
           expectEveryOrderAlike(label, text, exactly);
           // Not where a person typed over a character of a pending format's syntax (a replacement
           // whose old text is `*`): micromark reads the marked file's `**` otherwise there, whatever
-          // made the format change.
+          // made the format change (#299). Take this out when #299 is fixed.
           if (!structure && !/<!--sub \w{4} [^>]*[*_~`]/.test(text)) {
             expectEveryOrderRead(label, text);
           }
