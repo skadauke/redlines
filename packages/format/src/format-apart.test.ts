@@ -352,15 +352,11 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
         ),
         { k3x9: 'bo' },
       ],
-      // The delimiter row of a table, and its header row.
+      // The delimiter row of a table. (A mark in another cell, the header's too, is apart from a
+      // change in a cell: format §3.7, "Cells apart".)
       [
         'delimiter row',
         `| a | b |\n| - | -<!--ins k3x9-->-<!--/k3x9--> |\n| ${own} | x |`,
-        { k3x9: 'bo' },
-      ],
-      [
-        'header row',
-        `| a | <!--sub k3x9 b-->bee<!--/k3x9--> |\n| - | - |\n| ${own} | x |`,
         { k3x9: 'bo' },
       ],
       // A word whose text could end a code span, or start a line of its own.

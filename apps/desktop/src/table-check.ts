@@ -2205,6 +2205,98 @@ const CHECKS: Check[] = [
       return Object.keys(problems).length ? problems : null;
     },
   },
+  {
+    // ⌘B over a whole column with Track Changes on (issue #267; format §3.7, "Cells apart"): the
+    // table has eight pending insertions of someone else's in another column, more than the format
+    // once tried in every order, and the bold is written for every cell of the column as one change
+    // group, drawn bold in Redlines, and carded.
+    name: 'bold-over-a-column-with-track-changes-on-is-written-drawn-and-carded',
+    async run(editor) {
+      const rest = 'bcdfghjkmnpqrstvwxz23456789';
+      const ids = Array.from({ length: 8 }, (_, i) => `k${rest[i + 3]}${rest[i]}x`);
+      const rows = Array.from({ length: 24 }, (_, n) => {
+        const note =
+          n < ids.length ? `some <!--ins ${ids[n]}-->new<!--/${ids[n]}--> words` : 'some words';
+        return `| item ${n} | ${n} | ${note} |`;
+      });
+      const entries = ids.map((id) => `  ${id}: {by: bo, at: 2026-11-01T10:00Z}\n`).join('');
+      const long = [
+        'Intro.',
+        '',
+        '| Item | Count | Note |',
+        '| ---- | ----- | ---- |',
+        ...rows,
+        '',
+        'After.',
+        '',
+        `<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n${entries}-->\n`,
+      ].join('\n');
+      await load(editor, long, true);
+      const problems: Record<string, unknown> = {};
+      const read = tablesOf(editor.view.state)[0];
+      if (read?.rows.length !== 25) return { why: 'the table was not read' };
+      const first = cellOf(editor, 0, 0);
+      const last = cellOf(editor, 24, 0);
+      editor.view.dispatch({ selection: { anchor: first.textFrom, head: last.textTo } });
+      await frames();
+      const selected = rect(editor);
+      if (!selected || selected.rows.join() !== '0,24' || selected.cols.join() !== '0,0')
+        return { why: 'the column is not a rectangle', selected };
+      if (!editor.commands.run('format.bold')) return { why: 'Bold did nothing' };
+      await frames();
+      const marks = doc(editor).match(/<!--fmt [a-z0-9]{4} \+bold-->/g) ?? [];
+      if (marks.length !== 25) problems['marks'] = marks.length;
+      const groups = new Set(
+        [
+          ...doc(editor).matchAll(
+            /^ {2}[a-z0-9]{4}: \{by: [^,]+, at: [^,}]+, group: ([a-z0-9]{4})/gm,
+          ),
+        ].map((m) => m[1]),
+      );
+      if (groups.size !== 1) problems['groups'] = [...groups];
+      const written = (word: string) =>
+        new RegExp(
+          `\\| <!--fmt [a-z0-9]{4} \\+bold-->\\*\\*${word}\\*\\*<!--/[a-z0-9]{4}--> \\|`,
+        ).test(doc(editor));
+      if (!written('item 23') || !written('Item'))
+        problems['written'] = {
+          header: written('Item'),
+          last: written('item 23'),
+          tail: doc(editor).slice(
+            doc(editor).indexOf('item 23') - 40,
+            doc(editor).indexOf('item 23') + 60,
+          ),
+        };
+      editor.setViewMode('redlines');
+      await frames();
+      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')].filter(
+        (el) => /^(?:Item|item \d+)$/.test((el.textContent ?? '').trim()),
+      );
+      if (marked.length !== 25) problems['drawn'] = marked.length;
+      const heavy = (el: HTMLElement): boolean =>
+        Number(getComputedStyle(el).fontWeight) >= 600 ||
+        [...el.querySelectorAll<HTMLElement>('*')].some(
+          (c) => Number(getComputedStyle(c).fontWeight) >= 600,
+        );
+      const light = marked.filter((el) => !heavy(el)).length;
+      if (light > 0) problems['bold'] = `${light} of ${marked.length} are not drawn bold`;
+      const target = marked[0];
+      if (!target) return { ...problems, card: 'nothing to press' };
+      const box = await reveal(target);
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      mouse(target, 'mousedown', x, y);
+      mouse(window, 'mouseup', x, y);
+      await frames();
+      await frames();
+      const card = editor.view.dom.ownerDocument.querySelector('.rl-card .rl-card-what');
+      // One card for the group: Bold, once for each of its 25 changes.
+      const said = (card?.textContent ?? '').split(' · ');
+      if (said.length !== 25 || said.some((one) => one !== 'Formatted: Bold'))
+        problems['card'] = card?.textContent ?? 'no card';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
 ];
 
 export async function runTableCheck(editor: Editor): Promise<void> {

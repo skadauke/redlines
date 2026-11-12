@@ -50,6 +50,7 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
+import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
@@ -333,6 +334,8 @@ interface Planning extends FormatReader {
   original?: DocView;
   /** The newest view, once something has asked for it. */
   newest?: DocView;
+  /** The spans of all marks, once asked for. */
+  spans?: Range[];
 }
 
 function holdersIn(planning: Planning, layout: Layout): Holder[] {
@@ -1261,7 +1264,12 @@ function definedBefore(text: string, from: number, to: number): boolean {
 /** Whether another person's pending change, whose decisions could leave the syntax reading
  * otherwise, is in `range` (format §2.6). */
 function othersIn(planning: Planning, range: Range): boolean {
-  return planning.parsed.marks.some(
+  return othersMark(planning, range) !== undefined;
+}
+
+/** The first pending change of another person that is in `range`, if any. */
+function othersMark(planning: Planning, range: Range): MarkRange | undefined {
+  return planning.parsed.marks.find(
     (mark) =>
       CHANGE_KINDS.has(mark.kind) &&
       mark.entry.by !== planning.owner &&
@@ -1278,6 +1286,7 @@ function planFormat(
   op: FormatOp,
   tracked: boolean,
   author: Person | undefined,
+  shared?: Planning,
 ): Plan {
   if (range.from < 0 || range.to < range.from || range.to > text.length) {
     throw new RangeError(
@@ -1285,8 +1294,8 @@ function planFormat(
     );
   }
   if (op.kind === 'link' && op.url !== null) assertWritableUrl(op.url);
-  const parsed = parse(text);
-  const planning: Planning = {
+  const parsed = shared?.parsed ?? parse(text);
+  const planning: Planning = shared ?? {
     ...formatReader(text, parsed),
     parsed,
     me: tracked ? author?.handle : undefined,
@@ -1308,7 +1317,7 @@ function planFormat(
   }
   let inVerbatim = false;
   let elsewhere = false;
-  const spans = spansOf(planning, parsed);
+  const spans = (planning.spans ??= spansOf(planning, parsed));
   let block: Range | undefined;
   /** The end of the last block that a block change took, with the lines under it. */
   let taken = -1;
@@ -1385,8 +1394,24 @@ function planFormat(
     const typing = holder?.own === true;
     // Another person's pending change in the paragraph, whose decisions could leave the syntax
     // reading otherwise, is decided first (format §2.6).
-    const near = paragraphRegion(planning, spans, paragraph);
-    if (othersIn(planning, near) && !typing) throw refused(IN_PARAGRAPH);
+    // In a table's cell, it is the cell's text: GFM cuts a row into cells before it reads any
+    // inline syntax, so no mark in another cell can change how this one reads (format §3.7, "Cells
+    // apart").
+    const cell = cellAt(text, parsed, Math.max(from, paragraph.from), Math.min(to, paragraph.to));
+    const near = cell?.content ?? paragraphRegion(planning, spans, paragraph);
+    if (!typing) {
+      // A cell in another person's inserted row is theirs as long as the row is pending.
+      const row = cell?.table.rows[cell.row]?.insertion;
+      const mark =
+        othersMark(planning, near) ?? (row && row.entry.by !== planning.owner ? row : undefined);
+      if (mark) {
+        throw refused(
+          cell
+            ? `${nameOf(parsed, mark, planning.author)} is in ${cellName(cell)}. Accept or reject it first, then format the cell.`
+            : IN_PARAGRAPH,
+        );
+      }
+    }
     // The paragraphs of a block share its region, which is found once.
     if (!block || near.from < block.from || near.to > block.to) {
       block = blockRegion(planning, spans, near, limit);
@@ -1905,12 +1930,33 @@ function regionFile(
   region: Range,
   edits: readonly TextChange[],
 ): string {
-  const shifted = edits.map((edit) => ({
-    ...edit,
-    from: edit.from - region.from,
-    to: edit.to - region.from,
-  }));
-  const body = applyChanges(text.slice(region.from, region.to), inOrder(shifted));
+  return regionLines(text, ledger, region, [region], edits);
+}
+
+/**
+ * `regionFile`, of the lines `parts` of the region (each with the edits that are in it), one under
+ * the other: the header row, delimiter row and one row of a table whose other rows no change of a
+ * cell can reach (`scopeOf`).
+ */
+function regionLines(
+  text: string,
+  ledger: Ledger,
+  region: Range,
+  parts: readonly Range[],
+  edits: readonly TextChange[],
+): string {
+  const eol = eolOf(text);
+  if (edits.some((edit) => !parts.some((part) => edit.from >= part.from && edit.to <= part.to))) {
+    throw refused(SELF_CHECK);
+  }
+  const body = parts
+    .map((part) => {
+      const inPart = edits
+        .filter((edit) => edit.from >= part.from && edit.to <= part.to)
+        .map((edit) => ({ ...edit, from: edit.from - part.from, to: edit.to - part.from }));
+      return applyChanges(text.slice(part.from, part.to), inOrder(inPart));
+    })
+    .join(eol);
   const ids = new Set(scan(body).markers.map((marker) => marker.id));
   const local: Ledger = {
     version: 1,
@@ -1924,7 +1970,6 @@ function regionFile(
         .filter((match) => match.index < region.from || match.index > region.to)
         .map((match) => match[0].replace(/<!--[\s\S]*?-->/g, ''))
     : [];
-  const eol = eolOf(text);
   const written = inEol(serializeLedger(normalizeLedger(body, local)), eol);
   return [body, ...definitions, written].join(eol + eol) + eol;
 }
@@ -2030,34 +2075,94 @@ function selfCheck(
 ): void {
   const before = parsed.ledger;
   const body = bodyChanges(parsed, changes);
-  for (const { region, direct } of regionsOf(blocks)) {
+  for (const { region, direct: allDirect } of regionsOf(blocks)) {
     const inside = (change: TextChange) => change.from >= region.from && change.to <= region.to;
-    const touching = body.filter((change) => change.from <= region.to && region.from <= change.to);
-    if (!touching.every(inside)) throw refused(SELF_CHECK);
-    const local = regionFile(text, before, region, []);
-    const after = regionFile(text, ledger, region, touching);
-    const marks = parse(after).marks;
-    const others = marks
-      .filter((mark) => mark.kind !== 'cmt' && !created.includes(mark.id))
-      .map((mark) => mark.id);
-    const apart =
-      !checking.everyMark && others.length > 0 ? pendingIn(local, region, touching) : undefined;
-    const { alike, pending, misread } = readsAsBefore(local, after, apart);
-    if (!alike) throw refused(READS_OTHERWISE);
-    const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
-    const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
-    const size = {
-      ...sizeOf(text, region),
-      ...(checking.blockChange
-        ? { budget: BLOCK_TRIALS, reread: misread || readAgain(local) }
-        : {}),
-    };
-    proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
-    if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
-      const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
-      proveDecisions(bare, withoutAnnotations(after), fresh, others, size, pending);
+    const everything = body.filter(
+      (change) => change.from <= region.to && region.from <= change.to,
+    );
+    if (!everything.every(inside)) throw refused(SELF_CHECK);
+    // Changes in several cells of a table, none of whose marks is in two of them, are checked one
+    // cell at a time (format §3.7, "Cells apart").
+    for (const { touching, direct } of cellGroups(text, parsed, everything, allDirect) ?? [
+      { touching: everything, direct: allDirect },
+    ]) {
+      // A change in one cell of a table is checked against that cell's marks, on the lines of its
+      // row where the table's rows and columns have no change of their own.
+      const spot = cellOfEdits(text, parsed, touching);
+      const { elsewhere, lines } = scopeOf(text, parsed, spot);
+      const fileOf = (of: Ledger, edits: readonly TextChange[]) =>
+        lines ? regionLines(text, of, region, lines, edits) : regionFile(text, of, region, edits);
+      const local = fileOf(before, []);
+      const after = fileOf(ledger, touching);
+      const marks = parse(after).marks;
+      const others = marks
+        .filter(
+          (mark) => mark.kind !== 'cmt' && !created.includes(mark.id) && !elsewhere.has(mark.id),
+        )
+        .map((mark) => mark.id);
+      const apart =
+        !checking.everyMark && others.length > 0 ? pendingIn(local, region, touching) : undefined;
+      const { alike, pending, misread } = readsAsBefore(local, after, apart);
+      if (!alike) throw refused(READS_OTHERWISE);
+      const bytes = direct.length > 0 ? fileOf(before, direct) : local;
+      const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
+      const size = {
+        ...sizeOf(text, region),
+        ...(lines ? { length: lines.reduce((sum, line) => sum + line.to - line.from, 0) } : {}),
+        ...(checking.blockChange
+          ? { budget: BLOCK_TRIALS, reread: misread || readAgain(local) }
+          : {}),
+      };
+      proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
+      if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
+        const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
+        proveDecisions(bare, withoutAnnotations(after), fresh, others, size, pending);
+      }
     }
   }
+}
+
+/**
+ * The changes of a region split by the cell they are in, when each is wholly in a cell of one table
+ * and no mark they write has pieces in two cells: the cells of a rectangle that was formatted at
+ * once. Undefined where they are in one cell or not all in cells.
+ */
+function cellGroups(
+  text: string,
+  parsed: Parsed,
+  touching: readonly TextChange[],
+  direct: readonly TextChange[],
+): { touching: TextChange[]; direct: TextChange[] }[] | undefined {
+  if (touching.length < 2) return undefined;
+  const groups = new Map<string, { touching: TextChange[]; direct: TextChange[] }>();
+  const place = (change: TextChange, kind: 'touching' | 'direct') => {
+    const spot = cellAt(text, parsed, change.from, change.to);
+    if (!spot) return false;
+    const key = `${spot.table.from}:${spot.row}:${spot.col}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { touching: [], direct: [] };
+      groups.set(key, group);
+    }
+    group[kind].push(change);
+    return true;
+  };
+  if (!touching.every((change) => place(change, 'touching'))) return undefined;
+  if (!direct.every((change) => place(change, 'direct'))) return undefined;
+  if (groups.size < 2) return undefined;
+  // A mark with pieces in two cells is decided as one, and can't be tried a cell at a time.
+  const owner = new Map<string, string>();
+  for (const [key, group] of groups) {
+    for (const change of group.touching) {
+      for (const [, id] of change.insert.matchAll(/<!--(?:fmt |\/)([a-z0-9]{4})/g)) {
+        if (id !== undefined && owner.get(id) !== undefined && owner.get(id) !== key) {
+          return undefined;
+        }
+        if (id !== undefined) owner.set(id, key);
+      }
+    }
+  }
+  return [...groups.values()];
 }
 
 /**
@@ -2077,7 +2182,27 @@ export function trackedFormat(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  return formatTracked(text, range, op, ctx, LEAVING_MARKS_APART);
+  return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
+}
+
+/**
+ * `trackedFormat` of several ranges of one text at once, as one change: the ranges are in order and
+ * apart (the cells of a rectangle), and each is planned on the text as it is. Every block they
+ * make has its own mark, and all of them share one group. A range that lies in a cell of a table is
+ * checked against the marks of that cell, and not against all those of the table (format §3.7,
+ * "Cells apart"), so that many cells cost many small checks, and the text is read once. For the
+ * formats of text, not for a change of blocks.
+ *
+ * @throws RangeError when a range lies outside the text.
+ * @throws EditError as `trackedFormat` does, for the first range that can't take it.
+ */
+export function trackedFormatRanges(
+  text: string,
+  ranges: readonly Range[],
+  op: FormatOp,
+  ctx: EditContext,
+): TrackedEdits {
+  return formatTracked(text, ranges, op, ctx, LEAVING_MARKS_APART);
 }
 
 /** How a change is checked: with the marks apart from it left pending (format §2.6), or, with
@@ -2097,7 +2222,7 @@ const LEAVING_MARKS_APART: Checking = { everyMark: false };
  */
 export const tryingEveryMark = {
   trackedFormat: (text: string, range: Range, op: FormatOp, ctx: EditContext): TrackedEdits =>
-    formatTracked(text, range, op, ctx, { everyMark: true }),
+    formatTracked(text, [range], op, ctx, { everyMark: true }),
   untrackedFormat: (
     text: string,
     range: Range,
@@ -2109,15 +2234,25 @@ export const tryingEveryMark = {
 /** `trackedFormat`, checked as `checking` says. */
 function formatTracked(
   text: string,
-  range: Range,
+  ranges: readonly Range[],
   op: FormatOp,
   ctx: EditContext,
   checking: Checking,
 ): TrackedEdits {
-  const own = isBlockOp(op) ? ownBlockEdit(text, range, op, ctx) : undefined;
+  const [first] = ranges;
+  if (first === undefined) return { changes: [], markIds: [], extendedIds: [] };
+  const own = isBlockOp(op) ? ownBlockEdit(text, first, op, ctx) : undefined;
   if (own) return own;
-  const { planning, blocks } = planFormat(text, range, op, true, ctx.author);
-  if (blocks.length === 0) return { changes: [], markIds: [], extendedIds: [] };
+  let planning: Planning | undefined;
+  const blocks: Block[] = [];
+  // From the last, as formatting one range after the other would: the first refusal is the last
+  // cell's.
+  for (const range of ranges.toReversed()) {
+    const plan = planFormat(text, range, op, true, ctx.author, planning);
+    planning = plan.planning;
+    blocks.push(...plan.blocks);
+  }
+  if (!planning || blocks.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   const { parsed } = planning;
   const taken = idsIn(text);
   const draw = () => {
@@ -2536,7 +2671,11 @@ function formatUntracked(
     const local = regionFile(text, before, region, []);
     const after = regionFile(text, before, region, touching);
     const marks = parse(after).marks;
-    const others = marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id);
+    const spot = cellOfEdits(text, parsed, touching);
+    const { elsewhere } = scopeOf(text, parsed, spot);
+    const others = marks
+      .filter((mark) => mark.kind !== 'cmt' && !elsewhere.has(mark.id))
+      .map((mark) => mark.id);
     const inline = !checking.everyMark && others.length > 0;
     const apart = inline ? pendingIn(local, region, touching) : undefined;
     const { alike, pending } = readsAsBefore(local, after, apart);

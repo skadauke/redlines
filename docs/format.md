@@ -378,7 +378,8 @@ decisions without this change, all of the block, and once the new marks are reje
 the same bytes. A decision refused without this change must be refused with it, as nothing shows
 what it would come to. Too many marks to try (more than five, or fewer in a long block, marks apart
 not counted) is refused too, in words that go by the marks that are tried: when those are the new
-marks only, it says to change fewer items at once, as deciding the marks apart would not help. It is
+marks only, it says to change fewer items at once, as deciding the marks apart would not help. In a
+cell of a table, the marks counted are those of the cell (§3.7, "Cells apart"). It is
 read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub
 does not read it so yet. Emphasis is read as micromark 4.0.2 reads it: each run of `*` or `_` that
 can close, left to right, pairs with the nearest run before it that can open, on what is left of the
@@ -2059,6 +2060,35 @@ it, one per line:
   table first." or "… the alignment change …"). An alignment change is allowed with any row pending,
   and with a column pending only with Track Changes off (rule 5 above). Decisions are made on the lines of the table in this order: the other marks, then
   the columns, then the moves of rows, each on the text the ones before leave.
+- **Cells apart.** A format change confined to the text of one cell is checked against the marks in
+  that cell, and not against the marks of the other cells (§2.6, rule 5's count and the check of every
+  order). GFM cuts a row into cells at the pipes that no backslash escapes before it reads any inline
+  syntax: emphasis, a code span, a link and a bit of HTML can't reach from one cell into another, and
+  a `|` inside a code span still ends a cell. The markers of a mark never hold such a pipe (a payload
+  writes it as `\|`, §2.6), so a mark that lies wholly in one cell's text, accepted or rejected,
+  can't change how any other cell reads, in any order of decisions. What a change in a cell has to
+  show is therefore about the cell's marks: that every order of deciding them reads as it would
+  without the change, and that rejecting it gives back the bytes. The marks of other cells stay
+  pending, the same in the file with the change and in the file without it, and so do those that
+  lie in the header row; a mark that crosses a pipe, or lies outside the table, is not apart. The
+  table's own marks, the rows and columns pending, the moves and an alignment change, are decided in
+  their own tiers (the other marks, then the columns, then the moves of rows, each on the text the
+  ones before leave, as above) and still take part in the check, and a decision is still held to the
+  view with the pending moves accepted (the check of a decision in a moved row). Where none of them
+  is pending in the table, the lines checked are its header row, its delimiter row and the cell's
+  row, which read as they do among any rows, so that the cost of a change in a cell does not grow
+  with the table. Two things follow for what a person does. Bold or italic over a rectangle of cells
+  (a column, or the whole table) is one change group, a mark for each cell, each checked on its
+  own, and any number of cells is no more than that many small checks. And a cell that holds
+  another person's change, or is in their inserted or moved row, can't be formatted until that is
+  decided, as a paragraph can't, and the refusal says so of the cell and the person ("Bo Chen's
+  insertion is in the cell in row 3, column 2. Accept or reject it first, then format the cell.");
+  a change in another cell of the row does not matter. A row without a leading pipe takes no
+  format change (the cells of such a row are cut by the line's start, which a mark could change).
+  The pair model, a suite of random rectangles over tables with other people's marks, pending rows
+  and columns and alignment changes (every order of decisions, judged against micromark 4.0.2), and
+  the cases of a pipe in a code span, a cell that is only a marker, CRLF and a table without outer
+  pipes hold the format to this.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
 - **An agent's `str_replace` over a table.** When the old and the new text hold the same table, with

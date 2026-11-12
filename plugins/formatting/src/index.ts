@@ -32,11 +32,14 @@ import {
   EditError,
   applyChanges,
   type FormatOp,
+  idsIn,
   type InlineFormat,
+  newId,
   type Person,
   type Range,
   type TextChange,
   trackedFormat,
+  trackedFormatRanges,
   untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
@@ -337,11 +340,33 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const tracked = view.state.field(trackingField);
     let text = view.state.doc.toString();
     let total = ChangeSet.empty(text.length);
+    // The changes of several ranges are decided together (format §3.7).
+    const group = tracked && ranges.length > 1 ? newId(idsIn(text)) : undefined;
+    // The formats of text are made at once: the format library reads the text once, and checks
+    // each cell of a table against its own marks.
+    if (tracked && (op.kind === 'inline' || op.kind === 'clear')) {
+      try {
+        const made = trackedFormatRanges(text, ranges, op, {
+          author: person,
+          time: ledgerTime(new Date()),
+          ...(group === undefined ? {} : { group }),
+        });
+        return put(made.changes, userEvent, true);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        notice(explain(error));
+        return false;
+      }
+    }
     try {
       for (const found of ranges.toReversed()) {
         const range = { from: total.mapPos(found.from, -1), to: total.mapPos(found.to, 1) };
         const made = tracked
-          ? trackedFormat(text, range, op, { author: person, time: ledgerTime(new Date()) }).changes
+          ? trackedFormat(text, range, op, {
+              author: person,
+              time: ledgerTime(new Date()),
+              ...(group === undefined ? {} : { group }),
+            }).changes
           : untrackedFormat(text, range, op, { author: person });
         const step = ChangeSet.of(
           made.map(({ from, to, insert }) => ({ from, to, insert })),

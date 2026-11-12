@@ -46,7 +46,7 @@ export type {
   InlineFormat,
   ParsedFormatOp,
 } from './format-ops.ts';
-export { trackedFormat, untrackedFormat } from './formatting.ts';
+export { trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
 export { trackedEdit, trackedEdits } from './track.ts';
