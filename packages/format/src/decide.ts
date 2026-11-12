@@ -11,6 +11,7 @@ import {
   eolOf,
   inEol,
   markerRanges,
+  paragraphBreaks,
   spliceRepairs,
   workingLedger,
 } from './edit-support.ts';
@@ -30,7 +31,7 @@ import { colMarkIds, decideCols } from './table-cols.ts';
 import { isAlignMark } from './table-align.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
-import { syntaxOnly } from './views.ts';
+import { newestView, originalView, syntaxOnly } from './views.ts';
 
 type Action = 'accept' | 'reject';
 
@@ -335,6 +336,45 @@ function decide(
   return changes;
 }
 
+/** The text with every pending move of a row accepted, or undefined where one can't be. */
+function movesAccepted(text: string, parsed: Parsed): string | undefined {
+  const moves = parsed.marks.filter(isRowMove);
+  if (moves.length === 0) return undefined;
+  try {
+    return applyChanges(text, decide(text, parsed, moves, 'accept'));
+  } catch (error) {
+    if (error instanceof EditError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Throws when a decision lets the text of a row that a pending move writes be read otherwise once the
+ * move is accepted. The view of the decision leaves a moved row out as the original view does, or in
+ * its new place, and a mark inside the row can hold text that the decision cannot see (a substitution
+ * in a format change holds the closing `**` of the format as its old text): the decision is checked
+ * in the other order of the move too. (Format §3.7.)
+ */
+function assertMovesKept(
+  text: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+  keeps: 'newest' | 'original' | 'both',
+): void {
+  const before = movesAccepted(text, parsed);
+  if (before === undefined) return;
+  const afterText = applyChanges(text, changes);
+  const after = movesAccepted(afterText, parse(afterText));
+  if (after === undefined) return;
+  const view = keeps === 'newest' ? newestView : originalView;
+  if (paragraphBreaks(view(after).text) !== paragraphBreaks(view(before).text)) {
+    throw new EditError(
+      `This decision would change the ${keeps} text of a row that is moved, because a marker that goes lets the text next to it be read otherwise. Decide the changes next to it first.`,
+      'no-legal-placement',
+    );
+  }
+}
+
 function decideNow(
   text: string,
   parsed: Parsed,
@@ -415,7 +455,11 @@ function decideNow(
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
   try {
-    return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+    const done = commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+    if (keeps !== 'both' && !marks.some((mark) => isRowMove(mark) || isColMark(mark))) {
+      assertMovesKept(text, parsed, done, keeps);
+    }
+    return done;
   } catch (error) {
     // The ledger would be code: the decision would leave a fence open to the end of the file.
     if (error instanceof EditError && error.code === 'unclosed-end') {

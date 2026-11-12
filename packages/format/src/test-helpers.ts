@@ -980,17 +980,3 @@ export function expectNoDecisionRefused(
   walk(text, []);
   return seen.size;
 }
-
-/**
- * Whether the steps of a random table (`who {json}` each) have a bold change, then a row move, then
- * a typed edit: such a table reads two ways in one order of decisions. The same on main (3ee31ae),
- * in tables with outer pipes or without or with leading pipes only: issue #295. The random suites
- * skip these tables until it is fixed.
- */
-export function boldMoveEdit(steps: readonly string[]): boolean {
-  const bold = steps.findIndex((step) => step.includes('"kind":"bold"'));
-  const move = steps.findIndex((step, i) => i > bold && step.includes('"kind":"moveRows"'));
-  return (
-    bold !== -1 && move !== -1 && steps.some((step, i) => i > move && step.includes('"insert":'))
-  );
-}
