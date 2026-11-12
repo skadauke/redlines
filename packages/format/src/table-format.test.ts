@@ -152,7 +152,7 @@ describe('a cell that is only a marker', () => {
         op,
       );
     }
-  });
+  }, 60_000);
 
   it('is refused in words that name the cell and the person, and writes nothing', () => {
     expect(

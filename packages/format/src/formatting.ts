@@ -50,14 +50,7 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
-import {
-  cellAt,
-  cellName,
-  cellOfEdits,
-  isStructural,
-  marksOfOtherCells,
-  rowLines,
-} from './table-cells.ts';
+import { cellAt, cellName, cellOfEdits, isStructural, scopeOf } from './table-cells.ts';
 import type { CellSpot } from './table-cells.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
@@ -342,9 +335,8 @@ interface Planning extends FormatReader {
   original?: DocView;
   /** The newest view, once something has asked for it. */
   newest?: DocView;
-  /** The spans of all marks, and of those that are no row or column of a table, once asked for. */
+  /** The spans of all marks, once asked for. */
   spans?: Range[];
-  cellMarkSpans?: Range[];
 }
 
 function holdersIn(planning: Planning, layout: Layout): Holder[] {
@@ -1289,20 +1281,6 @@ function othersMark(planning: Planning, range: Range): MarkRange | undefined {
   );
 }
 
-/** The spans of the marks that are not a table's rows or columns: those that can reach from the
- * text of a cell into the text next to it. */
-function cellSpans(planning: Planning, parsed: Parsed): Range[] {
-  return (planning.cellMarkSpans ??= parsed.marks
-    .filter((mark) => !isStructural(mark))
-    .flatMap((mark) => mark.segments.map((segment) => segmentSpan(mark, segment, planning))));
-}
-
-/** What a refusal says of another person's change in the cell that is to be formatted. */
-function inCell(planning: Planning, mark: MarkRange, cell: CellSpot): string {
-  const name = nameOf(planning.parsed, mark, planning.author);
-  return `${name} is in ${cellName(cell)}. Accept or reject it first, then format the cell.`;
-}
-
 function planFormat(
   text: string,
   range: Range,
@@ -1421,15 +1399,19 @@ function planFormat(
     // inline syntax, so no mark in another cell can change how this one reads (format §3.7, "Cells
     // apart").
     const cell = cellAt(text, parsed, Math.max(from, paragraph.from), Math.min(to, paragraph.to));
-    const near = cell
-      ? closed(cell.content, cellSpans(planning, parsed), (range) => range)
-      : paragraphRegion(planning, spans, paragraph);
+    const near = cell?.content ?? paragraphRegion(planning, spans, paragraph);
     if (!typing) {
       // A cell in another person's inserted row is theirs as long as the row is pending.
       const row = cell?.table.rows[cell.row]?.insertion;
       const mark =
         othersMark(planning, near) ?? (row && row.entry.by !== planning.owner ? row : undefined);
-      if (mark) throw refused(cell ? inCell(planning, mark, cell) : IN_PARAGRAPH);
+      if (mark) {
+        throw refused(
+          cell
+            ? `${nameOf(parsed, mark, planning.author)} is in ${cellName(cell)}. Accept or reject it first, then format the cell.`
+            : IN_PARAGRAPH,
+        );
+      }
     }
     // The paragraphs of a block share its region, which is found once.
     if (!block || near.from < block.from || near.to > block.to) {
@@ -1747,7 +1729,7 @@ interface RegionSize {
   budget?: number;
   /** The cell a change is confined to, where the marks of the other cells are left out of the walk
    * (format §3.7, "Cells apart"): a refusal names it, and whose changes are in it. */
-  cell?: { name: string; people: string[] };
+  cell?: string;
   /** A block change whose region has lines that its marks apart can't be left out of, as the
    * numbers below it or an empty item would be read again (format §2.6): the refusal says so. */
   reread?: boolean;
@@ -1799,8 +1781,8 @@ function walkOrders(
     refused(
       others.length === 0
         ? `This changes too many items of one list at once to check them. Change up to ${region.budget === undefined ? 'five' : 'six'} items at a time.`
-        : region.cell && region.cell.people.length > 0
-          ? `There are ${others.length} pending changes in ${region.cell.name} and the rows and columns of this table (${region.cell.people.join(', ')}), too many to check this change against. Accept or reject some of them first.`
+        : region.cell
+          ? `There are ${others.length} pending changes in ${region.cell} and the rows and columns of this table, too many to check this change against. Accept or reject some of them first.`
           : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.${region.reread ? REREAD : ''}`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
@@ -1930,19 +1912,16 @@ function withoutAnnotations(text: string): string {
   return applyChanges(text, inOrder(changes));
 }
 
-/** The cell as a refusal names it, and the people whose changes in it are tried. */
-function cellWords(
-  parsed: Parsed,
-  spot: CellSpot,
-  tried: readonly string[],
-): { name: string; people: string[] } {
-  const people = new Set<string>();
-  for (const mark of parsed.marks) {
-    if (!tried.includes(mark.id) || isStructural(mark)) continue;
-    const { by } = mark.entry;
-    people.add(parsed.ledger.people.find((person) => person.handle === by)?.name ?? by);
-  }
-  return { name: cellName(spot), people: [...people] };
+/** The cell as a refusal names it, with the people whose changes in it are tried. */
+function cellWords(parsed: Parsed, spot: CellSpot, tried: readonly string[]): string | undefined {
+  const by = new Set(
+    parsed.marks
+      .filter((mark) => tried.includes(mark.id) && !isStructural(mark))
+      .map(
+        ({ entry }) => parsed.ledger.people.find((p) => p.handle === entry.by)?.name ?? entry.by,
+      ),
+  );
+  return by.size > 0 ? `${cellName(spot)} (${[...by].join(', ')})` : undefined;
 }
 
 /** What a region is called in a refusal, by its lines, and how long it is. */
@@ -2128,13 +2107,12 @@ function selfCheck(
       // A change in one cell of a table is checked against that cell's marks, on the lines of its
       // row where the table's rows and columns have no change of their own.
       const spot = cellOfEdits(text, parsed, touching);
-      const lines = spot ? rowLines(text, parsed, spot) : undefined;
+      const { elsewhere, lines } = scopeOf(text, parsed, spot);
       const fileOf = (of: Ledger, edits: readonly TextChange[]) =>
         lines ? regionLines(text, of, region, lines, edits) : regionFile(text, of, region, edits);
       const local = fileOf(before, []);
       const after = fileOf(ledger, touching);
       const marks = parse(after).marks;
-      const elsewhere = spot ? marksOfOtherCells(text, parsed, spot) : new Set<string>();
       const others = marks
         .filter(
           (mark) => mark.kind !== 'cmt' && !created.includes(mark.id) && !elsewhere.has(mark.id),
@@ -2234,7 +2212,7 @@ export function trackedFormat(
  * "Cells apart"), so that many cells cost many small checks, and the text is read once. For the
  * formats of text, not for a change of blocks.
  *
- * @throws RangeError when a range lies outside the text, or the change is one of blocks.
+ * @throws RangeError when a range lies outside the text.
  * @throws EditError as `trackedFormat` does, for the first range that can't take it.
  */
 export function trackedFormatRanges(
@@ -2243,7 +2221,6 @@ export function trackedFormatRanges(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  if (isBlockOp(op)) throw new RangeError('Several ranges are formatted for text, not for blocks.');
   return formatTracked(text, ranges, op, ctx, LEAVING_MARKS_APART);
 }
 
@@ -2714,7 +2691,7 @@ function formatUntracked(
     const after = regionFile(text, before, region, touching);
     const marks = parse(after).marks;
     const spot = cellOfEdits(text, parsed, touching);
-    const elsewhere = spot ? marksOfOtherCells(text, parsed, spot) : new Set<string>();
+    const { elsewhere } = scopeOf(text, parsed, spot);
     const others = marks
       .filter((mark) => mark.kind !== 'cmt' && !elsewhere.has(mark.id))
       .map((mark) => mark.id);
@@ -2724,7 +2701,6 @@ function formatUntracked(
     if (!alike) throw refused(READS_OTHERWISE);
     const size = {
       ...sizeOf(text, region),
-      ...(spot ? { cell: cellWords(parsed, spot, others) } : {}),
       ...(isBlockOp(op) ? { budget: BLOCK_TRIALS } : {}),
     };
     if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size, pending);

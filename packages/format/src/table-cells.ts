@@ -66,80 +66,62 @@ export function cellOfEdits(
   return cellAt(text, parsed, from, to);
 }
 
-/** The ids of the marks that lie wholly in the text of another cell of the table than `spot`'s:
- * nothing they bring in or take out can reach the cell (format §3.7, "Cells apart"). A mark of
- * the table's rows or columns, one that crosses a pipe, and one outside the table are not of them. */
-export function marksOfOtherCells(text: string, parsed: Parsed, spot: CellSpot): Set<string> {
-  const apart = new Set<string>();
-  const { table } = spot;
-  const lines = new Map<number, ReturnType<typeof readLine>>();
+/** What a change in `spot`'s cell is checked against (format §3.7, "Cells apart"). */
+export interface CellScope {
+  /** The ids of the marks that lie wholly in the text of another cell of the table: nothing they
+   * bring in or take out can reach this cell. A mark of the table's rows or columns, one that
+   * crosses a pipe, and one outside the table are not of them. */
+  elsewhere: Set<string>;
+  /**
+   * The lines of the table that the change is checked on: its header row, its delimiter row and the
+   * cell's row, and not the rows between, which read as they do among any rows, so that the cost
+   * does not grow with the table. Undefined where the table holds a change of its rows or columns
+   * or an alignment change (the cell's reading is then a matter of those, decided in their own
+   * tiers), or a mark reaches from these lines into others.
+   */
+  lines: Range[] | undefined;
+}
+
+export function scopeOf(text: string, parsed: Parsed, spot: CellSpot | undefined): CellScope {
+  if (!spot) return { elsewhere: new Set(), lines: undefined };
+  const { table, row, col } = spot;
+  const header = table.rows[0];
+  const mine = table.rows[row];
+  const whole = (range: Range) => ({ from: lineStart(text, range.from), to: range.to });
+  let lines: Range[] | undefined =
+    header && mine && !table.deletions.length && !table.colMarks.length
+      ? [whole(header), whole(table.delimiter), ...(row ? [whole(mine)] : [])]
+      : undefined;
+  if (table.rows.some((one) => one.insertion) || parsed.marks.some(isAlignMark)) lines = undefined;
+  const elsewhere = new Set<string>();
+  const read = new Map<number, ReturnType<typeof readLine>>();
   for (const mark of parsed.marks) {
-    if (mark.kind === 'cmt' || isStructural(mark)) continue;
-    let from = Infinity;
-    let to = -Infinity;
-    for (const segment of mark.segments) {
-      from = Math.min(from, segment.open.from, segment.carrier?.from ?? Infinity);
-      to = Math.max(to, (segment.close ?? segment.carrier ?? segment.open).to);
+    const spans = mark.segments.map((segment) => ({
+      from: segment.open.from,
+      to: (segment.close ?? segment.carrier ?? segment.open).to,
+    }));
+    const from = Math.min(...spans.map((span) => span.from));
+    const to = Math.max(...spans.map((span) => span.to));
+    // A mark that meets these lines lies wholly in them.
+    const within = (line: Range, span: Range) => line.from <= span.from && span.to <= line.to;
+    if (
+      lines?.some((line) => from <= line.to && line.from <= to) &&
+      !spans.every((span) => lines?.some((line) => within(line, span)))
+    ) {
+      lines = undefined;
     }
-    if (from < table.from || to > table.to) continue;
-    const row = table.rows.findIndex((one) => one.from <= from && to <= one.to);
-    const found = table.rows[row];
+    if (mark.kind === 'cmt' || isStructural(mark) || from < table.from || to > table.to) continue;
+    const at = table.rows.findIndex((one) => one.from <= from && to <= one.to);
+    const found = table.rows[at];
     if (!found) continue;
-    let line = lines.get(row);
-    if (!line) {
-      line = readLine(text, found.from, found.to);
-      lines.set(row, line);
-    }
-    const col = line.cells.findIndex((cell) => cell.contentFrom <= from && to <= cell.contentTo);
-    if (col === -1 || (row === spot.row && col === spot.col)) continue;
-    apart.add(mark.id);
+    if (!read.has(at)) read.set(at, readLine(text, found.from, found.to));
+    const index = read.get(at)?.cells.findIndex((c) => c.contentFrom <= from && to <= c.contentTo);
+    if (index !== -1 && (at !== row || index !== col)) elsewhere.add(mark.id);
   }
-  return apart;
+  return { elsewhere, lines };
 }
 
 /** A cell as a refusal names it: "row 3, column 2", or "the header, column 2". */
 export function cellName(spot: CellSpot): string {
-  const place = spot.row === 0 ? 'the header' : `row ${spot.row}`;
-  return `the cell in ${place}, column ${spot.col + 1}`;
-}
-
-/**
- * The lines of a table that a change in `spot`'s cell is checked on: its header row, its delimiter
- * row and the cell's row, and not the rows between. The cell reads as it does in any row of the
- * table whatever the other rows hold, so the check on these lines is the check on the table, at a
- * cost that does not grow with the table. Undefined where the table holds a change of its rows or
- * columns, or an alignment change (the cell's reading is then a matter of those, decided in their
- * own tiers: format §3.7), or a mark reaches from these lines into others.
- */
-export function rowLines(text: string, parsed: Parsed, spot: CellSpot): Range[] | undefined {
-  const { table } = spot;
-  if (table.deletions.length > 0 || table.colMarks.length > 0) return undefined;
-  if (table.rows.some((row) => row.insertion)) return undefined;
-  const header = table.rows[0];
-  const row = table.rows[spot.row];
-  if (!header || !row) return undefined;
-  const whole = (range: Range) => ({ from: lineStart(text, range.from), to: range.to });
-  const lines = [whole(header), whole(table.delimiter)];
-  if (spot.row > 0) lines.push(whole(row));
-  for (const mark of parsed.marks) {
-    if (mark.kind === 'fmt') {
-      const under = mark.segments.some((segment) => {
-        const end = (segment.carrier ?? segment.open).to;
-        return end <= table.from && text.slice(end, table.from).trim() === '';
-      });
-      if (under && isAlignMark(mark)) return undefined;
-    }
-    const inside = (segment: (typeof mark.segments)[number]) => {
-      const from = Math.min(segment.open.from, segment.carrier?.from ?? Infinity);
-      const to = (segment.close ?? segment.carrier ?? segment.open).to;
-      return lines.some((line) => line.from <= from && to <= line.to);
-    };
-    const touches = mark.segments.some((segment) => {
-      const from = Math.min(segment.open.from, segment.carrier?.from ?? Infinity);
-      const to = (segment.close ?? segment.carrier ?? segment.open).to;
-      return lines.some((line) => from <= line.to && line.from <= to);
-    });
-    if (touches && !mark.segments.every(inside)) return undefined;
-  }
-  return lines;
+  return `the cell in ${spot.row === 0 ? 'the header' : `row ${spot.row}`}, column ${spot.col + 1}`;
 }
