@@ -646,6 +646,15 @@ format changes after the other changes, which brings the syntax back. A format c
 can't reject stays pending, and the others are rejected. Rejecting leaves the original view as it was,
 and accepting the newest view, as every decision does.
 
+A row that a pending move writes is not in the original view, so there a decision is held to the
+view of the file with the moves accepted too: the file reads as it would if the moves were decided
+first. That is how text typed against the closing delimiter of a pending bold change (`**x**` and
+a `q` typed after it, which is written as the substitution of `x**` by `x**q` inside the change,
+the delimiter in its old text) reads alike wherever the row is (#280, #295). Rejecting the bold
+change while that substitution is pending is refused in a moved row as it is anywhere, with the
+words of every refused decision: decide the changes next to it first. Rejecting the substitution
+first, or accepting the bold change, is possible in every order.
+
 - Rewriting `*` as `_`, or any other rewrite that renders the same, is not a change. The
   serializer never makes one.
 - A format change also covers deleted text inside its range, as in Word. Rejecting the deletion

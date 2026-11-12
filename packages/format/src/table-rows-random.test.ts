@@ -20,7 +20,6 @@ import {
   exactly,
   everyOrder,
   bodyOf,
-  boldMoveEdit,
   expectEveryOrderAlike,
   expectNoDecisionRefused,
   expectInOrder,
@@ -182,8 +181,6 @@ describe('rows, random', () => {
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
       const marks = parse(text).marks.length;
       if (marks === 0 || marks > 5) continue;
-      // Skipped, on main too: a bold change, a row move and a typed edit (#295).
-      if (boldMoveEdit(steps)) continue;
       used++;
       try {
         expectEveryOrderAlike(label, text, exactly);
