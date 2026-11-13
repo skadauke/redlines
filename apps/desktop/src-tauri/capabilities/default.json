@@ -50,6 +50,8 @@
     "allow-set-appearance",
     "allow-set-zoom",
     "allow-show-images",
+    "allow-spelling-learn",
+    "allow-spelling-suggestions",
     "allow-undo-in-field",
     "allow-unwatch-document",
     "allow-update-check",

@@ -16,6 +16,12 @@
 //!
 //! A word ended with Return gets the system's correction, which WebKit never makes (the editor
 //! handles the key itself): `correct_word` asks `NSSpellChecker` for it, for the editor to make.
+//!
+//! A right-click on a misspelled word opens the formatting palette, not WebKit's menu, whose
+//! suggestions the palette has to show itself: `spelling_suggestions` asks `NSSpellChecker` for the
+//! word's guesses, and `spelling_learn` adds a word to the person's dictionary, as the menu's Learn
+//! Spelling does. (Ignore Spelling is not offered: it belongs to WebKit's own spell document for
+//! the page, which can't be reached from here.)
 
 // The query and the choice are the same everywhere and tested everywhere, but only the Mac's
 // checker uses them: elsewhere the command answers nothing.
@@ -135,6 +141,42 @@ pub fn correction(
     choose(&query, check(&query), suggest)
 }
 
+/// The most suggestions a right-click offers: a handful, as the Mac's own menu shows.
+const MAX_SUGGESTIONS: usize = 5;
+
+/// Whether the checker found the query's word, exactly, misspelled.
+fn misspelled(query: &Query, found: impl IntoIterator<Item = Found>) -> bool {
+    found.into_iter().any(|item| {
+        matches!(item, Found::Misspelled { start, len } if start == query.start && len == query.len)
+    })
+}
+
+/// What a right-click on `word` offers: None when it is no word or the checker finds it spelled
+/// right, and otherwise the checker's guesses for it, best first, without the word itself, without
+/// an empty or repeated one, and at most `MAX_SUGGESTIONS`. A misspelled word the checker has no
+/// guess for is `Some` of nothing: the palette still offers to learn it.
+pub fn suggestions(
+    word: &str,
+    before: &str,
+    check: impl FnOnce(&Query) -> Vec<Found>,
+    guess: impl FnOnce(&Query) -> Vec<String>,
+) -> Option<Vec<String>> {
+    let query = query(word, before)?;
+    if !misspelled(&query, check(&query)) {
+        return None;
+    }
+    let mut offered: Vec<String> = Vec::new();
+    for text in guess(&query) {
+        if offered.len() == MAX_SUGGESTIONS {
+            break;
+        }
+        if !text.is_empty() && text != word && !offered.contains(&text) {
+            offered.push(text);
+        }
+    }
+    Some(offered)
+}
+
 /// The spell document tags of the windows, one for each window's life: the checker keeps what it
 /// learns about a document, such as the words ignored, under its tag, so that repeated calls for a
 /// window agree with each other. (WebKit's own tag for the page can't be reached from here, so
@@ -194,6 +236,49 @@ fn correct_word_in(window: &str, word: &str, before: &str) -> Option<String> {
         let _ = (window, word, before);
         None
     }
+}
+
+/// What a right-click on `word` offers (`suggestions`): the system checker's guesses for a
+/// misspelled word, `before` being the block's text up to it, or nothing for a word that is spelled
+/// right or no word. A plain function command, which Tauri runs on the main thread, where AppKit's
+/// spell checker is meant to be used. Elsewhere it answers nothing.
+#[tauri::command]
+pub fn spelling_suggestions(
+    window: tauri::WebviewWindow,
+    word: String,
+    before: String,
+) -> Option<Vec<String>> {
+    suggestions_in(window.label(), &word, &before)
+}
+
+/// `spelling_suggestions` for the window labelled `window`, whose spell document it uses.
+fn suggestions_in(window: &str, word: &str, before: &str) -> Option<Vec<String>> {
+    #[cfg(target_os = "macos")]
+    {
+        let tag = macos::tag_of(window);
+        suggestions(
+            word,
+            before,
+            |query| macos::check(query, tag),
+            |query| macos::guesses(query, tag),
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, word, before);
+        None
+    }
+}
+
+/// Adds `word` to the person's dictionary, so that no app flags it again: the menu's Learn
+/// Spelling. Only a word is learned: nothing else a page sends goes into the dictionary.
+#[tauri::command]
+pub fn spelling_learn(word: String) {
+    if !is_word(&word) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    macos::learn(&word);
 }
 
 /// Registers the switch as on. First thing in `run`, before the app is built: WebKit reads it once,
@@ -302,6 +387,26 @@ mod macos {
             tag,
         );
         correction.map(|text| text.to_string())
+    }
+
+    /// The checker's guesses for the query's word, best first.
+    pub fn guesses(query: &super::Query, tag: isize) -> Vec<String> {
+        let checker = NSSpellChecker::sharedSpellChecker();
+        let text = NSString::from_str(&query.text);
+        checker
+            .guessesForWordRange_inString_language_inSpellDocumentWithTag(
+                NSRange::new(query.start, query.len),
+                &text,
+                Some(&checker.language()),
+                tag,
+            )
+            .map(|guesses| guesses.iter().map(|guess| guess.to_string()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Adds the word to the person's dictionary.
+    pub fn learn(word: &str) {
+        NSSpellChecker::sharedSpellChecker().learnWord(&NSString::from_str(word));
     }
 
     /// Adds the defaults to the registration domain, which keeps what was registered there before.
@@ -472,6 +577,105 @@ mod tests {
         assert_eq!(answer, Some("the".to_string()));
     }
 
+    fn misspelled_at(start: usize, len: usize) -> Found {
+        Found::Misspelled { start, len }
+    }
+
+    fn no_check(_: &Query) -> Vec<Found> {
+        panic!("the checker is asked about no word");
+    }
+
+    fn no_guess(_: &Query) -> Vec<String> {
+        panic!("the checker is asked for guesses of a word that is spelled right");
+    }
+
+    #[test]
+    fn a_misspelled_word_is_offered_the_checkers_guesses() {
+        let offered = suggestions(
+            "recieving",
+            "I am ",
+            |asked| vec![misspelled_at(asked.start, asked.len)],
+            |_| vec!["receiving".to_string(), "reviving".to_string()],
+        );
+        assert_eq!(
+            offered,
+            Some(vec!["receiving".to_string(), "reviving".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_word_spelled_right_is_offered_nothing() {
+        // The checker found other words misspelled, and not this one.
+        let offered = suggestions(
+            "world",
+            "Hello wrold and ",
+            |_| vec![misspelled_at(6, 5)],
+            no_guess,
+        );
+        assert_eq!(offered, None);
+        assert_eq!(suggestions("world", "", |_| vec![], no_guess), None);
+    }
+
+    #[test]
+    fn only_the_exact_word_counts_as_misspelled() {
+        let offered = suggestions(
+            "wrold",
+            "Hello ",
+            |_| vec![misspelled_at(0, 5), misspelled_at(6, 4), misspelled_at(7, 5)],
+            no_guess,
+        );
+        assert_eq!(offered, None);
+    }
+
+    #[test]
+    fn what_is_no_word_is_never_asked_about() {
+        for word in ["", "12", "teh1", "a b", "x.y", "(teh)"] {
+            assert_eq!(suggestions(word, "", no_check, no_guess), None, "{word:?}");
+        }
+    }
+
+    #[test]
+    fn the_word_itself_and_what_is_empty_or_repeated_are_left_out() {
+        let offered = suggestions(
+            "teh",
+            "",
+            |asked| vec![misspelled_at(asked.start, asked.len)],
+            |_| {
+                ["teh", "", "the", "tea", "the", "ten"]
+                    .map(String::from)
+                    .to_vec()
+            },
+        );
+        assert_eq!(
+            offered,
+            Some(vec!["the".to_string(), "tea".to_string(), "ten".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_handful_of_guesses_is_the_most_offered() {
+        let offered = suggestions(
+            "teh",
+            "",
+            |asked| vec![misspelled_at(asked.start, asked.len)],
+            |_| (0..20).map(|n| format!("guess{n}")).collect(),
+        )
+        .unwrap();
+        assert_eq!(offered.len(), MAX_SUGGESTIONS);
+        assert_eq!(offered[0], "guess0");
+    }
+
+    #[test]
+    fn a_misspelled_word_with_no_guess_is_still_misspelled() {
+        let offered = suggestions(
+            "zzzqx",
+            "",
+            |asked| vec![misspelled_at(asked.start, asked.len)],
+            |_| vec![],
+        );
+        assert_eq!(offered, Some(vec![]));
+    }
+
     /// Asks the real checker, which answers by the Mac's settings and language: run by hand.
     #[cfg(target_os = "macos")]
     #[test]
@@ -493,6 +697,18 @@ mod tests {
     #[test]
     fn elsewhere_the_command_answers_nothing() {
         assert_eq!(correct_word_in("main", "recieving", "Hello "), None);
+        assert_eq!(suggestions_in("main", "recieving", "Hello "), None);
+    }
+
+    /// Asks the real checker for guesses, which depend on the Mac's settings: run by hand.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "asks the system's spell checker, whose answer depends on the Mac's settings"]
+    fn the_system_checker_guesses_a_typo() {
+        let guessed = suggestions_in("test-window", "recieving", "I am ").unwrap();
+        eprintln!("guesses: {guessed:?}");
+        assert!(guessed.contains(&"receiving".to_string()));
+        assert_eq!(suggestions_in("test-window", "receiving", "I am "), None);
     }
     #[test]
     fn run_registers_the_defaults_before_it_builds_the_app() {
