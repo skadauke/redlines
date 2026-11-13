@@ -1173,10 +1173,11 @@ function changeLine(shown: readonly ChangeShown[]): HTMLElement {
 /**
  * What the changes of a suggestion did, in the card's words (`Replaced “March” with “April”`), as
  * the note's line in the simple look, where the page shows no old text: so that Accept and Reject
- * are not decided blind. The line is clipped to the note's lines as the arrows' is (styles.ts).
+ * are not decided blind. It is the only place that says what they decide, so it isn't clipped to
+ * the note's lines as the arrows' line is (styles.ts): every change of the suggestion shows.
  */
-function changeSentence(text: string, several: boolean): HTMLElement {
-  return element('div', several ? 'rl-note-change rl-note-changes' : 'rl-note-change', text);
+function changeSentence(text: string): HTMLElement {
+  return element('div', 'rl-note-change rl-note-sentence', text);
 }
 
 class NoteView {
@@ -1342,12 +1343,11 @@ class NoteView {
       text,
     }));
     const marks = note.change ? (note.changes ?? [note.change]) : null;
-    const change = marks ? changesShown(parsed, marks) : null;
-    // The simple look hides the old text, so the note says in words what a click decides.
-    const sentence =
-      marks && this.rail.view.state.field(viewModeField) === 'simple'
-        ? describeChanges(parsed, marks)
-        : null;
+    // The simple look hides the old text, so the note says in words what a click decides; the full
+    // markup shows the old text struck, and the note the arrow.
+    const simple = this.rail.view.state.field(viewModeField) === 'simple';
+    const sentence = marks && simple ? describeChanges(parsed, marks) : null;
+    const change = marks && !simple ? changesShown(parsed, marks) : null;
     const first = items[0];
     const label = settled ? 'Resolved note' : 'Note';
     this.dot.setAttribute('aria-label', first ? `${label} by ${first.who.name}` : label);
@@ -1358,13 +1358,8 @@ class NoteView {
       ...items.map(({ id, by, who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
-        if (change) {
-          item.append(
-            sentence === null
-              ? changeLine(change)
-              : changeSentence(sentence, (marks?.length ?? 0) > 1),
-          );
-        }
+        if (change) item.append(changeLine(change));
+        else if (sentence !== null) item.append(changeSentence(sentence));
         // A new comment has no text yet, and an orphaned reply no comment: only who is writing,
         // over the box.
         if (note.id !== NEW_COMMENT && !note.orphan) {

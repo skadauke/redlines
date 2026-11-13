@@ -50,14 +50,6 @@ export function suggestionIn(ctx: ReviewContext, id: string): MarkRange[] {
   return found ?? changesOf(ctx).filter((mark) => mark.id === id);
 }
 
-/** The text of the suggestion that change `id` is in, from the start of its first mark to the end of its last. */
-export function suggestionRange(ctx: ReviewContext, id: string): Range | null {
-  const marks = suggestionIn(ctx, id);
-  const first = marks[0];
-  const last = marks.at(-1);
-  return first && last ? { from: spanOf(first).from, to: spanOf(last).to } : null;
-}
-
 /**
  * Accepts or rejects the whole suggestion that change `id` is in, in one step to undo, or none of
  * it when one mark is refused. A mark alone is decided by its id, as always. It decides in any
@@ -244,7 +236,7 @@ export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   return { old, added };
 }
 
-/** Text as a card quotes it, in quotation marks (see `readable`). */
+/** Text as a card or a note quotes it, in quotation marks (see `readable`). */
 const quote = (text: string) => `“${readable(text)}”`;
 
 /**
@@ -258,9 +250,9 @@ function isBreak(text: string): boolean {
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
  * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
- * `Formatted: Bold`. A
- * substitution with no old text, such as the second part of one that untracked typing split
- * (format §3.10), inserted its text.
+ * `Formatted: Bold`: on the card, and in the simple look on the note. A substitution with no old
+ * text, such as the second part of one that untracked typing split (format §3.10), inserted its
+ * text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
   const row = rowsDone([change]);
