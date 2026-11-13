@@ -2,8 +2,10 @@
 //! for them, and Redlines can be made the default app for Markdown (`default_app.rs`). They are in
 //! `document-types.plist`, which Tauri's bundler merges into the Info.plist it writes for the Mac
 //! (`bundle.macOS.infoPlist`), and nowhere else: the Windows and Linux installers claim no files,
-//! and the program that `tauri dev` runs, outside a bundle, claims none either. These tests read
-//! that file, and, after `pnpm tauri build --debug --bundles app`, the built app's Info.plist.
+//! and the program that `tauri dev` runs, outside a bundle, claims none either. The file also holds
+//! what macOS's question says when it asks whether Redlines may read a protected folder, for an
+//! agent a person lets read their home folder. These tests read that file, and, after
+//! `pnpm tauri build --debug --bundles app`, the built app's Info.plist.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -146,12 +148,43 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
 }
 
 #[test]
+fn macos_is_told_why_when_it_asks_to_let_redlines_read_a_folder_it_protects() {
+    // The question macOS puts when an agent Redlines started reads Desktop, Documents, Downloads,
+    // a cloud folder or a volume, which it asks of Redlines, says why in these words.
+    let keys: plist::Dictionary = read(&source());
+    for key in [
+        "NSDesktopFolderUsageDescription",
+        "NSDocumentsFolderUsageDescription",
+        "NSDownloadsFolderUsageDescription",
+        "NSFileProviderDomainUsageDescription",
+        "NSNetworkVolumesUsageDescription",
+        "NSRemovableVolumesUsageDescription",
+    ] {
+        let why = keys
+            .get(key)
+            .and_then(plist::Value::as_string)
+            .unwrap_or("");
+        assert!(why.contains("agent"), "{key}: {why:?}");
+        assert!(why.contains("never changes"), "{key}: {why:?}");
+    }
+}
+
+#[test]
 fn the_file_holds_only_what_tauri_adds_to_its_own() {
     // Tauri's bundler lets each key of the file replace its own, such as the version.
     let keys: plist::Dictionary = read(&source());
     assert_eq!(
         keys.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["CFBundleDocumentTypes", "UTImportedTypeDeclarations"]
+        [
+            "CFBundleDocumentTypes",
+            "UTImportedTypeDeclarations",
+            "NSDesktopFolderUsageDescription",
+            "NSDocumentsFolderUsageDescription",
+            "NSDownloadsFolderUsageDescription",
+            "NSFileProviderDomainUsageDescription",
+            "NSNetworkVolumesUsageDescription",
+            "NSRemovableVolumesUsageDescription",
+        ]
     );
     // Tauri builds an Info.plist beside its config into the program that `tauri dev` runs too.
     let beside = Path::new(env!("CARGO_MANIFEST_DIR")).join("Info.plist");

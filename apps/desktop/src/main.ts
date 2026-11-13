@@ -9,6 +9,7 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  blockedMessage,
   createLiveLines,
   createMacAgents,
   createRuns,
@@ -26,7 +27,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
+import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -484,6 +485,9 @@ const runs = createRuns({
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
+  // What an agent may read at This folder and my home folder, and what macOS is holding back of
+  // it; a browser has none.
+  ...(isTauri ? { homeReach, homeAccess } : {}),
   settings: {
     defaultScope: () => settings.agentScope,
     consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
@@ -491,10 +495,29 @@ const runs = createRuns({
       changeSettings({
         consent: {
           ...loadSettings().consent,
-          // Preferences keep no wider answer than the folder yet.
-          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+          [consentKey(agent, folder)]: answer,
         },
       }),
+  },
+  // An agent that couldn't read a file inside what it may read: which file, why and what to do.
+  onBlocked: (notice) => {
+    const { text, action } = blockedMessage(notice);
+    notifications.show({
+      key: `blocked ${notice.thread} ${notice.cause} ${notice.place ?? ''}`,
+      text,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                if (action.do === 'log') showAgentLogs();
+                else openFilesAndFoldersSettings();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    });
   },
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
@@ -530,6 +553,15 @@ const liveLines = createLiveLines({
         : {}),
     }),
 });
+
+/** Opens System Settings where the person lets Redlines read a folder macOS protects. */
+function openFilesAndFoldersSettings(): void {
+  if (!isTauri) return notice.flash('System Settings are on the Mac.');
+  invoke('open_files_and_folders_settings').catch((error: unknown) => {
+    console.error('Could not open System Settings', error);
+    notice.flash('Couldn’t open System Settings.');
+  });
+}
 
 /**
  * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed

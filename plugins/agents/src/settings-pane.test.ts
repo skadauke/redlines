@@ -36,6 +36,10 @@ function setup(
   const terminal = vi.fn<(id: string) => Promise<void>>(() => Promise.resolve());
   const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
   const stopper = vi.fn<(id: string) => Promise<void>>(() => Promise.resolve());
+  const homeAccess = vi.fn<() => Promise<{ name: string; folder: string }[]>>(() =>
+    Promise.resolve([]),
+  );
+  const openSettings = vi.fn<() => Promise<void>>(() => Promise.resolve());
   /** What the host says is under way, by agent. */
   const under: Record<string, SetupUnderWay | undefined> = {};
   const deps: AgentsPaneDeps = {
@@ -50,6 +54,8 @@ function setup(
       running: () => under[id],
     })),
     copy,
+    homeAccess,
+    openFilesAndFoldersSettings: openSettings,
     settings: () => settings,
     update,
     openLogs,
@@ -67,6 +73,8 @@ function setup(
     terminal,
     copy,
     stopper,
+    homeAccess,
+    openSettings,
     under,
     now: () => settings,
   };
@@ -695,19 +703,153 @@ describe('the Agents pane', () => {
     expect(container.textContent).not.toContain('Signed in');
   });
 
-  it('sets what agents may read', () => {
+  it('sets what agents may read, to one of three, and keeps This folder as the default', () => {
     const { deps, container, update, now } = setup({});
     renderAgentsPane(container, deps);
     const select = row(container, 'What agents may read').querySelector('select')!;
-    expect([...select.options].map((option) => option.textContent)).toEqual([
-      'This document',
-      'This folder',
+    expect([...select.options].map((option) => [option.value, option.textContent])).toEqual([
+      ['document', 'This document'],
+      ['folder', 'This folder'],
+      ['everything', 'This folder and my home folder'],
     ]);
     expect(select.value).toBe('folder');
     select.value = 'document';
     select.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenCalledWith({ agentScope: 'document' });
     expect(now().agentScope).toBe('document');
+    select.value = 'everything';
+    select.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ agentScope: 'everything' });
+    expect(now().agentScope).toBe('everything');
+  });
+
+  describe('the note under What agents may read', () => {
+    const noteOf = (container: HTMLElement) =>
+      row(container, 'What agents may read').querySelector('.rl-pref-note')?.textContent ?? '';
+
+    it('says nothing for the narrower choices', () => {
+      for (const agentScope of ['document', 'folder'] as const) {
+        const { deps, container } = setup({}, { agentScope });
+        renderAgentsPane(container, deps);
+        expect(noteOf(container)).toBe('');
+      }
+    });
+
+    it('says plainly what the home folder choice opens, leaves out, risks and asks of macOS', () => {
+      const { deps, container } = setup({}, { agentScope: 'everything' });
+      renderAgentsPane(container, deps);
+      const note = noteOf(container);
+      // What it opens.
+      expect(note).toContain('anywhere in your home folder');
+      // What it leaves out, and the exception.
+      expect(note).toContain('Hidden files and folders and ~/Library are left out');
+      expect(note).toContain('cloud folders');
+      // Writes don't change.
+      expect(note).toContain('change only the document');
+      // The risk, in words: text someone else wrote, a private file, a comment that travels.
+      expect(note).toContain('someone else wrote');
+      expect(note).toContain('private file');
+      expect(note).toContain('travels with the document');
+      // macOS's questions, expected.
+      expect(note).toContain('macOS may ask');
+      expect(note).toContain('Documents');
+    });
+
+    describe('what macOS is holding back', () => {
+      const choose = (container: HTMLElement, value: string) => {
+        const select = row(container, 'What agents may read').querySelector('select')!;
+        select.value = value;
+        select.dispatchEvent(new Event('change'));
+      };
+      const accessOf = (container: HTMLElement) =>
+        row(container, 'What agents may read').textContent;
+
+      it('is looked for when the person picks the home folder, and said with a way to System Settings', async () => {
+        const { deps, container, homeAccess, openSettings } = setup({});
+        homeAccess.mockResolvedValueOnce([
+          { name: 'Documents', folder: '/Users/ada/Documents' },
+          { name: 'iCloud Drive', folder: '/Users/ada/Library/Mobile Documents' },
+        ]);
+        renderAgentsPane(container, deps);
+        // Not at the draw: nothing in the pane makes macOS ask until the person chooses.
+        expect(homeAccess).not.toHaveBeenCalled();
+        choose(container, 'everything');
+        expect(homeAccess).toHaveBeenCalledOnce();
+        await settle();
+        expect(accessOf(container)).toContain(
+          'macOS isn’t letting Redlines read your Documents folder.',
+        );
+        expect(accessOf(container)).toContain('macOS isn’t letting Redlines read iCloud Drive.');
+        const open = [...row(container, 'What agents may read').querySelectorAll('button')].find(
+          (button) => button.textContent === 'Open System Settings',
+        )!;
+        open.click();
+        expect(openSettings).toHaveBeenCalledOnce();
+      });
+
+      it('says nothing when macOS lets Redlines read every folder, or cannot be asked', async () => {
+        const { deps, container, homeAccess } = setup({});
+        renderAgentsPane(container, deps);
+        choose(container, 'everything');
+        await settle();
+        expect(accessOf(container)).not.toContain('macOS isn’t letting');
+        homeAccess.mockRejectedValueOnce(new Error('no app'));
+        choose(container, 'folder');
+        choose(container, 'everything');
+        await settle();
+        expect(accessOf(container)).not.toContain('macOS isn’t letting');
+        const bare = setup({});
+        delete bare.deps.homeAccess;
+        renderAgentsPane(bare.container, bare.deps);
+        choose(bare.container, 'everything');
+        await settle();
+        expect(bare.container.textContent).not.toContain('macOS isn’t letting');
+      });
+
+      it('is not looked for at the narrower choices, and goes with the choice, also when it comes late', async () => {
+        const { deps, container, homeAccess } = setup({});
+        let answer: (refused: { name: string; folder: string }[]) => void = () => {};
+        homeAccess.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+        renderAgentsPane(container, deps);
+        choose(container, 'document');
+        choose(container, 'folder');
+        expect(homeAccess).not.toHaveBeenCalled();
+        choose(container, 'everything');
+        // The person picks another choice before macOS has been answered.
+        choose(container, 'folder');
+        answer([{ name: 'Documents', folder: '/Users/ada/Documents' }]);
+        await settle();
+        expect(accessOf(container)).not.toContain('macOS isn’t letting');
+      });
+
+      it('says in a line when System Settings could not be opened', async () => {
+        const { deps, container, homeAccess, openSettings } = setup({});
+        homeAccess.mockResolvedValueOnce([{ name: 'Desktop', folder: '/Users/ada/Desktop' }]);
+        openSettings.mockRejectedValueOnce(new Error('no'));
+        renderAgentsPane(container, deps);
+        choose(container, 'everything');
+        await settle();
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === 'Open System Settings')!
+          .click();
+        await settle();
+        expect(accessOf(container)).toContain('Couldn’t open System Settings.');
+      });
+    });
+
+    it('comes and goes as the choice changes, without drawing the pane again', () => {
+      const { deps, container } = setup({});
+      renderAgentsPane(container, deps);
+      const select = row(container, 'What agents may read').querySelector('select')!;
+      expect(noteOf(container)).toBe('');
+      select.value = 'everything';
+      select.dispatchEvent(new Event('change'));
+      expect(noteOf(container)).toContain('anywhere in your home folder');
+      expect(row(container, 'What agents may read').querySelector('select')).toBe(select);
+      select.value = 'folder';
+      select.dispatchEvent(new Event('change'));
+      expect(noteOf(container)).toBe('');
+    });
   });
 
   it('forgets one folder’s answer and keeps the rest', () => {
@@ -735,6 +877,27 @@ describe('the Agents pane', () => {
     expect(now().consent['claude|/Users/me/notes']).toBeUndefined();
     expect(container.querySelector('[data-key="claude|/Users/me/notes"]')).toBeNull();
     expect(container.querySelector('[data-key="codex|/Users/me/notes"]')).not.toBeNull();
+  });
+
+  it('names each remembered answer, the home folder one too', () => {
+    const { deps, container } = setup(
+      {},
+      {
+        consent: {
+          'claude|/Users/me/a': 'folder',
+          'claude|/Users/me/b': 'document',
+          'codex|/Users/me/c': 'everything',
+          'codex|/Users/me/d': 'no',
+        },
+      },
+    );
+    renderAgentsPane(container, deps);
+    const said = (key: string) =>
+      row(container, 'Remembered answers').querySelector(`[data-key="${key}"]`)?.textContent;
+    expect(said('claude|/Users/me/a')).toContain('Claude · May read the folder');
+    expect(said('claude|/Users/me/b')).toContain('Claude · This document only');
+    expect(said('codex|/Users/me/c')).toContain('Codex · May read the folder and the home folder');
+    expect(said('codex|/Users/me/d')).toContain('Codex · Not allowed');
   });
 
   it('has no remembered-answers row when nothing is remembered', () => {

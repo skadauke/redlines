@@ -1320,17 +1320,65 @@ it was asked to:
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
   hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
+- At **This folder and my home folder** the same limits hold with the home folder added, and what
+  is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
+  the home folder (`--add-dir`, a link by its name and its target), so that a hidden folder and
+  `~/Library` aren't readable at all however it searches, plus the cloud folders in `~/Library`,
+  and its settings deny `.env` files and hidden files and folders below the home folder. Codex's
+  profile grants the home folder whole, denies hidden names and `.env` files by glob wherever they
+  are and `~/Library` but for its cloud folders, and grants a folder a link leads to outside the
+  home folder by its real path. Both are checked against the real programs
+  (`agent-limits.real.node.test.ts`, on request) and the command lines against the rule that lets
+  only them through.
 - Both change the document only through the toolbox's tools, which record tracked changes in the
   agent's name. They can't accept, reject or resolve.
 - A run whose toolbox never connected counts as failed, because both agents otherwise carry on
   without it and exit 0.
 
-**Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
-the repository's root, or else the document's folder) or This document. The first run of an agent
-in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
-in the app's settings, never in the document. Preferences › Agents lists the agents found on this
-Mac with their state (not installed, needs an update, signed out, signed in), the remembered
-answers with a Forget button for each, and Show Agent Logs.
+**Scope** is the setting What agents may read, in Preferences › Agents: This document, This folder
+(the default; the repository's root, or else the document's folder) or This folder and my home
+folder. The setting is the most that any answer can give. The first run of an agent in a folder
+asks in its thread (§5.7) what it may read, within the setting (the home folder is an answer only
+while the setting allows it), and the answer is remembered for that agent and folder in the app's
+settings, never in the document: an answer narrower than the setting stands, and one wider than
+it is held to it and kept, and stands again if the setting is widened. A document in the home
+folder itself, or in the disk's root, has no folder to read, and is read as This document.
+Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
+update, signed out, signed in), the remembered answers with a Forget button for each, and Show
+Agent Logs.
+
+**The home folder.** This folder and my home folder lets an agent read related files anywhere
+under the home folder, such as a reference document in another project. The default stays This
+folder, and the pane says plainly what the choice means:
+
+- **Left out even there:** hidden files and folders (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`,
+  `.env` files) and `~/Library` (mail, messages, browser data, keychains), except the cloud
+  folders in it (`~/Library/CloudStorage`: Dropbox, Google Drive, OneDrive, Box; `~/Library/Mobile
+  Documents`: iCloud Drive), where people's documents live, often behind a link in the home
+  folder. The limits name both a link and the folder it leads to. A home folder whose name holds a
+  character of a glob, or that holds no folder to read, gives the folder alone, and the line says
+  so.
+- **Writes don't change.** The agent still writes only through Redlines' tools, to the document.
+- **The risk:** text in a document that someone else wrote (a comment, a reply, deleted text)
+  could try to make an agent read a private file and quote it into a comment or a suggestion,
+  which then travels with the document. The note says so, and so does the question's answer.
+- **macOS asks.** Documents, Desktop, Downloads, iCloud Drive, other cloud folders and removable
+  and network volumes are protected, and macOS counts what an agent that Redlines starts reads as
+  Redlines' own, so it asks whether *Redlines* may read the folder, in words the bundle gives
+  (`document-types.plist`). The app lists each protected folder itself, from its own process,
+  when the person picks the choice, and before each run at it, which is what makes macOS ask, at a
+  moment they expect. A folder macOS refuses is said in a line with a button to Privacy &
+  Security › Files and Folders; the run goes on, and the agent is told which folders are out of
+  reach, so that its reply doesn't guess.
+- **A read that fails inside the scope** is said in a notification as it happens: which file, the
+  likely cause, and what to do. macOS isn't letting Redlines read a folder (a button to System
+  Settings); the file's own permissions refuse it; the agent's own settings, or an organization's,
+  do; or the agent's own words with Show Log. A refusal outside the scope, or of what the scope
+  leaves out, is a limit doing its work, and is never told of.
+
+Not done: search that skips files not downloaded from a cloud folder (macOS marks them dataless),
+which the agents' own search tools decide; the agents are not stopped from downloading a file they
+read.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
 agents/`: what was started (the agent, its version, the flags, the folder), each event the agent

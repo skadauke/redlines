@@ -11,8 +11,17 @@ import type {
   Plugin,
 } from '@redlines/plugin-api';
 import { definePlugin } from '@redlines/plugin-api';
-import type { FolderOptions } from '@redlines/agent-process';
-import { TOOLBOX_STATUS, clip, detectAgent, isRecord, runAgent } from '@redlines/agent-process';
+import type { FolderOptions, RunReach } from '@redlines/agent-process';
+import {
+  TOOLBOX_STATUS,
+  blockedRead,
+  blockedStatus,
+  clip,
+  detectAgent,
+  homeScope,
+  isRecord,
+  runAgent,
+} from '@redlines/agent-process';
 
 /** The oldest Claude Code tested. 2.1.201 has no `--restricted`. */
 export const MIN_VERSION = '2.1.318';
@@ -40,14 +49,26 @@ const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'stat
  * The prompt comes last, after `--`, so a comment that starts with `-` (a Markdown bullet) is not
  * taken for a flag. A bare `Read` is never in `--allowedTools`: it would reach outside the
  * folder. At This document there are no read tools at all.
+ *
+ * At This folder and my home folder each folder of the home folder that the host lists is granted
+ * by `--add-dir`, which `--restricted` confines the file tools to (a link is granted by its name,
+ * and so is its target), so that what isn't listed, a hidden folder or `~/Library`, is not
+ * readable at all, however the agent searches. The settings deny what is left out inside those
+ * folders (`.env` files, and hidden files and folders below the home folder), which beats every
+ * grant and which Grep and Glob honor. The folders' own skills and commands are turned off: a
+ * home folder's folders are no one's to load them from.
  */
 export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] {
+  const wide = homeScope(request);
   return [
     '-p',
     '--output-format',
     'stream-json',
     '--verbose',
     '--restricted',
+    ...(wide
+      ? [...wide.roots.flatMap((root) => ['--add-dir', root]), '--disable-slash-commands']
+      : []),
     '--permission-mode',
     'dontAsk',
     '--tools',
@@ -60,11 +81,31 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     }),
     '--strict-mcp-config',
     '--settings',
-    '{"disableAllHooks":true}',
+    JSON.stringify(
+      wide
+        ? { disableAllHooks: true, permissions: { deny: claudeDenies(wide.home) } }
+        : { disableAllHooks: true },
+    ),
     '--append-system-prompt',
     request.systemPrompt,
     '--',
     request.prompt,
+  ];
+}
+
+/**
+ * The permission rules that refuse what This folder and my home folder leaves out: `.env` files
+ * anywhere, and hidden files and folders anywhere below the home folder. `//` is a path from the
+ * root of the disk. The rules are also in `claude_denies` of the rule that lets only this line
+ * through (apps/desktop/src-tauri/src/agents/allowed.rs).
+ */
+export function claudeDenies(home: string): string[] {
+  return [
+    'Read(//**/.env)',
+    'Read(//**/.env.*)',
+    'Read(//**/*.env)',
+    `Read(/${home}/**/.*)`,
+    `Read(/${home}/**/.*/**)`,
   ];
 }
 
@@ -74,10 +115,30 @@ export interface ClaudeState {
   failure?: string;
   /** Whether the line just read was a retry, which doesn't end the run. */
   retry: boolean;
+  /** What the run may read, to tell a refused read in it from a limit doing its work. */
+  reach?: RunReach;
+  /** The file the agent's reading tools were asked for, by call, to say which one was refused. */
+  reads: Map<string, string>;
 }
 
-export function newClaudeState(): ClaudeState {
-  return { retry: false };
+export function newClaudeState(reach?: RunReach): ClaudeState {
+  return { retry: false, reads: new Map(), ...(reach === undefined ? {} : { reach }) };
+}
+
+/** The file or folder a Read, Grep or Glob call names. */
+function readPath(input: unknown): string | undefined {
+  if (!isRecord(input)) return undefined;
+  const path = input.file_path ?? input.path;
+  return typeof path === 'string' && path.startsWith('/') ? path : undefined;
+}
+
+/** What a tool result says, as one text. */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => (isRecord(part) && typeof part.text === 'string' ? part.text : ''))
+    .join(' ');
 }
 
 const FAILURES = new Map([
@@ -179,10 +240,21 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       }
       return null;
     }
-    case 'user':
+    case 'user': {
       // The run is going on, so an earlier retry has recovered.
       delete state.failure;
+      const message = event.message;
+      const content = isRecord(message) && Array.isArray(message.content) ? message.content : [];
+      for (const block of content) {
+        if (!isRecord(block) || block.type !== 'tool_result' || block.is_error !== true) continue;
+        const path = state.reads.get(String(block.tool_use_id));
+        if (path === undefined || state.reach === undefined) continue;
+        // A read inside what the agent may read that was refused is news, and says why if it can.
+        const blocked = blockedRead(path, resultText(block.content), state.reach);
+        if (blocked) return { type: 'status', text: blockedStatus(blocked), blocked };
+      }
       return null;
+    }
     case 'assistant': {
       const failure = failureFor(event.error, 'ok');
       if (failure !== undefined) {
@@ -193,6 +265,14 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       }
       const message = event.message;
       const content = isRecord(message) && Array.isArray(message.content) ? message.content : [];
+      // Each reading call is remembered by its id, so that a refusal can say which file.
+      for (const block of content) {
+        if (!isRecord(block) || block.type !== 'tool_use' || typeof block.id !== 'string') continue;
+        const path = readPath(block.input);
+        if (path !== undefined && ['Read', 'Grep', 'Glob'].includes(String(block.name))) {
+          state.reads.set(block.id, path);
+        }
+      }
       for (const block of content) {
         if (!isRecord(block)) continue;
         if (block.type === 'thinking') return { type: 'status', text: 'Thinking…' };
@@ -217,6 +297,17 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
 }
 
 export type ClaudeProviderOptions = FolderOptions;
+
+/** What the request lets the agent read, for the stream to tell a refused read from a limit. */
+function reachOf(request: AgentRequest): RunReach {
+  const { scope, folder, documentPath, homeRoots } = request;
+  return {
+    scope,
+    ...(folder === undefined ? {} : { folder }),
+    ...(documentPath === undefined ? {} : { documentPath }),
+    ...(homeRoots === undefined ? {} : { homeRoots }),
+  };
+}
 
 export function createClaudeProvider(
   processes: HostProcesses,
@@ -258,7 +349,7 @@ export function createClaudeProvider(
           binary: 'claude',
           ...(version === undefined ? {} : { version }),
           args: ({ request: asked }) => Promise.resolve(claudeArgs(asked, tools)),
-          newState: newClaudeState,
+          newState: () => newClaudeState(reachOf(request)),
           parse: parseClaudeLine,
           held: (state) => state.retry,
           failure: (state) => state.failure,
