@@ -134,6 +134,66 @@ function css(el: Element): Map<string, string> {
   return map;
 }
 
+/** The five types of GitHub's alerts, which the callouts of other pages are read as. */
+const GITHUB_ALERTS = new Set(['note', 'tip', 'important', 'warning', 'caution']);
+
+/** Sphinx's admonitions, by their class, as the nearest of GitHub's types. */
+const ADMONITIONS = new Map([
+  ['note', 'NOTE'],
+  ['seealso', 'NOTE'],
+  ['tip', 'TIP'],
+  ['hint', 'TIP'],
+  ['important', 'IMPORTANT'],
+  ['warning', 'WARNING'],
+  ['attention', 'WARNING'],
+  ['caution', 'CAUTION'],
+  ['danger', 'CAUTION'],
+  ['error', 'CAUTION'],
+]);
+
+/** MDN's notes, by their class. Its other cards (deprecated, experimental, …) are no alert. */
+const NOTE_CARDS = new Map([
+  ['note', 'NOTE'],
+  ['warning', 'WARNING'],
+]);
+
+/** A callout of a web page that is an alert (docs/research/paste.md): GitHub's own, Sphinx's
+ * admonition, MDN's note card. `kind` is the word the page's class gives it, which its title says too
+ * when the page wrote no title of its own; `titleClass` is the class of that title's paragraph. */
+interface WebAlert {
+  type: string;
+  kind: string;
+  titleClass: string | null;
+  /** MDN writes the title in bold at the start of the first paragraph, `Note:`. */
+  label: boolean;
+}
+
+function webAlert(el: Element): WebAlert | null {
+  const classes = (el.getAttribute('class') ?? '').split(/\s+/);
+  const find = <T>(read: (name: string) => T | undefined): T | undefined =>
+    classes.map(read).find((found) => found !== undefined);
+  if (classes.includes('markdown-alert')) {
+    const kind = find((name) => {
+      const word = /^markdown-alert-(\w+)$/.exec(name)?.[1];
+      return word !== undefined && GITHUB_ALERTS.has(word) ? word : undefined;
+    });
+    return kind
+      ? { type: kind.toUpperCase(), kind, titleClass: 'markdown-alert-title', label: false }
+      : null;
+  }
+  if (classes.includes('admonition')) {
+    const kind = find((name) => (ADMONITIONS.has(name) ? name : undefined));
+    return kind
+      ? { type: ADMONITIONS.get(kind)!, kind, titleClass: 'admonition-title', label: false }
+      : null;
+  }
+  if (classes.includes('notecard')) {
+    const kind = find((name) => (NOTE_CARDS.has(name) ? name : undefined));
+    return kind ? { type: NOTE_CARDS.get(kind)!, kind, titleClass: null, label: true } : null;
+  }
+  return null;
+}
+
 function hidden(el: Element): boolean {
   return (
     SKIPPED.has(el.tagName.toLowerCase()) ||
@@ -744,6 +804,8 @@ class Converter {
   }
 
   block(el: Element, tag: string, format: Format, ctx: Context): string[] {
+    const alert = this.alert(el, format, ctx);
+    if (alert) return [alert];
     const level = /^h[1-6]$/.test(tag) ? Number(tag[1]) : tag === 'p' ? wordHeading(el) : 0;
     if (level) {
       const runs: Run[] = [];
@@ -781,6 +843,34 @@ class Converter {
       default:
         return this.blocks(el, format, ctx);
     }
+  }
+
+  /**
+   * A callout of a web page as a GitHub alert, `> [!NOTE]` and the body quoted, or null where it is
+   * none, or would be read as none here: GitHub reads an alert only at the left edge, not in a quote,
+   * a list item or a table cell, and not without a body. A title the page wrote itself stays as the
+   * first paragraph of the body: an alert has no title of its own.
+   */
+  alert(el: Element, format: Format, ctx: Context): string | null {
+    if (ctx.cell || el.parentElement?.closest('blockquote, li, dd, td, th')) return null;
+    const found = webAlert(el);
+    if (!found) return null;
+    const copy = el.cloneNode(true) as Element;
+    const title = Array.from(copy.children).find((child) =>
+      found.titleClass ? child.classList.contains(found.titleClass) : false,
+    );
+    // The page's title is the type's name; one that says more is the author's, and stays.
+    if (title && (title.textContent ?? '').replace(/\s+/g, '').toLowerCase() === found.kind) {
+      title.remove();
+    }
+    const blocks = this.blocks(copy, format, ctx);
+    if (found.label && blocks[0]) {
+      blocks[0] = blocks[0].replace(/^\*\*(?:Note|Warning)(?::\*\*|\*\*:)\s*/i, '');
+    }
+    const body = blocks.filter(Boolean).join('\n\n').trim();
+    if (!body) return null;
+    const quoted = body.split('\n').map((line) => (line ? `> ${line}` : '>'));
+    return [`> [!${found.type}]`, ...quoted].join('\n');
   }
 
   pre(el: Element, ctx: Context): string[] {

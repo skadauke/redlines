@@ -482,6 +482,120 @@ describe('htmlToMarkdown, from Word', () => {
   });
 });
 
+describe('htmlToMarkdown, the callouts of web pages (#311)', () => {
+  // GitHub's own markup for an alert: its title is a paragraph with the type's icon in it.
+  const github = (type: string, name: string, body: string) =>
+    `<div class="markdown-alert markdown-alert-${type}" dir="auto"><p class="markdown-alert-title" dir="auto"><svg class="octicon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1.5Z"></path></svg>${name}</p>${body}</div>`;
+
+  it('turns a GitHub alert into an alert, its body inside the quote', () => {
+    const html = github(
+      'tip',
+      'Tip',
+      '<p>Use <strong>bold</strong> and a <a href="https://example.com" rel="nofollow">link</a>.</p>\n<p>Second paragraph.</p>',
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      [
+        '> [!TIP]',
+        '> Use **bold** and a [link](https://example.com).',
+        '>',
+        '> Second paragraph.',
+      ].join('\n'),
+    );
+  });
+
+  it('knows each of the five types, and keeps the text around the alert', () => {
+    for (const [type, name] of [
+      ['note', 'Note'],
+      ['tip', 'Tip'],
+      ['important', 'Important'],
+      ['warning', 'Warning'],
+      ['caution', 'Caution'],
+    ] as const) {
+      const html = `<p>Before.</p>${github(type, name, '<p>Body.</p>')}<p>After.</p>`;
+      expect(htmlToMarkdown(html), type).toBe(
+        `Before.\n\n> [!${type.toUpperCase()}]\n> Body.\n\nAfter.`,
+      );
+    }
+  });
+
+  it('keeps a list and a code block of the body, quoted', () => {
+    const html = github(
+      'note',
+      'Note',
+      '<ul><li>one</li><li>two</li></ul><pre><code class="language-js">let a = 1;\n\nlet b = 2;</code></pre>',
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      [
+        '> [!NOTE]',
+        '> - one',
+        '> - two',
+        '>',
+        '> ```js',
+        '> let a = 1;',
+        '>',
+        '> let b = 2;',
+        '> ```',
+      ].join('\n'),
+    );
+  });
+
+  it('turns a Sphinx admonition into an alert of the nearest type', () => {
+    const admonition = (kind: string, title: string) =>
+      `<div class="admonition ${kind}"><p class="admonition-title">${title}</p><p>Mind the gap.</p></div>`;
+    for (const [kind, title, type] of [
+      ['note', 'Note', 'NOTE'],
+      ['seealso', 'See also', 'NOTE'],
+      ['tip', 'Tip', 'TIP'],
+      ['hint', 'Hint', 'TIP'],
+      ['important', 'Important', 'IMPORTANT'],
+      ['warning', 'Warning', 'WARNING'],
+      ['attention', 'Attention', 'WARNING'],
+      ['caution', 'Caution', 'CAUTION'],
+      ['danger', 'Danger', 'CAUTION'],
+      ['error', 'Error', 'CAUTION'],
+    ] as const) {
+      expect(htmlToMarkdown(admonition(kind, title)), kind).toBe(`> [!${type}]\n> Mind the gap.`);
+    }
+  });
+
+  it('leaves an admonition with a title of its own as the text it is: GitHub has no such alert', () => {
+    const html =
+      '<div class="admonition"><p class="admonition-title">Remember</p><p>Mind the gap.</p></div>';
+    expect(htmlToMarkdown(html)).toBe('Remember\n\nMind the gap.');
+  });
+
+  it('turns an MDN note into an alert, without the label the page writes in bold', () => {
+    const note =
+      '<div class="notecard note">\n<p><strong>Note:</strong>\nIn UTF-16, characters above <code>\\uFFFF</code> are\nencoded as two code units.</p>\n</div>';
+    expect(htmlToMarkdown(note)).toBe(
+      '> [!NOTE]\n> In UTF-16, characters above `\\uFFFF` are encoded as two code units.',
+    );
+    const warning =
+      '<div class="notecard warning"><p><strong>Warning:</strong> Do not do this.</p></div>';
+    expect(htmlToMarkdown(warning)).toBe('> [!WARNING]\n> Do not do this.');
+  });
+
+  it('leaves an alert with no body as text: GitHub reads none without one', () => {
+    expect(htmlToMarkdown(github('note', 'Note', ''))).toBe('Note');
+  });
+
+  it('writes no alert where one would not be read: in a quote, a list item or a table cell', () => {
+    const inner = github('note', 'Note', '<p>Body.</p>');
+    expect(htmlToMarkdown(`<blockquote>${inner}</blockquote>`)).toBe('> Note\n>\n> Body.');
+    expect(htmlToMarkdown(`<ul><li>Item ${inner}</li></ul>`)).not.toContain('[!NOTE]');
+    expect(
+      htmlToMarkdown(`<table><tr><th>a</th></tr><tr><td>${inner}</td></tr></table>`),
+    ).not.toContain('[!NOTE]');
+  });
+
+  it('keeps an ordinary div, and a callout it does not know, as the blocks they hold', () => {
+    expect(htmlToMarkdown('<div class="notecard deprecated"><p>Gone.</p></div>')).toBe('Gone.');
+    expect(htmlToMarkdown('<div class="callout"><p>One.</p><p>Two.</p></div>')).toBe(
+      'One.\n\nTwo.',
+    );
+  });
+});
+
 describe('htmlToRange', () => {
   it('reads the cells of the one table, formatting and line breaks as Markdown', () => {
     const html =
