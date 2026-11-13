@@ -165,16 +165,19 @@ export const setViewModeEffect = StateEffect.define<ViewMode>();
 export const holdViewAnnotation = Annotation.define<boolean>();
 
 /**
- * How the document is shown. It starts in Redlines, in the look chosen last (the markup view),
- * when the document has redlines and in Clean when it doesn't (design §5.3), and after that it
- * stays as chosen: Redlines is available whatever the document holds, so one whose last redline
- * goes stays in it. The one exception is a document that gains redlines while it is shown Clean,
- * as when an agent's suggestions arrive, which switches to Redlines in that look, so suggestions
- * are never invisible.
+ * How the document is shown. It starts in the view its ledger says it was saved in (`view`, format
+ * §5.6), or else in Redlines, in the look chosen last (the markup view), when the document has
+ * redlines and in Clean when it doesn't (design §5.3), and after that it stays as chosen: Redlines
+ * is available whatever the document holds, so one whose last redline goes stays in it. The one
+ * exception is a document that gains redlines while it is shown Clean, as when an agent's
+ * suggestions arrive, which switches to Redlines in that look, so suggestions are never invisible.
  */
 export const viewModeField = StateField.define<ViewMode>({
-  create: (state) =>
-    hasRedlines(state.field(parsedField)) ? state.facet(markupViewFacet) : 'clean',
+  create: (state) => {
+    const parsed = state.field(parsedField);
+    if (parsed.ledger.view) return parsed.ledger.view;
+    return hasRedlines(parsed) ? state.facet(markupViewFacet) : 'clean';
+  },
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;

@@ -199,7 +199,7 @@ function click(editor: Editor, x: number, y: number, init: MouseEventInit = {}):
 }
 
 async function open(editor: Editor, view: 'clean' | 'simple' | 'redlines' | 'raw'): Promise<void> {
-  editor.setTracking(false);
+  editor.setTracking(false, { inFile: false });
   editor.reloadDoc(DOC);
   editor.setViewMode(view);
   // Down to the change, so that lines above it are drawn too. The page scrolls in an element
