@@ -15,6 +15,7 @@ import {
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
+import { EditorView } from '@codemirror/view';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
@@ -57,6 +58,7 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { followScrollbar } from './scrollbar.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
@@ -628,6 +630,12 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
+// editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
+// classic scrollbar.
+editor.addExtension(EditorView.scrollMargins.of(() => ({ top: titleBar.height() })));
+followScrollbar(scroller, main);
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its

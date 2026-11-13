@@ -161,6 +161,40 @@ describe('styles.css', () => {
     expect(declared('.rl-doc-icon')).toContain('width: calc(20 * var(--rl-frame))');
   });
 
+  it('lets the page scroll under a title bar with no background, and fades what passes under it', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The bar lies over the scroller, which reaches the top of the window: no color of its own,
+    // and as wide as the scroller less its scrollbar, which it must not cover.
+    const bar = declared('.rl-titlebar');
+    expect(bar).toContain('position: absolute');
+    expect(bar).toContain('top: 0');
+    expect(bar).toContain('right: var(--rl-scrollbar, 0px)');
+    expect(bar).not.toContain('background');
+    expect(bar).not.toContain('flex: none');
+    // The document starts below it, through the scroller's own top padding, which is room that
+    // scrolls: the text passes through it and under the bar. Nothing is hidden at rest.
+    expect(declared('.rl-scroller')).toContain('padding-top: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-scroller')).toContain('box-sizing: border-box');
+    // What passes under the bar fades into the page's own color, in every theme, and takes no
+    // pointer: the bar's controls and the text under the fade are both reached. It is a gradient
+    // of the page's color, not a mask on the scroller, which would dim the popovers inside it.
+    const fade = declared('.rl-main::after');
+    expect(fade).toMatch(/linear-gradient\(\s*to bottom,\s*var\(--rl-page/);
+    expect(fade).toContain('pointer-events: none');
+    expect(fade).toContain('position: absolute');
+    expect(fade).toContain('right: var(--rl-scrollbar, 0px)');
+    // Over the page's text (the editor's scroller is a stacking context of its own, at 0), under
+    // the bar, the sidebar that covers a narrow page, and the find bar and menus.
+    expect(fade).toContain('z-index: 0');
+    expect(declared('.rl-scroller')).not.toMatch(/mask/);
+    // The fade is no part of a printed page, and neither is the room for the bar.
+    const printed = css.slice(css.indexOf('@media print'));
+    expect(printed).toMatch(/\.rl-main::after[^{}]*\{[^}]*display: none/);
+    expect(printed).toMatch(/\.rl-scroller\s*\{[^}]*padding-top: 0/);
+  });
+
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
     const declared = (selector: string, css = all) =>
       css.find((rule) => rule.selector === selector)?.declarations ?? '';

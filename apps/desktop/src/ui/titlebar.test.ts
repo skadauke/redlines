@@ -628,6 +628,19 @@ describe('title bar', () => {
   });
 });
 
+describe('the bar floating over the page', () => {
+  it('says how tall it is, for the room the page keeps under it', () => {
+    const { root, bar } = setup();
+    const element = root.querySelector('.rl-titlebar');
+    if (!element) throw new Error('no bar');
+    // 52 points: as many CSS pixels as the window zoom makes of them.
+    element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 41.6);
+    expect(bar.height()).toBe(41.6);
+    element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 65);
+    expect(bar.height()).toBe(65);
+  });
+});
+
 describe('the file name on hover', () => {
   it('counts the words when the pointer comes, not before', () => {
     const { root, actions } = setup();

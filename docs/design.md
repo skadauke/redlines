@@ -148,8 +148,12 @@ otherwise.
 
 The window, on the desktop:
 
-- **The title bar is the page:** the same color, with no line under it, and the file name centered
-  in small gray type. There is no toolbar and no status bar.
+- **The title bar is the page:** it has no color of its own and no line under it. The page reaches
+  the top of the window and the text scrolls under the bar, fading out as it passes, so that the
+  window reads as one page, with no hard edge below the bar. The file name is centered in small
+  gray type, and the document starts below the bar, so that nothing is hidden at rest. The bar
+  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar
+  and no status bar.
 - **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
   icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
   hands over a copy of the file as it is saved. It never moves the file the window has open, and

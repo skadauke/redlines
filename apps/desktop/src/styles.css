@@ -59,10 +59,44 @@ body {
 
 .rl-scroller {
   flex: 1;
+  box-sizing: border-box;
+  /*
+   * The scroller reaches the top of the window, under the title bar that floats over it, and the
+   * document starts below the bar through this padding: it is room that scrolls, so that nothing is
+   * hidden at rest and the text passes under the bar as it scrolls. (The editor keeps what it
+   * scrolls to clear of the bar too: main.ts.)
+   */
+  padding-top: calc(52 * var(--rl-pt));
   overflow-y: auto;
+  scroll-padding-top: calc(52 * var(--rl-pt));
   /* A classic scrollbar that comes when the document grows (a table's row wraps) would move the
      centered text column, and every table in it, by half its width. */
   scrollbar-gutter: stable;
+}
+
+/*
+ * What passes under the title bar thins out into the page's own color over its lower part, so that
+ * the file name and the icons stay legible over it, and the text does not stop at a hard edge. It
+ * is a gradient of the page's color and no mask on the scroller, which would dim the popovers that
+ * hang inside the scroller too. Over the page's text (the editor's own scroller is a stacking
+ * context at 0, and this comes after it), under the bar, the sidebar that covers a narrow page, and
+ * the find bar and the menus. It takes no pointer, and stops short of a classic scrollbar.
+ */
+.rl-main::after {
+  position: absolute;
+  top: 0;
+  right: var(--rl-scrollbar, 0px);
+  left: 0;
+  z-index: 0;
+  height: calc(70 * var(--rl-pt));
+  background: linear-gradient(
+    to bottom,
+    var(--rl-page, Canvas) 0,
+    var(--rl-page, Canvas) 56%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
 }
 
 /*
@@ -79,13 +113,18 @@ body {
   outline: none;
 }
 
-/* The title bar: the page's own color, no line under it, the file name centered. */
+/*
+ * The title bar: no color of its own and no line under it, floating over the top of the scroller,
+ * so that the window reads as one page and the text scrolls under it; the file name centered.
+ */
 
 .rl-titlebar {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: var(--rl-scrollbar, 0px);
+  left: 0;
   z-index: 2;
   display: grid;
-  flex: none;
   /* The frame is in points beside the window buttons, and its contents in frame units (zoom.css). */
   grid-template-columns:
     minmax(calc(84 * var(--rl-pt) + 40 * var(--rl-frame)), 1fr) minmax(0, max-content)
@@ -93,7 +132,6 @@ body {
   align-items: center;
   height: calc(52 * var(--rl-pt));
   padding: 0 calc(12 * var(--rl-pt));
-  background: var(--rl-page, Canvas);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -735,6 +773,7 @@ body {
   }
 
   .rl-titlebar,
+  .rl-main::after,
   .rl-sidebar,
   .rl-rail,
   .rl-review-bar,
@@ -742,6 +781,11 @@ body {
   .rl-notifications,
   .rl-menu-anchor {
     display: none !important;
+  }
+
+  /* The room the title bar's float needs is no part of a page. */
+  .rl-scroller {
+    padding-top: 0;
   }
 
   #editor .cm-editor,

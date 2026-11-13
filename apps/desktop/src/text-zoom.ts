@@ -6,7 +6,15 @@
 // shows a size without its place, and the pinch draws no frame of its own.
 
 import type { EditorView } from '@codemirror/view';
-import { marginFor, placeAt, placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
+import {
+  marginFor,
+  placeAt,
+  placeBack,
+  readingPlace,
+  roomBelow,
+  visibleTop,
+  type ReadingPlace,
+} from './reading-place.ts';
 import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
 
 export interface TextZoomOptions {
@@ -72,8 +80,8 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     if (performance.now() - lastScrollInput < SCROLLING_MS) return;
     const coords = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
     if (!coords) return;
-    const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
-    const off = coords.top - scroller.getBoundingClientRect().top - want;
+    const want = marginFor(kept, 1, roomBelow(view, scroller));
+    const off = coords.top - visibleTop(view, scroller) - want;
     const before = scroller.scrollTop;
     // WebKit keeps a scroll position in whole pixels and drops a smaller step, so the position
     // is rounded: each correction leaves the line within half a pixel of where it is wanted.

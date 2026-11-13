@@ -76,6 +76,12 @@ export function createTitleBar(
   beginRename(): void;
   /** Closes the View and Review menus, as a zoom change does: they were placed for the old layout. */
   closeMenus(): void;
+  /**
+   * How tall the bar is now, in CSS pixels: 52 points, which the window zoom makes more or fewer of.
+   * The bar floats over the top of the page, whose text starts below it and passes under it, so the
+   * editor keeps what it scrolls to clear of this much.
+   */
+  height(): number;
   destroy(): void;
 } {
   let state: TitleBarState = {
@@ -335,6 +341,7 @@ export function createTitleBar(
       hideTip();
       for (const menu of menus) menu.close();
     },
+    height: () => bar.getBoundingClientRect().height,
     destroy() {
       hideTip();
       forgetPress?.();
