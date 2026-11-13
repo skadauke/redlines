@@ -27,7 +27,7 @@ function isDrawnChange(mark: MarkRange): boolean {
  * not a comment or a highlight, and not the half of a move that stays behind (a moved row is one
  * change, the row at its new place). This is `isChange` of packages/editor/src/tracked/field.ts,
  * repeated here since the editor draws with CodeMirror and a preview takes none of that;
- * summary.test.ts holds the two to each other.
+ * apps/desktop/src/quicklook-changes.test.ts holds the two to each other.
  */
 export function isChange(mark: MarkRange): boolean {
   if (isTableDeletion(mark)) return mark.entry.move === undefined;
