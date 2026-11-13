@@ -118,7 +118,11 @@ export function skillControls(options: {
     const mine = ++skillAsked;
     const host = agent.skill;
     if (!host || !found) {
+      // An agent that isn't there has no skill to say anything of, nor a note about the last one.
       skill = null;
+      skillDone = null;
+      skillSaid.classList.remove('rl-pref-failure');
+      skillSaid.replaceChildren();
       drawSkill();
       return;
     }
@@ -165,6 +169,8 @@ export function skillControls(options: {
     const host = agent.skill;
     if (!host || installing) return;
     const updating = skill !== null && skill !== 'failed' && skill.state === 'older';
+    // A look that was asked before this and answers after it would draw over what it did.
+    skillAsked++;
     installing = true;
     skillSaid.classList.remove('rl-pref-failure');
     skillSaid.replaceChildren();

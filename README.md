@@ -176,8 +176,8 @@ published, and installed copies update themselves quietly: [docs/releasing.md](d
 Inside the app, @Claude and @Codex do this for you. From a terminal, or a chat of an agent's own,
 an agent edits a Redlines file through the `redlines` command line, so that each edit is a tracked
 suggestion in its own name, for you to accept or reject. A skill teaches it that, and what a
-Redlines file is. In the app, Redlines › Preferences › Agents has Install Skill on each agent's row.
-Without it, copy the skill for the agent:
+Redlines file is. In the app, Redlines › Preferences › Agents has Install Skill on the rows of Claude
+and Codex. Without it, or for OpenClaw, copy the skill for the agent:
 
 ```sh
 # Claude Code, in ~/.claude/skills (or as a plugin: claude plugin marketplace add skadauke/redlines

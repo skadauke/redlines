@@ -24,6 +24,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -201,13 +202,41 @@ impl Found {
     }
 }
 
+/// The nearest part above `path` that exists, when it is a link that leads nowhere: nothing can be
+/// made below it, and an install would fail with a message about a file that exists.
+fn dangling_above(path: &Path) -> Option<PathBuf> {
+    let above = path
+        .ancestors()
+        .skip(1)
+        .find(|above| fs::symlink_metadata(above).is_ok())?;
+    let is_link = fs::symlink_metadata(above).is_ok_and(|found| found.file_type().is_symlink());
+    (is_link && fs::metadata(above).is_err()).then(|| above.to_owned())
+}
+
 /// Looks at the skill folder of an agent: what is there, and whether it is this skill's to replace.
 /// Nothing is followed that is a link, and nothing is changed.
 fn inspect(kind: Kind, folder: &Path, shown: &str) -> Found {
     let other = |sentence: String| Found::left(State::Other, sentence);
     let left = |what: String| other(format!("{what}, and Redlines leaves it as it is."));
     match fs::symlink_metadata(folder) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Found::of(State::Missing),
+        // Nothing there, unless the way to it goes through a link that leads nowhere, which no
+        // folder can be made below.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return match dangling_above(folder) {
+                Some(link) => {
+                    // The link as a person writes it: what of `shown` is above where it leads.
+                    let name = folder
+                        .strip_prefix(&link)
+                        .ok()
+                        .and_then(|rest| shown.strip_suffix(&format!("/{}", rest.display())))
+                        .unwrap_or(shown);
+                    other(format!(
+                        "{name} is a link that leads nowhere, and Redlines leaves links as they are."
+                    ))
+                }
+                None => Found::of(State::Missing),
+            };
+        }
         // A part of the path above it is a file, so there is no folder to put it in.
         Err(error) if error.kind() == io::ErrorKind::NotADirectory => {
             return other(format!(
@@ -308,10 +337,14 @@ pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
 /// Writes `text` as the skill's file in `folder`: to a file of its own name first, which is then
 /// moved over the skill's file, so that a reader sees the old file or the new one.
 fn write_whole(folder: &Path, text: &str) -> io::Result<()> {
+    // Never a name another call of this process has, which the clock alone doesn't promise: a
+    // loser's cleanup would otherwise remove the file the winner is about to move into place.
+    static NEXT: AtomicU32 = AtomicU32::new(0);
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
-    let temporary = folder.join(format!(".{FILE}.{}.{unique}", std::process::id()));
+    let count = NEXT.fetch_add(1, Ordering::Relaxed);
+    let temporary = folder.join(format!(".{FILE}.{}.{count}.{unique}", std::process::id()));
     let written = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -593,6 +626,61 @@ mod tests {
         symlink(&elsewhere, third.path().join(".openclaw/skills")).unwrap();
         install(Kind::OpenClaw, third.path()).unwrap();
         assert!(elsewhere.join("redlines").join(FILE).exists());
+    }
+
+    #[test]
+    fn a_link_that_leads_nowhere_above_the_folder_is_said_and_nothing_is_made() {
+        let temp = TempFolder::new("skill-dangling");
+        symlink(temp.path().join("gone"), temp.path().join(".claude")).unwrap();
+        let found = status(Kind::Claude, temp.path());
+        assert_eq!(found.state, State::Other);
+        let said = "~/.claude is a link that leads nowhere, and Redlines leaves links as they are.";
+        assert_eq!(found.message.as_deref(), Some(said));
+        assert_eq!(install(Kind::Claude, temp.path()), Err(said.to_owned()));
+        // The same a step lower.
+        let other = TempFolder::new("skill-dangling-2");
+        fs::create_dir_all(other.path().join(".agents")).unwrap();
+        symlink(
+            other.path().join("gone"),
+            other.path().join(".agents/skills"),
+        )
+        .unwrap();
+        assert_eq!(
+            install(Kind::Codex, other.path()),
+            Err("~/.agents/skills is a link that leads nowhere, and Redlines leaves links as they are.".to_owned())
+        );
+        // A link that leads somewhere is no such thing: the folder is made there.
+        let third = TempFolder::new("skill-dangling-3");
+        let real = third.path().join("dotfiles");
+        fs::create_dir_all(&real).unwrap();
+        symlink(&real, third.path().join(".openclaw")).unwrap();
+        install(Kind::OpenClaw, third.path()).unwrap();
+        assert!(real.join("skills/redlines/SKILL.md").exists());
+    }
+
+    #[test]
+    fn installs_at_the_same_time_neither_fail_nor_leave_a_file_behind() {
+        let temp = TempFolder::new("skill-concurrent");
+        let home = temp.path().to_owned();
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let home = home.clone();
+                std::thread::spawn(move || install(Kind::Codex, &home))
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+        let folder = home.join(Kind::Codex.relative_folder());
+        let names: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [FILE]);
+        assert_eq!(
+            fs::read_to_string(folder.join(FILE)).unwrap(),
+            Kind::Codex.copy()
+        );
     }
 
     #[test]

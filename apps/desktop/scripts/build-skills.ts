@@ -62,17 +62,19 @@ const FRONT: Record<Kind, string> = {
 const WHO: Record<Kind, string> = {
   claude:
     'Give every edit `--as claude-<person> --name Claude --for <person>`. `<person>` is the handle of the\n' +
-    'person you work for: lowercase letters, digits, `-` and `_`, made from their email (the part\n' +
-    'before the `@`) or else their name, with other characters turned into `-`. `Jane.Doe@example.org`\n' +
-    'is `jane-doe`. Ask if you are not sure.',
+    'person you work for: lowercase letters, digits, `-` and `_`, starting with a letter and never\n' +
+    '`unknown` or a word YAML reads as a boolean (`y`, `n`, `yes`, `no`, `on`, `off`, `true`,\n' +
+    '`false`, `null`), made from their email (the part before the `@`) or else their name, with\n' +
+    'other characters turned into `-`. `Jane.Doe@example.org` is `jane-doe`. Ask if you are not sure.',
   generic:
     "You write in your own name, not the person's. Give every edit `--as <you>-<person> --name <You> --for <person>`.\n" +
     '`<you>` is your own handle: your name in lowercase letters, digits, `-` and `_`, with other\n' +
     'characters turned into `-` (an agent called Moby is `moby`), and `<You>` is your name as people\n' +
-    'write it (`Moby`). `<person>` is the handle of the person you work for: lowercase letters,\n' +
-    'digits, `-` and `_`, made from their email (the part before the `@`) or else their name, with\n' +
-    'other characters turned into `-`. `Jane.Doe@example.org` is `jane-doe`. Ask if you are not\n' +
-    'sure of either.',
+    'write it (`Moby`). `<person>` is the handle of the person you work for. A handle starts with a\n' +
+    'letter and is never `unknown` or a word YAML reads as a boolean (`y`, `n`, `yes`, `no`, `on`,\n' +
+    '`off`, `true`, `false`, `null`). Make `<person>` from their email (the part before the `@`) or\n' +
+    'else their name, with other characters turned into `-`: `Jane.Doe@example.org` is `jane-doe`.\n' +
+    'Ask if you are not sure of either.',
 };
 
 /** An agent's handle in an example of the review view, as it names an author there. */

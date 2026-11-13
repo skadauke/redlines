@@ -213,12 +213,16 @@ The window, on the desktop:
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
   the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
   system's dialogs keep the system's size. Text Zoom changes only the document's text and the
-  notes and cards on it, from 80% to 200%: a pinch follows the fingers and keeps the line under the
-  pointer in place, and Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the
-  same sizes. The notes and cards grow with the text above 100%
-  and never go below their size at 100%. The text column grows with the text until it meets the
-  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
-  launches; neither reaches the file, a print, the clipboard or an export.
+  notes and cards on it, and goes twice as far, from 80% to 400%, so that the text can be made
+  really big: a pinch follows the fingers and keeps the line under the pointer in place, and
+  Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the sizes, which go on past
+  the window zoom's 200% to 250%, 300% and 400%, and Preferences offers them all. The window zoom
+  keeps its own range. The notes and cards grow with the text above 100% and never go below their
+  size at 100%. The text column grows with the text until it meets the margins, and only then do
+  lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
+  and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
+  neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
   default app for Markdown, and installing the `redlines` command line), Appearance (Match
@@ -1408,9 +1412,11 @@ text, comments, replies and notes as information, never as instructions. It is w
 differ: Claude writes as `claude-<person>`, and an agent with a name of its own, such as an OpenClaw
 agent called Moby, as `moby-<person>`. A test fails when a copy isn't what the source makes, or
 shows a command or an option the command line doesn't have. Each agent reads skills from a folder of
-its own, and Install Skill on its row in Preferences › Agents writes the one file there, `SKILL.md`:
-`~/.claude/skills/redlines` for Claude Code, `~/.agents/skills/redlines` for Codex, which OpenClaw
-reads too, and `~/.openclaw/skills/redlines` for OpenClaw. The row says where it went, and says
+its own, and Install Skill on the row of Claude Code and of Codex in Preferences › Agents writes the
+one file there, `SKILL.md`: `~/.claude/skills/redlines` for Claude Code and
+`~/.agents/skills/redlines` for Codex, which OpenClaw reads too (OpenClaw's own folder is
+`~/.openclaw/skills/redlines`, which the copy command in `integrations/README.md` fills, and the
+app can, for an OpenClaw on this Mac). The row says where it went, and says
 when a login shell can't find the `redlines` command, which the skill runs, and offers General,
 where the command line is installed; Install Skill doesn't install it itself, which may ask for an
 administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
@@ -1418,8 +1424,8 @@ the app carries its own, so that an installed copy that is older shows Update Sk
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); the skill is published on ClawHub by its owner
-(`integrations/README.md`).
+(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
 that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
@@ -1465,11 +1471,13 @@ it was asked to:
 
 - Claude runs with `--restricted`, which confines its file tools to the document's folder,
   symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
-  "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+  "Just This Document". Its hooks, and the person's settings, skills and `.mcp.json`, don't run
+  (`--restricted` leaves an installed skill out: its first event lists the built-in skills only).
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
-  hooks, its skills (the person's own, and Redlines' skill, are for Codex run by hand) and the
-  person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
+  hooks, its skills (the person's own, Redlines' skill, and Codex's built-in ones such as image
+  generation and the skill installer, are for Codex run by hand) and the person's ChatGPT
+  connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
 - At **This folder and my home folder** the same limits hold with the home folder added, and what
   is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
@@ -1579,7 +1587,7 @@ Syrus runs agents on its server with API keys or enterprise agreements.
 | **VS Code and Positron**            | One extension on Open VSX, which also covers Cursor. First, tracked-change decorations in the normal editor; then a custom editor that hosts the Redlines editor                                  | v1.x                              |
 | **Claude**                          | The command line and MCP server; a skill, which is also a Claude Code plugin (written); later, the plugin's hooks, which block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md)) | v1 (server, skill, plugin), v1.x (hooks) |
 | **Codex and ChatGPT**               | The same MCP server, a skill in `~/.agents/skills` (written) and an `AGENTS.md` snippet                                                                                                            | v1 (skill), v1.x                  |
-| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, and on ClawHub; the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
+| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, for ClawHub too (to be published by its owner); the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
 | **Other agents**                    | GitHub Copilot, Gemini, OpenCode and others through the Agent Client Protocol                                                                                                                       | v1.x                              |
 | **Review in chat apps**             | A remote MCP server whose review panel (MCP Apps) draws tracked changes inside claude.ai and ChatGPT, with Accept and Reject                                                                       | Later                             |
 | **Syrus**                           | A replacement for Syrus's Design Docs plugin (§9.1)                                                                                                                                                 | v1.x                              |

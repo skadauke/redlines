@@ -5,6 +5,7 @@
 
 import { baseTitle } from '@redlines/editor';
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
+import { TEXT_LEAST, TEXT_MOST, ZOOM_LEAST, ZOOM_MOST } from './text-size.ts';
 
 export interface MenuCommands {
   /** Opens a new window, with an empty document. */
@@ -39,7 +40,7 @@ export interface MenuCommands {
    */
   undo(): void;
   redo(): void;
-  /** Zooms every window one step up the ladder (text-size.ts), also from ⌘+ typed as "+". */
+  /** Zooms every window one step up the window zoom's ladder (`ZOOM_LADDER`, text-size.ts), also from ⌘+ typed as "+". */
   zoomIn(): void;
   zoomOut(): void;
   /** Takes the zoom back to 100%. */
@@ -67,9 +68,9 @@ export interface MenuState {
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
-  /** The window zoom (zoom.ts), a rung of the ladder; none until the page follows the app's. */
+  /** The window zoom (zoom.ts), a rung of its ladder (`ZOOM_LADDER`); none until the page follows the app's. */
   zoom: number | null;
-  /** The text size, any whole percent from 80 to 200 as a multiple of the theme's own. */
+  /** The text size, any whole percent from 80 to 400 as a multiple of the theme's own. */
   textSize: number;
   /** Whether the document is a file, which can be shown in Finder. */
   hasFile: boolean;
@@ -397,14 +398,14 @@ export function appMenuModel(
           text: 'Zoom In',
           accelerator: 'CmdOrCtrl+=',
           action: () => commands.zoomIn(),
-          enabled: (state) => state.zoom !== null && state.zoom < 2,
+          enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
           ...zoomKey,
         },
         {
           text: 'Zoom Out',
           accelerator: 'CmdOrCtrl+-',
           action: () => commands.zoomOut(),
-          enabled: (state) => state.zoom !== null && state.zoom > 0.8,
+          enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
           ...zoomKey,
         },
         SEPARATOR,
@@ -421,13 +422,13 @@ export function appMenuModel(
           text: 'Larger Text',
           accelerator: 'Ctrl+Cmd+=',
           action: () => commands.biggerText(),
-          enabled: (state) => state.textSize < 2,
+          enabled: (state) => state.textSize < TEXT_MOST,
         },
         {
           text: 'Smaller Text',
           accelerator: 'Ctrl+Cmd+-',
           action: () => commands.smallerText(),
-          enabled: (state) => state.textSize > 0.8,
+          enabled: (state) => state.textSize > TEXT_LEAST,
         },
         SEPARATOR,
         {

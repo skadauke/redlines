@@ -38,8 +38,9 @@ OpenClaw agent called Moby, writes `--as moby-<person> --name Moby`.
 
 ### Installing it
 
-**From the app.** Redlines › Preferences › Agents has an Install Skill button on each agent's row. It
-writes the one file, `SKILL.md`, into the agent's folder above, and says where. It says so when the
+**From the app.** Redlines › Preferences › Agents has an Install Skill button on the row of Claude
+Code and of Codex (an OpenClaw on this Mac has it in the OpenClaw section, once there is an OpenClaw
+agent there). It writes the one file, `SKILL.md`, into the agent's folder above, and says where. It says so when the
 `redlines` command isn't on your PATH, which the skill runs, and opens General, where the command
 line is installed. A skill that is already there and older than the app's shows Update Skill. Only a
 copy of this skill is ever replaced: a skill of your own with the same name, a link, and a newer
