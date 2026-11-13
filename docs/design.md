@@ -198,7 +198,10 @@ The window, on the desktop:
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
   Print. Printing holds the whole
   document in light ink and prints the view as it shows, without the rail: Simple prints the newest
-  text with its change bars.
+  text with its change bars. Saving a document that has no file yet opens the Save dialog in the
+  default folder for new documents (Preferences › General), when one is set and still there;
+  otherwise where macOS last saved. Save As of a saved document starts in that document's own
+  folder.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
@@ -217,11 +220,11 @@ The window, on the desktop:
   margins, and only then do lines rewrap. Both are each person's, for every window, kept across
   launches; neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and
-  text size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
-  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
-  once.
+  opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
+  default app for Markdown, and installing the `redlines` command line), Appearance (Match
+  System, Light or Dark, the theme, zoom and text size), Editor (spell check, smart quotes and
+  dashes, closing brackets, whether Track Changes starts on, and whether line breaks show their
+  marks, §5.5) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).

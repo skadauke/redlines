@@ -13,7 +13,7 @@
 //! the one in its settings: the app takes the report only when it has no level yet, and only the
 //! first.
 //!
-//! Preferences can't be resized by hand, so it grows with the zoom: 560 by 400 points times the
+//! Preferences can't be resized by hand, so it grows with the zoom: 560 by 440 points times the
 //! zoom, keeping its top edge and its middle, within the visible area of the screen.
 
 use std::io;
@@ -34,7 +34,7 @@ const REMEMBERED_FILE: &str = "zoom.json";
 const LADDER: [f64; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 
 /// Preferences' size in points at 100%, which is its size in `tauri.conf.json`.
-const PREFERENCES_SIZE: (f64, f64) = (560.0, 400.0);
+const PREFERENCES_SIZE: (f64, f64) = (560.0, 440.0);
 
 /// The app's level, once it has one.
 #[derive(Default)]
@@ -140,7 +140,7 @@ fn script(level: Option<f64>) -> String {
     }
 }
 
-/// Preferences' size at `zoom`: 560 by 400 points times it, within `area` when that is known.
+/// Preferences' size at `zoom`: 560 by 440 points times it, within `area` when that is known.
 fn zoomed_size(zoom: f64, area: Option<(f64, f64)>) -> (f64, f64) {
     // Whole points, so that 110% is 616 by 440 and not a hair off.
     let (width, height) = (
@@ -402,22 +402,23 @@ mod tests {
             height,
         };
         let area = frame(0.0, 25.0, 1440.0, 875.0);
-        let current = frame(440.0, 200.0, 560.0, 400.0);
+        let current = frame(440.0, 200.0, 560.0, 440.0);
         assert_eq!(
             preferences_frame(1.25, current, area),
-            frame(370.0, 200.0, 700.0, 500.0)
+            frame(370.0, 200.0, 700.0, 550.0)
         );
+        // Taller than the screen's visible area, which it fills.
         assert_eq!(
             preferences_frame(2.0, current, area),
-            frame(160.0, 100.0, 1120.0, 800.0)
+            frame(160.0, 25.0, 1120.0, 875.0)
         );
-        let low = frame(440.0, 600.0, 560.0, 400.0);
+        let low = frame(440.0, 600.0, 560.0, 440.0);
         let grown = preferences_frame(1.1, low, area);
-        assert_eq!((grown.x, grown.y, grown.height), (412.0, 460.0, 440.0));
+        assert_eq!((grown.x, grown.y, grown.height), (412.0, 416.0, 484.0));
         assert_eq!(grown.width, 616.0);
         let small = frame(0.0, 25.0, 1024.0, 743.0);
         assert_eq!(preferences_frame(2.0, current, small), small);
         assert_eq!(zoomed_size(2.0, Some((1024.0, 743.0))), (1024.0, 743.0));
-        assert_eq!(zoomed_size(1.5, None), (840.0, 600.0));
+        assert_eq!(zoomed_size(1.5, None), (840.0, 660.0));
     }
 }

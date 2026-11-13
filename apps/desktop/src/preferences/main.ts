@@ -89,10 +89,14 @@ const setups = createSetupRegistry((id) => {
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
  * Outside the app, in a plain browser, `outside` is.
  */
-async function appCommand<T>(command: string, outside: string): Promise<T> {
+async function appCommand<T>(
+  command: string,
+  outside: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri) throw new Error(outside);
   try {
-    return await invoke<T>(command);
+    return await invoke<T>(command, args);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
@@ -123,6 +127,9 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  // The app shows the panel, a sheet of this window, and hands back only the folder's path.
+  chooseFolder: (start) =>
+    appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', { start }),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
@@ -180,9 +187,11 @@ ignorePinch(window);
 watchSettings((next) => {
   settings = next;
   // The main window saves the last document at every change of its file. Redrawing the pane while
-  // someone types their name would take the caret away, so what is being edited is left alone.
+  // someone types their name would take the caret away, so what is being edited is left alone, and
+  // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) show(current);
+  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');

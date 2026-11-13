@@ -69,6 +69,7 @@ describe('settings', () => {
       agentScope: 'folder',
       consent: {},
       people: [],
+      newDocumentFolder: null,
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -97,6 +98,7 @@ describe('settings', () => {
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
       ],
+      newDocumentFolder: '/Users/ada/Notes',
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
@@ -280,6 +282,25 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
     }
+  });
+
+  it('keeps the default folder for new documents, also for settings saved before it, and none for anything else', () => {
+    // Settings saved before the setting: no folder, as Save has always done.
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().newDocumentFolder).toBeNull();
+    localStorage.setItem(SETTINGS_KEY, '{"newDocumentFolder":"/Users/ada/Notes"}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' });
+    // Anything that isn't a folder's path is no folder: an empty name, a number, a list.
+    for (const stored of ['""', '7', 'null', 'true', '["/Users/ada"]', '{"path":"/Users/ada"}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"newDocumentFolder":${stored}}`);
+      expect(loadSettings().newDocumentFolder).toBeNull();
+    }
+    // Chosen in Preferences, it reaches every window like the other settings.
+    expect(updateSettings({ newDocumentFolder: '/Users/ada/Drafts' }).newDocumentFolder).toBe(
+      '/Users/ada/Drafts',
+    );
+    expect(loadSettings().newDocumentFolder).toBe('/Users/ada/Drafts');
+    expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
   });
 
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
