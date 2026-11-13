@@ -1301,7 +1301,11 @@ Agent edits are animated, like a streaming chat answer.
     is put in the bubble, and what the document holds is untrusted, as for every run.
   - **Read-only.** The agent is given the tools that read (`view` and `status`) and nothing that
     writes, the document it reads refuses a write, and its answer is its last message: nothing is
-    written to the file or its ledger. Each run still writes its log.
+    written to the file or its ledger. Each run still writes its log. That guarantee is the
+    Redlines tools'. For the agents Redlines can hold to their reading (Claude Code and Codex) the
+    agent itself is read-only too, while an agent the person added may act on its own, as its own
+    settings allow, which Redlines can't stop: its first-run question says so, and does not say
+    that it changes nothing.
   - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
     live line while it works (what it is doing, with Stop), then the answer. The selection stays
     tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going. A

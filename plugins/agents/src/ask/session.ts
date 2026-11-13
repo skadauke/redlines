@@ -2,8 +2,11 @@
 // machinery as a comment's run (the agents the host lists, the first-run question for a folder, the
 // provider and the toolbox over MCP), and answered in the agent's last message. Nothing is written
 // to the file: the agent gets the tools that read (`ASK_TOOLS`), and the document it is handed
-// refuses to be written to besides. The session holds the exchange, and says what it is doing as
-// its state changes; the bubble draws it.
+// refuses to be written to besides. That is the guarantee of Redlines' tools. An agent that can be
+// held to what it reads (Claude and Codex) is read-only itself; one the person added can't be, and
+// may act on its own, which its first-run question says. The session holds the exchange, and says
+// what it is doing as its state changes; the bubble draws it. Each answer is kept with the agent
+// that gave it: a follow-up may name another.
 //
 // The reach (what the agent may read) is decided as a run decides it (runs.ts, `reachOf`): the
 // document alone for a document with no file, a folder too broad or Preferences saying so; else what

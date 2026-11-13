@@ -1,8 +1,9 @@
 // Ask (issue #324): select text, choose Ask, and type a question in a small box at the selection. The
 // default agent answers in a bubble beside the selection, citing the passages it used; the @ picks
-// another agent, as in a comment. Nothing is written to the file or its ledger: the agent reads and
-// cannot write (session.ts), the bubble goes on Esc or a click elsewhere, and what the person keeps
-// of an answer, as a comment, a document or text, is kept only when they ask (actions.ts).
+// another agent, as in a comment. Nothing is written to the file or its ledger: the agent is given
+// tools that read, and the document it reads refuses a write (session.ts); the bubble goes on Esc or
+// a click elsewhere, and what the person keeps of an answer, as a comment, a document or text, is
+// kept only when they ask (actions.ts).
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';

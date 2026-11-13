@@ -127,6 +127,50 @@ describe('renderLiveLine', () => {
     );
   });
 
+  it('does not say it of an agent that reads the whole Mac: it says what is true of it', () => {
+    const GEMINI: LiveLine = {
+      kind: 'asking',
+      agent: 'gemini',
+      agentName: 'Gemini',
+      folder: '/p',
+      readLimit: 'machine',
+    };
+    // A question: Redlines' tools only read, but this agent can't be held to them, and may act on
+    // its own. The words of the panel for a run are kept, and nothing of "changes nothing" is said.
+    const ask = renderLiveLine({ ...GEMINI, readOnly: true }, actions());
+    const note = ask.querySelector('.rl-ask-note')?.textContent ?? '';
+    expect(note).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads. It may also act on its own.',
+    );
+    expect(note).not.toMatch(/changes nothing/);
+    expect(textOf(ask, ask.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Gemini to read files on this Mac?',
+    ]);
+    // The panel is still described by it, for a screen reader.
+    expect(textOf(ask, ask.getAttribute('aria-describedby'))).toEqual([note]);
+    expect(buttons(ask).map(named)).toEqual(['Allow', 'Not Now']);
+    // A run's panel for the same agent is as it was.
+    const run = renderLiveLine(GEMINI, actions());
+    expect(run.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads.',
+    );
+  });
+
+  it('says it of Claude and Codex, which are held to their folder, as of any agent that is', () => {
+    for (const [agent, agentName] of [
+      ['claude', 'Claude'],
+      ['codex', 'Codex'],
+    ] as const) {
+      const el = renderLiveLine(
+        { kind: 'asking', agent, agentName, folder: '/p', readLimit: 'folder', readOnly: true },
+        actions(),
+      );
+      expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+        `${agentName} reads files here to answer, and changes nothing.`,
+      );
+    }
+  });
+
   it('asks as a panel of Redlines’ own: title, folder, what it means, and three buttons in a group', () => {
     const act = actions();
     const el = renderLiveLine(ASK, act);

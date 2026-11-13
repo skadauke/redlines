@@ -405,6 +405,33 @@ describe('asking', () => {
       ),
     );
     expect(claude.requests).toHaveLength(0);
+    // For an agent held to its folder, a question changes nothing.
+    expect(document.querySelector('.rl-qa .rl-ask-note')?.textContent).toBe(
+      'Claude reads files here to answer, and changes nothing.',
+    );
+    button('Allow')?.click();
+    await answered();
+    expect(claude.requests[0]?.scope).toBe('folder');
+  });
+
+  it('asks an agent that reads the whole Mac in the bubble, and does not say it changes nothing', async () => {
+    const { editor, claude } = mount({ scope: 'folder', reads: 'machine' });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await vi.waitFor(() =>
+      expect(document.querySelector('.rl-qa .rl-ask-title')?.textContent).toBe(
+        'Allow Claude to read files on this Mac?',
+      ),
+    );
+    // What is true of it: its own settings decide what it reads, and it may act on its own.
+    const note = document.querySelector('.rl-qa .rl-ask-note')?.textContent ?? '';
+    expect(note).toContain('its own settings decide what it reads');
+    expect(note).toContain('It may also act on its own.');
+    expect(note).not.toMatch(/changes nothing/);
+    // There is no This Document for it.
+    expect(button('Just This Document')).toBeUndefined();
+    expect(claude.requests).toHaveLength(0);
     button('Allow')?.click();
     await answered();
     expect(claude.requests[0]?.scope).toBe('folder');
