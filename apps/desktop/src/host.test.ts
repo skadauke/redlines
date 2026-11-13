@@ -8,6 +8,7 @@ import {
   DISCARD_DRAFT_BUTTONS,
   dirname,
   isDocument,
+  joinPath,
   NOT_A_DOCUMENT,
   NotADocumentError,
   opensInDefaultApp,
@@ -49,6 +50,17 @@ describe('dirname', () => {
     expect(dirname('/plan.md')).toBe('/');
     expect(dirname('plan.md')).toBe('');
     expect(dirname('C:\\docs\\plan.md')).toBe('C:\\docs');
+  });
+});
+
+describe('joinPath', () => {
+  it('puts a file name in a folder, once between them, in the separator the folder uses', () => {
+    expect(joinPath('/docs', 'plan.md')).toBe('/docs/plan.md');
+    expect(joinPath('/docs/', 'plan.md')).toBe('/docs/plan.md');
+    expect(joinPath('/', 'plan.md')).toBe('/plan.md');
+    expect(joinPath('C:\\docs', 'plan.md')).toBe('C:\\docs\\plan.md');
+    expect(joinPath('C:\\docs\\', 'plan.md')).toBe('C:\\docs\\plan.md');
+    expect(joinPath('C:\\', 'plan.md')).toBe('C:\\plan.md');
   });
 });
 
@@ -400,6 +412,79 @@ describe('the host in the app', () => {
       expect(options).toMatchObject({ defaultPath: '/docs/notes.txt' });
       expect(offered(options)).toEqual(DOCUMENTS);
       expect(writeTextFile).toHaveBeenCalledWith('/docs/notes.txt', 'One\r\n');
+    });
+
+    describe('the default folder for new documents', () => {
+      const startedAt = () => {
+        const [options] = dialog.save.mock.calls[0] ?? [];
+        return (options as { defaultPath: string }).defaultPath;
+      };
+
+      it('starts the dialog of a name alone in the folder, once the app says it is there', async () => {
+        dialog.save.mockResolvedValue(null);
+        vi.mocked(invoke).mockResolvedValueOnce(true);
+        await createHost().saveAs('Text', 'Untitled.md', '/Users/ada/Notes');
+        // src-tauri/src/files.rs: folder_exists.
+        expect(invoke).toHaveBeenCalledWith('folder_exists', { path: '/Users/ada/Notes' });
+        expect(startedAt()).toBe('/Users/ada/Notes/Untitled.md');
+      });
+
+      it('starts as it does without a folder when the folder is gone', async () => {
+        dialog.save.mockResolvedValue(null);
+        vi.mocked(invoke).mockResolvedValueOnce(false);
+        await createHost().saveAs('Text', 'Untitled.md', '/Users/ada/Gone');
+        expect(startedAt()).toBe('Untitled.md');
+      });
+
+      it('starts as it does without a folder when the app cannot say, and saves all the same', async () => {
+        dialog.save.mockResolvedValue('/docs/Untitled.md');
+        vi.mocked(writeTextFile).mockResolvedValue();
+        vi.mocked(invoke).mockRejectedValueOnce('no');
+        expect(await createHost().saveAs('Text', 'Untitled.md', '/Users/ada/Notes')).toBe(
+          '/docs/Untitled.md',
+        );
+        expect(startedAt()).toBe('Untitled.md');
+      });
+
+      it('asks nothing for a saved document, whose dialog starts in its own folder', async () => {
+        dialog.save.mockResolvedValue(null);
+        await createHost().saveAs('One', '/docs/notes.md', null);
+        await createHost().saveAs('One', '/docs/notes.md');
+        expect(invoke).not.toHaveBeenCalled();
+        expect(startedAt()).toBe('/docs/notes.md');
+      });
+
+      it('never puts a full path under the folder, even one that was given with it', async () => {
+        dialog.save.mockResolvedValue(null);
+        vi.mocked(invoke).mockResolvedValue(true);
+        await createHost().saveAs('One', '/docs/notes.md', '/Users/ada/Notes');
+        expect(startedAt()).toBe('/docs/notes.md');
+      });
+
+      it('writes the folder’s name once, whether it ends in a slash or is the disk’s root', async () => {
+        dialog.save.mockResolvedValue(null);
+        vi.mocked(invoke).mockResolvedValue(true);
+        await createHost().saveAs('Text', 'Untitled.md', '/Users/ada/Notes/');
+        expect(startedAt()).toBe('/Users/ada/Notes/Untitled.md');
+        dialog.save.mockClear();
+        await createHost().saveAs('Text', 'Untitled.md', '/');
+        expect(startedAt()).toBe('/Untitled.md');
+      });
+
+      it('does not wait for a folder that doesn’t answer, which would hold Save up', async () => {
+        vi.useFakeTimers();
+        try {
+          dialog.save.mockResolvedValue(null);
+          // A volume that has gone away leaves the question unanswered.
+          vi.mocked(invoke).mockReturnValueOnce(new Promise(() => {}));
+          const saving = createHost().saveAs('Text', 'Untitled.md', '/Volumes/Gone/Notes');
+          await vi.advanceTimersByTimeAsync(5000);
+          await saving;
+          expect(startedAt()).toBe('Untitled.md');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
 
     it('reads no file the Open panel picked that isn’t a document', async () => {

@@ -152,6 +152,51 @@ describe('renderLiveLine', () => {
     expect(other.getAttribute('aria-labelledby')).not.toBe(el.getAttribute('aria-labelledby'));
   });
 
+  it('offers the home folder as an answer where the question says it may, and says what it means', () => {
+    const act = actions();
+    const el = renderLiveLine({ ...ASK, home: true }, act);
+    expect(buttons(el).map(named)).toEqual([
+      'Allow',
+      'Allow Folder and Home Folder',
+      'Just This Document',
+      'Not Now',
+    ]);
+    // Allow stays the one that is bold: the home folder is the wider, deliberate choice.
+    expect(buttons(el).filter((each) => each.classList.contains('rl-ask-allow'))).toHaveLength(1);
+    press(el, 'Allow Folder and Home Folder');
+    press(el, 'Allow');
+    expect(act.calls).toEqual(['answer everything', 'answer folder']);
+    // What it means is shown and said to VoiceOver: what it opens, what it leaves out, the risk.
+    const note = [...el.querySelectorAll('.rl-ask-note')].map((each) => each.textContent);
+    expect(note).toEqual([
+      'Claude reads files here to answer, and changes only this document.',
+      'Allow Folder and Home Folder also lets Claude read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.',
+    ]);
+    const described = (el.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(described).toHaveLength(3);
+    expect(textOf(el, el.getAttribute('aria-describedby'))?.at(-1)).toContain('hidden files');
+    // Not offered, not drawn, where the question doesn't say so.
+    expect(buttons(renderLiveLine(ASK, actions())).map(named)).not.toContain(
+      'Allow Folder and Home Folder',
+    );
+  });
+
+  it('offers no home folder to an agent that can’t be kept to a folder, whatever the line says', () => {
+    const el = renderLiveLine(
+      {
+        kind: 'asking',
+        agent: 'gemini',
+        agentName: 'Gemini',
+        folder: '/p',
+        readLimit: 'machine',
+        home: true,
+      },
+      actions(),
+    );
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
+    expect(el.querySelectorAll('.rl-ask-note')).toHaveLength(1);
+  });
+
   it('asks an agent that can’t be kept to a folder about the Mac, with Allow and Not Now', () => {
     const el = renderLiveLine(
       { kind: 'asking', agent: 'gemini', agentName: 'Gemini', folder: '/p', readLimit: 'machine' },

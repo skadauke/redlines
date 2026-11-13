@@ -13,7 +13,12 @@
 // hidden text they act on the visible character beyond it, and nothing is typed after the ledger
 // at the end of the file.
 
-import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
+import {
+  defaultKeymap,
+  invertedEffects,
+  toggleBlockComment,
+  toggleComment,
+} from '@codemirror/commands';
 import {
   Annotation,
   ChangeSet,
@@ -79,6 +84,17 @@ export const trackingField = StateField.define<boolean>({
   create: (state) => state.field(parsedField).ledger.tracking === 'everyone',
   update: (on, tr) => tr.effects.findLast((effect) => effect.is(setTrackingEffect))?.value ?? on,
 });
+
+/**
+ * Undo and Redo of a switch that was written to the document (`setTracking` with `saveTracking`)
+ * bring Track Changes back as it was with the text, so that the setting and the file never differ.
+ * A switch that changes no text is a step of no one's, and gets none.
+ */
+const trackingInverse = invertedEffects.of((tr) =>
+  tr.docChanged && tr.effects.some((effect) => effect.is(setTrackingEffect))
+    ? [setTrackingEffect.of(tr.startState.field(trackingField))]
+    : [],
+);
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
@@ -860,6 +876,7 @@ const rawEditsRefused = EditorView.domEventObservers({
 export function trackedTyping(): Extension {
   return [
     trackingField,
+    trackingInverse,
     compositionField,
     typingFilter,
     compositionEnd,
