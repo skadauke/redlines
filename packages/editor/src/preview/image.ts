@@ -1,7 +1,9 @@
 // Images in the preview (design, Rendering): a local path relative to the document, or a URL,
-// drawn in place of its syntax, except while the caret is on it. What a pending change contains is
-// never fetched: an agent misled by text it read could otherwise leak what it read through an image
-// URL the moment its edit lands, so the image shows its alt text until the change is accepted.
+// drawn in place of its syntax, except while the caret is on it (but for a link a paste or a drop
+// has just added, which is drawn while the caret is still at its end: `fresh.ts`). What a pending
+// change contains is never fetched: an agent misled by text it read could otherwise leak what it
+// read through an image URL the moment its edit lands, so the image shows its alt text until the
+// change is accepted.
 
 import type { EditorState } from '@codemirror/state';
 import { Facet, StateEffect } from '@codemirror/state';
