@@ -32,8 +32,9 @@ export interface WindowStart {
   line: number | null;
   /**
    * The text of the Untitled document the window starts with, which is unsaved: never an empty
-   * string, and null for a window opened for a file or for nothing. The app answers the same each
-   * time the page asks, so a page that reloads starts with the text again.
+   * string, and null for a window opened for a file or for nothing. A page that reloads asks again
+   * and is told the same, so it starts with the text again, for as long as the window has no file:
+   * the app lets the text go once the window says its document is one.
    */
   text: string | null;
 }
