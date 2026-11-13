@@ -1872,6 +1872,38 @@ it, one per line:
   the table instead."). With Track Changes off the columns go from the original as well, so the last
   column that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
+- **Rule 6, deleting the table.** A table that goes whole is a deletion of a block (§3.4): one
+  deletion, in front of the block after the table, or behind the block before it when the table
+  ends the text. Its payload is the table as it reads with your own pending changes rejected, and
+  its comments are left out. The rule that a table keeps a row is for deleting rows: the whole
+  table may go.
+  - **Another person's pending changes stay theirs.** With Track Changes on, a table that holds one
+    can't be deleted until it is decided ("Bo Chen's pending change is in this table. Decide it
+    first."). That is a change in a cell, an inserted or moved row or column, a row or column
+    deleted and kept below the table, an alignment change, and a pending change whose text holds
+    the table. Comments and highlights are no changes.
+  - **Your own fold into the deletion,** as rejecting them would. A row or column you inserted is
+    removed outright, rows and columns you deleted or moved are in the payload as they were, and
+    your alignment change is undone. The deletion lines the table kept go with it, and their ledger
+    entries. A table that is part of the text of your own pending insertion is taken out of that
+    text, with no deletion; when it was all of the text, the insertion goes. A change of yours that
+    can't be undone with the table, as a format change that a later edit altered, is refused in the
+    same words.
+  - **Comments become point comments where the table was,** as in a row that leaves (rule 4): at the
+    start of the text of the block after the table, or, where that block can hold no marker, at the
+    end of the text of the block before it. A comment with a part that stays loses only the part in
+    the table. A highlight has no point form and goes. A comment with one end in the table and the
+    other outside it is refused ("Bo Chen's comment runs from this table into the text next to it.
+    Delete it first, or turn off Track Changes."), and so is one that no text next to the table
+    can keep, as when the table is all the text ("Bo Chen's comment is in this table, and no text
+    next to it can keep it. Delete the comment first, or turn off Track Changes.").
+  - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
+    and their ledger entries, and the blank lines after it (the break before it, when nothing
+    follows). Its comments become points as above. A comment that has no place so, or runs out of
+    the table, keeps a point where the text was, as it does for any text that goes (§3.10).
+  - Every order of decisions reads the same, judged against micromark 4.0.2. The newest view has no
+    table, and the original has the table as it read with your own changes rejected. Rejecting the
+    deletion writes the payload back, and decides nothing else.
 - **Order and positions.** The deletion lines are kept in the order of their positions, those at one
   position in the order the rows had. A row is written back at its position when its deletion is
   rejected, in front of the row that is at that position then; the deletions at the same position
@@ -1959,9 +1991,8 @@ it, one per line:
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
   "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
   the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
-  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
-  front of the table's first row as it does in front of a paragraph's first line, and everything
-  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  held to this: a deletion of a whole table is the block deletion of §3.4 (rule 6 above), and the
+  table is the marker's payload. A row whose cells are all dashes is a row like any
   other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
   of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
   can unmake the table, as an edit of any line can unmake what it is).

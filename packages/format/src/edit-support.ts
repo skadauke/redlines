@@ -116,7 +116,7 @@ export function assertNoMarkup(text: string): void {
 }
 
 /** A change from `before` to `after` as one change: what the two do not share in the middle. */
-function singleChange(before: string, after: string): TextChange[] {
+export function singleChange(before: string, after: string): TextChange[] {
   if (before === after) return [];
   const limit = Math.min(before.length, after.length);
   let start = 0;

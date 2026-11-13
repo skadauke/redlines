@@ -11,6 +11,7 @@ import {
   bodyOf,
   bo,
   context,
+  exactly,
   expectEveryOrderAlike,
   expectInOrder,
   file,
@@ -407,5 +408,18 @@ describe('deleting a whole table (format §3.4, §3.7)', () => {
 
   it('still refuses a deletion of only the table’s header row’s start', () => {
     expect(() => track(text, remove(from, from + 3))).toThrow(EditError);
+  });
+
+  it('is the same for a table whose header row has no leading pipe, where no marker stands', () => {
+    for (const table of ['a | b\n-- | --\n1 | 2', 'a | b |\n-- | -- |\n1 | 2 |']) {
+      const bare = file(`Intro.\n\n${table}\n\nAfter.`);
+      expect(readTables(bare, parse(bare)), table).toHaveLength(1);
+      const start = bare.indexOf('a | b');
+      const after = track(bare, remove(start, start + table.length));
+      expect(parse(after).marks[0]?.payload, table).toBe(`${table}\n\n`);
+      expectEveryOrderAlike(table, after, exactly);
+      expect(blockLeaves(newestView(after).text).some((leaf) => leaf.kind === 'table')).toBe(false);
+      expect(originalView(after).text.replace(/\n+$/, '')).toBe(`Intro.\n\n${table}\n\nAfter.`);
+    }
   });
 });

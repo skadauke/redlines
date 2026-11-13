@@ -5,15 +5,26 @@
 //    each: text in a row never holds an unescaped `|` or a line break, so no edit adds a cell, takes
 //    one away or splits a row. The editor writes `\|` and `<br>`; the format refuses the rest, an
 //    agent's edit included.
+// 6. A table that goes whole (a block deletion, §3.4) takes your own pending changes in, as rejecting
+//    them would, and is refused while it holds another person's. Its comments become point comments
+//    where it was.
 // 7. A row that starts with text and no pipe gets a plain `| ` in front when a marker has to stand
 //    at its start, which a row with markers must not leave bare.
 
-import { lineEnd, lineStart } from './blocks.ts';
+import {
+  bodyStart,
+  lineEnd,
+  lineStart,
+  nextLineStart,
+  openerRange,
+  prefixLength,
+} from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { readLine, readTables } from './table.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
+import { closersBelow, deletionLine } from './table-rows.ts';
+import type { MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 
 export const ONE_LINE_CELL = 'In a table, write a pipe as \\| and a line break as <br>.';
 
@@ -121,6 +132,9 @@ export function leadingPipeAt(text: string, edit: TextChange, parsed?: Parsed): 
   if (!line.includes('|') && !pipeAbove(text, edit.from)) return null;
   for (const table of tablesIn(text, parsed)) {
     if (edit.from < table.from || edit.from > table.to) continue;
+    // A deletion of the whole table is a deletion of a block, with its marker in front of the block
+    // after it: nothing stands at the start of the table's first row, and the pipe is no use.
+    if (edit.from <= table.from && edit.to >= table.to && edit.to > edit.from) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.from <= r.to);
     const cell = row?.cells[0];
     if (!row || !cell || row.leadingPipe) continue;
@@ -543,6 +557,242 @@ export function commentFromAbove(
     }
   }
   return null;
+}
+
+/**
+ * What belongs to a table, for deleting it whole (format §3.7, rule 6): from its first character to
+ * the end of its last deletion line. The closers of marks that end with the table stand below that,
+ * and are theirs.
+ */
+export function tableExtent(text: string, table: TableRead): Range {
+  let to = table.to;
+  for (const deletion of table.deletions) to = Math.max(to, deletionLine(text, deletion).to);
+  return { from: table.from, to };
+}
+
+/** Whether a mark has a marker in `extent`, or has the extent between its markers: it is in the
+ * table, or the table is in it. A marker in front of the table's first line, or behind its last,
+ * does not touch it. */
+function touchesExtent(mark: MarkRange, extent: Range): boolean {
+  let from = Infinity;
+  let to = -Infinity;
+  for (const segment of mark.segments) {
+    from = Math.min(from, segment.open.from);
+    to = Math.max(to, (segment.close ?? segment.open).to);
+  }
+  return from <= extent.to && to >= extent.from;
+}
+
+/** Whether a mark's text holds the whole extent, as an insertion that a table is typed into does: the
+ * table is part of the mark's text, which deleting it shortens, and no change of the table's own. */
+function holdsExtent(mark: MarkRange, extent: Range): boolean {
+  return (
+    (mark.kind === 'ins' || mark.kind === 'sub') &&
+    mark.segments.some(
+      (segment) =>
+        segment.close !== undefined &&
+        segment.open.to <= extent.from &&
+        extent.to <= segment.close.from,
+    )
+  );
+}
+
+/** A mark that is a change, which a comment and a highlight are not. */
+const isChangeMark = (mark: MarkRange): boolean => mark.kind !== 'cmt' && mark.kind !== 'hl';
+
+/**
+ * Rule 6 (format §3.7), for Track Changes on: another person's pending changes stay theirs, so a table
+ * that holds one can't be deleted until it is decided: a change in a cell, an inserted or moved row or
+ * column, a deleted row or column kept below it, an alignment change, or a pending change that holds
+ * the table in its text. Comments and highlights are no changes. Returns the refusal, which names the
+ * person, or null.
+ */
+export function ruleSix(
+  text: string,
+  table: TableRead,
+  parsed: Parsed,
+  author: Person | string,
+): string | null {
+  const me = typeof author === 'string' ? author : author.handle;
+  const extent = tableExtent(text, table);
+  for (const mark of parsed.marks) {
+    if (!isChangeMark(mark) || mark.entry.by === me || !touchesExtent(mark, extent)) continue;
+    return pendingInTable(parsed, mark);
+  }
+  return null;
+}
+
+/** The words of the refusal of deleting a table that holds the pending change `mark`. */
+export function pendingInTable(parsed: Parsed, mark: MarkRange): string {
+  return `${nameOf(parsed, mark.entry.by)}'s pending change is in this table. Decide it first.`;
+}
+
+/** Whether a mark is an alignment change of a table, whose markers stand around it (format §3.7). */
+const isAlignChange = (mark: MarkRange): boolean =>
+  mark.kind === 'fmt' &&
+  mark.segments.some((segment) => /^align=/.test(segment.payload ?? mark.payload ?? ''));
+
+/** Whether every marker of a mark lies in `extent`, or it is an alignment change, whose markers stand
+ * around the table. */
+function inExtent(mark: MarkRange, extent: Range): boolean {
+  const within = (range: Range | undefined) =>
+    range === undefined || (extent.from <= range.from && range.to <= extent.to);
+  return (
+    isAlignChange(mark) ||
+    mark.segments.every((segment) => within(segment.open) && within(segment.close))
+  );
+}
+
+/**
+ * The marks that deleting a table whole folds in (format §3.7, rule 6): the changes in the table, its
+ * row and column changes and deletion lines and its alignment change, by `handle` only, or by anyone
+ * with Track Changes off. A table that is part of the text of a pending insertion is no such change:
+ * deleting it shortens that text. A mark that has markers in the table and outside it is not folded
+ * either, which would undo what lies outside the table too (`straddlingMarks`).
+ */
+export function foldedMarks(
+  text: string,
+  table: TableRead,
+  parsed: Parsed,
+  handle: string | null,
+): MarkRange[] {
+  const extent = tableExtent(text, table);
+  return parsed.marks.filter(
+    (mark) =>
+      isChangeMark(mark) &&
+      (handle === null || mark.entry.by === handle) &&
+      touchesExtent(mark, extent) &&
+      !holdsExtent(mark, extent) &&
+      inExtent(mark, extent),
+  );
+}
+
+/** The marks of `handle` that have markers in a table and outside it, and do not hold it: undoing
+ * them would undo more than the table. */
+export function straddlingMarks(
+  text: string,
+  table: TableRead,
+  parsed: Parsed,
+  handle: string,
+): MarkRange[] {
+  const extent = tableExtent(text, table);
+  return parsed.marks.filter(
+    (mark) =>
+      isChangeMark(mark) &&
+      mark.entry.by === handle &&
+      touchesExtent(mark, extent) &&
+      !holdsExtent(mark, extent) &&
+      !inExtent(mark, extent),
+  );
+}
+
+/** The comments and highlights that have a marker in a table's rows (format §3.7, rule 6). */
+export interface TableAnnotations {
+  /** The markers inside the rows that go: those of the comments that lie wholly in them, and every one
+   * of a highlight that has one there, which goes whole. */
+  removals: TextChange[];
+  /** The comments that need a point where the table was: all of their parts are in it. In the order
+   * of their first marker. */
+  points: { id: string; by: string }[];
+  /** A comment with one end in the table and the other outside (it keeps its markers), and its author. */
+  crossing: { id: string; by: string } | null;
+}
+
+/**
+ * Rule 6 (format §3.7) for comments: a comment in a table that is deleted whole becomes a point comment
+ * where the table was, as in a row that leaves (rule 4); one with a part that stays loses only the
+ * part in the table. A highlight has no point form and goes. A comment with one end in the table and
+ * the other outside has no place for the end that leaves, and is reported.
+ */
+export function annotationsIn(parsed: Parsed, table: TableRead): TableAnnotations {
+  const inside = (range: Range | undefined) =>
+    range !== undefined && table.from <= range.from && range.to <= table.to;
+  // The opener of a comment on the first cell of a header with no pipe at its start is alone on the
+  // line above the table, which it starts as a block (§3.3): it is in the table, with its carrier.
+  const opens = (segment: Segment) =>
+    inside(segment.open) || (segment.carrier !== undefined && segment.carrier.to === table.from);
+  const removal = (range: Range): TextChange => ({ from: range.from, to: range.to, insert: '' });
+  const removals: TextChange[] = [];
+  const points: { id: string; by: string }[] = [];
+  let crossing: { id: string; by: string } | null = null;
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'cmt' && mark.kind !== 'hl') continue;
+    if (!mark.segments.some((segment) => opens(segment) || inside(segment.close))) continue;
+    const by = parsed.ledger.comments.find((thread) => thread.id === mark.id)?.by ?? mark.entry.by;
+    if (mark.kind === 'hl') {
+      for (const segment of mark.segments) {
+        removals.push(removal(openerRange(segment)));
+        if (segment.close) removals.push(removal(segment.close));
+      }
+      continue;
+    }
+    // A comment with a part that has one end in the table and the other outside it is left alone.
+    const across = mark.segments.some(
+      (segment) => segment.close !== undefined && opens(segment) !== inside(segment.close),
+    );
+    if (across) {
+      crossing ??= { id: mark.id, by };
+      continue;
+    }
+    let stays = false;
+    for (const segment of mark.segments) {
+      if (!opens(segment)) stays = true;
+      else {
+        removals.push(removal(openerRange(segment)));
+        if (segment.close) removals.push(removal(segment.close));
+      }
+    }
+    if (!stays) points.push({ id: mark.id, by });
+  }
+  return { removals, points, crossing };
+}
+
+/** The words of the refusal of a comment that runs from a table into the text around it. */
+export function commentCrossesTable(parsed: Parsed, by: string): string {
+  return `${nameOf(parsed, by)}'s comment runs from this table into the text next to it. Delete it first, or turn off Track Changes.`;
+}
+
+/** The words of the refusal of a comment in a table that has no text next to it to keep its point. */
+export function commentHasNoPlace(parsed: Parsed, by: string): string {
+  return `${nameOf(parsed, by)}'s comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.`;
+}
+
+/** Whether the line that starts at `start` is blank. */
+const blankAt = (text: string, start: number): boolean =>
+  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+
+/**
+ * Where a point comment of a table that is deleted whole may stand, in the order to try them (format
+ * §3.7, rule 6): at the start of the text of the block after the table, past its prefix (`- `, `> `,
+ * `## `), then at the end of the text of the block before it. Either may be missing, and neither is
+ * known to hold a marker: a code block holds none, which the edit that writes the point finds out.
+ */
+export function pointPlaces(text: string, parsed: Parsed, table: TableRead): number[] {
+  const places: number[] = [];
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  // Past the closers of marks that end with the table, which stand on a line of their own below it.
+  let end = tableExtent(text, table).to;
+  const closers = closersBelow(text, end);
+  if (closers !== -1) end = lineEnd(text, closers);
+  let after = nextLineStart(text, end);
+  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  if (after < stop) {
+    const line = text.slice(after, lineEnd(text, after));
+    const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefixLength(line)))?.[0].length ?? 0;
+    places.push(after + prefixLength(line) + heading);
+  }
+  const first = bodyStart(text);
+  let above = lineStart(text, table.from);
+  while (above > first) {
+    const line = lineStart(text, above - 1);
+    above = line;
+    const content = text.slice(line, lineEnd(text, line));
+    // A line of nothing but markers is no text to end at: a carrier follows it.
+    if (content.replace(/<!--.*?-->/g, '').trim() === '') continue;
+    places.push(lineEnd(text, line));
+    break;
+  }
+  return places;
 }
 
 /** A pipe written plain beside an edit (format §3.7, rule 7): where, what, and whether text at that

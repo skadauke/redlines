@@ -1,7 +1,9 @@
 // Random tables, cell edits and row operations by three people, with Track Changes on and off
 // (format §3.7): every state reads as one GFM table to the oracle, every order of decisions reads the
-// same, all accepted is the newest view and all rejected the original's bytes. `REDLINES_FUZZ` sets
-// how many tables (6000 before a stage merges).
+// same, all accepted is the newest view and all rejected the original's bytes. Each table ends by
+// being deleted whole, by one of the three or plain, alone in the file and among paragraphs: refused
+// exactly when another person's change is in it, and otherwise the same in every order. `REDLINES_FUZZ`
+// sets how many tables (6000 before a stage merges).
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
@@ -36,6 +38,106 @@ const PEOPLE = [ada, bo, claudeAda];
 
 function tablesOf(text: string) {
   return blockLeaves(text).filter((leaf) => leaf.kind === 'table');
+}
+
+/** The text without the blank lines at its end. */
+const tidy = (view: string) => view.replace(/\s+$/, '');
+
+/**
+ * Deletes the table of `text` whole (format §3.7, rule 6), by `who`, or plain with none, alone in the
+ * file and among paragraphs, and holds what comes of it to the rule: with Track Changes on it is
+ * refused exactly when another person's change is in the table (a comment alone in the file has no
+ * place), and otherwise the newest view has no table, the original is as it was, every order of
+ * decisions reads alike and accepting or rejecting all gives the newest and the original; with it off
+ * both views lose the table and no change is left.
+ */
+function expectWholeTableDeleted(
+  text: string,
+  who: (typeof PEOPLE)[number] | undefined,
+  ids: () => string[],
+  label: string,
+): void {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const cut = parse(text).ledgerRange?.from ?? text.length;
+  const table = text.slice(0, cut).replace(/[\r\n]+$/, '');
+  const among = `Intro.${eol}${eol}${table}${eol}${eol}After.${text.slice(cut)}`;
+  for (const [shape, body] of [
+    ['alone', text],
+    ['among', among],
+  ] as const) {
+    const found = readTables(body, parse(body))[0];
+    if (!found) continue;
+    const tag = `${label} / delete the table ${shape}, ${who?.handle ?? 'plain'}`;
+    const op: TableOp = { kind: 'deleteTable', table: found.from };
+    const parsed = parse(body);
+    const other = parsed.marks.find(
+      (mark) => mark.kind !== 'cmt' && mark.kind !== 'hl' && mark.entry.by !== who?.handle,
+    );
+    const comments = parsed.marks.some((mark) => mark.kind === 'cmt');
+    let after: string;
+    try {
+      const done = who ? tableEdit(body, op, context(who, ids())) : untrackedTableEdit(body, op);
+      after = applyChanges(body, done.changes);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      // Refused, and every refusal says why: another person's change, or no place for a comment,
+      // or a change of the table's own that can't be undone with it (rejecting it leaves a file
+      // that no longer reads as the table, which the decision's own rules do for a comment in a
+      // moved row of a table without a pipe at its start).
+      const named = parsed.ledger.people.find((p) => p.handle === other?.entry.by)?.name;
+      const pending = /'s pending change is in this table\. Decide it first\.$/.test(error.message);
+      if (who && other)
+        expect(error.message, tag).toBe(
+          `${named}'s pending change is in this table. Decide it first.`,
+        );
+      else if (pending) {
+        const undone = applyChanges(body, rejectAll(body));
+        expect(readTables(undone, parse(undone)), `${tag}: ${error.message}`).toHaveLength(0);
+      } else {
+        expect(who !== undefined && shape === 'alone' && comments, `${tag}: ${error.message}`).toBe(
+          true,
+        );
+        expect(error.message, tag).toMatch(
+          /comment is in this table, and no text next to it can keep it\./,
+        );
+      }
+      continue;
+    }
+    expect(
+      who !== undefined && other !== undefined,
+      `${tag}: allowed, with ${other?.id} pending`,
+    ).toBe(false);
+    const remaining = shape === 'alone' ? '' : `Intro.${eol}${eol}After.`;
+    // (a file with no mark keeps the ledger it had, which no edit writes)
+    if (parse(after).marks.length > 0) {
+      expectInOrder(
+        tag,
+        parse(after).ledger.comments.map((thread) => thread.id),
+        after,
+      );
+    }
+    expect(tablesOf(newestView(after).text), tag).toHaveLength(0);
+    expect(tidy(newestView(after).text), tag).toBe(remaining);
+    if (!who) {
+      expect(tablesOf(originalView(after).text), tag).toHaveLength(0);
+      expect(tidy(originalView(after).text), tag).toBe(remaining);
+      expect(
+        parse(after).marks.filter((mark) => mark.kind !== 'cmt'),
+        tag,
+      ).toEqual([]);
+      continue;
+    }
+    expect(originalView(after).text, tag).toBe(originalView(body).text);
+    expect(tablesOf(originalView(after).text), tag).toHaveLength(1);
+    expectEveryOrderAlike(tag, after, exactly);
+    // Accepting everything leaves the newest view, rejecting everything the original.
+    const accepted = applyChanges(after, acceptAll(after));
+    expect(tidy(newestView(accepted).text), `${tag}: accept all`).toBe(remaining);
+    const rejected = applyChanges(after, rejectAll(after));
+    expect(tidy(newestView(rejected).text), `${tag}: reject all`).toBe(
+      tidy(originalView(body).text),
+    );
+  }
 }
 
 describe('rows, random', () => {
@@ -179,6 +281,14 @@ describe('rows, random', () => {
         }
       }
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
+      // The table deleted whole, which ends every table's story.
+      const ender = pick(['ada', 'bo', 'claude-ada', 'plain'] as const);
+      expectWholeTableDeleted(
+        text,
+        PEOPLE.find((p) => p.handle === ender),
+        ids,
+        label,
+      );
       const marks = parse(text).marks.length;
       if (marks === 0 || marks > 5) continue;
       used++;
