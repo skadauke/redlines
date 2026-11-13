@@ -243,7 +243,10 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
     hits.push(hit);
   };
   for (const m of w.matchAll(AUTOLINK)) inside(m.index, m.index + m[0].length, 'autolink');
-  for (const m of w.matchAll(TAG)) inside(m.index, m.index + m[0].length, 'tag');
+  // A `<` that a backslash escapes starts no tag: the tag's text is text.
+  for (const m of w.matchAll(TAG)) {
+    if (!isEscaped(w, m.index)) inside(m.index, m.index + m[0].length, 'tag');
+  }
   for (const m of w.matchAll(FOOTNOTE)) inside(m.index, m.index + m[0].length, 'footnote');
   for (const re of [ENTITY, MATH, SHORTCODE, ATTRIBUTES]) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');

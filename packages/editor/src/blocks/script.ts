@@ -223,8 +223,14 @@ function expandDoc(script: Script): Expanded {
     if (!id) throw new Error(`${script.name}: ${tag} closes nothing`);
     return `<!--/${id}-->`;
   };
+  // A document with a ledger of its own is a file as it is written, which no shortened marker is
+  // in: the tags `<sub>` and `</sub>` of subscript, in a file that a generator of random documents
+  // made, are no markers of a substitution.
+  const asFile = script.doc.includes('<!-- redlines');
   let text = characters(script.doc).replace(
-    /<split>|<ins>|<\/ins>|<del ([^>]*)>|<sub ([^>]*)>|<\/sub>|<fmt ([^>]*)>|<\/fmt>/g,
+    asFile
+      ? /(?!)/g
+      : /<split>|<ins>|<\/ins>|<del ([^>]*)>|<sub ([^>]*)>|<\/sub>|<fmt ([^>]*)>|<\/fmt>/g,
     (tag, del?: string, sub?: string, fmt?: string) => {
       if (tag === '<split>') return `<!--split ${take()}-->`;
       if (tag === '<ins>') {

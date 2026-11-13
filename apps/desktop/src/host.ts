@@ -57,8 +57,12 @@ export interface Host {
   reveal(path: string): Promise<void>;
   /** Prints the window's page, as it is shown (the system's print dialog). */
   print(): Promise<void>;
-  /** Asks where to save, starting from a file name or a full path, and writes the file there. */
-  saveAs(text: string, suggestedName: string): Promise<string | null>;
+  /**
+   * Asks where to save, starting from a file name or a full path, and writes the file there. For a
+   * name alone, `folder` is where the dialog starts, if it is still there; without it, or when it
+   * is gone, the dialog starts where macOS has it. A full path starts in its own folder.
+   */
+  saveAs(text: string, suggestedName: string, folder?: string | null): Promise<string | null>;
   /**
    * Calls `onChange` after the file changes on disk; resolves to a function that stops watching. In
    * the app, only the window's document, a file it may use, which the app watches for it.
@@ -182,6 +186,12 @@ export function dirname(path: string): string {
   return path.slice(0, separator === 0 ? 1 : Math.max(separator, 0));
 }
 
+/** The path of the file `name` in `folder`, written with the separator the folder's path uses. */
+export function joinPath(folder: string, name: string): string {
+  const separator = folder.includes('\\') && !folder.includes('/') ? '\\' : '/';
+  return `${folder.replace(/[\\/]+$/, '')}${separator}${name}`;
+}
+
 export { deriveHandle };
 
 /**
@@ -243,6 +253,34 @@ function panelFilters(name = '') {
   return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
 }
 
+/** How long Save waits to hear whether the default folder is there, before it goes without. */
+const FOLDER_CHECK_MS = 1000;
+
+/**
+ * Where the save panel starts: a full path as it is, in its own folder; and for a name alone,
+ * the name in `folder`, once the app says the folder is there (src-tauri/src/files.rs), else the
+ * name alone, which leaves the folder to macOS, where it last saved. A folder the app can't be
+ * asked about, or doesn't answer about within a moment, as one on a volume that has gone away
+ * doesn't, is no reason to hold Save up.
+ */
+async function savePanelStart(name: string, folder: string | null | undefined): Promise<string> {
+  if (!folder || basename(name) !== name) return name;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const there = await Promise.race([
+      invoke<boolean>('folder_exists', { path: folder }),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), FOLDER_CHECK_MS);
+      }),
+    ]);
+    return there ? joinPath(folder, name) : name;
+  } catch {
+    return name;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -268,9 +306,10 @@ function createTauriHost(): Host {
     exists: (path) => exists(path),
     reveal: (path) => invoke('reveal_in_finder', { path }),
     print: () => invoke('print_window'),
-    async saveAs(text, suggestedName) {
+    async saveAs(text, suggestedName, folder) {
       const filters = panelFilters(suggestedName);
-      const path = await saveDialog({ defaultPath: suggestedName, filters });
+      const defaultPath = await savePanelStart(suggestedName, folder);
+      const path = await saveDialog({ defaultPath, filters });
       if (!path) return null;
       // The panel takes a name whose type conforms to one it offers, a script's for plain text's,
       // and off the Mac a name with no extension: nothing is written to a file that isn't a
