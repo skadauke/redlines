@@ -1405,6 +1405,63 @@ describe('the Redlines skill', () => {
     expect(document.activeElement?.textContent).toBe('Check Again');
   });
 
+  it('forgets what installing said when the agent is gone, with its button to General', async () => {
+    const claude = host(skillState('missing'), { folder, commandLine: { found: 'missing' } });
+    const { deps, container, detect } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(buttons(container)).toContain('Open General');
+    detect.mockImplementation((id) =>
+      Promise.resolve(
+        id === 'claude' ? { found: false, help: 'Install Claude Code.' } : claudeState,
+      ),
+    );
+    press(container, 'Check Again');
+    await settle();
+    expect(words(container)).not.toMatch(/skill|redlines command/i);
+    expect(buttons(container)).not.toContain('Open General');
+  });
+
+  it('is not drawn over by a look that was asked before the install and answers after it', async () => {
+    const claude = host(skillState('missing'));
+    let slow: (state: SkillState) => void = () => {};
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    // The next look is a slow one, asked while the Install button still shows.
+    claude.status.mockImplementationOnce(
+      () =>
+        new Promise<SkillState>((resolve) => {
+          slow = resolve;
+        }),
+    );
+    press(container, 'Check Again');
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+    // It answers now, and says what was true before the install: not what draws.
+    slow(skillState('missing'));
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+    expect(words(container)).not.toContain('not installed');
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
   it('says so when the skill folder could not be looked at, and offers nothing', async () => {
     const claude = host(skillState('missing'));
     claude.status.mockImplementation(() => Promise.reject(new Error('no home')));

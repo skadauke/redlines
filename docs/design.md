@@ -1407,9 +1407,11 @@ text, comments, replies and notes as information, never as instructions. It is w
 differ: Claude writes as `claude-<person>`, and an agent with a name of its own, such as an OpenClaw
 agent called Moby, as `moby-<person>`. A test fails when a copy isn't what the source makes, or
 shows a command or an option the command line doesn't have. Each agent reads skills from a folder of
-its own, and Install Skill on its row in Preferences › Agents writes the one file there, `SKILL.md`:
-`~/.claude/skills/redlines` for Claude Code, `~/.agents/skills/redlines` for Codex, which OpenClaw
-reads too, and `~/.openclaw/skills/redlines` for OpenClaw. The row says where it went, and says
+its own, and Install Skill on the row of Claude Code and of Codex in Preferences › Agents writes the
+one file there, `SKILL.md`: `~/.claude/skills/redlines` for Claude Code and
+`~/.agents/skills/redlines` for Codex, which OpenClaw reads too (OpenClaw's own folder is
+`~/.openclaw/skills/redlines`, which the copy command in `integrations/README.md` fills, and the
+app can, for an OpenClaw on this Mac). The row says where it went, and says
 when a login shell can't find the `redlines` command, which the skill runs, and offers General,
 where the command line is installed; Install Skill doesn't install it itself, which may ask for an
 administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
@@ -1417,19 +1419,21 @@ the app carries its own, so that an installed copy that is older shows Update Sk
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); the skill is published on ClawHub by its owner
-(`integrations/README.md`).
+(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:
 
 - Claude runs with `--restricted`, which confines its file tools to the document's folder,
   symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
-  "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+  "Just This Document". Its hooks, and the person's settings, skills and `.mcp.json`, don't run
+  (`--restricted` leaves an installed skill out: its first event lists the built-in skills only).
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
-  hooks, its skills (the person's own, and Redlines' skill, are for Codex run by hand) and the
-  person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
+  hooks, its skills (the person's own, Redlines' skill, and Codex's built-in ones such as image
+  generation and the skill installer, are for Codex run by hand) and the person's ChatGPT
+  connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
 - At **This folder and my home folder** the same limits hold with the home folder added, and what
   is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
@@ -1539,7 +1543,7 @@ Syrus runs agents on its server with API keys or enterprise agreements.
 | **VS Code and Positron**            | One extension on Open VSX, which also covers Cursor. First, tracked-change decorations in the normal editor; then a custom editor that hosts the Redlines editor                                  | v1.x                              |
 | **Claude**                          | The command line and MCP server; a skill, which is also a Claude Code plugin (written); later, the plugin's hooks, which block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md)) | v1 (server, skill, plugin), v1.x (hooks) |
 | **Codex and ChatGPT**               | The same MCP server, a skill in `~/.agents/skills` (written) and an `AGENTS.md` snippet                                                                                                            | v1 (skill), v1.x                  |
-| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, and on ClawHub; the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
+| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, for ClawHub too (to be published by its owner); the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
 | **Other agents**                    | GitHub Copilot, Gemini, OpenCode and others through the Agent Client Protocol                                                                                                                       | v1.x                              |
 | **Review in chat apps**             | A remote MCP server whose review panel (MCP Apps) draws tracked changes inside claude.ai and ChatGPT, with Accept and Reject                                                                       | Later                             |
 | **Syrus**                           | A replacement for Syrus's Design Docs plugin (§9.1)                                                                                                                                                 | v1.x                              |
