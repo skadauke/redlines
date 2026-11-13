@@ -266,7 +266,7 @@ Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 The View menu, under the eye at the top right (§5.1), sets how the document is shown:
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
-  (Word's No Markup).
+  (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Simple** (⌥⌘2): the same text as Clean, with a change bar beside each line that has a pending
   change, in its author's color, and the comments with their notes: deletions are hidden, and
   inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches
@@ -858,6 +858,7 @@ without the editor.
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
+| `apps/desktop/quicklook` | The Mac app's Quick Look preview of Markdown, R Markdown and Quarto files: the Clean view as HTML, made by a bundle of `@redlines/format`, micromark and the Default theme's CSS, and the Swift extension that runs it in JavaScriptCore (§10) | macOS (the system's JavaScriptCore) |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
@@ -895,6 +896,15 @@ one on its disk image or on another disk in `/Volumes` (an external drive, a sec
 network share), or one translocated by macOS. As for updates, it is refused before anything is
 asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
 checkout, `pnpm -s redlines` runs the TypeScript directly.
+
+The app carries one more program, the Quick Look extension (§10), as
+`Redlines.app/Contents/PlugIns/RedlinesPreview.appex`. Tauri builds no app extensions, so
+`scripts/build-quicklook` makes it as part of `pnpm build`: it bundles the renderer
+(`apps/desktop/quicklook`), compiles a small Swift extension for both architectures with `swiftc`,
+and signs it, and `bundle.macOS.files` copies the folder into the app. Tauri signs the app and the
+programs it copies and never a plug-in, so the extension is signed before Tauri seals the app, with
+the same identity and the sandbox entitlement that an app extension must have
+([releasing](releasing.md#the-quick-look-extension)).
 
 ### 6.4 Plugins
 
@@ -1367,6 +1377,34 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
+- **Quick Look (macOS).** Space on a Markdown, R Markdown or Quarto file in Finder, Mail, Spotlight
+  or the Open dialog shows the Clean view (§5.3): every pending change accepted, in the Default
+  theme, as the Mac app draws a document. A file that has changes or open comments waiting in it
+  has one line over the text that says so and points to the app ("4 changes and 2 comments by
+  Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
+  matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
+  line over its code. Raw HTML in the document is text, never live, and an image is its alt text.
+  - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
+    `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
+    It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
+    micromark with GitHub's extensions, the Default theme's tokens and its fonts, and runs it in
+    the system's JavaScriptCore, for the HTML that Quick Look draws. It never calls the
+    `redlines` program or anything on the `PATH`, and the app needn't be running.
+  - **Nothing to install.** macOS registers the extension the first time the app runs from
+    Applications and removing the app removes it. It needs macOS 13, the first whose
+    JavaScriptCore has the array methods the format library uses. System Settings › General ›
+    Login Items & Extensions › Quick Look turns it off.
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
+    no type for R Markdown and Quarto: a file of either gets a type made from its extension
+    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
+    extension from the app that declares it. Where another app declares them, macOS chooses that
+    app's type and preview, and a person can choose in the same settings pane; this is the one
+    extension per type that Quick Look has.
+  - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
+    drawn, to its last paragraph under that, with a line that says so. The count of what waits is
+    read from all of it.
+  - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
+    thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1380,6 +1418,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
+- **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
+  entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
+  so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
+  JavaScriptCore's compiler, without which the renderer is three times as slow (§10).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
