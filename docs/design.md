@@ -1068,18 +1068,17 @@ nothing in it run. No window goes to an `asset:` URL itself. A drop on a window 
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
 dragged, dropped back on that window, which opens nothing). Image files dropped alone, every file of
-the drop an image, are the window's to add to its document (§5.10), and are the one exception: the app, which
-has them from the system's drop, keeps them for that window and tells it how many there are, where
-they landed, and an id to ask for them by. The panel that Format › Image… shows is the app's too,
-so the window can raise a panel for image files and is given no path by it, only an id. The app
-copies the files into the folder for the document's images when the window asks, so the window
-never names a file to copy and reads none of them, and a pasted image's bytes, which the window
-has, are written the same way. What is copied is an image by its name and its first bytes, no
-larger than the preview shows, and goes inside the folder of a document the window may use and
-says it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one
-folder named in the settings, never one that is a link out of it, and never replacing a file. A
-folder or any other file dropped opens nothing, and lets the window read nothing it couldn't
-before. Tauri
+the drop an image, are the window's to add to its document (§5.10), and are the one exception: the
+app, which has them from the system's drop, keeps them for that window and tells it how many there
+are, where they landed, and an id to ask for them by. The panel that Format › Image… shows is the
+app's too, so the window can raise a panel for image files and is given no path by it, only an id.
+The app copies the files into the folder for the document's images when the window asks, so the
+window never names a file to copy and reads none of them, and a pasted image's bytes, which the
+window has, are written the same way. What is copied is an image by its name and its first bytes, no
+larger than the preview shows, and goes inside the folder of a document the window may use and says
+it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one folder
+named in the settings, never one that is a link out of it, and never replacing a file. A folder or
+any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
 adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
 holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
