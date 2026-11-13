@@ -203,6 +203,7 @@ function threadLines(thread: Thread): string[] {
 export function serializeLedger(ledger: Ledger): string {
   const lines = ['<!-- redlines', NOTE, 'version: 1'];
   if (ledger.tracking) lines.push(`tracking: ${ledger.tracking}`);
+  if (ledger.view) lines.push(`view: ${ledger.view}`);
   if (ledger.history === 'full') lines.push('history: full');
   if (ledger.people.length > 0) {
     lines.push('people:');
@@ -220,14 +221,18 @@ export function serializeLedger(ledger: Ledger): string {
   return lines.join('\n');
 }
 
-/** A ledger with no marks, no comments and no settings is not written (format §5.1). */
-function isEmpty(ledger: Ledger): boolean {
+/**
+ * Whether a ledger holds something that keeps it in the file: a mark, a comment, a setting or a key
+ * of a later version (format §5.1). People and the view don't: a ledger left with nothing but them is
+ * not written, and a view alone never makes one (format §5.6).
+ */
+export function keepsLedger(ledger: Ledger): boolean {
   return (
-    Object.keys(ledger.marks).length === 0 &&
-    ledger.comments.length === 0 &&
-    !ledger.tracking &&
-    ledger.history !== 'full' &&
-    Object.keys(ledger.extra ?? {}).length === 0
+    Object.keys(ledger.marks).length > 0 ||
+    ledger.comments.length > 0 ||
+    !!ledger.tracking ||
+    ledger.history === 'full' ||
+    Object.keys(ledger.extra ?? {}).length > 0
   );
 }
 
@@ -243,11 +248,11 @@ const LAST_BREAK = /(?:\r\n|\r|\n)$/;
 /**
  * The blank line in front of a ledger whose lines end in `eol`, after `text` up to `at` (format
  * §5.1): two line breaks of the file's, or two CRLFs after a CR alone, which the first LF of a
- * blank line would join into one CRLF for every reader but this one. Nothing in front of the
- * ledger, nothing.
+ * blank line would join into one CRLF for every reader but this one. A file with no text has it
+ * too: the ledger would otherwise start the file, and text typed in front of it would join its
+ * first line, where it can't be told from the ledger's own text.
  */
 function blankLine(text: string, at: number, eol: Eol): string {
-  if (at === 0) return '';
   return text[at - 1] === '\r' ? '\r\n\r\n' : eol + eol;
 }
 
@@ -276,7 +281,7 @@ export function setLedger(
       'unreadable-ledger',
     );
   }
-  if (isEmpty(ledger)) {
+  if (!keepsLedger(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
   const eol = eolOf(text, existing?.range ?? null);

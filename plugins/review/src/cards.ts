@@ -319,7 +319,18 @@ export function cards(ctx: ReviewContext): {
     const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
-    return { pos: from, end: to, above: true, create: (view) => new Card(view, ctx, found) };
+    // Not clipped: CodeMirror puts away a tooltip whose anchor is above the top of the editor's own
+    // box, less the room a host keeps over it (`scrollMargins`: the title bar's). The page is what
+    // scrolls, so that box is the whole document, which starts below that room already: the room
+    // would be taken twice, and a change on the first line would have no card. `visibleSpace` keeps
+    // the card where it can be seen.
+    return {
+      pos: from,
+      end: to,
+      above: true,
+      clip: false,
+      create: (view) => new Card(view, ctx, found),
+    };
   };
   const hover = hoverTooltip(cardAt, {
     hoverTime: 300,

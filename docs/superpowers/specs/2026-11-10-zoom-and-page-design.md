@@ -46,7 +46,7 @@ And the page (#190): the column is a number of characters, not of pixels. It gro
 - A zoom kept per document, per window or per display. Word keeps a zoom in each `.docx` (`w:zoom`); a Markdown file has nowhere private to keep one, and per-person state never goes in the file (format §5.6).
 - Zoom past 200%. macOS's own Zoom (System Settings › Accessibility › Zoom) magnifies the whole screen far beyond it.
 - A reading width setting, like Google Docs' View › Text Width for pageless documents, or Pages' Fit Width. Design §5.12 keeps reading settings for later; this design leaves room for a width token.
-- Zooming the menu bar, context menus, the system's open, save and alert dialogs, the About panel, and the install window. They are the system's, as in every Mac app; the install window runs before the app's settings exist.
+- Zooming the menu bar, context menus, the system's open, save and alert dialogs, the About window, and the install window. The first three are the system's, as in every Mac app; About and the install window are windows of the app's own with a fixed size, and the install window runs before the app's settings exist.
 - A pinch that zooms the window. Stephan: the pinch is for the text only.
 - Changing any theme's measure. 94 characters a line in Default is on the long side, but it is the theme's choice.
 - Windows and Linux beyond not breaking: Tauri's `set_zoom` drives WebView2 (`SetZoomFactor`) and WebKitGTK (`set_zoom_level`) the same way, and there the title bar is the platform's own. Only the Mac is tested.
@@ -131,7 +131,7 @@ Freeing `Mod-0` gives ⌘0 to the menu bar: the registry binds each command's ke
 
 ### What it zooms
 
-Everything Redlines draws: the page and its text, notes, cards, the review bar, the find bar, notices, notifications, the drawn View and Review menus, hover hints, the sidebar, and Preferences. At 200% each is twice its size in points and laid out afresh in a page half as wide, as a browser does. The menu bar, context menus, the system's dialogs, the About panel and the install window keep the system's size. The bars and popovers already place themselves by `innerWidth`, `innerHeight` and client rects, all in the zoomed CSS px, so the review bar, the find bar, the link popover, the picker, the live line and the rail follow as they are.
+Everything Redlines draws: the page and its text, notes, cards, the review bar, the find bar, notices, notifications, the drawn View and Review menus, hover hints, the sidebar, and Preferences. At 200% each is twice its size in points and laid out afresh in a page half as wide, as a browser does. The menu bar, context menus and the system's dialogs keep the system's size, and so do the About window and the install window, which have a fixed size of their own. The bars and popovers already place themselves by `innerWidth`, `innerHeight` and client rects, all in the zoomed CSS px, so the review bar, the find bar, the link popover, the picker, the live line and the rail follow as they are.
 
 **Call:** the window zoom is WebKit's page zoom, which the app sets with `set_zoom`. Because it is real zoom (measured above): the CSS viewport shrinks, text stays sharp, CodeMirror's coordinates stay exact, media queries and the rail's own width rule follow by themselves, and printing ignores it.
 
