@@ -5,6 +5,7 @@
 
 import { baseTitle } from '@redlines/editor';
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
+import { TEXT_LEAST, TEXT_MOST } from './text-size.ts';
 
 export interface MenuCommands {
   /** Opens a new window, with an empty document. */
@@ -424,13 +425,13 @@ export function appMenuModel(
           text: 'Larger Text',
           accelerator: 'Ctrl+Cmd+=',
           action: () => commands.biggerText(),
-          enabled: (state) => state.textSize < 2,
+          enabled: (state) => state.textSize < TEXT_MOST,
         },
         {
           text: 'Smaller Text',
           accelerator: 'Ctrl+Cmd+-',
           action: () => commands.smallerText(),
-          enabled: (state) => state.textSize > 0.8,
+          enabled: (state) => state.textSize > TEXT_LEAST,
         },
         SEPARATOR,
         {

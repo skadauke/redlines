@@ -45,9 +45,31 @@ const RAIL_TABLE: { size: number; beside: number; dots: number }[] = [
   { size: 1.25, beside: 1275, dots: 992 },
   { size: 1.5, beside: 1530, dots: 1190 },
   { size: 2, beside: 2040, dots: 1587 },
+  // Past the window zoom's 200%, to 400% (#318): the rail, its gap and the margins grow with the text.
+  { size: 2.5, beside: 2550, dots: 1984 },
+  { size: 3, beside: 3060, dots: 2380 },
+  { size: 4, beside: 4080, dots: 3174 },
 ];
-const WIDE_SIZES = [1.1, 1.25, 1.5, 1.75, 2];
+const WIDE_SIZES = [1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
 const COLUMN = 680;
+
+/** A table whose cells can't fit the column at the largest sizes, and the long words that wrap. */
+const TABLE_DOC = [
+  '# Sizes',
+  '',
+  '| Name | Role | Notes | Since |',
+  '| ---- | ---- | ----- | ----- |',
+  '| Ada | Author | Wrote the first program | 1843 |',
+  '| Bo | Reviewer | Reads every change with care | 2026 |',
+  '',
+  'A long word, Pneumonoultramicroscopicsilicovolcanoconiosis_and_then_some_more_letters, a link',
+  'https://example.org/a/very/long/path/that/keeps/going/and/going?with=query&and=more, and `inline_code_that_is_long_enough_to_wrap`.',
+  '',
+  '```sh',
+  'redlines str-replace /path/to/a/very/long/path/to/plan.md --old in-March --new in-April --as claude-ada',
+  '```',
+  '',
+].join('\n');
 
 const frames = async (count = 2) => {
   for (let i = 0; i < count; i++) {
@@ -148,6 +170,8 @@ export async function runZoomCheck({
     const baseline = visualLines(editor);
     const column: unknown[] = [];
     for (const size of WIDE_SIZES) {
+      // Wide enough for the column and its margins, which grow above 100%.
+      await setWidth(Math.ceil(COLUMN * size + 2 * 24 * Math.max(1, size)) + 80);
       await setSize(size);
       const width = textWidth(content);
       const lines = visualLines(editor);
@@ -186,6 +210,33 @@ export async function runZoomCheck({
         states.push({ size, dots: dots - 2, compact: false });
     }
     report('rail-states', states);
+
+    // 3. At the largest sizes a table that can't fit its column scrolls in its own box, and the
+    // page never scrolls sideways; long words, links and code wrap (#318).
+    editor.setDoc(TABLE_DOC);
+    editor.setViewMode('clean');
+    const spill: unknown[] = [];
+    for (const [size, width] of [
+      [4, 1000],
+      [4, 600],
+      [3, 700],
+      [2.5, 500],
+      [1, 360],
+    ] as const) {
+      await setSize(size);
+      await setWidth(width);
+      const { scrollDOM } = editor.view;
+      if (scrollDOM.scrollWidth > scrollDOM.clientWidth + 1)
+        spill.push({ size, width, scroll: scrollDOM.scrollWidth, client: scrollDOM.clientWidth });
+      const edge = scrollDOM.getBoundingClientRect().right + 1;
+      const wide = [...content.querySelectorAll<HTMLElement>('.cm-line, .rl-tbl-scroll')].filter(
+        (element) => element.getBoundingClientRect().right > edge,
+      );
+      if (wide.length) spill.push({ size, width, wide: wide.map((e) => e.className) });
+    }
+    report('nothing-spills-at-the-largest-sizes', spill);
+    editor.setDoc(sample);
+    scroller.scrollTop = 0;
   }
 
   // Leave the page as it was.

@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { LADDER } from './text-size.ts';
+import { ZOOM_LADDER } from './text-size.ts';
 
 /** The event the app sends a window with the level, just before it sets the window's zoom. */
 export const ZOOM_EVENT = 'zoom';
@@ -21,7 +21,7 @@ export const RESIZE_WAIT_MS = 500;
 /** The level the app's initialization script handed this page (`window.__REDLINES_ZOOM__`), if a rung. */
 export function initialZoom(): number | null {
   const level = (window as unknown as { __REDLINES_ZOOM__?: unknown }).__REDLINES_ZOOM__;
-  return typeof level === 'number' && LADDER.includes(level) ? level : null;
+  return typeof level === 'number' && ZOOM_LADDER.includes(level) ? level : null;
 }
 
 /** Sets `--rl-zoom` on `root`. */

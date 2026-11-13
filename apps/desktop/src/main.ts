@@ -57,7 +57,7 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
-import { applyTextSize, stepSize } from './text-size.ts';
+import { applyTextSize, stepSize, ZOOM_LADDER } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
@@ -544,7 +544,7 @@ const percent = (level: number) => `${Math.round(level * 100)}%`;
 const changeZoom = (change: { by: number } | { to: number }) => {
   if (!zoom) return;
   const from = zoom.level();
-  const level = 'to' in change ? change.to : stepSize(from, change.by);
+  const level = 'to' in change ? change.to : stepSize(from, change.by, ZOOM_LADDER);
   if (level === from) return;
   void zoom.ask(level).catch((error: unknown) => {
     console.error('Could not zoom the windows', error);

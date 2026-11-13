@@ -56,6 +56,10 @@ export const baseThemeSpec: ThemeSpec = {
     // The measure grows with the text size, between margins that grow above 100%.
     maxWidth: 'calc(var(--rl-column) * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
     margin: '0 auto',
+    // Narrower than the widest thing in it, if it comes to that: a table's cells can't fit the
+    // column at 400%, and the table scrolls in its own box, where the column would otherwise grow
+    // to its width and the page scroll sideways.
+    minWidth: '0',
     padding: `${s(32)} var(--rl-margin, 24px) 30vh`,
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
     // The text cursor, also in hosts whose chrome sets the default arrow.

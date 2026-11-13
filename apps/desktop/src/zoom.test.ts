@@ -55,7 +55,8 @@ describe('initialZoom', () => {
   it('takes the level the initialization script handed the page, if it is a rung', () => {
     script.__REDLINES_ZOOM__ = 1.5;
     expect(initialZoom()).toBe(1.5);
-    for (const level of [1.3, '1.5', null, undefined]) {
+    // The text's rungs above 200% are not zooms of the window.
+    for (const level of [1.3, 2.5, 3, 4, '1.5', null, undefined]) {
       script.__REDLINES_ZOOM__ = level;
       expect(initialZoom()).toBeNull();
     }

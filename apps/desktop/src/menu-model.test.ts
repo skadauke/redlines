@@ -329,7 +329,9 @@ describe('the menu model', () => {
     expect(enabledAt('Zoom Out', { zoom: 0.8 })).toBe(false);
     expect(enabledAt('Zoom Out', { zoom: 0.9 })).toBe(true);
     expect(enabledAt('Actual Text Size', { textSize: 1 })).toBe(false);
-    expect(enabledAt('Larger Text', { textSize: 2 })).toBe(false);
+    expect(enabledAt('Larger Text', { textSize: 4 })).toBe(false);
+    // Past 200%, where the window zoom stops: the text goes on to 400%.
+    for (const size of [2, 2.5, 3]) expect(enabledAt('Larger Text', { textSize: size })).toBe(true);
     expect(enabledAt('Smaller Text', { textSize: 0.8 })).toBe(false);
     for (const text of ['Actual Text Size', 'Larger Text', 'Smaller Text']) {
       expect(enabledAt(text, { textSize: 1.37 }), text).toBe(true);

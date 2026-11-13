@@ -284,9 +284,13 @@ describe('the panes', () => {
     for (let i = 0; i < 10; i++) smaller?.click();
     expect(now().textSize).toBe(0.8);
     expect(smaller?.disabled).toBe(true);
-    for (let i = 0; i < 10; i++) larger?.click();
-    expect(now().textSize).toBe(2);
+    // Past the window zoom's 200%, to 400%: the text goes twice as far.
+    for (let i = 0; i < 20; i++) larger?.click();
+    expect(now().textSize).toBe(4);
+    expect(shown()).toBe('400%');
     expect(larger?.disabled).toBe(true);
+    smaller?.click();
+    expect(now().textSize).toBe(3);
   });
 
   it('shows a text size between rungs and steps from it to the next rung', () => {
