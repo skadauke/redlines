@@ -193,6 +193,13 @@ export interface EditorOptions {
    */
   codeLanguages?: (info: string) => Language | LanguageDescription | null;
   /**
+   * Opens a link's address, for a ⌘-click on a link (Ctrl-click off a Mac): the host decides how, in
+   * the browser or the mail app. Only `http`, `https` and `mailto` addresses reach it (a `www.`
+   * address is the web's), and a hint on the link names the click after the title bar's pause.
+   * Default: none, and a link is text like any other: no click opens it and no hint shows.
+   */
+  openLink?: (address: string) => void;
+  /**
    * Turns the path of a local image, as written in the document and decoded (`img/a b.png`), into
    * a URL the page can load, or null to show the image's alt text. The host knows where the
    * document is and which folders the page may load from. Default: none, and a local image shows

@@ -3,40 +3,80 @@
 // it, so the next measure lays the text out and scrolls the line back before the frame is drawn.
 
 import { EditorView } from '@codemirror/view';
-import type { StateEffect } from '@codemirror/state';
+import type { Extension, StateEffect } from '@codemirror/state';
 
-/** A line to keep in place: where it starts, and its top's distance below the scroller's top, in CSS px. */
+/**
+ * A line to keep in place: where it starts, and its top's distance below the top of what the
+ * scroller shows, in CSS px (`visibleTop`).
+ */
 export interface ReadingPlace {
   pos: number;
   top: number;
 }
 
+/**
+ * The room the editor keeps clear above what it scrolls to (`EditorView.scrollMargins`): the title
+ * bar, which floats over the top of the scroller, and the find bar, while it is open, on top of it.
+ * What is drawn in that room is under them.
+ */
+export function topInset(view: EditorView): number {
+  let inset = 0;
+  for (const margins of view.state.facet(EditorView.scrollMargins)) {
+    inset = Math.max(inset, margins(view)?.top ?? 0);
+  }
+  return inset;
+}
+
+/**
+ * The scroll margin of a host that floats something over the top of the scroller, such as the title
+ * bar: the editor keeps what it scrolls to clear of `room()` pixels, asked for each time, since the
+ * window zoom changes what a point is worth.
+ */
+export function topRoom(room: () => number): Extension {
+  return EditorView.scrollMargins.of(() => ({ top: room() }));
+}
+
+/**
+ * Where what the scroller shows begins: its top, and the room kept above what is scrolled to. A
+ * scroll target puts a line that far below this, whatever the room is, so a place is kept as that
+ * distance, and the same under a bar above the scroller as under one floating over it.
+ */
+export function visibleTop(view: EditorView, scroller: HTMLElement): number {
+  return scroller.getBoundingClientRect().top + topInset(view);
+}
+
+/** How far below `visibleTop` a line can go and still be in sight: the most a place can be kept. */
+export function roomBelow(view: EditorView, scroller: HTMLElement): number {
+  return scroller.clientHeight - topInset(view) - view.defaultLineHeight;
+}
+
 function placeOfLine(view: EditorView, scroller: HTMLElement, pos: number): ReadingPlace {
   const block = view.lineBlockAt(pos);
-  const rect = scroller.getBoundingClientRect();
+  const top = visibleTop(view, scroller);
   // What a scroll target puts at the margin is the position's own coordinates (its first glyph,
   // a little below its block's top), so those are kept; the block's top only for a line CodeMirror
   // has no coordinates for, one it hasn't drawn.
   const coords = view.coordsAtPos(block.from);
   return {
     pos: block.from,
-    top: coords ? coords.top - rect.top : view.documentTop + block.top - rect.top,
+    top: coords ? coords.top - top : view.documentTop + block.top - top,
   };
 }
 
 function topLine(view: EditorView, scroller: HTMLElement): ReadingPlace {
-  const block = view.lineBlockAtHeight(scroller.getBoundingClientRect().top - view.documentTop);
+  const block = view.lineBlockAtHeight(visibleTop(view, scroller) - view.documentTop);
   return placeOfLine(view, scroller, block.from);
 }
 
 /** The caret's visual row while the caret is on screen, else the line at the top. */
 export function readingPlace(view: EditorView, scroller: HTMLElement): ReadingPlace {
   const rect = scroller.getBoundingClientRect();
+  const top = visibleTop(view, scroller);
   const head = view.state.selection.main.head;
   const coords = view.coordsAtPos(head);
-  if (coords && coords.top >= rect.top && coords.bottom <= rect.bottom) {
+  if (coords && coords.top >= top && coords.bottom <= rect.bottom) {
     // The caret's own row, not its line's: in a wrapped paragraph the line block starts rows above.
-    return { pos: head, top: coords.top - rect.top };
+    return { pos: head, top: coords.top - top };
   }
   return topLine(view, scroller);
 }
@@ -49,7 +89,14 @@ export function placeAt(
 ): ReadingPlace {
   if (!point) return topLine(view, scroller);
   const rect = scroller.getBoundingClientRect();
-  if (point.x < rect.left || point.x > rect.right || point.y < rect.top || point.y > rect.bottom) {
+  // A point under the bar, which hides the line it is over, is a point over no text: the first line
+  // the bar leaves in sight is the place.
+  if (
+    point.x < rect.left ||
+    point.x > rect.right ||
+    point.y < visibleTop(view, scroller) ||
+    point.y > rect.bottom
+  ) {
     return topLine(view, scroller);
   }
   const pos = view.posAtCoords(point);
@@ -70,7 +117,7 @@ export function placeBack(
   place: ReadingPlace,
   factor = 1,
 ): StateEffect<unknown> {
-  const room = scroller.clientHeight - view.defaultLineHeight;
+  const room = roomBelow(view, scroller);
   const pos = Math.min(place.pos, view.state.doc.length);
   return EditorView.scrollIntoView(pos, { y: 'start', yMargin: marginFor(place, factor, room) });
 }

@@ -151,8 +151,12 @@ otherwise.
 
 The window, on the desktop:
 
-- **The title bar is the page:** the same color, with no line under it, and the file name centered
-  in small gray type. There is no toolbar and no status bar.
+- **The title bar is the page:** it has no color of its own and no line under it. The page reaches
+  the top of the window and the text scrolls under the bar, fading out as it passes, so that the
+  window reads as one page, with no hard edge below the bar. The file name is centered in small
+  gray type, and the document starts below the bar, so that nothing is hidden at rest. The bar
+  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar
+  and no status bar.
 - **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
   icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
   hands over a copy of the file as it is saved. It never moves the file the window has open, and
@@ -293,6 +297,16 @@ Redlines covers everything in the Markdown Guide's
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
+
+**Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
+address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
+address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
+link is a pointer. Only `http`, `https` and `mailto` addresses open, and `www.` ones, which GitHub's
+autolinks read as the web's: the limit of a copy, which turns `javascript:` and its kin into plain
+text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
+the address again before it runs the system's opener, and the website's demos open a new tab. A
+link that doesn't open is left to the editor like any text, with no hint. A relative link to
+another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Raw
 
@@ -775,7 +789,7 @@ a new email under the same name becomes an alias in the ledger
 
 - the command palette (§5.9);
 - a folder sidebar (written), Quick Open and folder search, which folder chat also needs;
-- links from pasting a URL onto a selection (§5.10);
+- links from pasting a URL onto a selection (§5.10), and ⌘-click to open one (§5.2);
 - R Markdown and Quarto chunk options kept byte for byte.
 
 **Should (v1 if time allows):**
