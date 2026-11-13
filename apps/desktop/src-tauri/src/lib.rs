@@ -399,6 +399,14 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_logs_open,
             #[cfg(unix)]
+            agents::agent_update,
+            #[cfg(unix)]
+            agents::agent_sign_in,
+            #[cfg(unix)]
+            agents::agent_setup_stop,
+            #[cfg(unix)]
+            agents::agent_terminal_sign_in,
+            #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]
             agents::acp_agent_add,

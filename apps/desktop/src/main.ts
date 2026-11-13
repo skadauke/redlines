@@ -25,6 +25,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { watchAgentsChanged } from './agent-changes.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
@@ -45,6 +46,7 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
@@ -227,8 +229,8 @@ const editor = createEditor(element('#editor'), {
 });
 ui = editor.getUiState();
 // The agents on this Mac, run through their own programs; a plain browser has none. Claude and
-// Codex have providers of their own, and the agents the person added in Preferences, which the
-// app keeps, are each run through the Agent Client Protocol provider.
+// Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
+// doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
 const agents = createMacAgents(
   isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
@@ -242,8 +244,10 @@ const agents = createMacAgents(
       }
     : {},
 );
-// An agent added or removed in Preferences is in the next comment box's picker.
+// An agent added or removed by another window, or one that Preferences has updated, signed in or
+// found changed, is looked for again at the next comment box.
 if (isTauri) acpAgents.watch(() => agents.forget());
+watchAgentsChanged(() => agents.forget());
 /**
  * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
  * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
@@ -506,6 +510,7 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
   showThread: (thread) => review.showThread(thread),
   focusDocument: () => editor.focus(),
   notify: ({ key, text, action }) =>
@@ -525,6 +530,20 @@ const liveLines = createLiveLines({
         : {}),
     }),
 });
+
+/**
+ * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed
+ * run's line offers when the agent is too old or signed out. The window can't update or sign in an
+ * agent itself; it asks for the pane, and Preferences shows it.
+ */
+function openAgentPreferences(): void {
+  if (!isTauri) return notice.flash('Preferences are in the app.');
+  requestPane('agents');
+  invoke('open_preferences').catch((error: unknown) => {
+    console.error('Could not open Preferences', error);
+    notice.flash('Couldn’t open Preferences.');
+  });
+}
 
 /** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
 function showAgentLogs(): void {
