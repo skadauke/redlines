@@ -20,6 +20,7 @@ import {
   expectInOrder,
   expectMarkersBeforeLedger,
   expectNoDecisionRefused,
+  endsInClosingUnderscore,
   expectNoNewLineStarts,
   file,
   fixture,
@@ -33,6 +34,9 @@ import type { ViewBlock } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import type { Range } from './types.ts';
 import { newestView, originalView } from './views.ts';
+
+/** What a person is told when the range of a highlight covers no text. */
+const NO_TEXT = 'Select some text to highlight.';
 
 /** The words of a highlight that code or an HTML comment would hide (format §2.1). */
 const IN_CODE =
@@ -183,15 +187,88 @@ describe('addHighlight', () => {
     );
   });
 
-  it('covers a deletion that the range holds, and a range that is only in one', () => {
+  it('covers a deletion that the range holds, but is refused on one alone', () => {
     const text = file('a b <!--del b4rt gone-->c d', { b4rt: 'bo' });
     const { result } = highlight(text, { from: 2, to: text.indexOf(' d') + 2 });
     expect(bodyOf(result)).toBe('a <!--hl h4kz-->b <!--del b4rt gone-->c d<!--/h4kz-->');
     // From inside the payload of the deletion: its text is in no view of the file, so the highlight
-    // covers the whole marker, which is what a comment does.
+    // would cover the whole marker, which reads as nothing: no text to highlight.
     const marker = at(text, '<!--del b4rt gone-->');
-    const within = highlight(text, { from: marker.from + 12, to: marker.to - 2 }).result;
-    expect(bodyOf(within)).toBe('a b <!--hl h4kz--><!--del b4rt gone--><!--/h4kz-->c d');
+    expect(() =>
+      addHighlight(text, { from: marker.from + 12, to: marker.to - 2 }, context(ada, ['h4kz'])),
+    ).toThrow(NO_TEXT);
+    // With text of the line beside it, it is a range of text that holds the deletion.
+    const beside = highlight(text, { from: marker.from + 12, to: text.indexOf('c d') + 1 }).result;
+    expect(bodyOf(beside)).toBe('a b <!--hl h4kz--><!--del b4rt gone-->c<!--/h4kz--> d');
+  });
+
+  it('refuses a range that covers no text that reads in the newest view, in the words of no text', () => {
+    const errorOf = (text: string, range: Range): EditError => {
+      try {
+        addHighlight(text, range, context(ada, ['h4kz']));
+      } catch (thrown) {
+        if (thrown instanceof EditError) return thrown;
+        throw thrown;
+      }
+      throw new Error(
+        `A highlight was made on ${JSON.stringify(range)} of ${JSON.stringify(text)}`,
+      );
+    };
+    const insertion = file('a<!--ins k3x9-->bc<!--/k3x9-->d', { k3x9: 'bo' });
+    const point = file('a<!--cmt c9qf-->bc d', {}, thread('c9qf'));
+    const commented = file('One <!--cmt c8d2-->two<!--/c8d2--> three.', {}, thread('c8d2'));
+    const highlighted = file('a<!--hl w8nn-->bc<!--/w8nn-->d', { w8nn: 'bo' });
+    const deleted = file('a b <!--del b4rt gone-->c d', { b4rt: 'bo' });
+    const both = file(
+      'One <!--cmt c8d2--><!--del w2rf gone--><!--/c8d2--> two three.',
+      { w2rf: 'bo' },
+      thread('c8d2'),
+    );
+    const block = file('One.\n\n<!--del b4rt Two.-->\n\nThree.', { b4rt: 'bo' });
+    const split = file('One. <!--split s3vb-->\n\nTwo.', { s3vb: 'bo' });
+    for (const [what, text, range] of [
+      ['the opener of an insertion', insertion, at(insertion, '<!--ins k3x9-->')],
+      ['the closer of an insertion', insertion, at(insertion, '<!--/k3x9-->')],
+      ['the point of a point comment', point, at(point, '<!--cmt c9qf-->')],
+      ['the opener of a comment', commented, at(commented, '<!--cmt c8d2-->')],
+      ['the closer of a comment', commented, at(commented, '<!--/c8d2-->')],
+      ['the opener of a highlight', highlighted, at(highlighted, '<!--hl w8nn-->')],
+      ['a deletion', deleted, at(deleted, '<!--del b4rt gone-->')],
+      [
+        'a comment and a deletion that is all it covers',
+        both,
+        { from: both.indexOf('<!--cmt'), to: both.indexOf('<!--/c8d2-->') + 12 },
+      ],
+      ['a deleted block', block, at(block, '<!--del b4rt Two.-->')],
+      [
+        'a deleted block with the line breaks around it',
+        block,
+        { from: 4, to: block.indexOf('Three') },
+      ],
+      ['a split', split, at(split, '<!--split s3vb-->')],
+      ['the break between two blocks', block, { from: 4, to: 6 }],
+    ] as const) {
+      const error = errorOf(text, range);
+      expect(error.code, what).toBe('empty-range');
+      expect(error.message, what).toBe(NO_TEXT);
+    }
+    // With a word of the text beside the markers it is a range of text, whose markers it covers.
+    const withText = highlight(both, {
+      from: both.indexOf('<!--cmt'),
+      to: both.indexOf(' two') + 1,
+    }).result;
+    expect(bodyOf(withText)).toBe(
+      'One <!--hl h4kz--><!--cmt c8d2--><!--del w2rf gone--><!--/c8d2--> <!--/h4kz-->two three.',
+    );
+    // The comment is still a range comment on its text, which the highlight did not make a point.
+    expect(parse(withText).marks.find((m) => m.id === 'c8d2')?.segments[0]?.close).toBeDefined();
+    const whole = {
+      from: insertion.indexOf('<!--ins'),
+      to: insertion.indexOf('<!--/k3x9-->') + 12,
+    };
+    expect(bodyOf(highlight(insertion, whole).result)).toBe(
+      'a<!--hl h4kz--><!--ins k3x9-->bc<!--/k3x9--><!--/h4kz-->d',
+    );
   });
 
   it('overlaps another highlight, holds it, or is held by it', () => {
@@ -876,7 +953,11 @@ describe('on random documents', { timeout: 60_000 }, () => {
   it('changes no view, keeps the file in order, and is dismissed to the text it came from', () => {
     const documents = fuzzCount(150);
     let made = 0;
+    // No place for the markers, or markers that code would hide.
     let refused = 0;
+    // A range that covers no text that reads in the newest view, which is none by design: random
+    // ranges are in the ledger, and in the markers of the file, as often as in its text.
+    let textless = 0;
     let wholeBlocks = 0;
     let wholeRefused = 0;
     for (let seed = 1; seed <= documents; seed++) {
@@ -912,8 +993,13 @@ describe('on random documents', { timeout: 60_000 }, () => {
             error instanceof EditError &&
             [...REFUSALS, 'empty-range'].includes(error.code ?? '')
           ) {
+            if (error.code === 'empty-range') {
+              textless++;
+              continue;
+            }
             refused++;
-            if (whole) wholeRefused++;
+            // A body that ends in a closing `_` has no place for a closer at its end (format §4).
+            if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
             continue;
           }
           throw new Error(`${label}: ${String(error)}`, { cause: error });
@@ -929,12 +1015,23 @@ describe('on random documents', { timeout: 60_000 }, () => {
         ).toBe(true);
         expect(trimmed(newestView(result).text), label).toBe(trimmed(view.text));
         expect(trimmed(originalView(result).text), label).toBe(trimmed(originalView(text).text));
+        // It covers text that reads in the newest view, and every marker of it is in the body.
+        const shown = newestView(result);
+        const segment = parsed.marks.find((m) => m.id === added.id)?.segments[0];
+        expect(
+          shown.text.slice(
+            shown.map.fromSource(segment?.open.to ?? 0),
+            shown.map.fromSource(segment?.close?.from ?? 0),
+          ),
+          label,
+        ).toMatch(/[^\r\n]/);
+        expectMarkersBeforeLedger(label, result, added.id);
         for (const decide of [accept, reject]) {
           expect(applyChanges(result, decide(result, added.id)), label).toBe(text);
         }
       }
     }
-    expect(made + refused).toBe(documents * 3);
+    expect(made + refused + textless).toBe(documents * 3);
     expect(made).toBeGreaterThan(refused);
     // A highlight on whole blocks goes through, but where a construct has no place for its marker.
     expect(wholeRefused).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));

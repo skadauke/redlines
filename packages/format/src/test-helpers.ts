@@ -533,6 +533,18 @@ export function expectMarkersBeforeLedger(label: string, text: string, id: strin
   expect(text.slice(ledger.to), `${label}: text after the ledger`).toMatch(/^(?:\r\n|\n|\r)?$/);
 }
 
+/**
+ * Whether an anchor on a range of `text` that ends at `to` has no place for its closer, by design
+ * (format §4): the range reaches the end of the body, and the body ends in the closing `_` of
+ * emphasis, whose flanking a marker would change (§3.1, rule 5), so that the next place is after the
+ * ledger, where nothing is written. The random tests leave these refusals out of the ones they
+ * count as a construct that has no place for its marker.
+ */
+export function endsInClosingUnderscore(text: string, to: number): boolean {
+  const end = parse(text).ledgerRange?.from ?? text.length;
+  return to >= end && /[\p{L}\p{N}]_+$/u.test(newestView(text).text.trimEnd());
+}
+
 /** The body of a file, ending in one line break: a ledger leaves a blank line in front of it. */
 const bodyEnd = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 

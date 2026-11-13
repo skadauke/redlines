@@ -165,6 +165,30 @@ describe('the Highlight command', () => {
     expect(highlights(editor)).toEqual([]);
   });
 
+  it('says so for a caret or a selection in a struck-through word, which reads as no text', () => {
+    // The deleted words are in no view of the file, and a highlight on them alone has no text.
+    const struck = file('The importer ships <!--del w2rf in April--> soon.', [
+      ...PEOPLE,
+      'marks:',
+      '  w2rf: {by: bo, at: 2026-10-31T09:41Z}',
+    ]);
+    const { editor, notices } = mount(struck);
+    caretAt(editor, place(editor, 'April').from + 2);
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(false);
+    select(editor, 'in April');
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(false);
+    expect(notices).toEqual(['Select some text to highlight.', 'Select some text to highlight.']);
+    expect(doc(editor)).toBe(struck);
+    // With the word beside it in the selection, the highlight holds the deletion.
+    select(editor, 'ships <!--del w2rf in April-->');
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    const [mark] = highlights(editor);
+    expect(doc(editor)).toContain(
+      `<!--hl ${mark!.id}-->ships <!--del w2rf in April--><!--/${mark!.id}-->`,
+    );
+    expect(notices).toHaveLength(2);
+  });
+
   it('says the format’s words when it refuses, and changes nothing', () => {
     const code = file('Use `code` here.', PEOPLE);
     const { editor, notices } = mount(code);

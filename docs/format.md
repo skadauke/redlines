@@ -172,11 +172,14 @@ mark's markers there than the file had.
 - A highlight is a review annotation, hidden outside Redlines like every mark. Highlighting as
   part of the content (`==text==`, `<mark>`) is formatting, and adding it is a format change
   (`+mark`). A highlight is made on a range of text, and on nothing else: it has no point form, so
-  a range that covers no text is refused ("Select some text to highlight."), and it changes no
-  text, so neither view reads otherwise once it is made. Making one writes its markers, placed as
-  a comment's are (§4), and its entry in the ledger (`by` and `at`, §5.4), and adds its author to
-  `people`. Accepting or rejecting a highlight dismisses it and leaves the text, which is how it is
-  taken away; a highlight whose text is all removed by a decision goes with it.
+  a range that covers no text that reads in the newest view is refused ("Select some text to
+  highlight."): a point, line breaks alone, markers alone, or a deletion alone, whose old text is
+  in no view. A range that holds a deletion and text is fine, and covers the deletion. A highlight
+  changes no text, so neither view reads otherwise once it is made. Making one writes its markers,
+  placed as a comment's are (§4), and its entry in the ledger (`by` and `at`, §5.4), and adds its
+  author to `people`. Accepting or rejecting a highlight dismisses it and leaves the text, which is
+  how it is taken away, and gives back the file it was made on; a highlight whose text is all
+  removed by a decision goes with it.
 
 ### 2.3 Ids
 
@@ -2390,10 +2393,14 @@ A comment thread is anchored in the body and stored in the ledger under the same
   in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
   the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the
   reason, and "Select other text to highlight."), and across rows of a table while a move of rows
-  is pending in it (§3.7). A highlight has no point form: a range that covers no text, such as a
-  point, or the line breaks between two blocks once its ends are placed, is refused with the error
-  code `empty-range` ("Select some text to highlight."). Accepting or rejecting a highlight, which
-  dismisses it and leaves the text, takes it away again.
+  is pending in it (§3.7). A highlight has no point form, and covers text: a range that covers no
+  text that reads in the newest view, once its ends are placed, is refused with the error code
+  `empty-range` ("Select some text to highlight."). That is a point, the line breaks between two
+  blocks, markers alone (the opener or the closer of an insertion, a comment's anchor, a
+  highlight's), or a deletion alone, whose old text is in no view. A range that holds a deletion
+  and text is made, and covers the deletion. (Dismissing a highlight over markers alone would not
+  give the file back: over a comment and a deletion alone, it would leave the comment a point.)
+  Accepting or rejecting a highlight, which dismisses it and leaves the text, takes it away again.
 - **Typing** at the end of a comment's range extends it. Typing at its start doesn't. A highlight's
   range takes typed text the same way, with Track Changes on or off. A line break is not text of
   the range: Enter at its end goes after the closer, and in front of it after the opener, so that

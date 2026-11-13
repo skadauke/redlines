@@ -14,6 +14,7 @@ import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import { annotationAcrossRows } from './table-rules.ts';
 import type { EditContext, MarkEntry, Range, TextChange } from './types.ts';
+import { viewsOnce } from './views.ts';
 
 /** Why a highlight can't be made on a range that covers no text. */
 const NO_TEXT = 'Select some text to highlight.';
@@ -29,6 +30,20 @@ const HIGHLIGHT_WORDS: AnchorWords = {
   inCode:
     "A highlight can't be made inside code or an HTML comment, where its markers would not be read. Highlight the whole code span or comment instead, or the text around a code block.",
 };
+
+/**
+ * Whether `from`–`to`, a range of `text` whose ends are placed, covers text that reads in the newest
+ * view (format §2.2): not line breaks alone, markers alone (an insertion's opener or closer, a
+ * comment's or a highlight's), or a deletion alone, whose old text is in no view of the file. A
+ * range that holds a deletion and text does.
+ */
+function coversText(text: string, from: number, to: number): boolean {
+  const written = text.slice(from, to);
+  // Without a marker in it all of it reads in the view, as it is written.
+  if (!written.includes('<!--')) return /[^\r\n]/.test(written);
+  const { text: view, map } = viewsOnce().newest(text);
+  return /[^\r\n]/.test(view.slice(map.fromSource(from), map.fromSource(to)));
+}
 
 /**
  * A highlight that would run from one row of a table into another, in a table with a row move
@@ -62,8 +77,9 @@ function refuseAcrossMovedRows(after: string, id: string): void {
  *
  * @returns the changes, in offsets of `text`, and the id of the highlight.
  * @throws RangeError when the range lies outside the text.
- * @throws EditError when the range covers no text, which a highlight has no form for
- *   (`empty-range`), is in front matter, or would put the markers inside code or an HTML comment,
+ * @throws EditError when the range covers no text that reads in the newest view, which a highlight
+ *   has no form for (`empty-range`): a point, line breaks, markers or a deletion alone; or is in
+ *   front matter, or would put the markers inside code or an HTML comment,
  *   or where no place keeps the text as it reads, or across rows of a table with a row move
  *   pending; and when the ledger can't be read.
  */
@@ -90,8 +106,9 @@ export function addHighlight(
     throw error;
   }
   const { from, to } = placed;
-  // The ends moved together: the range was white space between blocks, or lines, with no text.
-  if (from === to) throw new EditError(NO_TEXT, 'empty-range');
+  // The ends moved together, or what is between them is not text of the newest view: the range was
+  // white space between blocks, or lines, or markers, or a deletion, and nothing that reads.
+  if (from === to || !coversText(text, from, to)) throw new EditError(NO_TEXT, 'empty-range');
 
   const id = newId(idsIn(text), ctx.random);
   const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };

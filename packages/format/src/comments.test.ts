@@ -12,6 +12,7 @@ import {
   bodyOf,
   claudeAda,
   context,
+  endsInClosingUnderscore,
   expectInOrder,
   expectMarkersBeforeLedger,
   expectNoNewLineStarts,
@@ -883,7 +884,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
             // A range with no place for its markers, or markers that code would hide, is refused.
             if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
               refused++;
-              if (whole) wholeRefused++;
+              // A body that ends in a closing `_` has no place for a closer at its end (format §4).
+              if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
               continue;
             }
             throw new Error(`${label}: ${String(error)}`, { cause: error });
