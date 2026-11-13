@@ -23,10 +23,19 @@ export type SaveChoice = 'save' | 'discard' | 'cancel';
 /** The answer to "This file changed on disk since you opened it" when saving. */
 export type OverwriteChoice = 'overwrite' | 'saveAs' | 'cancel';
 
-/** What a window was opened for: a file, and a line in it, or neither. */
+/**
+ * What a window was opened for: a file, and a line in it; or text, for an Untitled document that
+ * holds it; or none of these.
+ */
 export interface WindowStart {
   path: string | null;
   line: number | null;
+  /**
+   * The text of the Untitled document the window starts with, which is unsaved: never an empty
+   * string, and null for a window opened for a file or for nothing. The app answers the same each
+   * time the page asks, so a page that reloads starts with the text again.
+   */
+  text: string | null;
 }
 
 export interface Host {
@@ -96,8 +105,12 @@ export interface Host {
   askToDiscardDraft(): Promise<boolean>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
-  /** Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1). */
-  openWindow(path?: string, line?: number): Promise<void>;
+  /**
+   * Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1), or for
+   * an Untitled document that holds `text`, which is unsaved. A window opens for a file or for
+   * text, not both: the app refuses that, and this rejects with its reason.
+   */
+  openWindow(path?: string, line?: number, text?: string): Promise<void>;
   /** What this window was opened for. */
   windowStart(): Promise<WindowStart>;
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
@@ -308,8 +321,8 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
-    async openWindow(path, line) {
-      await invoke('open_window', { path: path ?? null, line: line ?? null });
+    async openWindow(path, line, text) {
+      await invoke('open_window', { path: path ?? null, line: line ?? null, text: text ?? null });
     },
     windowStart: () => invoke<WindowStart>('window_start'),
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
@@ -420,12 +433,13 @@ function createBrowserHost(): Host {
           ? 'overwrite'
           : 'cancel',
       ),
-    // Another tab, with its own folder in memory: it starts from sample.md, whatever was asked.
+    // Another tab, with its own folder in memory: it starts from sample.md, whatever was asked (a
+    // file, a line or text), so no tab is ever opened for any of them (`windowStart`).
     openWindow: () => {
       window.open(location.href);
       return Promise.resolve();
     },
-    windowStart: () => Promise.resolve({ path: null, line: null }),
+    windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => navigator.clipboard.readText(),
     // A browser tab is never asked to open a file.
     listenForFiles: () => Promise.resolve(),
