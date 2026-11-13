@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "list_folder",
     "make_default_app",
     "open_default",
+    "open_link",
     "open_preferences",
     "open_window",
     "opened_files",

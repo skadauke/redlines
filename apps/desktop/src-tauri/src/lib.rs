@@ -38,6 +38,9 @@ mod default_app;
 // Spell checking while typing, which WebKit on the Mac does only when the app's defaults say so.
 mod spelling;
 
+// Opening a link in the default browser, for a ⌘-click on a link in a document.
+mod links;
+
 // The appearance of every window, light, dark or the system's, which the app keeps a copy of.
 mod appearance;
 
@@ -359,6 +362,7 @@ pub fn run() {
             project::project_root,
             project::list_folder,
             project::open_default,
+            links::open_link,
             project::show_images,
             project::allow_document,
             file_scope::forget_documents,

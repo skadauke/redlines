@@ -261,6 +261,16 @@ Redlines covers everything in the Markdown Guide's
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
+**Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
+address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
+address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
+link is a pointer. Only `http`, `https` and `mailto` addresses open, and `www.` ones, which GitHub's
+autolinks read as the web's: the limit of a copy, which turns `javascript:` and its kin into plain
+text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
+the address again before it runs the system's opener, and the website's demos open a new tab. A
+link that doesn't open is left to the editor like any text, with no hint. A relative link to
+another document doesn't open yet.
+
 ### 5.3 Views: Clean, Simple, Redlines, Raw
 
 The View menu, under the eye at the top right (§5.1), sets how the document is shown:
@@ -730,7 +740,7 @@ a new email under the same name becomes an alias in the ledger
 
 - the command palette (§5.9);
 - a folder sidebar (written), Quick Open and folder search, which folder chat also needs;
-- links from pasting a URL onto a selection (§5.10);
+- links from pasting a URL onto a selection (§5.10), and ⌘-click to open one (§5.2);
 - R Markdown and Quarto chunk options kept byte for byte.
 
 **Should (v1 if time allows):**
