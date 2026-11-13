@@ -22,6 +22,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
+| `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
@@ -39,8 +40,9 @@ and [docs/format.md](docs/format.md) (the file format).
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
-Workspace members are `packages/*`, `plugins/*` and `apps/*` (`pnpm-workspace.yaml`). Workspace
-packages export their TypeScript sources; nothing is compiled before use.
+Workspace members are `packages/*`, `plugins/*`, `apps/*` and `apps/desktop/quicklook`
+(`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
+before use.
 
 ## Commands
 
@@ -106,6 +108,21 @@ repo root.
   again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
+- The Quick Look extension (macOS only), in `apps/desktop`: `scripts/build-quicklook` bundles the
+  renderer (`apps/desktop/quicklook`, with `rolldown`), compiles the Swift extension for both
+  architectures with `swiftc` (no Xcode project), and writes
+  `apps/desktop/quicklook/build/RedlinesPreview.appex`, signed ad hoc, or with the identity in
+  `APPLE_SIGNING_IDENTITY`. `pnpm build` runs it (on a Mac it needs the Xcode command line tools, and
+  on any other system it does nothing), and
+  `bundle.macOS.files` in `tauri.conf.json` copies it to `Redlines.app/Contents/PlugIns`; Tauri
+  signs the app and its programs but never a plug-in, so the release workflow signs the extension
+  first (`--sign-only`). `scripts/build-quicklook --check` also runs the renderer in the system's
+  JavaScriptCore, through `preview-render`, on `apps/desktop/quicklook/fixtures`, and reads the
+  extension's layout, Info.plist, entitlements and signature; CI's `quicklook` job runs it.
+  `--check-app <Redlines.app> [--signed]` checks the extension inside a built app. To see a
+  preview, register the app (`lsregister -f -R -trusted`, `pluginkit -a <the .appex>`) and run
+  `qlmanage -p file.md`; the steps are in [docs/releasing.md](docs/releasing.md#the-quick-look-extension).
+  The renderer's tests are ordinary Vitest tests (`apps/desktop/quicklook/src`).
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
   `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`
@@ -123,6 +140,8 @@ repo root.
   `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
   changes that touch only `docs/**`, `website/**` or `**/*.md`.
+- The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
+  (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,

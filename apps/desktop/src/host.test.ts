@@ -174,13 +174,27 @@ describe('the host in a browser tab', () => {
   it('was opened for no file, no line and no text: a tab starts from sample.md', async () => {
     const host = createHost();
     expect(await host.windowStart()).toEqual({ path: null, line: null, text: null });
-    // Another tab, which opens whatever it was asked for: it can't be given text.
+    // Another tab starts from sample.md, whatever it was asked for.
     const open = vi.fn<(url?: string | URL) => Window | null>(() => null);
     vi.stubGlobal('open', open);
-    await host.openWindow(undefined, undefined, '# The answer\n');
-    expect(open).toHaveBeenCalledOnce();
+    await host.openWindow();
+    await host.openWindow('sample.md', 3);
+    expect(open).toHaveBeenCalledTimes(2);
     expect(open).toHaveBeenCalledWith(location.href);
     expect(await host.windowStart()).toEqual({ path: null, line: null, text: null });
+  });
+
+  it('opens no tab for text, which a tab can’t be given, and says so', async () => {
+    const open = vi.fn<(url?: string | URL) => Window | null>(() => null);
+    vi.stubGlobal('open', open);
+    const host = createHost();
+    await expect(host.openWindow(undefined, undefined, '# The answer\n')).rejects.toThrow(
+      'A browser tab can’t be opened for text.',
+    );
+    expect(open).not.toHaveBeenCalled();
+    // An empty text is none, as it is for the app.
+    await host.openWindow(undefined, undefined, '');
+    expect(open).toHaveBeenCalledOnce();
   });
 });
 

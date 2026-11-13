@@ -435,8 +435,11 @@ function createBrowserHost(): Host {
           : 'cancel',
       ),
     // Another tab, with its own folder in memory: it starts from sample.md, whatever was asked (a
-    // file, a line or text), so no tab is ever opened for any of them (`windowStart`).
-    openWindow: () => {
+    // file or a line), so no tab is ever opened for either (`windowStart`). It can't be given text,
+    // which it would lose without a word: the request is refused, as the app refuses what it can't
+    // open. An empty text is none, as it is for the app.
+    openWindow: (_path, _line, text) => {
+      if (text) return Promise.reject(new Error('A browser tab can’t be opened for text.'));
       window.open(location.href);
       return Promise.resolve();
     },

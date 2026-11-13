@@ -199,6 +199,88 @@ compile to machine code. After signing, the workflow checks that it holds both a
 signed, and edits and shows a file with an empty environment. It comes to about 1.2 MB per
 architecture, and 2.5 MB in the universal app.
 
+## The Quick Look extension
+
+The app carries a Quick Look preview of Markdown, R Markdown and Quarto files, an app extension at
+`Redlines.app/Contents/PlugIns/RedlinesPreview.appex` (`apps/desktop/quicklook`; what it shows and
+why is design §10). Tauri builds no app extensions, so the build does it:
+
+- `scripts/build-quicklook` bundles the renderer (TypeScript that runs in JavaScriptCore),
+  compiles the Swift extension with `swiftc` for Apple silicon and Intel, joins them with `lipo`,
+  and writes `apps/desktop/quicklook/build/RedlinesPreview.appex`. `pnpm build` runs it, so `tauri
+  build` makes the extension as part of compiling the app, as it makes the `redlines` program. It
+  needs the Xcode command line tools, and on any other system it does nothing. The extension's
+  version is the app's, from `Cargo.toml`.
+- `bundle.macOS.files` in `tauri.conf.json` copies the whole folder to `Contents/PlugIns`.
+- **Signing.** Tauri signs the app and the programs it copies, `codesign --force` for each, in the
+  app's own identity, and never anything in `PlugIns`. So the extension must be signed when `tauri
+  bundle` runs, with the same identity, the hardened runtime and a secure timestamp (notarization
+  asks for both), and with the sandbox entitlement that every app extension needs, which signing it
+  again without `--entitlements` would take away. `scripts/build-quicklook` signs it itself,
+  ad hoc, or with `APPLE_SIGNING_IDENTITY` when that is set (which is how a build on your own Mac
+  below signs it). The workflow compiles the app before any credential is unpacked, so the
+  extension is built ad hoc there, and the step **Sign the Quick Look extension**, after the
+  keychain and before **Bundle, sign and notarize the app**, signs it again with the identity
+  (`scripts/build-quicklook --sign-only`). Tauri then seals the app around it, and notarization
+  reads it with the app.
+- **Entitlements** (`apps/desktop/quicklook/swift/RedlinesPreview.entitlements`): the app sandbox,
+  which every app extension must have, and which already lets it read the file that Quick Look
+  hands it; and JavaScriptCore's compiler (`com.apple.security.cs.allow-jit`). It has no network:
+  a preview never tells a server that a file was opened. Without the compiler the renderer is
+  several times slower (5 to 8 times measured: 100 KB takes 1.3 seconds instead of 0.2, and a 1.6 MB
+  file 4 seconds instead of 0.5, more when the Mac is busy), which a long document turns from a
+  moment into a wait.
+- **Checks.** `scripts/build-quicklook --check` (CI's `quicklook` job on a Mac) builds it, runs the
+  renderer in the system's JavaScriptCore on the fixtures of `apps/desktop/quicklook/fixtures`
+  (a plain file, one with tracked changes and comments, front matter, tables, R Markdown and Quarto
+  chunks, a large file) and reads the extension's layout, Info.plist, entitlements and signature.
+  The release workflow runs the checks of what it built (`--check-only`, before any credential) and
+  then of the extension inside the app (`--check-app "$APP" --signed`): that it is at the place, holds both
+  architectures, is signed with a Developer ID, a timestamp and the hardened runtime, by the team
+  that signed the app, with the sandbox and the compiler and no other entitlement, and that the
+  app's seal holds with it inside.
+- **Types.** The extension lists `net.daringfireball.markdown` and `public.markdown`, and the
+  dynamic types of `.qmd` and `.rmd`, which macOS makes for a file whose extension no app declares
+  (`dyn.` and the extension's bytes in base 32; `build-quicklook` computes them, and `--check` asks
+  the Mac for the type of an extension nobody declares to see that it agrees). Quick Look matches
+  these exactly, and the types of a subtype aren't matched: where another app declares `.qmd` or
+  `.Rmd` as its own type, Quick Look chooses by that type, and Redlines' extension isn't asked.
+- It needs macOS 13.3: the format library's patterns use regular-expression lookbehind, which the
+  JavaScriptCore before it (Safari 16.3 and earlier) can't read, so that it couldn't load the
+  renderer at all and every preview would be the file's text. Array methods such as `toSorted`
+  came with 13.0.
+
+### Try a preview on your Mac
+
+Build the app (`pnpm tauri build --bundles app`, or `tauri bundle`), then in `apps/desktop`:
+
+```sh
+app=src-tauri/target/release/bundle/macos/Redlines.app
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$lsregister" -f -R -trusted "$app"
+pluginkit -a "$app/Contents/PlugIns/RedlinesPreview.appex"
+pluginkit -m -v -p com.apple.quicklook.preview | grep -i redlines
+qlmanage -p quicklook/fixtures/redlines.md
+```
+
+An app in `/Applications` is registered by macOS itself, and the extension with it; the commands
+above are for a build somewhere else. `qlmanage -p -c <type> file` forces a type, to see a `.qmd`
+that another app owns on your Mac (`dyn.ah62d4rv4ge81c5pe` is `.qmd`, `dyn.ah62d4rv4ge81e5pe` is
+`.rmd`). The preview's window is blank while it is behind other windows, since the web view
+stops drawing: bring it to the front. What the extension did is in the log (`/usr/bin/log`, since
+`log` in zsh is something else):
+
+```sh
+/usr/bin/log show --last 5m --predicate 'subsystem == "md.redlines.editor.preview"'
+```
+
+When you are done, `pluginkit -r <the .appex>` and `"$lsregister" -u "$app"` take the build out of
+macOS's lists, so that it doesn't stand in for the installed app. On a Mac that has never had
+Redlines, check after a release that Space previews a Markdown file once the app has run from
+Applications, that System Settings › General › Login Items & Extensions › Quick Look lists
+Redlines with its switch on (`open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview"`
+opens that sheet), and that an update through the app's updater keeps it.
+
 ## A signed build on your own Mac
 
 With the Developer ID identity in your login keychain and the `redlines-notary` profile from step
@@ -217,6 +299,9 @@ codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$dmg"
 xcrun notarytool submit "$dmg" --keychain-profile redlines-notary --wait
 xcrun stapler staple "$dmg"
 ```
+
+The identity in `APPLE_SIGNING_IDENTITY` signs the Quick Look extension too, when `pnpm build`
+makes it, before Tauri seals the app, so the notarization above covers it.
 
 This builds for your Mac's processor only; the workflow builds the universal app
 (`--target universal-apple-darwin`, after `rustup target add x86_64-apple-darwin`), and makes the
