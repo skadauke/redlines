@@ -69,6 +69,59 @@ describe('walk seeds 14 and 170 (lists side by side): the caret ends in no hidde
   ]);
 });
 
+describe('walk seed 23 (lists side by side): Return at the start of a nested first item of a loose list, tracked', () => {
+  // The empty item goes in above the first one, at the end of the parent item's text; the blank line
+  // that keeps the list loose follows it, between it and the item that was first, and not before it
+  // (two blank lines in a row were written as two splits, the second a marker line in column 0,
+  // which ended the parent item: micromark read the sublist as a list of its own).
+  scriptRows([
+    {
+      name: 'a nested list with a blank line between its items, Track Changes on (the seed)',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      // The seed's other keys, Backspace, Delete and Shift-Return over the selection, are refused in
+      // words, which the walk allows.
+      name: 'the seed’s own text: items, a continuation line and a loose numbered list under them',
+      doc: '* note delta⏎* gamma gamma⏎* plan beta⏎  * ‸note note⏎    note delta⏎  * review gamma⏎    2. code plan⏎       delta alpha⏎⏎    2. delta ship⏎       code text⏎',
+      keys: ['Enter', 'Shift-ArrowLeft'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'a numbered nested list, a blank line between its items',
+      doc: '1. plan beta⏎   1. ‸note note⏎⏎   2. review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'in a quote',
+      doc: '> * plan beta⏎>   * ‸note note⏎>⏎>   * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'taken back with ⌘Z, and done again',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter', 'Mod-z', 'Mod-Shift-z'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'Track Changes off writes the blank line after the new item as well',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: false,
+      expect: {},
+    },
+  ]);
+});
+
 const FM = '---⏎title: Notes⏎---⏎';
 const HEAD = '⏎⏎<!-- redlines⏎version: 1⏎';
 const mark = (by: string) => `marks:⏎  k6hg: {by: ${by}, at: 2026-11-01T10:00Z}⏎-->⏎`;

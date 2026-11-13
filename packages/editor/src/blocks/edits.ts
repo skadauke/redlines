@@ -486,8 +486,12 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       // insertion on it, would be no blank line to a reader that doesn't know the markers; #248).
       // The new item takes the first item's own number: the list starts where it did and reads, by
       // position, as it did with one more item (the next number would put it ahead of `1.`).
-      const same = `${between}\n${item.indent}${item.marker}${item.after}`;
-      const joined = `\n${blankOf(item.indent)}${same}`;
+      // In a loose list the new item still stands right above the first one, with no blank line
+      // between them: the list is as loose as it was, whatever lies between its items (a looseness
+      // belongs to the list). A blank line there, after the one that goes over the item, was
+      // written as two splits, the second a marker line in column 0, which ended the item above
+      // (walk seed 23 of the lists side by side).
+      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
       return {
         changes: [{ from: above.to, insert: joined }],
         selection: EditorSelection.single(start + joined.length),
