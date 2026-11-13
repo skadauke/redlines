@@ -4,7 +4,9 @@ export { mentionedAgents } from './mentions.ts';
 export { attachPicker, pickerEntries } from './picker.ts';
 export type { PickerDeps, PickerEntry } from './picker.ts';
 export { agentHandle, createRuns } from './runs.ts';
-export type { LiveLine, RunController, RunDeps } from './runs.ts';
+export type { BlockedNotice, LiveLine, RunController, RunDeps } from './runs.ts';
+export { blockedMessage, privacyMessage } from './blocked-message.ts';
+export type { BlockedAction, BlockedMessage } from './blocked-message.ts';
 export { createLiveLines, fitStatus, renderLiveLine } from './live-line.ts';
 export type {
   LiveLineNotice,

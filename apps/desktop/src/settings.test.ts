@@ -359,7 +359,7 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
-        agentScope: 'everything',
+        agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
     );
@@ -376,6 +376,33 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
       expect(loadSettings().identity).toBeNull();
     }
+  });
+
+  it('keeps the three scopes an agent may read, and the answers that name them', () => {
+    for (const agentScope of ['document', 'folder', 'everything']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ agentScope }));
+      expect(loadSettings().agentScope).toBe(agentScope);
+    }
+    // The default stays This folder, for a setting that is missing or not a scope.
+    localStorage.setItem(SETTINGS_KEY, '{}');
+    expect(loadSettings().agentScope).toBe('folder');
+    expect(DEFAULT_SETTINGS.agentScope).toBe('folder');
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        consent: {
+          'claude|/notes': 'everything',
+          'codex|/notes': 'document',
+          'claude|/a': 'no',
+          'codex|/b': 'machine',
+        },
+      }),
+    );
+    expect(loadSettings().consent).toEqual({
+      'claude|/notes': 'everything',
+      'codex|/notes': 'document',
+      'claude|/a': 'no',
+    });
   });
 
   it('keeps what other windows saved when one setting changes', () => {
