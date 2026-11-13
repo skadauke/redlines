@@ -49,7 +49,7 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
-import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
+import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -59,6 +59,7 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { followScrollbar } from './scrollbar.ts';
 import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
@@ -670,6 +671,7 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleSidebar,
   renameDocument: () => renameDocument(),
   dragFile,
+  scrollPage: (dx, dy) => scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' }),
   rename: async (newName) => {
     const from = controller.state.path;
     const renamed = await controller.rename(newName);
@@ -686,6 +688,12 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
+// editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
+// classic scrollbar.
+editor.addExtension(topRoom(() => titleBar.room()));
+followScrollbar(scroller, main);
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
