@@ -20,16 +20,18 @@ const MINIMUM_MACOS: (isize, isize) = (13, 3);
 const SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview";
 
 /// Whether this app has a Quick Look preview to turn off: it runs from a bundle that holds the
-/// extension (a build run from the sources, as `pnpm tauri dev` does, has none), on a macOS that
-/// loads it. Preferences draws its line only then.
+/// extension (a build run from the sources, as `pnpm tauri dev` does, has none), installed rather
+/// than on a disk image, since macOS registers the extension when the app runs from Applications,
+/// and on a macOS that loads it. Preferences draws its line only then.
 #[tauri::command(async)]
 pub fn quick_look_available() -> bool {
-    running_bundle().is_some_and(|bundle| holds_the_extension(&bundle))
+    running_bundle().is_some_and(|bundle| holds_the_extension(&bundle) && !on_an_image(&bundle))
         && macos_version().is_some_and(loads_the_extension)
 }
 
 /// Opens System Settings at the Quick Look extensions. Only the Mac has Quick Look: elsewhere this
-/// refuses, in a sentence that the Preferences line shows.
+/// refuses, in a sentence. The Preferences line is drawn only where `quick_look_available` says
+/// there is a preview, and never shows that sentence; it is for a caller that didn't ask.
 #[tauri::command(async)]
 pub fn open_quick_look_settings() -> Result<(), String> {
     open(SETTINGS_URL)
@@ -43,6 +45,20 @@ fn holds_the_extension(bundle: &Path) -> bool {
 /// Whether a macOS of this version, (major, minor), loads the extension.
 fn loads_the_extension(version: (isize, isize)) -> bool {
     version >= MINIMUM_MACOS
+}
+
+/// Whether the app at `bundle` runs from a disk image, or translocated from one: it isn't installed
+/// yet, and the other lines of Preferences ask such a copy to move first
+/// (`install::may_be_on_image`).
+#[cfg(target_os = "macos")]
+fn on_an_image(bundle: &Path) -> bool {
+    let original = crate::install::macos::translocated_original(bundle);
+    crate::install::may_be_on_image(bundle, original.as_deref())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn on_an_image(_bundle: &Path) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -136,7 +152,8 @@ mod tests {
 
     #[test]
     fn a_bundle_has_a_preview_when_it_holds_the_extension() {
-        let folder = std::env::temp_dir().join(format!("redlines-quick-look-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("redlines-quick-look-{}", std::process::id()));
         let bundle = folder.join("Redlines.app");
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
@@ -150,6 +167,12 @@ mod tests {
     fn has_none_to_turn_off_where_the_app_is_not_run_from_its_bundle() {
         // The tests run from `target/`, as a build from the sources does.
         assert!(!quick_look_available());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_copy_on_a_disk_image_is_not_installed_yet() {
+        assert!(on_an_image(Path::new("/Volumes/Redlines/Redlines.app")));
     }
 
     #[cfg(target_os = "macos")]

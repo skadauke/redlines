@@ -192,9 +192,10 @@ The window, on the desktop:
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
   did. Finder's Get Info changes the choice again.
   Preferences › General › Quick Look previews of Markdown files opens System Settings at the list
-  of Quick Look extensions, where the app's preview (§10) is listed and can be turned off. The
-  line is drawn only where there is a preview to turn off: in the app run from its bundle (not from
-  the sources), on macOS 13.3 or later.
+  of Quick Look extensions, where the app's preview (§10) is listed and can be turned off; a macOS
+  that doesn't take the link there opens the page nearest to it. The line is drawn only where
+  there is a preview to turn off: in the installed app (not run from the sources, nor from a disk
+  image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
