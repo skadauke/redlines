@@ -30,6 +30,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |
 | `plugins/code`          | `@redlines/code`: syntax colors in code blocks                            |
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
+| `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |

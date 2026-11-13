@@ -223,6 +223,18 @@ The window, on the desktop:
   keyboard and touch.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
+- **Outline.** In a document with two or more headings, a column of short lines stands in the left
+  margin, one for each heading, longer for the higher levels, with the line of the section you are
+  reading in ink as you scroll. Hovering over it opens it, with a short animation, into a list of
+  the headings' text, and moving the pointer away closes it; a click on a heading goes to it, the
+  caret on its line and the line at the top of the page. It stands in the pane the text scrolls in,
+  so it moves with the file sidebar, takes no click but its own (the margin beside it holds the
+  change bars), and shows its lines only where the margin has room for them beside the bars; where
+  it has none, ⌃⌘O (View › Show Outline) still opens the list. The list is a navigation landmark of
+  buttons for VoiceOver: ⌃⌘O puts the focus on the heading you are reading, the arrows move between
+  headings, Return goes to one and Escape gives the focus back to the text. Headings read as the
+  text does with every pending change accepted, in every view: a heading deleted whole isn't listed,
+  Redlines included, where its card is.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
   over or select them, not at rest.
 - **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
@@ -936,7 +948,7 @@ written.
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
 | `export`     | HTML, clean Markdown and review-view export                                  | Files                      |
-| `outline`    | The outline panel and dragging sections                                      | —                          |
+| `outline`    | The outline of the headings in the left margin; dragging sections to come    | —                          |
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
