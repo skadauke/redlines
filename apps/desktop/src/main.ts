@@ -18,6 +18,7 @@ import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
+import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -59,13 +60,14 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
 import { applyTextSize, stepSize, ZOOM_LADDER } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
-import { createTitleBar } from './ui/titlebar.ts';
+import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
@@ -331,6 +333,25 @@ const review = createReview(editor, {
     // A resolved thread's note stays while its run asks, so that Show has a note to show.
     keepShown: (thread) => liveLines.keepsShown(thread),
   },
+});
+
+// The formatting palette: hidden while writing, it opens from a handle at the bottom center and on
+// right-click, in place of WebKit's own menu. Its items are commands of the registry, so it
+// registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
+// A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
+const palette = createPalette(editor, {
+  container: main,
+  tooltipMs: TOOLTIP_MS,
+  notice: (message) => notice.flash(message),
+  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  ...(isTauri
+    ? {
+        spelling: systemSpelling({
+          enabled: () => settings.spellCheck,
+          learned: () => checkSpellingAgain(editor.view.contentDOM),
+        }),
+      }
+    : {}),
 });
 
 const documentHost: Host = {
@@ -835,10 +856,11 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null };
+    return { path: null, line: null, text: null };
   });
   if (start.path === null) {
-    await controller.create();
+    // A window opened for text starts with an Untitled document that holds it, unsaved.
+    await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -861,6 +883,7 @@ if (isTauri) {
       kept = readingPlace(editor.view, scroller);
       titleBar.closeMenus();
       review.closePopovers();
+      palette.hide();
     },
     after: (level, from) => {
       if (kept) {
@@ -897,8 +920,9 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, with Track Changes on if Preferences ask for it.
-  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it. A
+  // window opened for text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) editor.setTracking(true);
   windows?.ready();
   const about = await loadAbout().catch((error: unknown) => {
     console.error('Could not read the build tag for About Redlines', error);
