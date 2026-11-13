@@ -437,6 +437,8 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       void turn(question);
     },
     answerConsent(answer) {
+      // An agent that reads the whole machine can't be held to this document.
+      if (answer === 'document' && run?.agent?.readLimit === 'machine') return;
       run?.answer?.(answer);
     },
     stop() {

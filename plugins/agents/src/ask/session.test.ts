@@ -353,8 +353,8 @@ describe('what the agent may read', () => {
     expect(session.state.line).toBeNull();
   });
 
-  it('always asks for an agent that can only be held to the machine', async () => {
-    const { session } = setup({
+  it('always asks for an agent that can only be held to the machine, and never takes This document', async () => {
+    const { session, claude, consent } = setup({
       scope: 'folder',
       claudeReads: 'machine',
       consent: { 'claude|/repo': 'document' },
@@ -362,10 +362,19 @@ describe('what the agent may read', () => {
     session.ask('What?');
     await vi.waitFor(() => expect(session.state.line?.kind).toBe('asking'));
     expect(session.state.line).toMatchObject({ kind: 'asking', readLimit: 'machine' });
-    // This document is not an answer it can keep.
+    // This document is not an answer it can keep: the question stays up, and nothing starts. A
+    // run that went on at once would have asked its agent a moment after, so the moment is waited.
     session.answerConsent('document');
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(session.state.line?.kind).toBe('asking');
-    session.close();
+    expect(claude.requests).toHaveLength(0);
+    expect(consent['claude|/repo']).toBe('document');
+    // Allow goes on, and reads the folder.
+    session.answerConsent('folder');
+    await done(session);
+    expect(lastRequest(claude).scope).toBe('folder');
+    expect(lastRequest(claude).folder).toBe('/repo');
+    expect(consent['claude|/repo']).toBe('folder');
   });
 });
 
