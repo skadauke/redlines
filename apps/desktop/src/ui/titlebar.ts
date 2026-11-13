@@ -11,8 +11,12 @@ import { createMenu, type Menu } from './menu.ts';
 export interface TitleBarState {
   name: string;
   dirty: boolean;
-  /** Whether the document has a file, which the icon beside the name drags. */
-  hasFile: boolean;
+  /**
+   * Whether the document's file can be dragged out of the window: it has a file (an Untitled
+   * document has none yet), and the app can hand it over (on the Mac). The icon beside the name
+   * is shown for it.
+   */
+  fileDraggable: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
@@ -36,7 +40,7 @@ export interface TitleBarActions {
   renameDocument(): void;
   /**
    * Starts dragging the document's file out of the window, once the pointer has dragged the icon
-   * beside the name: the app takes the drag from there (`host.dragFile`).
+   * beside the name: the app takes the drag from there (`start_file_drag`, in main.ts).
    */
   dragFile(): void;
   /**
@@ -68,6 +72,9 @@ export const TOOLTIP_MS = 400;
 /** How far the pointer moves, with the button down, before the document icon's drag starts. */
 const DRAG_START_PX = 4;
 
+/** How far the pointer may move between the second press of a double-click and its release. */
+const DOUBLE_CLICK_SLOP_PX = 3;
+
 export function createTitleBar(
   root: HTMLElement,
   actions: TitleBarActions,
@@ -87,7 +94,7 @@ export function createTitleBar(
   let state: TitleBarState = {
     name: '',
     dirty: false,
-    hasFile: false,
+    fileDraggable: false,
     view: 'clean',
     tracking: false,
     hasRedlines: false,
@@ -184,8 +191,20 @@ export function createTitleBar(
   // region, and listens on the document: the name keeps that mouseup from reaching it, and goes by
   // it too, since in the app WebKit sends the page no click or dblclick for a second press. A drag
   // on the name still moves the window, which starts on the first mousedown.
+  // Where the second press of a double-click on the name was, to tell the release that ends it from
+  // one that ends a press that began elsewhere (a word selected by a double-click-drag in the text,
+  // let go of over the name), which is no one's but the page's own.
+  let secondPress: { x: number; y: number } | null = null;
+  title.addEventListener('mousedown', (event) => {
+    secondPress =
+      event.button === 0 && event.detail === 2 ? { x: event.clientX, y: event.clientY } : null;
+  });
   title.addEventListener('mouseup', (event) => {
-    if (event.button !== 0 || event.detail !== 2) return;
+    const press = secondPress;
+    secondPress = null;
+    if (event.button !== 0 || event.detail !== 2 || !press) return;
+    // Where it began, as the window's own zoom asks, give or take the pixels a hand wobbles by.
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > DOUBLE_CLICK_SLOP_PX) return;
     event.stopPropagation();
     // In the field, a double-click selects a word.
     if (!field) actions.renameDocument();
@@ -318,8 +337,10 @@ export function createTitleBar(
     titleName.textContent = next.name;
     titleEdited.textContent = next.dirty ? ' — Edited' : '';
     // A document that has not been saved has no file to drag.
-    docIcon.hidden = !next.hasFile;
+    docIcon.hidden = !next.fileDraggable;
     docIcon.setAttribute('aria-label', `${next.name}, document icon`);
+    // With edits the file is behind: what is handed over is the file as it was last saved.
+    docIcon.title = next.dirty ? 'Drag to copy the file as saved' : 'Drag to copy the file';
 
     const filesLabel = next.sidebarOpen ? 'Hide files' : 'Show files';
     filesButton.setAttribute('aria-label', filesLabel);
