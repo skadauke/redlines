@@ -68,6 +68,9 @@ importers:
       '@redlines/formatting':
         specifier: workspace:*
         version: link:../../plugins/formatting
+      '@redlines/palette':
+        specifier: workspace:*
+        version: link:../../plugins/palette
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
@@ -355,6 +358,21 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/palette:
+    dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api

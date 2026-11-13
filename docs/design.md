@@ -130,7 +130,10 @@ otherwise.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
   the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
-  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  dictation and input methods. A right-click opens the formatting palette (below) in place of the
+  system's context menu, with the spelling suggestions of a misspelled word at its top and Learn
+  Spelling; ⇧ with the right-click shows the system's own menu, which has Look Up, Services and
+  Writing Tools. A correction is part of your typing, as in
   Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
   it changes the insertion's text, and no other change appears. Only the part of a correction that
   reaches into other text becomes a tracked change of that text; with Track Changes off it is a
@@ -221,6 +224,20 @@ The window, on the desktop:
 - **Icons without labels, explained on hover.** Hovering over an icon shows its name and shortcut,
   or opens its menu straight away, with each item's shortcut. Clicking opens the menu too, for the
   keyboard and touch.
+- **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
+  it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
+  which hovering over brings up, and which goes out of sight while you type) and on right-click, at
+  the pointer, where it takes the place of the system's context menu. It is a small card of icons
+  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
+  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
+  act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
+  Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
+  Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
+  Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
+  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
+  closes it. Paste reads the clipboard through the app and goes in the way ⇧⌘V does, so with Track
+  Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
@@ -672,6 +689,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
@@ -747,7 +765,9 @@ a new email under the same name becomes an alias in the ledger
 
 **Should (v1 if time allows):**
 
-- a selection toolbar: Comment, Suggest, Ask agent, and formatting;
+- a selection toolbar: Comment, Suggest, Ask agent, and formatting. Written as the formatting
+  palette (§5.1), which opens from a handle and on right-click rather than floating over a
+  selection by itself; Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
