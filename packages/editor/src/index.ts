@@ -74,6 +74,8 @@ import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import { breakCorrection } from './tracked/break-correction.ts';
+import { correctText } from './tracked/corrections.ts';
+import { wordAt } from './tracked/word-at.ts';
 import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
@@ -497,6 +499,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       plainPastes.add(event);
       view.contentDOM.dispatchEvent(event);
     },
+    wordAt: (pos) => wordAt(view, pos),
+    pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
     focus: () => view.focus(),
     destroy: () => {

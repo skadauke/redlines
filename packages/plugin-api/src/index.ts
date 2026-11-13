@@ -190,17 +190,31 @@ export interface HostPrint {
 
 /**
  * What the host found out about an agent's program on this machine. A program that is found but
- * can't run says why: it isn't signed in, or it is older than the provider was tested with.
+ * can't run says why: it isn't signed in, or it is older than the provider was tested with. A found
+ * program says where it is (`path`), so that a stale second copy earlier on the PATH shows.
  */
 export type AgentState =
-  | { found: false; help: string }
-  | { found: true; signedIn: true; version?: string; help?: string }
+  | {
+      found: false;
+      help: string;
+      /** The command that installs it, to show and copy; never run by Redlines. */
+      install?: string;
+      /** It couldn't be checked, which isn't the same as not being there. */
+      unchecked?: true;
+    }
+  | { found: true; signedIn: true; version?: string; path?: string; help?: string }
   | {
       found: true;
       signedIn: false;
       reason: 'signed-out' | 'too-old';
       version?: string;
+      path?: string;
       help?: string;
+      /**
+       * For `too-old`: what the program said when asked whether it is signed in. Absent when it
+       * didn't say, as an older program that doesn't know the question wouldn't.
+       */
+      account?: 'signed-in' | 'signed-out';
     };
 
 /** How much of the machine an agent is told about: the document, its folder, or anything. */
@@ -227,7 +241,11 @@ export type AgentEvent =
   | { type: 'status'; text: string }
   /** `finalText` is the last message, for an agent that never called reply. */
   | { type: 'done'; finalText?: string }
-  | { type: 'error'; message: string };
+  /**
+   * `setup` is true when Preferences › Agents can put it right: the agent is signed out, or too
+   * old to run here.
+   */
+  | { type: 'error'; message: string; setup?: true };
 
 /** How an agent's program reaches Redlines' tools: a command that speaks MCP. */
 export interface McpEndpoint {

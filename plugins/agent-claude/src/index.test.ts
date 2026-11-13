@@ -10,6 +10,7 @@ import type {
 import {
   claudeArgs,
   createClaudeProvider,
+  INSTALL_COMMAND,
   newClaudeState,
   parseClaudeLine,
   plugin,
@@ -307,6 +308,7 @@ describe('detect', () => {
       found: true,
       signedIn: true,
       version: '2.1.318',
+      path: '/usr/local/bin/claude',
     });
   });
 
@@ -320,6 +322,7 @@ describe('detect', () => {
       signedIn: false,
       reason: 'signed-out',
       version: '2.1.318',
+      path: '/usr/local/bin/claude',
       help: 'Run `claude auth login`.',
     });
   });
@@ -343,6 +346,24 @@ describe('detect', () => {
       version: '2.1.201',
     });
     expect(state.found && state.help).toMatch(/2\.1\.318/);
+  });
+
+  it('asks a Claude that is too old whether it is signed in, and says where it is', async () => {
+    const signedOut = (stdout: string, code = 1) => ({ code, stdout });
+    const ask = (status: { code: number; stdout: string }) =>
+      createClaudeProvider(
+        fakeProcesses({
+          exec: (_, args) => (args[0] === '--version' ? version('2.1.201 (Claude Code)') : status),
+        }).processes,
+      ).detect();
+    expect(await ask({ code: 0, stdout: '{"loggedIn":true}' })).toMatchObject({
+      reason: 'too-old',
+      path: '/usr/local/bin/claude',
+      account: 'signed-in',
+    });
+    expect(await ask(signedOut('{"loggedIn":false}'))).toMatchObject({ account: 'signed-out' });
+    // An older Claude that doesn't know `auth` fails the question and prints no JSON: no claim.
+    expect(await ask(signedOut(''))).not.toHaveProperty('account');
   });
 });
 
@@ -440,6 +461,29 @@ describe('run', () => {
       { type: 'started', logPath: '/logs/run.jsonl' },
       { type: 'error', message: 'Claude has hit its usage limit. Try again later.' },
     ]);
+  });
+
+  it('marks a failed sign-in as one Preferences can put right, and no other failure', async () => {
+    const run = async (name: string) => {
+      const fake = fakeProcesses({ lines: fixture(name), code: 1 });
+      const events = await collect(
+        createClaudeProvider(fake.processes, { emptyFolder }).run(
+          folderRequest,
+          endpoint,
+          new AbortController().signal,
+        ),
+      );
+      return events.at(-1);
+    };
+    expect(await run('scripted-retry-401.jsonl')).toEqual({
+      type: 'error',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      setup: true,
+    });
+    expect(await run('scripted-retry-429.jsonl')).toEqual({
+      type: 'error',
+      message: 'Claude has hit its usage limit. Try again later.',
+    });
   });
 
   it('gives one error for a truncated stream whose process was killed', async () => {
@@ -712,8 +756,11 @@ describe('hard lines', () => {
   it('says how to install Claude Code when it is not found', async () => {
     const fake = fakeProcesses({ which: null });
     const state = await createClaudeProvider(fake.processes).detect();
-    expect(state).toMatchObject({ found: false });
-    expect(state.help).toContain('curl -fsSL https://claude.ai/install.sh | bash');
+    expect(state).toMatchObject({ found: false, install: INSTALL_COMMAND });
+    expect(INSTALL_COMMAND).toBe('curl -fsSL https://claude.ai/install.sh | bash');
+    // The command is shown beside the help, with a Copy button: the help doesn't say it twice.
+    expect(state.help).toMatch(/isn't installed/);
+    expect(state.help).not.toContain('curl');
   });
 
   it('survives a detect that throws', async () => {

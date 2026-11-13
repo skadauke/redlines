@@ -115,14 +115,26 @@ describe('styles.css', () => {
     expect(bar?.declarations).toContain('background: none');
     const mixed = all.find(({ selector }) => selector === '#editor .rl-bar-mixed::before');
     expect(mixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
-    // The bars of the text are the layer's (bar-layer.ts), one piece for each screen line.
-    const seg = all.find(({ selector }) => selector === '#editor .rl-bar-seg');
-    expect(seg?.declarations).toContain('border-left: 2px solid var(--rl-color)');
-    expect(seg?.declarations).toContain('background: none');
-    const segMixed = all.find(({ selector }) => selector === '#editor .rl-bar-seg.rl-bar-mixed');
-    expect(segMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    // The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the
+    // text differently: the layer is left out, and each line that holds a change prints a bar down
+    // its whole paragraph, as the lines drew it before the layer.
+    const layer = all.find(({ selector }) => selector === '#editor .rl-bar-layer');
+    expect(layer?.declarations).toContain('display: none');
+    const line = all.find(({ selector }) => selector === '#editor .cm-line.rl-bar::before');
+    expect(line?.declarations).toContain("content: ''");
+    expect(line?.declarations).toContain('position: absolute');
+    expect(line?.declarations).toContain('left: -24px');
+    expect(line?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    const lineMixed = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-bar-mixed::before',
+    );
+    expect(lineMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    const quote = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-quote.rl-bar::before',
+    );
+    expect(quote?.declarations).toContain('left: -26px');
     // Among the print rules, and the bars nothing else draws as a background there.
-    for (const rule of [bar, mixed, seg, segMixed]) {
+    for (const rule of [bar, mixed, layer, line, lineMixed, quote]) {
       expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
     }
   });
@@ -151,6 +163,20 @@ describe('styles.css', () => {
     expect(covering?.declarations).toContain('position: absolute');
     // 240 px of sidebar and 360 of page.
     expect(240 + 360).toBe(600);
+  });
+
+  it('lets the file name take the pointer, for its double-click and the facts shown on hover', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // With `pointer-events: none` the pointer never reaches the name: the bar is under it.
+    expect(declared('.rl-title')).not.toContain('pointer-events');
+    // The name and the document's icon are one group in the bar's middle column, and the icon
+    // does not shrink when a long name is cut short.
+    expect(declared('.rl-title-group')).toContain('grid-column: 2');
+    expect(declared('.rl-title')).toContain('min-width: 0');
+    expect(declared('.rl-doc-icon')).toContain('flex: none');
+    // Its size is in the frame's units, as the other controls' are.
+    expect(declared('.rl-doc-icon')).toContain('width: calc(20 * var(--rl-frame))');
   });
 
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {

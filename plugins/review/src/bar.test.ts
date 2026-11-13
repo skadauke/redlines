@@ -221,6 +221,33 @@ describe('review bar', () => {
     expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
   });
 
+  it('opens the nearest change before a piece that has none beside it, as struck words that wrap onto later screen lines', () => {
+    // A deletion's words wrap over screen lines after the one it stands at: the piece of the bar
+    // there is beside plain text, and the change it belongs to is the last one before it.
+    const three = file(
+      'One <!--ins k3x9-->new<!--/k3x9--> and <!--ins w2rf-->more<!--/w2rf--> then plain words, <!--ins q3q3-->last<!--/q3q3-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+        '  q3q3: {by: ada, at: 2026-10-31T09:40Z}',
+      ],
+    );
+    const { editor, review } = mount(three);
+    review.openBar();
+    const gap = three.indexOf('plain');
+    editor.view.state
+      .facet(barClickHandlers)
+      .some((handler) => handler(editor.view, 0, undefined, { from: gap, to: gap + 11 }));
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “more”');
+    // Before the first change there is none before it: the first on the line.
+    editor.view.state
+      .facet(barClickHandlers)
+      .some((handler) => handler(editor.view, 0, undefined, { from: 0, to: 3 }));
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+  });
+
   it('opens the card of the change instead of switching, when a bar is clicked with the bar open', () => {
     const { editor, review } = mount(doc);
     const handle = (pos: number) =>
