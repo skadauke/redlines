@@ -28,6 +28,8 @@ interface Options {
   claudeReads?: 'folder' | 'machine';
   path?: string | null;
   root?: ProjectRoot;
+  /** The folder of the document can't be looked up. */
+  rootFails?: boolean;
   scope?: 'folder' | 'document';
   consent?: Record<string, AgentScope | 'no'>;
   noAgents?: boolean;
@@ -70,7 +72,9 @@ function setup(options: Options = {}) {
       },
       projectRoot: (path) => {
         asked.push(path);
-        return Promise.resolve(options.root ?? REPO);
+        return options.rootFails
+          ? Promise.reject(new Error('The folder is gone.'))
+          : Promise.resolve(options.root ?? REPO);
       },
       settings: {
         defaultScope: () => options.scope ?? 'document',
@@ -472,6 +476,32 @@ describe('what goes wrong', () => {
     session.ask('What?');
     await done(session);
     expect(session.state.line).toMatchObject({ kind: 'failed' });
+  });
+
+  it('says the agent stopped when it failed after it started, and that it did not start when it never did', async () => {
+    const stopped = setup({
+      claude: async function* ({ tools }) {
+        await tools.initialize();
+        yield { type: 'status', text: 'Reading plan.md' };
+        throw new Error('The program crashed.');
+      },
+    });
+    stopped.session.ask('What?');
+    await done(stopped.session);
+    expect(stopped.claude.requests).toHaveLength(1);
+    expect(stopped.session.state.line).toMatchObject({
+      kind: 'failed',
+      message: 'Claude stopped: The program crashed.',
+    });
+
+    const never = setup({ rootFails: true });
+    never.session.ask('What?');
+    await done(never.session);
+    expect(never.claude.requests).toHaveLength(0);
+    expect(never.session.state.line).toMatchObject({
+      kind: 'failed',
+      message: "Claude didn't start: The folder is gone.",
+    });
   });
 
   it('stops the tools of a question once another document took the place of this one', async () => {

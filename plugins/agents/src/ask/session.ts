@@ -286,6 +286,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     const generation = deps.document.generation();
     set({ pending: question, line: null });
     let agent: AgentInfo | null = null;
+    let started = false;
     try {
       const agents = await deps.agents.list();
       if (mine !== epoch) return;
@@ -315,10 +316,18 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         abort,
         generation,
         withoutMentions(question, agents, mentionedAgents(question, agents)),
+        () => {
+          started = true;
+        },
       );
     } catch (error) {
       const why = reasonOf(error);
-      fail(mine, agent, agent ? `${agent.name} didn't start: ${why}` : why);
+      // As a comment's run says it: what went wrong before the agent was started, or after.
+      fail(
+        mine,
+        agent,
+        agent ? `${agent.name} ${started ? 'stopped' : "didn't start"}: ${why}` : why,
+      );
     }
   }
 
@@ -330,6 +339,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     abort: AbortController,
     generation: number,
     question: string,
+    onStart: () => void,
   ): Promise<void> {
     const me = deps.author.handle;
     const author: Person = {
@@ -390,6 +400,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       author: { handle: author.handle, name: author.name, for: me },
     };
     set({ line: running(agent, reach.note ?? STARTING) });
+    onStart();
     const events = deps.agents.run(agent.id, request, tools, abort.signal)[Symbol.asyncIterator]();
     let logPath: string | undefined;
     try {
