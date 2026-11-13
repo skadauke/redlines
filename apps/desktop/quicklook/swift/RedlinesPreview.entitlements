@@ -4,9 +4,9 @@
   What the Quick Look extension may do. An app extension must be sandboxed, and the sandbox lets it
   read the one file that Quick Look hands it. It has no network entitlement, so that a preview never
   tells anyone that a file was opened, and no other. The one thing it asks for is JavaScriptCore's
-  compiler (allow-jit): the renderer is JavaScript, and without the compiler it runs several times
-  slower (a megabyte and a half of Markdown in 8 to 14 seconds instead of 0.4 to 1.5), which Quick
-  Look doesn't wait for. The hardened runtime, which notarization requires, takes the compiler away
+  compiler (allow-jit): the renderer is JavaScript, and without the compiler it runs 5 to 8 times
+  slower (100 KB of Markdown in 1.3 seconds instead of 0.2), which a long document turns from a
+  moment into a wait. The hardened runtime, which notarization requires, takes the compiler away
   unless asked.
 -->
 <plist version="1.0">

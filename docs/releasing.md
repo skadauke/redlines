@@ -227,8 +227,9 @@ why is design §10). Tauri builds no app extensions, so the build does it:
   which every app extension must have, and which already lets it read the file that Quick Look
   hands it; and JavaScriptCore's compiler (`com.apple.security.cs.allow-jit`). It has no network:
   a preview never tells a server that a file was opened. Without the compiler the renderer is
-  several times slower (a 1.6 MB file takes 8 to 14 seconds, with it 0.4 to 1.5, by how busy the
-  Mac is; 100 KB takes 3 seconds, with it 0.8), more than Quick Look waits for.
+  several times slower (5 to 8 times measured: 100 KB takes 1.3 seconds instead of 0.2, and a 1.6 MB
+  file 4 seconds instead of 0.5, more when the Mac is busy), which a long document turns from a
+  moment into a wait.
 - **Checks.** `scripts/build-quicklook --check` (CI's `quicklook` job on a Mac) builds it, runs the
   renderer in the system's JavaScriptCore on the fixtures of `apps/desktop/quicklook/fixtures`
   (a plain file, one with tracked changes and comments, front matter, tables, R Markdown and Quarto

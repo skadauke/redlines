@@ -1462,8 +1462,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
   entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
   so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
-  JavaScriptCore's compiler, without which the renderer is several times as slow (a megabyte and a
-  half of Markdown takes 8 to 14 seconds instead of 0.4 to 1.5), more than Quick Look waits for
+  JavaScriptCore's compiler, without which the renderer is 5 to 8 times as slow, which a long
+  document turns from a moment into a wait
   ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
