@@ -264,19 +264,19 @@ An app in `/Applications` is registered by macOS itself, and the extension with 
 above are for a build somewhere else. `qlmanage -p -c <type> file` forces a type, to see a `.qmd`
 that another app owns on your Mac (`dyn.ah62d4rv4ge81c5pe` is `.qmd`, `dyn.ah62d4rv4ge81e5pe` is
 `.rmd`). The preview's window is blank while it is behind other windows, since the web view
-stops drawing: bring it to the front. What the extension did is in the log:
+stops drawing: bring it to the front. What the extension did is in the log (`/usr/bin/log`, since
+`log` in zsh is something else):
 
 ```sh
-log show --last 5m --predicate 'subsystem == "md.redlines.editor.preview"'
+/usr/bin/log show --last 5m --predicate 'subsystem == "md.redlines.editor.preview"'
 ```
 
 When you are done, `pluginkit -r <the .appex>` and `"$lsregister" -u "$app"` take the build out of
 macOS's lists, so that it doesn't stand in for the installed app. On a Mac that has never had
 Redlines, check after a release that Space previews a Markdown file once the app has run from
 Applications, that System Settings › General › Login Items & Extensions › Quick Look lists
-Redlines with its switch on (the link `x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview`
-opens that sheet, as Preferences' button does), and that an update through the app's updater keeps
-it.
+Redlines with its switch on (`open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview"`
+opens that sheet), and that an update through the app's updater keeps it.
 
 ## A signed build on your own Mac
 
