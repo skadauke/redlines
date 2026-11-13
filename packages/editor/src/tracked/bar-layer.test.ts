@@ -2,11 +2,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import {
+  bandsOf,
   barLayerThemeSpec,
   barMeasure,
   type BarMeasure,
+  hotBar,
   segmentsOf,
   setHotBar,
+  type DrawnPiece,
   type ScreenLine,
 } from './bar-layer.ts';
 
@@ -134,6 +137,79 @@ describe('segmentsOf', () => {
   });
 });
 
+describe('bandsOf', () => {
+  const line = { from: 100, to: 400 };
+
+  it('makes the bands of the screen lines meet halfway between their text, and the ends reach the line’s', () => {
+    // Three rows of text 24 px apart and 16 px high, in a line from 0 to 82 with spacing around.
+    const stops = [
+      { from: 100, to: 180, top: 6, bottom: 22 },
+      { from: 180, to: 290, top: 30, bottom: 46 },
+      { from: 290, to: 400, top: 54, bottom: 70 },
+    ];
+    expect(bandsOf(stops, { top: 0, bottom: 82 }, line)).toEqual([
+      { from: 100, to: 180, top: 0, bottom: 26 },
+      { from: 180, to: 290, top: 26, bottom: 50 },
+      { from: 290, to: 400, top: 50, bottom: 82 },
+    ]);
+  });
+
+  it('is one screen line, the whole line, when there is one stop or none', () => {
+    expect(
+      bandsOf([{ from: 100, to: 400, top: 6, bottom: 22 }], { top: 0, bottom: 28 }, line),
+    ).toEqual([{ from: 100, to: 400, top: 0, bottom: 28 }]);
+    expect(bandsOf([], { top: 0, bottom: 28 }, line)).toEqual([
+      { from: 100, to: 400, top: 0, bottom: 28 },
+    ]);
+  });
+
+  it('does not make a second screen line of a boundary on the row of the first', () => {
+    // A paragraph that ends in a marker the view hides: CodeMirror gives the position before it as
+    // the end of the row, and what follows is no new row. Two bands would each be half the line.
+    const stops = [
+      { from: 100, to: 390, top: 6, bottom: 22 },
+      { from: 390, to: 400, top: 6, bottom: 22 },
+    ];
+    expect(bandsOf(stops, { top: 0, bottom: 28 }, line)).toEqual([
+      { from: 100, to: 400, top: 0, bottom: 28 },
+    ]);
+    // Also where the text there is a little smaller or lower, as in a span of code.
+    expect(
+      bandsOf(
+        [stops[0] as ScreenLine, { from: 390, to: 400, top: 8, bottom: 20 }],
+        { top: 0, bottom: 28 },
+        line,
+      ),
+    ).toEqual([{ from: 100, to: 400, top: 0, bottom: 28 }]);
+  });
+
+  it('keeps the rows of tight lines apart though their text boxes overlap', () => {
+    // 20 px boxes 18 px apart: the second row starts above the bottom of the first.
+    const stops = [
+      { from: 100, to: 250, top: 0, bottom: 20 },
+      { from: 250, to: 400, top: 18, bottom: 38 },
+    ];
+    expect(bandsOf(stops, { top: 0, bottom: 36 }, line)).toEqual([
+      { from: 100, to: 250, top: 0, bottom: 19 },
+      { from: 250, to: 400, top: 19, bottom: 36 },
+    ]);
+  });
+
+  it('lets the last screen line reach the end of the line of the file', () => {
+    // The walk stopped where the page gave no position for the text (a hidden range).
+    const stops = [
+      { from: 100, to: 180, top: 6, bottom: 22 },
+      { from: 180, to: 290, top: 30, bottom: 46 },
+    ];
+    expect(bandsOf(stops, { top: 0, bottom: 58 }, line).at(-1)).toEqual({
+      from: 180,
+      to: 400,
+      top: 26,
+      bottom: 58,
+    });
+  });
+});
+
 describe('the layer', () => {
   const doc =
     'Alpha.\n\nBeta <!--ins b2b2-->two<!--/b2b2--> three four five six seven eight nine ten.\n\nGamma.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n';
@@ -142,7 +218,7 @@ describe('the layer', () => {
    * Lines 20 px high, the paragraph with the change wrapped over three screen lines by character
    * position, from x = 100. Happy-dom has no layout.
    */
-  const measure: BarMeasure = {
+  const measureWith = (drawn?: DrawnPiece[]): BarMeasure => ({
     screenLines(view, line) {
       const text = view.state.doc.lineAt(line.from).text;
       if (!text.startsWith('Beta')) {
@@ -157,18 +233,27 @@ describe('the layer', () => {
           top: 100 + i * 20,
           bottom: 120 + i * 20,
         })),
+        ...(drawn ? { drawn } : {}),
       };
     },
-  };
+  });
+  const measure = measureWith();
 
-  function load(view: 'redlines' | 'simple' | 'clean' | 'raw' = 'redlines') {
+  /** The same paragraph with a second change in its last third. */
+  const two =
+    'Alpha.\n\nBeta <!--ins b2b2-->two<!--/b2b2--> three four five six seven eight <!--ins c3c3-->nine<!--/c3c3--> ten.\n\nGamma.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n  c3c3: {by: ada, at: 2026-10-31T09:35Z}\n-->\n';
+
+  function load(
+    view: 'redlines' | 'simple' | 'clean' | 'raw' = 'redlines',
+    options: { doc?: string; measure?: BarMeasure } = {},
+  ) {
     const parent = document.createElement('div');
     document.body.append(parent);
     const editor = createEditor(parent, {
-      doc,
+      doc: options.doc ?? doc,
       author: ada,
       view,
-      extensions: [barMeasure.of(measure)],
+      extensions: [barMeasure.of(options.measure ?? measure)],
     });
     open.push(editor);
     return editor;
@@ -233,6 +318,84 @@ describe('the layer', () => {
     editor.view.dispatch({ effects: setHotBar.of(null) });
     await frame();
     expect(segments(editor)[0]?.className).not.toContain('rl-bar-hot');
+  });
+
+  it('widens one of the two bars of a paragraph, the one whose screen lines start where it says', async () => {
+    const editor = load('redlines', { doc: two });
+    await frame();
+    // The first and the last third hold a change: two bars with the middle third between them.
+    expect(segments(editor).map(({ top }) => top)).toEqual(['100px', '140px']);
+    const from = editor.view.state.doc.line(3).from;
+    const lastThird = from + 2 * Math.ceil(editor.view.state.doc.line(3).length / 3);
+    for (const [hot, expected] of [
+      [from, [true, false]],
+      [lastThird, [false, true]],
+    ] as const) {
+      editor.view.dispatch({ effects: setHotBar.of({ from: hot }) });
+      await frame();
+      expect(segments(editor).map(({ className }) => className.includes('rl-bar-hot'))).toEqual(
+        expected,
+      );
+    }
+  });
+
+  it('lets go of the bar under the pointer when the text or the view changes', async () => {
+    const editor = load();
+    await frame();
+    const from = editor.view.state.doc.line(3).from;
+    editor.view.dispatch({ effects: setHotBar.of({ from }) });
+    expect(editor.view.state.field(hotBar)).toEqual({ from });
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(editor.view.state.field(hotBar)).toBeNull();
+    editor.view.dispatch({ effects: setHotBar.of({ from }) });
+    editor.setViewMode('simple');
+    expect(editor.view.state.field(hotBar)).toBeNull();
+    editor.view.dispatch({ effects: setHotBar.of({ from }) });
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    expect(editor.view.state.field(hotBar)).toEqual({ from });
+  });
+
+  it('draws a bar on each screen line that deleted text drawn apart from the text is on', async () => {
+    // Redlines draws deleted words as a widget that wraps as text does: the page says where each
+    // piece is, and the third screen line holds one though no position of the file does.
+    const pieces = [{ top: 142, bottom: 158, color: 7 }];
+    const editor = load('redlines', { measure: measureWith(pieces) });
+    await frame();
+    const drawn = segments(editor);
+    expect(drawn.map(({ top, height }) => [top, height])).toEqual([
+      ['100px', '20px'],
+      ['140px', '20px'],
+    ]);
+    expect(drawn[1]?.className).toContain('rl-author-7');
+  });
+
+  it('draws one bar for each line of the file that a change runs over', async () => {
+    const across =
+      'First <!--ins b2b2-->one\n\ntwo<!--/b2b2--> last.\n\nNo change.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n';
+    const editor = load('redlines', { doc: across });
+    await frame();
+    // The paragraph the change begins in, the blank line it runs over and the one it ends in:
+    // nothing on the paragraph below.
+    expect(segments(editor)).toHaveLength(3);
+  });
+
+  it('draws nothing beside a line the page does not draw, and the others as they are', async () => {
+    const both =
+      'Alpha <!--ins k3x9-->one<!--/k3x9-->.\n\nBeta <!--ins b2b2-->two<!--/b2b2--> three four five six.\n\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: ada, at: 2026-10-31T09:30Z}\n  b2b2: {by: ada, at: 2026-10-31T09:35Z}\n-->\n';
+    const hidden: BarMeasure = {
+      screenLines: (view, line) =>
+        view.state.doc.lineAt(line.from).text.startsWith('Beta')
+          ? null
+          : measure.screenLines(view, line),
+    };
+    const editor = load('redlines', { doc: both, measure: hidden });
+    await frame();
+    // The Alpha line's bar only: the Beta line is not drawn, and nothing breaks over it.
+    expect(segments(editor)).toHaveLength(1);
+    const none: BarMeasure = { screenLines: () => null };
+    const nothing = load('redlines', { doc: both, measure: none });
+    await frame();
+    expect(segments(nothing)).toEqual([]);
   });
 
   it('is 2 px wide, 3 under the pointer, in the author’s color or gray', () => {

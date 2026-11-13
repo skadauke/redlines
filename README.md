@@ -24,7 +24,7 @@ The editor shows a document three ways. This is one short document in all three.
 **Redlines** shows who changed what. Ada added "new". Claude, working for Ada, replaced "March"
 with "April". Bo deleted a sentence and asked a question. Each change can be accepted or rejected.
 A click on a change bar in the margin switches to Redlines' simple look, which reads like Clean, with
-a bar beside each changed line and the comments kept; a click on a bar switches back.
+a bar beside each changed screen line and the comments kept; a click on a bar switches back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-redlines-dark.png">

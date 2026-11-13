@@ -5,7 +5,7 @@
 
 import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { barsOnLine, hotBar, setHotBar } from './bar-layer.ts';
+import { BAR_LEFT, barsOnLine, hotBar, setHotBar } from './bar-layer.ts';
 import { chooseViewEffects, viewModeField } from './field.ts';
 
 /**
@@ -53,12 +53,12 @@ export interface BarSwitchOptions {
   geometry?: BarGeometry;
 }
 
-/** How far the bar's center is from its line's left edge: 24 px left, 2 px wide (see the theme). */
-const BAR_OFFSET = -23;
+/** How far the bar's center is from its line's left edge: `BAR_LEFT` left, 2 px wide (the theme's). */
+const BAR_OFFSET = 1 - BAR_LEFT;
 /** How far in from the content's edge a bar's target can reach: the margin the column keeps. */
 const MARGIN_REACH = 80;
-/** A quote's own border moves its bar 2 px further. */
-const QUOTE_OFFSET = -25;
+/** A struck quote's own border moves its bar 2 px further. */
+const QUOTE_OFFSET = BAR_OFFSET - 2;
 /** The target's reach on each side of the bar's center: 24 px wide. */
 const REACH = 12;
 /** The farthest the pointer may move between pressing and releasing for the press to be a click. */
@@ -125,6 +125,9 @@ const pageGeometry: BarGeometry = {
     if (isLine && !element.classList.contains('rl-trow')) {
       // A line of text: its bar is the pieces of it beside the screen lines that hold a change, and
       // the pointer is on one only at the height of one of them, not anywhere down the paragraph.
+      // A line that holds none is not measured: the pointer crosses many, and a paragraph that wraps
+      // is costly to measure.
+      if (!element.classList.contains('rl-bar')) return null;
       const from = view.lineBlockAt(pos).from;
       const found = barsOnLine(view, from);
       const piece = found?.segments.find(({ top, bottom }) => y >= top && y < bottom);
@@ -303,7 +306,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         this.release();
         const { state } = this.view;
         const effects = [
-          ...(state.field(hotBar) ? [setHotBar.of(null)] : []),
+          ...(state.field(hotBar, false) ? [setHotBar.of(null)] : []),
           ...(state.field(hoverField) !== null ? [setHover.of(null)] : []),
         ];
         if (effects.length) this.view.dispatch({ effects });

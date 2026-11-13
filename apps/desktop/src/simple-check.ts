@@ -408,6 +408,53 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
+    name: 'a-change-at-the-edge-of-a-paragraph-has-a-bar-as-tall-as-its-lines',
+    async run(editor) {
+      await open(editor, 'redlines');
+      // The markers the page hides stand at the ends of these paragraphs: one ends in a closer, one
+      // starts with an opener, and one wraps over screen lines with its change at the very end.
+      const filler = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod. ';
+      const doc = [
+        'Ends with <!--ins k3x9-->a change<!--/k3x9-->',
+        '',
+        '<!--ins q3q3-->Begins<!--/q3q3--> with one',
+        '',
+        `${filler.repeat(12)}<!--ins r2r2-->the last words<!--/r2r2-->`,
+        '',
+        '<!-- redlines',
+        'version: 1',
+        'people:',
+        '  ada: {name: Ada Lovelace}',
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  q3q3: {by: ada, at: 2026-10-31T09:31Z}',
+        '  r2r2: {by: ada, at: 2026-10-31T09:32Z}',
+        '-->',
+        '',
+      ].join('\n');
+      editor.reloadDoc(doc);
+      editor.setViewMode('redlines');
+      await frames();
+      const lines = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-bar')];
+      const segs = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')];
+      if (lines.length !== 3 || segs.length !== 3) {
+        return { lines: lines.length, segments: segs.length };
+      }
+      const problems: Problem = {};
+      const [ends, begins, long] = lines.map((el) => el.getBoundingClientRect());
+      const [endsBar, beginsBar, longBar] = segs.map((el) => el.getBoundingClientRect());
+      // A paragraph of one screen line: its bar is as tall as the line, not half of it.
+      if (Math.abs(endsBar!.height - ends!.height) > 3)
+        problems['ends'] = [endsBar!.height, ends!.height];
+      if (Math.abs(beginsBar!.height - begins!.height) > 3)
+        problems['begins'] = [beginsBar!.height, begins!.height];
+      // The long one: only its last screen lines, down to the bottom of the paragraph.
+      if (longBar!.bottom < long!.bottom - 3 || longBar!.height > long!.height / 2)
+        problems['long'] = [longBar!.top, longBar!.bottom, long!.top, long!.bottom];
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
     name: 'accept-on-a-note-in-simple-decides-nothing',
     async run(editor) {
       await open(editor, 'simple');

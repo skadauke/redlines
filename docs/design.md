@@ -272,11 +272,11 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
   off, so the View menu always offers the same three views. A document without redlines looks
   nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
   the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
-  short), the same text as Clean with a change bar beside each line that has a pending change, in
-  its author's color, and the comments with their notes: deletions are hidden, and inserted and
-  reformatted text is plain (Word's Simple Markup). The click switches from the one to the other,
-  with the line where it was. The simple look is no view of its own: the View menu has no entry for
-  it and no key shows it, so the menu says "Redlines" in both looks.
+  short), the same text as Clean with a change bar beside each screen line that has a pending
+  change (§5.5), in its author's color, and the comments with their notes: deletions are hidden,
+  and inserted and reformatted text is plain (Word's Simple Markup). The click switches from the
+  one to the other, with the line where it was. The simple look is no view of its own: the View
+  menu has no entry for it and no key shows it, so the menu says "Redlines" in both looks.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
@@ -349,7 +349,8 @@ mode has no counterpart in the desktop app.
   their own. In Redlines a click on a bar switches between its two looks, the full markup and the
   simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
   lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
-  prints.
+  prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
+  the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");

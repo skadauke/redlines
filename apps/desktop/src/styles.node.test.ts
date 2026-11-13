@@ -115,14 +115,26 @@ describe('styles.css', () => {
     expect(bar?.declarations).toContain('background: none');
     const mixed = all.find(({ selector }) => selector === '#editor .rl-bar-mixed::before');
     expect(mixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
-    // The bars of the text are the layer's (bar-layer.ts), one piece for each screen line.
-    const seg = all.find(({ selector }) => selector === '#editor .rl-bar-seg');
-    expect(seg?.declarations).toContain('border-left: 2px solid var(--rl-color)');
-    expect(seg?.declarations).toContain('background: none');
-    const segMixed = all.find(({ selector }) => selector === '#editor .rl-bar-seg.rl-bar-mixed');
-    expect(segMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    // The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the
+    // text differently: the layer is left out, and each line that holds a change prints a bar down
+    // its whole paragraph, as the lines drew it before the layer.
+    const layer = all.find(({ selector }) => selector === '#editor .rl-bar-layer');
+    expect(layer?.declarations).toContain('display: none');
+    const line = all.find(({ selector }) => selector === '#editor .cm-line.rl-bar::before');
+    expect(line?.declarations).toContain("content: ''");
+    expect(line?.declarations).toContain('position: absolute');
+    expect(line?.declarations).toContain('left: -24px');
+    expect(line?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    const lineMixed = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-bar-mixed::before',
+    );
+    expect(lineMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    const quote = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-quote.rl-bar::before',
+    );
+    expect(quote?.declarations).toContain('left: -26px');
     // Among the print rules, and the bars nothing else draws as a background there.
-    for (const rule of [bar, mixed, seg, segMixed]) {
+    for (const rule of [bar, mixed, layer, line, lineMixed, quote]) {
       expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
     }
   });
