@@ -6,8 +6,9 @@ import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, singleChange, workingLedger } from './edit-support.ts';
+import { addPerson, changesBetween, commitEdit, workingLedger } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
+import { SYNTAX_ONLY } from './inline.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
@@ -32,6 +33,8 @@ import {
   commentsOf,
   commentsOfCols,
   foldedMarks,
+  neighboursOf,
+  NEXT_TO_WORDS,
   pendingInTable,
   pointPlaces,
   ruleSix,
@@ -52,7 +55,7 @@ import {
   setPositions,
 } from './table-rows.ts';
 import type { RowItem } from './table-rows.ts';
-import { trackedEdit } from './track.ts';
+import { SELF_CHECK, trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { UntrackedContext } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
@@ -647,20 +650,6 @@ function moveRows(
   return { changes, caret: first?.cells[0]?.textFrom ?? table.from, rows: moved };
 }
 
-/** The changes from `before` to `after`: what the body and the ledger do not share, each as one change. */
-function changesBetween(before: string, after: string): TextChange[] {
-  const stop = (text: string) => parse(text).ledgerRange?.from ?? text.length;
-  const [a, b] = [stop(before), stop(after)];
-  return [
-    ...singleChange(before.slice(0, a), after.slice(0, b)),
-    ...singleChange(before.slice(a), after.slice(b)).map((change) => ({
-      ...change,
-      from: change.from + a,
-      to: change.to + a,
-    })),
-  ];
-}
-
 /** Why a point comment's place is refused by the edit that writes it, which the next place is tried for. */
 const NO_PLACE = new Set(['no-legal-placement', 'inside-code', 'would-hide-marks', 'unclosed-end']);
 
@@ -752,6 +741,30 @@ function caretAfterTable(before: string, from: number, after: string): number {
 }
 
 /**
+ * The words of a refusal of the deletion of the table `table` that say what stands in the way and what
+ * to do (format §3.7, rule 6), or null when the refusal is for another reason. The deletion's marker
+ * can't stand in front of a code fence, nor behind a code block or a rule where the table ends the
+ * text, and the block's deletion needs a break in front of the table's first line.
+ */
+function wordsNextTo(
+  error: EditError,
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): string | null {
+  const next = neighboursOf(text, parsed, table);
+  if (error.code === 'unclosed-end' && next.fenceAfter) return NEXT_TO_WORDS.codeAfter;
+  if (
+    next.endsText &&
+    ((error.code === 'inside-code' && next.indentedAbove) ||
+      (error.message === SYNTAX_ONLY && next.fenceOrRuleAbove))
+  ) {
+    return NEXT_TO_WORDS.codeBefore;
+  }
+  return error.message === SELF_CHECK && next.underText ? NEXT_TO_WORDS.underText : null;
+}
+
+/**
  * Deleting a table (format §3.4, §3.7 rule 6): a deletion of the block, in the form of §3.4, with the
  * table as it reads with your own pending changes rejected as its payload. With Track Changes on,
  * another person's pending change in the table refuses it; your own are folded in, as rejecting them
@@ -813,9 +826,19 @@ function deleteTable(
     read = parse(current);
     here = readTables(current, read)[index] as TableRead;
   }
-  const asked = ctx
-    ? trackedEdit(current, { from: here.from, to: here.to, insert: '' }, ctx)
-    : untrackedEdit(current, { ...plainRange(current, read, here), insert: '' }, plain);
+  let asked: TextChange[];
+  try {
+    asked = ctx
+      ? trackedEdit(current, { from: here.from, to: here.to, insert: '' }, ctx)
+      : untrackedEdit(current, { ...plainRange(current, read, here), insert: '' }, plain);
+  } catch (error) {
+    // The ordinary deletion of a block words its refusals for blocks in general, and some are not so of
+    // a table (it speaks of a code block to close, or of a change to make smaller). When what stands
+    // next to the table is in the way, say so.
+    const words =
+      ctx && error instanceof EditError ? wordsNextTo(error, current, read, here) : null;
+    throw words === null ? error : new EditError(words, 'no-legal-placement');
+  }
   const after = applyChanges(current, asked);
   return {
     changes: current === text ? asked : changesBetween(text, after),

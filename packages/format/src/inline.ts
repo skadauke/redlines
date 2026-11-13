@@ -47,6 +47,9 @@ export interface Paragraph {
 
 const BLANK = /^[ \t>]*$/;
 
+/** The refusal of a marker on a line that is only Markdown syntax: a fence, a rule, a bullet. */
+export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
+
 export function visible(
   text: string,
   hidden: readonly Range[],
@@ -486,7 +489,7 @@ export function inspectPlace(
     isSyntaxLine(lineText, underlines && !(first && start === 0)) &&
     !isTableRowAt(text, position)
   ) {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   const prefix = prefixLength(lineText);
   const heading = /^#{1,6}[ \t]+/.exec(lineText.slice(prefix))?.[0].length ?? 0;
@@ -546,7 +549,7 @@ export function inspectPlace(
   if (kind === 'block') return { kind: 'block' };
   if (kind === 'continuation') return { kind: 'continuation' };
   if (kind === 'syntax') {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   return { kind: 'ok' };
 }

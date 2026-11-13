@@ -1897,6 +1897,16 @@ it, one per line:
     Delete it first, or turn off Track Changes."), and so is one that no text next to the table
     can keep, as when the table is all the text ("Bo Chen's comment is in this table, and no text
     next to it can keep it. Delete the comment first, or turn off Track Changes.").
+  - **Where Track Changes has no place to write it.** The deletion's marker stands in front of the
+    block after the table, or behind the block before it when the table ends the text. It can't
+    stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
+    a table that ends the text right after one is refused too. A table that starts right under the
+    line above it, with no blank line between, and is followed by something, is refused as well,
+    unless that line is a `#` heading. Each refusal says which it is and what to do: put a paragraph
+    between the table and the code block or the rule (a pending insertion counts), or a blank line
+    above the table, or turn off Track Changes, which takes the table as text ("This table can't be
+    deleted with Track Changes on while a code block follows it with no text between. Put a
+    paragraph between them first, or turn off Track Changes.").
   - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
     and their ledger entries, and the blank lines after it (the break before it, when nothing
     follows). Its comments become points as above. A comment that has no place so, or runs out of

@@ -21,6 +21,7 @@ import {
 } from './table-ops.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
+import { trackedEdit } from './track.ts';
 import {
   TIME,
   ada,
@@ -439,6 +440,12 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
   const around = (table: string) => `Intro.\n\n${table}\n\nAfter.`;
   const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
   const pending = (name: string) => `${name}'s pending change is in this table. Decide it first.`;
+  const CODE_AFTER =
+    "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.";
+  const CODE_BEFORE =
+    "This table can't be deleted with Track Changes on while it ends the text right after a code block or a rule. Put a paragraph between them first, or turn off Track Changes.";
+  const UNDER_TEXT =
+    "This table can't be deleted with Track Changes on while it starts right under the line above it, with no blank line between. Put a blank line between them first, or turn off Track Changes.";
   const said = (run: () => unknown) => {
     try {
       run();
@@ -446,6 +453,21 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       return error instanceof EditError ? error.message : String(error);
     }
     return 'no error';
+  };
+  /** The tables that the newest view of `text` shows. */
+  const shown = (text: string) => {
+    const view = newestView(text).text;
+    return readTables(view, parse(view));
+  };
+  /** The refusal of `run`, which gives no changes: fails when it gives some instead. */
+  const refusal = (run: () => unknown): EditError => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    throw new Error('the deletion was not refused');
   };
 
   function remove(text: string, who: typeof ada | null = ada, ids = IDS) {
@@ -623,16 +645,142 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     expect(readTables(text, parse(text))).toHaveLength(1);
     // The blank line after the table stays: the paragraphs would be one without it.
     expect(trimmed(remove(text, null).after)).toBe('Intro.\n\nAfter.');
-    // A tracked deletion there has no form, and is refused, whole.
-    expect(() => remove(text)).toThrow(EditError);
+    // A tracked deletion there has no form, and is refused, in words of its own (below).
+    expect(refusal(() => remove(text)).message).toBe(UNDER_TEXT);
+  });
+
+  // With Track Changes on, the deletion's marker stands in front of the block after the table, or
+  // behind the block before it at the end of the text, and in some places no marker can stand. Each is
+  // refused in words that say what is in the way and what to do; each way out is held to work.
+  describe('where Track Changes has no place to write the deletion', () => {
+    const FENCES = [
+      '```\ncode\n```',
+      '~~~\ncode\n~~~',
+      '```js\ncode\n```',
+      '   ```\n   code\n   ```',
+    ];
+
+    it('refuses a code block after the table, and says to put a paragraph between them', () => {
+      for (const fence of FENCES) {
+        for (const [head, gap, tail] of [
+          ['Intro.\n\n', '\n\n', ''],
+          ['', '\n\n', ''],
+          ['Intro.\n\n', '\n', ''],
+          ['Intro.\n\n', '\n\n', '\n\nAfter.'],
+        ] as const) {
+          const label = JSON.stringify(head + FRUIT + gap + fence + tail);
+          const text = file(head + FRUIT + gap + fence + tail);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(CODE_AFTER);
+          expect(error.code, label).toBe('no-legal-placement');
+          // Track Changes off takes the table as text, and leaves the code block as it was.
+          expect(trimmed(remove(text, null).after), label).toBe(head + fence + tail);
+          // A paragraph between them, as text or as a pending insertion of anyone's, gives it a place.
+          const as = (between: string, marks: Record<string, string> = {}) =>
+            file(`${head}${FRUIT}\n\n${between}\n\n${fence}${tail}`, marks);
+          for (const fixed of [
+            as('Text.'),
+            as('<!--ins m2bd-->\n\nText.<!--/m2bd-->', { m2bd: 'ada' }),
+            as('<!--ins m2bd-->\n\nText.<!--/m2bd-->', { m2bd: 'bo' }),
+          ]) {
+            const done = remove(fixed);
+            expect(shown(done.after)).toHaveLength(0);
+            expectEveryOrderAlike(label, done.after, exactly);
+          }
+        }
+      }
+    });
+
+    it('refuses a table that ends the text right after a code block or a rule, and says so', () => {
+      for (const above of ['```\ncode\n```', '~~~\ncode\n~~~', '    code', '---']) {
+        for (const head of ['', 'Intro.\n\n']) {
+          const label = JSON.stringify(`${head}${above}\n\n${FRUIT}`);
+          const text = file(`${head}${above}\n\n${FRUIT}`);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(CODE_BEFORE);
+          expect(error.code, label).toBe('no-legal-placement');
+          expect(trimmed(remove(text, null).after), label).toBe(`${head}${above}`);
+          // A paragraph between them, or one after the table, gives it a place.
+          for (const fixed of [
+            `${head}${above}\n\nText.\n\n${FRUIT}`,
+            `${head}${above}\n\n${FRUIT}\n\nAfter.`,
+            `${head}${above}\n\n<!--ins m2bd-->\n\nText.<!--/m2bd-->\n\n${FRUIT}`,
+          ]) {
+            const done = remove(file(fixed, { m2bd: 'ada' }));
+            expect(shown(done.after)).toHaveLength(0);
+            expectEveryOrderAlike(label, done.after, exactly);
+          }
+        }
+      }
+    });
+
+    it('refuses a table on the line under a line of text, and says to put a blank line between', () => {
+      for (const above of [
+        'Intro.',
+        'One.\nTwo.',
+        'Intro.  ',
+        '---',
+        'Title\n=====',
+        '```\ncode\n```',
+      ]) {
+        const label = JSON.stringify(`${above}\n${FRUIT}`);
+        const text = file(`${above}\n${FRUIT}\n\nAfter.`);
+        expect(readTables(text, parse(text)), label).toHaveLength(1);
+        const error = refusal(() => remove(text));
+        expect(error.message, label).toBe(UNDER_TEXT);
+        expect(error.code, label).toBe('no-legal-placement');
+        expect(trimmed(remove(text, null).after), label).toBe(`${above}\n\nAfter.`);
+        // A blank line above the table gives it a place.
+        const done = remove(file(`${above}\n\n${FRUIT}\n\nAfter.`));
+        expect(shown(done.after)).toHaveLength(0);
+        expectEveryOrderAlike(label, done.after, exactly);
+      }
+    });
+
+    it('is given a place by a blank line that is typed with Track Changes on', () => {
+      const text = file(`Intro.\n${FRUIT}\n\nAfter.`);
+      const at = text.indexOf('Intro.') + 'Intro.'.length;
+      // (the editor's Return at the end of a paragraph writes a blank line)
+      const typed = applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from: at, to: at, insert: '\n\n' },
+          context(ada, ['m2bd', 'n3cd', 'p5qm']),
+        ),
+      );
+      expect(readTables(typed, parse(typed))).toHaveLength(1);
+      const done = remove(typed, ada, ['k3x9', 'w8nn']);
+      expect(shown(done.after)).toHaveLength(0);
+      expectEveryOrderAlike('typed blank line', done.after, exactly);
+    });
+
+    it('still deletes a table under a heading line or at the end of the text under a line of text', () => {
+      for (const body of [`## Head\n${FRUIT}\n\nAfter.`, `Intro.\n${FRUIT}`]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
+        expectEveryOrderAlike(body, done.after, exactly);
+      }
+    });
+
+    it('leaves the other refusals as they are', () => {
+      // Another person's change is named before the shape of the neighbors is looked at.
+      const text = file(`Intro.\n${FRUIT.replace('Pears', 'Pe<!--ins m2bd-->x<!--/m2bd-->ars')}`, {
+        m2bd: 'bo',
+      });
+      expect(refusal(() => remove(text)).message).toBe(pending('Bo Chen'));
+    });
   });
 
   describe('another person’s pending change stays theirs', () => {
     for (const [name, text] of Object.entries(pendingBy('bo'))) {
       it(`refuses ${name} of Bo’s, with Track Changes on, naming him`, () => {
-        expect(said(() => remove(text))).toBe(pending('Bo Chen'));
-        // Nothing is written: the refusal comes before any change.
-        expect(parse(text).marks.length).toBeGreaterThan(0);
+        // A refusal gives no changes (`refusal` fails on a return), and says whose change it is.
+        const error = refusal(() => remove(text));
+        expect(error.message).toBe(pending('Bo Chen'));
+        expect(error.code).toBe('no-legal-placement');
       });
     }
 
