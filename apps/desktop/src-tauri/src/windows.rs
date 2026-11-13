@@ -37,10 +37,23 @@ pub(crate) const ABOUT_WINDOW: &str = "about";
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
 
-/// Whether `label` is a document window: the main one, or one opened after it. Preferences and the
-/// install question are not.
+/// Whether `label` is a document window: the main one, or one opened after it. Preferences, About
+/// and the install question are not.
 pub(crate) fn is_document_window(label: &str) -> bool {
     label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
+}
+
+/// The windows that hold no document and stay while the app runs: Preferences and About. The app
+/// quits when its last window is gone, so these close with the last document window, or they would
+/// keep it running behind a menu bar that can do nothing.
+const WITHOUT_DOCUMENT: [&str; 2] = [PREFERENCES_WINDOW, ABOUT_WINDOW];
+
+/// The windows to close now that the window `closed` is gone and no document window is left: those
+/// without a document, but for `closed` itself.
+fn left_behind(closed: &str) -> impl Iterator<Item = &'static str> {
+    WITHOUT_DOCUMENT
+        .into_iter()
+        .filter(move |label| *label != closed)
 }
 
 /// How far down and right of the window in front a new one opens.
@@ -568,14 +581,15 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
                 Some(front) => {
                     let _ = app.emit_to(front.as_str(), "frontmost", ());
                 }
-                // The last document window has closed, which quits, as long as Preferences don't
-                // stay behind it with a menu bar that can do nothing.
-                None if label != PREFERENCES_WINDOW => {
-                    if let Some(preferences) = app.get_webview_window(PREFERENCES_WINDOW) {
-                        let _ = preferences.close();
+                // The last document window has closed, which quits, as long as Preferences and
+                // About don't stay behind it with a menu bar that can do nothing.
+                None => {
+                    for other in left_behind(label) {
+                        if let Some(window) = app.get_webview_window(other) {
+                            let _ = window.close();
+                        }
                     }
                 }
-                None => {}
             }
         }
         _ => {}
@@ -772,9 +786,90 @@ mod tests {
         }
         assert!(granted(MAIN_WINDOW));
         let question = crate::install::QUESTION_WINDOW;
-        for label in [PREFERENCES_WINDOW, question, "", "doc", "doc1", "main-2"] {
+        for label in [
+            PREFERENCES_WINDOW,
+            ABOUT_WINDOW,
+            question,
+            "",
+            "doc",
+            "doc1",
+            "main-2",
+        ] {
             assert!(!granted(label), "{label}");
+            assert!(!is_document_window(label), "{label}");
         }
+        for label in [MAIN_WINDOW, "doc-1", "doc-12"] {
+            assert!(is_document_window(label), "{label}");
+        }
+    }
+
+    #[test]
+    fn preferences_and_about_close_with_the_last_document_window() {
+        // Tauri ends the app when its window map is empty, and a window left behind keeps it
+        // running with a menu bar that can do nothing (a ⌘Q in a page that is gone).
+        for last in [MAIN_WINDOW, "doc-3"] {
+            let closing: Vec<_> = left_behind(last).collect();
+            assert_eq!(closing, [PREFERENCES_WINDOW, ABOUT_WINDOW], "{last}");
+        }
+        // One of them closing last has nothing more to close but the other.
+        assert_eq!(
+            left_behind(PREFERENCES_WINDOW).collect::<Vec<_>>(),
+            [ABOUT_WINDOW]
+        );
+        assert_eq!(
+            left_behind(ABOUT_WINDOW).collect::<Vec<_>>(),
+            [PREFERENCES_WINDOW]
+        );
+    }
+
+    #[test]
+    fn the_about_window_is_a_small_fixed_window_that_opens_hidden_and_has_a_capability_of_its_own()
+    {
+        // `open_about` builds it from the config, hidden: its page shows it once it is styled
+        // (src/about/main.ts), and a visible window would flash unstyled. The title is the one
+        // the system's tools read out; the page draws none.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["label"] == ABOUT_WINDOW)
+            .expect("About has a window in tauri.conf.json");
+        assert_eq!(window["url"], "about.html");
+        assert_eq!(window["title"], "About Redlines");
+        assert_eq!(window["hiddenTitle"], true);
+        assert_eq!(window["titleBarStyle"], "Overlay");
+        assert_eq!(window["visible"], false);
+        for fixed in ["resizable", "minimizable", "maximizable"] {
+            assert_eq!(window[fixed], false, "{fixed}");
+        }
+        let page = include_str!("../../about.html");
+        assert!(page.contains("<title>About Redlines</title>"), "{page}");
+        // Its commands are granted to it alone, by its label.
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/about.json")).unwrap();
+        assert_eq!(capability["windows"], serde_json::json!([ABOUT_WINDOW]));
+    }
+
+    #[test]
+    fn the_windows_without_a_document_are_the_ones_the_config_names_beside_the_documents() {
+        // A window added to `tauri.conf.json` that holds no document has to be named in
+        // `WITHOUT_DOCUMENT` or it keeps the app running; the install question is shown before
+        // any document window and is its own business (install.rs).
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let mut labels: Vec<&str> = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|window| window["label"].as_str().unwrap())
+            .filter(|label| !is_document_window(label) && *label != crate::install::QUESTION_WINDOW)
+            .collect();
+        labels.sort_unstable();
+        let mut named = WITHOUT_DOCUMENT.to_vec();
+        named.sort_unstable();
+        assert_eq!(labels, named);
     }
 
     #[test]

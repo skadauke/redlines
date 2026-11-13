@@ -8,7 +8,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { COPYRIGHT, loadAbout, versionLine, type About } from '../about.ts';
 import { loadSettings } from '../settings.ts';
 import { followTheme } from '../window-theme.ts';
-import { createIconCycler, markOrCaret, type Mark } from './marks.ts';
+import { createIconCycler, markOrCaret, MARKS, type Mark } from './marks.ts';
 import changeBar from '../../src-tauri/icons/family/change-bar.png';
 import caretInsertion from '../../src-tauri/icons/family/caret-insertion.png';
 import caret from '../../src-tauri/icons/family/caret.png';
@@ -58,8 +58,15 @@ const start = isTauri
   ? await invoke<string>('app_icon_mark').then(markOrCaret, () => markOrCaret(''))
   : markOrCaret('');
 
-// Every mark loads now, so that none is still arriving when the change is drawn.
-for (const url of Object.values(URLS)) new Image().src = url;
+// Every mark loads now, so that none is still arriving when the change is drawn. The pictures are
+// kept: one that is let go of may stop loading.
+const pictures = new Map(
+  MARKS.map((mark) => {
+    const picture = new Image();
+    picture.src = URLS[mark];
+    return [mark, picture] as const;
+  }),
+);
 
 const cycler = createIconCycler(element('icon'), {
   urls: URLS,
@@ -78,7 +85,14 @@ if (isTauri) {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') void getCurrentWindow().close();
   });
-  // Shown once its font has loaded too, so that it never flashes another.
-  await document.fonts.ready;
+  // Shown once its font has loaded, and the icon it starts on is drawn, so that it never flashes
+  // another font or an empty icon.
+  await Promise.all([
+    document.fonts.ready,
+    pictures
+      .get(start)
+      ?.decode()
+      .catch(() => undefined),
+  ]);
   await getCurrentWindow().show();
 }

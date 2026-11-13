@@ -31,15 +31,19 @@ function setup(start: Mark = 'caret', reduced = false) {
   const animate: Animator = (element, keyframes, options) => {
     let finish = () => {};
     const finished = new Promise<unknown>((resolve) => (finish = () => resolve(undefined)));
-    const animation = { element, keyframes, options, finished, finish, cancel: vi.fn() };
+    // As the page's own animation does, which settles its `finished` when it is cancelled too: the
+    // cycler hears of an end it caused itself.
+    const cancel = vi.fn(() => finish());
+    const animation = { element, keyframes, options, finished, finish, cancel };
     running.push(animation);
     return animation;
   };
   const shown: Mark[] = [];
+  const motion = { reduced };
   const cycler = createIconCycler(stage, {
     urls: URLS,
     start,
-    reducedMotion: () => reduced,
+    reducedMotion: () => motion.reduced,
     show: (mark) => shown.push(mark),
     animate,
   });
@@ -50,10 +54,13 @@ function setup(start: Mark = 'caret', reduced = false) {
   };
   const marks = () =>
     [...stage.querySelectorAll<HTMLImageElement>('img')].map((img) => img.dataset['mark']);
-  return { stage, running, shown, cycler, settle, marks };
+  return { stage, running, shown, cycler, settle, marks, motion };
 }
 
-afterEach(() => document.body.replaceChildren());
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.body.replaceChildren();
+});
 
 describe('the family of marks', () => {
   it('goes round in the order the launches show them, and starts over after the last', () => {
@@ -123,6 +130,27 @@ describe('the icon cycler', () => {
     expect(cycler.current()).toBe('change-bar');
   });
 
+  it('takes the strike away with the mark it strikes, so that no red line is left across the new one', () => {
+    const { running, cycler } = setup('caret');
+    cycler.click();
+    const endOf = ({ options }: Running) =>
+      Number(options.delay ?? 0) + Number(options.duration ?? 0);
+    const goes = (selector: string) =>
+      running.filter(
+        ({ element, keyframes }) =>
+          element.matches(selector) && keyframes.at(-1)?.['opacity'] === 0,
+      );
+    const old = goes("img[data-mark='caret']");
+    const strike = goes('.rl-strike');
+    expect(old).toHaveLength(1);
+    expect(strike).toHaveLength(1);
+    // It goes with the mark, not after it: when the old mark is gone, the line is.
+    expect(endOf(strike[0]!)).toBeLessThanOrEqual(endOf(old[0]!));
+    // And it is already going when the new mark has come most of the way in.
+    const incoming = running.find(({ element }) => element.matches("img[data-mark='change-bar']"));
+    expect(Number(strike[0]!.options.delay ?? 0)).toBeLessThan(endOf(incoming!));
+  });
+
   it('takes about half a second', () => {
     const { running, cycler } = setup();
     cycler.click();
@@ -175,6 +203,33 @@ describe('the icon cycler', () => {
     expect(cycler.current()).toBe('margin-bracket');
   });
 
+  it('does not let a change that was cut short end the one that follows', async () => {
+    const { marks, cycler } = setup('caret');
+    cycler.click();
+    // The second click cuts the first short, which settles its animations, a moment after.
+    cycler.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    // The third finds the second still going, and finishes it: nothing of it is left behind.
+    cycler.click();
+    expect(marks()).toEqual(['margin-bracket', 'delete-mark']);
+  });
+
+  it('reads whether the person wants less motion at each click', async () => {
+    const { stage, motion, cycler, settle, marks } = setup('caret');
+    cycler.click();
+    expect(stage.querySelector('.rl-strike')).not.toBeNull();
+    await settle();
+    motion.reduced = true;
+    cycler.click();
+    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+    await settle();
+    motion.reduced = false;
+    cycler.click();
+    expect(stage.querySelector('.rl-strike')).not.toBeNull();
+    await settle();
+    expect(marks()).toEqual(['delete-mark']);
+  });
+
   it('shows no change when the animations cannot run, and still ends on the next mark', () => {
     const stage = document.createElement('div');
     document.body.append(stage);
@@ -193,5 +248,66 @@ describe('the icon cycler', () => {
       'change-bar',
     ]);
     expect(shown).toEqual(['change-bar']);
+  });
+});
+
+describe('the page’s own animations', () => {
+  /** What `Element.animate` is called with, and an animation that is over at once, as one is that
+   * has been cancelled: the browser rejects its `finished` then. */
+  function pageAnimations(over: () => Promise<unknown>) {
+    const calls: { element: Element; options: KeyframeAnimationOptions }[] = [];
+    const cancel = vi.fn();
+    vi.spyOn(Element.prototype, 'animate').mockImplementation(function (
+      this: Element,
+      _keyframes,
+      options,
+    ) {
+      calls.push({ element: this, options: options as KeyframeAnimationOptions });
+      return { finished: over(), cancel } as unknown as Animation;
+    });
+    return { calls, cancel };
+  }
+
+  function stageWith(urls = URLS) {
+    const stage = document.createElement('div');
+    document.body.append(stage);
+    const cycler = createIconCycler(stage, {
+      urls,
+      start: 'caret',
+      reducedMotion: () => false,
+      show: () => {},
+    });
+    return { stage, cycler };
+  }
+
+  it('holds each at its last frame until the change is over, so that nothing jumps back', () => {
+    const { calls } = pageAnimations(() => new Promise(() => {}));
+    const { cycler } = stageWith();
+    cycler.click();
+    expect(calls.length).toBeGreaterThan(0);
+    for (const { options } of calls) expect(options.fill).toBe('both');
+  });
+
+  it('ends the change when an animation is cut short, which the browser reports as a refusal', async () => {
+    pageAnimations(() => Promise.reject(new DOMException('cancelled', 'AbortError')));
+    const { stage, cycler } = stageWith();
+    cycler.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect([...stage.querySelectorAll('img')].map((img) => img.dataset['mark'])).toEqual([
+      'change-bar',
+    ]);
+    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+  });
+
+  it('ends the change when its animations run out', async () => {
+    const { cancel } = pageAnimations(() => Promise.resolve());
+    const { stage, cycler } = stageWith();
+    cycler.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect([...stage.querySelectorAll('img')].map((img) => img.dataset['mark'])).toEqual([
+      'change-bar',
+    ]);
+    // What ran out is let go of, not left holding its last frame on the elements.
+    expect(cancel).toHaveBeenCalled();
   });
 });

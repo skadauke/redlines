@@ -1,9 +1,10 @@
 // The icon in About Redlines goes through the icon family when it is clicked: the next mark takes
 // the place of the one shown, drawn as a tracked change. The mark shown is struck through with a
-// red line that is drawn across it, and fades out; the next mark comes in from below, with a red
-// underline that is drawn across under it and goes, all in about half a second. A person who has
-// asked for less motion gets a plain crossfade. Nothing announces it: the cursor stays an arrow, and
-// the icon has no label (about.css). The app's Dock icon follows the mark, until the next launch.
+// red line that is drawn across it, and fades out with it; the next mark comes in from below, with
+// a red underline that is drawn across under it and goes, all in about half a second. A person who
+// has asked for less motion gets a plain crossfade. Nothing announces it: the cursor stays an
+// arrow, and the icon has no label (about.css). The app's Dock icon follows the mark, until the
+// next launch.
 
 /**
  * The marks of the family, as the names of their files in `src-tauri/icons/family`, in the order
@@ -138,6 +139,8 @@ export function createIconCycler(stage: HTMLElement, options: CyclerOptions): Ic
           ...STRIKE,
           easing: 'ease-out',
         }),
+        // The line goes with the mark it strikes, not after it, across the new one.
+        animate(strike, [{ opacity: 1 }, { opacity: 0 }], { ...FADE_OUT, easing: 'ease-in' }),
         animate(from, [{ opacity: 1 }, { opacity: 0 }], { ...FADE_OUT, easing: 'ease-in' }),
         animate(
           incoming,

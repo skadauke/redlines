@@ -292,9 +292,15 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
 /// Opens the About Redlines window, or brings it forward: there is only ever one. It is a small
 /// window of the app's own, as Preferences is, with the icon, the name, the version and build, and
 /// the copyright; it is made hidden, and shows itself once its page is styled (`src/about/main.ts`).
-/// It takes no zoom: like the install question, it is a fixed size.
-#[tauri::command]
+/// It takes no zoom: like the install question, it is a fixed size. It runs off the main thread, as
+/// a command that makes a window should, and one call at a time, so that a second click on About
+/// finds the window the first is making.
+#[tauri::command(async)]
 fn open_about(app: AppHandle) -> tauri::Result<()> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(window) = app.get_webview_window(windows::ABOUT_WINDOW) {
         window.show()?;
         return window.set_focus();
