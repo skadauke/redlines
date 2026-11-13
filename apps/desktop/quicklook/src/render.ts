@@ -9,9 +9,10 @@ import { page } from './page.ts';
 import { noticeOf } from './summary.ts';
 
 /** The most of a document that a preview draws, in characters, after its changes are accepted. A
- * longer one is drawn as far as its last paragraph under this, and says so: Quick Look gives an
- * extension seconds, and JavaScriptCore without its compiler reads a megabyte of Markdown in about
- * that. */
+ * longer one is drawn as far as its last paragraph under this, and says so. Quick Look gives an
+ * extension seconds, and micromark in JavaScriptCore draws this much in a second or so (0.4 to 1.5 s
+ * on an Apple silicon Mac, with the compiler that the extension's entitlements allow; several times
+ * that without it). */
 export const MAX_CHARS = 300_000;
 
 const CUT_SHORT =
