@@ -15,6 +15,20 @@ import type { Editor } from '@redlines/editor';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * An element's box where it rests. The palette rises 2 px as it appears, and a page that isn't
+ * drawing frames yet (a busy machine, a window out of sight) still has it at the start: the
+ * animation is put out while the box is read, and put back.
+ */
+function atRest(el: HTMLElement | null | undefined): DOMRect | null {
+  if (!el) return null;
+  const was = el.style.animation;
+  el.style.animation = 'none';
+  const rect = el.getBoundingClientRect();
+  el.style.animation = was;
+  return rect;
+}
+
 /** Waits until `test` gives something, for at most `ms`. */
 async function waitFor<T>(test: () => T | null | undefined | false, ms = 4000): Promise<T | null> {
   for (let waited = 0; waited < ms; waited += 25) {
@@ -91,7 +105,7 @@ async function checks(
   const event = rightClick(at.x, at.y);
   await sleep(150);
   const palette = query<HTMLElement>('.rl-palette');
-  const rect = palette?.getBoundingClientRect();
+  const rect = atRest(palette);
   report('right-click-is-the-palette', event.defaultPrevented && palette?.hidden === false, {
     prevented: event.defaultPrevented,
     hidden: palette?.hidden,
@@ -151,7 +165,7 @@ async function checks(
   );
   await sleep(300);
   const up = query<HTMLElement>('.rl-palette');
-  const ur = up?.getBoundingClientRect();
+  const ur = atRest(up);
   report(
     'hover-brings-the-palette-up-above-the-handle',
     up?.hidden === false &&
@@ -292,10 +306,14 @@ async function checks(
   return { passed, failed };
 }
 
+/** What the last run was given, for `__REDLINES_PALETTE__.run()` to run again with. */
+let last: { editor: Editor; options: PaletteCheckOptions } | null = null;
+
 export async function runPaletteCheck(
   editor: Editor,
   options: PaletteCheckOptions,
 ): Promise<{ passed: number; failed: number }> {
+  last = { editor, options };
   try {
     return await checks(editor, options);
   } catch (error) {
@@ -306,7 +324,10 @@ export async function runPaletteCheck(
   }
 }
 
-// To run the checks again by hand.
+// To run the checks again by hand, in the console: `await __REDLINES_PALETTE__.run()`.
 (window as unknown as Record<string, unknown>)['__REDLINES_PALETTE__'] = {
-  run: (editor: Editor, options: PaletteCheckOptions) => runPaletteCheck(editor, options),
+  run: () =>
+    last
+      ? runPaletteCheck(last.editor, last.options)
+      : Promise.reject(new Error('The check has not started yet.')),
 };
