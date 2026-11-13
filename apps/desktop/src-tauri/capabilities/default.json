@@ -34,6 +34,7 @@
     "allow-list-folder",
     "allow-open-about",
     "allow-open-default",
+    "allow-open-link",
     "allow-open-preferences",
     "allow-open-window",
     "allow-opened-files",

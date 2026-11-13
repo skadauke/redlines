@@ -198,6 +198,18 @@ const editor = createEditor(element('#editor'), {
     editor.setPeople(settings.people);
   },
   codeLanguages,
+  // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
+  // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
+  openLink: (address) => {
+    if (!isTauri) {
+      window.open(address, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    invoke('open_link', { url: address }).catch((error: unknown) => {
+      console.error('Could not open the link', error);
+      notice.flash('Couldn’t open the link.');
+    });
+  },
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
