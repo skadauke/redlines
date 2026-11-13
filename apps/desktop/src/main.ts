@@ -848,8 +848,9 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, with Track Changes on if Preferences ask for it.
-  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it. A
+  // window opened for text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) editor.setTracking(true);
   windows?.ready();
   const about = await loadAbout().catch((error: unknown) => {
     console.error('Could not read the build tag for About Redlines', error);
