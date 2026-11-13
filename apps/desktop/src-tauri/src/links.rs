@@ -43,11 +43,17 @@ fn opener(address: &str) -> Command {
     }
 }
 
+/// The command that opens what the page asked to open, or why nothing does: the page's text only
+/// ever reaches a program through `address`.
+fn command_for(url: &str) -> Result<Command, String> {
+    let address = address(url).ok_or_else(|| "Only web and mail addresses open.".to_string())?;
+    Ok(opener(address))
+}
+
 /// Opens a web or mail address in the default app for it.
 #[tauri::command(async)]
 pub fn open_link(url: String) -> Result<(), String> {
-    let address = address(&url).ok_or_else(|| "Only web and mail addresses open.".to_string())?;
-    let status = opener(address)
+    let status = command_for(&url)?
         .status()
         .map_err(|error| format!("Couldn’t open the link: {error}"))?;
     if status.success() {
@@ -59,7 +65,7 @@ pub fn open_link(url: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{address, opener};
+    use super::{address, command_for, opener};
 
     #[test]
     fn opens_web_and_mail_addresses_whatever_the_case_of_the_scheme() {
@@ -115,6 +121,36 @@ mod tests {
         ] {
             assert_eq!(address(url), None, "{url:?}");
         }
+    }
+
+    /// What the page asks for is what the program is built from, and nothing it may not open
+    /// builds one: the check is part of the command, not a courtesy before it.
+    #[test]
+    fn builds_no_command_for_what_it_does_not_open() {
+        for url in [
+            "",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "-a Calculator",
+            "--help",
+            "https://example.org/ x",
+            "https://example.org/\nopen",
+            "www.example.org",
+            "plan.md#intro",
+        ] {
+            let built = command_for(url);
+            assert!(built.is_err(), "{url:?} built a command");
+            assert_eq!(built.err().as_deref(), Some("Only web and mail addresses open."));
+        }
+    }
+
+    #[test]
+    fn builds_the_command_from_the_address_it_checked() {
+        let command = command_for("  HTTPS://Example.org/?a=1&b=2\n").expect("a web address");
+        let args: Vec<_> = command.get_args().collect();
+        // The address as it was given, without the white space around it, and nothing else.
+        assert_eq!(args.last().and_then(|arg| arg.to_str()), Some("HTTPS://Example.org/?a=1&b=2"));
+        assert!(args.iter().all(|arg| !arg.to_string_lossy().starts_with('-')));
     }
 
     #[test]

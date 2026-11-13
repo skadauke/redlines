@@ -150,6 +150,22 @@ describe('the address of a link (design §5.2)', () => {
     expect(at(editor, 'relative')).toBe('plan.md#intro');
   });
 
+  it('is the link’s own destination when its text begins with an address, as the reader has it', () => {
+    const editor = load(
+      [
+        '[ada@example.org](mailto:ada@example.org) and [www.example.org](https://other.example/path)',
+        'and [https://example.org/a…](https://example.org/a-very-long-path) and [https://x.example][r]',
+        '',
+        '[r]: https://def.example/r',
+        '',
+      ].join('\n'),
+    );
+    expect(at(editor, 'ada@example.org](')).toBe('mailto:ada@example.org');
+    expect(at(editor, 'www.example.org](')).toBe('https://other.example/path');
+    expect(at(editor, 'https://example.org/a…')).toBe('https://example.org/a-very-long-path');
+    expect(at(editor, 'https://x.example]')).toBe('https://def.example/r');
+  });
+
   it('is nothing outside a link, in an image, or for a reference nothing defines', () => {
     const editor = load(
       'Plain text, ![an image](https://example.org/i.png) and [undefined][nope] and `code https://x.org`.\n',
@@ -173,6 +189,8 @@ describe('⌘-click on a link (design §5.2)', () => {
     const open = vi.fn();
     const editor = load(DOC, { openLink: open });
     const link = linkNamed(editor, 'web link');
+    // The caret is elsewhere, in the text before the link.
+    editor.view.dispatch({ selection: { anchor: 1 } });
     const down = mouse(link, 'mousedown', { metaKey: true, clientX: 5, clientY: 5 });
     // Taken before the editor sees it: no caret, no second cursor, no selection.
     expect(down.defaultPrevented).toBe(true);
@@ -182,7 +200,9 @@ describe('⌘-click on a link (design §5.2)', () => {
     expect(up.defaultPrevented).toBe(true);
     expect(open).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledWith('https://example.org/a?b=1&c=2');
-    expect(editor.view.state.selection.main.head).toBe(0);
+    expect(editor.view.state.selection.ranges).toHaveLength(1);
+    expect(editor.view.state.selection.main.head).toBe(1);
+    expect(editor.view.state.selection.main.empty).toBe(true);
   });
 
   it('opens an autolink, a bare address, a www. address, a reference and a mail link', () => {
@@ -206,7 +226,21 @@ describe('⌘-click on a link (design §5.2)', () => {
     ]);
   });
 
-  it('is a plain click without ⌘: the editor places the caret, and nothing opens', () => {
+  it('opens the destination of a link whose text is an address, and not the text', () => {
+    const open = vi.fn<(address: string) => void>();
+    const editor = load(
+      '[ada@example.org](mailto:ada@example.org) and [www.example.org](https://other.example/path)\n',
+      { openLink: open },
+    );
+    commandClick(linkNamed(editor, 'ada@example.org'));
+    commandClick(linkNamed(editor, 'www.example.org'));
+    expect(open.mock.calls.map(([url]) => url)).toEqual([
+      'mailto:ada@example.org',
+      'https://other.example/path',
+    ]);
+  });
+
+  it('is a plain click without ⌘: the editor handles the press as it always does, and nothing opens', () => {
     const open = vi.fn();
     const editor = load(DOC, { openLink: open });
     const link = linkNamed(editor, 'web link');
@@ -228,10 +262,27 @@ describe('⌘-click on a link (design §5.2)', () => {
       expect(down.stopped, JSON.stringify(init)).toBe(false);
     }
     expect(open).not.toHaveBeenCalled();
-    // A drag from the link is a selection, whatever key is down.
-    mouse(link, 'mousedown', { metaKey: true, clientX: 5, clientY: 5 });
+    // A press that moves away before it is let go is no click: nothing opens, and the press was
+    // taken whole, so no selection starts either.
+    const down = mouse(link, 'mousedown', { metaKey: true, clientX: 5, clientY: 5 });
     mouse(link, 'mouseup', { metaKey: true, clientX: 60, clientY: 5 });
+    expect(down.stopped).toBe(true);
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens once for a double click, which the press takes whole as well', () => {
+    const open = vi.fn();
+    const editor = load(DOC, { openLink: open });
+    const link = linkNamed(editor, 'web link');
+    commandClick(link);
+    expect(open).toHaveBeenCalledTimes(1);
+    // The second press of a double click, and the third of a triple: nothing selects a word.
+    for (const detail of [2, 3]) {
+      const down = mouse(link, 'mousedown', { metaKey: true, clientX: 5, clientY: 5, detail });
+      mouse(link, 'mouseup', { metaKey: true, clientX: 5, clientY: 5, detail });
+      expect(down.stopped, `detail ${detail}`).toBe(true);
+    }
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing for an address that is not the web’s or mail’s, and leaves the click to the editor', () => {
@@ -323,6 +374,15 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()).toBeNull();
   });
 
+  it('does not come for a link that the text moved from under the pointer while it waited', () => {
+    const editor = load(DOC, { openLink: vi.fn() });
+    mouse(linkNamed(editor, 'web link'), 'mousemove');
+    vi.advanceTimersByTime(100);
+    editor.view.dispatch({ changes: { from: 0, to: 80 } });
+    vi.advanceTimersByTime(1000);
+    expect(hint()).toBeNull();
+  });
+
   it('goes when the text changes or a press comes, and stays away without a host to open', () => {
     const editor = load(DOC, { openLink: vi.fn() });
     mouse(linkNamed(editor, 'web link'), 'mousemove');
@@ -345,28 +405,58 @@ describe('the hint on a link (design §5.2)', () => {
 describe('the pointer over a link while ⌘ is held (design §5.2)', () => {
   const key = (type: 'keydown' | 'keyup', init: KeyboardEventInit = { key: 'Meta' }) =>
     window.dispatchEvent(new KeyboardEvent(type, { bubbles: true, ...init }));
+  /** Whether the content says that a link under the pointer opens: its theme makes that a pointer. */
+  const ready = (editor: Editor) => editor.view.contentDOM.classList.contains('rl-link-ready');
 
   it('is a pointer, and the cursor of text again when the key is let go or the pointer leaves', () => {
     const editor = load(DOC, { openLink: vi.fn() });
     const link = linkNamed(editor, 'web link');
     mouse(link, 'mousemove', { clientX: 5, clientY: 5 });
-    expect(link.style.cursor).toBe('');
+    expect(ready(editor)).toBe(false);
     mouse(link, 'mousemove', { metaKey: true, clientX: 6, clientY: 5 });
-    expect(link.style.cursor).toBe('pointer');
+    expect(ready(editor)).toBe(true);
     key('keyup');
-    expect(link.style.cursor).toBe('');
+    expect(ready(editor)).toBe(false);
     // ⌘ pressed with the pointer at rest on the link.
     key('keydown');
-    expect(link.style.cursor).toBe('pointer');
+    expect(ready(editor)).toBe(true);
     mouse(link, 'mouseleave');
-    expect(link.style.cursor).toBe('');
+    expect(ready(editor)).toBe(false);
   });
 
   it('is a pointer only over a link that opens', () => {
     const editor = load(DOC, { openLink: vi.fn() });
-    const bad = linkNamed(editor, 'bad');
-    mouse(bad, 'mousemove', { metaKey: true });
-    expect(bad.style.cursor).toBe('');
+    mouse(linkNamed(editor, 'bad'), 'mousemove', { metaKey: true });
+    expect(ready(editor)).toBe(false);
+    mouse(linkNamed(editor, 'web link'), 'mousemove', { metaKey: true });
+    expect(ready(editor)).toBe(true);
+    mouse(linkNamed(editor, 'bad'), 'mousemove', { metaKey: true });
+    expect(ready(editor)).toBe(false);
+  });
+
+  it('stays a pointer when the hint comes, and when the editor writes its attributes again', () => {
+    const editor = load(DOC, { openLink: vi.fn() });
+    const link = linkNamed(editor, 'web link');
+    key('keydown');
+    mouse(link, 'mousemove', { metaKey: true, clientX: 5, clientY: 5 });
+    expect(ready(editor)).toBe(true);
+    // The hint is a transaction, and CodeMirror sets the attributes of its content again at each.
+    vi.advanceTimersByTime(400);
+    expect(document.querySelector('.rl-link-hint')).not.toBeNull();
+    expect(ready(editor)).toBe(true);
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    expect(ready(editor)).toBe(true);
+    // The text changing takes the link from under the pointer.
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(ready(editor)).toBe(false);
+  });
+
+  it('has the theme make it a pointer on the link, and nowhere else', () => {
+    load(DOC, { openLink: vi.fn() });
+    const rules = [...document.querySelectorAll('style')]
+      .map((style) => style.textContent)
+      .join('');
+    expect(rules).toMatch(/\.cm-content\.rl-link-ready \.rl-link\s*\{[^}]*cursor:\s*pointer/);
   });
 });
 

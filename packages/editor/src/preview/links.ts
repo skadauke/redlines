@@ -70,36 +70,50 @@ function definition(state: EditorState, label: string): string | null {
 
 /** The destination of a `Link` node: its own, or the one its reference label gives. */
 function linkOf(state: EditorState, node: SyntaxNode): string | null {
-  const url = node.getChild('URL');
+  const [open, close] = node.getChildren('LinkMark');
+  if (!open || !close) return null;
+  // The destination or the label comes after the closing bracket of the text, which may hold an
+  // address of its own (`[www.example.org](https://…)`).
+  const after = (child: SyntaxNode) => child.from >= close.to;
+  const url = node.getChildren('URL').find(after);
   if (url) return destination(state.sliceDoc(url.from, url.to));
-  const label = node.getChild('LinkLabel');
+  const label = node.getChildren('LinkLabel').find(after);
   if (!label) return null;
   const written = state.sliceDoc(label.from + 1, label.to - 1);
   // `[text][]` is defined by its own text.
-  if (written.trim() !== '') return definition(state, written);
-  const [open, close] = node.getChildren('LinkMark');
-  return open && close ? definition(state, state.sliceDoc(open.to, close.from)) : null;
+  return definition(state, written.trim() !== '' ? written : state.sliceDoc(open.to, close.from));
 }
 
 /**
  * The destination of the link whose text holds `pos`, as the Markdown reader has it (unescaped, its
  * entities decoded, without the angle brackets): of an inline link, a reference link, an autolink
  * or a bare address. Null outside a link, in an image, and for a reference nothing defines.
+ *
+ * A bare address (`www.example.org`, `ada@example.org`, `https://…`) written in the text of a link
+ * is no link inside it: the reader makes none there, and what the link opens is its own destination.
  */
 export function linkDestination(state: EditorState, pos: number): string | null {
+  let bare: SyntaxNode | null = null;
   for (
     let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
     node;
     node = node.parent
   ) {
     if (node.name === 'Image') return null;
-    if (node.name === 'Link') return linkOf(state, node);
-    if (node.name === 'Autolink' || node.name === 'URL') {
-      const url = node.name === 'URL' ? node : node.getChild('URL');
+    if (node.name === 'Link') {
+      // A bracketed phrase with no destination, or a reference nothing defines, is text: an
+      // address in it is a bare address.
+      const to = linkOf(state, node);
+      if (to !== null) return to;
+    }
+    if (node.name === 'Autolink') {
+      const url = node.getChild('URL');
       return url ? destination(state.sliceDoc(url.from, url.to)) : null;
     }
+    // The climb goes on, to a link around it if there is one.
+    if (node.name === 'URL' && !bare && node.parent?.name !== 'Autolink') bare = node;
   }
-  return null;
+  return bare ? destination(state.sliceDoc(bare.from, bare.to)) : null;
 }
 
 /** A link under the pointer: the drawn element, where its text starts, and the address it opens. */
@@ -109,9 +123,14 @@ interface Hovered {
   address: string;
 }
 
-function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null {
+/** The drawn link under `target`, if the editor's content holds it. */
+function linkElement(view: EditorView, target: EventTarget | null): HTMLElement | null {
   const element = target instanceof Element ? target.closest<HTMLElement>('.rl-link') : null;
-  if (!element || !view.contentDOM.contains(element)) return null;
+  return element && view.contentDOM.contains(element) ? element : null;
+}
+
+/** The link that a drawn element is, if it is one that opens. */
+function linkAt(view: EditorView, element: HTMLElement): Hovered | null {
   let pos: number;
   try {
     pos = view.posAtDOM(element, 0);
@@ -122,6 +141,11 @@ function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null
   const href = linkDestination(view.state, pos);
   const address = href === null ? null : openableAddress(href);
   return address === null ? null : { element, pos, address };
+}
+
+function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null {
+  const element = linkElement(view, target);
+  return element ? linkAt(view, element) : null;
 }
 
 /** What the extension needs of the host and the page. */
@@ -141,6 +165,28 @@ const CLICK_SLOP = 4;
 const clickName = Facet.define<string, string>({ combine: (values) => values[0] ?? '⌘-click' });
 
 const setHint = StateEffect.define<Hovered | null>();
+
+const setReady = StateEffect.define<boolean>();
+
+const READY: Record<string, string> = { class: 'rl-link-ready' };
+const NOT_READY: Record<string, string> = {};
+
+/**
+ * Whether the pointer is on a link that opens with the key that opens down. The content says so by a
+ * class, and the theme makes it a pointer: CodeMirror keeps the attributes of its content, and takes
+ * away what is set by hand on its elements at its next update, the hint's own among them.
+ */
+const readyField = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setReady));
+    if (set) return set.value;
+    // The text moved: the link under the pointer may be gone.
+    return tr.docChanged ? false : value;
+  },
+  provide: (field) =>
+    EditorView.contentAttributes.from(field, (ready) => (ready ? READY : NOT_READY)),
+});
 
 /** The link the hint is for, shown after the pause. */
 interface Hint {
@@ -279,19 +325,20 @@ export function linkOpening(options: LinkOpeningOptions): Extension {
       private readonly move = (event: MouseEvent) => {
         if (this.press) return;
         this.held = isOpening(event);
-        const hovered = linkUnder(this.view, event.target);
+        const element = linkElement(this.view, event.target);
+        // Moving on within the link it is on: nothing to work out again.
+        if (element && element === this.over?.element) return this.sync(false);
+        const hovered = element ? linkAt(this.view, element) : null;
         if (!hovered) return this.forget();
-        if (this.over?.element !== hovered.element) {
-          this.forget();
-          this.over = hovered;
-          // The hint comes after the usual pause.
-          this.timer = setTimeout(() => {
-            if (this.over?.element === hovered.element) {
-              this.view.dispatch({ effects: setHint.of(hovered) });
-            }
-          }, delay);
-        }
-        this.look();
+        this.release();
+        this.over = hovered;
+        // The hint comes after the usual pause.
+        this.timer = setTimeout(() => {
+          if (this.over?.element === hovered.element) {
+            this.view.dispatch({ effects: setHint.of(hovered) });
+          }
+        }, delay);
+        this.sync(true);
       };
 
       private readonly leave = () => this.forget();
@@ -300,36 +347,47 @@ export function linkOpening(options: LinkOpeningOptions): Extension {
       private readonly key = (event: KeyboardEvent) => {
         if (event.key !== keyName) return;
         this.held = event.type === 'keydown';
-        this.look();
+        this.sync(false);
       };
 
       private readonly blur = () => {
         this.held = false;
-        this.look();
+        this.sync(false);
       };
-
-      /** The pointer's look over the link: a pointer while the key is down. */
-      private look(): void {
-        if (this.over) this.over.element.style.cursor = this.held ? 'pointer' : '';
-      }
 
       /** Lets go of the link under the pointer, without a transaction: for an update to call. */
       private release(): void {
         clearTimeout(this.timer);
-        if (this.over) this.over.element.style.cursor = '';
         this.over = null;
       }
 
       /** The pointer is no longer on a link that opens. */
       private forget(): void {
         this.release();
-        if (this.view.state.field(hintField, false)) {
-          this.view.dispatch({ effects: setHint.of(null) });
-        }
+        this.sync(true);
+      }
+
+      /**
+       * Brings the editor's state to what the pointer is doing: the hint away when asked, and the
+       * look of a pointer over a link that opens while the key that opens is down.
+       */
+      private sync(dropHint: boolean): void {
+        const { state } = this.view;
+        const effects: StateEffect<unknown>[] = [];
+        if (dropHint && state.field(hintField, false)) effects.push(setHint.of(null));
+        const ready = this.held && this.over !== null;
+        if (state.field(readyField, false) !== ready) effects.push(setReady.of(ready));
+        if (effects.length > 0) this.view.dispatch({ effects });
       }
     },
   );
-  return [plugin, hintField, clickName.of(command ? '⌘-click' : 'Ctrl-click'), linkTheme];
+  return [
+    plugin,
+    hintField,
+    readyField,
+    clickName.of(command ? '⌘-click' : 'Ctrl-click'),
+    linkTheme,
+  ];
 }
 
 const linkTheme = EditorView.baseTheme({
@@ -356,4 +414,6 @@ const linkTheme = EditorView.baseTheme({
   },
   // A tooltip of CodeMirror's draws no frame of its own here.
   '.cm-tooltip:has(> .rl-link-hint)': { border: 'none', backgroundColor: 'transparent' },
+  // With the key that opens down, a link that opens is a pointer.
+  '.cm-content.rl-link-ready .rl-link': { cursor: 'pointer' },
 });
