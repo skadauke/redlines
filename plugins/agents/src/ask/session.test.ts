@@ -279,6 +279,7 @@ describe('what the agent may read', () => {
       agentName: 'Claude',
       folder: '/repo',
       readLimit: 'folder',
+      readOnly: true,
     });
     expect(claude.requests).toHaveLength(0);
     session.answerConsent('folder');

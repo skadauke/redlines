@@ -33,6 +33,8 @@ export type LiveLine =
       agentName: string;
       folder: string;
       readLimit: 'folder' | 'machine';
+      /** For a question, which changes nothing: the panel says so, not that it changes this document. */
+      readOnly?: boolean;
     }
   | { kind: 'running'; agent: string; agentName: string; status: string }
   | { kind: 'failed'; agent: string; agentName: string; message: string; logPath?: string };

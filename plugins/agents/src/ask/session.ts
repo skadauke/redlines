@@ -250,6 +250,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
           agentName: agent.name,
           folder,
           readLimit: agent.readLimit,
+          readOnly: true,
         },
       });
     });

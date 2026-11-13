@@ -119,6 +119,13 @@ describe('renderLiveLine', () => {
       ? null
       : (id.split(' ').map((one) => el.querySelector(`#${one}`)?.textContent) ?? []);
 
+  it('says a question changes nothing, where a run says it changes this document', () => {
+    const el = renderLiveLine({ ...ASK, readOnly: true }, actions());
+    expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Claude reads files here to answer, and changes nothing.',
+    );
+  });
+
   it('asks as a panel of Redlines’ own: title, folder, what it means, and three buttons in a group', () => {
     const act = actions();
     const el = renderLiveLine(ASK, act);

@@ -481,6 +481,26 @@ describe('putting it away', () => {
   });
 });
 
+describe('stopping', () => {
+  it('brings the question back into the field after Stop, to ask again', async () => {
+    const { editor } = mount({
+      script: async function* ({ tools, signal }) {
+        await tools.initialize();
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve()));
+        yield { type: 'done', finalText: 'too late' };
+      },
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await vi.waitFor(() => expect(button('Stop')).toBeDefined());
+    button('Stop')?.click();
+    await vi.waitFor(() => expect(field()?.value).toBe('What is a lien?'));
+    expect(document.querySelector('.rl-qa-answer')).toBeNull();
+    expect(bubble()).not.toBeNull();
+  });
+});
+
 describe('follow-up', () => {
   it('has a field after the answer, and answers with the earlier exchange as context', async () => {
     const { editor, claude } = mount();
@@ -490,6 +510,8 @@ describe('follow-up', () => {
     await answered();
     expect(field()?.placeholder).toBe('Ask a follow-up');
     expect(field()?.hasAttribute('hidden')).toBe(false);
+    // The question that was answered is not asked again: the field is empty.
+    expect(field()?.value).toBe('');
     ask('Who holds it?');
     await vi.waitFor(() => expect(claude.requests).toHaveLength(2));
     expect(claude.requests[1]?.prompt).toContain('What is a lien?');

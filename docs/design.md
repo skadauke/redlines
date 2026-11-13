@@ -678,6 +678,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
@@ -755,7 +756,8 @@ a new email under the same name becomes an alias in the ledger
 
 - a selection toolbar: Comment, Suggest, Ask agent, and formatting. Written as the formatting
   palette (§5.1), which opens from a handle and on right-click rather than floating over a
-  selection by itself; Suggest and the agent's fix, shorten and rephrase are not in it yet;
+  selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are
+  not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
@@ -948,7 +950,7 @@ written.
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
-| `ai`         | The chat panel, Ask agent, agents in comment threads, agent levels (§8)      | Agents                     |
+| `ai`         | The chat panel, Ask, agents in comment threads, agent levels (§8)            | Agents                     |
 | `agents`     | The @ picker and the runs a posted mention starts (§8.6)                     | Agents                     |
 | `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
@@ -1175,11 +1177,11 @@ Redlines works the same with or without git. Its git support has two parts.
   injection hides.
 - **AI is off in a folder until someone turns it on.**
 
-### 8.2 Agent levels: Ask, Suggest, Auto
+### 8.2 Agent levels: Propose, Suggest, Auto
 
 | Level       | What the agent's edits become                                                                                                                        | Suits                          |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **Ask**     | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
+| **Propose** | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
 | **Suggest** | Tracked suggestions in the agent's name, for anyone to accept or reject                                                                              | Shared documents and review    |
 | **Auto**    | Direct edits, as when you type with tracking off. They appear as they are written, and the run ends with "Claude changed 3 paragraphs · Review · Undo" | Your own drafts                |
 
@@ -1227,7 +1229,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
   changes by the agent (§7.3), flagging any damaged markers.
 
 **Surfaces:** the MCP server and the `redlines` command line; @mentions in comment threads; the
-chat panel; and Ask agent on a selection.
+chat panel; and Ask, a question about a selection (§8.5).
 
 **Agent runs.** Each request, a chat turn or a mention, is one run. Each edit in it (one `str_replace`) that makes several marks gives them a `group` of their own, so the marks of one edit are one suggestion and two edits of a run never are.
 
@@ -1262,9 +1264,33 @@ Agent edits are animated, like a streaming chat answer.
 - **A chat panel** next to the comment rail. Its scope is the selection, the document, or the
   folder (a project or repository).
 - **Answers cite the text,** with links to ranges in the document. Chat never shows raw markers.
-- **Edits follow the agent's level** (§8.2). In Ask, the panel shows each proposal as a diff with
-  Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
-- **Ask agent** on a selection (fix, shorten, rephrase) works without opening the panel.
+- **Edits follow the agent's level** (§8.2). In Propose, the panel shows each proposal as a diff
+  with Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
+- **Ask** is a question about a selection, answered beside it without opening the panel:
+  - **Starting it.** Select text and choose Ask: ⌥⌘A, Format › Ask…, or the Ask item of the
+    formatting palette (§5.1) beside Add Comment. A small box opens at the selection for the
+    question, and an empty question means "Explain this in the context of the document." The
+    default agent answers, and @ picks another, as in a comment. Not in Raw, where a selection
+    holds markers that no answer could be about. (Fix, shorten and rephrase are not part of it.)
+  - **The same access and guardrails as a comment's run:** the agent reads what the Agents pane
+    allows (the document, or its folder), the first time it is asked in a folder the same question
+    is put in the bubble, and what the document holds is untrusted, as for every run.
+  - **Read-only.** The agent is given the tools that read (`view` and `status`) and nothing that
+    writes, the document it reads refuses a write, and its answer is its last message: nothing is
+    written to the file or its ledger. Each run still writes its log.
+  - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
+    live line while it works (what it is doing, with Stop), then the answer. The selection stays
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going.
+  - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
+    "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
+    an agent's `comment` finds its quote, and makes the marker a link that selects the passage; a
+    quote that is not in the document is plain gray text, which tells a made-up citation from a
+    real one.
+  - **A follow-up** has a field of its own, and is answered with the exchange so far as context.
+  - **Keeping an answer.** Make Comment makes a thread on the selection, as one step to undo: the
+    first question is the person's comment, its answer the agent's reply in the agent's name, and
+    each follow-up and answer a reply, in turn. Open in New Window opens the exchange as an
+    Untitled document. Copy puts the answer's text on the clipboard. Nothing is kept unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
@@ -1435,8 +1461,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 
 ## 14. Open questions
 
-1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Ask, Suggest
-   or Auto for agents, following their person by default.
+1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Propose,
+   Suggest or Auto for agents, following their person by default.
 2. **AI engines** (§8.6), to confirm with the vendors before release:
    - whether an open-source publisher must accept Anthropic's Commercial Terms, and whether its
      legal page supersedes the Agent SDK's note against third-party claude.ai sign-in;

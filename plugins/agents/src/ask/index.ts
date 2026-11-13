@@ -73,8 +73,11 @@ interface Open {
   bubble: Bubble;
   quote: string;
   generation: number;
-  /** What was typed last, which comes back into the field after a stop or a failure. */
-  lastQuestion: string;
+  /**
+   * What was typed last, and how many answers the session had then: it comes back into the field
+   * after a stop or a failure, and not after an answer.
+   */
+  lastQuestion: { text: string; answers: number };
   unsubscribe: () => void;
 }
 
@@ -114,7 +117,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       pending: state.pending,
       line: state.line,
       agentName: state.agent?.name ?? null,
-      draft: open.lastQuestion,
+      draft: state.turns.length > open.lastQuestion.answers ? '' : open.lastQuestion.text,
       canOpenWindow: options.openInNewWindow !== undefined,
     });
     place();
@@ -185,7 +188,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     const session = createAskSession(options, { quote: capped(quote) });
     const bubble = createBubble({
       submit: (text) => {
-        if (open) open.lastQuestion = text;
+        if (open) open.lastQuestion = { text, answers: session.state.turns.length };
         session.ask(text);
       },
       close: () => close(true),
@@ -233,7 +236,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       bubble,
       quote,
       generation: options.document.generation(),
-      lastQuestion: '',
+      lastQuestion: { text: '', answers: 0 },
       unsubscribe: session.subscribe(render),
     };
     doc.addEventListener('keydown', onKey);

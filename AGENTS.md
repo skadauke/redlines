@@ -24,7 +24,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
-| `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
+| `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
 | `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
 | `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |

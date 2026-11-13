@@ -404,7 +404,9 @@ function asking(
     'rl-ask-note',
     machine
       ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
-      : `${agentName} reads files here to answer, and changes only this document.`,
+      : line.readOnly
+        ? `${agentName} reads files here to answer, and changes nothing.`
+        : `${agentName} reads files here to answer, and changes only this document.`,
   );
   note.id = `${id}-note`;
   described.push(note.id);
