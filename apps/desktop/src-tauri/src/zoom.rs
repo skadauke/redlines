@@ -2,7 +2,8 @@
 //! 200%. The app is the only writer of WebKit's page zoom, which on the Mac has no getter, so it
 //! keeps the level itself.
 //!
-//! A level is one of the ladder's rungs (`LADDER` in `src/text-size.ts`). The app keeps it in
+//! A level is one of the ladder's rungs (`ZOOM_LADDER` in `src/text-size.ts`; the text's own ladder
+//! goes further, to 400%, and is the page's alone). The app keeps it in
 //! `zoom.json` in its data folder, read at the start, and none while the file is missing, can't be
 //! read or holds something else. A new document window or Preferences is built with an
 //! initialization script that hands its page the level (`window.__REDLINES_ZOOM__`), and the app
@@ -30,7 +31,7 @@ pub const ZOOM_EVENT: &str = "zoom";
 /// The file in the app's data folder that holds the level.
 const REMEMBERED_FILE: &str = "zoom.json";
 
-/// The zooms a person can have: the ladder of `src/text-size.ts`.
+/// The zooms a person can have: the window zoom's ladder of `src/text-size.ts`, `ZOOM_LADDER`.
 const LADDER: [f64; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 
 /// Preferences' size in points at 100%, which is its size in `tauri.conf.json`.

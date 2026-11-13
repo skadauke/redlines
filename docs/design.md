@@ -213,12 +213,16 @@ The window, on the desktop:
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
   the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
   system's dialogs keep the system's size. Text Zoom changes only the document's text and the
-  notes and cards on it, from 80% to 200%: a pinch follows the fingers and keeps the line under the
-  pointer in place, and Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the
-  same sizes. The notes and cards grow with the text above 100%
-  and never go below their size at 100%. The text column grows with the text until it meets the
-  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
-  launches; neither reaches the file, a print, the clipboard or an export.
+  notes and cards on it, and goes twice as far, from 80% to 400%, so that the text can be made
+  really big: a pinch follows the fingers and keeps the line under the pointer in place, and
+  Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the sizes, which go on past
+  the window zoom's 200% to 250%, 300% and 400%, and Preferences offers them all. The window zoom
+  keeps its own range. The notes and cards grow with the text above 100% and never go below their
+  size at 100%. The text column grows with the text until it meets the margins, and only then do
+  lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
+  and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
+  neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
   default app for Markdown, and installing the `redlines` command line), Appearance (Match
