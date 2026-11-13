@@ -4,7 +4,7 @@
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 
 /**
  * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
@@ -370,6 +370,23 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * The word at a position of the document, as the host's spell checker is asked about it: letters
+   * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
+   * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * formatting palette asks it for the word under a right-click.
+   */
+  wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
+  /**
+   * Makes a spelling suggestion the person picked: the text of `at`, which must read `replaced`, is
+   * made `text`, as the Mac's own corrections are made (design §5.1): as typing, in a step of its
+   * own that Undo takes back, with the caret after it. With Track Changes on, a word of the
+   * person's own pending insertion changes the insertion's text, and other text becomes a tracked
+   * change of the part that differs. Returns false, changing nothing, where the page shows other
+   * text than `replaced`.
+   */
+  pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
    * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or

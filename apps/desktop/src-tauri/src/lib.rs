@@ -358,6 +358,8 @@ pub fn run() {
             appearance::set_appearance,
             edit_menu::beep,
             spelling::correct_word,
+            spelling::spelling_suggestions,
+            spelling::spelling_learn,
             edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,
