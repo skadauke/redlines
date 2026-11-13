@@ -4,7 +4,7 @@
 // which the host has the editor record when it saves the file.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { parse } from '@redlines/format';
+import { applyChanges, parse, setTracking as trackingInFile, setView } from '@redlines/format';
 import { createEditor, type Editor, type EditorOptions, redoDepth, undoDepth } from '../index.ts';
 import { editSourceFacet } from './typing.ts';
 
@@ -240,6 +240,39 @@ describe('Track Changes, written to the document (format §5.6)', () => {
     }
   });
 
+  it('is written with its blank line in a document with no text, and the file keeps it', () => {
+    for (const start of ['', '\n']) {
+      const label = JSON.stringify(start);
+      const editor = load(start, { saveTracking: true });
+      editor.setTracking(true);
+      // What a save writes: the ledger after its blank line, though the caret is on an empty line.
+      const saved = editor.getDoc();
+      expect(saved.startsWith('\n\n<!-- redlines'), label).toBe(true);
+      // Opened again from the file, the first text typed has its place, and nothing is refused.
+      const notices: string[] = [];
+      const again = load(saved, { saveTracking: true, onNotice: (m) => notices.push(m) });
+      expect(again.getUiState().tracking, label).toBe(true);
+      again.view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
+      type(again, 'Hello');
+      expect(notices, label).toEqual([]);
+      expect(
+        again.getParsed().marks.map((mark) => mark.kind),
+        label,
+      ).toEqual(['ins']);
+      expect(again.getDoc().startsWith('<!--ins '), label).toBe(true);
+    }
+  });
+
+  it('leaves a gap between blank lines as it was, when the caret is in it', () => {
+    const text = 'One\n\n\n\nTwo\n';
+    const editor = load(text, { saveTracking: true });
+    editor.view.dispatch({ selection: { anchor: text.indexOf('Two') - 2 }, userEvent: 'select' });
+    editor.setTracking(true);
+    expect(editor.getDoc()).toBe(applyChanges(text, trackingInFile(text, true)));
+    editor.setTracking(false);
+    expect(editor.getDoc()).toBe(text);
+  });
+
   it('lets the first text be typed in a document with none, as Track Changes is turned on in it', () => {
     for (const start of ['', '\n']) {
       const label = JSON.stringify(start);
@@ -283,6 +316,22 @@ describe('Track Changes, written to the document (format §5.6)', () => {
     expect(notices).toEqual([
       "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
     ]);
+  });
+
+  it('can be kept to the editor when the caller says so, as a preference for new documents is', () => {
+    const editor = load(PLAIN, { saveTracking: true });
+    expect(editor.setTracking(true, { inFile: false })).toBe(true);
+    expect(editor.getUiState().tracking).toBe(true);
+    expect(editor.getDoc()).toBe(PLAIN);
+    expect(undoDepth(editor.view.state)).toBe(0);
+    // Typing then writes a ledger as it always did, and the file says nothing of Track Changes.
+    editor.view.dispatch({
+      selection: { anchor: PLAIN.indexOf('paragraph') },
+      userEvent: 'select',
+    });
+    type(editor, 'new ');
+    expect(editor.getParsed().ledger.tracking).toBeUndefined();
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['ins']);
   });
 
   it('only changes the editor’s state, as before, when the host does not ask for the file', () => {
@@ -384,20 +433,50 @@ describe('recording the view in the document (format §5.6)', () => {
     expect(editor.getDoc()).not.toContain('xy');
   });
 
-  it('waits for the next save while there are steps to redo, which it would drop', () => {
+  it('joins the newest step when steps can be redone, which it drops', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.undo();
+    expect(redoDepth(editor.view.state)).toBe(1);
+    editor.setViewMode('clean');
+    editor.recordView();
+    expect(parse(editor.getDoc()).ledger.view).toBe('clean');
+    expect(redoDepth(editor.view.state)).toBe(0);
+    expect(undoDepth(editor.view.state)).toBe(1);
+    // The step is the switch's, with the view: taken back, the file is as it was.
+    editor.undo();
+    expect(editor.getDoc()).toBe(reviewed());
+  });
+
+  it('waits for the next save when every step is taken back, which leaves nothing to join', () => {
     const editor = load(reviewed('tracking: everyone'));
     caretBefore(editor, 'word');
     type(editor, 'x');
     editor.undo();
+    expect(undoDepth(editor.view.state)).toBe(0);
     editor.setViewMode('clean');
     const before = editor.getDoc();
     editor.recordView();
     expect(editor.getDoc()).toBe(before);
     expect(redoDepth(editor.view.state)).toBe(1);
     expect(editor.redo()).toBe(true);
-    // Nothing to redo any more: the next save records it.
     editor.recordView();
     expect(parse(editor.getDoc()).ledger.view).toBe('clean');
+  });
+
+  it('leaves a gap between blank lines as it was, whatever the caret is on', () => {
+    const gap = reviewed().replace(
+      'noted<!--/c8d2-->.\n\n<!--',
+      'noted<!--/c8d2-->.\n\n\n\nEnd.\n\n<!--',
+    );
+    expect(gap).not.toBe(reviewed());
+    const editor = load(gap);
+    editor.view.dispatch({ selection: { anchor: gap.indexOf('End.') - 2 }, userEvent: 'select' });
+    editor.setViewMode('clean');
+    editor.recordView();
+    expect(editor.getDoc()).toBe(applyChanges(gap, setView(gap, 'clean')));
   });
 
   it('is recorded for the next time a window opens the document, exactly as it was left', () => {

@@ -400,8 +400,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
-    setTracking: (on) => {
-      if (!saveTracking) {
+    setTracking: (on, switched) => {
+      if (!(switched?.inFile ?? saveTracking)) {
         view.dispatch({ effects: setTrackingEffect.of(on) });
         return true;
       }
@@ -418,8 +418,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         changes,
         effects: setTrackingEffect.of(on),
         // A step of its own, apart from the typing around it, that Undo takes back with Track
-        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite.
-        annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite, and
+        // not an edit in the caret's place, where it would open an empty paragraph that the file
+        // never gets (as a reload isn't).
+        annotations: [
+          trackedEditAnnotation.of(true),
+          Transaction.remote.of(true),
+          isolateHistory.of('full'),
+        ],
         userEvent: 'track.switch',
       });
       return true;
@@ -434,17 +440,21 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       );
       if (!changes.length) return;
       const { state } = view;
-      // With steps to redo, a change would drop them, and made outside the history it would put
-      // the ledger out of step with theirs: the next save records the view.
-      if (redoDepth(state) > 0) return;
+      const joins = undoDepth(state) > 0;
+      // With every step taken back there is none to join, and a change outside the history would
+      // put the ledger out of step with the steps to redo: the next save records the view.
+      if (!joins && redoDepth(state) > 0) return;
       view.dispatch({
         changes,
         // Joined to the newest step, so that Undo gives it back with the step, and no step is
-        // left that undoes nothing a person can see; with none, outside the history, which has no
-        // step to put out of step. What comes after is a step of its own.
+        // left that undoes nothing a person can see (steps to redo, which a change would put out
+        // of step, are dropped, as by any edit); with no step at all, outside the history, which
+        // has none to put out of step. What comes after is a step of its own. Not an edit in the
+        // caret's place, which would open an empty paragraph that the file never gets.
         annotations: [
           trackedEditAnnotation.of(true),
-          ...(undoDepth(state) > 0
+          Transaction.remote.of(true),
+          ...(joins
             ? [joinsNewestStep.of(true), isolateHistory.of('after')]
             : [Transaction.addToHistory.of(false)]),
         ],

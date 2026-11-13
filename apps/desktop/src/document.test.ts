@@ -997,7 +997,7 @@ describe('the view a save records (format §5.6)', () => {
     expect(clean.state()?.dirty).toBe(false);
   });
 
-  it('is left as it was when the file can not be written, and the edits stay unsaved', async () => {
+  it('leaves the edits unsaved when the file can not be written', async () => {
     const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');
     editor.type('Two\n');

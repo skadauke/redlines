@@ -319,7 +319,8 @@ mode has no counterpart in the desktop app.
   Someone who turns it on, saves, and opens the file again, or sends it to someone else, finds it
   still on. A file with no ledger gets one for it, and turning it off again leaves the file as it
   was. A file that can't take a ledger (an unreadable one, or an end inside a code block that is
-  never closed) can't have it turned on, and says why.
+  never closed) can't have it turned on, and says why. Preferences' Track Changes for new
+  documents is the person's own start: it writes nothing to the file until they switch it.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
@@ -1023,8 +1024,8 @@ optional rules for document elements. People can add their own themes.
   Light or Dark holds whatever the system's is. A change reaches every window at once, About
   Redlines among them, and the windows opened later: the page, and the window itself, its title
   bar, scroll bars and the system's menus and dialogs. Redlines starts in the appearance chosen,
-  so no window opens in another first. The theme is each person's own, like the view: files store
-  no theme, and Copy for Word, PDF and the exports use the current theme.
+  so no window opens in another first. The theme is each person's own, like the markup view they
+  remembered: files store no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |

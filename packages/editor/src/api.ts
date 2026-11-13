@@ -316,17 +316,22 @@ export interface Editor {
    * itself, and `onChange` hears of it. A file that can't take a ledger refuses it, says why
    * through `onNotice`, and stays as it was.
    *
+   * `options.inFile` says whether this switch is written to the document: by default as the
+   * `saveTracking` option says, and `false` keeps it to this editor, for a Track Changes that is a
+   * person's own preference and not the file's (new documents that start tracked).
+   *
    * @returns false when the file refused, and Track Changes is as it was.
    */
-  setTracking(on: boolean): boolean;
+  setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
   /**
    * Writes the view the document is in to its ledger, as `view: clean` or `view: redlines` (format
    * §5.6): for the host to call when it saves the file, so that the document opens in it. Simple
    * is written as Redlines, and Raw leaves the view the file had. A view alone is no reason for a
    * ledger, so a file with none gets none, and a ledger that can't be read is left as it is. It is
-   * no step of its own: it joins the newest step, which Undo then takes back with it, and while
-   * there are steps to redo, which it would drop, it waits for the next save. Switching views never
-   * calls it: only a save does.
+   * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
+   * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
+   * for the next save. It is made in no empty paragraph's place, so a save never loses a blank line.
+   * Switching views never calls it: only a save does.
    */
   recordView(): void;
   /** Changes how typing helps, in this document and the ones opened later. */

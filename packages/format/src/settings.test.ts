@@ -53,6 +53,102 @@ describe('reading the view (format §5.6)', () => {
   });
 });
 
+describe('a setting that a merge repeated (format §5.5, §7.3)', () => {
+  it('is read from its last line, whole, with no warning: either side of a merge is right', () => {
+    const viewed = parse(withLines('view: clean', 'view: redlines'));
+    expect(viewed.ledger.view).toBe('redlines');
+    expect(viewed.warnings).toEqual([]);
+    const both = parse(withLines('tracking: everyone', 'view: clean', 'tracking: everyone'));
+    expect(both.ledger).toEqual({ ...empty, tracking: 'everyone', view: 'clean' });
+    expect(both.warnings).toEqual([]);
+    expect(parse(withLines('history: full', 'history: full')).ledger.history).toBe('full');
+  });
+
+  it('is written once, with the next write that rewrites the ledger', () => {
+    const text = withLines('view: clean', 'view: redlines', 'tracking: everyone');
+    expect(applyChanges(text, setLedger(text, parse(text).ledger))).toBe(
+      withLines('tracking: everyone', 'view: redlines'),
+    );
+  });
+
+  it('leaves every other key to be unique, as before', () => {
+    const doubled = withLines('people:', '  ada: {name: Ada}', 'people:', '  bo: {name: Bo}');
+    expect(parse(doubled).warnings.map((w) => w.code)).toEqual(['bad-ledger']);
+    // A key of a person's or a mark's own named view is no setting.
+    const nested = withLines('people:', '  ada: {name: Ada, view: clean}');
+    expect(parse(nested).ledger.view).toBeUndefined();
+  });
+});
+
+describe('recording the view changes that line alone (format §5.6)', () => {
+  /** A ledger the format would write differently: odd order, a YAML comment, an entry it ignores,
+   * a key of a later version and a version it doesn't know. A save must not touch any of it. */
+  const odd = [
+    'Body <!--ins k3x9-->new <!--/k3x9-->.',
+    '',
+    '<!-- redlines',
+    '# A note of a person, which the format never writes.',
+    'version: 2',
+    'people:',
+    '  bo: {name: Bo Chen}',
+    '  ada: {name: Ada Lovelace}',
+    'marks:',
+    '  "not an id": {by: ada, at: 2026-10-13T22:30Z}',
+    '  k3x9: {by: ada, at: 2026-10-13T22:30Z}',
+    'future: {a: 1}',
+    '-->',
+    '',
+  ].join('\n');
+
+  it('inserts one line after version, and changes no other byte of the ledger', () => {
+    const recorded = applyChanges(odd, setView(odd, 'clean'));
+    expect(recorded).toBe(odd.replace('version: 2\n', 'version: 2\nview: clean\n'));
+    expect(parse(recorded).ledger.view).toBe('clean');
+    // Once it is there, the next save changes only its value.
+    expect(applyChanges(recorded, setView(recorded, 'redlines'))).toBe(
+      odd.replace('version: 2\n', 'version: 2\nview: redlines\n'),
+    );
+  });
+
+  it('puts it after tracking when the ledger has it', () => {
+    const tracked = odd.replace('version: 2\n', 'version: 2\ntracking: everyone\n');
+    expect(applyChanges(tracked, setView(tracked, 'clean'))).toBe(
+      tracked.replace('tracking: everyone\n', 'tracking: everyone\nview: clean\n'),
+    );
+  });
+
+  it('gives each line a merge left the value, and the ledger’s own line breaks', () => {
+    const merged = odd.replace('version: 2\n', 'version: 2\nview: clean\nview: redlines\n');
+    expect(applyChanges(merged, setView(merged, 'clean'))).toBe(
+      odd.replace('version: 2\n', 'version: 2\nview: clean\nview: clean\n'),
+    );
+    const crlf = odd.replaceAll('\n', '\r\n');
+    expect(applyChanges(crlf, setView(crlf, 'clean'))).toBe(
+      crlf.replace('version: 2\r\n', 'version: 2\r\nview: clean\r\n'),
+    );
+  });
+
+  it('leaves a ledger it has no place in alone', () => {
+    const none = odd.replace('version: 2\n', '');
+    expect(parse(none).ledger.marks['k3x9']).toBeDefined();
+    expect(setView(none, 'clean')).toEqual([]);
+  });
+
+  it('does not touch a comment that holds a line that looks like it', () => {
+    const talk = withLines(
+      'comments:',
+      '  c8d2:',
+      '    by: ada',
+      '    at: 2026-10-13T22:40Z',
+      '    text: |-',
+      '      view: clean is what I like',
+    );
+    const recorded = applyChanges(talk, setView(talk, 'redlines'));
+    expect(recorded).toBe(talk.replace('version: 1\n', 'version: 1\nview: redlines\n'));
+    expect(parse(recorded).ledger.comments[0]?.text).toBe('view: clean is what I like');
+  });
+});
+
 describe('writing the view (format §5.7)', () => {
   it('puts it after tracking and before history', () => {
     const ledger: Ledger = { ...empty, tracking: 'everyone', view: 'redlines', history: 'full' };

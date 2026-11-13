@@ -2554,7 +2554,9 @@ same values.
   (§7.3). Readers ignore it, and the serializer always writes it.
 - Readers keep every value a string and reject duplicate keys: the JavaScript `yaml` package with
   `schema: 'failsafe'`, js-yaml with `FAILSAFE_SCHEMA`, PyYAML's `BaseLoader` plus a duplicate
-  check, and R's `yaml` with string handlers.
+  check, and R's `yaml` with string handlers. The settings `tracking`, `view` and `history`, which
+  a merge that keeps both sides can leave twice (§7.3), are the exception: a reader takes each from
+  its last line, and the next write puts one.
 - Keys are ids, handles and fixed names, none of which YAML can read as another type. They are
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
@@ -2602,7 +2604,9 @@ same values.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
-    it as it is.
+    it as it is. Recording it changes that one line, its value or a new line after `tracking`'s or
+    `version`'s, and no other byte of the ledger: a Save never rewrites what a person didn't touch,
+    whatever tool or version wrote it.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
     file with no changes or comments, Clean and Redlines look the same anyway.
@@ -2793,11 +2797,10 @@ A conflict in the ledger is resolved by keeping both sides:
 In the tests, keeping both sides gave the right result in every ledger conflict, apart from those
 stale entries and one rare case: two different people given the same handle on two branches. That
 leaves a duplicate key, which the merge driver and the editor repair by renaming the newer handle;
-since markers carry no handles, the rename touches only the ledger. A second such case is two
-branches that saved the document in different views (§5.6): keeping both sides leaves two `view`
-lines, and a ledger with a duplicate key can't be read until one is deleted. Either is right,
-because the setting only records how the document was last saved, and the merge driver keeps
-`redlines`. In GitHub's conflict editor, keeping both sides means deleting the three
+since markers carry no handles, the rename touches only the ledger. A second such case is
+two branches that saved the document in different views (§5.6): keeping both sides leaves two
+`view` lines. A reader takes the last (§5.5) and the next write puts one: either is right, because
+the setting only records how the document was last saved. In GitHub's conflict editor, keeping both sides means deleting the three
 conflict-marker lines.
 
 ### 7.4 Resolving conflicts automatically
@@ -3064,7 +3067,7 @@ Pending changes map onto Word's revisions
 | Split, join              | An inserted or deleted paragraph mark                                                |
 | Comment thread           | A comment with replies, resolved state and durable ids, in Word's comment parts      |
 | `tracking: everyone`     | `w:trackRevisions`                                                                   |
-| `view`                   | Not exported. Word's `w:view` is the page layout, not how markup is shown            |
+| `view`                   | Not exported. Word's `w:view` is the page layout; how markup is shown is its own state |
 | People                   | Author names, with the `org` appended when names collide                             |
 | History                  | Not exported. Word keeps no history                                                  |
 
