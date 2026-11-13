@@ -16,7 +16,7 @@ ship with the app; each one can be turned off. These are written:
 | `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, the runs a posted mention starts, and Ask: a question about a selection, answered in a bubble |
 | `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
-| `agent-acp` ([`@redlines/agent-acp`](agent-acp)) | The Agent Client Protocol provider: starts an agent the person added in Preferences |
+| `agent-acp` ([`@redlines/agent-acp`](agent-acp)) | The Agent Client Protocol provider: starts an agent the person added; Preferences doesn't offer adding one yet |
 
 The others are planned:
 

@@ -10,6 +10,7 @@ import type {
 import {
   codexArgs,
   createCodexProvider,
+  INSTALL_COMMAND,
   newCodexState,
   parseCodexLine,
   plugin,
@@ -358,6 +359,7 @@ describe('detect', () => {
       found: true,
       signedIn: true,
       version: '0.166.0',
+      path: '/opt/homebrew/bin/codex',
     });
   });
 
@@ -370,6 +372,7 @@ describe('detect', () => {
       signedIn: false,
       reason: 'signed-out',
       version: '0.166.0',
+      path: '/opt/homebrew/bin/codex',
       help: 'Run `codex login`.',
     });
   });
@@ -384,6 +387,34 @@ describe('detect', () => {
       version: '0.150.2',
     });
     expect(state.found && state.help).toMatch(/0\.166\.0/);
+  });
+
+  it('asks a Codex that is too old whether it is signed in, and says where it is', async () => {
+    const ask = (status: { code: number; stdout: string }) =>
+      createCodexProvider(
+        fakeProcesses({
+          exec: (_, args) =>
+            args[0] === '--version' ? { code: 0, stdout: 'codex-cli 0.150.2' } : status,
+        }).processes,
+      ).detect();
+    expect(await ask({ code: 0, stdout: '' })).toMatchObject({
+      reason: 'too-old',
+      path: '/opt/homebrew/bin/codex',
+      account: 'signed-in',
+    });
+    // Exit 1 is "Not logged in", and also a configuration this Codex can't read, which a newer
+    // Codex wrote: no claim of signed out for a Codex too old to be trusted with the question.
+    expect(await ask({ code: 1, stdout: '' })).not.toHaveProperty('account');
+    // An older Codex that doesn't know the question exits 2: no claim either.
+    expect(await ask({ code: 2, stdout: '' })).not.toHaveProperty('account');
+  });
+
+  it('says how to install Codex when it is not found, apart from the help', async () => {
+    const { processes } = fakeProcesses({ which: null });
+    const state = await createCodexProvider(processes).detect();
+    expect(state).toMatchObject({ found: false, install: INSTALL_COMMAND });
+    expect(INSTALL_COMMAND).toBe('brew install --cask codex');
+    expect(state.found ? '' : state.help).not.toContain('brew');
   });
 });
 
@@ -453,9 +484,23 @@ describe('run', () => {
     const fake = fakeProcesses({ lines: fixture('real-not-signed-in.jsonl'), code: 1 });
     const events = await run(fake);
     expect(events.filter((event) => event.type === 'error')).toHaveLength(1);
+    // A failed sign-in is one Preferences can put right, which the line offers to open.
     expect(events.at(-1)).toEqual({
       type: 'error',
       message: `Codex isn't signed in. ${SIGNED_OUT_HELP}`,
+      setup: true,
+    });
+  });
+
+  it('does not offer Preferences for a failure they cannot put right', async () => {
+    const lines = [
+      '{"type":"thread.started","thread_id":"x"}',
+      '{"type":"turn.failed","error":{"message":"You hit your usage limit."}}',
+    ];
+    const events = await run(fakeProcesses({ lines, code: 1 }));
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      message: 'Codex has hit its usage limit. Try again later.',
     });
   });
 

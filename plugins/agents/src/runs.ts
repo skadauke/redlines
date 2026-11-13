@@ -37,7 +37,15 @@ export type LiveLine =
       readOnly?: boolean;
     }
   | { kind: 'running'; agent: string; agentName: string; status: string }
-  | { kind: 'failed'; agent: string; agentName: string; message: string; logPath?: string };
+  | {
+      kind: 'failed';
+      agent: string;
+      agentName: string;
+      message: string;
+      logPath?: string;
+      /** Preferences › Agents can put it right (the agent is signed out or too old): offered. */
+      setup?: true;
+    };
 
 export interface RunController {
   /** The only way a run starts. */
@@ -227,11 +235,12 @@ export function createRuns(deps: RunDeps): RunController {
   }
 
   const who = (run: Run) => ({ agent: run.job.agent.id, agentName: run.job.agent.name });
-  const failed = (run: Run, message: string): LiveLine => ({
+  const failed = (run: Run, message: string, setup = false): LiveLine => ({
     kind: 'failed',
     ...who(run),
     message,
     ...(run.logPath === undefined ? {} : { logPath: run.logPath }),
+    ...(setup ? { setup: true as const } : {}),
   });
 
   /** Shows what a run that is still going is doing. */
@@ -368,7 +377,7 @@ export function createRuns(deps: RunDeps): RunController {
         // What detection found is kept for a while: the next post looks again, for a person who
         // has signed in or updated meanwhile.
         deps.agents.forget?.();
-        return finish(run, failed(run, cannotRun(agent, agent.state.reason)));
+        return finish(run, failed(run, cannotRun(agent, agent.state.reason), true));
       }
       const path = deps.document.path();
       // Posting a comment that starts a run saves the document, if it has a file.
@@ -504,7 +513,7 @@ export function createRuns(deps: RunDeps): RunController {
       } else if (event.type === 'status') {
         running(run, event.text);
       } else if (event.type === 'error') {
-        return finish(run, failed(run, event.message));
+        return finish(run, failed(run, event.message, event.setup === true));
       } else {
         return ended(run, ctx, event.finalText);
       }
