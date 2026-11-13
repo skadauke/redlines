@@ -73,7 +73,10 @@ export interface AskState {
 
 export interface AskSession {
   readonly state: AskState;
-  /** Asks a question of an agent: the one it names with @, else the default. An empty one explains. */
+  /**
+   * Asks a question of an agent: the one it names with @, else the default. An empty first question
+   * explains the selected text; after an answer an empty one asks nothing.
+   */
   ask(question: string): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
   answerConsent(answer: 'folder' | 'document' | 'no'): void;
@@ -420,6 +423,9 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     },
     ask(question) {
       if (closed || state.pending !== null) return;
+      // An empty question means "explain this", which only the first can mean: after an answer, a
+      // stray Return in the empty follow-up field asks nothing.
+      if (state.turns.length > 0 && question.trim() === '') return;
       void turn(question);
     },
     answerConsent(answer) {

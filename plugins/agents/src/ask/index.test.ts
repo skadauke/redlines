@@ -609,6 +609,41 @@ describe('follow-up', () => {
     ]);
   });
 
+  it('asks nothing when Return is pressed in the empty follow-up field', async () => {
+    const { editor, claude, notices } = mount();
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await answered();
+    expect(document.activeElement).toBe(field());
+    // A stray Return, and one after a space: no run, no turn, no notice, and the keyboard stays.
+    const enter = () =>
+      field()?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    enter();
+    const box = field();
+    if (box) box.value = '  ';
+    enter();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(claude.requests).toHaveLength(1);
+    expect(document.querySelectorAll('.rl-qa-question')).toHaveLength(1);
+    expect(document.querySelectorAll('.rl-qa-answer')).toHaveLength(1);
+    expect(document.querySelector('.rl-qa-composer')?.hasAttribute('hidden')).toBe(false);
+    expect(notices).toEqual([]);
+    expect(document.activeElement).toBe(field());
+    // The Ask button, pressed on an empty field, is the same.
+    button('Ask')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claude.requests).toHaveLength(1);
+    // The first question may be empty, though: that is the one that explains.
+    select(editor, 'Borrower');
+    editor.commands.run('ask.start');
+    ask('');
+    await vi.waitFor(() => expect(claude.requests).toHaveLength(2));
+    expect(claude.requests[1]?.prompt).toBe('Explain this in the context of the document.');
+  });
+
   it('names the agent that gave each answer, when a follow-up goes to another', async () => {
     const { editor, claude, codex } = mount({ codex: answers('Codex agrees.') });
     select(editor, 'first lien');

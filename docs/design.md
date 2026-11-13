@@ -1292,8 +1292,9 @@ Agent edits are animated, like a streaming chat answer.
 - **Ask** is a question about a selection, answered beside it without opening the panel:
   - **Starting it.** Select text and choose Ask: ⌥⌘A, Format › Ask…, or the Ask item of the
     formatting palette (§5.1) beside Add Comment. A small box opens at the selection for the
-    question, and an empty question means "Explain this in the context of the document." The
-    default agent answers, and @ picks another, as in a comment. Not in Raw, where a selection
+    question, and an empty first question means "Explain this in the context of the document." (A
+    Return in an empty follow-up field asks nothing.) The default agent answers, and @ picks
+    another, as in a comment. Not in Raw, where a selection
     holds markers that no answer could be about. (Fix, shorten and rephrase are not part of it.)
   - **The same access and guardrails as a comment's run:** the agent reads what the Agents pane
     allows (the document, or its folder), the first time it is asked in a folder the same question

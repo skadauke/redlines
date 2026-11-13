@@ -253,6 +253,25 @@ describe('an Ask', () => {
     expect(claude.requests).toHaveLength(1);
     expect(session.state.turns).toHaveLength(1);
   });
+
+  it('asks nothing of an empty follow-up, though an empty first question explains', async () => {
+    const { session, claude, states } = setup();
+    session.ask('What?');
+    await done(session);
+    const before = states.length;
+    session.ask('');
+    session.ask('  \n  ');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // No run, no turn, no pending question, no line: the state did not move at all.
+    expect(claude.requests).toHaveLength(1);
+    expect(states).toHaveLength(before);
+    expect(session.state).toMatchObject({ pending: null, line: null });
+    expect(session.state.turns).toHaveLength(1);
+    // A follow-up that says something still goes.
+    session.ask('Who holds it?');
+    await done(session);
+    expect(claude.requests).toHaveLength(2);
+  });
 });
 
 describe('what the agent may read', () => {
