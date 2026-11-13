@@ -750,12 +750,64 @@ mod tests {
         );
     }
 
+    /// Whether `path` is a file you can run: `apps/desktop/redlines` is the crate's folder, and a
+    /// folder of that name is no program.
+    fn is_runnable(path: &Path) -> bool {
+        std::fs::metadata(path)
+            .is_ok_and(|found| found.is_file() && found.permissions().mode() & 0o111 != 0)
+    }
+
+    /// Every runnable file called `redlines` in `folder` and in the folders below it, as deep as
+    /// `depth` says.
+    fn programs_below(folder: &Path, depth: u32) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name == "redlines") && is_runnable(&path) {
+                found.push(path);
+            } else if depth > 0 && path.is_dir() {
+                found.extend(programs_below(&path, depth - 1));
+            }
+        }
+        found
+    }
+
     /// The real program, as tauri-build copies it beside the build's binaries. `cargo` won't build
-    /// this crate without it (`scripts/build-redlines`).
-    fn start_the_program(opened: &Opened) -> Child {
+    /// this crate without it (`scripts/build-redlines`). Where the tests run from depends on
+    /// Cargo's layout of a build: `target/debug/deps` in the old one, and in the new one, the
+    /// default since Rust 1.100, `target/debug/build/redlines-desktop/<hash>/out`. The program is
+    /// beside the build's binaries in either, a few folders above the tests, so it is looked for in
+    /// each folder above them, nearest first, and failing that anywhere in the build's profile
+    /// folder (`target/debug`).
+    fn the_program() -> PathBuf {
         let tests = std::env::current_exe().unwrap();
-        let program = tests.parent().unwrap().parent().unwrap().join("redlines");
-        Command::new(program)
+        let above: Vec<PathBuf> = tests
+            .ancestors()
+            .skip(1)
+            .map(|folder| folder.join("redlines"))
+            .collect();
+        if let Some(program) = above.iter().find(|program| is_runnable(program)) {
+            return program.clone();
+        }
+        let profile = tests
+            .ancestors()
+            .find(|folder| {
+                folder
+                    .file_name()
+                    .is_some_and(|name| name == "debug" || name == "release")
+            })
+            .map(Path::to_path_buf);
+        let below = profile.as_deref().map(|folder| programs_below(folder, 4));
+        match below.as_deref() {
+            Some([program, ..]) => program.clone(),
+            _ => panic!(
+                "the redlines program isn't above the tests or in their profile folder {profile:?}; looked at {above:#?}"
+            ),
+        }
+    }
+
+    fn start_the_program(opened: &Opened) -> Child {
+        Command::new(the_program())
             .args(&opened.endpoint.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
