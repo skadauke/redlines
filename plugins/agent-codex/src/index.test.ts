@@ -111,6 +111,71 @@ async function collect(iterable: AsyncIterable<AgentEvent>): Promise<AgentEvent[
   return events;
 }
 
+describe('codexArgs at This folder and my home folder', () => {
+  const home = '/Users/ada';
+  const roots = [
+    '/Users/ada/Documents',
+    '/Users/ada/Library/CloudStorage',
+    '/Users/ada/Library/Mobile Documents',
+    '/Users/ada/code',
+    '/Volumes/Backup/Notes',
+  ];
+  const wide: AgentRequest = {
+    ...folderRequest,
+    scope: 'everything',
+    homeFolder: home,
+    homeRoots: roots,
+  };
+  const leftOut =
+    '{"."="read","**/.*"="deny","**/.*/**"="deny","**/.env"="deny","**/.env.*"="deny","**/*.env"="deny"}';
+  const profileOf = (request: AgentRequest) =>
+    valuesOf(codexArgs(request, endpoint, homebrew), '-c').find((value) =>
+      value.startsWith('permissions.redlines.filesystem='),
+    );
+
+  it('grants the home folder whole but for what is left out, and Library but for its cloud folders', () => {
+    expect(profileOf(wide)).toBe(
+      'permissions.redlines.filesystem={' +
+        '":minimal"="read",":project_roots"={"."="read"},":slash_tmp"="deny",' +
+        `"/Users/ada"=${leftOut},` +
+        '"/Users/ada/Library"="deny",' +
+        '"/Users/ada/Library/CloudStorage"="read","/Users/ada/Library/Mobile Documents"="read",' +
+        `"/Volumes/Backup/Notes"=${leftOut},` +
+        '"/opt/homebrew/bin"="read","/opt/homebrew/Caskroom/codex/0.166.0/bin"="read"}',
+    );
+  });
+
+  it('grants a folder a link leads to outside the home folder, and a cloud folder only where there is one', () => {
+    const only = profileOf({ ...wide, homeRoots: ['/Users/ada/Documents'] }) ?? '';
+    expect(only).not.toContain('CloudStorage');
+    expect(only).not.toContain('Mobile Documents');
+    // Still denied, as Library holds mail and messages.
+    expect(only).toContain('"/Users/ada/Library"="deny"');
+    expect(only).not.toContain('/Volumes');
+    // A root inside the home folder needs no entry of its own.
+    expect(only.match(/"\/Users\/ada\/Documents"/g)).toBeNull();
+  });
+
+  it('keeps every other door shut, as at This folder', () => {
+    const line = codexArgs(wide, endpoint, homebrew);
+    const folder = codexArgs(folderRequest, endpoint, homebrew);
+    const isProfile = (arg: string) => arg.startsWith('permissions.redlines.filesystem=');
+    expect(line.filter((arg) => !isProfile(arg))).toEqual(folder.filter((arg) => !isProfile(arg)));
+    expect(line).toContain('approval_policy="never"');
+    expect(line).toContain('--ignore-user-config');
+    // No `sandbox`, which reads anywhere.
+    expect(line.join(' ')).not.toMatch(/--sandbox|danger-full-access/);
+  });
+
+  it('is the folder’s profile where the request names no home folder, or none to grant, or another scope', () => {
+    const folder = profileOf(folderRequest);
+    expect(profileOf({ ...folderRequest, scope: 'everything' })).toBe(folder);
+    expect(profileOf({ ...wide, homeRoots: [] })).toBe(folder);
+    expect(profileOf({ ...wide, scope: 'folder' })).toBe(folder);
+    expect(profileOf({ ...wide, scope: 'document' })).toBe(profileOf(documentRequest));
+  });
+});
+
 describe('codexArgs', () => {
   const args = codexArgs(folderRequest, endpoint, homebrew);
   const settings = valuesOf(args, '-c');
@@ -336,6 +401,108 @@ describe('parseCodexLine', () => {
     expect(parseCodexLine('{"type":"thread.started","thread_id":"x"}', newCodexState())).toEqual({
       type: 'status',
       text: 'Thinking…',
+    });
+  });
+});
+
+describe('a read the agent could not make', () => {
+  const home = {
+    scope: 'everything' as const,
+    folder: '/Users/ada/code/redlines',
+    homeRoots: ['/Users/ada/Documents', '/Users/ada/code'],
+  };
+
+  const command = (output: string, exit = 1) =>
+    JSON.stringify({
+      type: 'item.completed',
+      item: {
+        id: 'item_3',
+        type: 'command_execution',
+        command: "/bin/zsh -lc 'cat x'",
+        aggregated_output: output,
+        exit_code: exit,
+        status: 'completed',
+      },
+    });
+
+  it('says macOS privacy for a command refused in a folder macOS asks about', () => {
+    const event = parseCodexLine(
+      command('cat: /Users/ada/Documents/plan.md: Operation not permitted\n'),
+      newCodexState(home),
+    );
+    expect(event).toEqual({
+      type: 'status',
+      text: 'Couldn’t read plan.md',
+      blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy', place: 'Documents' },
+    });
+  });
+
+  it('says the file’s permissions for a permission denied, from the system’s tools and the shell alike', () => {
+    for (const output of [
+      'ls: /Users/ada/code/shared: Permission denied\n',
+      'zsh:1: permission denied: /Users/ada/code/shared\n',
+      // ripgrep's own words, with the error's number.
+      'rg: /Users/ada/code/shared: Permission denied (os error 13)\n',
+    ]) {
+      expect(parseCodexLine(command(output), newCodexState(home))).toMatchObject({
+        blocked: { path: '/Users/ada/code/shared', cause: 'permission' },
+      });
+    }
+  });
+
+  it('reads ripgrep’s refusal, which carries the error’s number', () => {
+    expect(
+      parseCodexLine(
+        command('rg: /Users/ada/Documents: Operation not permitted (os error 1)\n'),
+        newCodexState(home),
+      ),
+    ).toMatchObject({
+      blocked: { path: '/Users/ada/Documents', cause: 'privacy', place: 'Documents' },
+    });
+  });
+
+  it('says nothing for a refusal outside what the agent may read, a hidden file at the home scope, a command that worked, or a run it knows nothing of', () => {
+    const refusedAt = (path: string) => command(`cat: ${path}: Operation not permitted\n`);
+    expect(parseCodexLine(refusedAt('/Users/ada/.ssh/id_rsa'), newCodexState(home))).toBeNull();
+    expect(parseCodexLine(refusedAt('/Users/ada/code/app/.env'), newCodexState(home))).toBeNull();
+    expect(
+      parseCodexLine(
+        command('cat: /Users/ada/Documents/a.md: Operation not permitted\n', 0),
+        newCodexState(home),
+      ),
+    ).toBeNull();
+    expect(parseCodexLine(refusedAt('/Users/ada/Documents/a.md'), newCodexState())).toBeNull();
+    // Outside the sandbox's profile at This folder, the profile doing its work.
+    const atFolder = { scope: 'folder' as const, folder: '/Users/ada/code/redlines' };
+    expect(
+      parseCodexLine(refusedAt('/Users/ada/Documents/a.md'), newCodexState(atFolder)),
+    ).toBeNull();
+  });
+
+  it('is told of by the provider, from the request it runs', async () => {
+    const lines = [
+      '{"type":"thread.started","thread_id":"x"}',
+      command('cat: /Users/ada/Documents/plan.md: Operation not permitted\n'),
+      '{"type":"turn.completed"}',
+    ];
+    const fake = fakeProcesses({ lines });
+    const events = await collect(
+      createCodexProvider(fake.processes, {
+        emptyFolder: () => Promise.resolve('/tmp/e'),
+        realPath: () => Promise.resolve('/opt/homebrew/Caskroom/codex/0.166.0/bin/codex'),
+      }).run(
+        {
+          ...folderRequest,
+          scope: 'everything',
+          folder: '/Users/ada/code/redlines',
+          homeRoots: ['/Users/ada/Documents'],
+        },
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(events.find((event) => event.type === 'status' && event.blocked)).toMatchObject({
+      blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy' },
     });
   });
 });

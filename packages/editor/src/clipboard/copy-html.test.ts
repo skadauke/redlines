@@ -5,6 +5,12 @@ import { fontStack, markdownToHtml } from './copy-html.ts';
 const html = (markdown: string) => markdownToHtml(markdown);
 
 describe('markdownToHtml', () => {
+  it('copies subscript and superscript as live tags, and any other tag as text', () => {
+    const out = html('H<sub>2</sub>O, x<sup>*n*</sup>, <SUB>no</SUB> and <u>no</u>.');
+    expect(out).toContain('H<sub>2</sub>O, x<sup><em>n</em></sup>,');
+    expect(out).toContain('&lt;SUB&gt;no&lt;/SUB&gt; and &lt;u&gt;no&lt;/u&gt;.');
+  });
+
   it('copies a heading, a list, bold, a link and a table as HTML with the twins in font-family', () => {
     const out = html(
       [

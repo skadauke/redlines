@@ -51,7 +51,14 @@ import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
-import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
+import {
+  DELIMITER,
+  INLINE_FORMATS,
+  closingOf,
+  encodeValue,
+  opsOf,
+  removedOp,
+} from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
   LINES_ABOVE,
@@ -137,6 +144,9 @@ const REFERENCE =
   "This text has a reference, whose address is defined elsewhere in the file, so a link can't be changed or added here.";
 
 const DEFINES = 'This line defines a link.';
+
+const STRAY_TAG =
+  'This text has a <sub> or <sup> tag without its pair. Select whole pairs of tags, or take the stray tag away in Raw first.';
 
 /** A stretch of the visible text. */
 type Piece = Range;
@@ -626,6 +636,25 @@ function refuseInComment(layout: Layout, clamp: Piece): void {
   }
 }
 
+/**
+ * Throws unless the tags of `format` in a piece are whole pairs, so that the pair a change writes
+ * around it pairs with each other: a closing tag with no opening tag in the piece would close the
+ * new opener, and an opening tag with no closer would be closed by the new closer (#310).
+ */
+function assertPaired(layout: Layout, piece: Piece, format: InlineFormat): void {
+  if (format !== 'sub' && format !== 'sup') return;
+  const open = DELIMITER[format];
+  const close = closingOf(format, open);
+  let depth = 0;
+  for (const hit of layout.hits.toSorted((a, b) => a.from - b.from)) {
+    if (hit.kind !== 'tag' || hit.from < piece.from || hit.to > piece.to) continue;
+    const tag = layout.v.slice(hit.from, hit.to);
+    if (tag === open) depth++;
+    else if (tag === close && --depth < 0) throw refused(STRAY_TAG);
+  }
+  if (depth !== 0) throw refused(STRAY_TAG);
+}
+
 /** Formats that are off in `clamp` turned on: what has it already is left out. */
 function planOn(planning: Planning, layout: Layout, clamp: Piece, format: InlineFormat): Step[] {
   if (format !== 'code') refuseInCode(layout, clamp);
@@ -650,6 +679,7 @@ function planOn(planning: Planning, layout: Layout, clamp: Piece, format: Inline
   for (const free of without(overAtoms(layout, start), skip)) {
     for (const cut of nested(layout, free, nesters)) {
       const piece = aroundSyntax(layout, cut, nesters);
+      assertPaired(layout, piece, format);
       const [left, right] = syntaxFor(format, layout.v.slice(piece.from, piece.to));
       steps.push(wrapStep(planning, layout, holders, piece, left, right, `+${format}`));
     }
@@ -658,8 +688,11 @@ function planOn(planning: Planning, layout: Layout, clamp: Piece, format: Inline
 }
 
 /** The syntax around text of a format. Code takes more backticks than the text has in a row, and a
- * space inside them next to a backtick. */
+ * space inside them next to a backtick. A tag has its closing tag behind the text. */
 function syntaxFor(format: InlineFormat, text: string): [string, string] {
+  if (format === 'sub' || format === 'sup') {
+    return [DELIMITER[format], closingOf(format, DELIMITER[format])];
+  }
   if (format !== 'code') return [DELIMITER[format], DELIMITER[format]];
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const run = '`'.repeat(longest + 1);
