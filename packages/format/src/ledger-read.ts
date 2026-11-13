@@ -86,7 +86,7 @@ export interface LedgerRead {
   valid: boolean;
 }
 
-const TOP_KEYS = new Set(['version', 'tracking', 'history', 'people', 'marks', 'comments']);
+const TOP_KEYS = new Set(['version', 'tracking', 'view', 'history', 'people', 'marks', 'comments']);
 /** Kept in `Ledger.extra` without a warning: used by a later version of Redlines (format §3.8). */
 const KEPT_KEYS = new Set(['frontmatter']);
 const PERSON_KEYS = new Set([
@@ -186,6 +186,31 @@ function yamlOf(source: string): unknown {
   return found.doc;
 }
 
+/** A setting that is one word, which keeping both sides of a merge can leave twice (format §7.3). */
+const SETTING_LINE = /^(tracking|view|history):/;
+
+/**
+ * `source` with each of the settings `tracking`, `view` and `history` on its last line only, so
+ * that a merge that kept both sides leaves a ledger that reads (format §5.5, §7.3): either side of
+ * it is right, and the next write puts one line. Any other repeated key is still an error.
+ */
+function lastOfRepeatedSettings(source: string): string {
+  if (!/^(?:tracking|view|history):[^]*\n(?:tracking|view|history):/m.test(source)) return source;
+  const lines = source.split('\n');
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] as string;
+    const key = SETTING_LINE.exec(line)?.[1];
+    if (key !== undefined) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    kept.push(line);
+  }
+  return kept.reverse().join('\n');
+}
+
 /** Reads the YAML inside a ledger comment. `range` is attached to the warnings. */
 export function readLedger(source: string, range: Range): LedgerRead {
   const warnings: Warning[] = [];
@@ -198,7 +223,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
 
   let doc: unknown;
   try {
-    doc = yamlOf(source);
+    doc = yamlOf(lastOfRepeatedSettings(source));
   } catch (error) {
     const reason = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
     return fail(`The ledger is not valid YAML: ${reason}`);
@@ -230,6 +255,10 @@ export function readLedger(source: string, range: Range): LedgerRead {
   const tracking = str(doc['tracking']);
   if (tracking === 'everyone') ledger.tracking = 'everyone';
   else if (tracking !== undefined) warn('bad-ledger', `Unknown tracking setting ${tracking}`);
+
+  const view = str(doc['view']);
+  if (view === 'clean' || view === 'redlines') ledger.view = view;
+  else if (view !== undefined) warn('bad-ledger', `Unknown view setting ${view}`);
 
   const history = str(doc['history']);
   if (history === 'full') ledger.history = 'full';
