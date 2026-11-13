@@ -32,5 +32,5 @@ The others are planned:
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |
 | `git`        | Optional git features                                     |
 | `collab`     | Live sessions: presence and invitations                   |
-| `ai`         | The chat panel, Ask agent, and agents in comments         |
+| `ai`         | Chat panel and agents in comments (Ask is in `agents`)    |
 | `onboarding` | The first run; desktop                                    |
