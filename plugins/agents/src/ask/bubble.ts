@@ -3,6 +3,10 @@
 // answer, and under it the actions and a field for a follow-up. It is a note's look: a thin border,
 // the interface font, and the review interface's own buttons and hints. It knows nothing of the
 // editor: `ask.ts` gives it what the session says, and what each button does.
+//
+// The exchange is a live region, which says what is added to it: so a turn that is drawn stays the
+// same node, and a new question is added after it, and its answer to it, and nothing that was said is
+// taken away and put back, which a screen reader would say again.
 
 import { fitStatus, renderLiveLine, type LiveLineActions } from '../live-line.ts';
 import type { LiveLine } from '../runs.ts';
@@ -156,26 +160,77 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
     return made;
   };
 
-  const turn = (question: string, answered: AskTurn | null) => {
+  /** The agent's name over its answer, and the answer: what a question is answered with. */
+  const answerOf = ({ answer, agent }: AskTurn): Node[] => {
+    const head = el('div', 'rl-note-head rl-author-0');
+    const dot = el('span', 'rl-dot');
+    const name = el('span', 'rl-note-name');
+    name.textContent = agent.name;
+    head.append(dot, name);
+    return [
+      head,
+      renderAnswer(answer, {
+        has: (quote) => handlers.has(quote),
+        show: (quote) => handlers.show(quote),
+      }),
+    ];
+  };
+
+  /** A turn as it is drawn: its question, and its answer once it has one. */
+  interface ShownTurn {
+    /** The turn it shows, or null while its question waits for an answer. */
+    turn: AskTurn | null;
+    /** The question that is waiting, to tell it from another. */
+    waiting: string;
+    block: HTMLElement;
+    asked: HTMLElement;
+  }
+  const shownTurns: ShownTurn[] = [];
+
+  const drawTurn = (turn: AskTurn | null, question: string): ShownTurn => {
     const block = el('div', 'rl-qa-turn');
     const asked = el('div', 'rl-qa-question');
     asked.textContent = shownQuestion(question);
     block.append(asked);
-    if (answered !== null) {
-      const head = el('div', 'rl-note-head rl-author-0');
-      const dot = el('span', 'rl-dot');
-      const name = el('span', 'rl-note-name');
-      name.textContent = answered.agent.name;
-      head.append(dot, name);
-      block.append(
-        head,
-        renderAnswer(answered.answer, {
-          has: (quote) => handlers.has(quote),
-          show: (quote) => handlers.show(quote),
-        }),
-      );
+    if (turn) block.append(...answerOf(turn));
+    return { turn, waiting: question, block, asked };
+  };
+
+  /**
+   * Makes the exchange show `turns` and the question `pending`, changing no more of it than has
+   * changed: a turn that is drawn is kept as it is; a question that has its answer now gets the
+   * answer added to it; whatever is new is added at the end. Anything else (which the session never
+   * does) is drawn again from there on.
+   */
+  const drawExchange = (turns: readonly AskTurn[], pending: string | null) => {
+    const wanted = [
+      ...turns.map((turn) => ({ turn, question: turn.question })),
+      ...(pending === null ? [] : [{ turn: null, question: pending }]),
+    ];
+    let at = 0;
+    for (const { turn, question } of wanted) {
+      const have = shownTurns[at];
+      if (have && turn !== null && have.turn === turn) {
+        // As it is.
+      } else if (have && turn === null && have.turn === null && have.waiting === question) {
+        // The same question, still waiting.
+      } else if (have && turn !== null && have.turn === null) {
+        // The question that was waiting has its answer: the answer is added to it.
+        have.turn = turn;
+        const asked = shownQuestion(turn.question);
+        if (have.asked.textContent !== asked) have.asked.textContent = asked;
+        have.block.append(...answerOf(turn));
+      } else {
+        break;
+      }
+      at++;
     }
-    return block;
+    for (const gone of shownTurns.splice(at)) gone.block.remove();
+    for (const { turn, question } of wanted.slice(at)) {
+      const made = drawTurn(turn, question);
+      shownTurns.push(made);
+      exchange.append(made.block);
+    }
   };
 
   /** What `live` shows now, to change a running line in place. */
@@ -194,10 +249,7 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
       const keyboardHere = !active || active === root.ownerDocument.body || root.contains(active);
       const working = view.pending !== null;
       const answered = view.turns.length > 0;
-      exchange.replaceChildren(
-        ...view.turns.map((answered) => turn(answered.question, answered)),
-        ...(view.pending === null ? [] : [turn(view.pending, null)]),
-      );
+      drawExchange(view.turns, view.pending);
 
       // The live line: a running one changes its words in place, so its dot keeps its pulse and
       // Stop keeps the keyboard.

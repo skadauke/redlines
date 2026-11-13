@@ -665,6 +665,107 @@ describe('follow-up', () => {
   });
 });
 
+/** The changes made to `target`'s children, however deep, until it is stopped. */
+function watch(target: Element) {
+  const records: MutationRecord[] = [];
+  const observer = new MutationObserver((list) => records.push(...list));
+  observer.observe(target, { childList: true, subtree: true });
+  return {
+    /** What was taken out and what was put in, once the observer has been told. */
+    async changes() {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return {
+        removed: records.flatMap((record) => [...record.removedNodes]),
+        added: records.flatMap((record) => [...record.addedNodes]),
+      };
+    },
+    stop: () => observer.disconnect(),
+  };
+}
+
+describe('the exchange', () => {
+  it('is a live region that says what is added, and the answers are added to it', async () => {
+    const { editor } = mount();
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    const exchange = document.querySelector<HTMLElement>('.rl-qa-exchange');
+    expect(exchange?.getAttribute('aria-live')).toBe('polite');
+    if (!exchange) throw new Error('No exchange');
+    const seen = watch(exchange);
+    ask('What is a lien?');
+    await answered();
+    const { removed, added } = await seen.changes();
+    seen.stop();
+    // The question, then the answer, are added; nothing is taken away.
+    expect(removed).toEqual([]);
+    expect(
+      added.some((node) => node instanceof HTMLElement && node.querySelector('.rl-qa-question')),
+    ).toBe(true);
+    expect(
+      added.some((node) => node instanceof HTMLElement && node.classList.contains('rl-qa-answer')),
+    ).toBe(true);
+  });
+
+  it('keeps the turns that were said as they are while a follow-up works, and when it answers', async () => {
+    let release: () => void = () => {};
+    const { editor } = mount({
+      script: async function* ({ tools, request }) {
+        await tools.initialize();
+        if (request.prompt.includes('follow-up')) {
+          yield { type: 'status', text: 'Reading loan.md' };
+          await new Promise<void>((resolve) => (release = resolve));
+          yield { type: 'status', text: 'Thinking it over' };
+          yield { type: 'done', finalText: 'The Lender holds it.' };
+          return;
+        }
+        yield { type: 'done', finalText: 'A lien is a claim.' };
+      },
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await answered();
+    const exchange = document.querySelector<HTMLElement>('.rl-qa-exchange');
+    if (!exchange) throw new Error('No exchange');
+    const first = exchange.firstElementChild;
+    const firstAnswer = first?.querySelector('.rl-qa-answer');
+    expect(firstAnswer?.textContent).toBe('A lien is a claim.');
+
+    const seen = watch(exchange);
+    ask('Who holds it?');
+    // The follow-up's status changes, once and again, while the first answer is on show.
+    await vi.waitFor(() =>
+      expect(document.querySelector('.rl-live-line-text')?.textContent).toContain(
+        'Reading loan.md',
+      ),
+    );
+    expect(exchange.firstElementChild).toBe(first);
+    release();
+    await vi.waitFor(() => expect(document.querySelectorAll('.rl-qa-answer')).toHaveLength(2));
+    const { removed, added } = await seen.changes();
+    seen.stop();
+
+    // The first turn is the node it was, with the answer it had; nothing was taken out of the
+    // region, for a screen reader to say it all again.
+    expect(exchange.firstElementChild).toBe(first);
+    expect(first?.querySelector('.rl-qa-answer')).toBe(firstAnswer);
+    expect(removed).toEqual([]);
+    expect(exchange.children).toHaveLength(2);
+    // What was added is the follow-up's turn, and its answer to it, and nothing of the first turn.
+    const second = exchange.children[1];
+    expect(added).toContain(second);
+    expect(
+      added.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.classList.contains('rl-qa-answer') &&
+          second?.contains(node) === true,
+      ),
+    ).toBe(true);
+    expect(added.some((node) => node === first || first?.contains(node))).toBe(false);
+  });
+});
+
 describe('keeping an answer', () => {
   it('Make Comment: the question is the person’s comment and the answer the agent’s reply, as one step', async () => {
     const { editor, shown, ask: asking } = mount();
