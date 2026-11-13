@@ -231,8 +231,10 @@ The window, on the desktop:
   Review turns Track Changes on and off, as ⇧⌘E does. A click while the menu is open closes it and
   acts. Each icon's hint says what a click will do, with its key ("Show Redlines ⌥⌘2", "Turn off
   Track Changes ⇧⌘E"): the menu has the pointer's rest, so the hint shows when the keyboard brings
-  the focus to the icon, and after a click, when the pointer stays. The pen is pressed
-  (`aria-pressed`) while Track Changes is on.
+  the focus to the icon, and after a click on the eye, when the pointer stays (a click on the pen
+  has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
+  time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
+  menu is Review.
 - **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
   it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
   which hovering over brings up, and which goes out of sight while you type) and on right-click, at
@@ -316,7 +318,9 @@ another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Raw
 
-The View menu, under the eye at the top right (§5.1), sets how the document is shown:
+The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
+the eye switches between Clean and Redlines, and from Raw goes back to whichever of the two was shown
+last; Raw is for the menu.
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
@@ -369,8 +373,8 @@ mode has no counterpart in the desktop app.
 
 - **The pen shows it.** The Review icon at the top right is a red pen with an underline while your
   changes are tracked, and a gray pen while they aren't. Red is the app's own color, and your own
-  too: the first author color (§5.5, §6.6). Hovering over the pen opens the Review menu, whose first
-  item switches Track Changes (⌘⇧E, as in Word).
+  too: the first author color (§5.5, §6.6). A click on the pen turns Track Changes on and off, as
+  ⌘⇧E does in Word; hovering over it opens the Review menu, whose first item is the same switch.
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
 - **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes).

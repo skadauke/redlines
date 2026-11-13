@@ -214,6 +214,10 @@ describe('styles.css', () => {
     expect(declared('.rl-tip')).toContain('left: 0');
     expect(declared('.rl-tip-end')).toContain('right: 0');
     expect(declared('.rl-tip-end')).toContain('left: auto');
+    // Both have the same weight, so the later wins: `left: auto` must come after `left: 0`, or a
+    // hint at the bar's end would span from the icon's left edge to its right.
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css.indexOf('.rl-tip-end {')).toBeGreaterThan(css.indexOf('.rl-tip {'));
   });
 
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {

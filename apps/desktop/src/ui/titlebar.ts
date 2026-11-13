@@ -81,17 +81,17 @@ export const TOOLTIP_MS = 400;
 /** The views a click on the View icon switches between: Raw is for the menu. */
 type SwitchView = Exclude<MenuView, 'raw'>;
 
-/** The views' names and the keys the menus give them (menu-model.ts). */
+/** The views' names, and the keys the menu bar gives them (menu-model.ts, which a test compares). */
 const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Raw' };
-const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
+export const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
 /** The same keys as assistive technology names them (`aria-keyshortcuts`). */
-const VIEW_ARIA_KEYS: Record<MenuView, string> = {
+export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   clean: 'Alt+Meta+1',
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
-const TRACKING_KEY = '⇧⌘E';
-const TRACKING_ARIA_KEY = 'Shift+Meta+E';
+export const TRACKING_KEY = '⇧⌘E';
+export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 
 /**
  * The bar is 52 points tall, and the fade that the text passes into under it ends 64 points down
@@ -151,7 +151,9 @@ export function createTitleBar(
   const filesButton = iconButton('Show files', icon('files', 17));
   filesButton.classList.add('rl-files-button');
   filesControl.append(filesButton);
-  const filesTip = createTip(filesControl, filesButton, 'rl-files-tip');
+  const filesTip = createTip(filesControl, filesButton, 'rl-files-tip', {
+    beforeShow: () => hideTips(),
+  });
   filesButton.addEventListener('mousedown', (event) => event.preventDefault());
   filesButton.addEventListener('click', () => {
     filesTip.hide();
@@ -274,11 +276,21 @@ export function createTitleBar(
   const viewButton = iconButton('View', icon('eye', 18));
   viewControl.append(viewButton);
   // What a click on each will do, which the hint under it says, and the icon's description is.
-  const viewTip = createTip(viewControl, viewButton, 'rl-view-tip', true);
+  // (A hint is not shown over its own icon's menu, which is open when the pointer has rested.)
+  const viewTip = createTip(viewControl, viewButton, 'rl-view-tip', {
+    end: true,
+    suppressed: () => viewMenu.isOpen,
+    beforeShow: () => hideTips(),
+  });
   const reviewControl = element('div', 'rl-control');
-  const reviewButton = iconButton('Review', icon('pen', 18));
+  // Named for what a click on it does, and pressed while that is on; its menu is Review.
+  const reviewButton = iconButton('Track Changes', icon('pen', 18));
   reviewControl.append(reviewButton);
-  const reviewTip = createTip(reviewControl, reviewButton, 'rl-review-tip', true);
+  const reviewTip = createTip(reviewControl, reviewButton, 'rl-review-tip', {
+    end: true,
+    suppressed: () => reviewMenu.isOpen,
+    beforeShow: () => hideTips(),
+  });
   reviewButton.setAttribute('aria-keyshortcuts', TRACKING_ARIA_KEY);
   end.append(viewControl, reviewControl);
   const tips = [filesTip, viewTip, reviewTip];
@@ -317,8 +329,9 @@ export function createTitleBar(
   });
 
   /**
-   * The view the last click on the eye leaves behind it, and the one a click goes back to from
-   * Raw. Redlines for a window that has shown neither.
+   * The one of Clean and Redlines shown last, by any means (the menu, the keys, a click on a change
+   * bar): what a click on the eye goes back to from Raw. Redlines for a window that has shown
+   * neither.
    */
   let lastShown: SwitchView = 'redlines';
   /** What a click on the eye shows: Clean and Redlines in turn, and from Raw the one shown last. */
@@ -391,11 +404,9 @@ export function createTitleBar(
         select: () => actions.toggleResolved(),
       },
     ],
-    // A click turns Track Changes on and off, as the key does.
-    activate: (event) => {
-      actions.toggleTracking();
-      if (event.detail > 0) reviewTip.arm();
-    },
+    // A click turns Track Changes on and off, as the key does. Its notice says so ("Track Changes
+    // is on"), and a hint at the bar's end would run into it in a narrow, zoomed window.
+    activate: () => actions.toggleTracking(),
     ...neighbors(() => reviewMenu),
   });
   menus.push(viewMenu, reviewMenu);
@@ -443,7 +454,7 @@ export function createTitleBar(
     height: () => bar.getBoundingClientRect().height,
     room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
-      hideTips();
+      for (const tip of tips) tip.destroy();
       forgetPress?.();
       for (const menu of menus) menu.destroy();
       bar.remove();
@@ -467,17 +478,34 @@ interface Tip {
   /** Starts the pause after which it shows, which the pointer leaving ends. */
   arm(): void;
   hide(): void;
+  /** Takes the hint away and stops listening to the document and the window. */
+  destroy(): void;
+}
+
+interface TipOptions {
+  /** Aligns it with the right of the icon, for the icons at the bar's right end. */
+  end?: boolean;
+  /** Whether it may not show now, as while the icon's menu is open: it would be over it. */
+  suppressed?: () => boolean;
+  /** Called as it shows, so that the others can go: one hint at a time. */
+  beforeShow?: () => void;
 }
 
 /**
  * The hint under an icon, in the dark bubble: it shows after the pointer has rested on the icon for
- * a pause, and at once when the keyboard brings the focus there (the mouse never does: a press
- * leaves the focus where it was), and goes when the pointer leaves, the focus goes, Escape is
- * pressed, or `hide` is called, as a menu opening does. It is the icon's description for assistive
- * technology. `end` aligns it with the right of the icon, for the icons at the bar's right end.
+ * a pause (a mouse's, not a finger's), and at once when the keyboard brings the focus there (the
+ * mouse never does: a press leaves the focus where it was), unless the icon's menu is open. It goes
+ * when the pointer leaves, the focus goes, the window loses the focus, Escape is pressed wherever
+ * the focus is, or `hide` is called, as a menu opening does. It is the icon's description for
+ * assistive technology.
  */
-function createTip(control: HTMLElement, button: HTMLButtonElement, id: string, end = false): Tip {
-  const tip = element('div', end ? 'rl-tip rl-tip-end' : 'rl-tip');
+function createTip(
+  control: HTMLElement,
+  button: HTMLButtonElement,
+  id: string,
+  options: TipOptions = {},
+): Tip {
+  const tip = element('div', options.end ? 'rl-tip rl-tip-end' : 'rl-tip');
   tip.id = id;
   tip.setAttribute('role', 'tooltip');
   tip.hidden = true;
@@ -488,26 +516,43 @@ function createTip(control: HTMLElement, button: HTMLButtonElement, id: string, 
   control.append(tip);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const hide = () => {
+  /** The last press was a finger's, whose tap leaves no pointer to rest or to leave. */
+  let touched = false;
+  // Escape dismisses a hint that is showing, wherever the focus is, and is left to whatever else
+  // it means.
+  const onEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') hide();
+  };
+  const show = () => {
+    if (options.suppressed?.()) return;
+    options.beforeShow?.();
+    tip.hidden = false;
+    document.addEventListener('keydown', onEscape, true);
+  };
+  function hide() {
     clearTimeout(timer);
     tip.hidden = true;
-  };
+    document.removeEventListener('keydown', onEscape, true);
+  }
   const arm = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => (tip.hidden = false), TOOLTIP_MS);
+    if (!touched) timer = setTimeout(show, TOOLTIP_MS);
   };
+  button.addEventListener('pointerdown', (event) => {
+    touched = event.pointerType === 'touch';
+  });
   button.addEventListener('pointerenter', (event) => {
-    if (event.pointerType !== 'touch') arm();
+    if (event.pointerType === 'touch') return;
+    touched = false;
+    arm();
   });
   button.addEventListener('pointerleave', hide);
   button.addEventListener('focus', () => {
     clearTimeout(timer);
-    tip.hidden = false;
+    show();
   });
   button.addEventListener('blur', hide);
-  button.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') hide();
-  });
+  window.addEventListener('blur', hide);
   return {
     set(text, key) {
       label.textContent = text;
@@ -515,6 +560,10 @@ function createTip(control: HTMLElement, button: HTMLButtonElement, id: string, 
     },
     arm,
     hide,
+    destroy() {
+      hide();
+      window.removeEventListener('blur', hide);
+    },
   };
 }
 
