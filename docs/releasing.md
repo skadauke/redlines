@@ -227,8 +227,8 @@ why is design §10). Tauri builds no app extensions, so the build does it:
   which every app extension must have, and which already lets it read the file that Quick Look
   hands it; and JavaScriptCore's compiler (`com.apple.security.cs.allow-jit`). It has no network:
   a preview never tells a server that a file was opened. Without the compiler the renderer is
-  three times slower (a megabyte of Markdown takes 14 seconds, with it 1.5), and Quick Look
-  doesn't wait.
+  several times slower (a 1.6 MB file takes 8 to 14 seconds, with it 0.4 to 1.5, by how busy the
+  Mac is; 100 KB takes 3 seconds, with it 0.8), more than Quick Look waits for.
 - **Checks.** `scripts/build-quicklook --check` (CI's `quicklook` job on a Mac) builds it, runs the
   renderer in the system's JavaScriptCore on the fixtures of `apps/desktop/quicklook/fixtures`
   (a plain file, one with tracked changes and comments, front matter, tables, R Markdown and Quarto
@@ -244,8 +244,10 @@ why is design §10). Tauri builds no app extensions, so the build does it:
   the Mac for the type of an extension nobody declares to see that it agrees). Quick Look matches
   these exactly, and the types of a subtype aren't matched: where another app declares `.qmd` or
   `.Rmd` as its own type, Quick Look chooses by that type, and Redlines' extension isn't asked.
-- It needs macOS 13: the format library uses array methods that the JavaScriptCore of macOS 12
-  doesn't have.
+- It needs macOS 13.3: the format library's patterns use regular-expression lookbehind, which the
+  JavaScriptCore before it (Safari 16.3 and earlier) can't read, so that it couldn't load the
+  renderer at all and every preview would be the file's text. Array methods such as `toSorted`
+  came with 13.0.
 
 ### Try a preview on your Mac
 

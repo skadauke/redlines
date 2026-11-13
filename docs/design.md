@@ -1391,18 +1391,22 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     the system's JavaScriptCore, for the HTML that Quick Look draws. It never calls the
     `redlines` program or anything on the `PATH`, and the app needn't be running.
   - **Nothing to install.** macOS registers the extension the first time the app runs from
-    Applications and removing the app removes it. It needs macOS 13, the first whose
-    JavaScriptCore has the array methods the format library uses. System Settings › General ›
-    Login Items & Extensions › Quick Look turns it off.
+    Applications and removing the app removes it. It needs macOS 13.3, the first whose
+    JavaScriptCore has the regular-expression lookbehind that the format library's patterns use
+    (its array methods came with 13.0). System Settings › General › Login Items & Extensions ›
+    Quick Look turns it off.
   - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
     no type for R Markdown and Quarto: a file of either gets a type made from its extension
     (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
-    extension from the app that declares it. Where another app declares them, macOS chooses that
-    app's type and preview, and a person can choose in the same settings pane; this is the one
-    extension per type that Quick Look has.
+    extension from the app that declares it. Where another app declares them, the file has that
+    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
+    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
+    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+    turns either off: that is the one extension per type that Quick Look has.
   - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is
-    read from all of it.
+    read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
+    end, isn't read.
   - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
     thumbnails in Finder, which are a separate extension.
 
@@ -1421,7 +1425,9 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
   entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
   so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
-  JavaScriptCore's compiler, without which the renderer is three times as slow (§10).
+  JavaScriptCore's compiler, without which the renderer is several times as slow (a megabyte and a
+  half of Markdown takes 8 to 14 seconds instead of 0.4 to 1.5), more than Quick Look waits for
+  ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's

@@ -1,8 +1,9 @@
 # The Quick Look preview
 
-Space on a Markdown, R Markdown or Quarto file in Finder, Mail, Spotlight or the Open dialog shows
-the file as the Clean view draws it: every change accepted, in the Default theme, under one line
-that says what is waiting in it (design §10). This folder is that preview: the renderer, and the
+Space on a Markdown file in Finder, Mail, Spotlight or the Open dialog shows the file as the Clean
+view draws it: every change accepted, in the Default theme, under one line that says what is
+waiting in it (design §10). R Markdown and Quarto files too, where no other app declares those
+extensions as its own type. This folder is that preview: the renderer, and the
 Swift extension that hosts it. The app builds it as part of `pnpm build`
 (`apps/desktop/scripts/build-quicklook`), and carries it as
 `Redlines.app/Contents/PlugIns/RedlinesPreview.appex`.
