@@ -1,7 +1,7 @@
-// An answer as the bubble shows it: the prose, light Markdown (code, bold, a bulleted list), and its
-// citations as links to the passages of the document. The text is the agent's, so the DOM is built
-// with `textContent` only. A citation whose words are no longer in the document, or never were, is
-// plain gray text and no link.
+// An answer as the bubble shows it: the prose, light Markdown (code, bold, bulleted and numbered
+// lists), and its citations as links to the passages of the document. The text is the agent's, so the
+// DOM is built with `textContent` only. A citation whose words are no longer in the document, or
+// never were, is plain text and no link.
 
 import { parseAnswer } from './answer.ts';
 
@@ -17,6 +17,10 @@ const SOURCE_SHOWN = 90;
 
 /** Code, bold and a citation marker. */
 const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[(\d{1,2})\]/g;
+/** A line of a bulleted list: `-`, `*` or `•`, white space, then the item. Indented ones are the same list. */
+const BULLET = /^\s*[-*•]\s+(.*)$/;
+/** A line of a numbered list: `1.` or `1)`, white space, then the item. */
+const NUMBERED = /^\s*(\d{1,6})[.)]\s+(.*)$/;
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -66,6 +70,41 @@ function inline(
   if (at < text.length) into.append(text.slice(at));
 }
 
+/** What a run of lines is: the lines of a paragraph, or the items of a list. */
+type Group =
+  | { kind: 'text'; items: string[] }
+  | { kind: 'bullets' | 'numbers'; items: string[]; start: number };
+
+/**
+ * Sorts the lines of a block into paragraphs and lists, line by line: a list may follow a line of
+ * text directly, with no blank line between. Lines that start `- `, `* ` or `• ` make a bulleted
+ * list, and lines that start `1. ` or `1) ` a numbered one, whatever the depth they are indented
+ * to: a list inside a list is flattened into it. Any other line is text, joined to the line before
+ * it, but an indented one under an item goes on with the item.
+ */
+function grouped(lines: readonly string[]): Group[] {
+  const groups: Group[] = [];
+  for (const line of lines) {
+    const bullet = BULLET.exec(line);
+    const numbered = bullet ? null : NUMBERED.exec(line);
+    const last = groups.at(-1);
+    if (bullet || numbered) {
+      const kind = bullet ? 'bullets' : 'numbers';
+      const item = (bullet ? bullet[1] : numbered?.[2]) ?? '';
+      if (last?.kind === kind) last.items.push(item);
+      else groups.push({ kind, items: [item], start: numbered ? Number(numbered[1]) : 1 });
+    } else if (last && last.kind !== 'text' && /^\s/.test(line)) {
+      const at = last.items.length - 1;
+      last.items[at] = `${last.items[at] ?? ''} ${line.trim()}`;
+    } else if (last?.kind === 'text') {
+      last.items.push(line.trim());
+    } else {
+      groups.push({ kind: 'text', items: [line.trim()] });
+    }
+  }
+  return groups;
+}
+
 /** Draws an answer's prose and its sources. */
 export function renderAnswer(text: string, deps: AnswerDeps): HTMLElement {
   const { body, sources } = parseAnswer(text);
@@ -73,19 +112,24 @@ export function renderAnswer(text: string, deps: AnswerDeps): HTMLElement {
   const root = el('div', 'rl-qa-answer');
   for (const block of body.split(/\n\s*\n/)) {
     const lines = block.split('\n').filter((line) => line.trim() !== '');
-    if (lines.length === 0) continue;
-    if (lines.every((line) => /^\s*[-*•]\s+/.test(line))) {
-      const list = el('ul');
-      for (const line of lines) {
-        const item = el('li');
-        inline(item, line.replace(/^\s*[-*•]\s+/, ''), byNumber, deps);
-        list.append(item);
+    for (const group of grouped(lines)) {
+      if (group.kind === 'text') {
+        const paragraph = el('p');
+        inline(paragraph, group.items.join(' '), byNumber, deps);
+        root.append(paragraph);
+        continue;
+      }
+      const list = el(group.kind === 'bullets' ? 'ul' : 'ol');
+      // A list that a blank line cut in two goes on from where it was, not from 1.
+      if (group.kind === 'numbers' && group.start !== 1) {
+        list.setAttribute('start', String(group.start));
+      }
+      for (const item of group.items) {
+        const entry = el('li');
+        inline(entry, item, byNumber, deps);
+        list.append(entry);
       }
       root.append(list);
-    } else {
-      const paragraph = el('p');
-      inline(paragraph, lines.map((line) => line.trim()).join(' '), byNumber, deps);
-      root.append(paragraph);
     }
   }
   if (sources.length > 0) {

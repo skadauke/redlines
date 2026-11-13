@@ -38,8 +38,10 @@ export const ASK_STYLE = `
 }
 .rl-qa-turn + .rl-qa-turn { margin-top: ${px(8)}; padding-top: ${px(6)}; border-top: 1px solid var(--rl-rule); }
 .rl-qa-answer p { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
-.rl-qa-answer p:last-child { margin-bottom: 0; }
-.rl-qa-answer ul { margin: 0 0 ${px(6)}; padding-left: ${px(16)}; }
+.rl-qa-answer ul, .rl-qa-answer ol { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
+.rl-qa-answer ul { padding-left: ${px(16)}; }
+.rl-qa-answer ol { padding-left: ${px(20)}; }
+.rl-qa-answer p:last-child, .rl-qa-answer ul:last-child, .rl-qa-answer ol:last-child { margin-bottom: 0; }
 .rl-qa-answer code { font-family: var(--rl-font-mono); }
 .rl-qa-cite {
   padding: 0;
