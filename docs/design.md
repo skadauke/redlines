@@ -1355,9 +1355,14 @@ folder, and the pane says plainly what the choice means:
   `.env` files) and `~/Library` (mail, messages, browser data, keychains), except the cloud
   folders in it (`~/Library/CloudStorage`: Dropbox, Google Drive, OneDrive, Box; `~/Library/Mobile
   Documents`: iCloud Drive), where people's documents live, often behind a link in the home
-  folder. The limits name both a link and the folder it leads to. A home folder whose name holds a
-  character of a glob, or that holds no folder to read, gives the folder alone, and the line says
-  so.
+  folder. The limits name both a link and the folder it leads to, and a link is followed only to
+  where it may be: never to `/`, to the home folder or to a folder above it, to a hidden folder, or
+  into `~/Library` but for its cloud folders, and, where it leaves the home folder, nothing above
+  two levels (`/Volumes/Backup`, not `/Volumes`). A link that leads anywhere else gets neither its
+  name nor its target, since the name alone would reach it. The home folder is named as it really
+  is, the agents' limits looking at real paths, and a hidden name is left out below each folder a
+  link leads to outside it too. A home folder whose name holds a character of a glob (or a quote or
+  a backslash), or that holds no folder to read, gives the folder alone, and the line says so.
 - **Writes don't change.** The agent still writes only through Redlines' tools, to the document.
 - **The risk:** text in a document that someone else wrote (a comment, a reply, deleted text)
   could try to make an agent read a private file and quote it into a comment or a suggestion,
@@ -1365,20 +1370,30 @@ folder, and the pane says plainly what the choice means:
 - **macOS asks.** Documents, Desktop, Downloads, iCloud Drive, other cloud folders and removable
   and network volumes are protected, and macOS counts what an agent that Redlines starts reads as
   Redlines' own, so it asks whether *Redlines* may read the folder, in words the bundle gives
-  (`document-types.plist`). The app lists each protected folder itself, from its own process,
-  when the person picks the choice, and before each run at it, which is what makes macOS ask, at a
-  moment they expect. A folder macOS refuses is said in a line with a button to Privacy &
-  Security › Files and Folders; the run goes on, and the agent is told which folders are out of
-  reach, so that its reply doesn't guess.
+  (`document-types.plist`, true whenever Redlines itself touches the folder). The app lists each
+  protected folder itself, from its own process, when the person picks the choice, and before each
+  run at it, which is what makes macOS ask, at a moment they expect: the first-run question says
+  so, and the run's line says it is checking what macOS allows, for as long as the person takes to
+  answer, up to twenty seconds (a network volume that has gone never answers), before the folders
+  are listed again for the agent's line. A folder macOS refuses is said in a line with a button to
+  Privacy & Security › Files and Folders; the run goes on, and the agent is told which folders are
+  out of reach, so that its reply doesn't guess.
 - **A read that fails inside the scope** is said in a notification as it happens: which file, the
   likely cause, and what to do. macOS isn't letting Redlines read a folder (a button to System
   Settings); the file's own permissions refuse it; the agent's own settings, or an organization's,
-  do; or the agent's own words with Show Log. A refusal outside the scope, or of what the scope
-  leaves out, is a limit doing its work, and is never told of.
+  do; or the agent's own words with Show Log, where they read as a refusal or a failed read. A
+  refusal outside the scope, or of what the scope leaves out (hidden names and `.env` files by any
+  name), is a limit doing its work, and is never told of, nor is a failure that is no refusal: a
+  file that isn't there, a folder, a file too large. It is read from Claude's tool results, and
+  from what Codex's commands print, which is best effort: the newer Codex models run most commands
+  through a tool that makes no event, and a command that prints a refusal's words is taken for
+  refused. The limit holds either way; only the message is missed.
 
 Not done: search that skips files not downloaded from a cloud folder (macOS marks them dataless),
 which the agents' own search tools decide; the agents are not stopped from downloading a file they
-read.
+read; and a message of its own for a cloud file that isn't on the Mac, which reads as the agent's
+own words where the agent says it timed out. Search skips links in both agents, and the prompt says
+so, so that the agent names a folder that is a link.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
 agents/`: what was started (the agent, its version, the flags, the folder), each event the agent

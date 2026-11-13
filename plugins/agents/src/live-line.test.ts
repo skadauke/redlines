@@ -169,7 +169,7 @@ describe('renderLiveLine', () => {
     const note = [...el.querySelectorAll('.rl-ask-note')].map((each) => each.textContent);
     expect(note).toEqual([
       'Claude reads files here to answer, and changes only this document.',
-      'Allow Folder and Home Folder also lets Claude read other files in your home folder, except hidden files and ~/Library. Text someone else wrote in the document could try to make it quote a private file in a comment.',
+      'Allow Folder and Home Folder also lets Claude read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.',
     ]);
     const described = (el.getAttribute('aria-describedby') ?? '').split(' ');
     expect(described).toHaveLength(3);

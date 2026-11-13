@@ -170,7 +170,7 @@
       "{\"mcpServers\":{\"redlines\":{\"command\":\"/Applications/Redlines.app/Contents/MacOS/redlines\",\"args\":[\"mcp\",\"--relay\",\"/var/folders/06/T/rl-7582-0/s\"]}}}",
       "--strict-mcp-config",
       "--settings",
-      "{\"disableAllHooks\":true,\"permissions\":{\"deny\":[\"Read(//**/.env)\",\"Read(//**/.env.*)\",\"Read(//**/*.env)\",\"Read(//Users/ada/**/.*)\",\"Read(//Users/ada/**/.*/**)\"]}}",
+      "{\"disableAllHooks\":true,\"permissions\":{\"deny\":[\"Read(//**/.env)\",\"Read(//**/.env.*)\",\"Read(//**/*.env)\",\"Read(//Users/ada/**/.*)\",\"Read(//Users/ada/**/.*/**)\",\"Read(//Volumes/Backup/Notes/**/.*)\",\"Read(//Volumes/Backup/Notes/**/.*/**)\"]}}",
       "--append-system-prompt",
       "Write like a margin comment.\n> the dam is dangerously high",
       "--",

@@ -54,8 +54,9 @@ export function agentPrompt(args: {
   outOfReach?: readonly string[];
   /**
    * At the home folder scope, the home folder and the folders of it the agent may read, which it
-   * is told of: its file tools are held to them, so searching the home folder itself is refused,
-   * and it should search them one by one.
+   * is told of: its file tools are held to them (Claude's refuse a search of the home folder
+   * itself) and a search skips links (Codex's too), so it should search them one by one, and name
+   * a folder that is a link.
    */
   home?: { folder: string; roots: readonly string[] };
 }): string {
@@ -83,7 +84,7 @@ export function agentPrompt(args: {
     ...scopeLines(args.scope, args.folder).map((line) => `- ${line}`),
     ...(args.scope === 'everything' && args.home && args.home.roots.length > 0
       ? [
-          `- The folders of the home folder you may read are: ${readableFolders(args.home)}. Your file tools are held to them and to the folder above, so look in them one by one: searching the home folder itself is refused.`,
+          `- The folders of the home folder you may read are: ${readableFolders(args.home)}. Look in them one by one, and name a folder that is a link: a search of the home folder itself may be refused, and a search skips folders that are links.`,
         ]
       : []),
     ...(args.outOfReach?.length

@@ -431,7 +431,7 @@ function asking(
     // risk of what someone else wrote in the document.
     const wider = block(
       'rl-ask-note',
-      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
+      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
     );
     wider.id = `${id}-home`;
     described.push(wider.id);

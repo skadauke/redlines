@@ -441,11 +441,24 @@ describe('a read the agent could not make', () => {
     for (const output of [
       'ls: /Users/ada/code/shared: Permission denied\n',
       'zsh:1: permission denied: /Users/ada/code/shared\n',
+      // ripgrep's own words, with the error's number.
+      'rg: /Users/ada/code/shared: Permission denied (os error 13)\n',
     ]) {
       expect(parseCodexLine(command(output), newCodexState(home))).toMatchObject({
         blocked: { path: '/Users/ada/code/shared', cause: 'permission' },
       });
     }
+  });
+
+  it('reads ripgrep’s refusal, which carries the error’s number', () => {
+    expect(
+      parseCodexLine(
+        command('rg: /Users/ada/Documents: Operation not permitted (os error 1)\n'),
+        newCodexState(home),
+      ),
+    ).toMatchObject({
+      blocked: { path: '/Users/ada/Documents', cause: 'privacy', place: 'Documents' },
+    });
   });
 
   it('says nothing for a refusal outside what the agent may read, a hidden file at the home scope, a command that worked, or a run it knows nothing of', () => {

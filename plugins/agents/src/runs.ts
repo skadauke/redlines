@@ -136,6 +136,14 @@ const STARTING = 'Starting…';
 const TOO_BROAD = 'Folder too broad: this document only';
 /** Said on the line when the home folder was allowed and the host could not list it. */
 const NO_HOME = 'No home folder found: this folder only';
+/** Said on the line while macOS may be asking whether Redlines can read a folder. */
+const CHECKING_MACOS = 'Checking what macOS allows…';
+/**
+ * How long a run waits for macOS to say what it holds back. The listing that finds out waits for
+ * the person to answer macOS's question, and for a network volume that has gone it may not end;
+ * a run that has waited this long goes on, and a read that is then refused is told of as it happens.
+ */
+const MACOS_WAIT = 20_000;
 
 /** One agent named in one post, waiting for its turn in the thread. */
 interface Job {
@@ -483,8 +491,11 @@ export function createRuns(deps: RunDeps): RunController {
       if (given === null || given === 'no' || stopIfGone(run)) return null;
       deps.settings.setConsent(agent.id, asked, given);
       answer = given;
+      // The question is answered: the line says the run goes on, and not the question.
+      running(run, STARTING);
     }
-    const scope = machine ? answer : narrower(answer, allowed);
+    // Preferences may have been narrowed while the question was up: the setting as it is now holds.
+    const scope = machine ? answer : narrower(answer, deps.settings.defaultScope());
     if (scope === 'document' || folder === undefined) return atDocument;
     return { scope, folder };
   }
@@ -529,23 +540,43 @@ export function createRuns(deps: RunDeps): RunController {
     return { reach: { ...reach, scope: 'folder', note: NO_HOME } };
   }
 
-  /** The folders macOS isn't letting Redlines read, or none where it can't be asked. */
-  async function macOsRefused(): Promise<readonly { name: string; folder: string }[]> {
-    return Promise.resolve()
-      .then(() => deps.homeAccess?.() ?? [])
-      .catch((): never[] => []);
+  /**
+   * The folders macOS isn't letting Redlines read, or none where it can't be asked or where it
+   * doesn't say within `MACOS_WAIT`.
+   */
+  function macOsRefused(): Promise<readonly { name: string; folder: string }[]> {
+    return new Promise((resolve) => {
+      const gone = setTimeout(() => resolve([]), MACOS_WAIT);
+      void Promise.resolve()
+        .then(() => deps.homeAccess?.() ?? [])
+        .catch((): never[] => [])
+        .then((found) => {
+          clearTimeout(gone);
+          resolve(found);
+        });
+    });
   }
 
   async function go(run: Run, path: string | null, asked: Reach): Promise<void> {
     const { job } = run;
     const { agent } = job;
-    const { reach, home } = await withHome(asked);
+    let { reach, home } = await withHome(asked);
     if (run.over || stopIfGone(run)) return;
     // Before the run, not in it: what macOS won't let Redlines read is told to the person and to
-    // the agent, which would otherwise fail to find a file, and guess why.
-    const refused = home === undefined ? [] : await macOsRefused();
-    if (run.over || stopIfGone(run)) return;
-    for (const { name, folder } of refused) {
+    // the agent, which would otherwise fail to find a file, and guess why. The wait can be as long
+    // as the person takes to answer macOS, so the line says what it is.
+    let refused: readonly { name: string; folder: string }[] = [];
+    if (home !== undefined) {
+      running(run, CHECKING_MACOS);
+      refused = await macOsRefused();
+      if (run.over || stopIfGone(run)) return;
+      // The folders are listed again once macOS has been asked: the app checks the agent's line
+      // against the list it makes when the agent starts, and a folder made while a question was up
+      // belongs in it.
+      ({ reach, home } = await withHome(asked));
+      if (run.over || stopIfGone(run)) return;
+    }
+    for (const { name, folder } of home === undefined ? [] : refused) {
       tellBlocked(run, { path: folder, cause: 'privacy', place: name });
     }
     const me = deps.author.handle;

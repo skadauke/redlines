@@ -241,20 +241,32 @@ fn codex_filesystem(
 
 /// The permission rules that refuse what the home folder scope leaves out, in Claude's settings, as
 /// `claudeDenies` in `plugins/agent-claude` writes them: `.env` files anywhere, and hidden files
-/// and folders anywhere below the home folder. Deny beats every grant, and Grep and Glob honor it.
-fn claude_denies(home: &str) -> Vec<String> {
-    vec![
+/// and folders anywhere below the home folder and below each folder a link leads to outside it
+/// (the home folder as it really is, without a closing slash, which would make a rule of
+/// `///Users/...`). Deny beats every grant, and Grep and Glob honor it.
+fn claude_denies(reach: &HomeReach) -> Vec<String> {
+    let mut bases = vec![reach.home.trim_end_matches('/')];
+    for root in &reach.roots {
+        let root = root.trim_end_matches('/');
+        if !bases.iter().any(|base| is_under(root, base)) {
+            bases.push(root);
+        }
+    }
+    let mut denies = vec![
         "Read(//**/.env)".to_owned(),
         "Read(//**/.env.*)".to_owned(),
         "Read(//**/*.env)".to_owned(),
-        format!("Read(/{home}/**/.*)"),
-        format!("Read(/{home}/**/.*/**)"),
-    ]
+    ];
+    for base in bases {
+        denies.push(format!("Read(/{base}/**/.*)"));
+        denies.push(format!("Read(/{base}/**/.*/**)"));
+    }
+    denies
 }
 
 /// `--settings` at the home folder scope, as `claudeArgs` writes it.
-fn claude_wide_settings(home: &str) -> String {
-    let denies: Vec<String> = claude_denies(home)
+fn claude_wide_settings(reach: &HomeReach) -> String {
+    let denies: Vec<String> = claude_denies(reach)
         .iter()
         .map(|deny| json_string(deny))
         .collect();
@@ -293,7 +305,7 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
         };
         let settings = wide.map_or_else(
             || r#"{"disableAllHooks":true}"#.to_owned(),
-            |reach| claude_wide_settings(&reach.home),
+            claude_wide_settings,
         );
         exact(&["-p", "--output-format", "stream-json", "--verbose"])
             .chain(exact(isolation))

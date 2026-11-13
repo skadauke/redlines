@@ -188,7 +188,12 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   }
   scope.value = deps.settings().agentScope;
   // The note comes with the widest choice, where the risk is, and goes with it.
+  // The risk is said where the choice is made, and a screen reader says it with the choice and
+  // again when the choice changes it.
   const scopeNote = el('div', 'rl-pref-note');
+  scopeNote.id = `rl-agents-${nextId++}`;
+  scopeNote.setAttribute('role', 'status');
+  scope.setAttribute('aria-describedby', scopeNote.id);
   const showScopeNote = () => {
     scopeNote.textContent = scope.value === 'everything' ? HOME_NOTE : '';
   };

@@ -103,16 +103,16 @@
     </dict>
   </array>
   <key>NSDesktopFolderUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSDocumentsFolderUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSDownloadsFolderUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSFileProviderDomainUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSNetworkVolumesUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSRemovableVolumesUsageDescription</key>
-  <string>Redlines reads files here, and never changes them, when you let an agent such as Claude or Codex read your home folder.</string>
+  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
 </dict>
 </plist>
