@@ -70,6 +70,7 @@ import {
   readable,
   type ReviewContext,
   segmentSpan,
+  visibleSpace,
   visibleStart,
 } from './shared.ts';
 import { MARGIN, NOTE_GAP, RAIL_SPACE, RAIL_WIDTH } from './styles.ts';
@@ -174,9 +175,70 @@ export function notesIn(
 }
 
 /**
+ * Places notes level with their anchors, with `pinned` the one that keeps its anchor's height and
+ * the others stacked around it, each clear of its neighbor by `gap`: the notes after it go down
+ * past it, and the ones before it go up, past the top of the page if need be (#328). `tops` and
+ * `heights` are in document order. A `settled` note (a resolved one) gives way: the others are
+ * placed as if it were not there, and it takes the first place at or below its anchor that clears
+ * them all. A `pinned` that is none of the notes is the first, which places every note from the
+ * top, as `stack` does. Notes can't go above `floor`: when the ones before the pinned note would,
+ * they stay at it and the notes after them give way, the pinned one last, as far as it takes.
+ */
+export function stackAround(
+  tops: readonly number[],
+  heights: readonly number[],
+  gap: number,
+  pinned: number,
+  settled?: readonly boolean[],
+  floor?: number,
+): number[] {
+  const placed: number[] = [];
+  const height = (i: number) => heights[i] ?? 0;
+  // The notes that take their place by the rule: those not settled, and the pinned one.
+  const chain = tops.flatMap((_, i) => (!settled?.[i] || i === pinned ? [i] : []));
+  const at = Math.max(chain.indexOf(pinned), 0);
+  const first = chain[at];
+  if (first !== undefined) {
+    placed[first] = tops[first] ?? 0;
+    for (let k = at + 1; k < chain.length; k++) {
+      const [i, before] = [chain[k] ?? 0, chain[k - 1] ?? 0];
+      placed[i] = Math.max(tops[i] ?? 0, (placed[before] ?? 0) + height(before) + gap);
+    }
+    for (let k = at - 1; k >= 0; k--) {
+      const [i, after] = [chain[k] ?? 0, chain[k + 1] ?? 0];
+      placed[i] = Math.min(tops[i] ?? 0, (placed[after] ?? 0) - gap - height(i));
+    }
+    if (floor !== undefined && chain.some((i) => (placed[i] ?? 0) < floor)) {
+      // No room above: from the first note down, each keeps clear of the one before it.
+      let bottom = -Infinity;
+      for (const i of chain) {
+        placed[i] = Math.max(placed[i] ?? 0, floor, bottom + gap);
+        bottom = (placed[i] ?? 0) + height(i);
+      }
+    }
+  }
+  if (!settled) return placed;
+  // Only settled notes look at the others.
+  const taken = chain.map((i) => ({ top: placed[i] ?? 0, bottom: (placed[i] ?? 0) + height(i) }));
+  tops.forEach((top, i) => {
+    if (!settled[i] || i === pinned) return;
+    let place = top;
+    // Moving down past one note can run into the next, so go through them in order until none is
+    // in the way.
+    for (const note of taken.sort((x, y) => x.top - y.top)) {
+      if (place < note.bottom + gap && note.top < place + height(i) + gap) {
+        place = note.bottom + gap;
+      }
+    }
+    placed[i] = place;
+    taken.push({ top: place, bottom: place + height(i) });
+  });
+  return placed;
+}
+
+/**
  * Places notes at their anchors' heights, in order, each pushed down to clear the note above it by
- * `gap`. A `settled` note (a resolved one) gives way: the others are placed as if it were not
- * there, and it takes the first place at or below its anchor that clears them all.
+ * `gap`: the layout of a page whose first note is the pinned one (`stackAround`).
  */
 export function stack(
   tops: readonly number[],
@@ -184,31 +246,45 @@ export function stack(
   gap: number,
   settled?: readonly boolean[],
 ): number[] {
-  const placed: number[] = [];
-  let bottom = -Infinity;
-  const taken: { top: number; bottom: number }[] = [];
-  tops.forEach((top, i) => {
-    if (settled?.[i]) return;
-    const at = Math.max(top, bottom + gap);
-    placed[i] = at;
-    bottom = at + (heights[i] ?? 0);
-    // Only settled notes look at the others.
-    if (settled) taken.push({ top: at, bottom });
-  });
-  if (!settled) return placed;
-  tops.forEach((top, i) => {
-    if (!settled[i]) return;
-    const height = heights[i] ?? 0;
-    let at = top;
-    // Moving down past one note can run into the next, so go through them in order until none is
-    // in the way.
-    for (const note of taken.sort((a, b) => a.top - b.top)) {
-      if (at < note.bottom + gap && note.top < at + height + gap) at = note.bottom + gap;
-    }
-    placed[i] = at;
-    taken.push({ top: at, bottom: at + height });
-  });
-  return placed;
+  return stackAround(
+    tops,
+    heights,
+    gap,
+    Math.max(
+      tops.findIndex((_, i) => !settled?.[i]),
+      0,
+    ),
+    settled,
+  );
+}
+
+/** The part of the page that can be seen, in the rail's coordinates. */
+interface Span {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * The note that keeps its anchor's height while the others stack around it (#328): the selected
+ * note when its anchor is in `view` (or always, with `always`: a comment being written stays where
+ * it is), else the first note whose anchor is, and when none is, the first below the view, else the
+ * last. `lines` are the anchors' first lines, in document order; `selected` is the index of the
+ * selected note, or -1. -1 for no notes.
+ */
+export function pinnedNote(
+  lines: readonly { top: number; bottom: number }[],
+  view: Span,
+  selected: number,
+  always = false,
+): number {
+  const inView = (line: { top: number; bottom: number }) =>
+    line.bottom >= view.top && line.top <= view.bottom;
+  const chosen = lines[selected];
+  if (chosen && (always || inView(chosen))) return selected;
+  const first = lines.findIndex(inView);
+  if (first >= 0) return first;
+  const below = lines.findIndex((line) => line.top > view.bottom);
+  return below >= 0 ? below : lines.length - 1;
 }
 
 /** The id of the note a new comment is written in. No mark's id has a space (format §2.3). */
@@ -415,6 +491,8 @@ interface Layout {
   /** The right end of the column's box, inside its padding: where the rail ends, or the text when
    * the rail is shrunk. */
   edge: number;
+  /** The part of the page that can be seen, where the notes follow the view (#328). */
+  view: Span;
 }
 
 /** The note shown over the page from its dot: on hover, or pinned by a click. */
@@ -444,8 +522,18 @@ class Rail {
   private readonly heightOf = new Map<string, number>();
   /** Keeps this document's drafts in the host's store, when it has one. */
   readonly keeper: DraftKeeper | null;
+  /**
+   * A scroll places the notes again by the layout last read, around the note that keeps its anchor's
+   * height (#328); while the host holds the rail, the page is measured again (parked notes).
+   */
+  private readonly onScroll = () => (this.choices.held ? this.measure() : this.scrolled());
+  private readonly scrollKey = {};
+  /** The layout last read, and each note's top as last written, which a scroll goes by. */
+  private layout: Layout | null = null;
+  private readonly written = new WeakMap<HTMLElement, number>();
+  /** The id of the selected note: the one clicked, or whose anchor holds the caret, or being written. */
+  private selectedId: string | null = null;
   /** Writes what is waiting to be written when the page goes away. */
-  private readonly onScroll = () => this.measure();
   private readonly onPageHide = () => this.keeper?.flush();
   /** The host put the view at a place of its own, which drafts given back leave as it is. */
   placeKept = false;
@@ -476,12 +564,11 @@ class Rail {
       ? new DraftKeeper(options.documentData, () => this.draftsNow(), options.onDraftsPending)
       : null;
     view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
-    if (choices.held) {
-      view.dom.ownerDocument.defaultView?.addEventListener('scroll', this.onScroll, {
-        capture: true,
-        passive: true,
-      });
-    }
+    // Any element's scroll: the page scrolls in an element around the editor in the desktop app.
+    view.dom.ownerDocument.defaultView?.addEventListener('scroll', this.onScroll, {
+      capture: true,
+      passive: true,
+    });
     this.sync(view.state);
   }
 
@@ -687,6 +774,7 @@ class Rail {
     notes.sort((a, b) => a.pos - b.pos);
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
+    this.selectedId = selected?.id ?? null;
     const ids = new Set(notes.map(({ id }) => id));
     for (const [id, view] of this.views) {
       if (ids.has(id)) continue;
@@ -749,10 +837,7 @@ class Rail {
     if (this.choices.held === held) return;
     this.choices.held = held;
     // A held rail parks the notes far from the screen, and the screen moves when the person
-    // scrolls, with no change of size to measure again: it measures on every scroll.
-    const win = this.view.dom.ownerDocument.defaultView;
-    if (held) win?.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
-    else win?.removeEventListener('scroll', this.onScroll, { capture: true });
+    // scrolls, with no change of size to measure again: it measures on every scroll (`onScroll`).
     if (!held) this.measure();
   }
 
@@ -785,6 +870,7 @@ class Rail {
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
+    const seen = this.seen(view, originTop);
     const { documentTop } = view;
     const lines = notes.map(({ pos }) => {
       const { top, bottom } = lineBox(view, pos, documentTop);
@@ -823,7 +909,31 @@ class Rail {
     // The column's own margin, which the rail stays inside.
     const margin = parseFloat(style?.getPropertyValue('padding-left') ?? '') || MARGIN * noteScale;
     const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - margin;
-    return { notes, compact, lines, heights, edge, noteScale, parked, again };
+    return { notes, compact, lines, heights, edge, noteScale, parked, again, view: seen };
+  }
+
+  /** The part of the page that can be seen, in the rail's coordinates: from the top of the page. */
+  private seen(view: EditorView, originTop: number): Span {
+    const space = visibleSpace(view);
+    return { top: space.top - originTop, bottom: space.bottom - originTop };
+  }
+
+  /**
+   * The page scrolled: the notes are placed again around the first anchor in view, by the layout
+   * last read, so that no note is read or measured again, and only those that move are written.
+   */
+  private scrolled(): void {
+    if (this.destroyed || !this.layout || this.layout.notes !== this.notes) return;
+    this.view.requestMeasure<Span>({
+      key: this.scrollKey,
+      read: (view) =>
+        this.seen(view, view.scrollDOM.getBoundingClientRect().top - view.scrollDOM.scrollTop),
+      write: (seen) => {
+        const { layout } = this;
+        if (this.destroyed || !layout || layout.notes !== this.notes) return;
+        this.place(layout, seen);
+      },
+    });
   }
 
   private write(layout: Layout | null): void {
@@ -839,21 +949,55 @@ class Rail {
       this.views.get(id)?.dom.classList.toggle(PARKED, !!layout.parked[i]);
     });
     if (layout.again) this.measure();
+    const { noteScale: k } = layout;
+    this.dom.style.left = this.compact
+      ? `${layout.edge + DOT_OFFSET * k}px`
+      : `${layout.edge - RAIL_WIDTH * k}px`;
+    this.layout = layout;
+    this.place(layout, layout.view);
+  }
+
+  /**
+   * Places the notes, or the dots, around the one that is level with its anchor (#328): the selected
+   * note when its anchor is in `seen`, else the first note whose anchor is. Only the notes that
+   * moved are written.
+   */
+  private place(layout: Layout, seen: Span): void {
+    const { noteScale: k } = layout;
+    const settled = settledOf(layout.notes);
+    // A resolved note gives way, and is never the one that keeps its anchor's height.
+    const open = layout.notes.flatMap((_, i) => (settled?.[i] ? [] : [i]));
+    const selected = layout.notes.findIndex(({ id }) => id === this.selectedId);
+    const pinned =
+      open[
+        pinnedNote(
+          open.map((i) => layout.lines[i] ?? { top: 0, bottom: 0 }),
+          seen,
+          open.indexOf(selected),
+          // A new comment being written stays where it is, wherever the page is scrolled to.
+          this.selectedId === NEW_COMMENT,
+        )
+      ] ?? 0;
+    const set = (el: HTMLElement, top: number) => {
+      if (this.written.get(el) === top) return;
+      this.written.set(el, top);
+      el.style.top = `${top}px`;
+    };
     if (this.compact) {
-      const { noteScale: k } = layout;
-      this.dom.style.left = `${layout.edge + DOT_OFFSET * k}px`;
       const centers = layout.lines.map(({ top, bottom }) => (top + bottom - DOT_SIZE * k) / 2);
-      const placed = stack(
+      const placed = stackAround(
         centers,
         layout.notes.map(() => DOT_SIZE * k),
         DOT_GAP * k,
-        settledOf(layout.notes),
+        pinned,
+        settled,
+        0,
       );
       layout.notes.forEach(({ id }, i) => {
         const view = this.views.get(id);
         if (!view) return;
-        view.dot.style.top = `${placed[i]}px`;
-        view.dom.style.top = `${(placed[i] ?? 0) - POPOVER_LIFT * k}px`;
+        set(view.dot, placed[i] ?? 0);
+        set(view.dom, (placed[i] ?? 0) - POPOVER_LIFT * k);
       });
       this.holdNotes(
         placed.map((top) => top - POPOVER_LIFT * k),
@@ -862,17 +1006,17 @@ class Rail {
       );
       return;
     }
-    const { noteScale: k } = layout;
-    this.dom.style.left = `${layout.edge - RAIL_WIDTH * k}px`;
-    const placed = stack(
+    const placed = stackAround(
       layout.lines.map(({ top }) => top - NOTE_LIFT * k),
       layout.heights,
       NOTE_GAP * k,
-      settledOf(layout.notes),
+      pinned,
+      settled,
+      0,
     );
     layout.notes.forEach(({ id }, i) => {
       const view = this.views.get(id);
-      if (view) view.dom.style.top = `${placed[i]}px`;
+      if (view) set(view.dom, placed[i] ?? 0);
     });
     this.holdNotes(placed, layout.heights, k);
   }
@@ -884,7 +1028,8 @@ class Rail {
    */
   private holdNotes(tops: readonly number[], heights: readonly number[], noteScale: number): void {
     const bottom = Math.max(...tops.map((top, i) => top + (heights[i] ?? 0)));
-    this.view.scrollDOM.style.minHeight = `${bottom + NOTES_FOOT * noteScale}px`;
+    const room = `${bottom + NOTES_FOOT * noteScale}px`;
+    if (this.view.scrollDOM.style.minHeight !== room) this.view.scrollDOM.style.minHeight = room;
   }
 
   /** Shrinks the rail to dots, or brings it back; the editor then redraws the column's width. */

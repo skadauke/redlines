@@ -5,7 +5,8 @@ import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeChange } from './cards.ts';
 import type { FieldAttachment, PostedComment } from './index.ts';
-import { notesIn, stack } from './rail.ts';
+import { notesIn, pinnedNote, stack, stackAround } from './rail.ts';
+import { reviewThemeSpec } from './styles.ts';
 import {
   button,
   click,
@@ -840,6 +841,91 @@ describe('margin notes', () => {
   it('stack pushes each note below the one above it', () => {
     expect(stack([0, 0, 200], [50, 40, 10], 8)).toEqual([0, 58, 200]);
     expect(stack([10, 30], [100, 20], 8)).toEqual([10, 118]);
+  });
+});
+
+describe('stackAround', () => {
+  it('is stack when the first note is the pinned one', () => {
+    expect(stackAround([0, 0, 200], [50, 40, 10], 8, 0)).toEqual(
+      stack([0, 0, 200], [50, 40, 10], 8),
+    );
+    const settled = [false, true, false];
+    expect(stackAround([0, 0, 20], [50, 40, 10], 8, 0, settled)).toEqual(
+      stack([0, 0, 20], [50, 40, 10], 8, settled),
+    );
+  });
+
+  it('puts the pinned note level with its anchor, the notes after it below and before it above', () => {
+    // Three anchors 10 apart, 50 high notes, the middle one pinned: the first goes up past its
+    // anchor, the last down past its own.
+    expect(stackAround([90, 100, 110], [50, 50, 50], 8, 1)).toEqual([42, 100, 158]);
+    // With room, no note leaves its anchor.
+    expect(stackAround([0, 200, 400], [50, 50, 50], 8, 1)).toEqual([0, 200, 400]);
+  });
+
+  it('goes on upward past the top of the page for as many notes as it takes', () => {
+    expect(stackAround([0, 0, 5], [40, 40, 40], 8, 2)).toEqual([-91, -43, 5]);
+  });
+
+  it('keeps every note on the page: with no room above, the pinned note is pushed down', () => {
+    expect(stackAround([0, 5, 10], [50, 50, 50], 8, 2, undefined, 0)).toEqual([0, 58, 116]);
+    // With room above, nothing changes.
+    expect(stackAround([300, 305, 310], [50, 50, 50], 8, 2, undefined, 0)).toEqual([194, 252, 310]);
+  });
+
+  it('lets a resolved note give way: it is placed as if it were not there, clear of the rest', () => {
+    // The middle note is resolved, and the last pinned: the first rises clear of the last alone,
+    // and the resolved one takes the first place at or below its anchor that clears both.
+    const placed = stackAround([100, 105, 110], [50, 50, 50], 8, 2, [false, true, false]);
+    expect(placed[2]).toBe(110);
+    expect(placed[0]).toBe(52);
+    expect(placed[1]).toBeGreaterThanOrEqual(168);
+  });
+
+  it('gives each note a place, whatever the pinned index', () => {
+    expect(stackAround([], [], 8, 0)).toEqual([]);
+    expect(stackAround([10, 20], [30, 30], 8, 5)).toEqual(stack([10, 20], [30, 30], 8));
+  });
+});
+
+describe('pinnedNote', () => {
+  // Anchors' first lines, 20 high, and a window of 100 from y = 500 to 600.
+  const lines = [100, 520, 540, 900].map((top) => ({ top, bottom: top + 20 }));
+  const view = { top: 500, bottom: 600 };
+
+  it('is the first note whose anchor is in view', () => {
+    expect(pinnedNote(lines, view, -1)).toBe(1);
+    expect(pinnedNote(lines, { top: 0, bottom: 200 }, -1)).toBe(0);
+  });
+
+  it('is the selected note when its anchor is in view, wherever it stands among them', () => {
+    expect(pinnedNote(lines, view, 2)).toBe(2);
+    expect(pinnedNote(lines, view, 1)).toBe(1);
+  });
+
+  it('is the first in view when the selected note is not in view', () => {
+    expect(pinnedNote(lines, view, 0)).toBe(1);
+    expect(pinnedNote(lines, view, 3)).toBe(1);
+  });
+
+  it('is the first note below the view when none is in view, else the last', () => {
+    expect(pinnedNote(lines, { top: 600, bottom: 700 }, -1)).toBe(3);
+    expect(pinnedNote(lines, { top: 1000, bottom: 1100 }, -1)).toBe(3);
+    expect(pinnedNote(lines, { top: 200, bottom: 300 }, -1)).toBe(1);
+  });
+
+  it('takes a note whose anchor is partly in view', () => {
+    expect(pinnedNote(lines, { top: 550, bottom: 700 }, -1)).toBe(2);
+    expect(pinnedNote(lines, { top: 110, bottom: 300 }, -1)).toBe(0);
+  });
+
+  it('is the selected note out of view too, when it is always the one, as a comment being written is', () => {
+    expect(pinnedNote(lines, view, 3, true)).toBe(3);
+    expect(pinnedNote(lines, view, -1, true)).toBe(1);
+  });
+
+  it('has none for no notes', () => {
+    expect(pinnedNote([], view, -1)).toBe(-1);
   });
 });
 
@@ -2392,5 +2478,165 @@ describe('margin notes in a table', () => {
     const shown = notes(editor);
     expect(shown).toHaveLength(1);
     expect(shown[0]!.querySelector('.rl-note-change')?.textContent).toBe('Inserted 2 rows');
+  });
+});
+
+// The notes follow the view (#328): one note is level with its anchor, and the others stack around
+// it, so that the note level with the top of the screen is the one the text there is about.
+describe('the notes follow the view', () => {
+  /** Four threads, two on the first line and two on a line far below. */
+  const four = file(
+    'One <!--cmt c2dk-->alpha<!--/c2dk--> two <!--cmt c3fm-->beta<!--/c3fm-->\n\nThree <!--cmt c4gn-->gamma<!--/c4gn--> four <!--cmt c5hp-->delta<!--/c5hp-->.',
+    [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'A'),
+      ...thread('c3fm', 'bo', 'B'),
+      ...thread('c4gn', 'bo', 'C'),
+      ...thread('c5hp', 'bo', 'D'),
+    ],
+  );
+
+  /**
+   * Anchors on a page 100, 110, 900 and 910 px down, in notes 60 high, in a window that is 768 px
+   * high and scrolled `scroll.by` px: the page, not the window, is where the anchors stand.
+   */
+  function load(doc = four) {
+    const scroll = { by: 0 };
+    const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 22 });
+    const { editor, review } = mount(doc);
+    const starts = ['beta', 'gamma', 'delta'].map((word) => place(editor, word).from);
+    const page = [100, 110, 900, 910];
+    vi.spyOn(editor.view, 'coordsAtPos').mockImplementation((pos) => {
+      const n = starts.filter((start) => pos >= start - 1).length;
+      const top = (page[n] ?? 910) - scroll.by;
+      return { left: 0, right: 5, top, bottom: top + 20 };
+    });
+    const scrollTo = async (by: number) => {
+      scroll.by = by;
+      editor.view.scrollDOM.scrollTop = by;
+      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
+      await frame();
+    };
+    // A move of the selection that is on no anchor makes the rail place its notes again.
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    return { editor, review, scroll, scrollTo, restore };
+  }
+  const tops = (editor: Editor) => notes(editor).map(top);
+
+  it('starts at the first note, as the page has always laid them out', async () => {
+    const { editor, restore } = load();
+    try {
+      await frame();
+      expect(tops(editor)).toEqual([95, 163, 895, 963]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('brings a selected note level with its anchor and moves the others out of its way', async () => {
+    const { editor, restore } = load();
+    try {
+      await frame();
+      notes(editor)[1]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await frame();
+      // The second note is level with its anchor (105), and the first has gone up to clear it.
+      expect(tops(editor).slice(0, 2)).toEqual([37, 105]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('follows scrolling: the note level with the first anchor in view is the pinned one', async () => {
+    const { editor, scrollTo, restore } = load();
+    try {
+      await frame();
+      expect(tops(editor)).toEqual([95, 163, 895, 963]);
+      await scrollTo(700);
+      // The third anchor is the first in view: its note is level with it, and the second and first
+      // notes, above, are no longer pushed down past it by those before them.
+      expect(tops(editor)).toEqual([37, 105, 895, 963]);
+      await scrollTo(0);
+      expect(tops(editor)).toEqual([95, 163, 895, 963]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps a selected note level with its anchor while it is in view, and lets go when it is not', async () => {
+    const { editor, scrollTo, restore } = load();
+    try {
+      await frame();
+      notes(editor)[3]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await scrollTo(600);
+      // In view (910 is in 600 to 1368), though not the first in it: it is the pinned one, level
+      // with its anchor, and the notes before it stack up from it.
+      expect(tops(editor)).toEqual([37, 105, 837, 905]);
+      // Scrolled away from it, the first anchor in view is the pinned one again.
+      await scrollTo(0);
+      expect(tops(editor)).toEqual([95, 163, 895, 963]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('moves the notes with a transition, which Reduce Motion takes away', () => {
+    expect(reviewThemeSpec['.rl-note']).toMatchObject({
+      transition: expect.stringContaining('top') as string,
+    });
+    const reduced = reviewThemeSpec['@media (prefers-reduced-motion: reduce)'] as Record<
+      string,
+      { transition?: string }
+    >;
+    const selectors = Object.keys(reduced).join(', ');
+    expect(selectors).toContain('.rl-note');
+    expect(selectors).toContain('.rl-note-dot');
+    expect(Object.values(reduced).every((rule) => rule.transition === 'none')).toBe(true);
+  });
+
+  it('keeps a new comment where it is while it is written, and the others out of its way', async () => {
+    const { editor, review, scrollTo, restore } = load();
+    try {
+      await frame();
+      select(editor, 'gamma');
+      expect(review.startComment()).toBe(true);
+      await frame();
+      const written = field(editor)!.closest<HTMLElement>('.rl-note')!;
+      // Level with the selection (900), as a posted note is with its anchor, and the note of the
+      // thread on the same word above it, out of its way.
+      expect(top(written)).toBe(895);
+      write(field(editor)!, 'Which one?');
+      await frame();
+      expect(top(written)).toBe(895);
+      // And a scroll that leaves the anchor in view doesn't move it from under the caret.
+      await scrollTo(700);
+      expect(top(written)).toBe(895);
+      expect(tops(editor)).toEqual([37, 105, 827, 895, 963]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('lays out the dots of a narrow window by the same rule', async () => {
+    const { editor, restore } = load();
+    try {
+      await frame();
+      stubWidth(editor.view.scrollDOM, 700);
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      await frame();
+      await tick();
+      const dots = () =>
+        [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note-dot')].map((dot) =>
+          parseFloat(dot.style.top),
+        );
+      // Anchors 10 px apart, dots 8 high and 4 apart at the least: the second goes below the first.
+      expect(dots().slice(0, 2)).toEqual([106, 118]);
+      notes(editor)[1]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await frame();
+      // Selected, the second is level with its anchor (116), and the first has gone above it.
+      expect(dots().slice(0, 2)).toEqual([104, 116]);
+    } finally {
+      restore();
+    }
   });
 });
