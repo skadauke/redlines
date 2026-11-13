@@ -13,6 +13,7 @@ ship with the app; each one can be turned off. These are written:
 | `outline` ([`@redlines/outline`](outline)) | The outline of the headings, in the left margin                |
 | `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
 | `tables` ([`@redlines/tables`](tables)) | The Table menu and its commands |
+| `palette` ([`@redlines/palette`](palette)) | The formatting palette: from a handle at the bottom center, and on right-click |
 | `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, and the runs a posted mention starts |
 | `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
