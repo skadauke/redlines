@@ -24,7 +24,6 @@ import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
@@ -677,6 +676,10 @@ const commands: MenuCommands = {
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
+  openAbout: () => {
+    if (isTauri) void invoke('open_about');
+    else notice.flash('About is in the app.');
+  },
   openPreferences: () => {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
@@ -850,11 +853,7 @@ if (isTauri) {
   // A new document, with Track Changes on if Preferences ask for it.
   if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
   windows?.ready();
-  const about = await loadAbout().catch((error: unknown) => {
-    console.error('Could not read the build tag for About Redlines', error);
-    return null;
-  });
-  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
     installShortcuts(menuModel);

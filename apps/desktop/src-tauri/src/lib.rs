@@ -279,6 +279,27 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Opens the About Redlines window, or brings it forward: there is only ever one. It is a small
+/// window of the app's own, as Preferences is, with the icon, the name, the version and build, and
+/// the copyright; it is made hidden, and shows itself once its page is styled (`src/about/main.ts`).
+/// It takes no zoom: like the install question, it is a fixed size.
+#[tauri::command]
+fn open_about(app: AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(windows::ABOUT_WINDOW) {
+        window.show()?;
+        return window.set_focus();
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == windows::ABOUT_WINDOW)
+        .ok_or(tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(&app, config)?.build()?;
+    Ok(())
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -349,6 +370,9 @@ pub fn run() {
             spelling::correct_word,
             edit_menu::undo_in_field,
             open_preferences,
+            open_about,
+            dock_icon::app_icon_mark,
+            dock_icon::show_app_icon_mark,
             zoom::set_zoom,
             zoom::zoom_level,
             command_line::install_command_line,

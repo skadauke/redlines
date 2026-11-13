@@ -30,6 +30,9 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 /// The label of the Preferences window, which holds no document.
 pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
 
+/// The label of the About Redlines window, which holds no document either.
+pub(crate) const ABOUT_WINDOW: &str = "about";
+
 /// How the labels of the document windows opened after the main one begin: `doc-1`, `doc-2` and
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
