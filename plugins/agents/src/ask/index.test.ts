@@ -194,15 +194,12 @@ describe('the command', () => {
   });
 
   it('says so, and opens nothing, with no text to ask about', () => {
-    const { editor, notices } = mount('' as never);
-    editor.view.dispatch({ selection: { anchor: 0 } });
     // On a blank line there is no word.
-    const blank = mount({ doc: 'a\n\n\nb\n' });
-    blank.editor.view.dispatch({ selection: { anchor: 3 } });
-    expect(blank.editor.commands.run('ask.start')).toBe(false);
-    expect(blank.notices).toEqual(['Select some text to ask about.']);
+    const { editor, notices } = mount({ doc: 'a\n\n\nb\n' });
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    expect(editor.commands.run('ask.start')).toBe(false);
+    expect(notices).toEqual(['Select some text to ask about.']);
     expect(bubble()).toBeNull();
-    void notices;
   });
 
   it('is not for Raw, where a selection holds markers', () => {
@@ -298,20 +295,44 @@ describe('asking', () => {
     expect(claude.requests[0]?.systemPrompt).toContain('> first lien');
   });
 
-  it('keeps Shift-Return for a new line in the question', () => {
+  it('keeps Shift-Return for a new line in the question, and only Return asks', async () => {
     const { editor, claude } = mount();
     select(editor, 'first lien');
     editor.commands.run('ask.start');
-    field()?.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      }),
+    // The control: Return asks. The question is on the bubble at once, and the provider is asked
+    // once the agents are looked up, a moment after: the moment is measured, and waited again.
+    const box = field();
+    if (!box) throw new Error('No field to ask in');
+    box.value = 'What is a lien?';
+    const pressed = performance.now();
+    box.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
     );
-    expect(claude.requests).toHaveLength(0);
-    expect(field()?.hasAttribute('hidden')).toBe(false);
+    expect(document.querySelector('.rl-qa-question')?.textContent).toBe('What is a lien?');
+    await vi.waitFor(() => expect(claude.requests).toHaveLength(1));
+    const moment = performance.now() - pressed;
+    await answered();
+
+    // Another question, with Shift-Return: nothing asks, the question stays in the field, and the
+    // field is left the key, which makes the new line.
+    select(editor, 'Borrower');
+    editor.commands.run('ask.start');
+    const next = field();
+    if (!next) throw new Error('No field to ask in');
+    next.value = 'Who pays?';
+    const shifted = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    next.dispatchEvent(shifted);
+    expect(shifted.defaultPrevented).toBe(false);
+    expect(document.querySelector('.rl-qa-question')).toBeNull();
+    expect(document.querySelector('.rl-qa-composer')?.hasAttribute('hidden')).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(50, moment * 3)));
+    expect(claude.requests).toHaveLength(1);
+    expect(next.value).toBe('Who pays?');
   });
 
   it('shows a failure on the agent’s line, and brings the question back to ask again', async () => {
@@ -405,14 +426,12 @@ describe('citations', () => {
     editor.commands.run('ask.start');
     ask('What?');
     await answered();
-    const link = document.querySelector<HTMLButtonElement>('.rl-qa-answer p .rl-qa-cite');
     const at = editor.view.state.doc.toString().indexOf('until paid in full');
     editor.view.dispatch({
       changes: { from: at, to: at + 'until paid in full'.length, insert: 'soon' },
     });
     document.querySelectorAll<HTMLButtonElement>('.rl-qa-answer p .rl-qa-cite')[1]?.click();
     expect(notices).toEqual(['That passage is no longer in the document.']);
-    void link;
   });
 });
 
@@ -459,6 +478,25 @@ describe('putting it away', () => {
     select(editor, 'first lien');
     editor.commands.run('ask.start');
     button('Cancel')?.click();
+    expect(bubble()).toBeNull();
+  });
+
+  it('stays when something nearer took the Esc, and goes on one that nobody took', () => {
+    const { editor, ask: asking } = mount();
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    // The @ picker, or a text box, takes an Esc it has a use for, and says so.
+    document.body.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+    const taken = key('Escape');
+    expect(taken.defaultPrevented).toBe(true);
+    expect(asking.isOpen()).toBe(true);
+    expect(bubble()).not.toBeNull();
+    // An Esc that ends an input method's composition is the input method's.
+    key('Escape', { isComposing: true });
+    expect(asking.isOpen()).toBe(true);
+    // Nobody took this one.
+    key('Escape');
+    expect(asking.isOpen()).toBe(false);
     expect(bubble()).toBeNull();
   });
 
