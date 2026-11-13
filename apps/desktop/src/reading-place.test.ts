@@ -2,7 +2,7 @@
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { marginFor, placeAt, placeBack, readingPlace, topInset } from './reading-place.ts';
+import { marginFor, placeAt, placeBack, readingPlace, topInset, topRoom } from './reading-place.ts';
 
 const DOC = ['first line', 'second line', 'third line', 'fourth line'].join('\n');
 const DOCUMENT_TOP = 20;
@@ -136,6 +136,17 @@ describe('topInset', () => {
   });
 });
 
+describe('topRoom', () => {
+  it('keeps what the editor scrolls to clear of the room the host says, as it is when asked', () => {
+    let room = 64;
+    const { view } = setup(0, [topRoom(() => room)]);
+    expect(topInset(view)).toBe(64);
+    // The bar's height follows the window zoom: it is asked for each time.
+    room = 51.2;
+    expect(topInset(view)).toBe(51.2);
+  });
+});
+
 describe('with a title bar floating over the scroller', () => {
   // The scroller reaches the top of the window, and the bar's 52 px are a scroll margin: the same
   // arrangement as a scroller that starts 52 px down, under a bar above it, as the tests above have.
@@ -174,6 +185,16 @@ describe('with a title bar floating over the scroller', () => {
       top: 130 - 52,
     });
     expect(placeAt(view, scroller, null).pos).toBe(view.state.doc.line(2).from);
+  });
+
+  it('takes the first line below the bar for the line under a point in the bar’s band', () => {
+    const { view, scroller } = barred(0);
+    view.posAtCoords = () => view.state.doc.line(4).from + 2;
+    // A pinch with the fingers over the bar: the line under it is hidden under the bar, so the
+    // place kept is the first line the bar leaves in sight, as it is when the pointer is over no text.
+    expect(placeAt(view, scroller, { x: 100, y: 30 }).pos).toBe(view.state.doc.line(2).from);
+    // Below the bar the line under the pointer is the one kept.
+    expect(placeAt(view, scroller, { x: 100, y: 300 }).pos).toBe(view.state.doc.line(4).from);
   });
 
   it('puts a line back as far below the bar, and keeps one near the bottom on screen', () => {

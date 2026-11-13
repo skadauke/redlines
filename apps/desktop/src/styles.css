@@ -85,10 +85,11 @@ body {
 .rl-main::after {
   position: absolute;
   top: 0;
-  right: var(--rl-scrollbar, 0px);
+  /* Stops short of a classic scrollbar, and of the edge where an overlay one is drawn. */
+  right: max(var(--rl-scrollbar, 0px), 12px);
   left: 0;
   z-index: 0;
-  height: calc(70 * var(--rl-pt));
+  height: calc(64 * var(--rl-pt));
   background: linear-gradient(
     to bottom,
     var(--rl-page, Canvas) 0,
@@ -146,6 +147,15 @@ body {
   white-space: nowrap;
   -webkit-user-select: none;
   user-select: none;
+}
+
+/*
+ * The table grips are drawn in a layer of their own above the document's text (the tables plugin's
+ * z-index: 5). It is no stacking context here, so it would be above the title bar the page scrolls
+ * under, and above the fade, and take the pointer: at 0 it is above the text only.
+ */
+#editor .rl-grips {
+  z-index: 0;
 }
 
 /*

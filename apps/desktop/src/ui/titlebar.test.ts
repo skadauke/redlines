@@ -26,6 +26,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     rename: vi.fn(() => Promise.resolve(true)),
     renameDocument: vi.fn(),
     dragFile: vi.fn(),
+    scrollPage: vi.fn(),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
@@ -727,6 +728,47 @@ describe('title bar', () => {
 });
 
 describe('the bar floating over the page', () => {
+  const wheel = (target: Element, init: WheelEventInit) => {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+    // The modifier is the event's own in a browser; happy-dom drops it from the init.
+    if (init.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  it('scrolls the page when the wheel turns over it, as over the text it floats on', () => {
+    const { root, actions } = setup();
+    const bar = root.querySelector('.rl-titlebar');
+    if (!bar) throw new Error('no bar');
+    const event = wheel(bar, { deltaX: 3, deltaY: 40 });
+    expect(actions.scrollPage).toHaveBeenCalledWith(3, 40);
+    expect(event.defaultPrevented).toBe(true);
+    // From anything in the bar: the name, the icons.
+    wheel(root.querySelector('.rl-title') ?? bar, { deltaX: 0, deltaY: -12 });
+    expect(actions.scrollPage).toHaveBeenLastCalledWith(0, -12);
+  });
+
+  it('turns lines into pixels for a wheel that counts in lines', () => {
+    const { root, actions } = setup();
+    const bar = root.querySelector('.rl-titlebar');
+    if (!bar) throw new Error('no bar');
+    wheel(bar, { deltaY: 3, deltaMode: 1 });
+    expect(actions.scrollPage).toHaveBeenCalledWith(0, 48);
+  });
+
+  it('leaves a pinch to the text size, and a wheel over an open menu to the menu', () => {
+    const { root, actions, button, menu } = setup();
+    const bar = root.querySelector('.rl-titlebar');
+    if (!bar) throw new Error('no bar');
+    // A pinch on a trackpad arrives as a wheel with the control key down.
+    const pinch = wheel(bar, { deltaY: -5, ctrlKey: true });
+    expect(pinch.defaultPrevented).toBe(false);
+    enter(button('View'));
+    vi.advanceTimersByTime(120);
+    wheel(menu('View'), { deltaY: 30 });
+    expect(actions.scrollPage).not.toHaveBeenCalled();
+  });
+
   it('says how tall it is, for the room the page keeps under it', () => {
     const { root, bar } = setup();
     const element = root.querySelector('.rl-titlebar');
@@ -736,6 +778,17 @@ describe('the bar floating over the page', () => {
     expect(bar.height()).toBe(41.6);
     element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 65);
     expect(bar.height()).toBe(65);
+  });
+
+  it('says how much of the page’s top it keeps, its fade included, which the text scrolls clear of', () => {
+    const { root, bar } = setup();
+    const element = root.querySelector('.rl-titlebar');
+    if (!element) throw new Error('no bar');
+    // The bar is 52 points and its fade ends 64 points down: whatever a point is worth in pixels.
+    element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 52);
+    expect(bar.room()).toBe(64);
+    element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 41.6);
+    expect(bar.room()).toBeCloseTo(51.2, 9);
   });
 });
 

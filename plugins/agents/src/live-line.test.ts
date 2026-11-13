@@ -8,6 +8,7 @@ import {
   createLiveLines,
   fitStatus,
   renderLiveLine,
+  shownInWindow,
   type LiveLineNotice,
   type LiveLineActions,
   type LiveLinesDeps,
@@ -25,6 +26,7 @@ function actions(): LiveLineActions & { calls: string[] } {
     stop: () => calls.push('stop'),
     dismiss: () => calls.push('dismiss'),
     showLog: (path) => calls.push(`log ${path}`),
+    openPreferences: () => calls.push('preferences'),
   };
 }
 
@@ -260,6 +262,39 @@ describe('renderLiveLine', () => {
     expect(act.calls).toEqual(['log /logs/run.jsonl', 'dismiss']);
   });
 
+  it('offers to open Preferences for a failure they can put right, beside its log', () => {
+    const act = actions();
+    const signedOut: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      setup: true,
+    };
+    const el = renderLiveLine(signedOut, act);
+    // A run that never started has no log: only Preferences, which has the Sign In button.
+    expect(buttons(el).map(named)).toEqual(['Open Preferences', 'Dismiss']);
+    press(el, 'Open Preferences');
+    expect(act.calls).toEqual(['preferences']);
+
+    const logged = renderLiveLine({ ...signedOut, logPath: '/logs/run.jsonl' }, actions());
+    expect(buttons(logged).map(named)).toEqual(['Show log', 'Open Preferences', 'Dismiss']);
+  });
+
+  it('offers no way to Preferences for any other failure, or where the host has none', () => {
+    const other: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude can't reach the network.",
+    };
+    expect(buttons(renderLiveLine(other, actions())).map(named)).toEqual(['Dismiss']);
+    const without = actions();
+    delete without.openPreferences;
+    const el = renderLiveLine({ ...other, setup: true }, without);
+    expect(buttons(el).map(named)).toEqual(['Dismiss']);
+  });
+
   it('names the agent before a failure that doesn’t, and offers no log without one', () => {
     const el = renderLiveLine(
       { kind: 'failed', agent: 'claude', agentName: 'Claude', message: 'Stopped.' },
@@ -316,6 +351,7 @@ function liveLines(overrides: Partial<LiveLinesDeps> = {}) {
     getParsed: () => PLAIN,
     refresh: (thread) => refreshed.push(thread),
     showLog: (path) => logs.push(path),
+    openPreferences: () => logs.push('preferences'),
     notify: (notice) => {
       const shown = { notice, closed: false };
       notices.push(shown);
@@ -505,6 +541,26 @@ describe('createLiveLines', () => {
     // Dismissing the line takes its notification away.
     s.set('c3fm', null);
     expect(shown?.closed).toBe(true);
+  });
+
+  it('sends Open Preferences to the window, in the line and in the notification', async () => {
+    const s = liveLines({ inView: () => false });
+    const setupFailure: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      logPath: '/logs/run.jsonl',
+      setup: true,
+    };
+    s.set('c2dk', setupFailure);
+    press(s.lines.footer('c2dk')!, 'Open Preferences');
+    expect(s.logs).toEqual(['preferences']);
+    await frame();
+    // What the person can do about it is open Preferences, so that is the notification's button.
+    expect(s.notices.map(({ notice }) => notice.action?.label)).toEqual(['Open Preferences']);
+    s.notices[0]?.notice.action?.run();
+    expect(s.logs).toEqual(['preferences', 'preferences']);
   });
 
   it('names the agent in a notification for a failure that doesn’t, and offers no log without one', async () => {
@@ -900,5 +956,40 @@ describe('the live line in a thread', () => {
     expect(allow.isConnected).toBe(true);
     allow.click();
     await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
+  });
+});
+
+describe('a note in the window', () => {
+  /** A page that scrolls, at `top`, with `padding` of room at its top, and a note at `at`. */
+  function page(top: number, padding: string, at: { top: number; bottom: number }) {
+    // The document itself clips nothing, as in a browser (happy-dom leaves its overflow unset).
+    document.documentElement.style.overflowY = 'visible';
+    document.body.style.overflowY = 'visible';
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    scroller.style.paddingTop = padding;
+    scroller.getBoundingClientRect = () => new DOMRect(0, top, 800, 700);
+    const note = document.createElement('div');
+    note.getBoundingClientRect = () => new DOMRect(0, at.top, 200, at.bottom - at.top);
+    note.getClientRects = () => [note.getBoundingClientRect()] as unknown as DOMRectList;
+    scroller.append(note);
+    document.body.append(scroller);
+    return note;
+  }
+  afterEach(() => document.body.replaceChildren());
+
+  it('shows while it is below the top of what its page shows', () => {
+    expect(shownInWindow(page(52, '0px', { top: 60, bottom: 90 }))).toBe(true);
+    // Under a bar above the page, which hides what is scrolled up to it.
+    expect(shownInWindow(page(52, '0px', { top: 20, bottom: 40 }))).toBe(false);
+  });
+
+  it('is hidden under a title bar that floats over the page, whose room is its top padding', () => {
+    // The page reaches the top of the window, and keeps the bar's room as padding: a note that has
+    // scrolled up into it is under the bar, though it is inside the page's own box.
+    expect(shownInWindow(page(0, '52px', { top: 10, bottom: 40 }))).toBe(false);
+    expect(shownInWindow(page(0, '52px', { top: 60, bottom: 90 }))).toBe(true);
+    // Partly under it, partly below: it shows.
+    expect(shownInWindow(page(0, '52px', { top: 40, bottom: 80 }))).toBe(true);
   });
 });

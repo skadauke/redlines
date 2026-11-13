@@ -358,6 +358,8 @@ pub fn run() {
             appearance::set_appearance,
             edit_menu::beep,
             spelling::correct_word,
+            spelling::spelling_suggestions,
+            spelling::spelling_learn,
             edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,
@@ -398,6 +400,14 @@ pub fn run() {
             agents::agent_stop,
             #[cfg(unix)]
             agents::agent_logs_open,
+            #[cfg(unix)]
+            agents::agent_update,
+            #[cfg(unix)]
+            agents::agent_sign_in,
+            #[cfg(unix)]
+            agents::agent_setup_stop,
+            #[cfg(unix)]
+            agents::agent_terminal_sign_in,
             #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]

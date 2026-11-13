@@ -20,6 +20,11 @@ export interface LiveLineActions {
   /** Shows a failed run's log. Without it, a failure offers none. */
   showLog?: (path: string) => void;
   /**
+   * Opens Preferences › Agents, where an agent is updated or signed in. Without it, a failure that
+   * Preferences could put right offers no way there.
+   */
+  openPreferences?: () => void;
+  /**
    * Puts the keyboard in the document: where it goes after a question answered from the keyboard,
    * when it came to the panel from nowhere else.
    */
@@ -51,6 +56,8 @@ export interface LiveLinesDeps {
   /** Draws the thread's note again, which asks for its footer: `ReviewController.refreshThread`. */
   refresh(thread: string): void;
   showLog?: (path: string) => void;
+  /** As `LiveLineActions.openPreferences`. */
+  openPreferences?: () => void;
   /** Posts a notice in the window's notifications, and returns a way to take it away. */
   notify?: (notice: LiveLineNotice) => { close(): void };
   /** Whether `el` is where the person can see it. By default, by where it is in the window. */
@@ -347,11 +354,18 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
         span('rl-live-line-name', agentName),
         ...withCode(named ? message.slice(agentName.length) : ` ${message}`),
       );
-      const { showLog } = actions;
+      const { showLog, openPreferences } = actions;
       if (logPath !== undefined && showLog) {
         text.append(
           ' ',
           button('rl-live-line-log', 'Show log', () => showLog(logPath)),
+        );
+      }
+      // The line can't update or sign in: Preferences can, and the button opens them.
+      if (line.setup === true && openPreferences) {
+        text.append(
+          ' ',
+          button('rl-live-line-log', 'Open Preferences', () => openPreferences()),
         );
       }
       return [dot, text, dismissButton(() => actions.dismiss())];
@@ -500,17 +514,19 @@ function noticeText({ agentName, message }: LiveLine & { kind: 'failed' }): stri
 
 /**
  * Whether `el` shows in the window: in the page, laid out, and not scrolled out of anything that
- * clips it.
+ * clips it. What clips it starts below its top padding: a title bar floating over the page keeps
+ * its room there, and a note scrolled up into it is under the bar.
  */
-function shownInWindow(el: HTMLElement): boolean {
+export function shownInWindow(el: HTMLElement): boolean {
   if (!el.isConnected || el.getClientRects().length === 0) return false;
   const rect = el.getBoundingClientRect();
   let top = Math.max(rect.top, 0);
   let bottom = Math.min(rect.bottom, window.innerHeight);
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    if (getComputedStyle(parent).overflowY === 'visible') continue;
+    const style = getComputedStyle(parent);
+    if (style.overflowY === 'visible') continue;
     const clip = parent.getBoundingClientRect();
-    top = Math.max(top, clip.top);
+    top = Math.max(top, clip.top + (Number.parseFloat(style.paddingTop) || 0));
     bottom = Math.min(bottom, clip.bottom);
   }
   return bottom > top;
@@ -548,6 +564,7 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     stop: () => runs.stop(thread),
     dismiss: () => runs.dismiss(thread),
     ...(deps.showLog ? { showLog: deps.showLog } : {}),
+    ...(deps.openPreferences ? { openPreferences: deps.openPreferences } : {}),
     ...(deps.focusDocument ? { focusDocument: deps.focusDocument } : {}),
   });
 
@@ -573,17 +590,21 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
   }
 
   function tell(thread: string, line: LiveLine & { kind: 'failed' }): void {
-    const { showLog } = deps;
+    const { showLog, openPreferences } = deps;
     if (runs.line(thread) !== line) return;
     const el = drawn.get(thread)?.el;
     if (el && inView(el)) return;
     const { logPath } = line;
+    // What the person can do about a failure Preferences can put right is open them; any other
+    // has its log, if it has one.
     post(thread, line, {
       key: `live-line ${thread}`,
       text: noticeText(line),
-      ...(logPath !== undefined && showLog
-        ? { action: { label: 'Show log', run: () => showLog(logPath) } }
-        : {}),
+      ...(line.setup === true && openPreferences
+        ? { action: { label: 'Open Preferences', run: () => openPreferences() } }
+        : logPath !== undefined && showLog
+          ? { action: { label: 'Show log', run: () => showLog(logPath) } }
+          : {}),
     });
   }
 

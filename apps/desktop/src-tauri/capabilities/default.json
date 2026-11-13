@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What a document window may use: Tauri's core defaults; dragging and titling the window, closing it after asking about unsaved edits, and bringing it to the front to ask; the open and save dialogs; reading the clipboard's text, for Paste as Plain Text; the three file commands the app calls (read a file, ask whether a file exists, write a text file), with the file plugin's denials of the webview's own data. Nothing of the updater: the app checks for, downloads and installs an update itself, for every window (src/updates.rs), and a window only asks it to, through the app's own commands. They reach no file by themselves, only the files the person opened or saved: the app adds each to the scope, as the dialog plugin does for a file picked in an open or save dialog (src/file_scope.rs). Nothing of the file plugin's watching either, which would have to reach a document's folder: the app watches a window's document for it, through the document's folder, and tells it of changes to that file alone (src/watch.rs). The app's own commands are granted one by one (build.rs lists them all): a window may call those its code calls, as src/command-permissions.node.test.ts checks (the zoom's two among them: the window asks the app for a level, and the app zooms every window), and the agent commands that only Preferences needs (adding or removing an agent, the command line and the default app) are not among them.",
+  "description": "What a document window may use: Tauri's core defaults; dragging and titling the window, closing it after asking about unsaved edits, and bringing it to the front to ask; the open and save dialogs; reading the clipboard's text, for Paste as Plain Text; the three file commands the app calls (read a file, ask whether a file exists, write a text file), with the file plugin's denials of the webview's own data. Nothing of the updater: the app checks for, downloads and installs an update itself, for every window (src/updates.rs), and a window only asks it to, through the app's own commands. They reach no file by themselves, only the files the person opened or saved: the app adds each to the scope, as the dialog plugin does for a file picked in an open or save dialog (src/file_scope.rs). Nothing of the file plugin's watching either, which would have to reach a document's folder: the app watches a window's document for it, through the document's folder, and tells it of changes to that file alone (src/watch.rs). The app's own commands are granted one by one (build.rs lists them all): a window may call those its code calls, as src/command-permissions.node.test.ts checks (the zoom's two among them: the window asks the app for a level, and the app zooms every window), and the agent commands that only Preferences needs (adding or removing an agent, updating one or signing it in, the command line and the default app) are not among them.",
   "windows": ["main", "doc-*"],
   "permissions": [
     "core:default",
@@ -50,6 +50,8 @@
     "allow-set-appearance",
     "allow-set-zoom",
     "allow-show-images",
+    "allow-spelling-learn",
+    "allow-spelling-suggestions",
     "allow-start-file-drag",
     "allow-undo-in-field",
     "allow-unwatch-document",

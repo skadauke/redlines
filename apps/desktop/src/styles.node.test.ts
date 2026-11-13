@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { BAR_PT, FADE_PT } from './ui/titlebar.ts';
 
 /** The style sheet's rules as selector and declarations (it has no nested rules but @media). */
 function rules(css: string): { selector: string; declarations: string }[] {
@@ -176,6 +177,7 @@ describe('styles.css', () => {
     // The document starts below it, through the scroller's own top padding, which is room that
     // scrolls: the text passes through it and under the bar. Nothing is hidden at rest.
     expect(declared('.rl-scroller')).toContain('padding-top: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-scroller')).toContain('scroll-padding-top: calc(52 * var(--rl-pt))');
     expect(declared('.rl-scroller')).toContain('box-sizing: border-box');
     // What passes under the bar fades into the page's own color, in every theme, and takes no
     // pointer: the bar's controls and the text under the fade are both reached. It is a gradient
@@ -184,11 +186,19 @@ describe('styles.css', () => {
     expect(fade).toMatch(/linear-gradient\(\s*to bottom,\s*var\(--rl-page/);
     expect(fade).toContain('pointer-events: none');
     expect(fade).toContain('position: absolute');
-    expect(fade).toContain('right: var(--rl-scrollbar, 0px)');
+    // It stops short of a classic scrollbar, and of the edge where an overlay one is drawn.
+    expect(fade).toContain('right: max(var(--rl-scrollbar, 0px), 12px)');
+    // The bar's 52 points and its fade's 64 are what the title bar says the page keeps clear
+    // (`BAR_PT`, `FADE_PT`): the text rests below the fade, where it is not faded.
+    expect(fade).toContain(`height: calc(${FADE_PT} * var(--rl-pt))`);
+    expect(declared('.rl-titlebar')).toContain(`height: calc(${BAR_PT} * var(--rl-pt))`);
+    expect(declared('.rl-scroller')).toContain(`padding-top: calc(${BAR_PT} * var(--rl-pt))`);
     // Over the page's text (the editor's scroller is a stacking context of its own, at 0), under
     // the bar, the sidebar that covers a narrow page, and the find bar and menus.
     expect(fade).toContain('z-index: 0');
     expect(declared('.rl-scroller')).not.toMatch(/mask/);
+    // The table grips' own layer is over a bar only if it is above it: the grips draw under it.
+    expect(declared('#editor .rl-grips')).toContain('z-index: 0');
     // The fade is no part of a printed page, and neither is the room for the bar.
     const printed = css.slice(css.indexOf('@media print'));
     expect(printed).toMatch(/\.rl-main::after[^{}]*\{[^}]*display: none/);
