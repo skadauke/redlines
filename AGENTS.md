@@ -40,8 +40,8 @@ and [docs/format.md](docs/format.md) (the file format).
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
 Workspace members are `packages/*`, `plugins/*`, `apps/*` and `apps/desktop/quicklook`
-(`pnpm-workspace.yaml`). Workspace
-packages export their TypeScript sources; nothing is compiled before use.
+(`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
+before use.
 
 ## Commands
 
@@ -108,7 +108,8 @@ repo root.
   renderer (`apps/desktop/quicklook`, with `rolldown`), compiles the Swift extension for both
   architectures with `swiftc` (no Xcode project), and writes
   `apps/desktop/quicklook/build/RedlinesPreview.appex`, signed ad hoc, or with the identity in
-  `APPLE_SIGNING_IDENTITY`. `pnpm build` runs it (on any other system it does nothing), and
+  `APPLE_SIGNING_IDENTITY`. `pnpm build` runs it (on a Mac it needs the Xcode command line tools, and
+  on any other system it does nothing), and
   `bundle.macOS.files` in `tauri.conf.json` copies it to `Redlines.app/Contents/PlugIns`; Tauri
   signs the app and its programs but never a plug-in, so the release workflow signs the extension
   first (`--sign-only`). `scripts/build-quicklook --check` also runs the renderer in the system's
