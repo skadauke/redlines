@@ -282,18 +282,23 @@ Clean, Simple and Redlines draw the blank lines between blocks as the space betw
 lines; Raw shows them.
 
 Simple and Redlines are the markup views, and Redlines remembers the one you chose last, Redlines at
-first. A document with redlines (pending changes, highlights or comment threads) opens in it; one
-without opens in Clean. Making a tracked change in Clean, or adding a comment there, switches to
-it, so suggestions are never invisible to their author, and so does a document shown Clean that
-gains redlines; a tracked change made in Simple stays in Simple, where its bar shows it. Reviewing
-(§5.6) switches to Redlines, where each change shows. Otherwise the view stays as you chose it:
-deciding the last change doesn't switch it. The view, and the markup view remembered, are each
-person's own and are never saved in the file; the markup view is kept in the app's settings and
-reaches every window for the documents each opens next, without changing the view any of them
-shows. The View menu also previews the original (every change rejected) and one person's changes
-alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
-Changes is off; while it is on, or locked on, Raw is read-only, because typing there could forge
-or break markers.
+first. A document opens in the view it was saved in, which its ledger records
+([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean and `view: redlines` in the
+full markup. A document that records none opens in the markup view when it has redlines (pending
+changes, highlights or comment threads), and in Clean when it has none. Making a tracked change in
+Clean, or adding a comment there, switches to the markup view, so suggestions are never invisible
+to their author, and so does a document shown Clean that gains redlines; a tracked change made in
+Simple stays in Simple, where its bar shows it. Reviewing (§5.6) switches to Redlines, where each
+change shows. Otherwise the view stays as you chose it: deciding the last change doesn't switch it.
+**Switching views never changes the file,** and so never makes the document edited or causes a
+write: a Save, made for another reason, records the view (Clean, or Redlines for Simple and
+Redlines, never Raw) in a file that has a ledger, so that reading a document leaves its git history
+quiet, and a view alone never adds a ledger to a plain file. The markup view remembered is each
+person's own and is never saved in the file; it is kept in the app's settings and reaches every
+window for the documents each opens next, without changing the view any of them shows. The View
+menu also previews the original (every change rejected) and one person's changes alone (everyone
+else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while
+it is on, or locked on, Raw is read-only, because typing there could forge or break markers.
 
 ### 5.4 Track Changes
 
@@ -307,13 +312,19 @@ mode has no counterpart in the desktop app.
   item switches Track Changes (⌘⇧E, as in Word).
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
-- **Your setting is yours,** like Word's "Just Mine" tracking. It isn't saved in the file, so using
-  Redlines without tracking imposes nothing on anyone. A file opens with tracking off unless it
-  asks for tracking.
-- **Track changes for everyone,** like Word's "For Everyone", is a setting of the file
-  (`tracking: everyone`, [format §5.6](format.md#56-settings)). Everyone who opens such a file
-  starts with Track Changes on, under a notice that says so. Without an app that enforces roles,
-  anyone can still turn it off; the notice makes that a deliberate choice.
+- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes).
+  Turning Track Changes on writes `tracking: everyone` into the file's ledger, and turning it off
+  takes it out ([format §5.6](format.md#56-settings)). The switch makes the document edited, like
+  any change to it, so the next Save keeps it, and a step of its own, which Undo takes back.
+  Someone who turns it on, saves, and opens the file again, or sends it to someone else, finds it
+  still on. A file with no ledger gets one for it, and turning it off again leaves the file as it
+  was. A file that can't take a ledger (an unreadable one, or an end inside a code block that is
+  never closed) can't have it turned on, and says why.
+- **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
+  who opens such a file starts with Track Changes on, under a notice that says so. Without an app
+  that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
+  notice makes that a deliberate choice. There is no "Just Mine" for now: a person's own tracking,
+  apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
@@ -762,7 +773,7 @@ Syrus and GitHub notify); paragraph locking.
 ### 5.13 Undo
 
 Undo goes back in time through what this window did: your edits, decisions, comments and replies,
-and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+turning Track Changes on or off, and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
 between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
@@ -770,7 +781,9 @@ through the `redlines` command line in its name, are a step each when they are n
 suggestions, comments and replies. Someone is your agent when the file, before the change or after
 it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
 stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
-mark, with Track Changes on or off, and waits for ⌘S like any edit.
+mark, with Track Changes on or off, and waits for ⌘S like any edit. Saving records the view in the
+step before it rather than as a step of its own, so one ⌘Z after ⌘S takes back the last edit,
+as it did before.
 
 ### 5.14 Writing in blocks
 
@@ -1384,8 +1397,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
-- **Per-person state stays out of the file:** view, mode, zoom and text size, filters, comment
-  drafts, folds, the last version each person saw, and presence.
+- **Per-person state stays out of the file:** mode, zoom and text size, the markup view each
+  person remembered, filters, comment drafts, folds, the last version each person saw, and
+  presence. The view a document opens in, and whether it tracks changes, are the document's own
+  (format §5.6).
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines
   its writes to the workspace.
 - **AI is opt-in,** with a choice of provider and a local option, and Redlines never reads or

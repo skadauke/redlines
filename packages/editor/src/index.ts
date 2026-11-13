@@ -16,8 +16,11 @@ import { GFM } from '@lezer/markdown';
 import {
   accept as acceptChange,
   acceptMarks,
+  EditError,
   reject as rejectChange,
   rejectMarks,
+  setTracking as trackingInFile,
+  setView as viewInFile,
   type TextChange,
 } from '@redlines/format';
 import type {
@@ -45,11 +48,14 @@ import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
+  joinsNewestStep,
+  redoDepth,
   redoHasSomething,
   redoName,
   redoSayingWhy,
   refusedStep,
   startOver,
+  undoDepth,
   undoHistory,
   undoHasSomething,
   undoKeys,
@@ -192,6 +198,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let author = options.author;
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
+  const saveTracking = options.saveTracking ?? false;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   let destroyed = false;
@@ -393,7 +400,56 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
-    setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
+    setTracking: (on) => {
+      if (!saveTracking) {
+        view.dispatch({ effects: setTrackingEffect.of(on) });
+        return true;
+      }
+      let changes: TextChange[];
+      try {
+        changes = trackingInFile(view.state.doc.toString(), on);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        // The file can't take the setting: Track Changes stays as it was, and says why.
+        options.onNotice?.(error.message);
+        return false;
+      }
+      view.dispatch({
+        changes,
+        effects: setTrackingEffect.of(on),
+        // A step of its own, apart from the typing around it, that Undo takes back with Track
+        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite.
+        annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+        userEvent: 'track.switch',
+      });
+      return true;
+    },
+    recordView: () => {
+      const shown = view.state.field(viewModeField);
+      // Raw is never saved: the file keeps the view it had. Simple is a markup view, as Redlines is.
+      if (shown === 'raw') return;
+      const changes = viewInFile(
+        view.state.doc.toString(),
+        shown === 'clean' ? 'clean' : 'redlines',
+      );
+      if (!changes.length) return;
+      const { state } = view;
+      // With steps to redo, a change would drop them, and made outside the history it would put
+      // the ledger out of step with theirs: the next save records the view.
+      if (redoDepth(state) > 0) return;
+      view.dispatch({
+        changes,
+        // Joined to the newest step, so that Undo gives it back with the step, and no step is
+        // left that undoes nothing a person can see; with none, outside the history, which has no
+        // step to put out of step. What comes after is a step of its own.
+        annotations: [
+          trackedEditAnnotation.of(true),
+          ...(undoDepth(state) > 0
+            ? [joinsNewestStep.of(true), isolateHistory.of('after')]
+            : [Transaction.addToHistory.of(false)]),
+        ],
+      });
+    },
     setTyping: (next: EditorTyping) => {
       typing = next;
       view.dispatch({ effects: typingCompartment.reconfigure(typingNow()) });

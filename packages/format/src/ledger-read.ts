@@ -86,7 +86,7 @@ export interface LedgerRead {
   valid: boolean;
 }
 
-const TOP_KEYS = new Set(['version', 'tracking', 'history', 'people', 'marks', 'comments']);
+const TOP_KEYS = new Set(['version', 'tracking', 'view', 'history', 'people', 'marks', 'comments']);
 /** Kept in `Ledger.extra` without a warning: used by a later version of Redlines (format §3.8). */
 const KEPT_KEYS = new Set(['frontmatter']);
 const PERSON_KEYS = new Set([
@@ -230,6 +230,10 @@ export function readLedger(source: string, range: Range): LedgerRead {
   const tracking = str(doc['tracking']);
   if (tracking === 'everyone') ledger.tracking = 'everyone';
   else if (tracking !== undefined) warn('bad-ledger', `Unknown tracking setting ${tracking}`);
+
+  const view = str(doc['view']);
+  if (view === 'clean' || view === 'redlines') ledger.view = view;
+  else if (view !== undefined) warn('bad-ledger', `Unknown view setting ${view}`);
 
   const history = str(doc['history']);
   if (history === 'full') ledger.history = 'full';
