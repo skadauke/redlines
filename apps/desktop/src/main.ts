@@ -975,6 +975,14 @@ if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
 }
 
+// Debug only (palette-check.ts): the formatting palette's right-click, handle and hints, and Ask's
+// bubble with the page's scripted agent, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
+  void import('./palette-check.ts').then(({ runPaletteCheck }) =>
+    runPaletteCheck(editor, { ask: !isTauri }),
+  );
+}
+
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_SIMPLE_CHECK']) {
   void import('./simple-check.ts').then(({ runSimpleCheck }) => runSimpleCheck(editor));
