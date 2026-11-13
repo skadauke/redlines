@@ -906,6 +906,8 @@ describe('a run', () => {
       expect(signedOut.line(c1)).toMatchObject({
         kind: 'failed',
         message: "Claude isn't signed in. Run `claude auth login`.",
+        // Preferences › Agents has the button for it, which the line offers to open.
+        setup: true,
       }),
     );
   });
@@ -938,8 +940,30 @@ describe('a run', () => {
       expect(tooOld.line(c1)).toMatchObject({
         kind: 'failed',
         message: 'Update Claude Code to 2.1.318 or newer.',
+        setup: true,
       }),
     );
+  });
+
+  it('marks a failure the agent says Preferences can put right, and no other', async () => {
+    const signedOut = "Claude isn't signed in. Run `claude auth login`.";
+    const s = setup({
+      claude: events({ type: 'error', message: signedOut, setup: true }),
+      codex: events({ type: 'error', message: 'Codex has hit its usage limit. Try again later.' }),
+    });
+    const claudeThread = ask(s, '@Claude hi');
+    await vi.waitFor(() =>
+      expect(s.runs.line(claudeThread)).toEqual({
+        kind: 'failed',
+        agent: 'claude',
+        agentName: 'Claude',
+        message: signedOut,
+        setup: true,
+      }),
+    );
+    const codexThread = ask(s, '@Codex hi');
+    await vi.waitFor(() => expect(s.runs.line(codexThread)?.kind).toBe('failed'));
+    expect(s.runs.line(codexThread)).not.toHaveProperty('setup');
   });
 
   it('asks the host to look for agents again after a run fails for sign-in', async () => {

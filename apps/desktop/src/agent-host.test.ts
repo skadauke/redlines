@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpAgentEdits } from './agent-preferences.ts';
+import { acpAgentEdits, agentSetup, setupResult } from './agent-preferences.ts';
 import { acpAgents, commandLine, createProcesses, createRelay } from './agent-host.ts';
 
 // The app's Rust side, which a test does not have. A channel is a holder for `onmessage`; the test
@@ -363,5 +363,107 @@ describe('createRelay', () => {
   it('rejects when the app can not open a relay', async () => {
     vi.mocked(invoke).mockRejectedValueOnce('No room');
     await expect(createRelay().open(() => Promise.resolve(null))).rejects.toBe('No room');
+  });
+});
+
+describe('agentSetup', () => {
+  const outcome = (change: Record<string, unknown> = {}) => ({
+    ran: 'brew upgrade --cask codex',
+    ok: true,
+    code: 0,
+    last_line: '',
+    timed_out: false,
+    stopped: false,
+    quick: false,
+    ...change,
+  });
+
+  it('names the agent and nothing else, to the app, which makes the command', async () => {
+    vi.mocked(invoke).mockResolvedValue(outcome());
+    expect(await agentSetup.update('codex')).toEqual({ ok: true, message: '' });
+    expect(await agentSetup.signIn('claude')).toEqual({ ok: true, message: '' });
+    await agentSetup.signInInTerminal('claude');
+    await agentSetup.stop('codex');
+    // src-tauri/src/agents/mod.rs: agent_update, agent_sign_in and agent_terminal_sign_in.
+    expect(invoke).toHaveBeenNthCalledWith(1, 'agent_update', { agent: 'codex' });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'agent_sign_in', { agent: 'claude' });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'agent_terminal_sign_in', { agent: 'claude' });
+    expect(invoke).toHaveBeenNthCalledWith(4, 'agent_setup_stop', { agent: 'codex' });
+  });
+
+  it('passes the app’s refusal on, as a line to show', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce('Redlines can’t find Homebrew.');
+    await expect(agentSetup.update('codex')).rejects.toBe('Redlines can’t find Homebrew.');
+  });
+});
+
+describe('setupResult', () => {
+  const failed = {
+    ran: 'claude auth login',
+    ok: false,
+    code: 1,
+    last_line: 'stdin is not a TTY',
+    timed_out: false,
+    stopped: false,
+    quick: true,
+  };
+
+  it('says what the command last printed when it failed', () => {
+    expect(setupResult(failed, false)).toEqual({ ok: false, message: 'stdin is not a TTY' });
+  });
+
+  it('says a login that failed at once wants a terminal, and no other failure does', () => {
+    expect(setupResult(failed, true)).toEqual({
+      ok: false,
+      message: 'stdin is not a TTY',
+      needsTerminal: true,
+    });
+    expect(setupResult({ ...failed, quick: false }, true)).not.toHaveProperty('needsTerminal');
+    expect(setupResult({ ...failed, timed_out: true }, true)).not.toHaveProperty('needsTerminal');
+  });
+
+  it('says how it ended when it printed nothing', () => {
+    const silent = { ...failed, last_line: '', quick: false };
+    expect(setupResult(silent, false).message).toBe('claude auth login ended with code 1.');
+    expect(setupResult({ ...silent, code: null }, false).message).toBe(
+      'claude auth login was stopped.',
+    );
+    expect(setupResult({ ...silent, timed_out: true }, false).message).toBe(
+      'claude auth login took too long, and Redlines stopped it.',
+    );
+  });
+
+  it('is ok when it ended well, and keeps what it said last, for an update that changed nothing', () => {
+    expect(
+      setupResult(
+        {
+          ran: 'claude update',
+          ok: true,
+          code: 0,
+          last_line: 'Already up to date.',
+          timed_out: false,
+          stopped: false,
+          quick: false,
+        },
+        true,
+      ),
+    ).toEqual({ ok: true, message: 'Already up to date.' });
+  });
+
+  it('says it was stopped, which is no failure to explain', () => {
+    expect(
+      setupResult(
+        {
+          ran: 'claude auth login',
+          ok: false,
+          code: null,
+          last_line: '',
+          timed_out: false,
+          stopped: true,
+          quick: false,
+        },
+        true,
+      ),
+    ).toEqual({ ok: false, message: '', stopped: true });
   });
 });
