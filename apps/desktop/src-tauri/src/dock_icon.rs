@@ -4,7 +4,9 @@
 //! alone, since changing it would break its signature. While the app runs, its Dock icon shows one
 //! of six marks instead (the window's icon, where there is no Dock): the next in a fixed order at
 //! each launch, so that no launch looks like the one before. Turning off Redlines › Settings ›
-//! Rotate the Dock Icon keeps the caret.
+//! Rotate the Dock Icon keeps the caret. About Redlines goes through the family by hand: it asks
+//! which mark the icon shows (`app_icon_mark`) and shows another until the next launch
+//! (`show_app_icon_mark`), which leaves what the app remembers alone.
 //!
 //! What the app remembers between launches, which mark came last and whether the icon rotates, is
 //! in `icon.json` in its data folder. The marks are PNG files in the app's resources
@@ -15,6 +17,7 @@
 
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::path::BaseDirectory;
@@ -34,6 +37,46 @@ const MARKS: [&str; 6] = [
 
 /// The caret's place in `MARKS`: what the icon goes back to when the rotation is turned off.
 const CARET: usize = 0;
+
+/// The mark the icon shows now, as its place in `MARKS`: what About Redlines starts on, and goes on
+/// from. Not what the app remembers: a mark shown for the length of a run (`show_app_icon_mark`) is
+/// in it too.
+struct Shown(AtomicUsize);
+
+impl Shown {
+    /// The caret, which the icon shows until one is shown.
+    const fn new() -> Self {
+        Self(AtomicUsize::new(CARET))
+    }
+
+    /// Notes the mark at `mark` in `MARKS` as shown. A place that is no mark is not one.
+    fn set(&self, mark: usize) {
+        if mark < MARKS.len() {
+            self.0.store(mark, Ordering::SeqCst);
+        }
+    }
+
+    /// The file name of the mark shown.
+    fn name(&self) -> &'static str {
+        MARKS[self.0.load(Ordering::SeqCst).min(MARKS.len() - 1)]
+    }
+}
+
+static SHOWN: Shown = Shown::new();
+
+fn set_shown(mark: usize) {
+    SHOWN.set(mark);
+}
+
+/// The file name of the mark the icon shows now.
+fn shown_mark() -> &'static str {
+    SHOWN.name()
+}
+
+/// The place in `MARKS` of the mark with the file name `name`, if it is one.
+fn mark_named(name: &str) -> Option<usize> {
+    MARKS.iter().position(|mark| *mark == name)
+}
 
 /// What the window says when the person turns the rotation on or off: the event's payload is
 /// `true` or `false`. `src/dock-icon.ts` sends it.
@@ -181,7 +224,37 @@ fn show<R: Runtime>(app: &AppHandle<R>, mark: usize) -> Result<(), String> {
         .resolve(format!("icons/family/{name}.png"), BaseDirectory::Resource)
         .map_err(|error| error.to_string())?;
     let png = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    set_icon(app, &png)
+    set_icon(app, &png)?;
+    set_shown(mark);
+    Ok(())
+}
+
+/// The mark the app's icon shows now, by its file name in `icons/family`: About Redlines starts on
+/// it, and its icon goes on through the family from there.
+#[tauri::command]
+pub fn app_icon_mark() -> &'static str {
+    shown_mark()
+}
+
+/// Shows the mark `name` as the app's icon until the next launch, as About Redlines does when its
+/// icon is clicked through the family. What the app remembers, the order of the launches included,
+/// is left alone, so that the next launch goes on as it would have. The page is told when the icon
+/// could not be changed, and keeps its own as it was.
+#[tauri::command]
+pub async fn show_app_icon_mark(app: AppHandle, name: String) -> Result<(), String> {
+    let mark = mark_named(&name).ok_or("there is no such mark")?;
+    // Only the main thread may change the Dock icon, and this waits, off it, to hear how it went.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(show(&handle, mark));
+    })
+    .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver.recv().map_err(|error| error.to_string())?
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[cfg(target_os = "macos")]
@@ -327,6 +400,60 @@ mod tests {
     }
 
     #[test]
+    fn a_mark_is_found_by_its_file_name_and_nothing_else_is_one() {
+        for (place, name) in MARKS.iter().enumerate() {
+            assert_eq!(mark_named(name), Some(place), "{name}");
+        }
+        for name in [
+            "",
+            "Caret",
+            "caret.png",
+            "../caret",
+            "icon",
+            " caret",
+            "caret ",
+        ] {
+            assert_eq!(mark_named(name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn the_mark_the_icon_shows_is_the_caret_until_one_is_shown_and_then_the_last_shown() {
+        let shown = Shown::new();
+        assert_eq!(shown.name(), "caret");
+        shown.set(3);
+        assert_eq!(shown.name(), "delete-mark");
+        // What is not a mark is not shown.
+        shown.set(MARKS.len());
+        assert_eq!(shown.name(), "delete-mark");
+        shown.set(CARET);
+        assert_eq!(shown.name(), "caret");
+    }
+
+    #[test]
+    fn what_the_app_says_it_shows_is_what_it_was_last_told() {
+        let _turn = take_turn();
+        let before = SHOWN.0.load(Ordering::SeqCst);
+        set_shown(2);
+        assert_eq!(app_icon_mark(), "margin-bracket");
+        set_shown(before);
+    }
+
+    #[test]
+    fn about_asks_for_the_mark_and_for_another_by_these_names() {
+        // src/about/main.ts reads the mark the icon shows, and shows the next ones as it is clicked,
+        // naming the mark `name`, which is what `show_app_icon_mark` takes. A call that names
+        // something else is refused when it is made, which the page only logs.
+        let page = include_str!("../../src/about/main.ts");
+        for call in [
+            "invoke<string>('app_icon_mark')",
+            "invoke('show_app_icon_mark', { name: mark })",
+        ] {
+            assert!(page.contains(call), "src/about/main.ts doesn't make {call}");
+        }
+    }
+
+    #[test]
     fn the_window_sends_the_event_the_app_listens_for() {
         let window = include_str!("../../src/dock-icon.ts");
         assert!(
@@ -342,6 +469,12 @@ mod tests {
         for payload in ["", "null", "1", "\"true\"", "{}", "tru"] {
             assert_eq!(parse_rotation(payload), None, "{payload:?}");
         }
+    }
+
+    /// The tests that touch the mark shown, which is the app's, take turns.
+    fn take_turn() -> std::sync::MutexGuard<'static, ()> {
+        static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// A folder for one test, which the test removes.

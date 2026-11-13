@@ -46,6 +46,11 @@ export interface TitleBarActions {
    */
   dragFile(): void;
   /**
+   * Scrolls the page by this many pixels, for the wheel that turns over the bar: the page runs
+   * under it, and scrolls there as it does over the text.
+   */
+  scrollPage(dx: number, dy: number): void;
+  /**
    * What the document's facts are made from, asked for when the pointer comes to the name: the
    * document's newest text (format §8), and when it was last saved here, if it was.
    */
@@ -71,11 +76,22 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
+/**
+ * The bar is 52 points tall, and the fade that the text passes into under it ends 64 points down
+ * (styles.css, which a test keeps these numbers in step with): the text rests below the fade, and
+ * what the editor scrolls to is kept clear of both (`room`).
+ */
+export const BAR_PT = 52;
+export const FADE_PT = 64;
+
 /** How far the pointer moves, with the button down, before the document icon's drag starts. */
 const DRAG_START_PX = 4;
 
 /** How far the pointer may move between the second press of a double-click and its release. */
 const DOUBLE_CLICK_SLOP_PX = 3;
+
+/** How many pixels a wheel that counts in lines scrolls for each line. */
+const WHEEL_LINE_PX = 16;
 
 export function createTitleBar(
   root: HTMLElement,
@@ -85,6 +101,17 @@ export function createTitleBar(
   beginRename(): void;
   /** Closes the View and Review menus, as a zoom change does: they were placed for the old layout. */
   closeMenus(): void;
+  /**
+   * How tall the bar is now, in CSS pixels: 52 points, which the window zoom makes more or fewer of.
+   */
+  height(): number;
+  /**
+   * How much of the page's top the bar keeps, in CSS pixels: the bar and its fade, 64 points. The bar
+   * floats over the top of the page, whose text starts below it and passes under it, so the editor
+   * keeps what it scrolls to clear of this much: a caret that scrolls into view rests where the
+   * text is no longer faded.
+   */
+  room(): number;
   destroy(): void;
 } {
   let state: TitleBarState = {
@@ -257,6 +284,23 @@ export function createTitleBar(
   bar.append(filesControl, titleGroup, end);
   root.append(bar);
 
+  // The page runs under the bar, which is no part of the scroller: a wheel that turns over it
+  // scrolls the page, as over the text. A pinch, which arrives as a wheel with the control key down,
+  // is the text size's, and an open menu's own wheel is its own.
+  bar.addEventListener(
+    'wheel',
+    (event) => {
+      if (event.ctrlKey || (event.target instanceof Element && event.target.closest('.rl-menu'))) {
+        return;
+      }
+      event.preventDefault();
+      // Lines, for a wheel that counts them, are about as tall as the text's.
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? WHEEL_LINE_PX : 1;
+      actions.scrollPage(event.deltaX * unit, event.deltaY * unit);
+    },
+    { passive: false },
+  );
+
   const menus: Menu[] = [];
   const neighbors = (self: () => Menu) => ({
     neighborOpen: () => menus.some((menu) => menu !== self() && menu.isOpen),
@@ -358,6 +402,8 @@ export function createTitleBar(
       hideTip();
       for (const menu of menus) menu.close();
     },
+    height: () => bar.getBoundingClientRect().height,
+    room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
       hideTip();
       forgetPress?.();

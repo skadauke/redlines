@@ -226,13 +226,14 @@ mod tests {
     use super::*;
 
     /// The capabilities of the app's windows, by file name.
-    const CAPABILITIES: [(&str, &str); 3] = [
+    const CAPABILITIES: [(&str, &str); 4] = [
         ("default.json", include_str!("../capabilities/default.json")),
         ("install.json", include_str!("../capabilities/install.json")),
         (
             "preferences.json",
             include_str!("../capabilities/preferences.json"),
         ),
+        ("about.json", include_str!("../capabilities/about.json")),
     ];
 
     /// The permissions of a capability, as `(identifier, the paths of its own scope)`. A permission
@@ -332,7 +333,7 @@ mod tests {
                 // otherwise have to be let watch the document's folder.
             ]
         );
-        // The install question and Preferences use no files at all.
+        // The install question, Preferences and About use no files at all.
         for (name, capability) in &CAPABILITIES[1..] {
             assert_eq!(file_permissions(capability), [], "{name}");
         }

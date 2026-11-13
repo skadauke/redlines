@@ -6,6 +6,7 @@ import { reply, resolve } from './comments.ts';
 import { accept, reject } from './decide.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { setView } from './settings.ts';
 import { ada, bo, claudeAda, context, fixture } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
 
@@ -147,6 +148,11 @@ describe('agentWorkOf', () => {
     );
     expect(everyone).toContain('tracking: everyone');
     expect(agentWorkOf(fixture, everyone, ME)).toBeNull();
+    // The view a document is saved in is a person's: an agent's tool never changes it.
+    const viewed = apply(claude, setView(claude, 'clean'));
+    expect(viewed).toContain('view: clean');
+    expect(agentWorkOf(fixture, viewed, ME)).toBeNull();
+    expect(agentWorkOf(viewed, claude, ME)).toBeNull();
     const own = commentOn(fixture, 'Launch plan', 'Is this final?', claudeAda, ['x5mq']);
     expect(agentWorkOf(own, replyIn(own, 'x5mq', 'It is.', ada, ['r2vb']), ME)).toBeNull();
     // Nor when the agent's thread goes with someone else's reply in it.

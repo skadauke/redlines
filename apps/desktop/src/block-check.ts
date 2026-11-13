@@ -1236,7 +1236,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   const { view } = editor;
   const text = lf(check.doc);
   editor.setViewMode('clean');
-  editor.setTracking(check.tracking ?? false);
+  editor.setTracking(check.tracking ?? false, { inFile: false });
   // Over an empty document first: the same text loaded over the last check's open empty paragraph
   // keeps it open (an echo of the file is no change), and this check starts from nothing.
   editor.reloadDoc('');
@@ -1312,7 +1312,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
 async function tab(editor: Editor): Promise<unknown> {
   const problems: string[] = [];
   editor.setViewMode('clean');
-  editor.setTracking(false);
+  editor.setTracking(false, { inFile: false });
   const load = async (doc: string) => {
     const text = lf(doc);
     editor.reloadDoc('');
@@ -1380,7 +1380,7 @@ export async function runBlockCheck(editor: Editor): Promise<void> {
     failed++;
     report(`BLOCK-CHECK tab FAIL ${JSON.stringify({ threw: String(error) })}`);
   }
-  editor.setTracking(false);
+  editor.setTracking(false, { inFile: false });
   editor.reloadDoc(sample);
   report(`BLOCK-CHECK done ${passed} passed, ${failed} failed`);
 }
