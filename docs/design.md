@@ -130,7 +130,10 @@ otherwise.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
   the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
-  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  dictation and input methods. A right-click opens the formatting palette (below) in place of the
+  system's context menu, with the spelling suggestions of a misspelled word at its top and Learn
+  Spelling; ⇧ with the right-click shows the system's own menu, which has Look Up, Services and
+  Writing Tools. A correction is part of your typing, as in
   Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
   it changes the insertion's text, and no other change appears. Only the part of a correction that
   reaches into other text becomes a tracked change of that text; with Track Changes off it is a
@@ -150,6 +153,15 @@ The window, on the desktop:
 
 - **The title bar is the page:** the same color, with no line under it, and the file name centered
   in small gray type. There is no toolbar and no status bar.
+- **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
+  icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
+  hands over a copy of the file as it is saved. It never moves the file the window has open, and
+  while the document is Untitled, with no file yet, the icon is hidden, as it is on Windows and
+  Linux, where the page has no drag to hand over. A double-click on the name
+  renames the document, as File › Rename does, or opens Save As for an Untitled one; a
+  double-click anywhere else on the bar zooms the window, and a drag anywhere on the bar, the
+  name included, moves it. Hovering over the name shows the words and when the document was last
+  saved.
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
@@ -158,7 +170,9 @@ The window, on the desktop:
   ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
   opens it in a new one, as does a click while an agent is working in the window. A plain text
   file is read as Markdown and saved under its own name, with Track Changes and comments like any
-  document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
+  document (format §9.1). A document dropped on a window opens as one from Finder does, but for
+  the file that the window's own document icon dragged, which opens nothing when it is dropped
+  back on that window. Any other
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
@@ -177,7 +191,8 @@ The window, on the desktop:
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
+  Print. Printing holds the whole
   document in light ink and prints the view as it shows, without the rail: Simple prints the newest
   text with its change bars. Saving a document that has no file yet opens the Save dialog in the
   default folder for new documents (Preferences › General), when one is set and still there;
@@ -212,6 +227,20 @@ The window, on the desktop:
 - **Icons without labels, explained on hover.** Hovering over an icon shows its name and shortcut,
   or opens its menu straight away, with each item's shortcut. Clicking opens the menu too, for the
   keyboard and touch.
+- **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
+  it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
+  which hovering over brings up, and which goes out of sight while you type) and on right-click, at
+  the pointer, where it takes the place of the system's context menu. It is a small card of icons
+  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
+  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
+  act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
+  Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
+  Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
+  Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
+  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
+  closes it. Paste reads the clipboard through the app and goes in the way ⇧⌘V does, so with Track
+  Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
@@ -269,7 +298,7 @@ Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 The View menu, under the eye at the top right (§5.1), sets how the document is shown:
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
-  (Word's No Markup).
+  (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Simple** (⌥⌘2): the same text as Clean, with a change bar beside each line that has a pending
   change, in its author's color, and the comments with their notes: deletions are hidden, and
   inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches
@@ -663,6 +692,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
@@ -738,7 +768,9 @@ a new email under the same name becomes an alias in the ledger
 
 **Should (v1 if time allows):**
 
-- a selection toolbar: Comment, Suggest, Ask agent, and formatting;
+- a selection toolbar: Comment, Suggest, Ask agent, and formatting. Written as the formatting
+  palette (§5.1), which opens from a handle and on right-click rather than floating over a
+  selection by itself; Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
@@ -861,6 +893,7 @@ without the editor.
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
+| `apps/desktop/quicklook` | The Mac app's Quick Look preview of Markdown, R Markdown and Quarto files: the Clean view as HTML, made by a bundle of `@redlines/format`, micromark and the Default theme's CSS, and the Swift extension that runs it in JavaScriptCore (§10) | macOS (the system's JavaScriptCore) |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
@@ -898,6 +931,15 @@ one on its disk image or on another disk in `/Volumes` (an external drive, a sec
 network share), or one translocated by macOS. As for updates, it is refused before anything is
 asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
 checkout, `pnpm -s redlines` runs the TypeScript directly.
+
+The app carries one more program, the Quick Look extension (§10), as
+`Redlines.app/Contents/PlugIns/RedlinesPreview.appex`. Tauri builds no app extensions, so
+`scripts/build-quicklook` makes it as part of `pnpm build`: it bundles the renderer
+(`apps/desktop/quicklook`), compiles a small Swift extension for both architectures with `swiftc`,
+and signs it, and `bundle.macOS.files` copies the folder into the app. Tauri signs the app and the
+programs it copies and never a plug-in, so the extension is signed before Tauri seals the app, with
+the same identity and the sandbox entitlement that an app extension must have
+([releasing](releasing.md#the-quick-look-extension)).
 
 ### 6.4 Plugins
 
@@ -995,7 +1037,8 @@ without each: a half-written comment is gone with the page, and nothing is saved
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
 nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
-images, as any document the person opens is; a folder or any other file dropped opens nothing, and
+images, as any document the person opens is (but for the file that the window's own document icon
+dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and
 lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
 scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
 and builds Tauri without that protocol.
@@ -1267,14 +1310,38 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 | ------ | ----------- | ------------- | ----- |
 | **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
 | **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
-| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written |
+| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written; Preferences doesn't offer adding one yet |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
-(for example, "Claude isn't signed in. Run `claude auth login`."). The UI says "Claude" and
-"Codex"; "Claude Code" appears only in plain text saying the app runs it.
+(for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
+Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
+runs it.
+
+**Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
+the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
+button, and Check Again always:
+
+- **Too old** (older than the version the provider was tested with): the row says an update is
+  needed, and what the program said when asked whether it is signed in, if it said (an older
+  program may not know the question). Update runs the agent's own updater for the way it was
+  installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
+  <package>@latest` for a global npm install, and the agent's own `update` for any other
+  (`claude update`, `codex update`). Redlines looks again when it ends.
+- **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
+  opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
+  the same command and looks again when the person comes back.
+- **Not installed:** the command that installs it, with Copy. Redlines never runs an installer.
+
+Each is a fixed command that the app makes for an agent the window names, never a program, an
+argument or a word of a document, and the name that goes to `brew` is one of a short list. Only
+Preferences may ask for them; a failed run's line in a document opens Preferences instead. An
+update or a sign-in under way has a Cancel, and stops when Preferences closes or the app quits; it
+goes on when the pane is drawn again, and the row follows it. What a failure shows of a command's
+output is its last line, with what looks like a secret left out as far as a heuristic can tell
+(the query of a link, a value after `token` or `key`, a long run that looks like a credential).
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:
@@ -1295,7 +1362,7 @@ it was asked to:
 the repository's root, or else the document's folder) or This document. The first run of an agent
 in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
 in the app's settings, never in the document. Preferences › Agents lists the agents found on this
-Mac with their state (not found, not signed in, signed in, and their version), the remembered
+Mac with their state (not installed, needs an update, signed out, signed in), the remembered
 answers with a Forget button for each, and Show Agent Logs.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
@@ -1370,6 +1437,38 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
+- **Quick Look (macOS).** Space on a Markdown, R Markdown or Quarto file in Finder, Mail, Spotlight
+  or the Open dialog shows the Clean view (§5.3): every pending change accepted, in the Default
+  theme, as the Mac app draws a document. A file that has changes or open comments waiting in it
+  has one line over the text that says so and points to the app ("4 changes and 2 comments by
+  Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
+  matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
+  line over its code. Raw HTML in the document is text, never live, and an image is its alt text.
+  - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
+    `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
+    It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
+    micromark with GitHub's extensions, the Default theme's tokens and its fonts, and runs it in
+    the system's JavaScriptCore, for the HTML that Quick Look draws. It never calls the
+    `redlines` program or anything on the `PATH`, and the app needn't be running.
+  - **Nothing to install.** macOS registers the extension the first time the app runs from
+    Applications and removing the app removes it. It needs macOS 13.3, the first whose
+    JavaScriptCore has the regular-expression lookbehind that the format library's patterns use
+    (its array methods came with 13.0). System Settings › General › Login Items & Extensions ›
+    Quick Look turns it off.
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
+    no type for R Markdown and Quarto: a file of either gets a type made from its extension
+    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
+    extension from the app that declares it. Where another app declares them, the file has that
+    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
+    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
+    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+    turns either off: that is the one extension per type that Quick Look has.
+  - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
+    drawn, to its last paragraph under that, with a line that says so. The count of what waits is
+    read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
+    end, isn't read.
+  - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
+    thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1383,6 +1482,12 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
+- **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
+  entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
+  so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
+  JavaScriptCore's compiler, without which the renderer is 5 to 8 times as slow, which a long
+  document turns from a moment into a wait
+  ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's

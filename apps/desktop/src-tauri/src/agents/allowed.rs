@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// One of the agents' own programs.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Agent {
     Claude,
     Codex,
@@ -33,10 +33,19 @@ impl Agent {
         }
     }
 
-    fn title(self) -> &'static str {
+    /// What people call it.
+    pub(super) fn title(self) -> &'static str {
         match self {
             Agent::Claude => "Claude",
             Agent::Codex => "Codex",
+        }
+    }
+
+    /// The name of its program, which is also what `named` takes.
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
         }
     }
 }

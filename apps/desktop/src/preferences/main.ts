@@ -8,8 +8,9 @@ import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { acpAgentEdits, createDetectionProcesses } from '../agent-preferences.ts';
-import { acpAgents, commandLine, type AcpAgent } from '../agent-programs.ts';
+import { announceAgentsChanged } from '../agent-changes.ts';
+import { agentSetup, createDetectionProcesses } from '../agent-preferences.ts';
+import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
@@ -18,6 +19,8 @@ import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
+import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
+import { createSetupRegistry } from './setup-registry.ts';
 import {
   PANES,
   renderPane,
@@ -66,17 +69,21 @@ const git = await currentIdentity()
 
 // The agents are asked about when the Agents pane opens, never at launch (agentsPane below). An
 // answer is kept while the pane stays open, so that redrawing it for a changed setting asks nothing
-// again; leaving the pane forgets it, and coming back asks anew, as after signing in.
+// again; leaving the pane forgets it, and coming back asks anew, as after signing in. Check Again,
+// and the look after an update or a sign-in, ask the program afresh.
 const processes = createDetectionProcesses();
 const providers: AgentProvider[] = [
   createClaudeProvider(processes),
   createCodexProvider(processes),
 ];
 const detections = new Map<string, Promise<AgentState>>();
-
-/** The other agents as the pane shows them. */
-const shownOthers = (list: AcpAgent[]) =>
-  list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
+// The updates and sign-ins asked of the app go on when the pane is drawn again, as it is whenever
+// another window changes a setting: a row drawn then follows what is under way. When one ends, what
+// was found is stale, and the document windows, which keep it for a minute, are told.
+const setups = createSetupRegistry((id) => {
+  detections.delete(id);
+  announceAgentsChanged();
+});
 
 /**
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
@@ -128,24 +135,32 @@ const deps: PaneDeps = {
       agents: providers.map((provider) => ({
         id: provider.id,
         name: provider.name,
-        detect: () => {
+        detect: (fresh?: boolean) => {
+          if (fresh) detections.delete(provider.id);
           const kept = detections.get(provider.id) ?? provider.detect();
           detections.set(provider.id, kept);
+          // A look the person asked for may have found the agent changed under the documents too.
+          if (fresh)
+            void kept.then(
+              () => announceAgentsChanged(),
+              () => {},
+            );
           return kept;
         },
+        // The app updates and signs in an agent with its own command, for the agent named and
+        // nothing more; in a plain browser there is no app to ask.
+        ...(isTauri
+          ? {
+              update: () => setups.track(provider.id, 'update', agentSetup.update(provider.id)),
+              signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
+              signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
+              stop: () => agentSetup.stop(provider.id),
+              running: () => setups.running(provider.id),
+            }
+          : {}),
       })),
-      // The other agents, which the app keeps and asks the person about before any change.
-      ...(isTauri
-        ? {
-            others: {
-              list: () => acpAgents.list().then(shownOthers),
-              // The app's refusal is the line the pane shows.
-              add: (name: string, command: string) =>
-                acpAgentEdits.add(name, command).then(shownOthers),
-              remove: (id: string) => acpAgentEdits.remove(id).then(shownOthers),
-            },
-          }
-        : {}),
+      copy: copyText,
+      // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),
       openLogs: async () => {
@@ -234,7 +249,10 @@ for (const { id, label } of PANES) {
   buttons.set(id, button);
   tabs.append(button);
 }
-show('general');
+// A window that asks for a pane (a failed run's line offers Preferences › Agents) is shown it, as
+// it opens and while it is open.
+show(takePaneRequest() ?? 'general');
+watchPaneRequests((id) => show(id));
 
 if (isTauri) {
   // The app zooms this window (and grows it) as the person's zoom changes anywhere; the stepper
