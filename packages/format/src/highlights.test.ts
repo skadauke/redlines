@@ -18,6 +18,7 @@ import {
   everyOrder,
   expectEveryDecision,
   expectInOrder,
+  expectMarkersBeforeLedger,
   expectNoDecisionRefused,
   expectNoNewLineStarts,
   file,
@@ -81,6 +82,8 @@ function highlight(
     label,
   ).toBe(true);
   expect(parsed.ledger.marks[id], label).toMatchObject({ by: 'ada', at: TIME });
+  // Every marker of it is in the body: none is in the ledger or after it (format §5.1).
+  expectMarkersBeforeLedger(label, result, id);
   // No warning the file did not have.
   const warned = new Set(before.warnings.map((w) => w.code));
   expect(
@@ -253,6 +256,61 @@ describe('addHighlight', () => {
     expect(() =>
       addHighlight(text, { from: ledgerStart + 2, to: text.length }, context(ada)),
     ).toThrow('Select some text to highlight.');
+  });
+
+  it('ends where the body does for a range to the end of the file, whatever the body ends in', () => {
+    // As select all does. A body that ends in a closer, of an insertion, a comment or a highlight,
+    // or in a line break, has the highlight's closer in front of the ledger and nothing after it.
+    for (const [what, text] of [
+      ['text', file('One two three.')],
+      ['an insertion', file('One two <!--ins k3x9-->three<!--/k3x9-->', { k3x9: 'bo' })],
+      ['a comment', file('One two <!--cmt c8d2-->three<!--/c8d2-->', {}, thread('c8d2'))],
+      ['a highlight', file('One two <!--hl w8nn-->three<!--/w8nn-->', { w8nn: 'bo' })],
+      ['a bold word', file('One two **three**')],
+      ['a deletion', file('One two three <!--del w2rf four-->', { w2rf: 'bo' })],
+      ['text, with no ledger', 'One two three.\n'],
+    ] as const) {
+      for (const from of [4, 0]) {
+        const { result, id } = highlight(text, { from, to: text.length });
+        expectMarkersBeforeLedger(what, result, id);
+      }
+    }
+  });
+
+  it('refuses a range that ends in the closing underscore that ends the body, where no place is left', () => {
+    // A marker next to the `_` would change how it flanks (format §3.1), and at the end of the body
+    // the next place is after the ledger, where the editor writes nothing (§5.1): the closer has
+    // no place. Selecting the word inside the underscores does, and that is what is told.
+    const text = file('Three.\n\nOne _two_');
+    const bodyEnd = text.indexOf('\n\n<!-- redlines');
+    for (const range of [
+      at(text, '_two_'),
+      { from: text.indexOf('One'), to: bodyEnd },
+      { from: 0, to: bodyEnd },
+      { from: text.indexOf('One'), to: text.length },
+      { from: 0, to: text.length },
+    ]) {
+      let error: unknown;
+      try {
+        addHighlight(text, range, context(ada, ['h4kz']));
+      } catch (thrown) {
+        error = thrown;
+      }
+      const label = JSON.stringify(range);
+      expect(error, label).toBeInstanceOf(EditError);
+      expect((error as EditError).code, label).toBe('no-legal-placement');
+      expect((error as EditError).message, label).toBe(
+        'There is no place for the markers of this highlight. Select other text to highlight.',
+      );
+    }
+    expect(bodyOf(highlight(text, at(text, 'two')).result)).toBe(
+      'Three.\n\nOne _<!--hl h4kz-->two<!--/h4kz-->_',
+    );
+    // In the middle of the file the same words end in another block, and are refused as well.
+    const middle = file('One _two_\n\nThree.');
+    expect(() => addHighlight(middle, at(middle, '_two_'), context(ada, ['h4kz']))).toThrow(
+      'There is no place for the markers of this highlight.',
+    );
   });
 
   it('keeps emoji, combining characters and line breaks in the range', () => {

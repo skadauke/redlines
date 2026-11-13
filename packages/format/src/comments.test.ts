@@ -13,6 +13,7 @@ import {
   claudeAda,
   context,
   expectInOrder,
+  expectMarkersBeforeLedger,
   expectNoNewLineStarts,
   file,
   fixture,
@@ -167,6 +168,80 @@ describe('addComment', () => {
     );
     expect(bodyOf(result)).toBe('One <!--cmt c9qf-->two.<!--/c9qf-->');
     expect(parse(result).ledger.comments[0]?.quote).toBe('two.');
+  });
+
+  it('ends a range that reaches the end of the file where the body does, whatever the body ends in', () => {
+    // As select all does: the closer is in front of the ledger, and nothing is written after it
+    // (format §5.1). A body that ends in a closer has the comment's closer after it.
+    for (const [what, text] of [
+      ['text', file('One two three.')],
+      ['an insertion', file('One two <!--ins k3x9-->three<!--/k3x9-->', { k3x9: 'bo' })],
+      ['a comment', file('One two <!--cmt c8d2-->three<!--/c8d2-->', {}, thread('c8d2'))],
+      ['a highlight', file('One two <!--hl w8nn-->three<!--/w8nn-->', { w8nn: 'bo' })],
+      ['a bold word', file('One two **three**')],
+      ['a deletion', file('One two three <!--del w2rf four-->', { w2rf: 'bo' })],
+    ] as const) {
+      for (const from of [4, 0]) {
+        const { changes, id } = addComment(
+          text,
+          { from, to: text.length },
+          'All of it',
+          context(ada, ['c9qf']),
+        );
+        const result = applyChanges(text, changes);
+        // The threads are in the order of their anchors in the text.
+        const threads = parse(result)
+          .marks.filter((mark) => mark.kind === 'cmt')
+          .map((mark) => mark.id);
+        expect(threads, what).toContain(id);
+        expectInOrder(what, threads, result);
+        expectMarkersBeforeLedger(what, result, id);
+        expect(newestView(result).text.trim(), what).toBe(newestView(text).text.trim());
+      }
+    }
+    // A range that is only in the ledger, and a point at the very end of the file, are at the end
+    // of the body: a point has no text to be anchored on, and none is anchored in the ledger.
+    const text = file('One two.');
+    for (const range of [
+      { from: text.length, to: text.length },
+      { from: text.indexOf('<!-- redlines') + 4, to: text.length },
+    ]) {
+      const { changes, id } = addComment(text, range, 'Here', context(ada, ['c9qf']));
+      const result = applyChanges(text, changes);
+      expect(bodyOf(result), JSON.stringify(range)).toBe('One two.<!--cmt c9qf-->');
+      expectMarkersBeforeLedger('a point', result, id);
+    }
+  });
+
+  it('refuses a range that ends in the closing underscore that ends the body, where no place is left', () => {
+    // A marker next to the `_` would change how it flanks (format §3.1), and at the end of the body
+    // the next place is after the ledger, where the editor writes nothing (§5.1). The word inside
+    // the underscores is fine.
+    const text = file('Three.\n\nOne _two_');
+    const bodyEnd = text.indexOf('\n\n<!-- redlines');
+    for (const range of [
+      at(text, '_two_'),
+      { from: text.indexOf('One'), to: bodyEnd },
+      { from: 0, to: text.length },
+    ]) {
+      let error: unknown;
+      try {
+        addComment(text, range, 'Hm', context(ada, ['c9qf']));
+      } catch (thrown) {
+        error = thrown;
+      }
+      const label = JSON.stringify(range);
+      expect(error, label).toBeInstanceOf(EditError);
+      expect((error as EditError).code, label).toBe('no-legal-placement');
+      expect((error as EditError).message, label).toBe(
+        'There is no place for the markers of this comment.',
+      );
+    }
+    const inside = applyChanges(
+      text,
+      addComment(text, at(text, 'two'), 'Hm', context(ada, ['c9qf'])).changes,
+    );
+    expect(bodyOf(inside)).toBe('Three.\n\nOne _<!--cmt c9qf-->two<!--/c9qf-->_');
   });
 
   it('adds the author to the people, and draws an id that is free', () => {

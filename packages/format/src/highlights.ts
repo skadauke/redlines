@@ -4,7 +4,7 @@
 // comment's go (anchors.ts), and accepting or rejecting it, which dismisses it and leaves the text
 // (decide.ts), is how it is taken away.
 
-import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
+import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { applyChanges } from './changes.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
@@ -74,8 +74,8 @@ export function addHighlight(
 ): { changes: TextChange[]; id: string } {
   assertRange(text, range);
   const parsed = parse(text);
-  const bodyEnd = parsed.ledgerRange?.from ?? text.length;
-  const wanted = { from: Math.min(range.from, bodyEnd), to: Math.min(range.to, bodyEnd) };
+  // A range that reaches into the ledger ends where the body does, and one that is only in it is none.
+  const wanted = withinBody(text, parsed, range);
   if (wanted.from === wanted.to) throw new EditError(NO_TEXT, 'empty-range');
   const markers = markerRanges(parsed);
   let placed: Range;

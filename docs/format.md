@@ -2374,12 +2374,18 @@ A comment thread is anchored in the body and stored in the ledger under the same
   item's indentation), starts where the text above it ends, as at the start of any line; at the
   start of the body, and under another blank line, where no text is right above it, it starts at
   the text of the block below: an opener alone on the blank line would take its line break for its
-  carrier (§3.3).
+  carrier (§3.3). A range that reaches into the ledger, as select all does by ending at the end of
+  the file, ends where the body does, for a comment's as for a highlight's: no anchor is written in
+  the ledger or after it (§5.1), and a point at the very end of the file is at the end of the body.
+  A range that ends right after the closing `_` of emphasis that ends the body has no place for
+  its closer: a marker there would change how the `_` flanks (§3.1, rule 5), and the next place is
+  past the ledger. It is refused, with the error code `no-legal-placement` and "There is no place
+  for the markers of this comment."; the text inside the underscores can be anchored.
 - **Highlights** (§2.2) are anchored as comments are, and have no thread:
   `<!--hl ID-->text<!--/ID-->`, a range that may span blocks, with its entry in `marks` (§5.4).
-  Making one changes no text. Its ends are placed as a comment's are (above, and §3.1 to §3.3),
-  and a range that reaches into the ledger ends where the body does. It is refused where a
-  comment's anchor is, in words about highlights: in code or an HTML comment, where its markers
+  Making one changes no text. Its ends are placed as a comment's are (above, and §3.1 to §3.3,
+  at the end of the body too), and it is refused where a comment's anchor is, in words about
+  highlights: in code or an HTML comment, where its markers
   would not be read (`inside-code`, "A highlight can't be made inside code or an HTML comment, …"),
   in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
   the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the

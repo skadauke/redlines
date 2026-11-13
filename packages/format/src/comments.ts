@@ -43,14 +43,15 @@ const COMMENT_WORDS: AnchorWords = {
 /**
  * Adds a comment thread by `ctx.author` on a range of the file, which is written as
  * `<!--cmt ID-->text<!--/ID-->`, or on a point when the range is empty: `<!--cmt ID-->`. An end of
- * the range that falls inside a marker is moved out of it, so the comment covers the marker. The
- * thread records the text it covers as it reads in the newest view (`quote`), so that the comment
- * can say what it was about when the text is gone (format §4).
+ * the range that falls inside a marker is moved out of it, so the comment covers the marker, and a
+ * range that reaches into the ledger ends where the body does. The thread records the text it
+ * covers as it reads in the newest view (`quote`), so that the comment can say what it was about
+ * when the text is gone (format §4).
  *
  * @returns the changes, in offsets of `text`, and the id of the thread.
  * @throws RangeError when the range lies outside the text.
- * @throws EditError when the anchor would be inside code or an HTML comment, or when the ledger
- *   can't be read.
+ * @throws EditError when the anchor would be inside code or an HTML comment, or where no place keeps
+ *   the text as it reads, or when the ledger can't be read.
  */
 export function addComment(
   text: string,

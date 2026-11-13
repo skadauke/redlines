@@ -130,7 +130,14 @@ function placeAnchor(
       const close = inspectPlace(text, markers, to);
       if (close.kind === 'refuse') refuse(close.reason);
       else if (close.kind === 'construct') to = close.to;
-      else if (close.kind === 'flank') to = stepRight(text, markers, to);
+      else if (close.kind === 'flank') {
+        const next = stepRight(text, markers, to);
+        // At the end of the body the step would hop over the ledger, which is a marker to it, and
+        // the closer would be written after it, where the editor writes no text (format §5.1): a
+        // range that ends at the end of the body, in a closing delimiter, has no place.
+        if (next > end) refuse(words.noPlace);
+        to = next;
+      }
       // The closer must not start the next block or line: the range ends where the last ends.
       else if (close.kind === 'block' || close.kind === 'continuation') {
         // Not inside the opener of a mark that starts the block, or between it and its carrier.
@@ -143,9 +150,20 @@ function placeAnchor(
 }
 
 /**
+ * `range` with its ends no further than where the body ends: a range that reaches into the ledger,
+ * as select all does by ending at the end of the file, ends where the body does (format §4). An
+ * anchor is never written in the ledger or after it.
+ */
+export function withinBody(text: string, parsed: Parsed, range: Range): Range {
+  const end = parsed.ledgerRange?.from ?? text.length;
+  return { from: Math.min(range.from, end), to: Math.min(range.to, end) };
+}
+
+/**
  * The range of `text` that an anchor on `range` is written around, with its ends moved out of the
  * markers that they fall in and then to where its markers may stand. An empty range is a point:
- * `from` and `to` are the same place.
+ * `from` and `to` are the same place. A range that reaches into the ledger ends where the body does
+ * (`withinBody`).
  *
  * @throws EditError when the range is in front matter (`front-matter`), or no place for the markers
  *   keeps the text as it reads (`no-legal-placement`).
@@ -158,16 +176,17 @@ export function anchorRange(
   words: AnchorWords,
 ): Range {
   const frontEnd = frontMatterEnd(text);
-  if (frontEnd >= 0 && range.from <= frontEnd) {
+  const inBody = withinBody(text, parsed, range);
+  if (frontEnd >= 0 && inBody.from <= frontEnd) {
     throw new EditError(words.frontMatter, 'front-matter');
   }
-  const wanted = range.from === range.to;
-  const start = snapOut(markers, range.from, false);
+  const point = inBody.from === inBody.to;
+  const start = snapOut(markers, inBody.from, false);
   return placeAnchor(
     text,
     markers,
     frontEnd,
-    { from: start, to: wanted ? start : snapOut(markers, range.to, true) },
+    { from: start, to: point ? start : snapOut(markers, inBody.to, true) },
     parsed.ledgerRange?.from ?? text.length,
     words,
   );
