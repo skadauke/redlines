@@ -159,14 +159,27 @@ describe('renderAnswer', () => {
     expect(link?.textContent).toBe('[1] “the Lender shall hold a first lien”');
   });
 
-  it('leaves a citation to a passage that is not there as plain gray text', () => {
+  it('leaves a citation to a passage that is not there as plain text', () => {
     const { root } = draw('It is so [1].\n\nSources:\n[1] "words the agent made up"');
     expect(root.querySelector('p .rl-qa-cite')).toBeNull();
     expect(root.querySelector('p .rl-qa-lost')?.textContent).toBe('[1]');
     const source = root.querySelector('.rl-qa-sources .rl-qa-lost');
-    expect(source?.textContent).toBe('[1] “words the agent made up”');
+    expect(source?.firstChild?.textContent).toBe('[1] “words the agent made up”');
     expect(source?.getAttribute('title')).toBe('This passage is not in the document');
     expect(root.querySelector('.rl-qa-sources button')).toBeNull();
+  });
+
+  it('says in the text of the row, not only in a title, that the passage is not found', () => {
+    const { root } = draw(
+      'It is so [1] and so [2].\n\nSources:\n[1] "words the agent made up"\n[2] "until paid in full"',
+    );
+    const [lost, found] = [...root.querySelectorAll('.rl-qa-source')];
+    // Said to a screen reader, in a visually hidden span: a title on a row nobody can focus is not.
+    expect(lost?.querySelector('.rl-qa-sr')?.textContent).toBe('(not found in the document)');
+    expect(lost?.textContent).toBe('[1] “words the agent made up” (not found in the document)');
+    // A passage that is there is a button, and says nothing of the kind.
+    expect(found?.querySelector('.rl-qa-sr')).toBeNull();
+    expect(found?.querySelector('button')?.textContent).toBe('[2] “until paid in full”');
   });
 
   it('leaves a marker that no source answers as it is written', () => {
@@ -177,7 +190,10 @@ describe('renderAnswer', () => {
 
   it('cuts a long source for the list', () => {
     const quote = 'word '.repeat(60).trim();
-    const { root } = draw(`Body [1].\n\nSources:\n[1] "${quote}"`);
+    const root = renderAnswer(`Body [1].\n\nSources:\n[1] "${quote}"`, {
+      has: () => true,
+      show: vi.fn(),
+    });
     const row = root.querySelector('.rl-qa-source')?.textContent ?? '';
     expect(row.endsWith('…”')).toBe(true);
     expect(row.length).toBeLessThan(110);

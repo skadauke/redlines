@@ -23,4 +23,23 @@ describe('the agents plugin styles', () => {
       expect(bare(style)).not.toMatch(/\b([2-9]|\d{2,})(\.\d+)?px/);
     }
   });
+
+  it("draws the Ask bubble's lost passages and focus ring in the second ink, which reads", () => {
+    // The third ink is 2.6:1 on the page in the light themes and 3.3:1 in the dark ones: too faint
+    // for text (4.5:1) and for a ring (3:1) alike. The second is 5:1 or more on the page in every theme.
+    expect(ASK_STYLE).toMatch(/\.rl-qa-lost\s*\{\s*color:\s*var\(--rl-ink-2\)/);
+    expect(ASK_STYLE).toMatch(
+      /\.rl-qa-cite:focus-visible\s*\{\s*outline:\s*2px solid var\(--rl-ink-2\)/,
+    );
+    expect(ASK_STYLE).not.toMatch(/\.rl-qa-lost[^}]*--rl-ink-3|outline:[^;]*--rl-ink-3/);
+  });
+
+  it('hides the words said only to a screen reader, without taking them out of the text', () => {
+    const rule = /\.rl-qa-sr\s*\{([^}]*)\}/.exec(ASK_STYLE)?.[1] ?? '';
+    expect(rule).toContain('position: absolute');
+    expect(rule).toContain('clip-path: inset(50%)');
+    expect(rule).toContain('overflow: hidden');
+    // Not display: none or visibility: hidden, which a screen reader skips.
+    expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+  });
 });

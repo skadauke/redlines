@@ -432,6 +432,19 @@ describe('citations', () => {
     expect(document.querySelector('.rl-qa-source.rl-qa-lost')).not.toBeNull();
   });
 
+  it('are plain text, and say so to a screen reader, where the quote is only part of a word', async () => {
+    const { editor } = mount({ script: answers('It is a claim [1].\n\nSources:\n[1] "lie"') });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    expect(document.querySelector('.rl-qa-answer p .rl-qa-cite')).toBeNull();
+    expect(document.querySelector('.rl-qa-answer p .rl-qa-lost')?.textContent).toBe('[1]');
+    const source = document.querySelector('.rl-qa-source.rl-qa-lost');
+    expect(source?.querySelector('.rl-qa-sr')?.textContent).toBe('(not found in the document)');
+    expect(source?.querySelector('button')).toBeNull();
+  });
+
   it('go to the place nearest the text asked about, where a quote is in several', async () => {
     const script = answers('It binds [1].\n\nSources:\n[1] "shall"');
     const { editor } = mount({ script });

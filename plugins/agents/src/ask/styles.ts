@@ -55,8 +55,20 @@ export const ASK_STYLE = `
   cursor: default;
 }
 .rl-qa-cite:hover { color: var(--rl-ink); text-decoration-color: var(--rl-ink-2); }
-.rl-qa-cite:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 1px; }
-.rl-qa-lost { color: var(--rl-ink-3); }
+/* The second ink is 5:1 or more on the page in every theme: enough for the ring (3:1) and for text. */
+.rl-qa-cite:focus-visible { outline: 2px solid var(--rl-ink-2); outline-offset: 1px; }
+.rl-qa-lost { color: var(--rl-ink-2); }
+/* Said to a screen reader, never seen: what a passage that is not in the document says of itself. */
+.rl-qa-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .rl-qa-sources {
   margin-top: ${px(6)};
   padding-top: ${px(5)};

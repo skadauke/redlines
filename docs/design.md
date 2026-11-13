@@ -1309,10 +1309,14 @@ Agent edits are animated, like a streaming chat answer.
     can put it right (the agent is signed out or too old), as a comment's run does.
   - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
     "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
-    an agent's `comment` finds its quote, and makes the marker a link that selects the passage; a
-    quote that is not in the document is plain gray text, which tells a made-up citation from a
-    real one.
-  - **A follow-up** has a field of its own, and is answered with the exchange so far as context.
+    an agent's `comment` finds its quote, and makes the marker a link that selects the passage. A
+    quote links only where its words stand as words ("lien" is not in "alien", and a quote of one
+    character is no link), and where they are in several places the link goes to the one nearest
+    the selection. A quote that is not in the document is plain text with no link, which tells a
+    made-up citation from a real one, and says "not found in the document" to a screen reader.
+  - **A follow-up** has a field of its own, and is answered with the exchange so far as context. It
+    may name another agent: each answer is the reply of the agent that gave it, in the bubble and
+    in Make Comment. The earlier answers go to the agent as quoted data, never as instructions.
   - **Keeping an answer.** Make Comment makes a thread on the selection, as one step to undo: the
     first question is the person's comment, its answer the agent's reply in the agent's name, and
     each follow-up and answer a reply, in turn. Open in New Window opens the exchange as an

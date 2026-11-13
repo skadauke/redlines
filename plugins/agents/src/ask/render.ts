@@ -1,7 +1,7 @@
 // An answer as the bubble shows it: the prose, light Markdown (code, bold, bulleted and numbered
 // lists), and its citations as links to the passages of the document. The text is the agent's, so the
 // DOM is built with `textContent` only. A citation whose words are no longer in the document, or
-// never were, is plain text and no link.
+// never were, is plain text and no link, and says so to a screen reader as well as to the eye.
 
 import { parseAnswer } from './answer.ts';
 
@@ -21,6 +21,9 @@ const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[(\d{1,2})\]/g;
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 /** A line of a numbered list: `1.` or `1)`, white space, then the item. */
 const NUMBERED = /^\s*(\d{1,6})[.)]\s+(.*)$/;
+
+/** Said to a screen reader where a passage that isn't in the document is shown. */
+const NOT_FOUND = '(not found in the document)';
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -146,7 +149,8 @@ export function renderAnswer(text: string, deps: AnswerDeps): HTMLElement {
       } else {
         row.className = 'rl-qa-source rl-qa-lost';
         row.title = 'This passage is not in the document';
-        row.textContent = label;
+        // The row isn't focusable, and a title isn't read to everyone: the cue is in its text too.
+        row.append(label, ' ', el('span', 'rl-qa-sr', NOT_FOUND));
       }
       list.append(row);
     }
