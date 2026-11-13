@@ -217,7 +217,7 @@ describe('the menu bar', () => {
   });
 
   it('lists Clean, Redlines and Raw, with Redlines checked in its simple look too', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const names = ['Clean', 'Simple', 'Redlines', 'Raw'];
     const views = made.items.filter(
       (item) => item.kind === 'check' && item.text !== undefined && names.includes(item.text),
