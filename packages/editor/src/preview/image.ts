@@ -34,11 +34,25 @@ function sourceOf(written: string): Source {
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };
   if (!url || SCHEME.test(url)) return { kind: 'none' };
-  try {
-    return { kind: 'local', path: decodeURI(url) };
-  } catch {
-    return { kind: 'local', path: url };
-  }
+  return { kind: 'local', path: decodePath(url) };
+}
+
+/**
+ * A path written as a link destination, with every percent code decoded, those of `#` and `?`
+ * included, which a path in a document is never a fragment or a query of: `Photo%20%232.png` is
+ * `Photo #2.png`. A name whose codes are broken, such as a lone `%`, stays as it is written.
+ */
+function decodePath(url: string): string {
+  return url
+    .split('/')
+    .map((name) => {
+      try {
+        return decodeURIComponent(name);
+      } catch {
+        return name;
+      }
+    })
+    .join('/');
 }
 
 /** Whether a pending change covers any of `from`–`to`: its markers or what they hold. */

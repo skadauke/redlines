@@ -129,6 +129,25 @@ export interface MetPerson {
   color: number;
 }
 
+/**
+ * Where the links of images being added will be written, held while the host saves the images
+ * (`EditorOptions.onImageFiles`, `Editor.imageSpot`). The spot follows the text around it, so what
+ * is written in the document meanwhile moves nothing.
+ */
+export interface ImageSpot {
+  /**
+   * Writes a link to each path, `![](path)` with the path as a link destination needs it written,
+   * at the spot: one after another, a space apart, in place of the text the selection held when a
+   * paste took the spot. It is the person's own insertion, tracked while Track Changes is on, and
+   * one step for Undo, which the Edit menu calls Insert Image. Paths are as the document should
+   * reach the files, relative to it (`images/shot.png`). A spot is used once. Returns whether the
+   * links went in; when the document refuses them, the reason is said through `onNotice`.
+   */
+  insert(paths: readonly string[]): boolean;
+  /** Lets the spot go, when no image will be added. A spot that was used is let go already. */
+  release(): void;
+}
+
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
@@ -187,6 +206,17 @@ export interface EditorOptions {
    * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
    */
   resolveImage?: (src: string) => string | null;
+  /**
+   * Called when image files are pasted into the document, or dropped on it, with the files and the
+   * spot their links will go to (`ImageSpot`). The host saves each file where the document can
+   * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells
+   * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
+   * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
+   * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
+   * image where it can't (Raw while Track Changes is on, code) through `onNotice`, and the host is
+   * not called. Default: none, and the browser does what it does with such a paste or a drop.
+   */
+  onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
   /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
@@ -345,6 +375,13 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * The spot an image added now would go, for a host that has the images by other means than a
+   * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
+   * client point `at` is in the text, when given and over some, and otherwise the selection. Null
+   * when the editor takes no image there, which `onNotice` then says.
+   */
+  imageSpot(at?: { x: number; y: number }): ImageSpot | null;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
    * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
