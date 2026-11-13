@@ -112,6 +112,63 @@ describe('the headings of a document', () => {
     ]);
   });
 
+  it('keeps the brackets of a phrase that is no link, as the page draws them', () => {
+    // No destination and no label: the preview leaves such a phrase as text.
+    expect(
+      brief(
+        headings(
+          '# [WIP] Feature\n\n## [x] Done\n\n## Title[^1]\n\n## A [link](https://x.org) b\n',
+        ),
+      ),
+    ).toEqual([
+      [1, '[WIP] Feature'],
+      [2, '[x] Done'],
+      [2, 'Title[^1]'],
+      [2, 'A link b'],
+    ]);
+  });
+
+  it('leaves out a link’s title and the tags of inline HTML, and keeps the text between them', () => {
+    expect(
+      brief(
+        headings(
+          '# See [the docs](https://x.org "Docs") now\n\n## <a id="install"></a>Install <kbd>⌘</kbd>K\n',
+        ),
+      ),
+    ).toEqual([
+      [1, 'See the docs now'],
+      [2, 'Install ⌘K'],
+    ]);
+  });
+
+  it('leaves a comment in a code span alone, which is code and no mark', () => {
+    expect(brief(headings('# The `<!-- x -->` syntax\n\n## Two\n'))).toEqual([
+      [1, 'The <!-- x --> syntax'],
+      [2, 'Two'],
+    ]);
+  });
+
+  it('leaves out the quote marks of a heading that runs over lines of a quote', () => {
+    expect(brief(headings('> First line\n> second line\n> ---\n\n# Two\n'))).toEqual([
+      [2, 'First line second line'],
+      [1, 'Two'],
+    ]);
+  });
+
+  it('leaves out the attributes that Quarto and Pandoc put after a heading', () => {
+    expect(
+      brief(
+        headings(
+          '# Methods {#sec-methods .unnumbered}\n\n## Results {#sec-results}\n\n## Braces {not attributes} here\n',
+        ),
+      ),
+    ).toEqual([
+      [1, 'Methods'],
+      [2, 'Results'],
+      [2, 'Braces {not attributes} here'],
+    ]);
+  });
+
   it('puts each at the start of its line, for the caret and the scroll', () => {
     const doc = 'Intro.\n\n## Second\n\nSetext\n======\n';
     expect(headings(doc).map(({ from }) => from)).toEqual([8, 19]);

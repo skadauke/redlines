@@ -55,6 +55,8 @@ export const STYLE = `
   flex-direction: column;
   gap: 9px;
   padding-left: 8px;
+  /* Only a picture of the headings: what it covers is the panel's, and the list's when open. */
+  pointer-events: none;
   transition: opacity 120ms ease;
 }
 .rl-outline[data-ticks='false'] .rl-outline-ticks {
@@ -95,6 +97,9 @@ export const STYLE = `
   padding: 8px;
   list-style: none;
   opacity: 0;
+  /* Its entries, 31 px apart, are not where the lines are: a click on a line before the card opens
+     would go to another heading. */
+  pointer-events: none;
   transition: opacity 140ms ease 40ms;
 }
 .rl-outline[data-open='true'] .rl-outline-list {
@@ -102,6 +107,7 @@ export const STYLE = `
   width: auto;
   padding: 0;
   opacity: 1;
+  pointer-events: auto;
 }
 .rl-outline-item {
   display: block;
@@ -133,6 +139,13 @@ export const STYLE = `
 .rl-outline-item:focus-visible {
   outline: 2px solid var(--rl-ink-3);
   outline-offset: -2px;
+}
+
+/* The page is what prints. */
+@media print {
+  .rl-outline {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -19,5 +19,6 @@ export const plugin: Plugin = {
       commands: [{ id: 'outline.focus', title: 'Show Outline', shortcut: 'Mod-Ctrl-o' }],
     },
   },
-  activate: (context) => createOutline(context.editor as Editor),
+  activate: (context) =>
+    createOutline(context.editor as Editor, { notice: (message) => context.notice(message) }),
 };

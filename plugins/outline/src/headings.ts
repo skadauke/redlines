@@ -4,6 +4,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
+import type { SyntaxNode } from '@lezer/common';
 
 export interface Heading {
   /** Where the heading's line starts: the caret and the scroll go there. */
@@ -16,7 +17,11 @@ export interface Heading {
 /** The blocks whose children may be headings. Every other block is passed over whole. */
 const CONTAINERS = new Set(['Document', 'Blockquote', 'BulletList', 'OrderedList', 'ListItem']);
 
-/** The marks of inline syntax, which read as nothing: its text is what stays. */
+/**
+ * The marks of inline syntax, which read as nothing: its text is what stays. The markers of pending
+ * changes are comments, deleted text with them; the tags of inline HTML read as nothing, and the
+ * text between a pair of them stays; the `>` of a quote is the quote's, not the heading's.
+ */
 const MARKS = new Set([
   'EmphasisMark',
   'CodeMark',
@@ -24,7 +29,13 @@ const MARKS = new Set([
   'LinkMark',
   'LinkLabel',
   'LinkTitle',
+  'QuoteMark',
+  'HTMLTag',
+  'Comment',
 ]);
+
+/** The attributes that Quarto and Pandoc put after a heading: `{#sec-x .unnumbered key=value}`. */
+const ATTRIBUTES = /\s*\{(?:[#.][^{}]*|[\w-]+=[^{}]*)\}\s*$/;
 
 const NAMED: Record<string, string> = {
   amp: '&',
@@ -63,7 +74,10 @@ function textBetween(state: EditorState, from: number, to: number): string {
       // The destination of a link or an image is not its text; a bare address is.
       const destination =
         name === 'URL' && ['Link', 'Image'].includes(inner.node.parent?.name ?? '');
-      if (MARKS.has(name) || destination) {
+      // A bracketed phrase with no destination or label, such as "[WIP]" or a footnote's "[^1]", is
+      // text, as the page draws it (`link` in the editor's decorations): its brackets stay.
+      const bracket = name === 'LinkMark' && !isLinked(inner.node.parent);
+      if ((MARKS.has(name) && !bracket) || destination) {
         take(inner.from);
         at = Math.max(at, inner.to);
       } else if (name === 'Escape') {
@@ -77,12 +91,13 @@ function textBetween(state: EditorState, from: number, to: number): string {
     },
   });
   take(to);
-  // The markers of pending changes are comments, deleted text with them: what is left reads as the
-  // newest text does.
-  return text
-    .replace(/<!--[^]*?-->/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return text.replace(/\s+/g, ' ').trim().replace(ATTRIBUTES, '');
+}
+
+/** Whether a link or an image has a destination or a label, and so is more than bracketed text. */
+function isLinked(node: SyntaxNode | null): boolean {
+  if (!node) return false;
+  return node.getChild('URL') !== null || node.getChild('LinkLabel') !== null;
 }
 
 /** The headings of the document, in order. A heading with no text is left out. */
@@ -104,8 +119,9 @@ export function headingsOf(state: EditorState): Heading[] {
         from = open.to;
         to = close ? close.from : ref.to;
       } else if (marks[0]) {
-        // The text runs up to the line of `===` or `---` under it.
-        to = marks[0].from;
+        // The text runs up to the line of `===` or `---` under it, and not the quote marks or the
+        // indentation that stand in front of that line.
+        to = state.doc.lineAt(marks[0].from).from;
       }
       const text = textBetween(state, from, to);
       if (text) found.push({ from: ref.from, level, text });

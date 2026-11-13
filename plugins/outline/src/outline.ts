@@ -26,6 +26,10 @@ export interface PaneBox {
   height: number;
   /** How far in from the pane's left edge the text starts, in px. */
   textLeft: number;
+  /** Whether the page has been scrolled down at all. */
+  scrolled: boolean;
+  /** Whether it can go no further down: also true of a page that fits, and is not scrolled. */
+  atEnd: boolean;
 }
 
 /** What the outline asks the page's layout; the tests stand in for it, as happy-dom lays out nothing. */
@@ -38,6 +42,8 @@ export interface OutlineGeometry {
 
 export interface OutlineOptions {
   geometry?: OutlineGeometry;
+  /** Says a short word to the person, as when the outline has too few headings to show. */
+  notice?: (message: string) => void;
 }
 
 /** How long after the text changes the headings are read again: not at each keystroke. */
@@ -51,6 +57,8 @@ const CLOSE_MS = 160;
 const READING_LINE = 80;
 /** Fewer headings than this are not worth an outline. */
 const MIN_HEADINGS = 2;
+/** What the command says when there are fewer. */
+const TOO_FEW = 'The outline needs a document with two headings.';
 /** The room the lines need in the margin: the change bars' reach, the strip, and a gap. */
 const BAR_REACH = 36;
 const STRIP = 38;
@@ -82,6 +90,8 @@ const pageGeometry: OutlineGeometry = {
       top: paneRect.top - hostRect.top,
       height: pane.clientHeight,
       textLeft: content.left + padding - paneRect.left,
+      scrolled: pane.scrollTop > 2,
+      atEnd: pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2,
     };
   },
   lineTop: (view, pos) =>
@@ -122,6 +132,12 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     private headings: Heading[] = [];
     /** The heading of the section being read. */
     private current = 0;
+    /**
+     * The heading that was clicked, held as the one being read while the page can go no further, so
+     * that it can't be brought to the reading line: until the page moves from its end, or the text
+     * changes.
+     */
+    private pinned: number | null = null;
     private open = false;
     private hovered = false;
     private focusedIn = false;
@@ -160,7 +176,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.doc.defaultView?.addEventListener('resize', this.locateSoon);
       // The file sidebar opening, or any change to the pane, moves it without a resize of the window.
       this.resizes =
-        typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.locateSoon);
+        typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.locateSoon());
 
       this.headings = headingsOf(view.state);
       this.render();
@@ -170,6 +186,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     update(update: ViewUpdate): void {
       if (update.docChanged) {
         // Until the headings are read again, where each is, so that a click goes to the right line.
+        this.pinned = null;
         this.headings = this.headings.map((heading) => ({
           ...heading,
           from: update.changes.mapPos(heading.from),
@@ -211,9 +228,18 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       }, REFRESH_MS);
     };
 
-    private readonly locateSoon = () => {
-      clearTimeout(this.locateTimer);
-      this.locateTimer = setTimeout(() => this.locate(), LOCATE_MS);
+    /**
+     * Works out the placing and the section being read, at most once in a while: a scroll sends
+     * events all the way, and a pause after the last would be after it was over. What scrolls in the
+     * outline itself is the person's, and leaves the reading place alone.
+     */
+    private readonly locateSoon = (event?: Event) => {
+      if (event?.target instanceof Node && this.nav.contains(event.target)) return;
+      if (this.locateTimer !== undefined) return;
+      this.locateTimer = setTimeout(() => {
+        this.locateTimer = undefined;
+        this.locate();
+      }, LOCATE_MS);
     };
 
     /** Draws the lines and the list, or hides the outline when there is too little to outline. */
@@ -243,6 +269,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       );
       this.current = Math.min(this.current, Math.max(0, this.headings.length - 1));
       this.mark(this.current);
+      this.reveal();
       // The list was drawn again under the focus, which stays on the same heading.
       if (hadFocus >= 0 && !this.nav.hidden)
         this.focusItem(Math.min(hadFocus, this.headings.length - 1));
@@ -269,19 +296,38 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
         this.reach();
       }
       // The last heading whose line is at or above the reading line; the first before any is.
+      let found = this.lastAbove(READING_LINE);
+      if (pane?.atEnd) {
+        // The page can go no further, so a heading below the reading line can't be brought to it:
+        // the one that was clicked is the one being read, and after a scroll to the end the last
+        // one in view is.
+        const inView = this.lastAbove(pane.height - 1);
+        if (this.pinned !== null && this.pinned <= inView) found = this.pinned;
+        else if (pane.scrolled) found = Math.max(found, inView);
+      }
+      if (!pane?.atEnd || (this.pinned !== null && this.pinned <= found && found !== this.pinned)) {
+        this.pinned = null;
+      }
+      const changed = found !== this.current;
+      this.current = found;
+      this.mark(found);
+      if (changed) this.reveal();
+    }
+
+    /** The last heading whose line is at or above `line`, px from the pane's top; the first if none. */
+    private lastAbove(line: number): number {
       let found = 0;
       let low = 0;
       let high = this.headings.length - 1;
       while (low <= high) {
         const middle = (low + high) >> 1;
         const heading = this.headings[middle] as Heading;
-        if (geometry.lineTop(this.view, heading.from) <= READING_LINE) {
+        if (geometry.lineTop(this.view, heading.from) <= line) {
           found = middle;
           low = middle + 1;
         } else high = middle - 1;
       }
-      this.current = found;
-      this.mark(found);
+      return found;
     }
 
     /** Marks the heading being read, in the lines and in the list, and makes it the list's tab stop. */
@@ -309,6 +355,17 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.open = open;
       this.nav.dataset['open'] = String(open);
       this.reach();
+      if (open) this.reveal();
+    }
+
+    /**
+     * Scrolls the panel, which may hold more lines than it shows, to the line of the section being
+     * read at rest, or to its entry in the open list: into the middle of the panel.
+     */
+    private reveal(): void {
+      const at = this.open ? this.list.children[this.current] : this.ticks.children[this.current];
+      if (!(at instanceof HTMLElement)) return;
+      this.panel.scrollTop = Math.max(0, at.offsetTop - this.panel.clientHeight / 2);
     }
 
     /** Where the lines are not shown, nothing at the margin's edge takes the pointer (the change bars
@@ -329,6 +386,9 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     private go(index: number): void {
       const heading = this.headings[index];
       if (!heading) return;
+      this.pinned = index;
+      this.current = index;
+      this.mark(index);
       this.view.dispatch({
         selection: { anchor: heading.from },
         effects: EditorView.scrollIntoView(heading.from, { y: 'start', yMargin: READING_LINE - 8 }),
@@ -414,7 +474,13 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       menu: 'view',
       group: 'outline',
       runsInFields: true,
-      run: () => instance?.focusCurrent() ?? false,
+      run: () => {
+        if (!instance) return false;
+        if (instance.focusCurrent()) return true;
+        // Nothing to show: a key that did nothing without a word would be no answer.
+        options.notice?.(TOO_FEW);
+        return options.notice !== undefined;
+      },
     },
   ]);
   return () => {
