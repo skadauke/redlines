@@ -52,6 +52,9 @@ export function atLeast(version: string, minimum: string): boolean {
   return true;
 }
 
+/** What a program's status command printed and how it ended. */
+export type StatusResult = { code: number | null; stdout: string };
+
 /** What differs between agents when checking a program. */
 export interface DetectSpec {
   /** `Claude`, as the person reads it. */
@@ -59,30 +62,66 @@ export interface DetectSpec {
   /** The program's name, for `which`. */
   binary: string;
   notFoundHelp: string;
+  /** The command that installs it, for a program that isn't found: shown and copied, never run. */
+  installCommand?: string;
   minVersion: string;
   signedOutHelp: string;
   /** The program's own sign-in command, such as `['auth', 'status']`. */
   statusArgs: string[];
-  isSignedIn(result: { code: number | null; stdout: string }): boolean;
+  isSignedIn(result: StatusResult): boolean;
+  /**
+   * Whether the status command says plainly that the program is signed out, as against not
+   * understanding the question. Used for a program too old to trust: where this is missing, such a
+   * program that isn't signed in is reported as saying nothing.
+   */
+  isSignedOut?(result: StatusResult): boolean;
 }
 
-/** Finds the program, checks its version and asks it, never a file, whether it is signed in. */
+/**
+ * Finds the program, checks its version and asks it, never a file, whether it is signed in. A
+ * program too old to run here is asked too: what it says is reported beside the need to update,
+ * and where it says nothing, nothing is claimed (an older program may not know the question).
+ */
 export async function detectAgent(processes: HostProcesses, spec: DetectSpec): Promise<AgentState> {
   try {
     const program = await processes.which(spec.binary);
-    if (program === null) return { found: false, help: spec.notFoundHelp };
+    if (program === null) {
+      return {
+        found: false,
+        help: spec.notFoundHelp,
+        ...(spec.installCommand === undefined ? {} : { install: spec.installCommand }),
+      };
+    }
     const version = versionOf((await processes.exec(program, ['--version'])).stdout);
-    if (version !== undefined && !atLeast(version, spec.minVersion)) {
+    const known = { ...(version === undefined ? {} : { version }), path: program };
+    const tooOld = version !== undefined && !atLeast(version, spec.minVersion);
+    let status: StatusResult | undefined;
+    try {
+      status = await processes.exec(program, spec.statusArgs);
+    } catch (error) {
+      // A program too old to run here is still reported as such, and a question it fails to run
+      // is no answer. Of a current one, the check is what failed.
+      if (!tooOld) throw error;
+    }
+    if (tooOld) {
+      const account =
+        status === undefined
+          ? undefined
+          : spec.isSignedIn(status)
+            ? 'signed-in'
+            : spec.isSignedOut?.(status)
+              ? 'signed-out'
+              : undefined;
       return {
         found: true,
         signedIn: false,
         reason: 'too-old',
-        version,
+        ...known,
         help: `${spec.name} ${version} is too old. Update it to ${spec.minVersion} or newer.`,
+        ...(account === undefined ? {} : { account }),
       };
     }
-    const known = version === undefined ? {} : { version };
-    if (spec.isSignedIn(await processes.exec(program, spec.statusArgs))) {
+    if (status !== undefined && spec.isSignedIn(status)) {
       return { found: true, signedIn: true, ...known };
     }
     return {
@@ -119,6 +158,8 @@ interface RunCommon<S> {
   held?(state: S): boolean;
   /** The reason a run is failing, once the stream has said so. */
   failure?(state: S): string | undefined;
+  /** Whether Preferences › Agents can put right the failure that `message` says (signed out). */
+  setup?(message: string): boolean;
   /** Stop was asked for: what to tell the program, before it is stopped. */
   cancel?(state: S): void;
 }
@@ -266,6 +307,11 @@ async function* follow<S>(
     },
   );
   const state = spec.newState();
+  /** An error the person can put right in Preferences says so: the line offers to open them. */
+  const flagged = (event: AgentEvent): AgentEvent =>
+    event.type === 'error' && spec.setup?.(event.message) === true
+      ? { ...event, setup: true }
+      : event;
   const stop = () => stopQuietly(handle);
   // Stop says so to the program first, for one that can be told, and then stops it.
   const abort = () => {
@@ -303,7 +349,7 @@ async function* follow<S>(
       const event = spec.parse(got.value, state);
       // A retry may still work: it is held back, and reported only if the run then fails.
       if (event === null || spec.held?.(state) === true) continue;
-      yield event;
+      yield flagged(event);
       if (event.type === 'error') stop();
       if (event.type !== 'status') return;
     }
@@ -312,7 +358,7 @@ async function* follow<S>(
     if (signal.aborted) {
       yield { type: 'error', message: 'Stopped.' };
     } else if (failure !== undefined) {
-      yield { type: 'error', message: failure };
+      yield flagged({ type: 'error', message: failure });
     } else {
       const last = end.stderr
         .split('\n')
