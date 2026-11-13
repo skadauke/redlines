@@ -2,7 +2,7 @@
   "name": "@redlines/agents",
   "version": "0.0.0",
   "private": true,
-  "description": "Agents in the comment box: the @ picker, and the runs a posted mention starts.",
+  "description": "Agents in the comment box: the @ picker, the runs a posted mention starts, and Ask, a question about a selection answered in a bubble.",
   "license": "MIT",
   "type": "module",
   "exports": {

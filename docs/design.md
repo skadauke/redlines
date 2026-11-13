@@ -766,10 +766,9 @@ a new email under the same name becomes an alias in the ledger
 
 **Should (v1 if time allows):**
 
-- a selection toolbar: Comment, Suggest, Ask agent, and formatting. Written as the formatting
-  palette (§5.1), which opens from a handle and on right-click rather than floating over a
-  selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are
-  not in it yet;
+- a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
+  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
