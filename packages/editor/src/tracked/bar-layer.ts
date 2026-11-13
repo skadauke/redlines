@@ -46,6 +46,8 @@ export interface DrawnPiece {
 export interface BarSegment {
   /** Where its first screen line starts, which says which segment it is. */
   from: number;
+  /** Where its last screen line ends. */
+  to: number;
   top: number;
   bottom: number;
   /** The author colors of the changes on it, sorted; one color is that author's, more are gray. */
@@ -93,7 +95,8 @@ export function segmentsOf(
     const joined = segments.at(-1);
     if (joined && previous === i - 1 && joined.colors.join() === here.join()) {
       joined.bottom = s.bottom;
-    } else segments.push({ from: s.from, top: s.top, bottom: s.bottom, colors: here });
+      joined.to = s.to;
+    } else segments.push({ from: s.from, to: s.to, top: s.top, bottom: s.bottom, colors: here });
     previous = i;
   });
   return segments;
