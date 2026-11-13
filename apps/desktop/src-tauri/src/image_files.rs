@@ -380,6 +380,18 @@ fn images_only(files: &[PathBuf]) -> bool {
             .all(|file| file.is_file() && has_image_name(file))
 }
 
+/// Where a drop landed, in points from the top left of the window's page. On the Mac the position
+/// Tauri calls physical is the pasteboard's dragging location as wry has it, already in points
+/// (wry, `wkwebview/drag_drop.rs`), so `in_points` is true there and the position is taken as it
+/// is; elsewhere it is physical pixels, which the window's scale factor turns into points.
+fn drop_points(position: PhysicalPosition<f64>, scale: f64, in_points: bool) -> (f64, f64) {
+    if in_points || scale <= 0.0 {
+        (position.x, position.y)
+    } else {
+        (position.x / scale, position.y / scale)
+    }
+}
+
 /// `files`, dropped at `position` on the window `label`, if they are all images: they are kept for
 /// the window, which is told where they landed (`DROPPED_EVENT`, in points of its page), and the app
 /// does nothing else with them. Says whether it took them; any other drop is for the app to offer
@@ -398,11 +410,12 @@ pub fn dropped(
         .and_then(|window| window.scale_factor().ok())
         .unwrap_or(1.0);
     let id = app.state::<ImageSources>().keep(label, files.to_vec());
+    let (x, y) = drop_points(position, scale, cfg!(target_os = "macos"));
     let event = Dropped {
         id,
         count: files.len(),
-        x: position.x / scale,
-        y: position.y / scale,
+        x,
+        y,
     };
     if let Err(error) = app.emit_to(label, DROPPED_EVENT, event) {
         eprintln!("Redlines can’t tell {label} of the images dropped on it: {error}");
@@ -817,6 +830,19 @@ mod tests {
         // A folder named like an image is no image.
         assert!(!images_only(&at(&["folder.png"])));
         assert!(!images_only(&at(&["missing.png"])));
+    }
+
+    #[test]
+    fn a_drops_position_is_in_points_of_the_page_whatever_the_system_calls_it() {
+        // The Mac's drop position is the pasteboard's dragging location, in points from the top
+        // left of the web view, though Tauri calls it physical (wry, wkwebview/drag_drop.rs): it is
+        // taken as it is. Elsewhere it is physical pixels, which the scale factor turns into points.
+        let position = PhysicalPosition::new(100.0, 40.0);
+        assert_eq!(drop_points(position, 2.0, true), (100.0, 40.0));
+        assert_eq!(drop_points(position, 2.0, false), (50.0, 20.0));
+        assert_eq!(drop_points(position, 1.0, false), (100.0, 40.0));
+        // A window that can't say its scale is at 1.
+        assert_eq!(drop_points(position, 0.0, false), (100.0, 40.0));
     }
 
     #[test]
