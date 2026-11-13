@@ -33,7 +33,18 @@ import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
-const WORDS = ['alpha', 'b', 'café', 'x y', '11', '', 'two words'];
+// The tags of subscript and superscript are in the body cells, after the words the header takes.
+const WORDS = [
+  'alpha',
+  'b',
+  'café',
+  'x y',
+  '11',
+  '',
+  'two words',
+  'H<sub>2</sub>O',
+  '<sup>t u</sup>',
+];
 const PEOPLE = [ada, bo, claudeAda];
 const POOL = [
   'k3x9',
@@ -159,7 +170,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
             if (ranges.length === 0) continue;
             const op: FormatOp = {
               kind: 'inline',
-              format: pick(['bold', 'italic'] as const),
+              format: pick(['bold', 'italic', 'sub', 'sup'] as const),
               on: true,
             };
             steps.push(`[${ranges.length} cells ${op.format}]`);
