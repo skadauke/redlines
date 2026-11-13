@@ -730,21 +730,24 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
   asks for files in the system's panel) all do the same. The file is copied into the folder for
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
-  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. The
-  image shows at once. The caret ends at the end of the links, as after any paste, and the preview,
-  which draws an image only while the caret is off its link, draws one just added all the same
-  until the caret moves or anything is written. Several images go in as links a space apart, and
-  nothing else is written. A dropped file, or an image file copied in Finder, keeps its name, and
-  pasted image data, which has none worth keeping, gets one made of the time
-  (`image-2026-11-12-153012.png`). A name that is taken gets `-2`, `-3` and on, and no file is
-  ever replaced; an image that is in the folder already is linked, not copied. With Track Changes on, the link is the person's own tracked insertion, and
-  Undo, named Insert Image, takes it back in one step. Rejecting the insertion or undoing it takes
-  back the link only: the file stays beside the document, where it can be seen and deleted by hand,
-  because Redlines never deletes a file it might not be the only one to want. A document with no
-  file yet asks to be saved first, since there is no folder to save beside. The person may go on
-  writing while the images are saved: the links go in where the paste or drop was, after what was
-  typed there meanwhile, and none of it is replaced; a document that was replaced meanwhile gets
-  none of the links, and the person is told, the files being where they were saved.
+  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
+  over the sidebar, the title bar or the ground below the text goes where the caret is. The image
+  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
+  draws an image only while the caret is off its link, draws one just added all the same until the
+  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
+  data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
+  name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
+  folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
+  insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
+  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
+  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  person may go on writing while the images are saved: the links go in where the paste or drop was,
+  ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
+  all of it is still there; what was typed in it stays, and the links go after it. A document that
+  was replaced meanwhile gets none of the links, and the person is told, the files being where they
+  were saved.
 - **Where images go** is Preferences › Editor › Images: a folder beside the document, called
   `images` (the name can be changed), a folder named for the document (`plan.assets` for
   `plan.md`), or the document's own folder. All three are inside the document's folder, where the

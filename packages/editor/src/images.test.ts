@@ -12,6 +12,7 @@ const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const editor of open.splice(0)) editor.destroy();
   document.body.replaceChildren();
   document.getSelection()?.removeAllRanges();
@@ -77,8 +78,22 @@ function dropFiles(editor: Editor, files: File[], at?: { x: number; y: number })
   return event;
 }
 
-/** What the editor finds under a point: the test says, as a page with no layout can't. */
+/**
+ * What is under a client point, which a page with no layout can't say: the editor's text for a point
+ * in its box (here 100 to 700 across and 50 to 300 down), else the page around it, as the sidebar,
+ * the title bar and the ground below the document are.
+ */
+function overText(editor: Editor) {
+  return vi
+    .spyOn(editor.view.root, 'elementFromPoint')
+    .mockImplementation((x, y) =>
+      x >= 100 && x <= 700 && y >= 50 && y <= 300 ? editor.view.contentDOM : document.body,
+    );
+}
+
+/** What the editor finds in the text at a point over it: the test says, as a page with no layout can't. */
 function pointsAt(editor: Editor, pos: number | null) {
+  overText(editor);
   return vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(pos);
 }
 
@@ -187,10 +202,9 @@ describe('images dropped on the editor', () => {
     const { editor, given } = load('One two three\n');
     editor.view.dispatch({ selection: { anchor: 0 } });
     const finding = pointsAt(editor, 8);
-    const event = dropFiles(editor, [png('plan.png')], { x: 40, y: 12 });
+    const event = dropFiles(editor, [png('plan.png')], { x: 400, y: 120 });
     expect(event.defaultPrevented).toBe(true);
-    // Precisely: a point that no line covers, in a margin or below the text, is no position.
-    expect(finding).toHaveBeenCalledWith({ x: 40, y: 12 });
+    expect(finding).toHaveBeenCalledWith({ x: 400, y: 120 });
     expect(given).toHaveLength(1);
     // A dropped file keeps its name: it is a file, not a clipboard's data.
     expect(given[0]!.pasted).toBe(false);
@@ -200,14 +214,47 @@ describe('images dropped on the editor', () => {
     expect(editor.getDoc()).toBe('One two ![](images/plan.png)three\n');
   });
 
-  it('go where the caret is when the point is over no text', () => {
+  it('go where the caret is when no line covers the point', () => {
     const { editor, given } = load('One two\n');
     editor.view.dispatch({ selection: { anchor: 3 } });
     pointsAt(editor, null);
-    dropFiles(editor, [png()]);
+    dropFiles(editor, [png()], { x: 400, y: 120 });
     given[0]!.spot.insert(['shot.png']);
     expect(editor.getDoc()).toBe('One![](shot.png) two\n');
   });
+
+  it('go where the caret is when something else is over the text at the point, as the title bar is over a scrolled document', () => {
+    const { editor, given } = load('One two\n');
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    const finding = pointsAt(editor, 7);
+    // At a point in the box, where the title bar is now, not the text.
+    vi.spyOn(editor.view.root, 'elementFromPoint').mockReturnValue(
+      document.createElement('header'),
+    );
+    dropFiles(editor, [png()], { x: 400, y: 120 });
+    expect(finding).not.toHaveBeenCalled();
+    given[0]!.spot.insert(['shot.png']);
+    expect(editor.getDoc()).toBe('One![](shot.png) two\n');
+  });
+
+  it.each([
+    ['over the sidebar, left of the text', { x: 50, y: 120 }],
+    ['above the text, over the title bar', { x: 400, y: 20 }],
+    ['below the text', { x: 400, y: 400 }],
+    ['beyond the text on the right', { x: 800, y: 120 }],
+  ])(
+    'go where the caret is when the point is %s, which CodeMirror would clamp to the text',
+    (_, at) => {
+      const { editor, given } = load('One two\n');
+      editor.view.dispatch({ selection: { anchor: 3 } });
+      // Asked, the editor would give the start or the end of the text, or the line at that height.
+      const finding = pointsAt(editor, 7);
+      dropFiles(editor, [png()], at);
+      expect(finding).not.toHaveBeenCalled();
+      given[0]!.spot.insert(['shot.png']);
+      expect(editor.getDoc()).toBe('One![](shot.png) two\n');
+    },
+  );
 
   it('leave a drop of text to the editor, which has no image file in it', () => {
     const dataTransfer = new DataTransfer();
@@ -313,6 +360,16 @@ describe('after the links are written', () => {
     expect(drawn(editor)).toBe(0);
   });
 
+  it('ends the exception when anything is written, even where the caret and the link stay', () => {
+    const { editor, spot } = spotAt('One two\n', 3);
+    spot.insert(['shot.png']);
+    expect(drawn(editor)).toBe(1);
+    // Text written after the link, with no selection set: the caret is still at its end.
+    editor.view.dispatch({ changes: { from: editor.view.state.doc.length, insert: '!' } });
+    expect(editor.view.state.selection.main.head).toBe('One![](shot.png)'.length);
+    expect(drawn(editor)).toBe(0);
+  });
+
   it('draws it still when text is typed after it, which leaves the caret off the link', () => {
     const { editor, spot } = spotAt('One two\n', 3);
     spot.insert(['shot.png']);
@@ -331,7 +388,8 @@ describe('after the links are written', () => {
     spot.insert(['shot.png']);
     // After the last line break, the format writes the insertion as it writes typing there.
     const marks = editor.getParsed().marks;
-    expect(marks.length).toBeGreaterThan(0);
+    // One mark, the format's own: nothing but the links is written, no line break and no split.
+    expect(marks.map((mark) => mark.kind)).toEqual(['sub']);
     expect(new Set(marks.map((mark) => mark.entry.by))).toEqual(new Set(['ada']));
     expect(editor.getDoc()).toContain('![](shot.png)');
     expect(parse(editor.getDoc()).warnings.map((warning) => warning.code)).toEqual([]);
@@ -397,6 +455,22 @@ describe('a spot', () => {
     editor.view.dispatch({ changes: { from: 5, insert: 'X' } });
     spot.insert(['a.png']);
     expect(editor.getDoc()).toBe('One tXwo![](a.png) three\n');
+  });
+
+  it('goes after text that was written over what it covers, and replaces none of it', () => {
+    const { editor, spot } = spotOver('One two three\n', 4, 7);
+    editor.view.dispatch({ changes: { from: 4, to: 7, insert: 'TWO' } });
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One TWO![](a.png) three\n');
+  });
+
+  it('goes after text typed where what it covered was taken away', () => {
+    const { editor, spot } = spotOver('One two three\n', 4, 7);
+    editor.view.dispatch({ changes: { from: 4, to: 8 } });
+    editor.view.dispatch({ changes: { from: 4, insert: 'Q' } });
+    expect(editor.getDoc()).toBe('One Qthree\n');
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One Q![](a.png)three\n');
   });
 
   it('goes after text that was taken away from under it', () => {
@@ -465,7 +539,7 @@ describe('a spot', () => {
     editor.imageSpot()!.insert(['a.png']);
     expect(editor.getDoc()).toBe('One![](a.png) two\n');
     pointsAt(editor, 0);
-    editor.imageSpot({ x: 1, y: 1 })!.insert(['b.png']);
+    editor.imageSpot({ x: 400, y: 120 })!.insert(['b.png']);
     expect(editor.getDoc()).toBe('![](b.png)One![](a.png) two\n');
   });
 });
@@ -565,6 +639,21 @@ describe('where the editor takes no image', () => {
       expect(editor.imageSpot(), `at ${at}`).toBeNull();
     }
     expect(notices).toEqual([IMAGE_IN_CODE, IMAGE_IN_CODE, IMAGE_IN_CODE]);
+  });
+
+  it('refuses an image in front of the first line of indented code, where it would end the block', () => {
+    const doc = 'Para\n\n    code line\n';
+    const { editor, notices } = load(doc);
+    const line = doc.indexOf('    code');
+    // The indent is not in the block's node, which begins at the code: columns 0, 2 and 4.
+    for (const at of [line, line + 2, line + 4]) {
+      editor.view.dispatch({ selection: { anchor: at } });
+      expect(editor.imageSpot(), `at ${at}`).toBeNull();
+    }
+    expect(notices).toEqual([IMAGE_IN_CODE, IMAGE_IN_CODE, IMAGE_IN_CODE]);
+    // The paragraph above is no code.
+    editor.view.dispatch({ selection: { anchor: 4 } });
+    expect(editor.imageSpot()).not.toBeNull();
   });
 
   it('says so for a spot asked for by the host, which is then none', () => {

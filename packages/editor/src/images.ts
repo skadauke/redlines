@@ -94,13 +94,17 @@ function within(state: EditorState, pos: number, side: -1 | 1, names: readonly s
 
 /**
  * Whether a link at `pos` would be in code, which shows it as it is. In inline code that is between
- * its backticks: right before it or after it is outside, where an image goes. In a code block, and
- * at the edge of its fences, which a link would break.
+ * its backticks: right before it or after it is outside, where an image goes. In a code block, at
+ * the edge of its fences, and in the indent before its first line or its fence, none of which is in
+ * the block's node and all of which a link would break.
  */
 function inCode(state: EditorState, pos: number): boolean {
   if (within(state, pos, -1, ['InlineCode']) && within(state, pos, 1, ['InlineCode'])) return true;
   const blocks = ['FencedCode', 'CodeBlock'];
-  return within(state, pos, -1, blocks) || within(state, pos, 1, blocks);
+  if (within(state, pos, -1, blocks) || within(state, pos, 1, blocks)) return true;
+  const line = state.doc.lineAt(pos);
+  const indent = /^[ \t]*/.exec(line.text.slice(pos - line.from))![0].length;
+  return indent > 0 && within(state, pos + indent, 1, blocks);
 }
 
 /**
@@ -119,10 +123,22 @@ function refusal(state: EditorState, from: number, to: number): string | null {
 }
 
 /**
+ * The position of the text under the client point `at`, or null when the point is over none: over
+ * the sidebar, the title bar or a card, or below the end of the document. CodeMirror gives a position
+ * for any point, the start or the end of the document for one above or below the text and the
+ * nearest on a line for one beside it, so what is under the point is asked first. That holds for a
+ * scrolled document too, whose text goes on under the title bar.
+ */
+function textAt(view: EditorView, at: { x: number; y: number }): number | null {
+  const hit = view.root.elementFromPoint(at.x, at.y);
+  return hit && view.contentDOM.contains(hit) ? view.posAtCoords(at) : null;
+}
+
+/**
  * A spot for the links of images: where the client point `at` is in the text, if given and over
- * some, else the selection, which a paste replaces and a drop leaves. A point that no line covers,
- * in a margin or below the text, is no place: the caret is. Null when the document takes no image
- * there, which `notice` then says.
+ * some, else the selection, which a paste replaces and a drop leaves. A point that is over no text,
+ * in a margin, the sidebar or below the text, is no place: the caret is. Null when the document
+ * takes no image there, which `notice` then says.
  */
 export function imageSpot(
   view: EditorView,
@@ -133,7 +149,7 @@ export function imageSpot(
   if (!plugin) return null;
   const { state } = view;
   const { main } = state.selection;
-  const point = at ? view.posAtCoords(at) : null;
+  const point = at ? textAt(view, at) : null;
   // Cells selected are no one place for a link, and replacing them would take the table apart.
   const range =
     point != null
