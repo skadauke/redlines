@@ -396,6 +396,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
+  // Save for a document with no file opens its dialog in the folder Preferences name, if any.
+  newDocumentFolder: () => loadSettings().newDocumentFolder,
 });
 
 /** The document the runs were last told of. */

@@ -4,6 +4,7 @@
 import type { Editor } from '@redlines/editor';
 import { plugin as code } from '@redlines/code';
 import { plugin as find } from '@redlines/find';
+import { plugin as outline } from '@redlines/outline';
 import type {
   Host,
   HostDocumentData,
@@ -13,7 +14,7 @@ import type {
 } from '@redlines/plugin-api';
 
 /** The plugins the desktop app activates, in order. */
-export const DESKTOP_PLUGINS: readonly Plugin[] = [find, code];
+export const DESKTOP_PLUGINS: readonly Plugin[] = [find, code, outline];
 
 export interface ActivateOptions {
   /** Who is using the app; until it is known, plugins see a stand-in. */
