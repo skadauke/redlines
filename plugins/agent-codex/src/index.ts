@@ -176,12 +176,16 @@ export function newCodexState(reach?: RunReach): CodexState {
 
 /**
  * The files a command's output says it couldn't read: `cat: /path: Operation not permitted`, as the
- * system's tools say it, and `zsh: permission denied: /path`, as the shell does.
+ * system's tools say it, `rg: /path: Operation not permitted (os error 1)`, as ripgrep does, and
+ * `zsh: permission denied: /path`, as the shell does. This is best effort: it reads what a command
+ * printed, so a command that prints such a line is taken for one that was refused, and the newer
+ * models run most commands through a tool that makes no `command_execution` event at all, where
+ * nothing is seen. The limit holds either way; only the message is missed.
  */
 function refusals(output: string): { path: string; words: string }[] {
   const found: { path: string; words: string }[] = [];
   for (const match of output.matchAll(
-    /(?:^|\n)(?:[^:\n]+: )?(\/[^\n]*?): (Operation not permitted|Permission denied)[ \t]*(?=\n|$)/g,
+    /(?:^|\n)(?:[^:\n]+: )?(\/[^\n]*?): (Operation not permitted|Permission denied)(?: \(os error \d+\))?[ \t]*(?=\n|$)/g,
   )) {
     const [words, path] = [match[2], match[1]];
     if (path !== undefined && words !== undefined) found.push({ path, words });

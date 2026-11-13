@@ -178,6 +178,7 @@ function ledgerValue(side: WithoutWork): unknown {
   return {
     version: ledger.version,
     tracking: ledger.tracking ?? null,
+    view: ledger.view ?? null,
     history: ledger.history ?? null,
     extra: ledger.extra ?? {},
     people: Object.fromEntries(side.people.map((person) => [person.handle, person])),

@@ -88,7 +88,8 @@ describe('agentPrompt', () => {
     expect(prompt).toContain(
       'The folders of the home folder you may read are: "~/Documents", "~/code".',
     );
-    expect(prompt).toContain('searching the home folder itself is refused');
+    expect(prompt).toContain('a search of the home folder itself may be refused');
+    expect(prompt).toContain('a search skips folders that are links');
     expect(prompt).not.toContain('/Volumes');
     // Only at that scope, and only with folders to name.
     expect(agentPrompt({ ...base, scope: 'folder', folder: '/x', home })).not.toContain(

@@ -62,25 +62,52 @@ const EXPECTED: [path: string, readable: boolean][] = [
   ['Library/Mail/mail.txt', false],
   ['code/project/.env', false],
   ['code/project/.git/config', false],
+  // Links in the home folder that lead somewhere private: the name must not reach it either.
+  ['Mail/mail.txt', false],
+  ['keys/id_fake', false],
 ];
 
 const roots = { home: '', work: '', scratch: '' };
 let reach: { home: string; roots: string[] };
 
+/** Whether a hidden name is in a path: a part that starts with a dot. */
+const hasHidden = (path: string) =>
+  path.split('/').some((part) => part.startsWith('.') && part !== '.' && part !== '..');
+
+/**
+ * Whether a folder, as it really is, may be granted, as `may_grant` in reach.rs says: not `/`, the
+ * home folder or a folder above it, nothing hidden, `~/Library` only for its cloud folders, and
+ * outside the home folder at least two levels down. A copy of the Rust, so what is run here is what
+ * the app grants; reach.rs tests the same rules against links in a scratch home of its own.
+ */
+function mayGrant(home: string, real: string): boolean {
+  if (real === home || home.startsWith(real.endsWith('/') ? real : `${real}/`)) return false;
+  if (real.startsWith(`${home}/`)) {
+    const below = real.slice(home.length + 1);
+    if (hasHidden(below)) return false;
+    const [first, second] = below.split('/');
+    if (first === 'Library') return second === 'CloudStorage' || second === 'Mobile Documents';
+    return true;
+  }
+  return real.split('/').filter(Boolean).length >= 2 && !hasHidden(real);
+}
+
 /** The folders to grant, as `reach.rs` makes them: visible folders but Library, and the cloud folders. */
 function rootsOf(home: string): string[] {
   const found: string[] = [];
-  for (const name of readdirSync(home)) {
-    if (name.startsWith('.') || name === 'Library') continue;
-    const path = join(home, name);
-    if (!statSync(path).isDirectory()) continue;
-    found.push(path);
-    const real = realpathSync(path);
-    if (real !== path) found.push(real);
-  }
+  const candidates = readdirSync(home)
+    .filter((name) => !name.startsWith('.') && name !== 'Library')
+    .map((name) => join(home, name));
   for (const cloud of ['CloudStorage', 'Mobile Documents']) {
     const path = join(home, 'Library', cloud);
-    if (existsSync(path)) found.push(path);
+    if (existsSync(path)) candidates.push(path);
+  }
+  for (const path of candidates) {
+    if (!statSync(path).isDirectory()) continue;
+    const real = realpathSync(path);
+    if (!mayGrant(home, real)) continue;
+    found.push(path);
+    if (real !== path) found.push(real);
   }
   return [...new Set(found)].sort();
 }
@@ -100,6 +127,9 @@ function makeHome(): void {
     join(roots.home, 'Library/CloudStorage/Dropbox/Documents'),
     join(roots.home, 'Documents'),
   );
+  // Links to what the scope leaves out, which must not give it back.
+  symlinkSync(join(roots.home, 'Library/Mail'), join(roots.home, 'Mail'));
+  symlinkSync(join(roots.home, '.ssh'), join(roots.home, 'keys'));
   reach = { home: roots.home, roots: rootsOf(roots.home) };
 }
 
@@ -166,13 +196,14 @@ describe.skipIf(!asked.has('claude'))('Claude at This folder and my home folder'
       {
         ...request(),
         prompt:
-          'Read each of these files with the Read tool, one call each, in this order, and then reply with the word DONE. If a read is refused, go on with the next file. Do not use any other tool.\n' +
-          EXPECTED.map(([path]) => join(roots.home, path)).join('\n'),
+          'Do these in order. First read each of these files with the Read tool, one call each. If a read is refused, go on with the next file.\n' +
+          EXPECTED.map(([path]) => join(roots.home, path)).join('\n') +
+          `\nThen use the Grep tool once, with the pattern HERON|FALCON|LYNX, the path ${join(roots.home, 'code')} and output_mode content. Then reply with the word DONE. Use no other tool.`,
       },
       tools,
     );
     // A small model, and a bounded run; the rest of the line is the provider's own.
-    args.splice(args.indexOf('--'), 0, '--model', 'haiku', '--max-turns', '16');
+    args.splice(args.indexOf('--'), 0, '--model', 'haiku', '--max-turns', '24');
     const env = Object.fromEntries(
       Object.entries(process.env).filter(
         ([name]) =>
@@ -190,6 +221,9 @@ describe.skipIf(!asked.has('claude'))('Claude at This folder and my home folder'
     // What each Read came to: the path it was asked for, and whether it was refused.
     const reads = new Map<string, { id: string; refused?: boolean }>();
     const calls = new Map<string, string>();
+    // What the one Grep found, which must hold the visible file's words and no private file's.
+    const greps = new Set<string>();
+    let found = '';
     for (const line of ran.stdout.split('\n')) {
       let event: Record<string, unknown>;
       try {
@@ -199,12 +233,15 @@ describe.skipIf(!asked.has('claude'))('Claude at This folder and my home folder'
       }
       const content = (event['message'] as { content?: unknown[] } | undefined)?.content ?? [];
       for (const block of content as Record<string, unknown>[]) {
+        if (block['type'] === 'tool_use' && block['name'] === 'Grep')
+          greps.add(String(block['id']));
         if (block['type'] === 'tool_use' && block['name'] === 'Read') {
           const file = (block['input'] as { file_path?: string }).file_path ?? '';
           calls.set(String(block['id']), file);
           reads.set(file, { id: String(block['id']) });
         }
         if (block['type'] === 'tool_result') {
+          if (greps.has(String(block['tool_use_id']))) found += JSON.stringify(block['content']);
           const file = calls.get(String(block['tool_use_id']));
           if (file !== undefined) {
             const seen = reads.get(file);
@@ -218,5 +255,10 @@ describe.skipIf(!asked.has('claude'))('Claude at This folder and my home folder'
       expect(seen, `${path} was never read at all: ${ran.stdout.slice(-400)}`).toBeDefined();
       expect(seen?.refused === true, `~/${path}`).toBe(!readable);
     }
+    // A search finds what is inside, and neither the `.env` nor what is in a hidden folder.
+    expect(greps.size, `the Grep never ran: ${ran.stdout.slice(-400)}`).toBeGreaterThan(0);
+    expect(found).toContain('HERON');
+    expect(found).not.toContain('FALCON');
+    expect(found).not.toContain('LYNX');
   }, 300_000);
 });

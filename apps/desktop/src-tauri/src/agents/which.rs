@@ -91,11 +91,11 @@ impl Programs {
     /// The protected folders among those, which macOS isn't letting this program read: found by
     /// listing each, which is what makes macOS ask the person the first time.
     pub fn home_refused(&self) -> Vec<super::reach::Protected> {
-        let roots = self
-            .home_reach()
-            .map(|reach| reach.roots)
-            .unwrap_or_default();
-        let places = super::reach::protected(&self.home, &roots);
+        // The home folder as the reach names it, which is how the roots below it are written.
+        let Some(reach) = self.home_reach() else {
+            return Vec::new();
+        };
+        let places = super::reach::protected(Path::new(&reach.home), &reach.roots);
         super::reach::refused(&places)
     }
 
@@ -246,14 +246,31 @@ impl Programs {
         args: &[String],
         sockets: &[String],
     ) -> Result<(), String> {
-        let reach = self.home_reach();
+        let agent = self.agent_at(program)?;
         let known = Known {
             bundled: self.bundled.to_str().unwrap_or_default(),
             sockets,
             program_folders: &program_folders(program),
-            reach: reach.as_ref(),
+            reach: None,
         };
-        check_run_line(self.agent_at(program)?, args, &known)
+        let first = check_run_line(agent, args, &known);
+        if first.is_ok() {
+            return first;
+        }
+        // Only a line of the home folder scope is made from what is in the home folder, which is
+        // listed and resolved here, so that a start at any other scope never waits on it (a link
+        // into a mount that has gone, say).
+        match self.home_reach() {
+            Some(reach) => check_run_line(
+                agent,
+                args,
+                &Known {
+                    reach: Some(&reach),
+                    ..known
+                },
+            ),
+            None => first,
+        }
     }
 
     /// Whether `program` may be run to its end with these arguments: what `which` returned for its

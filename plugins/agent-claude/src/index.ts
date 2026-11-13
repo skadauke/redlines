@@ -83,7 +83,7 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     '--settings',
     JSON.stringify(
       wide
-        ? { disableAllHooks: true, permissions: { deny: claudeDenies(wide.home) } }
+        ? { disableAllHooks: true, permissions: { deny: claudeDenies(wide.home, wide.roots) } }
         : { disableAllHooks: true },
     ),
     '--append-system-prompt',
@@ -95,17 +95,22 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
 
 /**
  * The permission rules that refuse what This folder and my home folder leaves out: `.env` files
- * anywhere, and hidden files and folders anywhere below the home folder. `//` is a path from the
- * root of the disk. The rules are also in `claude_denies` of the rule that lets only this line
- * through (apps/desktop/src-tauri/src/agents/allowed.rs).
+ * anywhere, and hidden files and folders anywhere below the home folder and below each folder a
+ * link leads to outside it. `//` is a path from the root of the disk, so a base has no closing
+ * slash, which would make `///Users/...`. The rules are also in `claude_denies` of the rule that
+ * lets only this line through (apps/desktop/src-tauri/src/agents/allowed.rs).
  */
-export function claudeDenies(home: string): string[] {
+export function claudeDenies(home: string, roots: readonly string[] = []): string[] {
+  const bases = [home.replace(/\/+$/, '')];
+  for (const root of roots) {
+    const base = root.replace(/\/+$/, '');
+    if (!bases.some((known) => base === known || base.startsWith(`${known}/`))) bases.push(base);
+  }
   return [
     'Read(//**/.env)',
     'Read(//**/.env.*)',
     'Read(//**/*.env)',
-    `Read(/${home}/**/.*)`,
-    `Read(/${home}/**/.*/**)`,
+    ...bases.flatMap((base) => [`Read(/${base}/**/.*)`, `Read(/${base}/**/.*/**)`]),
   ];
 }
 

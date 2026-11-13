@@ -9,14 +9,18 @@
 //!   (Dropbox, Google Drive, OneDrive, Box) and `Mobile Documents` (iCloud Drive);
 //! - each one by its name and by the folder it really is when that is a link, because the agents'
 //!   limits look at where a link leads: a `~/Documents` that is a link into a Dropbox folder is
-//!   common, and a limit that named only the link, or only `~/Library`, would be wrong either way.
+//!   common, and a limit that named only the link, or only `~/Library`, would be wrong either way;
+//! - and only where a link leads to somewhere that is itself allowed: never `/` or a folder that
+//!   holds the home folder, never a hidden folder or `~/Library` but for its cloud folders, and, if
+//!   it leaves the home folder, nothing above two levels (`/Volumes/Backup`, not `/Volumes`), so
+//!   that a link can't put back what the rules leave out.
 //!
 //! The page asks for this list (`agent_home_reach`) to build an agent's command line, and the app
 //! checks that line against the list it makes itself when the agent starts (`allowed.rs`), so a
 //! window can't widen it. Nothing here reads a file or lists any folder but the home folder itself.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The folders of `~/Library` that hold people's documents, which stay readable though `~/Library`
 /// isn't: Dropbox, Google Drive, OneDrive and Box, and iCloud Drive.
@@ -35,21 +39,19 @@ pub struct HomeReach {
 /// Characters that mean something to a glob or to a table key in an agent's limits, and that a
 /// home folder's name would turn into another rule: such a home isn't one that this scope can be
 /// given for, and the run reads the folder only.
-const NOT_IN_A_HOME: [char; 7] = ['*', '?', '[', ']', '{', '}', '!'];
+const NOT_IN_A_HOME: [char; 9] = ['*', '?', '[', ']', '{', '}', '!', '"', '\\'];
 
 /// The reach at `home`, or nothing when there is none to give: no home folder, one whose name
-/// holds a character of a glob, or one with no folder to read.
+/// holds a character of a glob, or one with no folder to read. The home folder is named as it
+/// really is, since the agents' limits look at real paths: a home that is itself a link would
+/// otherwise be named by a path they never see.
 pub fn of(home: &Path) -> Option<HomeReach> {
-    let shown_home = shown(home)?;
+    let real_home = fs::canonicalize(home).ok()?;
+    let shown_home = shown(&real_home)?;
     if shown_home.chars().any(|c| NOT_IN_A_HOME.contains(&c)) {
         return None;
     }
-    let roots = roots(home);
-    // A folder whose name would be taken for a glob is left out too, rather than the rest.
-    let roots: Vec<String> = roots
-        .into_iter()
-        .filter(|root| !root.chars().any(|c| NOT_IN_A_HOME.contains(&c)))
-        .collect();
+    let roots = roots(&real_home);
     (!roots.is_empty()).then_some(HomeReach {
         home: shown_home,
         roots,
@@ -68,8 +70,43 @@ fn shown(path: &Path) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Whether a folder, as it really is, may be granted: not `/`, not the home folder, not a folder
+/// above it, not a hidden folder or one inside a hidden folder, not in `~/Library` but for its
+/// cloud folders and, where it is outside the home folder, at least two levels down, which is a
+/// volume (`/Volumes/Backup`) or a folder of one, and not `/Volumes`, `/Users` or `/opt`.
+/// `home` is the home folder as it really is.
+fn may_grant(home: &Path, real: &Path) -> bool {
+    // The disk's root, a folder above the home folder, and the home folder itself.
+    if home.starts_with(real) {
+        return false;
+    }
+    let hidden = |path: &Path| {
+        path.components().any(
+            |part| matches!(part, Component::Normal(name) if name.to_string_lossy().starts_with('.')),
+        )
+    };
+    match real.strip_prefix(home) {
+        Ok(below) => {
+            if hidden(below) {
+                return false;
+            }
+            let mut parts = below.components();
+            match parts.next() {
+                Some(Component::Normal(first)) if first == "Library" => matches!(
+                    parts.next(),
+                    Some(Component::Normal(second)) if CLOUD_FOLDERS.iter().any(|cloud| second == *cloud)
+                ),
+                _ => true,
+            }
+        }
+        Err(_) => real.components().count() >= 3 && !hidden(real),
+    }
+}
+
 /// The folders an agent may read in `home`, each once, in order: the name in the home folder and,
-/// when that is a link, where it leads. Empty when there is no home folder to read.
+/// when that is a link, where it leads. A link that leads somewhere that isn't allowed
+/// (`may_grant`) is left out with where it leads, since the name alone would reach it. Empty when
+/// there is no home folder to read. `home` is the home folder as it really is.
 pub fn roots(home: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(home) else {
         return Vec::new();
@@ -88,9 +125,26 @@ pub fn roots(home: &Path) -> Vec<String> {
 
     let mut roots = Vec::new();
     for path in found.into_iter().filter(|path| is_folder(path)) {
-        let real = fs::canonicalize(&path).ok();
+        // A folder whose real path can't be told isn't granted: it might lead anywhere.
+        let Ok(real) = fs::canonicalize(&path) else {
+            continue;
+        };
+        if !may_grant(home, &real) {
+            continue;
+        }
+        // A folder whose name would be taken for a glob is left out with where it leads, rather
+        // than the rest: the name alone would reach it.
+        if [path.as_path(), real.as_path()].iter().any(|each| {
+            each.to_string_lossy()
+                .chars()
+                .any(|c| NOT_IN_A_HOME.contains(&c))
+        }) {
+            continue;
+        }
         roots.extend(shown(&path));
-        roots.extend(real.filter(|real| *real != path).as_deref().and_then(shown));
+        if real != path {
+            roots.extend(shown(&real));
+        }
     }
     roots.sort();
     roots.dedup();
@@ -301,6 +355,140 @@ mod tests {
         assert!(named(&home.join("Library/CloudStorage")));
         assert!(!named(&home.join("Library")));
         assert!(!named(&home.join("Library/Mail")));
+    }
+
+    #[test]
+    fn only_a_folder_that_may_be_read_is_granted_whatever_leads_there() {
+        let home = Path::new("/Users/ada");
+        let may = |path: &str| may_grant(home, Path::new(path));
+        // In the home folder, and in the cloud folders of ~/Library.
+        for path in [
+            "/Users/ada/Documents",
+            "/Users/ada/Library/CloudStorage",
+            "/Users/ada/Library/CloudStorage/Dropbox/Docs",
+            "/Users/ada/Library/Mobile Documents/com~apple~CloudDocs",
+        ] {
+            assert!(may(path), "{path}");
+        }
+        // Left out by where it really is: the disk's root, what holds the home folder, the home
+        // folder itself, hidden folders and what is in them, and ~/Library but for its cloud
+        // folders.
+        for path in [
+            "/",
+            "/Users",
+            "/Users/ada",
+            "/Users/ada/.ssh",
+            "/Users/ada/.config/gh",
+            "/Users/ada/code/project/.git",
+            "/Users/ada/Library",
+            "/Users/ada/Library/Mail",
+            "/Users/ada/Library/Messages",
+            "/Users/ada/Library/Keychains",
+            "/Users/ada/Library/Application Support",
+        ] {
+            assert!(!may(path), "{path}");
+        }
+        // Outside the home folder: a volume or a folder of one, and the shared folder, but not
+        // the folder of volumes, another top-level folder, or what is hidden.
+        for path in [
+            "/Volumes/Backup",
+            "/Volumes/Backup/Notes",
+            "/Users/Shared/Docs",
+        ] {
+            assert!(may(path), "{path}");
+        }
+        for path in [
+            "/Volumes",
+            "/opt",
+            "/private",
+            "/etc",
+            "/Volumes/.timemachine",
+            "/Volumes/Backup/.Trashes",
+        ] {
+            assert!(!may(path), "{path}");
+        }
+        // A home folder on a volume: the volume above it is above it.
+        let on_a_volume = Path::new("/Volumes/Data/ada");
+        assert!(!may_grant(on_a_volume, Path::new("/Volumes/Data")));
+        assert!(!may_grant(on_a_volume, Path::new("/Volumes")));
+        assert!(may_grant(on_a_volume, Path::new("/Volumes/Data/ada/code")));
+        assert!(may_grant(on_a_volume, Path::new("/Volumes/Backup")));
+    }
+
+    #[test]
+    fn a_link_that_leads_somewhere_private_gets_neither_its_name_nor_where_it_leads() {
+        let temp = TempFolder::new("reach-private-links");
+        let outside = real(&temp);
+        let home = folder(&outside, "home");
+        folder(&home, "code/project/.git");
+        for name in ["Mail", "Messages"] {
+            folder(&home, &format!("Library/{name}"));
+            symlink(home.join("Library").join(name), home.join(name)).unwrap();
+        }
+        folder(&home, ".ssh");
+        symlink(home.join(".ssh"), home.join("keys")).unwrap();
+        symlink(home.join("code/project/.git"), home.join("git")).unwrap();
+        // Above the home folder, the home folder itself and the disk's root.
+        symlink(&outside, home.join("up")).unwrap();
+        symlink(&home, home.join("self")).unwrap();
+        symlink("/", home.join("disk")).unwrap();
+        // One that is fine, for contrast.
+        let documents = folder(&outside, "Dropbox/Documents");
+        symlink(&documents, home.join("Documents")).unwrap();
+
+        let mut expected: Vec<String> = [home.join("Documents"), home.join("code"), documents]
+            .map(|path| path.to_str().unwrap().to_owned())
+            .to_vec();
+        expected.sort();
+        assert_eq!(roots(&home), expected);
+    }
+
+    #[test]
+    fn a_cloud_folder_that_is_a_link_to_a_private_place_is_not_granted() {
+        let temp = TempFolder::new("reach-cloud-link");
+        let home = folder(&real(&temp), "home");
+        folder(&home, "code");
+        folder(&home, ".ssh");
+        folder(&home, "Library");
+        symlink(home.join(".ssh"), home.join("Library/CloudStorage")).unwrap();
+        assert_eq!(shown_roots(&home), ["~/code"]);
+    }
+
+    #[test]
+    fn the_home_folder_is_named_as_it_really_is() {
+        let temp = TempFolder::new("reach-home-link");
+        let outside = real(&temp);
+        let real_home = folder(&outside, "real-home");
+        folder(&real_home, "Documents");
+        let linked = outside.join("home-link");
+        symlink(&real_home, &linked).unwrap();
+        let reach = of(&linked).unwrap();
+        assert_eq!(reach.home, real_home.to_str().unwrap());
+        assert_eq!(
+            reach.roots,
+            [real_home.join("Documents").to_str().unwrap().to_owned()]
+        );
+        // A home folder that isn't there has no reach.
+        assert_eq!(of(&outside.join("nobody")), None);
+    }
+
+    #[test]
+    fn a_home_with_a_quote_or_a_backslash_in_its_name_has_no_reach() {
+        let temp = TempFolder::new("reach-odd-names");
+        let outside = real(&temp);
+        for name in ["a\"b", "a\\b", "a*b", "a{b}"] {
+            let home = folder(&outside, name);
+            folder(&home, "Documents");
+            assert_eq!(of(&home), None, "{name}");
+        }
+        // The same names, in a folder a link leads to, leave that folder out, and the link with
+        // it, and not the rest.
+        let home = folder(&outside, "home");
+        folder(&home, "Documents");
+        let odd = folder(&outside, "odd\"name");
+        symlink(&odd, home.join("Odd")).unwrap();
+        let reach = of(&home).unwrap();
+        assert_eq!(reach.roots, [home.join("Documents").to_str().unwrap()]);
     }
 
     fn names(places: &[Protected], home: &Path) -> Vec<(String, String)> {

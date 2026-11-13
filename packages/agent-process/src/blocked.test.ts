@@ -114,6 +114,39 @@ describe('blockedRead', () => {
     });
   });
 
+  it('says the agent’s settings for how Claude words a deny rule of its own or an organization’s', () => {
+    for (const words of [
+      'Permission to use Read has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools.',
+      'Permission to read /Users/ada/code/redlines/notes.md has been denied.',
+      '<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>',
+    ]) {
+      expect(blockedRead('/Users/ada/code/redlines/notes.md', words, folder)?.cause, words).toBe(
+        'settings',
+      );
+    }
+  });
+
+  it('says nothing for an ordinary failure: a file that isn’t there, a folder, one too large', () => {
+    for (const words of [
+      '<tool_use_error>File does not exist.</tool_use_error>',
+      "ENOENT: no such file or directory, open '/Users/ada/code/redlines/a.md'",
+      'EISDIR: illegal operation on a directory, read',
+      'EISDIR: is a directory',
+      'File content (31245 tokens) exceeds maximum allowed tokens (25000).',
+      'The file is too large to read.',
+      'cat: a.md: No such file or directory',
+    ]) {
+      expect(blockedRead('/Users/ada/code/redlines/a.md', words, folder), words).toBeUndefined();
+      expect(blockedRead('/Users/ada/code/a.md', words, home), words).toBeUndefined();
+    }
+  });
+
+  it('says nothing for words that tell of no refusal and no failed read', () => {
+    expect(
+      blockedRead('/Users/ada/code/redlines/a.md', 'Something odd happened.', folder),
+    ).toBeUndefined();
+  });
+
   it('gives the agent’s own words, on one line, for any other cause', () => {
     expect(
       blockedRead('/Users/ada/code/redlines/a.md', 'EIO: i/o error,\nread   timed out', folder),
@@ -145,6 +178,17 @@ describe('blockedRead', () => {
     expect(
       blockedRead('/Users/ada/code/app/.git/config', 'Operation not permitted', home),
     ).toBeUndefined();
+    // An `.env` file by any name is left out too, which `hidden` alone wouldn't tell.
+    for (const name of ['prod.env', 'prod.ENV', '.env.local', '.env']) {
+      expect(
+        blockedRead(`/Users/ada/code/app/${name}`, 'Permission to use Read has been denied', home),
+        name,
+      ).toBeUndefined();
+    }
+    // `env` as a name of its own isn't a file the scope leaves out.
+    expect(
+      blockedRead('/Users/ada/code/app/env', 'Permission to use Read has been denied', home)?.cause,
+    ).toBe('settings');
     // At This folder nothing is left out, so a refusal there is news.
     expect(
       blockedRead('/Users/ada/code/redlines/.env', 'EACCES: permission denied', folder)?.cause,
@@ -152,7 +196,11 @@ describe('blockedRead', () => {
   });
 
   it('keeps the words short', () => {
-    const long = blockedRead('/Users/ada/code/redlines/a.md', `weird ${'x '.repeat(300)}`, folder);
+    const long = blockedRead(
+      '/Users/ada/code/redlines/a.md',
+      `timed out ${'x '.repeat(300)}`,
+      folder,
+    );
     expect(long?.cause).toBe('other');
     expect(long?.words?.length).toBeLessThanOrEqual(200);
   });

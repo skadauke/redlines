@@ -164,8 +164,15 @@ fn macos_is_told_why_when_it_asks_to_let_redlines_read_a_folder_it_protects() {
             .get(key)
             .and_then(plist::Value::as_string)
             .unwrap_or("");
+        // True whenever Redlines itself touches the folder (its sidebar, opening and saving a
+        // document there), and not only when an agent reads: macOS shows it for every trigger.
         assert!(why.contains("agent"), "{key}: {why:?}");
-        assert!(why.contains("never changes"), "{key}: {why:?}");
+        assert!(
+            why.contains("opens and saves your documents"),
+            "{key}: {why:?}"
+        );
+        assert!(why.contains("changes only the document"), "{key}: {why:?}");
+        assert!(!why.contains("never changes them"), "{key}: {why:?}");
     }
 }
 

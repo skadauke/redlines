@@ -586,6 +586,57 @@ describe('what an agent may read', () => {
       expect(s.claude.requests[1]).toMatchObject({ scope: 'everything', folder: '/repo' });
     });
 
+    it('puts the question away as soon as it is answered, and holds the answer to what Preferences allow now', async () => {
+      const s = setup({ consent: {}, scope: 'everything' });
+      const runs = createRuns({
+        ...depsLike(s),
+        agents: createMacAgents([s.claude], s.relay),
+        settings: {
+          defaultScope: () => 'everything' as const,
+          consent: () => undefined,
+          setConsent: () => {},
+        },
+        homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+        // The wait for macOS never ends, to look at the line meanwhile.
+        homeAccess: () => new Promise(() => {}),
+      });
+      const thread = ask(s, 'Look here.');
+      runs.posted({ thread, id: thread, text: '@Claude look' });
+      await vi.waitFor(() => expect(runs.line(thread)?.kind).toBe('asking'));
+      runs.answerConsent(thread, 'everything');
+      // Not the question with buttons that do nothing: the run, which is under way.
+      await vi.waitFor(() => {
+        const line = runs.line(thread);
+        expect(line?.kind === 'running' && line.status).toBe('Checking what macOS allows…');
+      });
+      runs.stop(thread);
+
+      // Preferences are narrowed while the question is up, and the person allows the home folder:
+
+      // the run is at the folder, as Preferences allow it now.
+      const t = setup({ consent: {}, scope: 'everything' });
+      let narrowed: 'folder' | 'everything' = 'everything';
+      const again = createRuns({
+        ...depsLike(t),
+        agents: createMacAgents([t.claude], t.relay),
+        settings: {
+          defaultScope: () => narrowed,
+          consent: () => undefined,
+          setConsent: () => {},
+        },
+        homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+        homeAccess: () => Promise.resolve([]),
+      });
+      const second = ask(t, 'Look here.');
+      again.posted({ thread: second, id: second, text: '@Claude look' });
+      await vi.waitFor(() => expect(again.line(second)?.kind).toBe('asking'));
+      narrowed = 'folder';
+      again.answerConsent(second, 'everything');
+      await vi.waitFor(() => expect(t.claude.requests).toHaveLength(1));
+      expect(t.claude.requests[0]).toMatchObject({ scope: 'folder', folder: '/repo' });
+      expect(t.claude.requests[0]).not.toHaveProperty('homeRoots');
+    });
+
     it('gives the agent the folders the host lists, and only at this scope', async () => {
       const home = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
       ask(home, '@Claude look');
@@ -722,6 +773,92 @@ describe('what an agent may read', () => {
           expect(s.claude.requests[0]?.systemPrompt).not.toContain("macOS isn't letting");
           expect(s.blocked).toEqual([]);
         }
+      });
+
+      it('says it is checking what macOS allows while it waits, and goes on with the answer', async () => {
+        const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+        let answer: (found: { name: string; folder: string }[]) => void = () => {};
+        const runs = createRuns({
+          ...depsLike(s),
+          agents: createMacAgents([s.claude], s.relay),
+          settings: {
+            defaultScope: () => 'everything' as const,
+            consent: () => 'everything' as const,
+            setConsent: () => {},
+          },
+          homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+          homeAccess: () =>
+            new Promise((resolve) => {
+              answer = resolve;
+            }),
+        });
+        const thread = ask(s, 'Look here.');
+        runs.posted({ thread, id: thread, text: '@Claude look' });
+        await vi.waitFor(() => {
+          const line = runs.line(thread);
+          expect(line?.kind === 'running' && line.status).toBe('Checking what macOS allows…');
+        });
+        expect(s.claude.requests).toHaveLength(0);
+        answer([documents]);
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        expect(s.claude.requests[0]?.systemPrompt).toContain('"/Users/ada/Documents"');
+      });
+
+      it('does not wait for macOS for ever: after twenty seconds the run goes on', async () => {
+        vi.useFakeTimers();
+        try {
+          const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+          const runs = createRuns({
+            ...depsLike(s),
+            agents: createMacAgents([s.claude], s.relay),
+            settings: {
+              defaultScope: () => 'everything' as const,
+              consent: () => 'everything' as const,
+              setConsent: () => {},
+            },
+            homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+            // A folder on a volume that has gone never says.
+            homeAccess: () => new Promise(() => {}),
+          });
+          const thread = ask(s, 'Look here.');
+          runs.posted({ thread, id: thread, text: '@Claude look' });
+          await vi.advanceTimersByTimeAsync(19_000);
+          expect(s.claude.requests).toHaveLength(0);
+          await vi.advanceTimersByTimeAsync(1_500);
+          await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+          // Nothing is known of what macOS holds back, and nothing is told.
+          expect(s.claude.requests[0]).toMatchObject({ scope: 'everything' });
+          expect(s.blocked).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('lists the home folder again after macOS was asked, which the app checks the line against', async () => {
+        const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+        const reaches = [HOME_ROOTS, [...HOME_ROOTS, '/Users/ada/new-folder']];
+        let listed = 0;
+        const runs = createRuns({
+          ...depsLike(s),
+          agents: createMacAgents([s.claude], s.relay),
+          settings: {
+            defaultScope: () => 'everything' as const,
+            consent: () => 'everything' as const,
+            setConsent: () => {},
+          },
+          homeReach: () =>
+            Promise.resolve({
+              home: HOME,
+              roots: [...(reaches[Math.min(listed++, reaches.length - 1)] ?? [])],
+            }),
+          homeAccess: () => Promise.resolve([]),
+        });
+        const thread = ask(s, 'Look here.');
+        runs.posted({ thread, id: thread, text: '@Claude look' });
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        // A folder made while macOS's question was up is in what the agent is given.
+        expect(s.claude.requests[0]?.homeRoots).toEqual([...HOME_ROOTS, '/Users/ada/new-folder']);
+        expect(listed).toBe(2);
       });
 
       it('is not asked of a run that fell back to the folder, which reads none of it', async () => {

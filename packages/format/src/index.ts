@@ -1,7 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
-export { openerRange } from './blocks.ts';
+export { frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
@@ -49,6 +49,7 @@ export type {
 export { trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export { setTracking, setView } from './settings.ts';
 export { trackedEdit, trackedEdits } from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';

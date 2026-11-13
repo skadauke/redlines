@@ -743,6 +743,21 @@ describe('the Agents pane', () => {
       }
     });
 
+    it('is what a screen reader says with the choice, and says again when the choice changes', async () => {
+      const { deps, container } = setup({}, { agentScope: 'folder' });
+      renderAgentsPane(container, deps);
+      const select = row(container, 'What agents may read').querySelector('select')!;
+      const note = row(container, 'What agents may read').querySelector('.rl-pref-note')!;
+      // The note is the select's description, and a live region, which a change is heard from.
+      expect(note.id).not.toBe('');
+      expect(select.getAttribute('aria-describedby')).toBe(note.id);
+      expect(note.getAttribute('role')).toBe('status');
+      select.value = 'everything';
+      select.dispatchEvent(new Event('change'));
+      await settle();
+      expect(note.textContent).toContain('macOS may ask');
+    });
+
     it('says plainly what the home folder choice opens, leaves out, risks and asks of macOS', () => {
       const { deps, container } = setup({}, { agentScope: 'everything' });
       renderAgentsPane(container, deps);

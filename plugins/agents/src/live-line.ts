@@ -431,7 +431,7 @@ function asking(
     // risk of what someone else wrote in the document.
     const wider = block(
       'rl-ask-note',
-      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
+      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
     );
     wider.id = `${id}-home`;
     described.push(wider.id);
@@ -529,17 +529,19 @@ function noticeText({ agentName, message }: LiveLine & { kind: 'failed' }): stri
 
 /**
  * Whether `el` shows in the window: in the page, laid out, and not scrolled out of anything that
- * clips it.
+ * clips it. What clips it starts below its top padding: a title bar floating over the page keeps
+ * its room there, and a note scrolled up into it is under the bar.
  */
-function shownInWindow(el: HTMLElement): boolean {
+export function shownInWindow(el: HTMLElement): boolean {
   if (!el.isConnected || el.getClientRects().length === 0) return false;
   const rect = el.getBoundingClientRect();
   let top = Math.max(rect.top, 0);
   let bottom = Math.min(rect.bottom, window.innerHeight);
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    if (getComputedStyle(parent).overflowY === 'visible') continue;
+    const style = getComputedStyle(parent);
+    if (style.overflowY === 'visible') continue;
     const clip = parent.getBoundingClientRect();
-    top = Math.max(top, clip.top);
+    top = Math.max(top, clip.top + (Number.parseFloat(style.paddingTop) || 0));
     bottom = Math.min(bottom, clip.bottom);
   }
   return bottom > top;

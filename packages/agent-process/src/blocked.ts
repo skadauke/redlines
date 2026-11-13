@@ -59,6 +59,30 @@ function hidden(path: string): boolean {
   return path.split('/').some((part) => part.startsWith('.') && part !== '.' && part !== '..');
 }
 
+/**
+ * Whether the scope leaves a file out on purpose: a hidden one, or one inside a hidden folder, and
+ * an `.env` file by any name (`.env`, `.env.local`, `prod.env`).
+ */
+function leftOut(path: string): boolean {
+  return hidden(path) || /\.env$/i.test(path);
+}
+
+/**
+ * What the agent says of a read that failed for a reason that is no refusal: a file that isn't
+ * there, a folder, one too large to read. Models look for paths that aren't there all the time, and
+ * none of that is news.
+ */
+const NOT_A_REFUSAL =
+  /does not exist|doesn['\u2019]?t exist|no such file|\bENOENT\b|\bEISDIR\b|is a directory|illegal operation on a directory|too large|too big|exceeds|maximum allowed|not a regular file|\bENAMETOOLONG\b/i;
+
+/**
+ * What a read that couldn't be made says when it was refused, or failed as a read of a file that
+ * can't be had does (a cloud file that is downloading times out, a volume that is gone says so):
+ * what Redlines can tell the person of, and no more.
+ */
+const A_FAILED_READ =
+  /denied|not permitted|not allowed|refus|forbidden|blocked|not authori[sz]ed|unauthori[sz]ed|\bEPERM\b|\bEACCES\b|permission|outside|sandbox|\bEIO\b|i\/o error|\bETIMEDOUT\b|\bEDEADLK\b|\bECANCELED\b|timed out|timeout/i;
+
 /** The most characters of a refusal's words that are kept. */
 const WORDS = 200;
 
@@ -70,23 +94,33 @@ function oneLine(words: string): string {
 
 /**
  * What a refused read of `path` says, from the agent's own `words`, or undefined when it needs no
- * message: a read outside what the agent may read, which is a limit doing its work, and a hidden
- * file at This folder and my home folder, which that scope leaves out on purpose.
+ * message: a read outside what the agent may read, which is a limit doing its work, a hidden file
+ * or an `.env` file at This folder and my home folder, which that scope leaves out on purpose, and
+ * a failure that is no refusal (a file that isn't there, a folder, one too large to read).
  */
 export function blockedRead(path: string, words: string, run: RunReach): BlockedRead | undefined {
   if (!insideReach(path, run)) return undefined;
-  if (run.scope === 'everything' && hidden(path)) return undefined;
+  if (run.scope === 'everything' && leftOut(path)) return undefined;
+  // A file that isn't there, a folder, a file too large: an ordinary failure, and no news.
+  if (NOT_A_REFUSAL.test(words)) return undefined;
   // `Operation not permitted` is macOS's privacy where it asks, and anything else is the agent's.
   const place = protectedFolder(path);
   if (/\b(?:EPERM|operation not permitted)\b/i.test(words) && place !== undefined) {
     return { path, cause: 'privacy', place };
   }
   if (/\b(?:EACCES|permission denied)\b/i.test(words)) return { path, cause: 'permission' };
+  // The agent's own rules: Claude says "Permission to use Read has been denied", "Permission to
+  // read <path> has been denied" and "denied by your permission settings", and when a mode, rules
+  // or an organization's managed settings are the reason, says so.
   if (
-    /denied because .* (?:don't ask|dont ask) mode|permission rules?|managed settings/i.test(words)
+    /permission to \S+( .*)? has been denied|denied by your permission settings|denied because .* (?:don't ask|dont ask) mode|permission rules?|managed settings/i.test(
+      words,
+    )
   ) {
     return { path, cause: 'settings' };
   }
+  // What looks like no refusal and no failed read is not news.
+  if (!A_FAILED_READ.test(words)) return undefined;
   return { path, cause: 'other', words: oneLine(words) };
 }
 

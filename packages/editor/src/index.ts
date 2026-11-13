@@ -16,8 +16,11 @@ import { GFM } from '@lezer/markdown';
 import {
   accept as acceptChange,
   acceptMarks,
+  EditError,
   reject as rejectChange,
   rejectMarks,
+  setTracking as trackingInFile,
+  setView as viewInFile,
   type TextChange,
 } from '@redlines/format';
 import type {
@@ -45,11 +48,14 @@ import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
+  joinsNewestStep,
+  redoDepth,
   redoHasSomething,
   redoName,
   redoSayingWhy,
   refusedStep,
   startOver,
+  undoDepth,
   undoHistory,
   undoHasSomething,
   undoKeys,
@@ -58,6 +64,7 @@ import {
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
 import { tableReach } from './table/reach.ts';
@@ -73,6 +80,8 @@ import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import { breakCorrection } from './tracked/break-correction.ts';
+import { correctText } from './tracked/corrections.ts';
+import { wordAt } from './tracked/word-at.ts';
 import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
@@ -192,6 +201,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let author = options.author;
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
+  const saveTracking = options.saveTracking ?? false;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   let destroyed = false;
@@ -216,6 +226,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     clipboard(),
     caretKeys,
     markdownPreview(),
+    options.openLink ? linkOpening({ open: options.openLink }) : [],
     tableLayout(),
     tableGhosts(),
     tableStops(),
@@ -393,7 +404,66 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
-    setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
+    setTracking: (on, switched) => {
+      if (!(switched?.inFile ?? saveTracking)) {
+        view.dispatch({ effects: setTrackingEffect.of(on) });
+        return true;
+      }
+      let changes: TextChange[];
+      try {
+        changes = trackingInFile(view.state.doc.toString(), on);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        // The file can't take the setting: Track Changes stays as it was, and says why.
+        options.onNotice?.(error.message);
+        return false;
+      }
+      view.dispatch({
+        changes,
+        effects: setTrackingEffect.of(on),
+        // A step of its own, apart from the typing around it, that Undo takes back with Track
+        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite, and
+        // not an edit in the caret's place, where it would open an empty paragraph that the file
+        // never gets (as a reload isn't).
+        annotations: [
+          trackedEditAnnotation.of(true),
+          Transaction.remote.of(true),
+          isolateHistory.of('full'),
+        ],
+        userEvent: 'track.switch',
+      });
+      return true;
+    },
+    recordView: () => {
+      const shown = view.state.field(viewModeField);
+      // Raw is never saved: the file keeps the view it had. Simple is a markup view, as Redlines is.
+      if (shown === 'raw') return;
+      const changes = viewInFile(
+        view.state.doc.toString(),
+        shown === 'clean' ? 'clean' : 'redlines',
+      );
+      if (!changes.length) return;
+      const { state } = view;
+      const joins = undoDepth(state) > 0;
+      // With every step taken back there is none to join, and a change outside the history would
+      // put the ledger out of step with the steps to redo: the next save records the view.
+      if (!joins && redoDepth(state) > 0) return;
+      view.dispatch({
+        changes,
+        // Joined to the newest step, so that Undo gives it back with the step, and no step is
+        // left that undoes nothing a person can see (steps to redo, which a change would put out
+        // of step, are dropped, as by any edit); with no step at all, outside the history, which
+        // has none to put out of step. What comes after is a step of its own. Not an edit in the
+        // caret's place, which would open an empty paragraph that the file never gets.
+        annotations: [
+          trackedEditAnnotation.of(true),
+          Transaction.remote.of(true),
+          ...(joins
+            ? [joinsNewestStep.of(true), isolateHistory.of('after')]
+            : [Transaction.addToHistory.of(false)]),
+        ],
+      });
+    },
     setTyping: (next: EditorTyping) => {
       typing = next;
       view.dispatch({ effects: typingCompartment.reconfigure(typingNow()) });
@@ -472,6 +542,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       plainPastes.add(event);
       view.contentDOM.dispatchEvent(event);
     },
+    wordAt: (pos) => wordAt(view, pos),
+    pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
     focus: () => view.focus(),
     destroy: () => {

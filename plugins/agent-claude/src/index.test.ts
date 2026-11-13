@@ -169,18 +169,37 @@ describe('claudeArgs at This folder and my home folder', () => {
       permissions: { deny: string[] };
     };
     expect(settings.disableAllHooks).toBe(true);
-    expect(settings.permissions.deny).toEqual(claudeDenies(home));
-    expect(claudeDenies(home)).toEqual([
+    expect(settings.permissions.deny).toEqual(claudeDenies(home, roots));
+    expect(claudeDenies(home, roots)).toEqual([
       'Read(//**/.env)',
       'Read(//**/.env.*)',
       'Read(//**/*.env)',
       'Read(//Users/ada/**/.*)',
       'Read(//Users/ada/**/.*/**)',
+      // A folder a link leads to outside the home folder: its hidden names are left out too.
+      'Read(//Volumes/Backup/Notes/**/.*)',
+      'Read(//Volumes/Backup/Notes/**/.*/**)',
     ]);
     // Written as the Rust side writes it, with its keys in this order and no spaces.
     expect(valueOf(args, '--settings')).toBe(
-      '{"disableAllHooks":true,"permissions":{"deny":["Read(//**/.env)","Read(//**/.env.*)","Read(//**/*.env)","Read(//Users/ada/**/.*)","Read(//Users/ada/**/.*/**)"]}}',
+      '{"disableAllHooks":true,"permissions":{"deny":["Read(//**/.env)","Read(//**/.env.*)","Read(//**/*.env)","Read(//Users/ada/**/.*)","Read(//Users/ada/**/.*/**)","Read(//Volumes/Backup/Notes/**/.*)","Read(//Volumes/Backup/Notes/**/.*/**)"]}}',
     );
+  });
+
+  it('writes a rule for each base once, and never with a closing slash', () => {
+    // A closing slash would make `///Users/ada//**/.*`, which names nothing.
+    expect(
+      claudeDenies('/Users/ada/', ['/Users/ada/code/', '/Volumes/Backup/', '/Volumes/Backup/x']),
+    ).toEqual([
+      'Read(//**/.env)',
+      'Read(//**/.env.*)',
+      'Read(//**/*.env)',
+      'Read(//Users/ada/**/.*)',
+      'Read(//Users/ada/**/.*/**)',
+      'Read(//Volumes/Backup/**/.*)',
+      'Read(//Volumes/Backup/**/.*/**)',
+    ]);
+    expect(claudeDenies('/Users/ada')).toHaveLength(5);
   });
 
   it('is the folder’s line where the request names no home folder, or none to grant', () => {

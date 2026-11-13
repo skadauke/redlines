@@ -257,7 +257,8 @@ class FindBar {
         const win = view.dom.ownerDocument.defaultView ?? window;
         const scroller = view.scrollDOM.getBoundingClientRect();
         return {
-          top: Math.max(scroller.top, 0) + BAR_INSET,
+          // Below what the host floats over the top of the editor, such as a title bar.
+          top: Math.max(scroller.top, hostRoom(view)) + BAR_INSET,
           right: win.innerWidth - Math.min(scroller.right, win.innerWidth) + BAR_INSET,
         };
       },
@@ -274,14 +275,27 @@ class FindBar {
   }
 }
 
+/**
+ * The room the host keeps at the top of the editor for itself, which text is scrolled clear of: a
+ * title bar that floats over the page, say. What the other scroll margins ask for, not the bar's
+ * own, which sits below it.
+ */
+function hostRoom(view: EditorView): number {
+  let room = 0;
+  for (const margins of view.state.facet(EditorView.scrollMargins)) {
+    if (margins !== barRoom) room = Math.max(room, margins(view)?.top ?? 0);
+  }
+  return room;
+}
+
+/** While the bar is open, the room it and the host's keep above the text the editor scrolls to. */
+function barRoom(view: EditorView) {
+  return findState(view.state).open ? { top: hostRoom(view) + BAR_ROOM } : null;
+}
+
 /** The bar as an extension, and a way to put the caret in its find box. */
 export function findBar(editor: Editor): { extension: Extension; focus(replace?: boolean): void } {
   const plugin = ViewPlugin.define((view) => new FindBar(view, editor));
-  const extension = [
-    findField,
-    plugin,
-    findTheme,
-    EditorView.scrollMargins.of((view) => (findState(view.state).open ? { top: BAR_ROOM } : null)),
-  ];
+  const extension = [findField, plugin, findTheme, EditorView.scrollMargins.of(barRoom)];
   return { extension, focus: (replace) => editor.view.plugin(plugin)?.focus(replace) };
 }
