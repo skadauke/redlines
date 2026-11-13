@@ -1420,9 +1420,11 @@ folder, and the pane says plainly what the choice means:
   Documents`: iCloud Drive), where people's documents live, often behind a link in the home
   folder. The limits name both a link and the folder it leads to, and a link is followed only to
   where it may be: never to `/`, to the home folder or to a folder above it, to a hidden folder, or
-  into `~/Library` but for its cloud folders, and, where it leaves the home folder, nothing above
-  two levels (`/Volumes/Backup`, not `/Volumes`). A link that leads anywhere else gets neither its
-  name nor its target, since the name alone would reach it. The home folder is named as it really
+  into `~/Library` but for its cloud folders, and, where it leaves the home folder, only to a
+  volume or what is in one (`/Volumes/Backup`, not `/Volumes`) or to the shared folder
+  (`/Users/Shared`): the system's own folders are the same files as the home folder's under another
+  name (`/System/Volumes/Data/Users/...`), or not a person's. A link that leads anywhere else gets
+  neither its name nor its target, since the name alone would reach it. The home folder is named as it really
   is, the agents' limits looking at real paths, and a hidden name is left out below each folder a
   link leads to outside it too. A home folder whose name holds a character of a glob (or a quote or
   a backslash), or that holds no folder to read, gives the folder alone, and the line says so.

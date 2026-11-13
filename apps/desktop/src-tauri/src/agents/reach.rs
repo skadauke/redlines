@@ -12,8 +12,8 @@
 //!   common, and a limit that named only the link, or only `~/Library`, would be wrong either way;
 //! - and only where a link leads to somewhere that is itself allowed: never `/` or a folder that
 //!   holds the home folder, never a hidden folder or `~/Library` but for its cloud folders, and, if
-//!   it leaves the home folder, nothing above two levels (`/Volumes/Backup`, not `/Volumes`), so
-//!   that a link can't put back what the rules leave out.
+//!   it leaves the home folder, only to a volume or what is in one (`/Volumes/Backup`, not
+//!   `/Volumes`) or to `/Users/Shared`, so that a link can't put back what the rules leave out.
 //!
 //! The page asks for this list (`agent_home_reach`) to build an agent's command line, and the app
 //! checks that line against the list it makes itself when the agent starts (`allowed.rs`), so a
@@ -70,12 +70,38 @@ fn shown(path: &Path) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Where a link may lead outside the home folder, and nowhere else: strictly below a folder of
+/// volumes (`/Volumes/Backup`, and what is in it, not `/Volumes`), and the shared folder itself or
+/// what is in it. Every other place outside the home folder is the system's, however deep: the
+/// firmlink to the Data volume (`/System/Volumes/Data/Users/ada/Library/Mail` is the same file as
+/// `~/Library/Mail`, which `canonicalize` doesn't fold), `/private/etc`, `/private/var`, `/usr`.
+struct Outside {
+    below: Vec<PathBuf>,
+    within: Vec<PathBuf>,
+}
+
+impl Outside {
+    /// The places a person's own documents can be outside the home folder.
+    fn volumes() -> Self {
+        Outside {
+            below: vec![PathBuf::from("/Volumes")],
+            within: vec![PathBuf::from("/Users/Shared")],
+        }
+    }
+
+    fn allows(&self, real: &Path) -> bool {
+        self.below.iter().any(|base| {
+            real.strip_prefix(base)
+                .is_ok_and(|rest| rest.components().next().is_some())
+        }) || self.within.iter().any(|base| real.starts_with(base))
+    }
+}
+
 /// Whether a folder, as it really is, may be granted: not `/`, not the home folder, not a folder
 /// above it, not a hidden folder or one inside a hidden folder, not in `~/Library` but for its
-/// cloud folders and, where it is outside the home folder, at least two levels down, which is a
-/// volume (`/Volumes/Backup`) or a folder of one, and not `/Volumes`, `/Users` or `/opt`.
-/// `home` is the home folder as it really is.
-fn may_grant(home: &Path, real: &Path) -> bool {
+/// cloud folders and, where it is outside the home folder, only where `outside` says. `home` is the
+/// home folder as it really is.
+fn may_grant(home: &Path, real: &Path, outside: &Outside) -> bool {
     // The disk's root, a folder above the home folder, and the home folder itself.
     if home.starts_with(real) {
         return false;
@@ -99,7 +125,7 @@ fn may_grant(home: &Path, real: &Path) -> bool {
                 _ => true,
             }
         }
-        Err(_) => real.components().count() >= 3 && !hidden(real),
+        Err(_) => outside.allows(real) && !hidden(real),
     }
 }
 
@@ -108,6 +134,11 @@ fn may_grant(home: &Path, real: &Path) -> bool {
 /// (`may_grant`) is left out with where it leads, since the name alone would reach it. Empty when
 /// there is no home folder to read. `home` is the home folder as it really is.
 pub fn roots(home: &Path) -> Vec<String> {
+    roots_in(home, &Outside::volumes())
+}
+
+/// `roots`, with `outside` the places a link may lead outside the home folder.
+fn roots_in(home: &Path, outside: &Outside) -> Vec<String> {
     let Ok(entries) = fs::read_dir(home) else {
         return Vec::new();
     };
@@ -129,7 +160,7 @@ pub fn roots(home: &Path) -> Vec<String> {
         let Ok(real) = fs::canonicalize(&path) else {
             continue;
         };
-        if !may_grant(home, &real) {
+        if !may_grant(home, &real, outside) {
             continue;
         }
         // A folder whose name would be taken for a glob is left out with where it leads, rather
@@ -235,6 +266,15 @@ mod tests {
         fs::canonicalize(temp.path()).unwrap()
     }
 
+    /// Places a link may lead outside the home folder, for a test whose folders are in a temp
+    /// folder and not on a volume: everything below `dir`.
+    fn outside_at(dir: &Path) -> Outside {
+        Outside {
+            below: vec![dir.to_owned()],
+            within: Vec::new(),
+        }
+    }
+
     fn folder(at: &Path, name: &str) -> PathBuf {
         let path = at.join(name);
         fs::create_dir_all(&path).unwrap();
@@ -336,8 +376,13 @@ mod tests {
                 .map(|path| path.to_str().unwrap().to_owned())
                 .to_vec();
         expected.sort();
-        // Both the link and the folder it leads to.
-        assert_eq!(roots(&home), expected);
+        // Both the link and the folder it leads to, where that is a place a link may lead.
+        assert_eq!(roots_in(&home, &outside_at(&outside)), expected);
+        // Anywhere else outside the home folder it is neither: the name alone would reach it.
+        assert_eq!(
+            roots(&home),
+            [home.join("code").to_str().unwrap().to_owned()]
+        );
     }
 
     #[test]
@@ -360,7 +405,8 @@ mod tests {
     #[test]
     fn only_a_folder_that_may_be_read_is_granted_whatever_leads_there() {
         let home = Path::new("/Users/ada");
-        let may = |path: &str| may_grant(home, Path::new(path));
+        let outside = Outside::volumes();
+        let may = |path: &str| may_grant(home, Path::new(path), &outside);
         // In the home folder, and in the cloud folders of ~/Library.
         for path in [
             "/Users/ada/Documents",
@@ -409,10 +455,23 @@ mod tests {
         }
         // A home folder on a volume: the volume above it is above it.
         let on_a_volume = Path::new("/Volumes/Data/ada");
-        assert!(!may_grant(on_a_volume, Path::new("/Volumes/Data")));
-        assert!(!may_grant(on_a_volume, Path::new("/Volumes")));
-        assert!(may_grant(on_a_volume, Path::new("/Volumes/Data/ada/code")));
-        assert!(may_grant(on_a_volume, Path::new("/Volumes/Backup")));
+        let outside = Outside::volumes();
+        assert!(!may_grant(
+            on_a_volume,
+            Path::new("/Volumes/Data"),
+            &outside
+        ));
+        assert!(!may_grant(on_a_volume, Path::new("/Volumes"), &outside));
+        assert!(may_grant(
+            on_a_volume,
+            Path::new("/Volumes/Data/ada/code"),
+            &outside
+        ));
+        assert!(may_grant(
+            on_a_volume,
+            Path::new("/Volumes/Backup"),
+            &outside
+        ));
     }
 
     #[test]
@@ -440,7 +499,39 @@ mod tests {
             .map(|path| path.to_str().unwrap().to_owned())
             .to_vec();
         expected.sort();
-        assert_eq!(roots(&home), expected);
+        assert_eq!(roots_in(&home, &outside_at(&outside)), expected);
+    }
+
+    #[test]
+    fn a_link_to_the_systems_own_folders_is_not_followed_however_deep() {
+        // `/System/Volumes/Data/...` is the same file as the one under `/`, which `canonicalize`
+        // doesn't fold, and `/private/etc`, `/usr/local` and `/opt/homebrew` are the system's.
+        let home = Path::new("/Users/ada");
+        let outside = Outside::volumes();
+        for path in [
+            "/System/Volumes/Data/Users/ada/Library/Mail",
+            "/System/Volumes/Data/Users/ada/Library",
+            "/System/Volumes/Data",
+            "/private/etc",
+            "/private/var/db",
+            "/usr/local",
+            "/opt/homebrew",
+            "/Library/Keychains",
+            "/Applications/Redlines.app",
+            "/Volumes",
+            "/Users",
+            "/Users/bob",
+        ] {
+            assert!(!may_grant(home, Path::new(path), &outside), "{path}");
+        }
+        for path in [
+            "/Volumes/Backup",
+            "/Volumes/Backup/Notes",
+            "/Users/Shared",
+            "/Users/Shared/Docs",
+        ] {
+            assert!(may_grant(home, Path::new(path), &outside), "{path}");
+        }
     }
 
     #[test]
@@ -487,8 +578,10 @@ mod tests {
         folder(&home, "Documents");
         let odd = folder(&outside, "odd\"name");
         symlink(&odd, home.join("Odd")).unwrap();
-        let reach = of(&home).unwrap();
-        assert_eq!(reach.roots, [home.join("Documents").to_str().unwrap()]);
+        assert_eq!(
+            roots_in(&home, &outside_at(&outside)),
+            [home.join("Documents").to_str().unwrap()]
+        );
     }
 
     fn names(places: &[Protected], home: &Path) -> Vec<(String, String)> {
