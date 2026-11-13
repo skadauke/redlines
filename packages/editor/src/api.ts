@@ -137,11 +137,16 @@ export interface MetPerson {
 export interface ImageSpot {
   /**
    * Writes a link to each path, `![](path)` with the path as a link destination needs it written,
-   * at the spot: one after another, a space apart, in place of the text the selection held when a
-   * paste took the spot. It is the person's own insertion, tracked while Track Changes is on, and
-   * one step for Undo, which the Edit menu calls Insert Image. Paths are as the document should
-   * reach the files, relative to it (`images/shot.png`). A spot is used once. Returns whether the
-   * links went in; when the document refuses them, the reason is said through `onNotice`.
+   * at the spot: one after another, a space apart, and nothing else. They take the place of the text
+   * the selection held when a paste took the spot, but only while it is all still there: text
+   * written in it meanwhile stays, and the links go after it; text written at its edges stays
+   * outside. For a spot that held no text, the links go before what was written at it meanwhile. It
+   * is the person's own insertion, tracked while Track Changes is on, and one step for Undo, which
+   * the Edit menu calls Insert Image. The caret goes to the end of the links if it is still at the
+   * spot, and stays where the person put it otherwise; the preview draws the image all the same.
+   * Paths are as the document should reach the files, relative to it (`images/shot.png`). A spot is
+   * used once. Returns whether the links went in: when the document refuses them, or was replaced
+   * since, so that the spot is gone, the reason is said through `onNotice`.
    */
   insert(paths: readonly string[]): boolean;
   /** Lets the spot go, when no image will be added. A spot that was used is let go already. */

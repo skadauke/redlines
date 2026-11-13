@@ -147,7 +147,7 @@ function fontsOf(view: EditorView): FontStacks {
 }
 
 /** Whether `pos` is in code, where a paste is text as it is. */
-export function inCode(state: EditorState, pos: number): boolean {
+function inCode(state: EditorState, pos: number): boolean {
   for (
     let node = syntaxTree(state).resolveInner(pos, -1) as { name: string; parent: unknown } | null;
     node;

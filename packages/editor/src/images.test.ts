@@ -5,7 +5,7 @@ import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type ImageSpot } from './index.ts';
 import { previewDecorations } from './preview/decorations.ts';
-import { IMAGE_IN_CODE, imageFiles, imageLink } from './images.ts';
+import { DOCUMENT_CHANGED, IMAGE_IN_CODE, imageFiles, imageLink } from './images.ts';
 import { RAW_READ_ONLY } from './tracked/typing.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -113,8 +113,8 @@ describe('images pasted into the editor', () => {
     expect(editor.getDoc()).toBe('One two\n');
     expect(given[0]!.spot.insert(['images/shot.png'])).toBe(true);
     expect(editor.getDoc()).toBe('One![](images/shot.png) two\n');
-    // The caret is past the space after the link, off it, so that the image shows.
-    expect(editor.view.state.selection.main.head).toBe(3 + '![](images/shot.png)'.length + 1);
+    // The caret is at the end of the links, as after any paste.
+    expect(editor.view.state.selection.main.head).toBe(3 + '![](images/shot.png)'.length);
   });
 
   it('replaces the selection, as pasting does', () => {
@@ -189,7 +189,8 @@ describe('images dropped on the editor', () => {
     const finding = pointsAt(editor, 8);
     const event = dropFiles(editor, [png('plan.png')], { x: 40, y: 12 });
     expect(event.defaultPrevented).toBe(true);
-    expect(finding).toHaveBeenCalledWith({ x: 40, y: 12 }, false);
+    // Precisely: a point that no line covers, in a margin or below the text, is no position.
+    expect(finding).toHaveBeenCalledWith({ x: 40, y: 12 });
     expect(given).toHaveLength(1);
     // A dropped file keeps its name: it is a file, not a clipboard's data.
     expect(given[0]!.pasted).toBe(false);
@@ -228,7 +229,7 @@ describe('images dropped on the editor', () => {
 describe('after the links are written', () => {
   /** A spot at `at` in `doc`, as a paste there gives one. */
   function spotAt(doc: string, at: number, options: Partial<EditorOptions> = {}) {
-    const made = load(doc, options);
+    const made = load(doc, { resolveImage: (src) => `app://${src}`, ...options });
     made.editor.view.dispatch({ selection: { anchor: at } });
     pasteFiles(made.editor, [png()]);
     return { ...made, spot: made.given[0]!.spot };
@@ -241,37 +242,92 @@ describe('after the links are written', () => {
     const { state } = editor.view;
     previewDecorations(state).between(0, state.doc.length, (_from, _to, value) => {
       const widget = (value.spec as { widget?: WidgetType }).widget;
-      if (widget?.toDOM(editor.view).classList.contains('rl-image')) found++;
+      const dom = widget?.toDOM(editor.view);
+      // An image that is not found draws its alt text under the same class.
+      if (dom?.classList.contains('rl-image') && !dom.classList.contains('rl-image-missing')) {
+        found++;
+      }
     });
     return found;
   }
 
-  it('has the caret past the link, so that the preview draws the image at once', () => {
-    const { editor, spot } = spotAt('One two\n', 3, { resolveImage: (src) => `app://${src}` });
+  it('leaves the caret at the end of the links, where the preview draws the image all the same', () => {
+    const { editor, spot } = spotAt('One two\n', 3);
     spot.insert(['shot.png']);
+    expect(editor.getDoc()).toBe('One![](shot.png) two\n');
+    expect(editor.view.state.selection.main.head).toBe('One![](shot.png)'.length);
+    // The preview draws an image except where the caret is on it, and a link just added is the
+    // one exception, for the caret has nowhere else to be.
     expect(drawn(editor)).toBe(1);
   });
 
-  it('has the caret on the next line when the links end a line', () => {
-    const { editor, spot } = spotAt('One\nTwo\n', 3);
-    spot.insert(['shot.png']);
-    expect(editor.getDoc()).toBe('One![](shot.png)\nTwo\n');
-    expect(editor.view.state.selection.main.head).toBe('One![](shot.png)\n'.length);
+  it('draws it where text follows the links directly, and at the start of a line', () => {
+    const joined = spotAt('Onetwo\n', 3);
+    joined.spot.insert(['shot.png']);
+    // Nothing is written that the person didn't paste.
+    expect(joined.editor.getDoc()).toBe('One![](shot.png)two\n');
+    expect(drawn(joined.editor)).toBe(1);
+    const first = spotAt('Hello\n', 0);
+    first.spot.insert(['shot.png']);
+    expect(first.editor.getDoc()).toBe('![](shot.png)Hello\n');
+    expect(drawn(first.editor)).toBe(1);
   });
 
-  it('ends the document with a line break after them, where the caret goes, when they end it', () => {
-    const { editor, spot } = spotAt('One\n', 4, { resolveImage: (src) => `app://${src}` });
+  it('draws it at the end of a line, and of the document, with nothing written after the links', () => {
+    const line = spotAt('One\nTwo\n', 3);
+    line.spot.insert(['shot.png']);
+    expect(line.editor.getDoc()).toBe('One![](shot.png)\nTwo\n');
+    expect(drawn(line.editor)).toBe(1);
+    const end = spotAt('One\n', 4);
+    end.spot.insert(['shot.png']);
+    expect(end.editor.getDoc()).toBe('One\n![](shot.png)');
+    expect(end.editor.view.state.selection.main.head).toBe(end.editor.view.state.doc.length);
+    expect(drawn(end.editor)).toBe(1);
+  });
+
+  it.each([
+    ['a blank line before the ledger', 'One\n\n'],
+    ['the ledger on the next line', 'One\n'],
+  ])(
+    'draws it at the end of the last line of a file that ends with its ledger, with %s',
+    (_, body) => {
+      // Nothing can follow the links there: the body ends with its last line.
+      const LEDGER = '<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\n-->\n';
+      const { editor, spot } = spotAt(body + LEDGER, 3);
+      spot.insert(['shot.png']);
+      expect(editor.view.state.selection.main.head).toBe('One![](shot.png)'.length);
+      expect(drawn(editor)).toBe(1);
+    },
+  );
+
+  it('shows the source when the caret moves onto the link, and the image again once it moves off', () => {
+    const { editor, spot } = spotAt('One two\n', 3);
     spot.insert(['shot.png']);
-    expect(editor.getDoc()).toBe('One\n![](shot.png)\n');
-    expect(editor.view.state.selection.main.head).toBe(editor.view.state.doc.length);
+    const end = editor.view.state.selection.main.head;
+    editor.view.dispatch({ selection: { anchor: end - 1 } });
+    expect(drawn(editor)).toBe(0);
+    editor.view.dispatch({ selection: { anchor: end + 2 } });
+    expect(drawn(editor)).toBe(1);
+    // And back to its end: the exception was for the link as it was added, and is over.
+    editor.view.dispatch({ selection: { anchor: end } });
+    expect(drawn(editor)).toBe(0);
+  });
+
+  it('draws it still when text is typed after it, which leaves the caret off the link', () => {
+    const { editor, spot } = spotAt('One two\n', 3);
+    spot.insert(['shot.png']);
+    const end = editor.view.state.selection.main.head;
+    // As typing does: the text, and the caret after it.
+    editor.view.dispatch({
+      changes: { from: end, insert: '!' },
+      selection: { anchor: end + 1 },
+      userEvent: 'input.type',
+    });
     expect(drawn(editor)).toBe(1);
   });
 
   it('does the same while Track Changes is on, which is the person’s own change and breaks no marker rule', () => {
-    const { editor, spot } = spotAt('One\n', 4, {
-      tracking: true,
-      resolveImage: (src) => `app://${src}`,
-    });
+    const { editor, spot } = spotAt('One\n', 4, { tracking: true });
     spot.insert(['shot.png']);
     // After the last line break, the format writes the insertion as it writes typing there.
     const marks = editor.getParsed().marks;
@@ -279,17 +335,20 @@ describe('after the links are written', () => {
     expect(new Set(marks.map((mark) => mark.entry.by))).toEqual(new Set(['ada']));
     expect(editor.getDoc()).toContain('![](shot.png)');
     expect(parse(editor.getDoc()).warnings.map((warning) => warning.code)).toEqual([]);
-    expect(editor.view.state.selection.main.head).toBeGreaterThan(
-      editor.getDoc().indexOf('shot.png') + 'shot.png)'.length,
-    );
     expect(drawn(editor)).toBe(1);
   });
 
-  it('keeps the caret on the link where a letter follows it, which is where the caret is', () => {
-    const { editor, spot } = spotAt('Onetwo\n', 3);
+  it('writes no line break where the links end a table, which would make a break tag in its cell', () => {
+    const { editor, spot } = spotAt('a | b\n- | -\nc | d', 'a | b\n- | -\nc | d'.length);
+    spot.insert(['a b.png']);
+    expect(editor.getDoc()).toBe('a | b\n- | -\nc | d![](a%20b.png)');
+    expect(editor.getDoc()).not.toContain('<br>');
+  });
+
+  it.each(['clean', 'simple', 'redlines'] as const)('writes the links in the %s view', (view) => {
+    const { editor, spot } = spotAt('One two\n', 3, { view });
     spot.insert(['shot.png']);
-    expect(editor.getDoc()).toBe('One![](shot.png)two\n');
-    expect(editor.view.state.selection.main.head).toBe('One![](shot.png)'.length);
+    expect(editor.getDoc()).toBe('One![](shot.png) two\n');
   });
 });
 
@@ -307,6 +366,64 @@ describe('a spot', () => {
     editor.view.dispatch({ changes: { from: 0, insert: 'Say: ' } });
     spot.insert(['shot.png']);
     expect(editor.getDoc()).toBe('Say: One![](shot.png) two\n');
+  });
+
+  it('goes before text typed at it meanwhile, and swallows none of it', () => {
+    const { editor, spot } = spotAt('One\n', 3);
+    editor.view.dispatch({ changes: { from: 3, insert: 'XYZ' } });
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One![](a.png)XYZ\n');
+  });
+
+  /** A spot over the text from `from` to `to` of `doc`, as a paste over a selection gives one. */
+  function spotOver(doc: string, from: number, to: number) {
+    const made = load(doc);
+    made.editor.view.dispatch({ selection: { anchor: from, head: to } });
+    pasteFiles(made.editor, [png()]);
+    return { ...made, spot: made.given[0]!.spot };
+  }
+
+  it('replaces the text it was taken over, with what is typed at its two ends left', () => {
+    const { editor, spot } = spotOver('One two three\n', 4, 7);
+    editor.view.dispatch({ changes: { from: 4, insert: 'A' } });
+    editor.view.dispatch({ changes: { from: 8, insert: 'B' } });
+    expect(editor.getDoc()).toBe('One AtwoB three\n');
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One A![](a.png)B three\n');
+  });
+
+  it('goes after the text it was taken over when that was changed, and replaces none of it', () => {
+    const { editor, spot } = spotOver('One two three\n', 4, 7);
+    editor.view.dispatch({ changes: { from: 5, insert: 'X' } });
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One tXwo![](a.png) three\n');
+  });
+
+  it('goes after text that was taken away from under it', () => {
+    const { editor, spot } = spotOver('One two three\n', 4, 7);
+    editor.view.dispatch({ changes: { from: 4, to: 8 } });
+    expect(editor.getDoc()).toBe('One three\n');
+    spot.insert(['a.png']);
+    expect(editor.getDoc()).toBe('One ![](a.png)three\n');
+  });
+
+  it('leaves the caret where the person put it meanwhile, and only moves one that is at the spot', () => {
+    const { editor, spot } = spotAt('One two\n', 3);
+    editor.view.dispatch({ selection: { anchor: 7 } });
+    spot.insert(['a.png']);
+    // At the end of "two", where it was moved to, by the length of what went in before it.
+    expect(editor.view.state.selection.main.head).toBe(7 + '![](a.png)'.length);
+  });
+
+  it('says so when the document changed before the links could be written', () => {
+    const { editor, spot, notices } = spotAt('One\n', 3);
+    editor.setDoc('Another document\n');
+    expect(spot.insert(['a.png'])).toBe(false);
+    expect(notices).toEqual([DOCUMENT_CHANGED]);
+    expect(editor.getDoc()).toBe('Another document\n');
+    // Said once: the spot is spent.
+    spot.insert(['a.png']);
+    expect(notices).toEqual([DOCUMENT_CHANGED]);
   });
 
   it('is used once', () => {
@@ -418,6 +535,36 @@ describe('where the editor takes no image', () => {
     expect(given).toEqual([]);
     expect(notices).toEqual([IMAGE_IN_CODE, IMAGE_IN_CODE]);
     expect(editor.getDoc()).toBe('Text `code` here\n\n```\nfenced\n```\n');
+  });
+
+  it('takes an image right after inline code, and right before it, where the caret is outside it', () => {
+    const doc = 'Run `npm i` now\n';
+    const { editor, notices } = load(doc);
+    const open = doc.indexOf('`');
+    const close = doc.indexOf('`', open + 1) + 1;
+    for (const at of [open, close]) {
+      editor.view.dispatch({ selection: { anchor: at } });
+      expect(editor.imageSpot(), `at ${at}`).not.toBeNull();
+    }
+    // At the end of a line that ends in code too.
+    const ending = load('Run `npm i`\n');
+    ending.editor.view.dispatch({ selection: { anchor: 'Run `npm i`'.length } });
+    expect(ending.editor.imageSpot()).not.toBeNull();
+    expect(notices).toEqual([]);
+    expect(ending.notices).toEqual([]);
+  });
+
+  it('refuses an image inside inline code, and at the edges of a code block', () => {
+    const { editor, notices } = load('Run `npm i` now\n\n```\ncode\n```\n');
+    const doc = editor.getDoc();
+    const inside = doc.indexOf('npm') + 1;
+    const fence = doc.indexOf('```');
+    const afterFence = doc.indexOf('```', fence + 3) + 3;
+    for (const at of [inside, fence, afterFence]) {
+      editor.view.dispatch({ selection: { anchor: at } });
+      expect(editor.imageSpot(), `at ${at}`).toBeNull();
+    }
+    expect(notices).toEqual([IMAGE_IN_CODE, IMAGE_IN_CODE, IMAGE_IN_CODE]);
   });
 
   it('says so for a spot asked for by the host, which is then none', () => {

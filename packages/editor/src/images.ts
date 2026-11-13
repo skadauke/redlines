@@ -4,15 +4,23 @@
 // insertion (a tracked one while Track Changes is on), which Undo takes back in one step. The
 // editor knows nothing of where files are kept: that is the host's (`EditorOptions.onImageFiles`).
 
+import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { ImageSpot } from './api.ts';
+import { freshImageEffect, freshImageField } from './preview/fresh.ts';
 import { rectOf } from './table/cells.ts';
-import { inCode } from './tracked/clipboard.ts';
 import { rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
 
 /** Why an image doesn't go where the caret is in code, which would show the link as it is. */
 export const IMAGE_IN_CODE = 'An image can’t go inside code.';
+
+/**
+ * What is said when the document was replaced while the images were being saved, so that their
+ * links have nowhere to go: they stay where they were saved, and the person is told.
+ */
+export const DOCUMENT_CHANGED =
+  'The document changed before the images were added, so their links weren’t written.';
 
 const ENCODER = new TextEncoder();
 
@@ -45,22 +53,55 @@ export function imageLink(path: string): string {
 interface Spot {
   from: number;
   to: number;
+  /** The text the spot covers, as it was when it was taken: it is replaced only while it is all there. */
+  text: string;
+  /** For a spot that covers nothing: whether text written at it goes before the spot or after it. */
+  after: boolean;
 }
 
-/** The spots that are held, and how they follow the document. One for each editor. */
+/**
+ * The spots that are held, and how they follow the document. One for each editor. Text written at
+ * the ends of a spot stays outside it: a spot that covers text takes in none of what is typed at its
+ * edges, and one that covers none goes before what is typed at it, as a paste goes before what is
+ * typed after it.
+ */
 const spots = ViewPlugin.define(() => ({
   held: new Set<Spot>(),
   update(update: ViewUpdate) {
     if (!update.docChanged) return;
     for (const spot of this.held) {
-      spot.from = update.changes.mapPos(spot.from, -1);
-      spot.to = update.changes.mapPos(spot.to, 1);
+      if (spot.from === spot.to && spot.text === '') {
+        spot.from = spot.to = update.changes.mapPos(spot.from, spot.after ? 1 : -1);
+      } else {
+        spot.from = update.changes.mapPos(spot.from, 1);
+        spot.to = Math.max(spot.from, update.changes.mapPos(spot.to, -1));
+      }
     }
   },
 }));
 
 /** What stands for the links in the probe that asks whether the document takes them. */
 const PROBE = imageLink('image.png');
+
+type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
+
+/** Whether the syntax at `pos`, looking to its `side`, is in a node called one of `names`. */
+function within(state: EditorState, pos: number, side: -1 | 1, names: readonly string[]): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
+  for (; node; node = node.parent) if (names.includes(node.name)) return true;
+  return false;
+}
+
+/**
+ * Whether a link at `pos` would be in code, which shows it as it is. In inline code that is between
+ * its backticks: right before it or after it is outside, where an image goes. In a code block, and
+ * at the edge of its fences, which a link would break.
+ */
+function inCode(state: EditorState, pos: number): boolean {
+  if (within(state, pos, -1, ['InlineCode']) && within(state, pos, 1, ['InlineCode'])) return true;
+  const blocks = ['FencedCode', 'CodeBlock'];
+  return within(state, pos, -1, blocks) || within(state, pos, 1, blocks);
+}
 
 /**
  * Why the document takes no image in `from`–`to`, or null when it does: in code, or by what the
@@ -79,8 +120,9 @@ function refusal(state: EditorState, from: number, to: number): string | null {
 
 /**
  * A spot for the links of images: where the client point `at` is in the text, if given and over
- * some, else the selection, which a paste replaces and a drop leaves. Null when the document takes
- * no image there, which `notice` then says.
+ * some, else the selection, which a paste replaces and a drop leaves. A point that no line covers,
+ * in a margin or below the text, is no place: the caret is. Null when the document takes no image
+ * there, which `notice` then says.
  */
 export function imageSpot(
   view: EditorView,
@@ -91,7 +133,7 @@ export function imageSpot(
   if (!plugin) return null;
   const { state } = view;
   const { main } = state.selection;
-  const point = at && view.posAtCoords(at, false);
+  const point = at ? view.posAtCoords(at) : null;
   // Cells selected are no one place for a link, and replacing them would take the table apart.
   const range =
     point != null
@@ -104,25 +146,42 @@ export function imageSpot(
     notice?.(reason);
     return null;
   }
-  const spot: Spot = { ...range };
+  const spot: Spot = { ...range, text: state.sliceDoc(range.from, range.to), after: false };
   plugin.held.add(spot);
-  const letGo = () => view.plugin(spots)?.held.delete(spot) ?? false;
+  /** Used, let go, or lost with its document: nothing more is written. */
+  let spent = false;
+  const letGo = () => {
+    spent = true;
+    return view.plugin(spots)?.held.delete(spot) ?? false;
+  };
   return {
     insert: (paths) => {
-      // Used already, let go, or of a document that was replaced since.
+      if (spent || !paths.length) return false;
       const held = view.plugin(spots)?.held;
-      if (!paths.length || !held?.has(spot)) return false;
+      if (!held?.has(spot)) {
+        // The document was replaced since, and the spot went with it.
+        spent = true;
+        notice?.(DOCUMENT_CHANGED);
+        return false;
+      }
       const before = view.state.doc;
-      const next = before.sliceString(spot.to, spot.to + 1);
-      // The links that end the document get a line break of their own, so that the caret has a
-      // place off them.
-      const text = paths.map(imageLink).join(' ') + (next === '' ? '\n' : '');
+      const { selection } = view.state;
+      // The text the spot covers is replaced only while it is all there: what was typed or written
+      // in it since stays, and the links go after it.
+      const replaces = before.sliceString(spot.from, spot.to) === spot.text;
+      const from = replaces ? spot.from : spot.to;
+      // The caret goes with the links only if it is still where they came, not if the person has
+      // moved on while they were saved.
+      const atSpot =
+        selection.ranges.length === 1 &&
+        selection.main.from >= spot.from &&
+        selection.main.to <= spot.to;
       // Where the links end, once Track Changes has put its markers around them.
-      const end: Spot = { from: spot.to, to: spot.to };
+      const end: Spot = { from: spot.to, to: spot.to, text: '', after: true };
       held.add(end);
       try {
         view.dispatch({
-          changes: { from: spot.from, to: spot.to, insert: text },
+          changes: { from, to: spot.to, insert: paths.map(imageLink).join(' ') },
           userEvent: 'input.image',
         });
       } finally {
@@ -131,11 +190,15 @@ export function imageSpot(
       }
       // The editing rules refused it, and said why through `onNotice`: nothing was written.
       if (view.state.doc === before) return false;
-      // The preview draws an image only while the caret is off its link, so that it shows at once:
-      // the caret goes past the space or line break that follows the links, when one does.
-      const caret =
-        end.to + (/[ \t\n]/.test(view.state.doc.sliceString(end.to, end.to + 1)) ? 1 : 0);
-      view.dispatch({ selection: { anchor: caret }, scrollIntoView: true });
+      if (atSpot) {
+        // The caret is at the end of the links, as a paste leaves it, where the preview draws the
+        // image all the same (`freshImageField`).
+        view.dispatch({
+          selection: { anchor: end.to },
+          effects: freshImageEffect.of(end.to),
+          scrollIntoView: true,
+        });
+      }
       return true;
     },
     release: () => void letGo(),
@@ -157,7 +220,7 @@ export function images(
   onImageFiles: ((files: File[], spot: ImageSpot, pasted: boolean) => void) | undefined,
   notice: ((message: string) => void) | undefined,
 ): Extension {
-  if (!onImageFiles) return spots;
+  if (!onImageFiles) return [spots, freshImageField];
   const take = (
     event: Event,
     view: EditorView,
@@ -175,6 +238,7 @@ export function images(
   };
   return [
     spots,
+    freshImageField,
     EditorView.domEventHandlers({
       paste: (event, view) => take(event, view, imageFiles(event.clipboardData), true),
       drop: (event, view) =>

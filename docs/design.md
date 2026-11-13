@@ -701,15 +701,20 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   asks for files in the system's panel) all do the same. The file is copied into the folder for
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
   the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. The
-  image shows at once: the preview draws an image only while the caret is off its link, so the
-  caret steps past it. Several images go in as links a space apart. A dropped file keeps its name,
-  and a pasted image gets one made of the time (`image-2026-11-12-153012.png`). A name that is taken
-  gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the folder already is
-  linked, not copied. With Track Changes on, the link is the person's own tracked insertion, and
+  image shows at once. The caret ends at the end of the links, as after any paste, and the preview,
+  which draws an image only while the caret is off its link, draws one just added all the same
+  until the caret moves or anything is written. Several images go in as links a space apart, and
+  nothing else is written. A dropped file, or an image file copied in Finder, keeps its name, and
+  pasted image data, which has none worth keeping, gets one made of the time
+  (`image-2026-11-12-153012.png`). A name that is taken gets `-2`, `-3` and on, and no file is
+  ever replaced; an image that is in the folder already is linked, not copied. With Track Changes on, the link is the person's own tracked insertion, and
   Undo, named Insert Image, takes it back in one step. Rejecting the insertion or undoing it takes
   back the link only: the file stays beside the document, where it can be seen and deleted by hand,
   because Redlines never deletes a file it might not be the only one to want. A document with no
-  file yet asks to be saved first, since there is no folder to save beside.
+  file yet asks to be saved first, since there is no folder to save beside. The person may go on
+  writing while the images are saved: the links go in where the paste or drop was, after what was
+  typed there meanwhile, and none of it is replaced; a document that was replaced meanwhile gets
+  none of the links, and the person is told, the files being where they were saved.
 - **Where images go** is Preferences › Editor › Images: a folder beside the document, called
   `images` (the name can be changed), a folder named for the document (`plan.assets` for
   `plan.md`), or the document's own folder. All three are inside the document's folder, where the
@@ -1021,12 +1026,17 @@ nothing in it run. No window goes to an `asset:` URL itself. A drop on a window 
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is. Image files dropped alone, every file of the drop an
 image, are the window's to add to its document (§5.10), and are the one exception: the app, which
-has them from the system's drop, keeps them for that window and tells it only how many there are
-and where they landed. It copies them into the folder for the document's images when the window
-asks, so the window never names a file to copy and reads none of them, and a pasted image's bytes,
-which the window has, are written the same way. What is copied is an image by its name and its
-first bytes, inside the folder of the window's own document, and never replaces a file. A folder or
-any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
+has them from the system's drop, keeps them for that window and tells it how many there are, where
+they landed, and an id to ask for them by. The panel that Format › Image… shows is the app's too,
+so the window can raise a panel for image files and is given no path by it, only an id. The app
+copies the files into the folder for the document's images when the window asks, so the window
+never names a file to copy and reads none of them, and a pasted image's bytes, which the window
+has, are written the same way. What is copied is an image by its name and its first bytes, no
+larger than the preview shows, and goes inside the folder of a document the window may use and
+says it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one
+folder named in the settings, never one that is a link out of it, and never replacing a file. A
+folder or any other file dropped opens nothing, and lets the window read nothing it couldn't
+before. Tauri
 adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
 holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
@@ -1414,7 +1424,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
 - **A desktop window reaches only the files the person opened or saved,** and the images its
-  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
+  beside its document, §5.10, which it cannot read back), and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
 - **Per-person state stays out of the file:** view, mode, zoom and text size, filters, comment
