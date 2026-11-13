@@ -66,15 +66,16 @@ muda = { version = "0.20", default-features = false }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# The Dock icon (dock_icon.rs), the install question's window buttons (install/macos.rs) and the
-# question before an agent is added (agents/question.rs), set through AppKit; the copies of the
+# The Dock icon (dock_icon.rs), the install question's window buttons (install/macos.rs), the
+# question before an agent is added (agents/question.rs) and the drag of the window's file out of
+# its title bar (drag.rs), set through AppKit; the copies of the
 # app that are running, when installing over one (install/macos.rs); the defaults the web views
 # start with (spelling.rs); and the default app for Markdown, which NSWorkspace reads and sets
 # (default_app.rs). The versions and features are Tauri's and its plugins' own, so nothing more is
 # built for them, but NSWorkspace.
 objc2 = "0.6.5"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSEvent", "NSImage", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "FoundationErrors", "NSArray", "NSData", "NSDictionary", "NSError", "NSObject", "NSRange", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults", "NSValue"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSGraphicsContext", "NSImage", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "FoundationErrors", "NSArray", "NSData", "NSDate", "NSDictionary", "NSError", "NSObject", "NSProcessInfo", "NSRange", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults", "NSValue"] }
 block2 = "0.6.2"
 # Answers macOS's question whether the app may quit from outside the event loop's own callback
 # (windows.rs). Tauri's own version.

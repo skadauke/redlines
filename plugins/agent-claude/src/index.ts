@@ -19,6 +19,9 @@ export const MIN_VERSION = '2.1.318';
 
 export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 
+/** What Claude Code's own site says to run to install it. Redlines shows it and never runs it. */
+export const INSTALL_COMMAND = 'curl -fsSL https://claude.ai/install.sh | bash';
+
 const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
 
 /**
@@ -232,12 +235,15 @@ export function createClaudeProvider(
         name: 'Claude Code',
         binary: 'claude',
         notFoundHelp:
-          "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude. Install it: curl -fsSL https://claude.ai/install.sh | bash",
+          "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude.",
+        installCommand: INSTALL_COMMAND,
         minVersion: MIN_VERSION,
         signedOutHelp: SIGNED_OUT_HELP,
         // `auth status` prints JSON and exits 1 when signed out; a stale token counts as signed out.
         statusArgs: ['auth', 'status'],
         isSignedIn: (status) => status.code === 0 && !/"loggedIn"\s*:\s*false/.test(status.stdout),
+        // An older program that doesn't know `auth` fails too, but prints no JSON: that isn't it.
+        isSignedOut: (status) => /"loggedIn"\s*:\s*false/.test(status.stdout),
       });
       version = state.found ? state.version : undefined;
       return state;
@@ -256,6 +262,8 @@ export function createClaudeProvider(
           parse: parseClaudeLine,
           held: (state) => state.retry,
           failure: (state) => state.failure,
+          // Signing in again is Preferences' to offer; a usage limit or a network error isn't.
+          setup: (message) => message === failureNamed('authentication_failed'),
         },
         options,
         request,

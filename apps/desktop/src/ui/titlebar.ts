@@ -1,7 +1,8 @@
 // The title bar (design §5.1): part of the page, with the file name centered and three icons and
 // no labels. Files, next to the window buttons, explains itself on hover; View and Review open
 // their menus on hover. The file name says how many words the document has, and when it was last
-// saved, on hover.
+// saved, on hover, and a double-click on it renames the document. A small document icon beside it
+// drags the file, as a native title bar's proxy icon does.
 
 import type { ViewMode } from '@redlines/editor';
 import { icon } from './icons.ts';
@@ -10,6 +11,12 @@ import { createMenu, type Menu } from './menu.ts';
 export interface TitleBarState {
   name: string;
   dirty: boolean;
+  /**
+   * Whether the document's file can be dragged out of the window: it has a file (an Untitled
+   * document has none yet), and the app can hand it over (on the Mac). The icon beside the name
+   * is shown for it.
+   */
+  fileDraggable: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
@@ -25,6 +32,17 @@ export interface TitleBarActions {
   toggleSidebar(): void;
   /** Renames the file to `newName`; resolves to whether it has the name (document.ts). */
   rename(newName: string): Promise<boolean>;
+  /**
+   * What a double-click on the file name asks for, as File › Rename does: the name becomes a field
+   * (`beginRename`) for a document with a file, and Save As asks for a name for an Untitled one,
+   * which has no file to rename yet.
+   */
+  renameDocument(): void;
+  /**
+   * Starts dragging the document's file out of the window, once the pointer has dragged the icon
+   * beside the name: the app takes the drag from there (`start_file_drag`, in main.ts).
+   */
+  dragFile(): void;
   /**
    * What the document's facts are made from, asked for when the pointer comes to the name: the
    * document's newest text (format §8), and when it was last saved here, if it was.
@@ -51,6 +69,12 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
+/** How far the pointer moves, with the button down, before the document icon's drag starts. */
+const DRAG_START_PX = 4;
+
+/** How far the pointer may move between the second press of a double-click and its release. */
+const DOUBLE_CLICK_SLOP_PX = 3;
+
 export function createTitleBar(
   root: HTMLElement,
   actions: TitleBarActions,
@@ -64,6 +88,7 @@ export function createTitleBar(
   let state: TitleBarState = {
     name: '',
     dirty: false,
+    fileDraggable: false,
     view: 'clean',
     tracking: false,
     hasRedlines: false,
@@ -107,20 +132,79 @@ export function createTitleBar(
     actions.toggleSidebar();
   });
 
-  // The file name.
+  // The file name, and beside it the document's icon, which drags the file: the two are centered
+  // as one.
+  const titleGroup = element('div', 'rl-title-group');
+  const docIcon = element('span', 'rl-doc-icon');
+  // The bar drags the window everywhere but here: a drag on the icon drags the file.
+  docIcon.dataset['tauriDragRegion'] = 'false';
+  docIcon.setAttribute('role', 'img');
+  docIcon.title = 'Drag to copy the file';
+  docIcon.append(icon('document', 16));
+  // The press leaves the document's caret and keyboard focus where they were.
+  docIcon.addEventListener('mousedown', (event) => event.preventDefault());
+  let forgetPress: (() => void) | null = null;
+  docIcon.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.pointerType === 'touch') return;
+    forgetPress?.();
+    const { clientX, clientY } = event;
+    const onMove = (move: PointerEvent) => {
+      // A button that went up unseen: the system takes a drag over, and the page hears no more.
+      if ((move.buttons & 1) === 0) return forget();
+      if (Math.hypot(move.clientX - clientX, move.clientY - clientY) < DRAG_START_PX) return;
+      forget();
+      actions.dragFile();
+    };
+    const forget = () => {
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', forget, true);
+      document.removeEventListener('pointercancel', forget, true);
+      forgetPress = null;
+    };
+    forgetPress = forget;
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', forget, true);
+    document.addEventListener('pointercancel', forget, true);
+  });
+
+  /** The rename field, while the name is one. */
+  let field: HTMLInputElement | null = null;
   const title = element('div', 'rl-title');
   const titleName = element('span', 'rl-title-name');
   const titleEdited = element('span', 'rl-title-edited');
   title.append(titleName, titleEdited);
+  titleGroup.append(docIcon, title);
   // Counted when the pointer comes, not as the document changes.
   title.addEventListener('pointerenter', () => {
     const { newestText, savedAt } = actions.documentFacts();
     title.title = documentFactsLine(newestText, savedAt);
   });
   title.addEventListener('pointerleave', () => title.removeAttribute('title'));
+  // A double-click on the name renames the document, and a double-click anywhere else on the bar
+  // zooms the window. Tauri's drag script zooms on the mouseup of a double-click in any drag
+  // region, and listens on the document: the name keeps that mouseup from reaching it, and goes by
+  // it too, since in the app WebKit sends the page no click or dblclick for a second press. A drag
+  // on the name still moves the window, which starts on the first mousedown.
+  // Where the second press of a double-click on the name was, to tell the release that ends it from
+  // one that ends a press that began elsewhere (a word selected by a double-click-drag in the text,
+  // let go of over the name), which is no one's but the page's own.
+  let secondPress: { x: number; y: number } | null = null;
+  title.addEventListener('mousedown', (event) => {
+    secondPress =
+      event.button === 0 && event.detail === 2 ? { x: event.clientX, y: event.clientY } : null;
+  });
+  title.addEventListener('mouseup', (event) => {
+    const press = secondPress;
+    secondPress = null;
+    if (event.button !== 0 || event.detail !== 2 || !press) return;
+    // Where it began, as the window's own zoom asks, give or take the pixels a hand wobbles by.
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > DOUBLE_CLICK_SLOP_PX) return;
+    event.stopPropagation();
+    // In the field, a double-click selects a word.
+    if (!field) actions.renameDocument();
+  });
 
   // Rename…: the name becomes a field until Return, Escape or a click elsewhere.
-  let field: HTMLInputElement | null = null;
   const beginRename = () => {
     if (field) return;
     const input = element('input', 'rl-title-field');
@@ -168,7 +252,7 @@ export function createTitleBar(
   reviewControl.append(reviewButton);
   end.append(viewControl, reviewControl);
 
-  bar.append(filesControl, title, end);
+  bar.append(filesControl, titleGroup, end);
   root.append(bar);
 
   const menus: Menu[] = [];
@@ -246,6 +330,11 @@ export function createTitleBar(
     state = next;
     titleName.textContent = next.name;
     titleEdited.textContent = next.dirty ? ' — Edited' : '';
+    // A document that has not been saved has no file to drag.
+    docIcon.hidden = !next.fileDraggable;
+    docIcon.setAttribute('aria-label', `${next.name}, document icon`);
+    // With edits the file is behind: what is handed over is the file as it was last saved.
+    docIcon.title = next.dirty ? 'Drag to copy the file as saved' : 'Drag to copy the file';
 
     const filesLabel = next.sidebarOpen ? 'Hide files' : 'Show files';
     filesButton.setAttribute('aria-label', filesLabel);
@@ -269,6 +358,7 @@ export function createTitleBar(
     },
     destroy() {
       hideTip();
+      forgetPress?.();
       for (const menu of menus) menu.destroy();
       bar.remove();
     },
