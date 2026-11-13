@@ -12,6 +12,7 @@ import {
   placeBack,
   readingPlace,
   roomBelow,
+  topInset,
   visibleTop,
   type ReadingPlace,
 } from './reading-place.ts';
@@ -141,6 +142,8 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
       root.style.getPropertyValue('--rl-zoom'),
       scroller.clientWidth,
       scroller.clientHeight,
+      // The room kept above the text: the find bar adds to the title bar's as it opens.
+      topInset(view),
       /\brl-view-\w+/.exec(view.dom.className)?.[0],
     ].join('|');
   const stickyPlace = (): ReadingPlace => {

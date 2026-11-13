@@ -220,6 +220,24 @@ describe('followTextZoom', () => {
     expect(scroller.scrollTop).toBe(2);
   });
 
+  it('keeps a line near the bottom of the window in sight, by the room under the bar', async () => {
+    const { zoom, view } = setup(1, true);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    // The caret's row is drawn at 750 to 770, in a window 772 high with 52 of it under the bar:
+    // 698 below the bar, and a line can go 772 - 52 - 27 = 693 below it, no more.
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 750 - scroller.scrollTop,
+      bottom: 770 - scroller.scrollTop,
+    });
+    zoom.follow(1.1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Wanted 693 below the bar, which is 745 down: the row at 750 is 5 too low.
+    expect(scroller.scrollTop).toBe(5);
+  });
+
   it('rounds the correction to whole pixels, which is all WebKit keeps of a scroll', async () => {
     const { zoom, view } = setup(1);
     const scroller = view.dom.parentElement!;

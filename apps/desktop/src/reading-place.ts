@@ -3,7 +3,7 @@
 // it, so the next measure lays the text out and scrolls the line back before the frame is drawn.
 
 import { EditorView } from '@codemirror/view';
-import type { StateEffect } from '@codemirror/state';
+import type { Extension, StateEffect } from '@codemirror/state';
 
 /**
  * A line to keep in place: where it starts, and its top's distance below the top of what the
@@ -25,6 +25,15 @@ export function topInset(view: EditorView): number {
     inset = Math.max(inset, margins(view)?.top ?? 0);
   }
   return inset;
+}
+
+/**
+ * The scroll margin of a host that floats something over the top of the scroller, such as the title
+ * bar: the editor keeps what it scrolls to clear of `room()` pixels, asked for each time, since the
+ * window zoom changes what a point is worth.
+ */
+export function topRoom(room: () => number): Extension {
+  return EditorView.scrollMargins.of(() => ({ top: room() }));
 }
 
 /**
@@ -80,7 +89,14 @@ export function placeAt(
 ): ReadingPlace {
   if (!point) return topLine(view, scroller);
   const rect = scroller.getBoundingClientRect();
-  if (point.x < rect.left || point.x > rect.right || point.y < rect.top || point.y > rect.bottom) {
+  // A point under the bar, which hides the line it is over, is a point over no text: the first line
+  // the bar leaves in sight is the place.
+  if (
+    point.x < rect.left ||
+    point.x > rect.right ||
+    point.y < visibleTop(view, scroller) ||
+    point.y > rect.bottom
+  ) {
     return topLine(view, scroller);
   }
   const pos = view.posAtCoords(point);
