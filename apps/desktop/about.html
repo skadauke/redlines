@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>About Redlines</title>
+  </head>
+  <body>
+    <!-- About Redlines, in a small window of the app's own (src-tauri/src/lib.rs, open_about): the
+         icon, the name, the version and the build, and the copyright, centered, as the system's own
+         About panel shows them. The window has no title drawn, and is dragged by anything but the
+         icon, which a click takes (src/about/marks.ts). -->
+    <main class="rl-about" data-tauri-drag-region="deep">
+      <div class="rl-about-icon" id="icon" data-tauri-drag-region="false"></div>
+      <h1 class="rl-about-name" id="name">Redlines</h1>
+      <p class="rl-about-version" id="version"></p>
+      <p class="rl-about-copyright" id="copyright"></p>
+    </main>
+    <script type="module" src="/src/about/main.ts"></script>
+  </body>
+</html>
