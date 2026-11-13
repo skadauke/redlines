@@ -282,16 +282,26 @@ applies its inverse:
   strikethrough is `~~`, and code has one more backtick than its text has in a row, with a space
   inside them next to a backtick. Emphasis written with `_` stays as it is.
 - **Subscript and superscript** are the first of a short list of inline HTML tags that are formats:
-  `<!--fmt m2bd +sub--><sub>2</sub><!--/m2bd-->`. Any other tag is an inline HTML tag, which shows as
-  written and takes no marker inside it (§3.5). What is read as a format is the tag as the
-  serializer writes it: `<sub>`, `</sub>`, `<sup>` and `</sup>`, in lowercase, with no attributes
-  and no space in them, so `-sub` and `-sup` carry no syntax and rejecting writes the tag back.
-  - A closing tag pairs with the nearest opening tag of its name before it that has no closing tag,
-    as HTML pairs them, in one paragraph, and in one link text or one table cell, as emphasis does.
-    A tag with no pair, an escaped tag (`\<sub>`), one in code, in an HTML comment, in an image or
-    in a link's address, a pair that crosses another format's syntax, and a tag written otherwise
-    (`<SUB>`, `<sub class="x">`) are no format: the text stays as written, and turning a format off
-    does nothing to it.
+  `<!--fmt m2bd +sub--><sub>2</sub><!--/m2bd-->`. The list is `<sub>` and `<sup>`, built; `<mark>`
+  (highlight, `+mark`) and `<ins>` (underline, `+underline`), which §2.2 names and nothing writes
+  yet; and `<br>`, the line break of a table cell (§3.7), which is not a format of text. No other tag
+  is on it. Any other tag is an inline HTML tag, which shows as written and takes no marker inside
+  it (§3.5). What is read as a format is the tag as the serializer writes it: `<sub>`, `</sub>`,
+  `<sup>` and `</sup>`, in lowercase, with no attributes and no space in them, so `-sub` and `-sup`
+  carry no syntax and rejecting writes the tag back.
+  - A closing tag pairs with the nearest opening tag of its name before it that is read as a format
+    and has no closing tag yet, in one paragraph, and in one link text or one table cell, as
+    emphasis does. A tag with no pair, an escaped tag (`\<sub>`, which is text), a tag in code, in an
+    HTML comment, in an image, in a link's address, in math, in a footnote reference, in an entity or
+    a shortcode, in a URL or in an attribute block, a pair that crosses another format's syntax, and
+    a tag written otherwise (`<SUB>`, `<sub class="x">`) are no format: the text stays as written,
+    and turning a format off does nothing to it, with a notice that says so.
+  - A format is written only around text whose tags of its name are whole pairs: a stray `</sub>`
+    or `<sub>` in the text would pair with the one written, and the change is refused, in words
+    that say so ("This text has a <sub> or <sup> tag without its pair…"). A backslash in front of
+    the text, which would escape the opening tag, goes into the pair with the character it
+    escapes (`<sub>\b</sub>`); text that ends in a backslash, which would escape the closing tag,
+    is refused, as it is for the other formats.
   - Formats nest as they do for emphasis: one around all of another goes outside its syntax, and a
     piece that crosses the edge of a format is cut there. Turning a format off takes the whole run of
     it, and the same tag inside itself (`<sub>a <sub>b</sub></sub>`) is two runs, in a mark each.
@@ -959,7 +969,8 @@ at the outer edge of a whole inline construct. A marker never goes:
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
-   (§9.1); after or inside `{…}` attributes; on `:::` lines; before or
+   (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
+   attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
 
@@ -2959,10 +2970,13 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   Quarto callouts.
 - Subscript and superscript are `<sub>` and `<sup>` in every file type (§2.6). pandoc's `~x~` and
   `^x^` would not read the same in both dialects: a single `~x~` is strikethrough on GitHub, and
-  `^x^` shows there as text. pandoc reads the tags as raw HTML, which its Word output drops (§9.4),
-  so a `.qmd` or `.Rmd` file rendered to Word through pandoc loses them; Redlines' own Word export
-  keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept byte for byte
-  and shown as written: it is no format, and nothing changes it.
+  `^x^` shows there as text. pandoc reads the tags as raw HTML, which its Word output drops
+  ([research](research/syntax.md)), so a `.qmd` or `.Rmd` file rendered to Word through pandoc
+  loses them; Redlines' own Word export keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept as written:
+  Redlines never writes either, never turns one into a tag, and doesn't read it as subscript or
+  superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
+  strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
+  would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and

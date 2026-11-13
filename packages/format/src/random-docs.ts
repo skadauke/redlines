@@ -77,6 +77,12 @@ const NEWER_CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => strin
   (pick) => `x<sup>${pick(WORDS)}</sup>y`,
   (pick) => `<SUB>${pick(WORDS)}</SUB>`,
   (pick) => `<sub class="s">${pick(WORDS)}</sub>`,
+  // A tag with no pair, one that a backslash escapes, and a word that ends in a backslash: the
+  // tags are text, and a pair written around them must still pair with itself.
+  () => '<sub>',
+  () => '</sup>',
+  (pick) => `\\<sup>${pick(WORDS)}</sup>`,
+  (pick) => `${pick(WORDS)}\\\\`,
 ];
 
 /** What a random document holds besides the blocks every one may have. */

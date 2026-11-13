@@ -155,4 +155,28 @@ describe('Subscript and Superscript', () => {
     expect(editor.commands.run('format.clear')).toBe(true);
     expect(editor.getDoc()).toBe('One two three.\n');
   });
+
+  it('say so, in a notice, where the pair the preview draws is no pair the format reads', () => {
+    // The parse pairs the closing tag first and drops the star; the format's reader reads emphasis
+    // first, and the pair crosses it: nothing can be taken off, which is never silent.
+    for (const [id, name] of [
+      ['format.sub', 'sub'],
+      ['format.sup', 'sup'],
+    ] as const) {
+      const doc = `Plain <${name}>a *b</${name}> c* here.\n`;
+      const { editor, notices } = mount(doc);
+      select(editor, doc.indexOf('a *b') + 1);
+      expect(editor.commands.run(id)).toBe(false);
+      expect(editor.getDoc()).toBe(doc);
+      expect(notices, id).toHaveLength(1);
+      expect(notices[0]).toMatch(/tags/);
+    }
+  });
+
+  it('say nothing of tags where a selection of white space has nothing to format', () => {
+    const { editor, notices } = mount('One   two.\n');
+    select(editor, 3, 6);
+    expect(editor.commands.run('format.sub')).toBe(false);
+    expect(notices).toEqual([]);
+  });
 });

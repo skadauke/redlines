@@ -502,6 +502,16 @@ const ATOMS = new Set(['Image', 'Autolink', 'HTMLTag', 'Entity', 'URL']);
  */
 export function openConstructs(state: EditorState, pos: number): OpenConstruct[] {
   const found: OpenConstruct[] = [];
+  // The text of a tag of subscript or superscript, paired or not, is no text to part, as the text
+  // of any other tag is not: a pair with the tags hidden has no node for the tags, and a tag with no
+  // pair is text to the parse.
+  const line = state.doc.lineAt(pos);
+  for (const tag of line.text.matchAll(/<\/?(?:sub|sup)>/g)) {
+    const from = line.from + tag.index;
+    if (from < pos && pos < from + tag[0].length) {
+      found.push({ kind: 'atom', from, to: from + tag[0].length, open: '', close: '' });
+    }
+  }
   for (
     let node: SyntaxNode | null = treeTo(state, pos).resolveInner(pos, 1);
     node;

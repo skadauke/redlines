@@ -1922,6 +1922,9 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       '<sup>t u</sup>',
       '**<sub>v</sub>**',
       'H<sub>2</sub>O',
+      '</sub>',
+      '<sup>',
+      '\\<sub>',
     ];
     const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
     // Blocks whose lines read as they do only with the rest of the block: nested items indented
@@ -2006,7 +2009,8 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
   const letters = (text: string) =>
     newestView(text)
       .text.replace(/^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/gm, '')
-      .replace(/<\/?(?:sub|sup)>/g, '')
+      // A tag that a backslash escapes is text.
+      .replace(/(?<=(?:^|[^\\])(?:\\\\)*)<\/?(?:sub|sup)>/g, '')
       .replace(/[^\p{L}\p{N}]+/gu, '');
 
   it('never starts a line with a marker, and every decision of every mark comes out right', () => {

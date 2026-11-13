@@ -272,8 +272,8 @@ Redlines covers everything in the Markdown Guide's
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 - **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
   lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
-  are in the Format menu, the command palette and the formatting palette, and are tracked as format
-  changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
+  are in the Format menu and the command palette (and in the formatting palette, §5.12, when it
+  lists inline formats), and are tracked as format changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
   renders as formats; any other tag shows as written. pandoc's `~x~` and `^x^` in a `.qmd` or
   `.Rmd` file are kept byte for byte and shown as written.
 

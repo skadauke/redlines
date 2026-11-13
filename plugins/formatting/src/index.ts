@@ -55,6 +55,10 @@ export interface FormattingOptions {
 
 const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
+ * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
+const TAGS_NOT_A_PAIR =
+  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Raw.";
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
@@ -257,7 +261,12 @@ function personOf(author: Author): Person {
  */
 export function createFormatting(editor: Editor, options: FormattingOptions): () => void {
   const { view } = editor;
-  const notice = (message: string) => options.notice(message);
+  /** How many notices have been shown, to know whether a refusal said something. */
+  let noticed = 0;
+  const notice = (message: string) => {
+    noticed++;
+    options.notice(message);
+  };
   const removeTheme = editor.addExtension(linkTheme);
 
   /** Whether the selection can be edited at all: Raw is read-only while edits are tracked. */
@@ -427,7 +436,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         return false;
       }
       const on = !atSelection(view.state).some(({ name }) => name === INLINE_NODE[format_]);
-      return format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      const saidBefore = noticed;
+      const done = format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      // The parse says the format is on and the format's reader finds none to take off, as it can
+      // pair a tag otherwise (it reads emphasis first): nothing happened, and says why.
+      if (!done && !on && noticed === saidBefore && (format_ === 'sub' || format_ === 'sup')) {
+        notice(TAGS_NOT_A_PAIR);
+      }
+      return done;
     };
 
   const block =

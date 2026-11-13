@@ -128,6 +128,7 @@ describe('subscript and superscript as format changes (#310)', () => {
     for (const source of [
       'Plain \\<sub>text</sub> here.\n',
       'Plain `<sub>text</sub>` here.\n',
+      'Plain <!-- <sub>text</sub> --> here.\n',
       'Plain ![a <sub>b</sub>](x.png) here.\n',
       'Plain [a](x<sub>y</sub>) here.\n',
       // The tags of a pair stand on both sides of the edge of a link, or of a cell.
@@ -221,12 +222,27 @@ describe('subscript and superscript as format changes (#310)', () => {
     ).toBe('inside-code');
   });
 
-  it('keeps the text of a tag whole: a selection that ends inside one reaches over it', () => {
+  it('keeps the text of a tag whole: a selection that starts or ends inside one reaches over it', () => {
     const source = 'Plain <sub>text</sub> here.\n';
-    // The selection starts inside `<sub>`, and ends in `here`.
-    const after = format(source, { from: 9, to: rangeOf(source, 'here').to }, inline('sup', true));
-    expect(rejected(after, 'm2bd')).toBe(source);
-    expect(accepted(after, 'm2bd')).toMatch(/<sup>.*<\/sup>/);
+    // Starting inside `<sub>`, and ending in `here`.
+    const starts = format(source, { from: 9, to: rangeOf(source, 'here').to }, inline('sup', true));
+    expect(body(starts)).toBe(
+      'Plain <!--fmt m2bd +sup--><sup><sub>text</sub> here</sup><!--/m2bd-->.\n',
+    );
+    expect(rejected(starts, 'm2bd')).toBe(source);
+    expect(accepted(starts, 'm2bd')).toBe('Plain <sup><sub>text</sub> here</sup>.\n');
+    // Ending inside `</sub>`.
+    const ends = format(source, { from: 0, to: source.indexOf('</sub>') + 3 }, inline('sup', true));
+    expect(body(ends)).toBe(
+      '<!--fmt m2bd +sup-->\n\n<sup>Plain <sub>text</sub></sup><!--/m2bd--> here.\n',
+    );
+    expect(rejected(ends, 'm2bd')).toBe(source);
+    // Starting in one tag and ending in another.
+    const both = format(source, { from: 9, to: source.indexOf('</sub>') + 3 }, inline('sup', true));
+    expect(body(both)).toBe(
+      'Plain <!--fmt m2bd +sup--><sup><sub>text</sub></sup><!--/m2bd--> here.\n',
+    );
+    expect(rejected(both, 'm2bd')).toBe(source);
   });
 
   it('writes the tags with Track Changes off, and takes them off', () => {
@@ -262,5 +278,93 @@ describe('subscript and superscript as format changes (#310)', () => {
     expect(
       codeOf(() => trackedFormat(source, rangeOf(source, 'new'), inline('sub', true), ctx())),
     ).toBe('no-legal-placement');
+  });
+});
+
+describe('a pair that is written must read as a pair (#310 review)', () => {
+  const refusedBy = (run: () => unknown): string => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof EditError) return `${error.code ?? 'no code'}: ${error.message}`;
+      throw error;
+    }
+    return 'written';
+  };
+  const plain = (source: string, selected: string | Range, op: FormatOp) =>
+    refusedBy(() =>
+      untrackedFormat(
+        source,
+        typeof selected === 'string' ? rangeOf(source, selected) : selected,
+        op,
+        {
+          author: ada,
+        },
+      ),
+    );
+  const tracked = (source: string, selected: string | Range, op: FormatOp) =>
+    refusedBy(() =>
+      trackedFormat(
+        source,
+        typeof selected === 'string' ? rangeOf(source, selected) : selected,
+        op,
+        ctx(),
+      ),
+    );
+
+  it('is refused where the text ends in a backslash, which would escape the closing tag', () => {
+    const source = 'a b\\ c\n';
+    expect(plain(source, 'b\\', inline('sub', true))).toMatch(/^no-legal-placement/);
+    expect(tracked(source, 'b\\', inline('sub', true))).toMatch(/^no-legal-placement/);
+    // The same in the text of your own insertion, which takes the syntax as typed.
+    const own = file('Plain <!--ins k3x9-->new b\\ text<!--/k3x9--> here.', { k3x9: 'ada' });
+    expect(tracked(own, 'b\\', inline('sup', true))).toMatch(/^no-legal-placement/);
+  });
+
+  it('takes a backslash in front of the text into the pair, so that it escapes nothing', () => {
+    const source = 'a \\b c\n';
+    const written = applyChanges(
+      source,
+      untrackedFormat(source, rangeOf(source, 'b'), inline('sub', true), { author: ada }),
+    );
+    expect(written).toBe('a <sub>\\b</sub> c\n');
+    const after = format(source, rangeOf(source, 'b'), inline('sup', true));
+    expect(body(after)).toBe('a <!--fmt m2bd +sup--><sup>\\b</sup><!--/m2bd--> c\n');
+    expect(rejected(after, 'm2bd')).toBe(source);
+  });
+
+  it('is refused with words about the tag where the text holds a tag with no pair', () => {
+    for (const [source, selected] of [
+      ['a </sub> b\n', 'a </sub> b'],
+      ['x y <sub>\n', 'y <sub>'],
+      ['x </sub> y\n', '</sub> y'],
+      ['<sub>a b\n', '<sub>a b'],
+      ['a <sup> b </sup> c </sup> d\n', 'a <sup> b </sup> c </sup>'],
+    ] as const) {
+      const name = source.includes('<sup>') ? 'sup' : 'sub';
+      for (const run of [plain, tracked]) {
+        expect(run(source, selected, inline(name, true)), source).toMatch(
+          /^no-legal-placement: .*tag without its pair/,
+        );
+      }
+    }
+    const own = file('Plain <!--ins k3x9-->new </sub> text<!--/k3x9--> here.', { k3x9: 'ada' });
+    expect(tracked(own, 'new </sub> text', inline('sub', true))).toMatch(/tag without its pair/);
+  });
+
+  it('writes a pair around a text that holds whole pairs of another tag, and leaves a stray one outside', () => {
+    const source = 'a <sup>b</sup> c </sub> d\n';
+    const after = format(source, rangeOf(source, 'a <sup>b</sup> c'), inline('sub', true));
+    expect(body(after)).toBe(
+      '<!--fmt m2bd +sub-->\n\n<sub>a <sup>b</sup> c</sub><!--/m2bd--> </sub> d\n',
+    );
+    expect(rejected(after, 'm2bd')).toBe(source);
+  });
+
+  it('reads an escaped tag as text: no pair, no format, and no atom', () => {
+    const source = 'a \\<sub>b</sub> c\n';
+    expect(
+      trackedFormat(source, rangeOf(source, 'b'), inline('sub', false), ctx()).changes,
+    ).toEqual([]);
   });
 });
