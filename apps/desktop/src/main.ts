@@ -856,10 +856,11 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null };
+    return { path: null, line: null, text: null };
   });
   if (start.path === null) {
-    await controller.create();
+    // A window opened for text starts with an Untitled document that holds it, unsaved.
+    await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -919,8 +920,9 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, with Track Changes on if Preferences ask for it.
-  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it. A
+  // window opened for text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) editor.setTracking(true);
   windows?.ready();
   const about = await loadAbout().catch((error: unknown) => {
     console.error('Could not read the build tag for About Redlines', error);
