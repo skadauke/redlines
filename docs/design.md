@@ -283,15 +283,15 @@ lines; Raw shows them.
 
 Simple and Redlines are the markup views, and Redlines remembers the one you chose last, Redlines at
 first. A document with redlines (pending changes, highlights or comment threads) opens in it; one
-without opens in Clean. Making a tracked change in Clean, or adding a comment there, switches to
-it, so suggestions are never invisible to their author, and so does a document shown Clean that
-gains redlines; a tracked change made in Simple stays in Simple, where its bar shows it. Reviewing
-(§5.6) switches to Redlines, where each change shows. Otherwise the view stays as you chose it:
-deciding the last change doesn't switch it. The view, and the markup view remembered, are each
-person's own and are never saved in the file; the markup view is kept in the app's settings and
-reaches every window for the documents each opens next, without changing the view any of them
-shows. The View menu also previews the original (every change rejected) and one person's changes
-alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
+without opens in Clean. Making a tracked change in Clean, or adding a comment or a highlight there,
+switches to it, so suggestions are never invisible to their author, and so does a document shown
+Clean that gains redlines; a tracked change made in Simple stays in Simple, where its bar shows
+it. Reviewing (§5.6) switches to Redlines, where each change shows. Otherwise the view stays as you
+chose it: deciding the last change doesn't switch it. The view, and the markup view remembered,
+are each person's own and are never saved in the file; the markup view is kept in the app's
+settings and reaches every window for the documents each opens next, without changing the view any
+of them shows. The View menu also previews the original (every change rejected) and one person's
+changes alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
 Changes is off; while it is on, or locked on, Raw is read-only, because typing there could forge
 or break markers.
 
@@ -648,6 +648,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
+| Highlight                      | ⇧⌘H                                                                                           | Ctrl+Shift+H              |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |

@@ -3,7 +3,7 @@
 // the review interface and the other plugins. Every row has its command, its key and its state,
 // and no key is bound twice across the whole menu bar and the registry.
 
-import { createEditor, type Author, type Editor } from '@redlines/editor';
+import { baseTitle, createEditor, type Author, type Editor } from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
 import { createReview } from '@redlines/review';
 import { afterEach, expect, it } from 'vitest';
@@ -92,7 +92,7 @@ it('puts Format and Paragraph between Edit and View', () => {
   ]);
 });
 
-it('lists the Format rows with their keys, set apart by group, Add Comment last', () => {
+it('lists the Format rows with their keys, set apart by group, Add Comment and Highlight last', () => {
   const { model } = mount('Some text.\n');
   const rows = rowsOf(model, 'Format');
   expect(rows.map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)))).toEqual([
@@ -106,6 +106,7 @@ it('lists the Format rows with their keys, set apart by group, Add Comment last'
     ['Clear Formatting', 'CmdOrCtrl+\\'],
     'Separator',
     ['Add Comment', 'CmdOrCtrl+Alt+M'],
+    ['Highlight', 'CmdOrCtrl+Shift+H'],
   ]);
 });
 
@@ -143,7 +144,8 @@ it('gives every row its command, key and state, and runs the command from the ro
   const state = { ...STATE, ...ui } satisfies MenuState;
   for (const title of ['Format', 'Paragraph']) {
     for (const row of rowsOf(model, title).filter(isAction)) {
-      const command = commands.find((candidate) => candidate.title === row.text);
+      // (A title that reads the state, as Highlight's does, is what the menu shows before a state.)
+      const command = commands.find((candidate) => baseTitle(candidate) === row.text);
       expect(command, `${title}: ${row.text} has a command`).toBeDefined();
       expect(command?.menu).toBe(title.toLowerCase());
       expect(row.accelerator).toBe(
@@ -175,6 +177,25 @@ it('checks the rows that hold at the caret', () => {
   expect(checked()).toEqual(['Bold', 'Body']);
 });
 
+it('shows Highlight as Remove Highlight, with a check, where the caret is in a highlight', () => {
+  const doc =
+    'Some <!--hl h4kz-->marked<!--/h4kz--> text.\n\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\nmarks:\n  h4kz: {by: ada, at: 2026-10-31T09:41Z}\n-->\n';
+  const { editor, model } = mount(doc);
+  const row = rowsOf(model, 'Format')
+    .filter(isAction)
+    .find((candidate) => candidate.text === 'Highlight');
+  const state = () => ({ ...STATE, ...editor.getUiState() }) satisfies MenuState;
+  expect(row?.textFor).toBeDefined();
+  expect(row?.checked).toBeDefined();
+  editor.view.dispatch({ selection: { anchor: 0 } });
+  expect([row?.textFor?.(state()), row?.checked?.(state())]).toEqual(['Highlight', false]);
+  editor.view.dispatch({ selection: { anchor: doc.indexOf('marked') + 2 } });
+  expect([row?.textFor?.(state()), row?.checked?.(state())]).toEqual(['Remove Highlight', true]);
+  // Chosen from the menu, it takes the highlight away: the text stays.
+  row?.action();
+  expect(editor.getDoc()).toBe('Some marked text.\n');
+});
+
 it('binds no key twice across the menu bar and the registry', () => {
   const { editor, model } = mount('Some text.\n');
   const seen = new Map<string, string>();
@@ -191,7 +212,7 @@ it('binds no key twice across the menu bar and the registry', () => {
   // Every registered shortcut is in a menu, so none is bound outside one that the menu would meet.
   for (const command of editor.commands.list()) {
     if (command.shortcut) {
-      expect(seen.get(normalized(acceleratorFor(command.shortcut)))).toContain(command.title);
+      expect(seen.get(normalized(acceleratorFor(command.shortcut)))).toContain(baseTitle(command));
     }
   }
 });
