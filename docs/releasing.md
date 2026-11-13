@@ -279,7 +279,8 @@ macOS's lists, so that it doesn't stand in for the installed app. On a Mac that 
 Redlines, check after a release that Space previews a Markdown file once the app has run from
 Applications, that System Settings › General › Login Items & Extensions › Quick Look lists
 Redlines with its switch on (`open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview"`
-opens that sheet), and that an update through the app's updater keeps it.
+opens that sheet, as does Preferences › General › Quick Look previews of Markdown files › Open
+System Settings), and that an update through the app's updater keeps it.
 
 ## A signed build on your own Mac
 

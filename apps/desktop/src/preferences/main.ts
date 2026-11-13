@@ -103,8 +103,11 @@ const installCommandLine = <T>(command: string) =>
 const defaultAppCommand = <T>(command: string) =>
   appCommand<T>(command, 'The default app is set from the app.');
 
-/** Quick Look is the Mac's, and its settings open from the app. */
-const hasQuickLook = isTauri && navigator.userAgent.includes('Macintosh');
+/**
+ * Whether there is a Quick Look preview to turn off: only the app can say (quick_look.rs: it runs
+ * from a bundle that holds the extension, on a macOS that loads it), and a plain browser has none.
+ */
+const hasQuickLook = isTauri && (await invoke<boolean>('quick_look_available').catch(() => false));
 
 const deps: PaneDeps = {
   settings: () => settings,
@@ -126,11 +129,9 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  // The app's refusal is a string, which the row shows as it is.
   ...(hasQuickLook
-    ? {
-        openQuickLookSettings: () =>
-          appCommand<void>('open_quick_look_settings', 'Quick Look settings open from the app.'),
-      }
+    ? { openQuickLookSettings: () => invoke<void>('open_quick_look_settings') }
     : {}),
   agentsPane: (container) =>
     renderAgentsPane(container, {

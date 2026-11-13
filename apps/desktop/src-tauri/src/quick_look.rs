@@ -1,20 +1,69 @@
-// The settings pane where a person turns the Quick Look preview of Markdown files off (#316). The
-// preview is an extension inside the app (apps/desktop/quicklook) that macOS registers by itself
-// when the app first runs from Applications, and System Settings › General › Login Items &
-// Extensions › Quick Look lists it. Preferences › General has one line for it, with a button that
-// opens that pane.
+// What Preferences › General says of the Quick Look preview of Markdown files (#316). The preview is
+// an extension inside the app (apps/desktop/quicklook) that macOS registers by itself when the app
+// first runs from Applications, and System Settings lists it with the other Quick Look extensions,
+// where it is turned off. Preferences has one line for it, drawn only where there is a preview to
+// turn off (`quick_look_available`), with a button that opens that list (`open_quick_look_settings`).
 
-/// The pane: Login Items & Extensions, with its sheet of the Quick Look extensions, each with a
-/// switch (seen on macOS 27; `com.apple.ExtensionsPreferences`, which looks as if it should do this,
-/// opens at Login Items alone). Where System Settings doesn't know the extension point it shows the
-/// Login Items page, a few steps from the list.
+use std::path::{Path, PathBuf};
+
+/// The extension inside the app's bundle, where `bundle.macOS.files` in tauri.conf.json puts it.
+const EXTENSION: &str = "Contents/PlugIns/RedlinesPreview.appex";
+
+/// The oldest macOS, as (major, minor), that loads the extension: `MINIMUM_MACOS` in
+/// scripts/build-quicklook, which says why.
+const MINIMUM_MACOS: (isize, isize) = (13, 3);
+
+/// The list of Quick Look extensions in System Settings. Tried on macOS 27 only, where this opens
+/// Login Items & Extensions with the sheet of Quick Look extensions over it, each with a switch;
+/// `com.apple.ExtensionsPreferences` with the same query opens General there, and without it Login
+/// Items. A macOS that doesn't know the extension point may open a page a few steps from the list.
 const SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?extensionPointIdentifier=com.apple.quicklook.preview";
+
+/// Whether this app has a Quick Look preview to turn off: it runs from a bundle that holds the
+/// extension (a build run from the sources, as `pnpm tauri dev` does, has none), on a macOS that
+/// loads it. Preferences draws its line only then.
+#[tauri::command(async)]
+pub fn quick_look_available() -> bool {
+    running_bundle().is_some_and(|bundle| holds_the_extension(&bundle))
+        && macos_version().is_some_and(loads_the_extension)
+}
 
 /// Opens System Settings at the Quick Look extensions. Only the Mac has Quick Look: elsewhere this
 /// refuses, in a sentence that the Preferences line shows.
 #[tauri::command(async)]
 pub fn open_quick_look_settings() -> Result<(), String> {
     open(SETTINGS_URL)
+}
+
+/// Whether the app at `bundle` carries the extension.
+fn holds_the_extension(bundle: &Path) -> bool {
+    bundle.join(EXTENSION).is_dir()
+}
+
+/// Whether a macOS of this version, (major, minor), loads the extension.
+fn loads_the_extension(version: (isize, isize)) -> bool {
+    version >= MINIMUM_MACOS
+}
+
+#[cfg(target_os = "macos")]
+fn running_bundle() -> Option<PathBuf> {
+    crate::install::macos::running_bundle()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running_bundle() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_version() -> Option<(isize, isize)> {
+    let version = objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersion();
+    Some((version.majorVersion, version.minorVersion))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_version() -> Option<(isize, isize)> {
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -35,8 +84,10 @@ fn open(_url: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// The extension point that the Quick Look extension is built for, in the script that builds it.
+    /// The script that builds the extension, which says what it is built for.
     const BUILD_SCRIPT: &str = include_str!("../../scripts/build-quicklook");
+    /// The configuration that puts the extension in the bundle.
+    const TAURI_CONF: &str = include_str!("../tauri.conf.json");
 
     #[test]
     fn the_pane_lists_the_extensions_that_quick_look_previews_come_from() {
@@ -50,6 +101,61 @@ mod tests {
             BUILD_SCRIPT.contains(&format!("\"{extension_point}\"")),
             "scripts/build-quicklook doesn't declare {extension_point}"
         );
+    }
+
+    #[test]
+    fn looks_for_the_extension_where_the_bundle_puts_it() {
+        let in_plug_ins = EXTENSION
+            .strip_prefix("Contents/")
+            .expect("the extension is inside Contents");
+        assert!(
+            TAURI_CONF.contains(&format!("\"{in_plug_ins}\"")),
+            "tauri.conf.json puts no {in_plug_ins} in the bundle"
+        );
+    }
+
+    #[test]
+    fn asks_of_macos_what_the_extension_asks() {
+        let (major, minor) = MINIMUM_MACOS;
+        assert!(
+            BUILD_SCRIPT.contains(&format!("MINIMUM_MACOS = \"{major}.{minor}\"")),
+            "scripts/build-quicklook builds for another macOS than {major}.{minor}"
+        );
+    }
+
+    #[test]
+    fn the_extension_loads_from_the_macos_that_the_build_names() {
+        assert!(!loads_the_extension((10, 15)));
+        assert!(!loads_the_extension((12, 7)));
+        assert!(!loads_the_extension((13, 0)));
+        assert!(!loads_the_extension((13, 2)));
+        assert!(loads_the_extension((13, 3)));
+        assert!(loads_the_extension((14, 0)));
+        assert!(loads_the_extension((27, 0)));
+    }
+
+    #[test]
+    fn a_bundle_has_a_preview_when_it_holds_the_extension() {
+        let folder = std::env::temp_dir().join(format!("redlines-quick-look-{}", std::process::id()));
+        let bundle = folder.join("Redlines.app");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        assert!(!holds_the_extension(&bundle));
+        std::fs::create_dir_all(bundle.join(EXTENSION)).unwrap();
+        assert!(holds_the_extension(&bundle));
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn has_none_to_turn_off_where_the_app_is_not_run_from_its_bundle() {
+        // The tests run from `target/`, as a build from the sources does.
+        assert!(!quick_look_available());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn knows_which_macos_it_runs_on() {
+        assert!(macos_version().is_some_and(|(major, _)| major >= 11));
     }
 
     #[cfg(not(target_os = "macos"))]

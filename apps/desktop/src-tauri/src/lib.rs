@@ -370,6 +370,7 @@ pub fn run() {
             default_app::default_app,
             default_app::make_default_app,
             quick_look::open_quick_look_settings,
+            quick_look::quick_look_available,
             install::answer_install,
             project::project_root,
             project::list_folder,

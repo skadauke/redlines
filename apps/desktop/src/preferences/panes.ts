@@ -309,14 +309,18 @@ function general(deps: PaneDeps): HTMLElement[] {
   ];
 }
 
-/** What the line under the Quick Look button says until it has something to say about the button. */
+/**
+ * What the line under the Quick Look button says until it has something to say about the button. It
+ * names no menu: where the list is in System Settings changes from one macOS to the next.
+ */
 const QUICK_LOOK_HINT =
-  'Turn the preview off in System Settings › General › Login Items & Extensions › Quick Look.';
+  'Redlines’ preview is one of the Quick Look extensions in System Settings, where it can be turned off.';
 
 /**
  * Quick Look previews of Markdown files: the app comes with one, which macOS registers by itself
  * and lists in System Settings, so that is where it is turned off. The button opens that list. If
- * it can't, the line under it says why, and goes back to the hint on the next press.
+ * it can't, the line under it says why, with the hint still, and goes back to the hint alone on the
+ * next press.
  */
 function quickLookRow(open: () => Promise<void>): HTMLElement {
   const status = el('div', 'rl-pref-note', QUICK_LOOK_HINT);
@@ -327,10 +331,21 @@ function quickLookRow(open: () => Promise<void>): HTMLElement {
     status.classList.toggle('rl-pref-failure', failed);
     status.textContent = text;
   };
+  // One press at a time: a second while the first is under way would put its answer over the
+  // other's, in whichever order they come.
+  let opening = false;
   button.addEventListener('click', () => {
+    if (opening) return;
+    opening = true;
     say(QUICK_LOOK_HINT, false);
-    open().catch((error: unknown) =>
-      say(error instanceof Error ? error.message : String(error), true),
+    open().then(
+      () => {
+        opening = false;
+      },
+      (error: unknown) => {
+        opening = false;
+        say(`${error instanceof Error ? error.message : String(error)} ${QUICK_LOOK_HINT}`, true);
+      },
     );
   });
   const control = el('div', 'rl-pref-inline');

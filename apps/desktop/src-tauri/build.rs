@@ -49,6 +49,7 @@ const COMMANDS: &[&str] = &[
     "opened_files",
     "print_window",
     "project_root",
+    "quick_look_available",
     "quit_all",
     "real_path",
     "relaunch",
