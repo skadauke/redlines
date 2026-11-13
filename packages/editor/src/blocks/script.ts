@@ -31,6 +31,16 @@ import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
+/**
+ * Lets the event loop turn, which a loop of scripts must do now and then (`await settle()`, once a
+ * script or once a seed). A script's editors are destroyed, but happy-dom's `requestAnimationFrame`
+ * answers with an object, so CodeMirror's `destroy()` does not take it for a pending frame and
+ * never cancels the frame it asked for: each editor stays reachable from a timer until a macrotask
+ * turn. A loop that never yields held them all, about 18 MB a seed, and ran out of memory at
+ * `REDLINES_FUZZ=200` (#286). A turn that is only a microtask does not release them.
+ */
+export const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
 export type KeyName =
   | 'Enter'

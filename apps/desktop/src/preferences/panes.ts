@@ -8,7 +8,7 @@ import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
 import type { AppearanceChoice, Settings } from '../settings.ts';
-import { stepSize } from '../text-size.ts';
+import { stepSize, ZOOM_LADDER } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
 
@@ -54,7 +54,7 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms every window of the app to a level of the ladder, and keeps it (zoom.ts). */
+  /** Zooms every window of the app to a level of the window zoom's ladder, and keeps it (zoom.ts). */
   setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
@@ -486,8 +486,9 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  // Both walk the ladder of text-size.ts: the zoom of every window, and the text alone.
-  const zoom = stepper(current.zoom, (level) => deps.setZoom(level));
+  // They walk the ladders of text-size.ts: the zoom of every window, which stops at 200%, and the
+  // text alone, which goes on to 400%.
+  const zoom = stepper(current.zoom, (level) => deps.setZoom(level), ZOOM_LADDER);
   const text = stepper(current.textSize, (textSize) => update({ textSize }));
 
   return [
@@ -502,7 +503,11 @@ function appearance(deps: PaneDeps): HTMLElement[] {
  * A − 100% + control that steps `start` along the ladder and calls `change` with each size. The
  * value is a live region, so that VoiceOver reads it as it changes.
  */
-function stepper(start: number, change: (size: number) => void): HTMLElement {
+function stepper(
+  start: number,
+  change: (size: number) => void,
+  ladder?: readonly number[],
+): HTMLElement {
   // Another level lands from outside (`showZoom`): shown in place, so that the button pressed
   // keeps the focus and the live region is read.
   let size = start;
@@ -515,11 +520,11 @@ function stepper(start: number, change: (size: number) => void): HTMLElement {
   larger.setAttribute('aria-label', 'Larger');
   const show = () => {
     value.textContent = `${Math.round(size * 100)}%`;
-    smaller.disabled = stepSize(size, -1) === size;
-    larger.disabled = stepSize(size, 1) === size;
+    smaller.disabled = stepSize(size, -1, ladder) === size;
+    larger.disabled = stepSize(size, 1, ladder) === size;
   };
   const move = (by: number) => {
-    size = stepSize(size, by);
+    size = stepSize(size, by, ladder);
     show();
     change(size);
   };
