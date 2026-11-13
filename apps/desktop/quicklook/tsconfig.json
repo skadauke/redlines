@@ -1,0 +1,11 @@
+{
+  // No DOM: the renderer runs in JavaScriptCore, with nothing but the language. Node's types are for
+  // the tests, and the bundler's config is checked with the rest.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["src", "rolldown.config.mjs"]
+}

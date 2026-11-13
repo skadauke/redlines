@@ -18,5 +18,8 @@ apps/desktop/src-tauri/permissions/
 apps/desktop/src-tauri/binaries/
 apps/desktop/redlines/bundle/
 
+# The Quick Look extension and its renderer's bundle (apps/desktop/scripts/build-quicklook)
+apps/desktop/quicklook/build/
+
 # Vitest output a reporter or a crashed run can leave behind.
 .vitest/
