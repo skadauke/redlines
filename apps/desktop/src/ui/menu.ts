@@ -1,7 +1,8 @@
 // A menu that opens from an icon button: on hover after a short pause, or on click, Enter, Space or
 // the down arrow. A hover-opened menu closes soon after the pointer leaves both the button and the
 // menu; a clicked one stays until Esc, a second click or a click elsewhere. Opening on hover
-// never takes the keyboard focus from the document.
+// never takes the keyboard focus from the document. A button that acts (`activate`) has its menu
+// for hover and the arrow keys only: a click, Enter and Space act, and close the menu if it is open.
 
 import { icon, type IconName } from './icons.ts';
 
@@ -31,6 +32,14 @@ export interface MenuOptions {
   button: HTMLButtonElement;
   /** The entries, read again on every refresh. Their order and number never change. */
   entries(): MenuEntry[];
+  /**
+   * What a click on the button does, for a button that acts, as the eye switches the view and the
+   * pen turns Track Changes on and off. A click, or Enter or Space on the focused button, closes the
+   * menu if it is open, whichever way it was opened, and calls this; none of them opens it. The menu
+   * still opens on hover, after the pause, and from the arrow keys. Given the click, whose `detail`
+   * is 0 for a key's.
+   */
+  activate?: (event: MouseEvent) => void;
   /** Whether a neighboring menu is open, in which case hovering opens this one at once. */
   neighborOpen(): boolean;
   /** Called as the menu opens, so that its neighbors can close. */
@@ -168,6 +177,13 @@ export function createMenu(options: MenuOptions): Menu {
   };
 
   const onClick = (event: MouseEvent) => {
+    if (options.activate) {
+      // The button acts. Its menu goes with the click, and the pause that was running does not
+      // open it after: the pointer has to leave and come back.
+      close();
+      options.activate(event);
+      return;
+    }
     // A click on a menu that hover opened keeps it open; a click on a clicked menu closes it.
     if (isOpen && pinned) close();
     else open(event.detail === 0 ? 'keyboard' : 'click');

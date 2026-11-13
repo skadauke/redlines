@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 import { newestView } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTitleBar, documentFactsLine, wordCount, type TitleBarState } from './titlebar.ts';
+import {
+  createTitleBar,
+  documentFactsLine,
+  TOOLTIP_MS,
+  wordCount,
+  type TitleBarState,
+} from './titlebar.ts';
 
 const BASE: TitleBarState = {
   name: 'launch-plan.md',
@@ -13,6 +19,9 @@ const BASE: TitleBarState = {
   sidebarOpen: false,
   showResolved: false,
 };
+
+/** The bars the test made, which are taken down after it: an open menu listens on the document. */
+const made: { destroy(): void }[] = [];
 
 function setup(state: Partial<TitleBarState> = {}) {
   const root = document.createElement('div');
@@ -30,6 +39,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
+  made.push(bar);
   bar.update({ ...BASE, ...state });
   const button = (label: string) => {
     const found = root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
@@ -54,6 +64,14 @@ function item(menu: HTMLElement, label: string): HTMLButtonElement {
 
 const enter = (el: Element) => el.dispatchEvent(new PointerEvent('pointerenter'));
 const leave = (el: Element) => el.dispatchEvent(new PointerEvent('pointerleave'));
+/** The pointer comes to an icon and rests there until its menu has opened. */
+const hover = (el: Element) => {
+  enter(el);
+  vi.advanceTimersByTime(120);
+};
+/** A click as a mouse makes it (a key's has no `detail`). */
+const click = (el: Element) =>
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
 const press = (el: Element, key: string) =>
   el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
 const shown = (el: Element) => el.closest('[hidden]') === null;
@@ -63,6 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const bar of made.splice(0)) bar.destroy();
   vi.useRealTimers();
   document.body.replaceChildren();
 });
@@ -495,11 +514,12 @@ describe('title bar', () => {
 
   it('closes its menus when asked', () => {
     const { bar, button, menu } = setup();
-    button('View').click();
+    hover(button('View'));
     expect(shown(menu('View'))).toBe(true);
     bar.closeMenus();
     expect(shown(menu('View'))).toBe(false);
-    button('Review').click();
+    leave(button('View'));
+    hover(button('Review'));
     expect(shown(menu('Review'))).toBe(true);
     bar.closeMenus();
     expect(shown(menu('Review'))).toBe(false);
@@ -539,7 +559,7 @@ describe('title bar', () => {
 
   it('offers Redlines whatever the document holds', () => {
     const { actions, bar, button, menu } = setup({ hasRedlines: false, view: 'clean' });
-    button('View').click();
+    hover(button('View'));
     const redlines = () => item(menu('View'), 'Redlines');
     expect(shown(redlines())).toBe(true);
     expect(redlines().disabled).toBe(false);
@@ -556,7 +576,7 @@ describe('title bar', () => {
 
   it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {
     const { actions, menu, button } = setup({ view: 'clean' });
-    button('View').click();
+    hover(button('View'));
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
     // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
     expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Raw⌥⌘3']);
@@ -568,8 +588,7 @@ describe('title bar', () => {
   });
 
   it('checks Redlines, and no other view, in its simple look', () => {
-    const { menu, button } = setup({ view: 'simple' });
-    button('View').click();
+    const { menu } = setup({ view: 'simple' });
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
   });
@@ -607,7 +626,7 @@ describe('title bar', () => {
 
   it('the Review menu switches tracking and starts a review', () => {
     const { actions, button, menu } = setup();
-    button('Review').click();
+    hover(button('Review'));
     const review = menu('Review');
     expect(item(review, 'Track changes').textContent).toContain('⇧⌘E');
     expect(item(review, 'Review changes').textContent).toContain('⌥⌘]');
@@ -620,7 +639,7 @@ describe('title bar', () => {
 
   it('the Review menu checks Show resolved comments, and switches it', () => {
     const { actions, bar, button, menu } = setup();
-    button('Review').click();
+    hover(button('Review'));
     const review = menu('Review');
     const row = item(review, 'Show resolved comments');
     expect(row.getAttribute('role')).toBe('menuitemcheckbox');
@@ -667,30 +686,21 @@ describe('title bar', () => {
     expect(view.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('click opens the menu and keeps it open; a second click closes it', () => {
+  it('the arrow key opens the menu and keeps it open until Esc, a click elsewhere or the icon', () => {
     const { button, menu } = setup();
-    button('View').click();
+    press(button('View'), 'ArrowDown');
     expect(shown(menu('View'))).toBe(true);
     leave(button('View'));
     vi.advanceTimersByTime(1000);
     expect(shown(menu('View'))).toBe(true);
-    button('View').click();
+    // A click on the icon acts, and takes its menu away with it.
+    click(button('View'));
     expect(shown(menu('View'))).toBe(false);
-  });
-
-  it('a click on a menu that hover opened keeps it open', () => {
-    const { button, menu } = setup();
-    enter(button('View'));
-    vi.advanceTimersByTime(120);
-    button('View').click();
-    leave(button('View'));
-    vi.advanceTimersByTime(1000);
-    expect(shown(menu('View'))).toBe(true);
   });
 
   it('Esc closes the menu', () => {
     const { button, menu } = setup();
-    button('View').click();
+    hover(button('View'));
     press(document.body, 'Escape');
     expect(shown(menu('View'))).toBe(false);
   });
@@ -785,6 +795,232 @@ describe('the bar floating over the page', () => {
     expect(bar.room()).toBe(64);
     element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 41.6);
     expect(bar.room()).toBeCloseTo(51.2, 9);
+  });
+});
+
+describe('a click on the View and Review icons', () => {
+  it('switches between Clean and Redlines on the View icon', () => {
+    const { actions, bar, button } = setup({ view: 'redlines' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenLastCalledWith('clean');
+    bar.update({ ...BASE, view: 'clean' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenLastCalledWith('redlines');
+    expect(actions.setView).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the simple look for Redlines, which it switches from', () => {
+    const { actions, button } = setup({ view: 'simple' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenCalledWith('clean');
+  });
+
+  it('goes back from Raw to the one of Clean and Redlines that was shown last', () => {
+    const { actions, bar, button } = setup({ view: 'clean' });
+    bar.update({ ...BASE, view: 'raw' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenLastCalledWith('clean');
+    bar.update({ ...BASE, view: 'redlines' });
+    bar.update({ ...BASE, view: 'raw' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenLastCalledWith('redlines');
+    // The simple look is a look of Redlines.
+    bar.update({ ...BASE, view: 'simple' });
+    bar.update({ ...BASE, view: 'raw' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenLastCalledWith('redlines');
+  });
+
+  it('goes to Redlines from a Raw that no other view came before', () => {
+    const { actions, button } = setup({ view: 'raw' });
+    click(button('View'));
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+  });
+
+  it('turns Track Changes on and off on the pen, as the key does', () => {
+    const { actions, bar, button } = setup({ tracking: false });
+    click(button('Review'));
+    expect(actions.toggleTracking).toHaveBeenCalledOnce();
+    bar.update({ ...BASE, tracking: true });
+    click(button('Review'));
+    expect(actions.toggleTracking).toHaveBeenCalledTimes(2);
+    expect(actions.setView).not.toHaveBeenCalled();
+  });
+
+  it('is what Space or Return does on a focused icon, which the browser sends as a click', () => {
+    // A click that a key makes has no position: it is `detail` 0, and `click()` makes one.
+    const { actions, button, menu } = setup({ view: 'clean' });
+    button('View').click();
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+    button('Review').click();
+    expect(actions.toggleTracking).toHaveBeenCalledOnce();
+    expect(shown(menu('View'))).toBe(false);
+    expect(shown(menu('Review'))).toBe(false);
+  });
+
+  it('opens no menu, which hover and the arrow keys do', () => {
+    const { button, menu } = setup();
+    click(button('View'));
+    click(button('Review'));
+    expect(shown(menu('View'))).toBe(false);
+    expect(shown(menu('Review'))).toBe(false);
+    press(button('Review'), 'ArrowDown');
+    expect(shown(menu('Review'))).toBe(true);
+    expect(document.activeElement).toBe(item(menu('Review'), 'Track changes'));
+    press(menu('Review'), 'Escape');
+    press(button('View'), 'ArrowUp');
+    expect(shown(menu('View'))).toBe(true);
+  });
+
+  it('closes a menu that hover opened, and acts', () => {
+    const { actions, button, menu } = setup({ view: 'redlines' });
+    hover(button('View'));
+    expect(shown(menu('View'))).toBe(true);
+    click(button('View'));
+    expect(shown(menu('View'))).toBe(false);
+    expect(actions.setView).toHaveBeenCalledOnce();
+    // The pointer that stays does not open it again: the menu comes back when the pointer has left
+    // and returned.
+    vi.advanceTimersByTime(1000);
+    expect(shown(menu('View'))).toBe(false);
+    leave(button('View'));
+    hover(button('View'));
+    expect(shown(menu('View'))).toBe(true);
+  });
+
+  it('closes a menu that a key opened, and acts', () => {
+    const { actions, button, menu } = setup({ tracking: false });
+    press(button('Review'), 'ArrowDown');
+    expect(shown(menu('Review'))).toBe(true);
+    click(button('Review'));
+    expect(shown(menu('Review'))).toBe(false);
+    expect(actions.toggleTracking).toHaveBeenCalledOnce();
+  });
+
+  it('acts before the menu would have opened, and the menu does not open after', () => {
+    const { actions, button, menu } = setup();
+    enter(button('Review'));
+    vi.advanceTimersByTime(60);
+    click(button('Review'));
+    vi.advanceTimersByTime(1000);
+    expect(actions.toggleTracking).toHaveBeenCalledOnce();
+    expect(shown(menu('Review'))).toBe(false);
+  });
+
+  it('leaves the menu’s own items to choose for themselves', () => {
+    const { actions, button, menu } = setup({ view: 'redlines' });
+    hover(button('View'));
+    item(menu('View'), 'Raw').click();
+    expect(actions.setView).toHaveBeenCalledOnce();
+    expect(actions.setView).toHaveBeenCalledWith('raw');
+  });
+});
+
+describe('what a click on the icons will do, said before it is made', () => {
+  const tips = (root: HTMLElement) => ({
+    view: root.querySelector<HTMLElement>('#rl-view-tip'),
+    review: root.querySelector<HTMLElement>('#rl-review-tip'),
+  });
+
+  it('says on the View icon which view a click shows, with its key', () => {
+    const { root, bar } = setup({ view: 'redlines' });
+    const { view } = tips(root);
+    expect(view?.getAttribute('role')).toBe('tooltip');
+    expect(view?.textContent).toBe('Show Clean⌥⌘1');
+    bar.update({ ...BASE, view: 'clean' });
+    expect(view?.textContent).toBe('Show Redlines⌥⌘2');
+    // From Raw, the one shown last: Clean, then.
+    bar.update({ ...BASE, view: 'raw' });
+    expect(view?.textContent).toBe('Show Clean⌥⌘1');
+    bar.update({ ...BASE, view: 'redlines' });
+    bar.update({ ...BASE, view: 'raw' });
+    expect(view?.textContent).toBe('Show Redlines⌥⌘2');
+    bar.update({ ...BASE, view: 'clean' });
+    bar.update({ ...BASE, view: 'raw' });
+    expect(view?.textContent).toBe('Show Clean⌥⌘1');
+  });
+
+  it('says on the pen whether a click turns Track Changes on or off, with the key', () => {
+    const { root, bar } = setup({ tracking: false });
+    const { review } = tips(root);
+    expect(review?.getAttribute('role')).toBe('tooltip');
+    expect(review?.textContent).toBe('Turn on Track Changes⇧⌘E');
+    bar.update({ ...BASE, tracking: true });
+    expect(review?.textContent).toBe('Turn off Track Changes⇧⌘E');
+  });
+
+  it('describes the icon, which keeps its name, and gives its key to those who cannot see it', () => {
+    const { root, bar, button } = setup({ view: 'redlines', tracking: false });
+    expect(button('View').getAttribute('aria-describedby')).toBe(tips(root).view?.id);
+    expect(button('Review').getAttribute('aria-describedby')).toBe(tips(root).review?.id);
+    expect(button('View').getAttribute('aria-keyshortcuts')).toBe('Alt+Meta+1');
+    expect(button('Review').getAttribute('aria-keyshortcuts')).toBe('Shift+Meta+E');
+    bar.update({ ...BASE, view: 'clean' });
+    expect(button('View').getAttribute('aria-keyshortcuts')).toBe('Alt+Meta+2');
+  });
+
+  it('shows the pen as pressed while Track Changes is on, and the eye as no switch', () => {
+    const { bar, button } = setup({ tracking: false });
+    expect(button('Review').getAttribute('aria-pressed')).toBe('false');
+    bar.update({ ...BASE, tracking: true });
+    expect(button('Review').getAttribute('aria-pressed')).toBe('true');
+    expect(button('View').hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('shows after a pause on an icon whose menu is not open, as the Show files hint does', () => {
+    const { root, button } = setup({ tracking: false });
+    const { review } = tips(root);
+    // A click that was made before the menu opened: the pointer stays, and what comes next is said.
+    enter(button('Review'));
+    vi.advanceTimersByTime(30);
+    click(button('Review'));
+    vi.advanceTimersByTime(TOOLTIP_MS - 1);
+    expect(review && shown(review)).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(review && shown(review)).toBe(true);
+    leave(button('Review'));
+    expect(review && shown(review)).toBe(false);
+  });
+
+  it('says what the next click will do after this one, when the pointer stays', () => {
+    const { root, bar, button } = setup({ view: 'redlines' });
+    const { view } = tips(root);
+    click(button('View'));
+    bar.update({ ...BASE, view: 'clean' });
+    vi.advanceTimersByTime(TOOLTIP_MS);
+    expect(view && shown(view)).toBe(true);
+    expect(view?.textContent).toBe('Show Redlines⌥⌘2');
+  });
+
+  it('never shows over the icon’s own menu: the menu opens first, and takes the hint away', () => {
+    const { root, button, menu } = setup();
+    hover(button('View'));
+    expect(shown(menu('View'))).toBe(true);
+    vi.advanceTimersByTime(TOOLTIP_MS * 3);
+    const { view } = tips(root);
+    expect(view && shown(view)).toBe(false);
+  });
+
+  it('shows at once on the keyboard focus, and goes with the focus or Escape', () => {
+    const { root, button } = setup();
+    const { review } = tips(root);
+    button('Review').focus();
+    expect(review && shown(review)).toBe(true);
+    button('Review').blur();
+    expect(review && shown(review)).toBe(false);
+    button('Review').focus();
+    press(button('Review'), 'Escape');
+    expect(review && shown(review)).toBe(false);
+  });
+
+  it('goes when the menu opens by a key', () => {
+    const { root, button, menu } = setup();
+    const { view } = tips(root);
+    button('View').focus();
+    expect(view && shown(view)).toBe(true);
+    press(button('View'), 'ArrowDown');
+    expect(shown(menu('View'))).toBe(true);
+    expect(view && shown(view)).toBe(false);
   });
 });
 

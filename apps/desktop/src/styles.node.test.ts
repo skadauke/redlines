@@ -205,6 +205,17 @@ describe('styles.css', () => {
     expect(printed).toMatch(/\.rl-scroller\s*\{[^}]*padding-top: 0/);
   });
 
+  it('keeps the hints of the right-hand icons inside the window, aligned with the icon’s right edge', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The Files icon's hint starts at its left edge, under the window buttons' side of the bar;
+    // View and Review are at the other end, where a hint that started at the icon's left would run
+    // out of the window.
+    expect(declared('.rl-tip')).toContain('left: 0');
+    expect(declared('.rl-tip-end')).toContain('right: 0');
+    expect(declared('.rl-tip-end')).toContain('left: auto');
+  });
+
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
     const declared = (selector: string, css = all) =>
       css.find((rule) => rule.selector === selector)?.declarations ?? '';

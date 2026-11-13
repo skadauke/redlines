@@ -692,12 +692,12 @@ async function surfacesFit({
   for (const control of document.querySelectorAll('.rl-titlebar button, .rl-title')) {
     fits(`titlebar ${control.getAttribute('aria-label') ?? control.className}`, control);
   }
-  // The open View menu.
+  // The open View menu: the arrow key opens it, since a click on the eye switches the view.
   const view = document.querySelector<HTMLElement>('.rl-titlebar button[aria-label="View"]');
-  view?.click();
+  view?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   await settle();
   fits('view menu', document.querySelector('.rl-menu-anchor:not([hidden]) .rl-menu'));
-  view?.click();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   // The review bar.
   surfaces.review.openBar();
   await settle();

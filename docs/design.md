@@ -224,9 +224,15 @@ The window, on the desktop:
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
-- **Icons without labels, explained on hover.** Hovering over an icon shows its name and shortcut,
-  or opens its menu straight away, with each item's shortcut. Clicking opens the menu too, for the
-  keyboard and touch.
+- **Icons without labels, explained on hover.** Hovering over Files shows its name and shortcut.
+  Hovering over View or Review opens its menu after a short pause, with each item's shortcut, and
+  the arrow keys open it from the keyboard. A click on either does what is done most often: View
+  switches between Clean and Redlines (from Raw, back to whichever of the two was shown last), and
+  Review turns Track Changes on and off, as ⇧⌘E does. A click while the menu is open closes it and
+  acts. Each icon's hint says what a click will do, with its key ("Show Redlines ⌥⌘2", "Turn off
+  Track Changes ⇧⌘E"): the menu has the pointer's rest, so the hint shows when the keyboard brings
+  the focus to the icon, and after a click, when the pointer stays. The pen is pressed
+  (`aria-pressed`) while Track Changes is on.
 - **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
   it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
   which hovering over brings up, and which goes out of sight while you type) and on right-click, at
