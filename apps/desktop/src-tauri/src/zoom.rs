@@ -10,7 +10,7 @@
 //! sets the page zoom right after it builds the window, before the page loads. A window asks for a
 //! level with `set_zoom`; the app keeps it and tells each document window and Preferences, with the
 //! `zoom` event and then the page zoom, in that order (`src/zoom.ts` follows the two). The install
-//! window is never zoomed. Each page, once loaded, asks `zoom_level` for the app's level, reporting
+//! window and About are never zoomed. Each page, once loaded, asks `zoom_level` for the app's level, reporting
 //! the one in its settings: the app takes the report only when it has no level yet, and only the
 //! first.
 //!
@@ -108,7 +108,8 @@ fn answer(level: &mut Option<f64>, reported: f64) -> (f64, bool) {
     (1.0, false)
 }
 
-/// Only a document window or Preferences may zoom; the install window keeps the system's size.
+/// Only a document window or Preferences may zoom; the install window and About keep the system's
+/// size.
 fn may_zoom(label: &str) -> Result<(), String> {
     if is_document_window(label) || label == PREFERENCES_WINDOW {
         Ok(())
@@ -361,8 +362,13 @@ mod tests {
         for label in ["main", "doc-3", "preferences"] {
             assert!(may_zoom(label).is_ok(), "{label}");
         }
-        assert!(may_zoom("install").is_err());
-        assert!(may_zoom("").is_err());
+        for label in [
+            crate::install::QUESTION_WINDOW,
+            crate::windows::ABOUT_WINDOW,
+            "",
+        ] {
+            assert!(may_zoom(label).is_err(), "{label}");
+        }
     }
 
     #[test]

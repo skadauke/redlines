@@ -41,6 +41,7 @@ function commands() {
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
+    openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
@@ -90,7 +91,6 @@ const rowsOf = (model: MenuModel, title: string): readonly MenuRow[] => {
 
 /** A row as it reads in the menu: its name and accelerator, or `---` for a separator. */
 const reads = (row: MenuRow): string | [string, string | undefined] => {
-  if ('about' in row) return 'About Redlines';
   if ('item' in row) return row.item === 'Separator' ? '---' : (row.text ?? row.item);
   if ('rows' in row) return `${row.text} ›`;
   return [row.text, row.accelerator];
@@ -215,7 +215,7 @@ describe('the menu model', () => {
       ['Show Resolved Comments', undefined],
     ]);
     expect(readsAll(model, 'Redlines')).toEqual([
-      'About Redlines',
+      ['About Redlines', undefined],
       ['Check for Updates…', undefined],
       '---',
       ['Preferences…', 'CmdOrCtrl+,'],

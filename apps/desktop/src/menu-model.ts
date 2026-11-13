@@ -24,6 +24,8 @@ export interface MenuCommands {
   print(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
+  /** Opens the About Redlines window, or brings it forward. */
+  openAbout(): void;
   setView(mode: ViewMode): void;
   toggleSidebar(): void;
   toggleTracking(): void;
@@ -118,11 +120,6 @@ export interface StandardRow {
   text?: string;
 }
 
-/** About Redlines. What it shows is known when the menu bar is drawn. */
-export interface AboutRow {
-  about: true;
-}
-
 export interface ActionRow {
   text: string;
   /** In Tauri's notation, such as 'Shift+CmdOrCtrl+E'. */
@@ -156,7 +153,7 @@ export interface SubmenuRow {
   };
 }
 
-export type MenuRow = StandardRow | AboutRow | ActionRow | SubmenuRow;
+export type MenuRow = StandardRow | ActionRow | SubmenuRow;
 
 export interface AppMenu {
   title: string;
@@ -273,7 +270,7 @@ export function appMenuModel(
     {
       title: 'Redlines',
       rows: [
-        { about: true },
+        { text: 'About Redlines', action: () => commands.openAbout() },
         { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
         SEPARATOR,
         {

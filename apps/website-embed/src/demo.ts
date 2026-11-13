@@ -98,6 +98,8 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       tracking: true,
       typing: { smartPunctuation: true, spellCheck: false, closePairs: false },
       people: PEOPLE,
+      // ⌘-click on a link opens it in a new tab, which the page's own scripts can't reach.
+      openLink: (address) => window.open(address, '_blank', 'noopener,noreferrer'),
       extensions: [
         EditorView.contentAttributes.of({ 'aria-label': `Document: ${file}. An editable demo.` }),
         // The demo is a page, not a writing surface: Tab leaves it, in every engine (Safari handles

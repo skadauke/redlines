@@ -8,6 +8,7 @@ export {
   dropStepsEffect,
   followsText,
   history,
+  joinsNewestStep,
   joinsStep,
   historyField,
   historyKeymap,
