@@ -383,6 +383,8 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            files::folder_exists,
+            files::choose_folder,
             drag::start_file_drag,
             about,
             appearance::set_appearance,
