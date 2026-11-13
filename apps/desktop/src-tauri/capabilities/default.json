@@ -50,6 +50,7 @@
     "allow-set-appearance",
     "allow-set-zoom",
     "allow-show-images",
+    "allow-start-file-drag",
     "allow-undo-in-field",
     "allow-unwatch-document",
     "allow-update-check",

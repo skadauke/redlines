@@ -150,6 +150,15 @@ The window, on the desktop:
 
 - **The title bar is the page:** the same color, with no line under it, and the file name centered
   in small gray type. There is no toolbar and no status bar.
+- **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
+  icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
+  hands over a copy of the file as it is saved. It never moves the file the window has open, and
+  while the document is Untitled, with no file yet, the icon is hidden, as it is on Windows and
+  Linux, where the page has no drag to hand over. A double-click on the name
+  renames the document, as File › Rename does, or opens Save As for an Untitled one; a
+  double-click anywhere else on the bar zooms the window, and a drag anywhere on the bar, the
+  name included, moves it. Hovering over the name shows the words and when the document was last
+  saved.
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
@@ -158,7 +167,9 @@ The window, on the desktop:
   ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
   opens it in a new one, as does a click while an agent is working in the window. A plain text
   file is read as Markdown and saved under its own name, with Track Changes and comments like any
-  document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
+  document (format §9.1). A document dropped on a window opens as one from Finder does, but for
+  the file that the window's own document icon dragged, which opens nothing when it is dropped
+  back on that window. Any other
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
@@ -177,7 +188,8 @@ The window, on the desktop:
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
+  Print. Printing holds the whole
   document in light ink and prints the view as it shows, without the rail: Simple prints the newest
   text with its change bars.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
@@ -992,7 +1004,8 @@ without each: a half-written comment is gone with the page, and nothing is saved
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
 nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
-images, as any document the person opens is; a folder or any other file dropped opens nothing, and
+images, as any document the person opens is (but for the file that the window's own document icon
+dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and
 lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
 scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
 and builds Tauri without that protocol.
