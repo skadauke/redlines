@@ -133,18 +133,19 @@ async function checks(
 
   // The hint comes after the delay, with the name and the keys.
   const bold = palette?.querySelector<HTMLElement>('[data-command="format.bold"]');
+  const hovered = performance.now();
   bold?.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }));
-  await sleep(250);
   const early = query<HTMLElement>('.rl-palette-tip')?.hidden;
-  await sleep(300);
-  const tip = query<HTMLElement>('.rl-palette-tip');
+  // Waited for, not slept for: a busy machine runs a timer late, and never early.
+  const tip = await waitFor(() => {
+    const found = query<HTMLElement>('.rl-palette-tip');
+    return found && !found.hidden ? found : null;
+  }, 3000);
+  const after = Math.round(performance.now() - hovered);
   report(
     'hint-comes-after-the-delay',
-    early === true && tip?.hidden === false && tip.textContent === 'Bold⌘B',
-    {
-      early,
-      text: tip?.textContent,
-    },
+    early === true && !!tip && after >= 350 && tip.textContent === 'Bold⌘B',
+    { early, after, text: tip?.textContent },
   );
   escape();
   await sleep(50);
