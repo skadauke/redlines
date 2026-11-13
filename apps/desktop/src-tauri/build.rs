@@ -62,6 +62,8 @@ const COMMANDS: &[&str] = &[
     "set_zoom",
     "show_app_icon_mark",
     "show_images",
+    "spelling_learn",
+    "spelling_suggestions",
     "start_file_drag",
     "undo_in_field",
     "unwatch_document",
