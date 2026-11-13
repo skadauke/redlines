@@ -71,3 +71,30 @@ struct PreviewRenderer {
             """
     }
 }
+
+/// What is read of a file that Quick Look asks to preview: the start of its text, and whether the
+/// file was longer. The extension and the test command line both read a file this way.
+struct PreviewText {
+    /// The most of a file that is read, in bytes. A longer file is shown as far as this, and the page
+    /// says so: the renderer would take longer than Quick Look waits.
+    static let maxBytes = 4 * 1024 * 1024
+
+    let text: String
+    /// Whether the file is longer than `maxBytes`, so that `text` is only its start.
+    let cut: Bool
+    /// The bytes that were read.
+    let bytes: Int
+
+    /// The start of the file at `url`. Not every file is well-formed UTF-8: what isn't is shown as the
+    /// replacement character. A byte order mark at the start is not text.
+    static func read(_ url: URL, maxBytes: Int = PreviewText.maxBytes) throws -> PreviewText {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        // One byte more than is kept, to know whether there is more.
+        let data = try handle.read(upToCount: maxBytes + 1) ?? Data()
+        let cut = data.count > maxBytes
+        var text = String(decoding: cut ? data.prefix(maxBytes) : data, as: UTF8.self)
+        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
+        return PreviewText(text: text, cut: cut, bytes: min(data.count, maxBytes))
+    }
+}

@@ -1,7 +1,7 @@
 // A command line that runs the renderer the way the Quick Look extension does, in the system's
 // JavaScriptCore, for the checks of scripts/build-quicklook and for timing it by hand.
 //
-//     preview-render <preview.js> <file> [--name NAME] [--cut] [--repeat N]
+//     preview-render <preview.js> <file> [--name NAME] [--cut] [--max-bytes N] [--repeat N]
 //     preview-render --fallback <file>
 //     preview-render --dynamic-type <extension>
 //
@@ -37,6 +37,7 @@ if arguments.first == "--fallback" {
 
 var name: String?
 var cut = false
+var maxBytes = PreviewText.maxBytes
 var repeats = 1
 var positional: [String] = []
 while let argument = arguments.first {
@@ -47,6 +48,10 @@ while let argument = arguments.first {
         guard let value = arguments.first else { fail("--name needs a value") }
         name = value
         arguments.removeFirst()
+    case "--max-bytes":
+        guard let value = arguments.first, let n = Int(value), n > 0 else { fail("--max-bytes needs a number") }
+        maxBytes = n
+        arguments.removeFirst()
     case "--repeat":
         guard let value = arguments.first, let n = Int(value), n > 0 else { fail("--repeat needs a number") }
         repeats = n
@@ -54,15 +59,15 @@ while let argument = arguments.first {
     default: positional.append(argument)
     }
 }
-guard positional.count == 2 else { fail("usage: preview-render <preview.js> <file> [--name NAME] [--cut] [--repeat N]") }
+guard positional.count == 2 else { fail("usage: preview-render <preview.js> <file> [--name NAME] [--cut] [--max-bytes N] [--repeat N]") }
 
 let script: String
-let data: Data
+let read: PreviewText
 do {
     script = try String(contentsOfFile: positional[0], encoding: .utf8)
-    data = try Data(contentsOf: URL(fileURLWithPath: positional[1]))
+    read = try PreviewText.read(URL(fileURLWithPath: positional[1]), maxBytes: maxBytes)
 } catch { fail("\(error)") }
-let text = String(decoding: data, as: UTF8.self)
+let text = read.text
 
 do {
     let loaded = Date()
@@ -72,11 +77,12 @@ do {
     var times: [Double] = []
     for _ in 0..<repeats {
         let started = Date()
-        html = try renderer.html(text: text, name: name ?? URL(fileURLWithPath: positional[1]).lastPathComponent, cut: cut)
+        html = try renderer.html(text: text, name: name ?? URL(fileURLWithPath: positional[1]).lastPathComponent, cut: cut || read.cut)
         times.append(Date().timeIntervalSince(started) * 1000)
     }
     FileHandle.standardOutput.write(Data(html.utf8))
     let first = times.first ?? 0
     let best = times.min() ?? 0
-    FileHandle.standardError.write(Data(String(format: "preview-render: %d chars, loaded in %.0f ms, rendered in %.0f ms (best of %d: %.0f ms), %d chars of HTML\n", text.count, loadMs, first, repeats, best, html.count).utf8))
+    let summary = "preview-render: \(text.count) chars\(read.cut ? " (the start of a longer file)" : ""), loaded in \(Int(loadMs)) ms, rendered in \(Int(first)) ms (best of \(repeats): \(Int(best)) ms), \(html.count) chars of HTML\n"
+    FileHandle.standardError.write(Data(summary.utf8))
 } catch { fail("\(error)") }

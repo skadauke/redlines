@@ -63,8 +63,10 @@ IN_APP = Path("PlugIns") / f"{NAME}.appex"
 
 # The extension's identifier starts with the app's (md.redlines.editor), as an extension's must.
 BUNDLE_ID = "md.redlines.editor.preview"
-# JavaScriptCore before macOS 13 lacks the array methods that the format library uses (toSorted).
-MINIMUM_MACOS = "13.0"
+# The format library's patterns use regular-expression lookbehind, which JavaScriptCore has from
+# Safari 16.4, that is macOS 13.3: before it the renderer's script doesn't even parse. (Its array
+# methods, toSorted and the rest, came with 13.0.)
+MINIMUM_MACOS = "13.3"
 ARCHS = ["arm64", "x86_64"]
 
 # The types of the files that the extension previews. Markdown has two types on macOS 27: the
@@ -253,7 +255,7 @@ def build_harness() -> None:
         "-framework", "UniformTypeIdentifiers",
     )  # fmt: skip
     # With the hardened runtime and the compiler, as the extension has them: without the entitlement
-    # the renderer takes three times as long, and the harness would time something else.
+    # the renderer takes several times as long, and the harness would time something else.
     run("codesign", "--force", "--sign", "-", "--options", "runtime", "--entitlements", HARNESS_ENTITLEMENTS, HARNESS)
 
 
@@ -279,6 +281,16 @@ class Checks:
 
 def architectures(binary: Path) -> List[str]:
     return output("lipo", "-archs", binary).split()
+
+
+def display(path: Path) -> str:
+    """What `codesign --display` says of a signed bundle: its signature, verbosely, and its entitlements
+    as XML. macOS 27 warns that the form with a colon (`:-`) will stop working, so the one with `--xml`
+    goes first, and the colon form is for a codesign that doesn't know `--xml`."""
+    shown = output("codesign", "--display", "--verbose=2", "--entitlements", "-", "--xml", path, check=False)
+    if "<plist" not in shown:
+        shown = output("codesign", "--display", "--verbose=2", "--entitlements", ":-", path, check=False)
+    return shown
 
 
 def check_layout(appex: Path, checks: Checks, signed: bool) -> None:
@@ -310,7 +322,7 @@ def check_layout(appex: Path, checks: Checks, signed: bool) -> None:
         checks.ok(found is not None and found.group(1) == MINIMUM_MACOS, f"{name} is built for macOS {MINIMUM_MACOS} ({arch})", said.strip().splitlines()[-1] if said.strip() else "")
     verified = subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", appex], capture_output=True, text=True)
     checks.ok(verified.returncode == 0, f"{name}'s signature holds", verified.stderr.strip())
-    shown = output("codesign", "--display", "--verbose=2", "--entitlements", ":-", appex, check=False)
+    shown = display(appex)
     checks.ok("<key>com.apple.security.app-sandbox</key>" in shown, f"{name} is sandboxed")
     checks.ok("com.apple.security.network" not in shown, f"{name} has no network")
     # JavaScriptCore's compiler is all it asks for besides the sandbox (swift/RedlinesPreview.entitlements).
@@ -364,6 +376,27 @@ def fixture_checks(checks: Checks) -> None:
     has(done.stdout, "the fallback page", "&lt;script&gt;alert('no')&lt;/script&gt;", "# Field notes", "default-src 'none'")
     lacks(done.stdout, "the fallback page", "<script", "<img", "<h1>")
 
+    # How the extension reads a file (PreviewText in swift/PreviewRenderer.swift): a byte order mark
+    # isn't text, bytes that aren't UTF-8 are the replacement character, and a file longer than the
+    # extension reads is drawn as far as that, says so, and names nobody, since its ledger isn't read.
+    BUILD.mkdir(exist_ok=True)
+    odd = BUILD / "odd.md"
+    odd.write_bytes(b"\xef\xbb\xbf# With a mark\n")
+    has(render(odd), "a file with a byte order mark", "<h1>With a mark</h1>")
+    odd.write_bytes(b"# Caf\xe9\n\nBytes that are not UTF-8.\n")
+    has(render(odd), "a file that is not UTF-8", "<h1>Caf\ufffd</h1>")
+    odd.unlink()
+    over = BUILD / "over.md"
+    ledger_after = (
+        "<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada}\n"
+        "marks:\n  k3x9: {by: ada, at: 2026-10-13T22:30Z}\ncomments: []\n-->\n"
+    )
+    over.write_text("# Over the limit\n\nA <!--ins k3x9-->new <!--/k3x9-->word.\n\n" + "A paragraph of text.\n\n" * 220000 + ledger_after, encoding="utf-8")
+    page = render(over)
+    has(page, "a file over the extension's limit", "<h1>Over the limit</h1>", "first part of a long document")
+    lacks(page, "a file over the extension's limit", '<p class="rl-notice">')
+    over.unlink()
+
     # A large file: about 2 MB, with a change at the top and the ledger at the end.
     BUILD.mkdir(exist_ok=True)
     large = BUILD / "large.md"
@@ -384,7 +417,7 @@ def fixture_checks(checks: Checks) -> None:
     seconds = time.monotonic() - started
     has(page, "large.md", "<h1>A long document</h1>", "first part of a long document")
     # With JavaScriptCore's compiler this takes a second or two. Without it (a runner that denies it,
-    # or Lockdown Mode) it takes ten times that, which this lets by: what it is after is a render
+    # or Lockdown Mode) it takes several times that, which this lets by: what it is after is a render
     # that never ends, since Quick Look gives an extension no more than a little while.
     checks.ok(seconds < 30, f"large.md ({large.stat().st_size // 1024} KB) renders in under 30 s", f"{seconds:.1f} s")
     large.unlink()
