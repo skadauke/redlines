@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { railCompact } from './rail.ts';
 import { type Editor, redo, undo } from '@redlines/editor';
-import { parse } from '@redlines/format';
+import { encodePayload, parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeChange } from './cards.ts';
 import type { FieldAttachment, PostedComment } from './index.ts';
@@ -293,6 +293,22 @@ describe('margin notes', () => {
     button(note!, 'Accept').click();
     expect(decided).toEqual([{ id: 'p7qd', how: 'accept' }]);
     expect(notes(editor)).toHaveLength(0);
+  });
+
+  it('says what a table deleted whole was in the note of its change, as its card does', () => {
+    const table = encodePayload('| a | b |\n| - | - |\n| 1 | 2 |\n\n');
+    const doc = file(`One.\n\n<!--del w2rf ${table}-->\n\nAfter.`, [
+      ...PEOPLE,
+      'marks:',
+      '  w2rf: {by: claude-ada, at: 2026-10-31T09:31Z, note: Out of date}',
+    ]);
+    const { editor } = mount(doc);
+    const [note] = notes(editor);
+    expect(note?.querySelector('.rl-note-change')?.textContent).toBe(
+      'Deleted table (2 columns, 2 rows)',
+    );
+    expect(note?.querySelector('.rl-note-old')).toBeNull();
+    expect(texts(note!)).toEqual(['Out of date']);
   });
 
   describe('in Simple', () => {

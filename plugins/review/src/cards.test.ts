@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { activateHover } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
-import { parse, type MarkRange } from '@redlines/format';
+import { encodePayload, parse, type MarkRange } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { describeChange, describeChanges } from './cards.ts';
 import {
@@ -632,6 +632,100 @@ describe('an inserted table row', () => {
   it('is listed in the review bar’s changes', () => {
     const { editor } = mount(ONE);
     expect(editor.getUiState().changes.map((change) => change.id)).toEqual(['k3x9']);
+  });
+});
+
+describe('a table deleted whole', () => {
+  /** A table of `columns` columns and `rows` rows, the header's and the body's. */
+  const table = (columns: number, rows: number) => {
+    const cells = (label: string) =>
+      `| ${Array.from({ length: columns }, (_, c) => `${label}${c}`).join(' | ')} |`;
+    const delimiter = `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`;
+    return [
+      cells('h'),
+      delimiter,
+      ...Array.from({ length: rows - 1 }, (_, r) => cells(`r${r}`)),
+    ].join('\n');
+  };
+  const ledger = [...PEOPLE, 'marks:', '  w2rf: {by: bo, at: 2026-10-31T09:35Z}'];
+  /** The deletion in front of the block after the table, behind the block above at the end, or alone. */
+  const forms = (text: string) => ({
+    middle: file(`One.\n\n<!--del w2rf ${encodePayload(`${text}\n\n`)}-->\n\nAfter.`, ledger),
+    end: file(`One.<!--del w2rf ${encodePayload(`\n\n${text}`)}-->`, ledger),
+    alone: file(`<!--del w2rf ${encodePayload(text)}-->`, ledger),
+  });
+  const said = (doc: string) => {
+    const parsed = parse(doc);
+    return describeChange(parsed, parsed.marks[0]!);
+  };
+
+  it('is described as Deleted table, with its columns and rows', () => {
+    expect(said(forms(table(3, 20)).middle)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(said(forms(table(2, 3)).middle)).toBe('Deleted table (2 columns, 3 rows)');
+  });
+
+  it('is singular for one column or one row, and counts a header alone as a row', () => {
+    expect(said(forms(table(1, 1)).middle)).toBe('Deleted table (1 column, 1 row)');
+    expect(said(forms(table(1, 5)).middle)).toBe('Deleted table (1 column, 5 rows)');
+    expect(said(forms(table(4, 1)).middle)).toBe('Deleted table (4 columns, 1 row)');
+  });
+
+  it('is described the same in every form it is written in', () => {
+    for (const [form, doc] of Object.entries(forms(table(3, 20)))) {
+      expect(said(doc), form).toBe('Deleted table (3 columns, 20 rows)');
+    }
+  });
+
+  it('is not said of a deletion of more than a table, or of a table’s text inside a paragraph', () => {
+    const more = file(
+      `One.\n\n<!--del w2rf ${encodePayload(`Intro.\n\n${table(2, 3)}\n\n`)}-->\n\nAfter.`,
+      ledger,
+    );
+    expect(said(more)).toMatch(/^Deleted “Intro\./);
+    const words = file('One <!--del w2rf | a | b |-->two.', ledger);
+    expect(said(words)).toBe('Deleted “| a | b |”');
+  });
+
+  it('is described in the list of a suggestion’s changes, as each change is', () => {
+    const parsed = parse(forms(table(3, 20)).middle);
+    expect(describeChanges(parsed, parsed.marks)).toBe('Deleted table (3 columns, 20 rows)');
+  });
+
+  it('opens its card on hover over the ghost table, and pins it on a click', async () => {
+    const { editor } = mount(forms(table(3, 20)).middle);
+    const ghost = editor.view.contentDOM.querySelector<HTMLElement>('.rl-ghost-table')!;
+    expect(ghost).not.toBeNull();
+    const cell = ghost.querySelector('.rl-del')!;
+    cell.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    activateHover(editor.view, editor.view.posAtDOM(ghost), 1);
+    expect(what(editor)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(card(editor)?.querySelector('.rl-card-name')?.textContent).toBe('Bo Chen');
+    // A press on the table pins the card too, and puts no caret in it.
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    click(ghost.querySelector('.rl-del')!, editor.view.contentDOM);
+    await tick();
+    expect(what(editor)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(editor.view.state.selection.main.head).toBe(1);
+  });
+
+  it('Reject in its card puts the table back, and Accept makes the deletion final', async () => {
+    const doc = forms(table(2, 3)).middle;
+    const { editor, decided } = mount(doc);
+    click(editor.view.contentDOM.querySelector('.rl-ghost-table .rl-del')!, editor.view.contentDOM);
+    await tick();
+    button(card(editor)!, 'Reject').click();
+    expect(decided).toEqual([{ id: 'w2rf', how: 'reject' }]);
+    expect(editor.getDoc()).toContain(`${table(2, 3)}\n\nAfter.`);
+    expect(editor.view.contentDOM.querySelector('.rl-ghost-table')).toBeNull();
+    const again = mount(doc);
+    click(
+      again.editor.view.contentDOM.querySelector('.rl-ghost-table .rl-del')!,
+      again.editor.view.contentDOM,
+    );
+    await tick();
+    button(card(again.editor)!, 'Accept').click();
+    expect(again.editor.getDoc()).not.toContain('h0');
+    expect(again.editor.getDoc()).not.toContain('w2rf');
   });
 });
 

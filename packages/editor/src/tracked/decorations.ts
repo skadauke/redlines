@@ -41,6 +41,14 @@ import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
+import {
+  GHOST_ROWS,
+  ghostColors,
+  ghostTableDOM,
+  ghostTableHeight,
+  ghostTableOf,
+  type GhostTable,
+} from '../table/ghost-table.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -152,14 +160,17 @@ interface StruckRun {
 interface StruckBlock {
   kind: DeletedBlockKind;
   runs: StruckRun[];
+  /** A deleted table, drawn as a ghost table (`table/ghost-table.ts`), not as runs of its source. */
+  table?: GhostTable;
 }
 
 /**
  * A whole-block deletion (format §3.4) drawn as the blocks it deleted, struck where they were.
  * `lines` is its marker's own line, which the hidden lines around it hide (the widget replaces
  * them); `before` is the line of the next item of a list, whose bullet the deletion leaves in
- * front of its marker, and the blocks are drawn above it; `after` is the line above a block
- * deleted at the end of the text, and the blocks are drawn below it.
+ * front of its marker, and the blocks are drawn above it (so are the blocks of a deletion that is
+ * all the text, above its marker's own line); `after` is the line above a block deleted at the end
+ * of the text, and the blocks are drawn below it.
  */
 interface Struck {
   id: string;
@@ -334,6 +345,8 @@ function struckBlocks(
     const line = doc.lineAt(first.open.from);
     const lead = doc.sliceString(line.from, first.open.from).replace(MARKER, '');
     let where: Struck['where'];
+    // A deletion that is all the text of the file: no block above holds its marker, none follows it.
+    let alone = false;
     let segments: { segment: Segment; mark: MarkRange }[] = mark.segments.map((segment) => ({
       segment,
       mark,
@@ -378,14 +391,22 @@ function struckBlocks(
       where = 'after';
       if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
         continue;
+      // The first line of the file, with no text above it, has no block above to hold the marker:
+      // the blocks are drawn above its line, which is hidden like the ledger and leaves the caret
+      // a place, as in Clean.
+      alone = BLANK.test(lead) && line.number === 1;
+      if (alone) where = 'before';
     }
     const blocks = replaced
       ? [replaced]
       : deletedBlocks(
           segments.map(({ segment }) => segment),
-          { lead, atEnd: where === 'after' },
+          { lead, atEnd: where === 'after' || alone, alone, tableRows: GHOST_ROWS },
         );
     if (!blocks) continue;
+    // Of the text that is all the text, only a table is drawn as a block: any other stays as the text
+    // on its line that it is, which the caret rests on (`hideMarkerLines`).
+    if (alone && !blocks.every((block) => block.kind.kind === 'table')) continue;
     // Each stretch of the blocks' text in the color of the person who deleted it.
     const owners: { to: number; color: number }[] = [];
     let total = 0;
@@ -395,6 +416,12 @@ function struckBlocks(
     }
     const drawn = new Set<number>();
     const struckBlock = blocks.map((block): StruckBlock => {
+      // A table is drawn as a table, with its cells' text in the colors of whose it is.
+      if (block.kind.kind === 'table') {
+        const table = ghostTableOf(block.kind, owners, colorOf(mark), marks);
+        for (const color of ghostColors(table)) drawn.add(color);
+        return { kind: { ...block.kind, rows: [] }, runs: [], table };
+      }
       const runs: StruckRun[] = [];
       const add = (text: string, color: number) => {
         const previous = runs.at(-1);
@@ -939,7 +966,14 @@ class StruckWidget extends WidgetType {
   }
 
   override get estimatedHeight(): number {
-    return this.deleted.reduce((sum, item) => sum + item.blocks.length * 28, 0);
+    return this.deleted.reduce(
+      (sum, item) =>
+        item.blocks.reduce(
+          (height, block) => height + (block.table ? ghostTableHeight(block.table) : 28),
+          sum,
+        ),
+      0,
+    );
   }
 
   override toDOM(): HTMLElement {
@@ -950,6 +984,12 @@ class StruckWidget extends WidgetType {
     for (const deleted of this.deleted) {
       const bar = barClass(deleted.colors);
       for (const block of deleted.blocks) {
+        // A table is its own element, laid out as a table (`table/ghost-table.ts`), and no item.
+        if (block.table) {
+          wrap.append(ghostTableDOM(block.table, deleted.id, bar));
+          item = false;
+          continue;
+        }
         const { kind } = block;
         const div = document.createElement('div');
         div.dataset['mark'] = deleted.id;

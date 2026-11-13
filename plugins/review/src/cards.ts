@@ -36,6 +36,7 @@ import {
   type ReviewContext,
   segmentSpan,
   suggestionIn,
+  tableDeleted,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
@@ -53,13 +54,13 @@ function isBreak(text: string): boolean {
 
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
- * `Formatted: Bold`. A
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs`,
+ * `Deleted table (3 columns, 20 rows)` or `Formatted: Bold`. A
  * substitution with no old text, such as the second part of one that untracked typing split
  * (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const row = rowsDone([change]);
+  const row = rowsDone([change]) ?? tableDeleted(change);
   if (row !== null) return row;
   const { old, added, label } = changeTexts(parsed, change);
   if (label !== undefined) return `Formatted: ${label}`;
