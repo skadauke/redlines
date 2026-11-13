@@ -23,11 +23,17 @@ use crate::windows::Windows;
 /// the window hears of a drop a moment after the drag's source hears that it ended.
 const RETURN_GRACE: Duration = Duration::from_secs(2);
 
-/// A drag of the window's own file: which window, which file, and when it ended.
+/// How long a drag can go on before it is taken for lost. The system tells when one ends; this is
+/// for the day it doesn't, which would make the app ignore what is dropped on a window, and refuse
+/// to begin another drag, for good.
+const LONGEST_DRAG: Duration = Duration::from_secs(60);
+
+/// A drag of the window's own file: which window, which file, and when it began and ended.
 #[derive(Debug)]
 struct OwnDrag {
     window: String,
     file: PathBuf,
+    began: Instant,
     ended: Option<Instant>,
 }
 
@@ -36,19 +42,25 @@ impl OwnDrag {
         Self {
             window: window.to_owned(),
             file: file.to_owned(),
+            began: Instant::now(),
             ended: None,
         }
+    }
+
+    /// Whether the drag is going at `now`: not ended, and not so old that its end was missed.
+    fn is_going(&self, now: Instant) -> bool {
+        self.ended.is_none() && now.saturating_duration_since(self.began) <= LONGEST_DRAG
     }
 
     /// Whether `dropped`, which landed on the window `window` at `now`, is this drag's file coming
     /// back to the window it left: that file alone, while the drag is going or just after.
     fn is_coming_back(&self, window: &str, dropped: &[PathBuf], now: Instant) -> bool {
-        let recent = self
+        let just_ended = self
             .ended
-            .is_none_or(|ended| now.saturating_duration_since(ended) <= RETURN_GRACE);
+            .is_some_and(|ended| now.saturating_duration_since(ended) <= RETURN_GRACE);
         let own = file_scope::real(&self.file);
         self.window == window
-            && recent
+            && (self.is_going(now) || just_ended)
             && matches!(dropped, [only] if file_scope::real(only) == own)
     }
 }
@@ -58,6 +70,26 @@ static LAST: Mutex<Option<OwnDrag>> = Mutex::new(None);
 
 fn last() -> std::sync::MutexGuard<'static, Option<OwnDrag>> {
     LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// For other modules' tests of what they do with the remembered drag: they take turns with this
+/// module's own tests, which write it too.
+#[cfg(test)]
+pub(crate) fn take_turn() -> std::sync::MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Remembers a drag of `file` out of the window `window` that is going, as `start` does.
+#[cfg(test)]
+pub(crate) fn remember(window: &str, file: &Path) {
+    *last() = Some(OwnDrag::begun(window, file));
+}
+
+/// Forgets the remembered drag.
+#[cfg(test)]
+pub(crate) fn forget() {
+    *last() = None;
 }
 
 /// Whether a drop of `dropped` on the window `window` is the file of a drag that began in that
@@ -92,9 +124,37 @@ fn check_draggable(
     Ok(())
 }
 
+/// Begins a drag of `file` out of the window `window`, which `begin` asks the system for; says
+/// whether it did. The drag is remembered before the system is asked, since it can say that the
+/// drag ended before it has given it back, and forgotten when the system took none. While one is
+/// going, no other begins: the system keeps the source of its session, which a second session
+/// would let go of.
+fn start(
+    window: &str,
+    file: &Path,
+    begin: impl FnOnce() -> Result<bool, String>,
+) -> Result<bool, String> {
+    {
+        let mut last = last();
+        if last
+            .as_ref()
+            .is_some_and(|drag| drag.is_going(Instant::now()))
+        {
+            return Ok(false);
+        }
+        *last = Some(OwnDrag::begun(window, file));
+    }
+    let result = begin();
+    if !matches!(result, Ok(true)) {
+        *last() = None;
+    }
+    result
+}
+
 /// Starts dragging the window's own document out of the window, for the title bar's document icon.
 /// Says whether the system took the drag: not once the button is up, which happens when the
-/// pointer is fast, and not off the Mac, where the page has no icon to drag.
+/// pointer is fast, nor while another drag is going, and not off the Mac, where the page has no
+/// icon to drag.
 ///
 /// Only the file the window holds: the page has no business handing over anything else.
 #[tauri::command]
@@ -108,11 +168,7 @@ pub fn start_file_drag(
     check_draggable(&app.state::<Windows>(), window.label(), file, |path| {
         file_scope::allowed(&scope, path)
     })?;
-    let began = platform::begin(&window, file)?;
-    if began {
-        *last() = Some(OwnDrag::begun(window.label(), file));
-    }
-    Ok(began)
+    start(window.label(), file, || platform::begin(&window, file))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -245,7 +301,9 @@ mod platform {
             NSURL::fileURLWithPath(&NSString::from_str(path)),
         );
 
-        let event = drag_event(mtm, ns_window);
+        let Some(event) = drag_event(mtm, ns_window) else {
+            return Ok(false);
+        };
         let icon = NSWorkspace::sharedWorkspace().iconForFile(&ns_path);
         icon.setSize(NSSize::new(ICON, ICON));
 
@@ -276,7 +334,7 @@ mod platform {
     /// The mouse event the drag begins with. The one the app is handling, if it is the press or a
     /// move with the button down; otherwise, as when the page's message came after another kind of
     /// event woke the app, one made for the pointer where it is.
-    fn drag_event(mtm: MainThreadMarker, window: &NSWindow) -> Retained<NSEvent> {
+    fn drag_event(mtm: MainThreadMarker, window: &NSWindow) -> Option<Retained<NSEvent>> {
         let current = NSApplication::sharedApplication(mtm).currentEvent();
         if let Some(event) = current
             && matches!(
@@ -284,7 +342,7 @@ mod platform {
                 NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
             )
         {
-            return event;
+            return Some(event);
         }
         NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
             NSEventType::LeftMouseDragged,
@@ -297,7 +355,6 @@ mod platform {
             1,
             1.0,
         )
-        .expect("the system makes a mouse event from valid arguments")
     }
 }
 
@@ -411,6 +468,7 @@ mod tests {
 
     #[test]
     fn the_last_drag_is_remembered_for_the_drop_and_ended_by_the_system() {
+        let _turn = take_turn();
         let dir = folder("last");
         let file = dir.join("plan.md");
         std::fs::write(&file, "mine").unwrap();
@@ -422,5 +480,79 @@ mod tests {
         assert!(ignores_drop("doc-9", std::slice::from_ref(&file)));
         *last() = None;
         assert!(!ignores_drop("doc-9", std::slice::from_ref(&file)));
+    }
+
+    #[test]
+    fn a_drag_whose_end_was_never_heard_stops_counting_after_a_minute() {
+        let dir = folder("lost");
+        let file = dir.join("plan.md");
+        std::fs::write(&file, "mine").unwrap();
+        let mut drag = OwnDrag::begun("doc-1", &file);
+        let began = Instant::now();
+        drag.began = began;
+        let dropped = std::slice::from_ref(&file);
+        assert!(drag.is_going(at(59.0, began)));
+        assert!(drag.is_coming_back("doc-1", dropped, at(59.0, began)));
+        // The system tells when a drag ends. If it never did, the file dragged from Finder onto the
+        // window later is a drop like any other, and another drag may begin.
+        assert!(!drag.is_going(at(61.0, began)));
+        assert!(!drag.is_coming_back("doc-1", dropped, at(61.0, began)));
+        // One that ended is no longer going, and its file comes back only for a moment.
+        drag.ended = Some(at(3.0, began));
+        assert!(!drag.is_going(at(4.0, began)));
+        assert!(drag.is_coming_back("doc-1", dropped, at(4.0, began)));
+    }
+
+    #[test]
+    fn a_drag_is_remembered_before_the_system_is_asked_and_only_when_it_began() {
+        let _turn = take_turn();
+        let dir = folder("start");
+        let file = dir.join("plan.md");
+        std::fs::write(&file, "mine").unwrap();
+        let dropped = std::slice::from_ref(&file);
+        *last() = None;
+
+        // The system can say that a drag ended before it has given the drag back.
+        let began = start("doc-7", &file, || {
+            assert!(ignores_drop("doc-7", dropped), "remembered before begin");
+            ended();
+            Ok(true)
+        });
+        assert_eq!(began, Ok(true));
+        assert!(last().as_ref().is_some_and(|drag| drag.ended.is_some()));
+
+        // A drag the system didn't take is forgotten, with the reason, if it gave one.
+        *last() = None;
+        assert_eq!(start("doc-7", &file, || Ok(false)), Ok(false));
+        assert!(!ignores_drop("doc-7", dropped));
+        assert_eq!(
+            start("doc-7", &file, || Err("no button down".to_owned())),
+            Err("no button down".to_owned())
+        );
+        assert!(!ignores_drop("doc-7", dropped));
+        *last() = None;
+    }
+
+    #[test]
+    fn no_drag_begins_while_another_is_going() {
+        let _turn = take_turn();
+        let dir = folder("twice");
+        let file = dir.join("plan.md");
+        std::fs::write(&file, "mine").unwrap();
+        *last() = None;
+        assert_eq!(start("doc-5", &file, || Ok(true)), Ok(true));
+        // A second one, from the page or any window, would let go of the first's source while the
+        // system holds it: it isn't begun, and the system isn't asked.
+        let asked = std::cell::Cell::new(false);
+        let again = start("doc-6", &file, || {
+            asked.set(true);
+            Ok(true)
+        });
+        assert_eq!(again, Ok(false));
+        assert!(!asked.get());
+        // When the first one ends, the next begins.
+        ended();
+        assert_eq!(start("doc-6", &file, || Ok(true)), Ok(true));
+        *last() = None;
     }
 }

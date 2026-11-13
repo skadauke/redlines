@@ -166,13 +166,20 @@ function beep(): void {
 }
 
 /**
+ * Whether the app can hand the document's file to another app by a drag: the Mac's, which draws the
+ * title bar's document icon for it (src-tauri/src/drag.rs). A plain browser has no file to hand
+ * over, and Windows and Linux no drag to hand it by.
+ */
+const canDragFile = isTauri && /Macintosh/.test(navigator.userAgent);
+
+/**
  * Starts dragging the document's file out of the window, once the title bar's document icon has
  * been dragged: the app does it, as a native title bar's proxy icon would, and a drop in Finder,
- * Mail or Terminal hands over the file. A plain browser has no file to hand over.
+ * Mail or Terminal hands over the file.
  */
 function dragFile(): void {
   const path = doc?.path;
-  if (!path || !isTauri) return;
+  if (!path || !canDragFile) return;
   invoke<boolean>('start_file_drag', { path }).catch((error: unknown) => {
     console.error('Could not drag the file', error);
   });
@@ -767,7 +774,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
-    hasFile: doc.path !== null,
+    fileDraggable: doc.path !== null && canDragFile,
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,

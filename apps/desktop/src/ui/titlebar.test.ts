@@ -6,7 +6,7 @@ import { createTitleBar, documentFactsLine, wordCount, type TitleBarState } from
 const BASE: TitleBarState = {
   name: 'launch-plan.md',
   dirty: false,
-  hasFile: true,
+  fileDraggable: true,
   view: 'redlines',
   tracking: false,
   hasRedlines: true,
@@ -167,8 +167,17 @@ describe('double-clicking the file name', () => {
   });
   afterEach(() => document.removeEventListener('mouseup', zoomed));
 
-  const mouse = (target: Element, type: string, detail: number, button = 0) =>
-    target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button, detail }));
+  const mouse = (target: Element, type: string, detail: number, button = 0, x = 100, y = 20) =>
+    target.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button,
+        detail,
+        clientX: x,
+        clientY: y,
+      }),
+    );
   const doubleClick = (target: Element) => {
     mouse(target, 'mousedown', 1);
     mouse(target, 'mouseup', 1);
@@ -190,7 +199,7 @@ describe('double-clicking the file name', () => {
   });
 
   it('asks the same for an Untitled document, which has no file to rename', () => {
-    const { root, actions } = setup({ name: 'Untitled.md', hasFile: false });
+    const { root, actions } = setup({ name: 'Untitled.md', fileDraggable: false });
     doubleClick(nameOf(root));
     expect(actions.renameDocument).toHaveBeenCalledOnce();
   });
@@ -220,11 +229,44 @@ describe('double-clicking the file name', () => {
 
   it('answers only the primary button, and a double-click only', () => {
     const { root, actions } = setup();
+    mouse(nameOf(root), 'mousedown', 2, 2);
     mouse(nameOf(root), 'mouseup', 2, 2);
+    mouse(nameOf(root), 'mousedown', 3);
     mouse(nameOf(root), 'mouseup', 3);
     expect(actions.renameDocument).not.toHaveBeenCalled();
     // A triple-click's third press is nobody's: it reaches the window as it did.
     expect(zoomed).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers a double-click whose second press began on the name, and nothing else', () => {
+    const { root, actions } = setup();
+    const name = nameOf(root);
+    // A word selected by a double-click-drag in the text, let go of over the name: the press began
+    // elsewhere, and the release is no one's but the page's own listeners'.
+    mouse(document.body, 'mousedown', 2);
+    mouse(name, 'mouseup', 2);
+    expect(actions.renameDocument).not.toHaveBeenCalled();
+    expect(zoomed).toHaveBeenCalledOnce();
+    // And a press that began on the name answers once.
+    zoomed.mockClear();
+    mouse(name, 'mousedown', 2);
+    mouse(name, 'mouseup', 2);
+    mouse(name, 'mouseup', 2);
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+    expect(zoomed).toHaveBeenCalledOnce();
+  });
+
+  it('answers a double-click that stayed where it was, give or take a wobble of the hand', () => {
+    const { root, actions } = setup();
+    const name = nameOf(root);
+    mouse(name, 'mousedown', 2, 0, 100, 20);
+    mouse(name, 'mouseup', 2, 0, 102, 21);
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+    // Dragged off to another place on the name before the release, it was no double-click.
+    mouse(name, 'mousedown', 2, 0, 100, 20);
+    mouse(name, 'mouseup', 2, 0, 130, 20);
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+    expect(zoomed).toHaveBeenCalledOnce();
   });
 
   it('leaves a double-click anywhere else on the bar to the window, which zooms', () => {
@@ -232,7 +274,9 @@ describe('double-clicking the file name', () => {
     const bar = root.querySelector('.rl-titlebar');
     const group = root.querySelector('.rl-title-group');
     if (!bar || !group) throw new Error('no bar');
+    mouse(bar, 'mousedown', 2);
     mouse(bar, 'mouseup', 2);
+    mouse(group, 'mousedown', 2);
     mouse(group, 'mouseup', 2);
     expect(zoomed).toHaveBeenCalledTimes(2);
     expect(actions.renameDocument).not.toHaveBeenCalled();
@@ -251,7 +295,7 @@ describe('double-clicking the file name', () => {
 
 describe('the document icon', () => {
   const iconOf = (root: HTMLElement) => root.querySelector<HTMLElement>('.rl-doc-icon');
-  const pointer = (type: string, x: number, buttons: number, target: Element | Document) =>
+  const pointer = (type: string, x: number, buttons: number, target: Element | Document, y = 20) =>
     target.dispatchEvent(
       new PointerEvent(type, {
         bubbles: true,
@@ -260,7 +304,7 @@ describe('the document icon', () => {
         button: 0,
         buttons,
         clientX: x,
-        clientY: 20,
+        clientY: y,
       }),
     );
 
@@ -277,13 +321,13 @@ describe('the document icon', () => {
   });
 
   it('is hidden for an Untitled document, and shown once it has a file', () => {
-    const { root, bar } = setup({ name: 'Untitled.md', hasFile: false });
+    const { root, bar } = setup({ name: 'Untitled.md', fileDraggable: false });
     const icon = iconOf(root);
     if (!icon) throw new Error('no icon');
     expect(shown(icon)).toBe(false);
-    bar.update({ ...BASE, hasFile: true });
+    bar.update({ ...BASE, fileDraggable: true });
     expect(shown(icon)).toBe(true);
-    bar.update({ ...BASE, hasFile: false });
+    bar.update({ ...BASE, fileDraggable: false });
     expect(shown(icon)).toBe(false);
   });
 
@@ -307,6 +351,20 @@ describe('the document icon', () => {
     pointer('pointermove', 140, 1, document);
     pointer('pointermove', 180, 1, document);
     expect(actions.dragFile).toHaveBeenCalledOnce();
+  });
+
+  it('measures how far the pointer went in both directions', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    // Straight down, 6 px: as far as 6 across.
+    pointer('pointerdown', 100, 1, icon, 20);
+    pointer('pointermove', 100, 1, document, 26);
+    expect(actions.dragFile).toHaveBeenCalledOnce();
+    // Diagonally 3 and 3, which is 4.2: past the 4 px, though neither way is.
+    pointer('pointerdown', 100, 1, icon, 20);
+    pointer('pointermove', 103, 1, document, 23);
+    expect(actions.dragFile).toHaveBeenCalledTimes(2);
   });
 
   it('starts nothing on a click, and takes no part in what the pointer does after it', () => {
@@ -335,30 +393,70 @@ describe('the document icon', () => {
     expect(actions.dragFile).toHaveBeenCalledOnce();
   });
 
-  it('keeps the keyboard where it was, and takes no other button than the left', () => {
+  it('measures from the press it is in, not from an earlier one that was never released', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    pointer('pointerdown', 100, 1, icon);
+    pointer('pointerdown', 300, 1, icon);
+    // 4 px from the second press, 204 from the first, whose watch the second took over.
+    pointer('pointermove', 304, 1, document);
+    expect(actions.dragFile).toHaveBeenCalledOnce();
+  });
+
+  it('answers the left button of a mouse only, not another button or a finger', () => {
     const { root, actions } = setup();
     const icon = iconOf(root);
     if (!icon) throw new Error('no icon');
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
     icon.dispatchEvent(down);
+    // Keeps the keyboard where it was: no focus moves to the icon, no text is selected.
     expect(down.defaultPrevented).toBe(true);
+    // The right button pressed, with the left one held too: the press is not the left's.
     icon.dispatchEvent(
       new PointerEvent('pointerdown', {
         bubbles: true,
         pointerType: 'mouse',
         button: 2,
-        buttons: 2,
+        buttons: 3,
       }),
     );
-    pointer('pointermove', 400, 2, document);
+    pointer('pointermove', 400, 3, document);
+    // A finger: a touch has no drag of the file to start.
+    icon.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerType: 'touch',
+        button: 0,
+        buttons: 1,
+        clientX: 100,
+        clientY: 20,
+      }),
+    );
+    pointer('pointermove', 400, 1, document);
+    expect(actions.dragFile).not.toHaveBeenCalled();
+  });
+
+  it('lets go of a press when the bar goes', () => {
+    const { root, bar, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    pointer('pointerdown', 100, 1, icon);
+    bar.destroy();
+    pointer('pointermove', 200, 1, document);
     expect(actions.dragFile).not.toHaveBeenCalled();
   });
 
   it('says what it is for, for those who cannot see it', () => {
-    const { root } = setup();
+    const { root, bar } = setup();
     const icon = iconOf(root);
     expect(icon?.getAttribute('role')).toBe('img');
     expect(icon?.getAttribute('aria-label')).toBe('launch-plan.md, document icon');
+    expect(icon?.title).toBe('Drag to copy the file');
+    // With edits the file is behind: what is handed over is the file as it was last saved.
+    bar.update({ ...BASE, dirty: true });
+    expect(icon?.title).toBe('Drag to copy the file as saved');
+    bar.update({ ...BASE, dirty: false });
     expect(icon?.title).toBe('Drag to copy the file');
   });
 

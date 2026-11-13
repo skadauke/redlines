@@ -19,7 +19,7 @@ tauri-build = { version = "2.7.3", features = [] }
 [dependencies]
 # Without `protocol-asset`: the app serves the images of the project folders to the preview itself
 # (images.rs), and Tauri's asset protocol would serve whatever is dropped on a window too.
-tauri = { version = "2.12.4", features = [] }
+tauri = "2.12.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tauri-plugin-dialog = "2"
