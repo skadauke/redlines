@@ -4,7 +4,7 @@
 import { ChangeSet } from '@codemirror/state';
 import type { Author, Editor } from '@redlines/editor';
 import { addComment, applyChanges, type EditContext, type Person, reply } from '@redlines/format';
-import { foldComment, joinReply } from '@redlines/agent-tools';
+import { fitReply, joinReply } from '@redlines/agent-tools';
 import { agentHandle } from '../runs.ts';
 import { EXPLAIN, type AskTurn } from './session.ts';
 
@@ -22,10 +22,13 @@ function personOf(author: Author): Person {
 /** What a question says in a thread: what was typed, or what an empty one means. */
 const questionText = (question: string) => (question.trim() === '' ? EXPLAIN : question.trim());
 
-/** An answer as an agent's reply is kept: its first paragraph, and the rest after a blank line. */
+/**
+ * An answer as an agent's reply is kept: its first paragraph, and the rest after a blank line, cut
+ * to the limits that the toolbox puts on a reply (`fitReply`), as when an agent ends without one.
+ */
 function replyText(answer: string): string {
-  const { shown, more } = foldComment(answer);
-  return more === null ? shown.trim() : joinReply(shown.trim(), more);
+  const { text, details } = fitReply(answer);
+  return joinReply(text, details);
 }
 
 /** An agent as the ledger knows it: `<agent>-<you>`, acting for the person who asked. */

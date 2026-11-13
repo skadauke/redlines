@@ -904,6 +904,38 @@ describe('keeping an answer', () => {
     expect(undo(editor.view)).toBe(false);
   });
 
+  it('Make Comment: a long answer is cut to the limits of an agent’s reply, as the toolbox cuts one', async () => {
+    const long = `${'word '.repeat(80).trim()}\n\nAnd a second paragraph.`;
+    const { editor } = mount({ script: answers(long) });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Make Comment')?.click();
+    const [thread] = parse(editor.getDoc()).ledger.comments;
+    const text = thread?.replies[0]?.text ?? '';
+    // At most 200 characters shown, cut at a word, and the rest after a blank line, as details.
+    const [shown = '', more = ''] = text.split('\n\n');
+    expect(shown.length).toBeLessThanOrEqual(200);
+    expect(shown.endsWith('…')).toBe(true);
+    expect(more.endsWith('And a second paragraph.')).toBe(true);
+    expect(text.match(/word/g)).toHaveLength(80);
+  });
+
+  it('Make Comment: the details of a very long answer are cut at 2,000 characters', async () => {
+    const { editor } = mount({ script: answers('word '.repeat(1000).trim()) });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Make Comment')?.click();
+    const [thread] = parse(editor.getDoc()).ledger.comments;
+    const [shown = '', more = ''] = (thread?.replies[0]?.text ?? '').split('\n\n');
+    expect(shown.length).toBeLessThanOrEqual(200);
+    expect(more.length).toBeLessThanOrEqual(2000);
+    expect(more.endsWith('…')).toBe(true);
+  });
+
   it('Make Comment: a refusal says why, and keeps the bubble', async () => {
     const doc = 'Text.\n\n```\nlet lien = 1;\n```\n';
     const { editor, notices, ask: asking } = mount({ doc });

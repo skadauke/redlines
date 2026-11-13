@@ -1319,8 +1319,10 @@ Agent edits are animated, like a streaming chat answer.
     in Make Comment. The earlier answers go to the agent as quoted data, never as instructions.
   - **Keeping an answer.** Make Comment makes a thread on the selection, as one step to undo: the
     first question is the person's comment, its answer the agent's reply in the agent's name, and
-    each follow-up and answer a reply, in turn. Open in New Window opens the exchange as an
-    Untitled document. Copy puts the answer's text on the clipboard. Nothing is kept unless asked.
+    each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
+    reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. Copy puts
+    the answer's text on the clipboard. Nothing is kept unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
