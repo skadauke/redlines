@@ -2145,8 +2145,10 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
 `frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
-an edit, a comment or a highlight there is refused with the error code `front-matter`: "Front
-matter can't be edited with Track Changes on yet."
+an edit there is refused with the error code `front-matter`: "Front matter can't be edited with
+Track Changes on yet." A comment or a highlight there is refused with the same code, in words
+about what it is: "A comment can't be anchored in front matter yet." and "A highlight can't be made
+in front matter yet. Select text in the body instead."
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
 the body's, and are written plain; anything else typed there is refused as an edit of front matter.
