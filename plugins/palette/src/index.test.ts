@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-import { createEditor, type Editor, type EditorCommand } from '@redlines/editor';
+import {
+  createEditor,
+  type Editor,
+  type EditorCommand,
+  type EditorOptions,
+} from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPalette, type Palette, type PaletteOptions, plugin } from './index.ts';
 
@@ -47,10 +52,11 @@ function mount(
   doc = 'Hello wrold there',
   options: Partial<PaletteOptions> = {},
   commands: readonly EditorCommand[] = COMMANDS,
+  editorOptions: Partial<EditorOptions> = {},
 ): Mount {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author: ada });
+  const editor = createEditor(parent, { doc, author: ada, ...editorOptions });
   editor.commands.register(commands);
   const notices: string[] = [];
   const palette = createPalette(editor, {
@@ -95,14 +101,31 @@ function key(
   return event;
 }
 
+/**
+ * A right-click as WebKit sends it: the press, then the menu event, with the right button down at
+ * the pointer.
+ */
 function rightClick(editor: Editor, init: MouseEventInit = {}): MouseEvent {
+  const at = { clientX: 120, clientY: 90, ...init };
+  const down = { bubbles: true, cancelable: true, button: 2, buttons: 2, ...at };
+  editor.view.contentDOM.dispatchEvent(new MouseEvent('mousedown', down));
+  const event = new MouseEvent('contextmenu', down);
+  editor.view.contentDOM.dispatchEvent(event);
+  return event;
+}
+
+/**
+ * The menu key, or Ctrl-Return, as WebKit sends it (`sendContextMenuEventForKey`): the right button,
+ * no button held, and no press before it.
+ */
+function menuKey(editor: Editor): MouseEvent {
   const event = new MouseEvent('contextmenu', {
     bubbles: true,
     cancelable: true,
     button: 2,
-    clientX: 120,
-    clientY: 90,
-    ...init,
+    buttons: 0,
+    clientX: 5,
+    clientY: 5,
   });
   editor.view.contentDOM.dispatchEvent(event);
   return event;
@@ -179,7 +202,7 @@ describe('the handle', () => {
     expect(panelOf()?.hidden).toBe(true);
   });
 
-  it('keeps the document’s focus when it is pressed', () => {
+  it('cancels a press on it, which is what keeps the keyboard in the text', () => {
     mount();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     handleOf()?.dispatchEvent(down);
@@ -258,7 +281,7 @@ describe('the items', () => {
     expect(editor.view.hasFocus || document.activeElement === editor.view.contentDOM).toBe(true);
   });
 
-  it('keeps the document’s focus and selection when the mouse presses one', () => {
+  it('cancels a press on one, which is what keeps the text’s focus and selection', () => {
     mount();
     handleOf()?.click();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
@@ -372,6 +395,14 @@ describe('the right-click', () => {
     expect(editor.view.state.sliceDoc(...rangeOf(editor))).toBe('Hello wrold');
   });
 
+  it('selects the whole of a word with an apostrophe in it, as the Mac does', () => {
+    const { editor } = mount("I dosen't know");
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(4);
+    vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
+    rightClick(editor);
+    expect(editor.view.state.sliceDoc(...rangeOf(editor))).toBe("dosen't");
+  });
+
   it('puts the palette above the pointer where the window ends first', () => {
     const { editor } = mount();
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
@@ -382,19 +413,65 @@ describe('the right-click', () => {
     expect(parseFloat(panelOf()!.style.left)).toBeLessThanOrEqual(window.innerWidth - 214 - 8);
   });
 
-  it('opens at the caret with the keyboard in it, for the menu key', () => {
+  it('opens below the caret with the keyboard in it, for the menu key', () => {
     const { editor } = mount();
     editor.view.dispatch({ selection: { anchor: 3 } });
-    const event = rightClick(editor, { button: 0, buttons: 0 });
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({
+      left: 100,
+      right: 101,
+      top: 200,
+      bottom: 220,
+    });
+    const event = menuKey(editor);
     expect(event.defaultPrevented).toBe(true);
     expect(panelOf()?.hidden).toBe(false);
+    expect(document.activeElement).toBe(buttons()[0]);
+    // Under the caret, not at the pointer the event carries (5, 5): the panel has no size here.
+    expect(panelOf()?.style.left).toBe('100px');
+    expect(panelOf()?.style.top).toBe(`${220 + 8}px`);
+  });
+
+  it('takes a right-click for the pointer’s though the buttons it reads are let go already', () => {
+    // A quick tap: the hardware has no button down by the time the event is made.
+    const { editor } = mount();
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    const at = { bubbles: true, cancelable: true, button: 2, clientX: 140, clientY: 70 };
+    editor.view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 2 }));
+    editor.view.contentDOM.dispatchEvent(new MouseEvent('contextmenu', { ...at, buttons: 0 }));
+    expect(panelOf()?.hidden).toBe(false);
+    expect(panelOf()?.style.left).toBe('140px');
+    expect(panelOf()?.style.top).toBe('70px');
+    // The pointer's palette doesn't take the keyboard.
+    expect(document.activeElement).not.toBe(buttons()[0]);
+  });
+
+  it('takes a menu event far from the last press for the key’s', () => {
+    const { editor } = mount();
+    editor.view.contentDOM.dispatchEvent(
+      new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 2,
+        buttons: 2,
+        clientX: 10,
+        clientY: 10,
+      }),
+    );
+    editor.view.contentDOM.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        buttons: 0,
+        clientX: 400,
+        clientY: 300,
+      }),
+    );
     expect(document.activeElement).toBe(buttons()[0]);
   });
 
   it('puts itself away on Esc, and gives the keyboard back to the text', () => {
     const { editor } = mount();
-    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
-    rightClick(editor, { button: 0, buttons: 0 });
+    menuKey(editor);
     key(buttons()[0]!, 'Escape');
     expect(panelOf()?.hidden).toBe(true);
     expect(document.activeElement).toBe(editor.view.contentDOM);
@@ -427,6 +504,91 @@ function rangeOf(editor: Editor): [number, number] {
   return [from, to];
 }
 
+describe('where the palette goes', () => {
+  it('stays in the window for a caret that is scrolled out of it', () => {
+    const { editor } = mount();
+    Object.defineProperty(panelOf()!, 'offsetHeight', { value: 160, configurable: true });
+    Object.defineProperty(panelOf()!, 'offsetWidth', { value: 214, configurable: true });
+    // Far below the window, where CodeMirror still draws a margin of lines.
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({
+      left: 100,
+      right: 110,
+      top: window.innerHeight + 300,
+      bottom: window.innerHeight + 320,
+    });
+    editor.commands.run('palette.show');
+    const top = parseFloat(panelOf()!.style.top);
+    expect(top).toBeLessThanOrEqual(window.innerHeight - 160 - 8);
+    expect(top).toBeGreaterThanOrEqual(8);
+  });
+
+  it('stays in the window for a right-click below it', () => {
+    const { editor } = mount();
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    Object.defineProperty(panelOf()!, 'offsetHeight', { value: 160, configurable: true });
+    rightClick(editor, { clientY: window.innerHeight + 500 });
+    expect(parseFloat(panelOf()!.style.top)).toBeLessThanOrEqual(window.innerHeight - 160 - 8);
+  });
+});
+
+describe('what the page’s other boxes keep', () => {
+  it('leaves Esc to a text box that has the keyboard', () => {
+    const { palette } = mount();
+    const box = document.createElement('textarea');
+    document.body.append(box);
+    handleOf()?.click();
+    box.focus();
+    const event = key(box, 'Escape');
+    expect(event.defaultPrevented).toBe(false);
+    expect(palette.isOpen()).toBe(true);
+  });
+
+  it('puts the keyboard in the text for a choice made in the palette, whoever had it', () => {
+    const ran = vi.fn(() => true);
+    const { editor } = mount('Hello', {}, [command('format.bold', { run: ran })]);
+    const box = document.createElement('textarea');
+    document.body.append(box);
+    box.focus();
+    handleOf()?.click();
+    itemFor('format.bold')?.click();
+    // The command ran, which the registry does not for a keyboard left in another box.
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(editor.view.hasFocus || document.activeElement === editor.view.contentDOM).toBe(true);
+  });
+
+  it('leaves the keyboard in another box when the palette is put away by the pointer leaving', () => {
+    mount();
+    const box = document.createElement('textarea');
+    document.body.append(box);
+    pointer(handleOf()!, 'pointerenter');
+    vi.advanceTimersByTime(120);
+    box.focus();
+    pointer(handleOf()!, 'pointerleave');
+    vi.advanceTimersByTime(200);
+    expect(panelOf()?.hidden).toBe(true);
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('cancels a press on the padding of the palette, as on an item', () => {
+    mount();
+    handleOf()?.click();
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    panelOf()?.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+  });
+
+  it('says it is open for the palette the handle brought up, and not for a right-click’s', () => {
+    const { editor } = mount();
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    expect(handleOf()?.hasAttribute('aria-haspopup')).toBe(false);
+    rightClick(editor);
+    expect(handleOf()?.getAttribute('aria-expanded')).toBe('false');
+    key(document.body, 'Escape');
+    handleOf()?.click();
+    expect(handleOf()?.getAttribute('aria-expanded')).toBe('true');
+  });
+});
+
 describe('spelling suggestions', () => {
   const spelling = (answer: readonly string[] | null, extra: object = {}) => ({
     enabled: () => true,
@@ -447,7 +609,7 @@ describe('spelling suggestions', () => {
     expect(first?.classList.contains('rl-palette-spelling')).toBe(true);
   });
 
-  it('makes the suggestion that is picked, as typing, and puts the palette away', async () => {
+  it('makes the suggestion that is picked, and puts the palette away', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     const focus = vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
@@ -458,6 +620,24 @@ describe('spelling suggestions', () => {
     expect(editor.view.state.doc.toString()).toBe('Hello world there');
     expect(editor.view.state.selection.main.head).toBe(11);
     expect(panelOf()?.hidden).toBe(true);
+  });
+
+  it('makes a pick a tracked change while Track Changes is on, as typing it would', async () => {
+    const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) }, COMMANDS, {
+      tracking: true,
+    });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
+    rightClick(editor);
+    await settle();
+    words()[0]?.click();
+    // The text that was there stays in the file, and the change is the author's, as typing over
+    // the word would make it.
+    const marks = editor.getParsed().marks;
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
+    expect(marks.some((mark) => mark.kind === 'sub' || mark.kind === 'del')).toBe(true);
+    expect(editor.view.state.doc.toString()).not.toBe('Hello world there');
   });
 
   it('learns the word on Learn Spelling', async () => {
@@ -528,6 +708,45 @@ describe('spelling suggestions', () => {
     expect(words().map((word) => word.textContent)).toEqual(['world']);
   });
 
+  it('keeps the keyboard in the palette when the suggestions come late', async () => {
+    let answer: (suggestions: readonly string[]) => void = () => {};
+    const slow = {
+      enabled: () => true,
+      suggest: () => new Promise<readonly string[]>((resolve) => (answer = resolve)),
+    };
+    const { editor } = mount('Hello wrold there', { spelling: slow });
+    editor.view.dispatch({ selection: { anchor: 8 } });
+    menuKey(editor);
+    await vi.advanceTimersByTimeAsync(120);
+    const before = document.activeElement;
+    expect(before).toBe(buttons()[0]);
+    answer(['world']);
+    await settle();
+    // The panel was drawn again, and the keyboard is in it, on the first suggestion.
+    expect(document.activeElement).toBe(words()[0]);
+    expect(tipOf()?.hidden).toBe(true);
+  });
+
+  it('does nothing for a late suggestion when the text moved before it came', async () => {
+    let answer: (suggestions: readonly string[]) => void = () => {};
+    const slow = {
+      enabled: () => true,
+      suggest: () => new Promise<readonly string[]>((resolve) => (answer = resolve)),
+    };
+    const { editor } = mount('Hello wrold there', { spelling: slow });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
+    rightClick(editor);
+    await vi.advanceTimersByTimeAsync(120);
+    // The text moves while the checker thinks: the word is no longer where it was found.
+    editor.view.dispatch({ changes: { from: 0, insert: 'Oh. ' } });
+    answer(['world']);
+    await settle();
+    // The answer is for a word that is somewhere else now: no rows are drawn for it.
+    expect(words()).toEqual([]);
+    expect(editor.view.state.doc.toString()).toBe('Oh. Hello wrold there');
+  });
+
   it('drops an answer that comes after the palette went away', async () => {
     let answer: (suggestions: readonly string[]) => void = () => {};
     const slow = {
@@ -545,20 +764,34 @@ describe('spelling suggestions', () => {
     expect(words()).toEqual([]);
   });
 
-  it('does nothing for a suggestion whose word has moved', async () => {
+  it('takes the suggestions away when the text moves under them', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     rightClick(editor);
     await settle();
+    expect(words()).toHaveLength(1);
     editor.view.dispatch({ changes: { from: 0, insert: 'Oh. ' } });
-    words()[0]?.click();
+    // Rows that would do nothing are not left in the palette, and the items stay.
+    expect(words()).toEqual([]);
+    expect(buttons().length).toBeGreaterThan(0);
+    expect(panelOf()?.hidden).toBe(false);
     expect(editor.view.state.doc.toString()).toBe('Oh. Hello wrold there');
+  });
+
+  it('keeps the keyboard in the palette when the suggestions go', async () => {
+    const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
+    editor.view.dispatch({ selection: { anchor: 8 } });
+    menuKey(editor);
+    await settle();
+    expect(document.activeElement).toBe(words()[0]);
+    editor.view.dispatch({ changes: { from: 0, insert: 'Oh. ' } });
+    expect(words()).toEqual([]);
+    expect(document.activeElement).toBe(buttons()[0]);
   });
 
   it('keeps the arrows among the suggestions and the items', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world', 'word']) });
-    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
-    rightClick(editor, { button: 0, buttons: 0 });
+    menuKey(editor);
     await settle();
     // From the keyboard: the focus is in the first row, the first suggestion.
     expect(document.activeElement).toBe(words()[0]);
@@ -698,8 +931,11 @@ describe('Cut, Copy and Paste', () => {
     expect(board.paste).toHaveBeenCalledTimes(1);
   });
 
-  it('say so when the clipboard cannot be read, or is empty', async () => {
-    const board = { ...clipboard(), paste: vi.fn(() => Promise.reject(new Error('empty'))) };
+  it.each([
+    ['is empty', 'empty'],
+    ['cannot be read', 'denied'],
+  ])('say so when the clipboard %s', async (_what, reason) => {
+    const board = { ...clipboard(), paste: vi.fn(() => Promise.reject(new Error(reason))) };
     const { editor, notices } = mount('Hello', { clipboard: board });
     editor.commands.run('edit.paste');
     await settle();

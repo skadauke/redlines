@@ -59,6 +59,10 @@ export interface Palette {
 /** How the palette was opened, which says what puts it away. */
 type How = 'hover' | 'click' | 'keyboard' | 'context';
 
+/** How soon, and how near, a press of the mouse comes before the menu event it is the pointer's for. */
+const PRESS_MS = 1000;
+const PRESS_PX = 6;
+
 /** The title bar's delays: a menu opens a moment after the pointer comes, and closes after it goes. */
 const HOVER_OPEN_MS = 120;
 const HOVER_CLOSE_MS = 200;
@@ -70,12 +74,17 @@ const HINT_GAP = 6;
 
 const NO_TEXT = 'The clipboard has no text to paste.';
 
-/** `selection.main` is where `pos` is, for a right-click: kept when inside the selection. */
-function moveSelectionTo(view: EditorView, pos: number): void {
+/**
+ * Puts the selection where a right-click is: kept where the pointer is inside it, else the word
+ * under the pointer, as the Mac selects it, and the caret where there is none. The editor's word is
+ * the Mac's (an apostrophe inside a word is part of it, `don't`), and the one the spell checker is
+ * asked about; CodeMirror's own, which splits at the apostrophe, is for where the editor reads none.
+ */
+function moveSelectionTo(editor: Editor, pos: number): void {
+  const { view } = editor;
   const { main } = view.state.selection;
   if (!main.empty && pos >= main.from && pos <= main.to) return;
-  // As the Mac does for a right-click in text: the word under the pointer is selected.
-  const word = view.state.wordAt(pos);
+  const word = editor.wordAt(pos) ?? view.state.wordAt(pos);
   view.dispatch({
     selection: word ? EditorSelection.range(word.from, word.to) : EditorSelection.cursor(pos),
     userEvent: 'select.pointer',
@@ -101,7 +110,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   handle.className = 'rl-palette-handle';
   handle.tabIndex = -1;
   handle.setAttribute('aria-label', 'Formatting palette');
-  handle.setAttribute('aria-haspopup', 'true');
   handle.setAttribute('aria-expanded', 'false');
   const grip = doc.createElement('span');
   grip.className = 'rl-palette-grip';
@@ -124,13 +132,8 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
 
   let how: How | null = null;
   let drawn: DrawnPanel | null = null;
-  /** The spelling rows the palette holds, and the word they are for. */
-  let spelling: {
-    rows: SpellingRows;
-    from: number;
-    to: number;
-    doc: typeof view.state.doc;
-  } | null = null;
+  /** The spelling rows the palette holds, and where the word they are for is. */
+  let spelling: { rows: SpellingRows; from: number; to: number } | null = null;
   /** Counts the palette's openings, so that an answer that comes late knows its own. */
   let opening = 0;
   let placeAgain: () => void = () => {};
@@ -171,20 +174,22 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     // At the pointer, or above it when the window ends first, as a menu does.
     const top = y + height + MARGIN > win.innerHeight ? y - height : y;
     panel.style.left = `${clamp(x, width, win.innerWidth)}px`;
-    panel.style.top = `${Math.max(MARGIN, top)}px`;
+    panel.style.top = `${clamp(top, height, win.innerHeight)}px`;
   };
   const placeAbove = (rect: DOMRect) => {
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
     panel.style.left = `${clamp(rect.left + rect.width / 2 - width / 2, width, win.innerWidth)}px`;
-    panel.style.top = `${Math.max(MARGIN, rect.top - GAP - height)}px`;
+    panel.style.top = `${clamp(rect.top - GAP - height, height, win.innerHeight)}px`;
   };
   const placeBelow = (rect: { left: number; top: number; bottom: number }) => {
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
     const fits = rect.bottom + GAP + height + MARGIN <= win.innerHeight;
+    // A caret scrolled out of the window is still a place: the palette stays in the window.
+    const top = fits ? rect.bottom + GAP : rect.top - GAP - height;
     panel.style.left = `${clamp(rect.left, width, win.innerWidth)}px`;
-    panel.style.top = `${Math.max(MARGIN, fits ? rect.bottom + GAP : rect.top - GAP - height)}px`;
+    panel.style.top = `${clamp(top, height, win.innerHeight)}px`;
   };
 
   /** Draws the items as the registry has them now; in place when they are the ones drawn. */
@@ -194,21 +199,39 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
       drawn = drawPanel(panel, groups(), spelling?.rows ?? null, handlers);
   };
 
+  /** Draws the palette again with other spelling rows, or none, and the keyboard where it was. */
+  const respell = (next: typeof spelling): void => {
+    const hadFocus = panel.contains(doc.activeElement);
+    spelling = next;
+    // A hint waiting for a button that is gone goes too.
+    hideHint();
+    drawn = drawPanel(panel, groups(), next?.rows ?? null, handlers);
+    placeAgain();
+    if (hadFocus) drawn.rows()[0]?.[0]?.focus();
+  };
+  const dropSpelling = () => respell(null);
+
+  /** Puts the palette away and the keyboard in the text: a choice made in the palette is for it. */
+  const choose = (): void => {
+    close();
+    view.focus();
+  };
+
   const handlers: PanelHandlers = {
     run(id) {
-      close(true);
+      choose();
       editor.commands.run(id);
     },
     pick(suggestion) {
       const held = spelling;
-      close(true);
-      // The text moved on since the word was found: it is not this word any more.
-      if (!held || view.state.doc !== held.doc) return;
-      editor.pickCorrection({ from: held.from, to: held.to }, held.rows.word, suggestion);
+      choose();
+      if (held) {
+        editor.pickCorrection({ from: held.from, to: held.to }, held.rows.word, suggestion);
+      }
     },
     learn() {
       const held = spelling;
-      close(true);
+      choose();
       if (held) void Promise.resolve(options.spelling?.learn?.(held.rows.word)).catch(() => {});
     },
     hint,
@@ -218,6 +241,8 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   // and typing, which means the person went back to writing.
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || event.isComposing) return;
+    // A text box of the page that has the keyboard, a comment's or the find bar's, has the key.
+    if (inOtherField()) return;
     event.preventDefault();
     event.stopPropagation();
     close(true);
@@ -261,7 +286,22 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     panel.hidden = false;
     placeAgain = place;
     place();
-    handle.setAttribute('aria-expanded', 'true');
+    // The handle is open only for the palette it brought up.
+    handle.setAttribute('aria-expanded', String(next === 'hover' || next === 'click'));
+  }
+
+  /** Whether the keyboard is in a text field of the page other than the document and the palette. */
+  function inOtherField(): boolean {
+    const active = doc.activeElement;
+    if (!(active instanceof HTMLElement) || panel.contains(active) || view.dom.contains(active)) {
+      return false;
+    }
+    return (
+      active instanceof HTMLTextAreaElement ||
+      (active instanceof HTMLInputElement &&
+        !/^(button|checkbox|radio|submit|reset)$/.test(active.type)) ||
+      active.isContentEditable
+    );
   }
 
   function close(refocus = false): void {
@@ -271,14 +311,15 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     opening++;
     if (how === null) return;
     const hadFocus = panel.contains(doc.activeElement);
+    // The keyboard goes back to the text, unless it is in another field, which keeps it.
+    const takeBack = hadFocus || (refocus && !inOtherField());
     how = null;
     drawn = null;
     spelling = null;
     panel.hidden = true;
     handle.setAttribute('aria-expanded', 'false');
     unlisten();
-    // The keyboard was in the palette, and has nowhere to be but the text.
-    if (hadFocus || refocus) view.focus();
+    if (takeBack) view.focus();
   }
 
   const fromHandle = (next: 'hover' | 'click') => () => {
@@ -299,6 +340,8 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     if (how === 'hover') closeTimer = setTimeout(() => close(), HOVER_CLOSE_MS);
   };
   handle.addEventListener('pointerleave', scheduleClose);
+  // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
+  panel.addEventListener('mousedown', (event) => event.preventDefault());
   panel.addEventListener('pointerenter', () => clearTimeout(closeTimer));
   panel.addEventListener('pointerleave', scheduleClose);
   handle.addEventListener('mousedown', (event) => event.preventDefault());
@@ -373,9 +416,12 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     if (!fromKeyboard) {
       const pos = view.posAtCoords({ x, y }, false);
       at = pos;
-      moveSelectionTo(view, pos);
+      moveSelectionTo(editor, pos);
     }
     const found = options.spelling?.enabled() ? editor.wordAt(at) : null;
+    // The text the word was found in: a suggestion is for the word where it was, and not for text
+    // that moved while the checker thought.
+    const foundIn = view.state.doc;
     let rows: typeof spelling = null;
     if (found && options.spelling) {
       const asked = options.spelling.suggest(found.word, found.before);
@@ -385,16 +431,13 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
         rows: rowsOf(found.word, suggestions),
         from: found.from,
         to: found.to,
-        doc: view.state.doc,
       });
       if (answer === 'late') {
         // The palette opens without them, and takes them in if they come while it is open.
         void asked.then(
           (late) => {
-            if (mine !== opening || how === null || !late) return;
-            spelling = held(late);
-            drawn = drawPanel(panel, groups(), spelling.rows, handlers);
-            placeAgain();
+            if (mine !== opening || how === null || !late || view.state.doc !== foundIn) return;
+            respell(held(late));
           },
           () => {},
         );
@@ -417,11 +460,25 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     if (fromKeyboard) drawn?.rows()[0]?.[0]?.focus();
   }
 
+  // The last press of the mouse in the text. A menu event after a press, at the same place, is the
+  // pointer's: WebKit gives it the right button, and the buttons held only as the hardware has them
+  // when the event is made, which a quick tap may have let go of already.
+  let lastPress: { x: number; y: number; at: number } | null = null;
+  const notePress = (event: MouseEvent) => {
+    lastPress = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+  };
+  view.contentDOM.addEventListener('mousedown', notePress, true);
+
   const onContextMenu = (event: MouseEvent) => {
     if (options.contextMenu === false || event.defaultPrevented || event.shiftKey) return;
     event.preventDefault();
-    // The menu key and Ctrl-Return ask for the menu at the caret: no button is down.
-    void openContext(event.clientX, event.clientY, event.button === 0 && event.buttons === 0);
+    // The menu key and Ctrl-Return ask for the menu at the caret: WebKit sends the event with the
+    // right button, no press before it, and no button held.
+    const pressed =
+      lastPress !== null &&
+      event.timeStamp - lastPress.at < PRESS_MS &&
+      Math.hypot(event.clientX - lastPress.x, event.clientY - lastPress.y) <= PRESS_PX;
+    void openContext(event.clientX, event.clientY, !pressed && event.buttons === 0);
   };
   view.contentDOM.addEventListener('contextmenu', onContextMenu);
 
@@ -429,7 +486,10 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   // Cut and Copy need a selection.
   const removeExtension = editor.addExtension(
     EditorView.updateListener.of((update) => {
-      if (how !== null && (update.selectionSet || update.docChanged)) refresh();
+      if (how === null) return;
+      // Suggestions are for the word where it was found: text that moves takes them away.
+      if (update.docChanged && spelling) dropSpelling();
+      if (update.selectionSet || update.docChanged) refresh();
     }),
   );
 
@@ -475,6 +535,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
       removeExtension();
       view.contentDOM.removeEventListener('keydown', onWriting);
       view.contentDOM.removeEventListener('contextmenu', onContextMenu);
+      view.contentDOM.removeEventListener('mousedown', notePress, true);
       win.removeEventListener('pointermove', onMove);
       handle.remove();
       panel.remove();
