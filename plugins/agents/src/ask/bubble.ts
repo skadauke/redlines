@@ -83,6 +83,8 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
   // Nothing in the bubble takes the keyboard from the field by a press of the mouse, and a press
   // in its padding goes nowhere.
   const exchange = el('div', 'rl-qa-exchange');
+  // An answer is said when it comes, to VoiceOver as to the eye.
+  exchange.setAttribute('aria-live', 'polite');
   const live = el('div', 'rl-qa-live');
   const actions = el('div', 'rl-qa-actions');
   const composer = el('div', 'rl-note-box rl-qa-composer');
@@ -185,6 +187,10 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
       return field.value.trim() !== '';
     },
     render(view) {
+      // The keyboard was in the bubble, or was lost when the field went away to make room for the
+      // answer: it goes back to the field when it returns.
+      const active = root.ownerDocument.activeElement;
+      const keyboardHere = !active || active === root.ownerDocument.body || root.contains(active);
       const working = view.pending !== null;
       const answered = view.turns.length > 0;
       exchange.replaceChildren(
@@ -234,8 +240,13 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
         field.value = view.draft;
         field.setSelectionRange(field.value.length, field.value.length);
       }
+      const returned = composing && !wasComposing;
       wasComposing = composing;
       size();
+      // After an answer or a failure the keyboard goes back to the field, for the next question.
+      if (returned && keyboardHere && (answered || view.draft !== '')) {
+        field.focus({ preventScroll: true });
+      }
     },
     focusField() {
       if (!composer.hidden) field.focus();

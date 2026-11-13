@@ -508,6 +508,8 @@ describe('follow-up', () => {
     editor.commands.run('ask.start');
     ask('What is a lien?');
     await answered();
+    // The keyboard is back in the field for the follow-up.
+    expect(document.activeElement).toBe(field());
     expect(field()?.placeholder).toBe('Ask a follow-up');
     expect(field()?.hasAttribute('hidden')).toBe(false);
     // The question that was answered is not asked again: the field is empty.
