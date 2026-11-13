@@ -6,6 +6,7 @@
 
 import Foundation
 import QuickLookUI
+import UniformTypeIdentifiers
 import os
 
 private let log = Logger(subsystem: "md.redlines.editor.preview", category: "preview")
