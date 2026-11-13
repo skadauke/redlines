@@ -8,12 +8,13 @@
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
 import type { AgentState } from '@redlines/plugin-api';
+import { privacyMessage } from './blocked-message.ts';
 
 /** The part of the app's settings this pane reads and changes. */
 export interface AgentsPaneSettings {
-  agentScope: 'folder' | 'document';
+  agentScope: 'document' | 'folder' | 'everything';
   /** What the person allowed each agent, keyed `agent|folder`. */
-  consent: Record<string, 'folder' | 'document' | 'no'>;
+  consent: Record<string, 'document' | 'folder' | 'everything' | 'no'>;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -69,6 +70,14 @@ export interface AgentsPaneDeps {
   /** Puts text on the clipboard, for the install command's Copy. Without it, there is no Copy. */
   copy?(text: string): Promise<void>;
   /**
+   * Lists the folders among what an agent may read at This folder and my home folder that macOS
+   * isn't letting Redlines read, from the app, which is also what makes macOS ask the person, once:
+   * so it is asked when the person picks that choice, a moment they expect, and never before.
+   */
+  homeAccess?(): Promise<readonly { name: string; folder: string }[]>;
+  /** Opens System Settings at Privacy & Security › Files and Folders. */
+  openFilesAndFoldersSettings?(): Promise<void>;
+  /**
    * The other agents, where the host keeps a list. Adding and removing ask the person first, in
    * the host's own question, and reject with a line to show when they say no.
    */
@@ -85,9 +94,25 @@ export interface AgentsPaneDeps {
 
 const ANSWERS = {
   folder: 'May read the folder',
+  everything: 'May read the folder and the home folder',
   document: 'This document only',
   no: 'Not allowed',
 } as const;
+
+/**
+ * What the home folder choice means, said plainly, as the choice is made: what it opens and leaves
+ * out, that writes don't change, the risk of what someone else wrote in a document, and that macOS
+ * will ask (Documents, Desktop, Downloads and iCloud Drive are protected folders).
+ */
+const HOME_NOTE =
+  'Agents can read related files anywhere in your home folder, such as a reference document in ' +
+  'another project. Hidden files and folders and ~/Library are left out, except the cloud ' +
+  'folders in it (iCloud Drive, Dropbox, Google Drive, OneDrive and Box). Agents change only the ' +
+  'document. Text in a document that someone else wrote, such as a comment, a reply or deleted ' +
+  'text, could try to make an agent read a private file and quote it into a comment or a ' +
+  'suggestion, which then travels with the document. macOS may ask whether Redlines can access ' +
+  'your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through ' +
+  'Redlines: say yes there to let them.';
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -155,16 +180,72 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   for (const [value, label] of [
     ['document', 'This document'],
     ['folder', 'This folder'],
+    ['everything', 'This folder and my home folder'],
   ] as const) {
     const option = el('option', undefined, label);
     option.value = value;
     scope.append(option);
   }
   scope.value = deps.settings().agentScope;
-  scope.addEventListener('change', () =>
-    deps.update({ agentScope: scope.value === 'document' ? 'document' : 'folder' }),
-  );
-  container.append(row('What agents may read', scope));
+  // The note comes with the widest choice, where the risk is, and goes with it.
+  // The risk is said where the choice is made, and a screen reader says it with the choice and
+  // again when the choice changes it.
+  const scopeNote = el('div', 'rl-pref-note');
+  scopeNote.id = `rl-agents-${nextId++}`;
+  scopeNote.setAttribute('role', 'status');
+  scope.setAttribute('aria-describedby', scopeNote.id);
+  const showScopeNote = () => {
+    scopeNote.textContent = scope.value === 'everything' ? HOME_NOTE : '';
+  };
+  showScopeNote();
+  // What macOS holds back from Redlines, found when the choice is made: the folders, and a way to
+  // System Settings, where Redlines can be turned on.
+  const holdingBack = el('div', 'rl-pref-note rl-pref-failure');
+  holdingBack.setAttribute('role', 'status');
+  let looking = 0;
+  const lookForRefusals = () => {
+    const mine = ++looking;
+    holdingBack.replaceChildren();
+    if (scope.value !== 'everything' || !deps.homeAccess) return;
+    let asking: Promise<readonly { name: string; folder: string }[]>;
+    try {
+      asking = deps.homeAccess();
+    } catch (error) {
+      asking = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    asking.then(
+      (refused) => {
+        if (!alive || mine !== looking || refused.length === 0) return;
+        const lines = refused.map(({ name, folder }) =>
+          el('div', undefined, privacyMessage(folder, name).text),
+        );
+        const open = button('Open System Settings');
+        open.addEventListener('click', () => {
+          const failed = () => {
+            if (alive) holdingBack.append(el('div', undefined, 'Couldn’t open System Settings.'));
+          };
+          try {
+            void Promise.resolve(deps.openFilesAndFoldersSettings?.()).catch(failed);
+          } catch {
+            failed();
+          }
+        });
+        holdingBack.replaceChildren(...lines, open);
+      },
+      () => {},
+    );
+  };
+  scope.addEventListener('change', () => {
+    const chosen = scope.value;
+    deps.update({
+      agentScope: chosen === 'document' || chosen === 'everything' ? chosen : 'folder',
+    });
+    showScopeNote();
+    lookForRefusals();
+  });
+  const scopeExtras = el('div');
+  scopeExtras.append(scopeNote, holdingBack);
+  container.append(row('What agents may read', scope, scopeExtras));
 
   // The remembered answers: a row only while there are any.
   let remembered: HTMLElement | null = null;
@@ -176,7 +257,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     else if (next) logs.before(next);
     remembered = next;
   };
-  const list = (entries: [string, 'folder' | 'document' | 'no'][]): HTMLElement => {
+  const list = (entries: [string, AgentsPaneSettings['consent'][string]][]): HTMLElement => {
     const items = el('div', 'rl-pref-list');
     for (const [key, answer] of entries) {
       const split = key.indexOf('|');

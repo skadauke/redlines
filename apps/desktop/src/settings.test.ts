@@ -69,6 +69,7 @@ describe('settings', () => {
       agentScope: 'folder',
       consent: {},
       people: [],
+      newDocumentFolder: null,
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -97,6 +98,7 @@ describe('settings', () => {
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
       ],
+      newDocumentFolder: '/Users/ada/Notes',
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
@@ -282,6 +284,25 @@ describe('settings', () => {
     }
   });
 
+  it('keeps the default folder for new documents, also for settings saved before it, and none for anything else', () => {
+    // Settings saved before the setting: no folder, as Save has always done.
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().newDocumentFolder).toBeNull();
+    localStorage.setItem(SETTINGS_KEY, '{"newDocumentFolder":"/Users/ada/Notes"}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' });
+    // Anything that isn't a folder's path is no folder: an empty name, a number, a list.
+    for (const stored of ['""', '7', 'null', 'true', '["/Users/ada"]', '{"path":"/Users/ada"}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"newDocumentFolder":${stored}}`);
+      expect(loadSettings().newDocumentFolder).toBeNull();
+    }
+    // Chosen in Preferences, it reaches every window like the other settings.
+    expect(updateSettings({ newDocumentFolder: '/Users/ada/Drafts' }).newDocumentFolder).toBe(
+      '/Users/ada/Drafts',
+    );
+    expect(loadSettings().newDocumentFolder).toBe('/Users/ada/Drafts');
+    expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
+  });
+
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
     localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
     expect(loadSettings().zoom).toBe(1.25);
@@ -338,7 +359,7 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
-        agentScope: 'everything',
+        agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
     );
@@ -355,6 +376,33 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
       expect(loadSettings().identity).toBeNull();
     }
+  });
+
+  it('keeps the three scopes an agent may read, and the answers that name them', () => {
+    for (const agentScope of ['document', 'folder', 'everything']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ agentScope }));
+      expect(loadSettings().agentScope).toBe(agentScope);
+    }
+    // The default stays This folder, for a setting that is missing or not a scope.
+    localStorage.setItem(SETTINGS_KEY, '{}');
+    expect(loadSettings().agentScope).toBe('folder');
+    expect(DEFAULT_SETTINGS.agentScope).toBe('folder');
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        consent: {
+          'claude|/notes': 'everything',
+          'codex|/notes': 'document',
+          'claude|/a': 'no',
+          'codex|/b': 'machine',
+        },
+      }),
+    );
+    expect(loadSettings().consent).toEqual({
+      'claude|/notes': 'everything',
+      'codex|/notes': 'document',
+      'claude|/a': 'no',
+    });
   });
 
   it('keeps what other windows saved when one setting changes', () => {

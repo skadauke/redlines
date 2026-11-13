@@ -97,7 +97,7 @@ interface Span {
 }
 
 /** The stretches of `from`..`to` that the preview hides when the caret is elsewhere: the marks of
- * emphasis, code and strikethrough, a link's brackets and destination (its text shows), an image's
+ * emphasis, code, strikethrough, subscript and superscript, a link's brackets and destination (its text shows), an image's
  * syntax (its alt text stands in for the picture) and an autolink's angle brackets. */
 function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
   const hidden: Span[] = [];
@@ -113,6 +113,8 @@ function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
         case 'EmphasisMark':
         case 'CodeMark':
         case 'StrikethroughMark':
+        case 'SubscriptMark':
+        case 'SuperscriptMark':
           hide(node.from, node.to);
           break;
         case 'Link':

@@ -4,6 +4,7 @@ import { createEditor, type Editor, type EditorOptions, undo } from '@redlines/e
 import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFind, plugin } from './index.ts';
+import { setFind } from './search.ts';
 
 const mac = /Mac/.test(navigator.platform);
 
@@ -399,6 +400,45 @@ describe('while the bar is open', () => {
     remove();
     expect(editor.commands.list()).toEqual([]);
     expect(bar(editor).root).toBeNull();
+  });
+});
+
+describe('under a title bar that floats over the editor', () => {
+  // The host reserves the bar's room as a scroll margin, as the title bar of the desktop app does.
+  const BAR = 52;
+  const reserve = (editor: Editor, top: number) =>
+    editor.addExtension(EditorView.scrollMargins.of(() => ({ top })));
+  /** The room each scroll margin asks for above the text, the find bar's included. */
+  const room = (editor: Editor) =>
+    editor.view.state.facet(EditorView.scrollMargins).map((margins) => margins(editor.view)?.top);
+  /** Lets the editor measure, which is when the bar is placed. */
+  const measured = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+  it('floats below the room the host keeps, which the text scrolls under', async () => {
+    const { editor } = mount('cat\n');
+    reserve(editor, BAR);
+    search(editor, 'cat');
+    await measured();
+    // The editor's scroller is at the top of the window here, which the title bar covers.
+    expect(bar(editor).root?.style.top).toBe(`${BAR + 12}px`);
+  });
+
+  it('floats where it did when the host keeps no room', async () => {
+    const { editor } = mount('cat\n');
+    search(editor, 'cat');
+    await measured();
+    expect(bar(editor).root?.style.top).toBe('12px');
+  });
+
+  it('asks for room for itself on top of the host’s, while it is open, and none when closed', () => {
+    const { editor } = mount('cat\n');
+    reserve(editor, BAR);
+    expect(room(editor).filter((top) => top !== undefined)).toEqual([BAR]);
+    search(editor, 'cat');
+    // The bar's 84 px start below the host's room: the text is kept clear of both.
+    expect(Math.max(...room(editor).map((top) => top ?? 0))).toBe(BAR + 84);
+    editor.view.dispatch({ effects: setFind.of({ open: false }) });
+    expect(Math.max(...room(editor).map((top) => top ?? 0))).toBe(BAR);
   });
 });
 

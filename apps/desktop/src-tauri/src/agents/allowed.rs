@@ -16,6 +16,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::reach::HomeReach;
+
 /// One of the agents' own programs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Agent {
@@ -100,6 +102,9 @@ pub struct Known<'a> {
     pub sockets: &'a [String],
     /// The folder the program was found in, and the folder of its real path if that's another.
     pub program_folders: &'a [String],
+    /// What an agent may read at This folder and my home folder, which the app makes itself: the
+    /// lines of that scope are lines only for exactly this, and there are none without it.
+    pub reach: Option<&'a HomeReach>,
 }
 
 /// One argument of a line.
@@ -174,13 +179,58 @@ fn claude_mcp_config(bundled: &str, socket: &str) -> String {
     )
 }
 
-/// The file profile of `codexArgs`. At This document there's no `:project_roots`.
-fn codex_filesystem(program_folders: &[String], project_roots: bool) -> String {
+/// What Codex's profile leaves out of a folder it grants whole at the home folder scope: hidden
+/// files and folders, and `.env` files, by name, wherever they are below it (`.*` alone reaches
+/// only the top, and a hidden folder's own files need `/**`). A glob can only deny.
+const CODEX_LEFT_OUT: &str = r#"{"."="read","**/.*"="deny","**/.*/**"="deny","**/.env"="deny","**/.env.*"="deny","**/*.env"="deny"}"#;
+
+/// Whether `path` is `folder` or inside it, by name.
+fn is_under(path: &str, folder: &str) -> bool {
+    path == folder
+        || path
+            .strip_prefix(folder)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// What Codex's profile says of the home folder at the home folder scope, as `homeEntries` in
+/// `plugins/agent-codex` writes it: the home folder granted whole but for what is left out,
+/// `~/Library` denied but for its cloud folders, and any folder a link in the home folder leads to
+/// outside it granted the same way as the home folder.
+fn codex_home_entries(reach: &HomeReach) -> Vec<String> {
+    let home = &reach.home;
+    let mut entries = vec![
+        format!("{}={CODEX_LEFT_OUT}", json_string(home)),
+        format!(r#"{}="deny""#, json_string(&format!("{home}/Library"))),
+    ];
+    for cloud in ["Library/CloudStorage", "Library/Mobile Documents"] {
+        let path = format!("{home}/{cloud}");
+        if reach.roots.contains(&path) {
+            entries.push(format!(r#"{}="read""#, json_string(&path)));
+        }
+    }
+    entries.extend(
+        reach
+            .roots
+            .iter()
+            .filter(|root| !is_under(root, home))
+            .map(|root| format!("{}={CODEX_LEFT_OUT}", json_string(root))),
+    );
+    entries
+}
+
+/// The file profile of `codexArgs`. At This document there's no `:project_roots`. At the home folder
+/// scope there is the home folder's too.
+fn codex_filesystem(
+    program_folders: &[String],
+    project_roots: bool,
+    wide: Option<&HomeReach>,
+) -> String {
     let mut entries = vec![r#"":minimal"="read""#.to_owned()];
     if project_roots {
         entries.push(r#"":project_roots"={"."="read"}"#.to_owned());
     }
     entries.push(r#"":slash_tmp"="deny""#.to_owned());
+    entries.extend(wide.map(codex_home_entries).into_iter().flatten());
     entries.extend(
         program_folders
             .iter()
@@ -189,22 +239,80 @@ fn codex_filesystem(program_folders: &[String], project_roots: bool) -> String {
     format!("permissions.redlines.filesystem={{{}}}", entries.join(","))
 }
 
+/// The permission rules that refuse what the home folder scope leaves out, in Claude's settings, as
+/// `claudeDenies` in `plugins/agent-claude` writes them: `.env` files anywhere, and hidden files
+/// and folders anywhere below the home folder and below each folder a link leads to outside it
+/// (the home folder as it really is, without a closing slash, which would make a rule of
+/// `///Users/...`). Deny beats every grant, and Grep and Glob honor it.
+fn claude_denies(reach: &HomeReach) -> Vec<String> {
+    let mut bases = vec![reach.home.trim_end_matches('/')];
+    for root in &reach.roots {
+        let root = root.trim_end_matches('/');
+        if !bases.iter().any(|base| is_under(root, base)) {
+            bases.push(root);
+        }
+    }
+    let mut denies = vec![
+        "Read(//**/.env)".to_owned(),
+        "Read(//**/.env.*)".to_owned(),
+        "Read(//**/*.env)".to_owned(),
+    ];
+    for base in bases {
+        denies.push(format!("Read(/{base}/**/.*)"));
+        denies.push(format!("Read(/{base}/**/.*/**)"));
+    }
+    denies
+}
+
+/// `--settings` at the home folder scope, as `claudeArgs` writes it.
+fn claude_wide_settings(reach: &HomeReach) -> String {
+    let denies: Vec<String> = claude_denies(reach)
+        .iter()
+        .map(|deny| json_string(deny))
+        .collect();
+    format!(
+        r#"{{"disableAllHooks":true,"permissions":{{"deny":[{}]}}}}"#,
+        denies.join(",")
+    )
+}
+
 /// `claudeArgs` in `plugins/agent-claude`, and the same with the fallback the findings keep ready in
-/// case `--restricted` loses a plan's sign-in.
+/// case `--restricted` loses a plan's sign-in, and, where the app makes a reach, the line of the
+/// home folder scope: each folder of the reach granted by `--add-dir` (the file tools are confined
+/// to them and the working folder), the folders' own skills and commands off, and the settings
+/// that deny what the scope leaves out.
 fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
-    let line = |isolation: &[&str]| {
+    let line = |isolation: &[&str], wide: Option<&HomeReach>| {
         let configs = known
             .sockets
             .iter()
             .map(|socket| claude_mcp_config(known.bundled, socket))
             .collect();
+        let granted = wide.into_iter().flat_map(|reach| {
+            reach.roots.iter().flat_map(|root| {
+                [
+                    Part::Exact("--add-dir".to_owned()),
+                    Part::Exact(root.clone()),
+                ]
+            })
+        });
+        let skills = wide.map(|_| Part::Exact("--disable-slash-commands".to_owned()));
+        // At the home folder scope the file tools are always there: it isn't This document.
+        let tools = if wide.is_some() {
+            vec!["Read,Grep,Glob".to_owned()]
+        } else {
+            vec!["Read,Grep,Glob".to_owned(), String::new()]
+        };
+        let settings = wide.map_or_else(
+            || r#"{"disableAllHooks":true}"#.to_owned(),
+            claude_wide_settings,
+        );
         exact(&["-p", "--output-format", "stream-json", "--verbose"])
             .chain(exact(isolation))
+            .chain(granted)
+            .chain(skills)
             .chain(exact(&["--permission-mode", "dontAsk", "--tools"]))
-            .chain([Part::OneOf(vec![
-                "Read,Grep,Glob".to_owned(),
-                String::new(),
-            ])])
+            .chain([Part::OneOf(tools)])
             .chain(exact(&[
                 "--allowedTools",
                 "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
@@ -215,7 +323,7 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             .chain(exact(&[
                 "--strict-mcp-config",
                 "--settings",
-                r#"{"disableAllHooks":true}"#,
+                &settings,
                 "--append-system-prompt",
             ]))
             .chain([Part::Words])
@@ -223,10 +331,16 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             .chain([Part::Prompt])
             .collect()
     };
-    vec![
-        line(&["--restricted"]),
-        line(&["--setting-sources", "user"]),
-    ]
+    let mut lines = vec![
+        line(&["--restricted"], None),
+        line(&["--setting-sources", "user"], None),
+    ];
+    lines.extend(
+        known
+            .reach
+            .map(|reach| line(&["--restricted"], Some(reach))),
+    );
+    lines
 }
 
 /// `codexArgs` in `plugins/agent-codex`.
@@ -248,10 +362,18 @@ fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
             r#"default_permissions="redlines""#,
             "-c",
         ]))
-        .chain([Part::OneOf(vec![
-            codex_filesystem(known.program_folders, true),
-            codex_filesystem(known.program_folders, false),
-        ])])
+        .chain([Part::OneOf(
+            [
+                Some(codex_filesystem(known.program_folders, true, None)),
+                Some(codex_filesystem(known.program_folders, false, None)),
+                known
+                    .reach
+                    .map(|reach| codex_filesystem(known.program_folders, true, Some(reach))),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        )])
         .chain(exact(&[
             "-c",
             &format!(
@@ -364,6 +486,9 @@ pub mod tests {
         pub socket: String,
         pub program_folders: Vec<String>,
         pub lines: std::collections::BTreeMap<String, Vec<String>>,
+        /// What the app makes of This folder and my home folder, which the lines of that scope
+        /// name.
+        pub home: HomeReach,
         /// The messages `plugins/agent-acp` writes to an agent (`acp_gate.rs`).
         pub acp: AcpMessages,
     }
@@ -381,7 +506,7 @@ pub mod tests {
     }
 
     pub fn codex_filesystem_for_tests(program_folders: &[String], project_roots: bool) -> String {
-        codex_filesystem(program_folders, project_roots)
+        codex_filesystem(program_folders, project_roots, None)
     }
 
     /// Runs `check` with what the app would know while the file's lines are being asked for.
@@ -392,6 +517,7 @@ pub mod tests {
             bundled: &lines.bundled,
             sockets: &sockets,
             program_folders: &lines.program_folders,
+            reach: Some(&lines.home),
         };
         check(&lines, &known)
     }
@@ -443,7 +569,7 @@ pub mod tests {
     #[test]
     fn every_provider_line_is_allowed() {
         with_known(|lines, known| {
-            assert_eq!(lines.lines.len(), 4);
+            assert_eq!(lines.lines.len(), 6);
             for (name, line) in &lines.lines {
                 assert_eq!(
                     check_run_line(agent_of(name), line, known),
@@ -452,6 +578,214 @@ pub mod tests {
                 );
             }
         });
+    }
+
+    /// The line of the home folder scope for `name`, with the reach the app would make.
+    fn check_at_home(name: &str, line: &[String], reach: Option<&HomeReach>) -> Result<(), String> {
+        with_known(|_, known| {
+            let known = Known { reach, ..*known };
+            check_run_line(agent_of(name), line, &known)
+        })
+    }
+
+    const CLAUDE_HOME: &str = "claude at the home folder";
+    const CODEX_HOME: &str = "codex at the home folder";
+
+    #[test]
+    fn the_home_folder_lines_are_lines_only_for_the_reach_the_app_makes() {
+        let lines = provider_lines();
+        let reach = |change: &dyn Fn(&mut HomeReach)| {
+            let mut reach = lines.home.clone();
+            change(&mut reach);
+            reach
+        };
+        for name in [CLAUDE_HOME, CODEX_HOME] {
+            let line = &lines.lines[name];
+            assert_eq!(
+                check_at_home(name, line, Some(&lines.home)),
+                Ok(()),
+                "{name}"
+            );
+            // Without a reach to give, there is no such line.
+            assert!(check_at_home(name, line, None).is_err(), "{name}");
+            // Nor for a reach with more, less, or other than the app makes, that a line shows.
+            for (what, other) in [
+                ("all of the disk", reach(&|r| r.roots.push("/".to_owned()))),
+                (
+                    "another home folder",
+                    reach(&|r| r.home = "/Users/bo".to_owned()),
+                ),
+                (
+                    "a folder less outside the home folder",
+                    reach(&|r| r.roots.retain(|root| !root.starts_with("/Volumes"))),
+                ),
+                (
+                    "a cloud folder less",
+                    reach(&|r| r.roots.retain(|root| !root.ends_with("CloudStorage"))),
+                ),
+            ] {
+                assert!(
+                    check_at_home(name, line, Some(&other)).is_err(),
+                    "{name} with {what}"
+                );
+            }
+        }
+
+        // Claude names each folder it grants, so any other list is another line.
+        let claude = &lines.lines[CLAUDE_HOME];
+        for (what, other) in [
+            (
+                "a hidden folder",
+                reach(&|r| r.roots.push("/Users/ada/.ssh".to_owned())),
+            ),
+            (
+                "all of Library",
+                reach(&|r| r.roots.push("/Users/ada/Library".to_owned())),
+            ),
+            ("one folder less", reach(&|r| drop(r.roots.remove(0)))),
+        ] {
+            assert!(
+                check_at_home(CLAUDE_HOME, claude, Some(&other)).is_err(),
+                "{what}"
+            );
+        }
+        // Codex names the home folder whole, so a folder inside it changes nothing it says: the
+        // same line is still the right one, and nothing is granted that it doesn't say.
+        let codex = &lines.lines[CODEX_HOME];
+        let inside = reach(&|r| r.roots.push("/Users/ada/Music".to_owned()));
+        assert_eq!(check_at_home(CODEX_HOME, codex, Some(&inside)), Ok(()));
+    }
+
+    #[test]
+    fn the_folder_lines_still_need_no_reach() {
+        for name in [
+            "claude at a folder",
+            "claude at this document",
+            "codex at a folder",
+            "codex at this document",
+        ] {
+            let lines = provider_lines();
+            assert_eq!(
+                check_at_home(name, &lines.lines[name], None),
+                Ok(()),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn claudes_home_folder_line_grants_only_the_listed_folders_and_keeps_its_denials() {
+        let lines = provider_lines();
+        let line = &lines.lines[CLAUDE_HOME];
+        let reach = Some(&lines.home);
+        let at = |flag: &str| line.iter().position(|arg| arg == flag).unwrap();
+
+        // Another folder granted, in place of one, or the home folder whole.
+        for folder in ["/", "/Users/ada", "/Users/ada/.ssh", "/Users/ada/Library"] {
+            let mut other = line.clone();
+            let grant = other.iter().position(|arg| arg == "--add-dir").unwrap();
+            other[grant + 1] = folder.to_owned();
+            assert!(
+                check_at_home(CLAUDE_HOME, &other, reach).is_err(),
+                "{folder}"
+            );
+        }
+        // A grant added, or taken away, or the skills let back in.
+        let mut added = line.clone();
+        let at_end = at("--permission-mode");
+        added.splice(at_end..at_end, ["--add-dir".to_owned(), "/etc".to_owned()]);
+        assert!(check_at_home(CLAUDE_HOME, &added, reach).is_err());
+        let mut skills = line.clone();
+        skills.remove(at("--disable-slash-commands"));
+        assert!(check_at_home(CLAUDE_HOME, &skills, reach).is_err());
+        // The settings with a denial taken out, with none, or with the folder's own.
+        let settings = at("--settings") + 1;
+        let denies = [
+            r#""Read(//**/.env)","#,
+            r#""Read(//**/.env.*)","#,
+            r#""Read(//**/*.env)","#,
+            r#""Read(//Users/ada/**/.*)","#,
+            r#","Read(//Users/ada/**/.*/**)""#,
+        ];
+        for deny in denies {
+            let mut weaker = line.clone();
+            weaker[settings] = weaker[settings].replace(deny, "");
+            assert_ne!(weaker[settings], line[settings], "{deny}");
+            assert!(
+                check_at_home(CLAUDE_HOME, &weaker, reach).is_err(),
+                "{deny}"
+            );
+        }
+        let mut none = line.clone();
+        none[settings] = r#"{"disableAllHooks":true}"#.to_owned();
+        assert!(check_at_home(CLAUDE_HOME, &none, reach).is_err());
+        // No tools at all isn't the line of a scope that reads files either.
+        let mut tools = line.clone();
+        tools[at("--tools") + 1] = String::new();
+        assert!(check_at_home(CLAUDE_HOME, &tools, reach).is_err());
+        // And a bare Bash among the tools never.
+        let mut bash = line.clone();
+        bash[at("--tools") + 1] = "Read,Grep,Glob,Bash".to_owned();
+        assert!(check_at_home(CLAUDE_HOME, &bash, reach).is_err());
+    }
+
+    #[test]
+    fn codexs_home_folder_line_leaves_out_what_the_scope_leaves_out() {
+        let lines = provider_lines();
+        let line = &lines.lines[CODEX_HOME];
+        let reach = Some(&lines.home);
+        let at = line
+            .iter()
+            .position(|arg| arg.starts_with("permissions.redlines.filesystem="))
+            .unwrap();
+        let profile = &line[at];
+        for (what, change) in [
+            (
+                "the hidden names",
+                profile.replace(r#""**/.*"="deny","#, ""),
+            ),
+            (
+                "the hidden folders",
+                profile.replace(r#""**/.*/**"="deny","#, ""),
+            ),
+            (
+                "the .env files",
+                profile.replace(r#""**/.env"="deny","#, ""),
+            ),
+            (
+                "the .env variants",
+                profile.replace(r#""**/.env.*"="deny","#, ""),
+            ),
+            (
+                "the denial of Library",
+                profile.replace(r#""/Users/ada/Library"="deny","#, ""),
+            ),
+            (
+                "the whole disk",
+                profile.replace(r#""/opt/homebrew/bin"="read""#, r#""/"="read""#),
+            ),
+            (
+                "Library in whole",
+                profile.replace(
+                    r#""/Users/ada/Library/CloudStorage"="read""#,
+                    r#""/Users/ada/Library"="read""#,
+                ),
+            ),
+        ] {
+            assert_ne!(&change, profile, "{what}");
+            let mut other = line.clone();
+            other[at] = change;
+            assert!(check_at_home(CODEX_HOME, &other, reach).is_err(), "{what}");
+        }
+        // The home folder granted whole, with nothing left out.
+        let mut bare = line.clone();
+        bare[at] = bare[at].replacen(
+            r#""/Users/ada"={"."="read","**/.*"="deny","**/.*/**"="deny","**/.env"="deny","**/.env.*"="deny","**/*.env"="deny"}"#,
+            r#""/Users/ada"="read""#,
+            1,
+        );
+        assert_ne!(bare[at], line[at]);
+        assert!(check_at_home(CODEX_HOME, &bare, reach).is_err());
     }
 
     #[test]

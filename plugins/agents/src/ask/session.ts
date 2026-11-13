@@ -82,7 +82,7 @@ export interface AskSession {
    */
   ask(question: string): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
-  answerConsent(answer: 'folder' | 'document' | 'no'): void;
+  answerConsent(answer: AgentScope | 'no'): void;
   /** Stops the run, and leaves the question unanswered. */
   stop(): void;
   /** Puts a failure away. */
@@ -453,6 +453,9 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     answerConsent(answer) {
       // An agent that reads the whole machine can't be held to this document.
       if (answer === 'document' && run?.agent?.readLimit === 'machine') return;
+      // The home folder is not offered to a question (its panel has no such button): nothing here
+      // gives that answer, and one that came would read more than was asked.
+      if (answer === 'everything') return;
       run?.answer?.(answer);
     },
     stop() {

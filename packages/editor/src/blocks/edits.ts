@@ -744,7 +744,15 @@ export function hardBreakAt(
 }
 
 /** The inline syntax whose delimiters the caret is right inside of, at an edge of its text. */
-const EDGED = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'InlineCode', 'Link']);
+const EDGED = new Set([
+  'Emphasis',
+  'StrongEmphasis',
+  'Strikethrough',
+  'InlineCode',
+  'Link',
+  'Subscript',
+  'Superscript',
+]);
 
 /**
  * A position at the edge of an inline construct's text, right inside its delimiters, moved out of
@@ -765,7 +773,11 @@ function outsideEdges(state: EditorState, head: number): number {
               ? 'CodeMark'
               : node.name === 'Strikethrough'
                 ? 'StrikethroughMark'
-                : 'EmphasisMark',
+                : node.name === 'Subscript'
+                  ? 'SubscriptMark'
+                  : node.name === 'Superscript'
+                    ? 'SuperscriptMark'
+                    : 'EmphasisMark',
         );
         const open = marks[0];
         const close = node.name === 'Link' ? marks[1] : marks.at(-1);

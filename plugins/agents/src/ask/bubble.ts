@@ -8,6 +8,7 @@
 // same node, and a new question is added after it, and its answer to it, and nothing that was said is
 // taken away and put back, which a screen reader would say again.
 
+import type { AgentScope } from '@redlines/plugin-api';
 import { fitStatus, renderLiveLine, type LiveLineActions } from '../live-line.ts';
 import type { LiveLine } from '../runs.ts';
 import { askIcon, type AskIconName } from './icons.ts';
@@ -34,7 +35,7 @@ export interface BubbleHandlers {
   /** Cancel, or Esc in the field. */
   close(): void;
   stop(): void;
-  consent(answer: 'folder' | 'document' | 'no'): void;
+  consent(answer: AgentScope | 'no'): void;
   dismiss(): void;
   showLog?: (path: string) => void;
   /** Opens Preferences › Agents, for a failure they can put right. */

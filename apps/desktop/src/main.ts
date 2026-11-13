@@ -9,6 +9,7 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  blockedMessage,
   createAsk,
   createLiveLines,
   createMacAgents,
@@ -26,9 +27,8 @@ import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { loadAbout } from './about.ts';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
+import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -51,7 +51,7 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
-import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
+import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -61,6 +61,7 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { followScrollbar } from './scrollbar.ts';
 import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
@@ -193,6 +194,9 @@ function dragFile(): void {
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  // Track Changes is the document's, as Word's is: turning it on or off is written to its ledger
+  // (format §5.6), and the file is edited until it is saved.
+  saveTracking: true,
   people: settings.people,
   // The first time a document shows someone, they are recorded with their color, for every window.
   onNewPeople: (handles) => {
@@ -200,6 +204,18 @@ const editor = createEditor(element('#editor'), {
     editor.setPeople(settings.people);
   },
   codeLanguages,
+  // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
+  // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
+  openLink: (address) => {
+    if (!isTauri) {
+      window.open(address, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    invoke('open_link', { url: address }).catch((error: unknown) => {
+      console.error('Could not open the link', error);
+      notice.flash('Couldn’t open the link.');
+    });
+  },
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
@@ -389,6 +405,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
+  // Save for a document with no file opens its dialog in the folder Preferences name, if any.
+  newDocumentFolder: () => loadSettings().newDocumentFolder,
 });
 
 /** The document the runs were last told of. */
@@ -509,8 +527,7 @@ const agentSettings = {
     changeSettings({
       consent: {
         ...loadSettings().consent,
-        // Preferences keep no wider answer than the folder yet.
-        [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+        [consentKey(agent, folder)]: answer,
       },
     }),
 };
@@ -528,7 +545,30 @@ const runs = createRuns({
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
+  // What an agent may read at This folder and my home folder, and what macOS is holding back of
+  // it; a browser has none.
+  ...(isTauri ? { homeReach, homeAccess } : {}),
   settings: agentSettings,
+  // An agent that couldn't read a file inside what it may read: which file, why and what to do.
+  onBlocked: (notice) => {
+    const { text, action } = blockedMessage(notice);
+    notifications.show({
+      key: `blocked ${notice.thread} ${notice.cause} ${notice.place ?? ''}`,
+      text,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                if (action.do === 'log') showAgentLogs();
+                else openFilesAndFoldersSettings();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    });
+  },
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
 });
@@ -563,6 +603,15 @@ const liveLines = createLiveLines({
         : {}),
     }),
 });
+
+/** Opens System Settings where the person lets Redlines read a folder macOS protects. */
+function openFilesAndFoldersSettings(): void {
+  if (!isTauri) return notice.flash('System Settings are on the Mac.');
+  invoke('open_files_and_folders_settings').catch((error: unknown) => {
+    console.error('Could not open System Settings', error);
+    notice.flash('Couldn’t open System Settings.');
+  });
+}
 
 // Ask: a question about the selection, answered in a bubble beside it, which writes nothing to the
 // file. It runs the agents as a comment's run does, with the tools that read; registered here, after
@@ -617,7 +666,8 @@ function showAgentLogs(): void {
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
-  editor.setTracking(on);
+  // A file that can't take the setting says why, and Track Changes stays as it was.
+  if (!editor.setTracking(on)) return;
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
   // Every switch says so (design §5.4).
@@ -699,6 +749,7 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleSidebar,
   renameDocument: () => renameDocument(),
   dragFile,
+  scrollPage: (dx, dy) => scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' }),
   rename: async (newName) => {
     const from = controller.state.path;
     const renamed = await controller.rename(newName);
@@ -715,6 +766,12 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
+// editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
+// classic scrollbar.
+editor.addExtension(topRoom(() => titleBar.room()));
+followScrollbar(scroller, main);
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
@@ -787,6 +844,10 @@ const commands: MenuCommands = {
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
+  openAbout: () => {
+    if (isTauri) void invoke('open_about');
+    else notice.flash('About is in the app.');
+  },
   openPreferences: () => {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
@@ -963,15 +1024,14 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it. A
-  // window opened for text isn't untouched (it holds the text, unsaved), but it is as new as any.
-  if (controller.state.path === null && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
+  // person's own preference, not the document's, so nothing is written to it. A window opened for
+  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) {
+    editor.setTracking(true, { inFile: false });
+  }
   windows?.ready();
-  const about = await loadAbout().catch((error: unknown) => {
-    console.error('Could not read the build tag for About Redlines', error);
-    return null;
-  });
-  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
     installShortcuts(menuModel);

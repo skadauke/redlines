@@ -9,6 +9,17 @@ function oneLine(s: string): string {
   return JSON.stringify(s).replace(/[\u0085\u2028\u2029]/g, ' ');
 }
 
+/** The most folders of the home folder the prompt names. */
+const FOLDERS_NAMED = 30;
+
+/** The folders as a list on one line, from `~`, and the rest counted. */
+function readableFolders({ folder, roots }: { folder: string; roots: readonly string[] }): string {
+  const inside = roots.filter((root) => root === folder || root.startsWith(`${folder}/`));
+  const named = inside.slice(0, FOLDERS_NAMED).map((root) => oneLine(root.replace(folder, '~')));
+  const more = inside.length - named.length;
+  return more > 0 ? `${named.join(', ')} and ${more} more` : named.join(', ');
+}
+
 function scopeLines(scope: AgentScope, folder: string | undefined): string[] {
   switch (scope) {
     case 'document':
@@ -21,7 +32,13 @@ function scopeLines(scope: AgentScope, folder: string | undefined): string[] {
         'Use them to answer, and do not change them.',
       ];
     case 'everything':
-      return ['You may read other files on this computer to answer. Do not change them.'];
+      return [
+        folder === undefined
+          ? "You may read the files in this document's folder, and in the person's home folder."
+          : `You may read the files in this folder: ${oneLine(folder)}, and in the person's home folder.`,
+        'Hidden files and folders, and the Library folder (except its cloud storage folders), are not available to you.',
+        'Use them to answer, and do not change them.',
+      ];
   }
 }
 
@@ -56,6 +73,18 @@ export function agentPrompt(args: {
   quote?: string;
   scope: AgentScope;
   folder?: string;
+  /**
+   * Folders inside what the agent may read that macOS isn't letting Redlines read, which the
+   * agent is told of, so that its reply doesn't guess at what is in them.
+   */
+  outOfReach?: readonly string[];
+  /**
+   * At the home folder scope, the home folder and the folders of it the agent may read, which it
+   * is told of: its file tools are held to them (Claude's refuse a search of the home folder
+   * itself) and a search skips links (Codex's too), so it should search them one by one, and name
+   * a folder that is a link.
+   */
+  home?: { folder: string; roots: readonly string[] };
 }): string {
   const lines = [
     `You are working in a comment thread on the document ${oneLine(args.documentName)}, for the person who wrote the request.`,
@@ -79,6 +108,16 @@ export function agentPrompt(args: {
     '- Use `comment` to start a thread on other text, `read_thread` to read this thread, and `status` to say what you are doing now.',
     '- You cannot accept, reject or resolve anything, and should not try.',
     ...scopeLines(args.scope, args.folder).map((line) => `- ${line}`),
+    ...(args.scope === 'everything' && args.home && args.home.roots.length > 0
+      ? [
+          `- The folders of the home folder you may read are: ${readableFolders(args.home)}. Look in them one by one, and name a folder that is a link: a search of the home folder itself may be refused, and a search skips folders that are links.`,
+        ]
+      : []),
+    ...(args.outOfReach?.length
+      ? [
+          `- macOS isn't letting Redlines read these folders, so you can't read them now: ${args.outOfReach.map(oneLine).join(', ')}. If you need something in them, say so in your reply and do not guess what it holds.`,
+        ]
+      : []),
     '',
     ...TRUST_LINES,
     ...quoteLines(

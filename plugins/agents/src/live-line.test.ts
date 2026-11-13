@@ -8,6 +8,7 @@ import {
   createLiveLines,
   fitStatus,
   renderLiveLine,
+  shownInWindow,
   type LiveLineNotice,
   type LiveLineActions,
   type LiveLinesDeps,
@@ -200,6 +201,51 @@ describe('renderLiveLine', () => {
     // Two panels never share ids.
     const other = renderLiveLine(ASK, act);
     expect(other.getAttribute('aria-labelledby')).not.toBe(el.getAttribute('aria-labelledby'));
+  });
+
+  it('offers the home folder as an answer where the question says it may, and says what it means', () => {
+    const act = actions();
+    const el = renderLiveLine({ ...ASK, home: true }, act);
+    expect(buttons(el).map(named)).toEqual([
+      'Allow',
+      'Allow Folder and Home Folder',
+      'Just This Document',
+      'Not Now',
+    ]);
+    // Allow stays the one that is bold: the home folder is the wider, deliberate choice.
+    expect(buttons(el).filter((each) => each.classList.contains('rl-ask-allow'))).toHaveLength(1);
+    press(el, 'Allow Folder and Home Folder');
+    press(el, 'Allow');
+    expect(act.calls).toEqual(['answer everything', 'answer folder']);
+    // What it means is shown and said to VoiceOver: what it opens, what it leaves out, the risk.
+    const note = [...el.querySelectorAll('.rl-ask-note')].map((each) => each.textContent);
+    expect(note).toEqual([
+      'Claude reads files here to answer, and changes only this document.',
+      'Allow Folder and Home Folder also lets Claude read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.',
+    ]);
+    const described = (el.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(described).toHaveLength(3);
+    expect(textOf(el, el.getAttribute('aria-describedby'))?.at(-1)).toContain('hidden files');
+    // Not offered, not drawn, where the question doesn't say so.
+    expect(buttons(renderLiveLine(ASK, actions())).map(named)).not.toContain(
+      'Allow Folder and Home Folder',
+    );
+  });
+
+  it('offers no home folder to an agent that can’t be kept to a folder, whatever the line says', () => {
+    const el = renderLiveLine(
+      {
+        kind: 'asking',
+        agent: 'gemini',
+        agentName: 'Gemini',
+        folder: '/p',
+        readLimit: 'machine',
+        home: true,
+      },
+      actions(),
+    );
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
+    expect(el.querySelectorAll('.rl-ask-note')).toHaveLength(1);
   });
 
   it('asks an agent that can’t be kept to a folder about the Mac, with Allow and Not Now', () => {
@@ -1006,5 +1052,40 @@ describe('the live line in a thread', () => {
     expect(allow.isConnected).toBe(true);
     allow.click();
     await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
+  });
+});
+
+describe('a note in the window', () => {
+  /** A page that scrolls, at `top`, with `padding` of room at its top, and a note at `at`. */
+  function page(top: number, padding: string, at: { top: number; bottom: number }) {
+    // The document itself clips nothing, as in a browser (happy-dom leaves its overflow unset).
+    document.documentElement.style.overflowY = 'visible';
+    document.body.style.overflowY = 'visible';
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    scroller.style.paddingTop = padding;
+    scroller.getBoundingClientRect = () => new DOMRect(0, top, 800, 700);
+    const note = document.createElement('div');
+    note.getBoundingClientRect = () => new DOMRect(0, at.top, 200, at.bottom - at.top);
+    note.getClientRects = () => [note.getBoundingClientRect()] as unknown as DOMRectList;
+    scroller.append(note);
+    document.body.append(scroller);
+    return note;
+  }
+  afterEach(() => document.body.replaceChildren());
+
+  it('shows while it is below the top of what its page shows', () => {
+    expect(shownInWindow(page(52, '0px', { top: 60, bottom: 90 }))).toBe(true);
+    // Under a bar above the page, which hides what is scrolled up to it.
+    expect(shownInWindow(page(52, '0px', { top: 20, bottom: 40 }))).toBe(false);
+  });
+
+  it('is hidden under a title bar that floats over the page, whose room is its top padding', () => {
+    // The page reaches the top of the window, and keeps the bar's room as padding: a note that has
+    // scrolled up into it is under the bar, though it is inside the page's own box.
+    expect(shownInWindow(page(0, '52px', { top: 10, bottom: 40 }))).toBe(false);
+    expect(shownInWindow(page(0, '52px', { top: 60, bottom: 90 }))).toBe(true);
+    // Partly under it, partly below: it shows.
+    expect(shownInWindow(page(0, '52px', { top: 40, bottom: 80 }))).toBe(true);
   });
 });
