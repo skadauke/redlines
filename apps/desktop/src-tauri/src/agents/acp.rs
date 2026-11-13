@@ -1273,9 +1273,10 @@ mod tests {
         assert_eq!(agents.list(), []);
         write(&[r#"{"id":"gemini","name":"Gemini","program":"/opt/homebrew/bin/gemini","args":["--experimental-acp"],"bridge":{}}"#.to_owned()]);
         assert_eq!(agents.list(), []);
-        write(&[format!(
-            r#"{{"id":"moby","name":"Moby","program":"/opt/homebrew/bin/openclaw","args":["acp","--url","wss://gateway.example.org","--token","secret"],"bridge":{{}}}}"#
-        )]);
+        write(&[
+            r#"{"id":"moby","name":"Moby","program":"/opt/homebrew/bin/openclaw","args":["acp","--url","wss://gateway.example.org","--token","secret"],"bridge":{}}"#
+                .to_owned(),
+        ]);
         assert_eq!(agents.list(), []);
         // An agent that isn't a bridge has no `bridge` in what it saves.
         let other = AcpAgent {

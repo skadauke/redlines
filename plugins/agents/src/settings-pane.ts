@@ -116,6 +116,9 @@ const ANSWERS = {
   no: 'Not allowed',
 } as const;
 
+/** What a remembered answer of an agent with no toolbox says: it reads nothing, it is sent. */
+const ANSWER_SENT = 'May be sent the document and its comments';
+
 /**
  * What the home folder choice means, said plainly, as the choice is made: what it opens and leaves
  * out, that writes don't change, the risk of what someone else wrote in a document, and that macOS
@@ -264,8 +267,15 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       const item = el('div', 'rl-pref-item');
       item.dataset['key'] = key;
       const what = el('div', 'rl-pref-item-text');
+      // An agent that isn't Claude or Codex is an OpenClaw agent, which has no toolbox: allowing
+      // it in a folder is allowing it to be sent the document and its comments, not to read.
+      const sent = !names.has(agent) && answer === 'folder';
       what.append(
-        el('span', undefined, `${names.get(agent) ?? agent} · ${ANSWERS[answer]}`),
+        el(
+          'span',
+          undefined,
+          `${names.get(agent) ?? agent} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`,
+        ),
         el('span', 'rl-pref-note', folder),
       );
       const forget = el('button', 'rl-pref-button', 'Forget');

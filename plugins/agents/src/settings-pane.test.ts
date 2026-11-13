@@ -923,6 +923,19 @@ describe('the Agents pane', () => {
     expect(said('codex|/Users/me/d')).toContain('Codex · Not allowed');
   });
 
+  it('says of an agent that isn’t Claude or Codex, which has no toolbox, that it may be sent the document', () => {
+    const { deps, container } = setup(
+      {},
+      { consent: { 'moby|/Users/me/a': 'folder', 'moby|/Users/me/b': 'no' } },
+    );
+    renderAgentsPane(container, deps);
+    const said = (key: string) =>
+      row(container, 'Remembered answers').querySelector(`[data-key="${key}"]`)?.textContent;
+    expect(said('moby|/Users/me/a')).toContain('moby · May be sent the document and its comments');
+    expect(said('moby|/Users/me/a')).not.toContain('read the folder');
+    expect(said('moby|/Users/me/b')).toContain('moby · Not allowed');
+  });
+
   it('has no remembered-answers row when nothing is remembered', () => {
     const { deps, container } = setup({});
     renderAgentsPane(container, deps);
