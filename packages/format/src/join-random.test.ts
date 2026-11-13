@@ -243,9 +243,9 @@ interface Case {
 
 /** A random stretch of one line of a random document, its words rewritten at a random density, as
  * the prototype's random run made them. */
-function singleBlockCase(seed: number): Case | undefined {
+function singleBlockCase(seed: number, legacy = false): Case | undefined {
   const random = seeded(seed);
-  const doc = randomDocument(random);
+  const doc = randomDocument(random, { legacy });
   const newest = newestView(doc).text;
   const lines = newest.split('\n').filter((line) => /\p{L}.*\s.*\p{L}/u.test(line));
   if (lines.length === 0) return undefined;
@@ -264,13 +264,13 @@ const BREAK = /(\n[ \t]*\n[ \t]*|\n(?=[ \t]*(?:[-*+>#|]|\d+[.)]))| \| )/;
 
 /** A stretch over one to three line breaks of a random document, a random subset of its blocks
  * rewritten, and now and then a break added or taken away. */
-function severalBlocksCase(seed: number): Case | undefined {
+function severalBlocksCase(seed: number, legacy = false): Case | undefined {
   const random = seeded(seed * 7919);
   const below = (n: number) => Math.floor(random() * n);
   const doc =
     below(3) === 0
       ? listDocument(random)
-      : randomDocument(random, { indentedCode: below(4) === 0 });
+      : randomDocument(random, { indentedCode: below(4) === 0, legacy });
   const newest = newestView(doc).text;
   // A stretch from a word of one line to a word of a line after it, one to three lines on.
   const starts = [...newest.matchAll(/\p{L}+/gu)].map((match) => match.index);
@@ -331,14 +331,15 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
   it('makes no more marks than today’s form, where the joined form would (seeds 13912, 6903)', () => {
     // Found by the long run: the joined form read as asked and wrote 2 marks where the word form
     // writes 1 (single block), and 5 where it writes 4 (several blocks).
-    expect(singleBlockCase(13912)).toBeDefined();
-    expect(severalBlocksCase(6903)).toBeDefined();
-    checkCase(13912, singleBlockCase(13912), zero());
-    checkCase(6903, severalBlocksCase(6903), zero());
+    // A seed found by a long run keeps its document: the legacy generator, without the later forms.
+    expect(singleBlockCase(13912, true)).toBeDefined();
+    expect(severalBlocksCase(6903, true)).toBeDefined();
+    checkCase(13912, singleBlockCase(13912, true), zero());
+    checkCase(6903, severalBlocksCase(6903, true), zero());
   });
 
   it('holds the properties of the seed that nests an agent’s own change in another’s (seed 11867)', () => {
-    checkCase(11867, severalBlocksCase(11867), zero());
+    checkCase(11867, severalBlocksCase(11867, true), zero());
   });
 
   it('refuses the edit that leaves an insertion unrejectable (seed 12198, #246)', () => {
@@ -346,7 +347,7 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
     // place) leaves it unrejectable in the word form, as it did when this seed was pinned as "as
     // decidable as today's form". Since #246 the edit is refused and writes nothing; the word
     // form's own write, which the test still makes, is the one that leaves the insertion stuck.
-    const found = severalBlocksCase(12198);
+    const found = severalBlocksCase(12198, true);
     if (!found) throw new Error('the seed no longer makes a case');
     const [first, second] = twice(12198);
     expect(() => suggestReplace(found.doc, found.oldStr, found.newStr, second)).toThrow(

@@ -18,6 +18,7 @@ mod allowed;
 mod log;
 mod process;
 mod question;
+mod reach;
 pub mod relay;
 mod setup;
 mod which;
@@ -232,6 +233,24 @@ fn named_agent(app: &AppHandle, name: &str) -> Result<(Agent, String), String> {
     Ok((agent, program))
 }
 
+/// What an agent may read at This folder and my home folder (`reach.rs`): the home folder and the
+/// folders of it to grant. The page builds the agent's command line from it, and the app checks
+/// that line against the same when the agent starts. Nothing where there is none to give.
+#[tauri::command(async)]
+pub fn agent_home_reach(app: AppHandle) -> Option<reach::HomeReach> {
+    app.state::<Programs>().home_reach()
+}
+
+/// The protected folders among those an agent may read at This folder and my home folder (Desktop,
+/// Documents, Downloads, iCloud Drive, cloud folders, volumes) that macOS isn't letting Redlines
+/// read: each is listed from here, which is what makes macOS ask the person, once, for Redlines,
+/// which the agents' reads are counted as. A window asks before a run, and Preferences when the
+/// person picks that scope. Nothing is returned for a folder that is allowed.
+#[tauri::command(async)]
+pub fn agent_home_access(app: AppHandle) -> Vec<reach::Protected> {
+    app.state::<Programs>().home_refused()
+}
+
 /// Updates an agent with its own updater, for the way it was installed, which its path says
 /// (`setup.rs`): `brew upgrade` for a Homebrew install, `npm install -g` for a global npm install,
 /// and its own `update` for any other. Waits for it to end. Only Preferences is granted the command
@@ -288,6 +307,27 @@ pub fn agent_terminal_sign_in(app: AppHandle, agent: String) -> Result<(), Strin
     setup::open_in_terminal(&path).inspect_err(|_| {
         let _ = std::fs::remove_file(&path);
     })
+}
+
+/// Where System Settings shows which apps may read the folders macOS protects (Privacy & Security,
+/// Files and Folders), which is where the person lets Redlines read a folder an agent needs.
+const FILES_AND_FOLDERS_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders";
+
+/// Opens System Settings at Privacy & Security › Files and Folders: what a message about a read
+/// macOS refused offers, so that the person can turn Redlines on there. A fixed address; nothing of
+/// the page's goes in it.
+#[tauri::command(async)]
+pub fn open_files_and_folders_settings() -> Result<(), String> {
+    let status = Command::new("open")
+        .arg(FILES_AND_FOLDERS_SETTINGS)
+        .status()
+        .map_err(|error| format!("Couldn't open System Settings: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn't open System Settings.".to_owned())
+    }
 }
 
 /// Opens the folder of agent logs in Finder.

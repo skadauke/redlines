@@ -25,6 +25,7 @@ const fixture = read('provider-lines.json') as {
   socket: string;
   programFolders: string[];
   lines: Record<string, string[]>;
+  home: { home: string; roots: string[] };
   acp: { folder: string; sessionId: string; messages: Record<string, unknown> };
 };
 
@@ -46,6 +47,14 @@ const atFolder: AgentRequest = {
   author: { handle: 'claude-ada', name: 'Claude', for: 'ada' },
 };
 const atDocument: AgentRequest = { ...atFolder, scope: 'document' };
+// At This folder and my home folder: what the app makes of the home folder (reach.rs), which the
+// Rust side makes again to check the line.
+const atHome: AgentRequest = {
+  ...atFolder,
+  scope: 'everything',
+  homeFolder: fixture.home.home,
+  homeRoots: fixture.home.roots,
+};
 const tools: McpEndpoint = {
   command: fixture.bundled,
   args: ['mcp', '--relay', fixture.socket],
@@ -62,6 +71,8 @@ describe('the lines the Rust side lets through', () => {
         folder: '/var/folders/06/T/redlines-run.abc',
         programFolders,
       }),
+      'claude at the home folder': claudeArgs(atHome, tools),
+      'codex at the home folder': codexArgs(atHome, tools, { folder, programFolders }),
     });
   });
 });

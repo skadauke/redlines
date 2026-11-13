@@ -100,6 +100,8 @@ it('lists the Format rows with their keys, set apart by group, Add Comment last'
     ['Italic', 'CmdOrCtrl+I'],
     ['Code', 'Ctrl+`'],
     ['Strikethrough', 'Ctrl+Shift+`'],
+    ['Subscript', 'CmdOrCtrl+Alt+,'],
+    ['Superscript', 'CmdOrCtrl+Alt+.'],
     'Separator',
     ['Link…', 'CmdOrCtrl+K'],
     'Separator',

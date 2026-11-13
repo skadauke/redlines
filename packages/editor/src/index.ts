@@ -73,6 +73,7 @@ import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
+import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
@@ -228,7 +229,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
-    markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
+    markdown({
+      extensions: [GFM, frontMatter, scriptTags],
+      codeLanguages: options.codeLanguages,
+    }),
     trackedChanges(),
     barLayer(),
     barSwitch(),
