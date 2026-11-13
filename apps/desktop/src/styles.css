@@ -114,6 +114,41 @@ body {
 }
 
 /*
+ * The word count (word-count.ts): a small gray label in the page's lower right corner, on a fade of
+ * the page's color that rises from the window's lower edge as the title bar's falls from the top,
+ * so that the text and the notes that scroll under it are gone before they meet it. Over the page's
+ * text, under the review bar, the notifications and whatever else floats; it takes no pointer, and
+ * stops short of a classic scrollbar. It follows the theme and the window zoom as any text does.
+ */
+.rl-footer {
+  position: absolute;
+  right: var(--rl-scrollbar, 0px);
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  height: 44px;
+  background: linear-gradient(
+    to top,
+    var(--rl-page, Canvas) 0,
+    var(--rl-page, Canvas) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.rl-word-count {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
  * The title bar: no color of its own and no line under it, floating over the top of the scroller,
  * so that the window reads as one page and the text scrolls under it; the file name centered.
  */
@@ -774,6 +809,7 @@ body {
 
   .rl-titlebar,
   .rl-main::after,
+  .rl-footer,
   .rl-sidebar,
   .rl-rail,
   .rl-review-bar,

@@ -62,6 +62,8 @@ export interface Settings {
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
+  /** Whether the word count shows in the window's lower right corner (design §5.1). */
+  showWordCount: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -94,6 +96,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   closePairs: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
+  showWordCount: true,
   agentScope: 'folder',
   consent: {},
   people: [],
@@ -111,7 +114,13 @@ export function loadSettings(): Settings {
   }
   const value = (stored ?? {}) as Record<string, unknown>;
   const flag = (
-    key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates' | 'showLineBreakMarks',
+    key:
+      | 'sidebarOpen'
+      | 'showResolved'
+      | 'rotateIcon'
+      | 'checkForUpdates'
+      | 'showLineBreakMarks'
+      | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -139,6 +148,7 @@ export function loadSettings(): Settings {
     closePairs: typing('closePairs'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
+    showWordCount: flag('showWordCount'),
     agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),

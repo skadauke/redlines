@@ -66,6 +66,7 @@ import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
+import { createWordCount, wordsIn } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
@@ -391,6 +392,7 @@ function showDocument(state: DocumentState): void {
     void refreshRecent();
   }
   notice.setStanding(state.notice, () => controller.dismissNotice());
+  wordCount.schedule();
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
   reportWindow();
@@ -643,6 +645,19 @@ const titleBar = createTitleBar(element('#titlebar'), {
 // classic scrollbar.
 editor.addExtension(EditorView.scrollMargins.of(() => ({ top: titleBar.height() })));
 followScrollbar(scroller, main);
+
+// The word count in the lower right corner, counted on idle after the text or the selection last
+// changed (a document that opens is counted by `showDocument`).
+const wordCount = createWordCount(
+  main,
+  { count: () => wordsIn(editor.getDoc(), editor.view.state.selection.main) },
+  { visible: settings.showWordCount },
+);
+editor.addExtension(
+  EditorView.updateListener.of((update) => {
+    if (update.docChanged || update.selectionSet) wordCount.schedule();
+  }),
+);
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
@@ -919,6 +934,7 @@ watchSettings((changed) => {
   // A text size another window saved takes the reading place before it is applied.
   textZoom.follow(settings.textSize);
   review.setShowResolved(settings.showResolved);
+  wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
