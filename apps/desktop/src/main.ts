@@ -9,6 +9,7 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  createAsk,
   createLiveLines,
   createMacAgents,
   createRuns,
@@ -20,7 +21,7 @@ import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
 import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
-import type { AgentInfo } from '@redlines/plugin-api';
+import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -212,18 +213,23 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added in Preferences, which the
 // app keeps, are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
-const agents = createMacAgents(
-  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
-  createRelay(),
-  isTauri
-    ? {
-        more: async () =>
-          (await acpAgents.list()).map(({ id, name, program, args }) =>
-            createAcpProvider(processes, { id, name, command: program, args }),
-          ),
-      }
-    : {},
-);
+const agents =
+  !isTauri && import.meta.env.DEV
+    ? // A plain page has no agent programs: in development a scripted one stands in, which answers
+      // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+    : createMacAgents(
+        isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+        createRelay(),
+        isTauri
+          ? {
+              more: async () =>
+                (await acpAgents.list()).map(({ id, name, program, args }) =>
+                  createAcpProvider(processes, { id, name, command: program, args }),
+                ),
+            }
+          : {},
+      );
 // An agent added or removed in Preferences is in the next comment box's picker.
 if (isTauri) acpAgents.watch(() => agents.forget());
 /**
@@ -246,6 +252,17 @@ const documentData = createDocumentData(
   (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
 );
 
+/** The @ picker for a box that asks an agent: a comment's, and the question of an Ask. */
+const attachAgentPicker = (field: HTMLTextAreaElement) => {
+  void lookForAgents();
+  return attachPicker(field, {
+    getParsed: () => editor.getParsed(),
+    getMet: () => settings.people,
+    me: author.handle,
+    agents: () => knownAgents,
+  });
+};
+
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
@@ -265,15 +282,7 @@ const review = createReview(editor, {
   },
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
-  attachToField: (field) => {
-    void lookForAgents();
-    return attachPicker(field, {
-      getParsed: () => editor.getParsed(),
-      getMet: () => settings.people,
-      me: author.handle,
-      agents: () => knownAgents,
-    });
-  },
+  attachToField: attachAgentPicker,
   extras: {
     renderText: (entry, person) =>
       renderCommentText(entry, person, {
@@ -468,6 +477,20 @@ async function openHere(path: string): Promise<void> {
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
 
+/** What an agent may read, as Preferences and the person's answers say: a run's and an Ask's. */
+const agentSettings = {
+  defaultScope: () => settings.agentScope,
+  consent: (agent: string, folder: string) => loadSettings().consent[consentKey(agent, folder)],
+  setConsent: (agent: string, folder: string, answer: AgentScope | 'no') =>
+    changeSettings({
+      consent: {
+        ...loadSettings().consent,
+        // Preferences keep no wider answer than the folder yet.
+        [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+      },
+    }),
+};
+
 const runs = createRuns({
   agents,
   author,
@@ -481,18 +504,7 @@ const runs = createRuns({
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
-  settings: {
-    defaultScope: () => settings.agentScope,
-    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
-    setConsent: (agent, folder, answer) =>
-      changeSettings({
-        consent: {
-          ...loadSettings().consent,
-          // Preferences keep no wider answer than the folder yet.
-          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
-        },
-      }),
-  },
+  settings: agentSettings,
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
 });
@@ -524,6 +536,31 @@ const liveLines = createLiveLines({
             },
           }
         : {}),
+    }),
+});
+
+// Ask: a question about the selection, answered in a bubble beside it, which writes nothing to the
+// file. It runs the agents as a comment's run does, with the tools that read; registered here, after
+// the review interface, it follows Add Comment and Highlight in the Format menu.
+const ask = createAsk(editor, {
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+  },
+  projectRoot: projectOf,
+  settings: agentSettings,
+  notice: (message) => notice.flash(message),
+  attachToField: attachAgentPicker,
+  showThread: (thread) => review.showThread(thread),
+  showLog: () => showAgentLogs(),
+  // A long answer worth keeping or editing: an Untitled document in a new window.
+  openInNewWindow: (text) =>
+    void host.openWindow(undefined, undefined, text).catch((error: unknown) => {
+      console.error('Could not open a new window', error);
+      notice.flash('Couldn’t open a new window.');
     }),
 });
 
@@ -800,7 +837,10 @@ if (isTauri) {
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
-    else runs.stopAll();
+    else {
+      runs.stopAll();
+      ask.close();
+    }
   });
   // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
   // to show what it was opened for.
