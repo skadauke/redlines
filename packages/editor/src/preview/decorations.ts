@@ -58,6 +58,9 @@ const INLINE: Record<string, { className: string; mark: string; unchecked?: true
   StrongEmphasis: { className: 'rl-strong', mark: 'EmphasisMark' },
   InlineCode: { className: 'rl-code', mark: 'CodeMark', unchecked: true },
   Strikethrough: { className: 'rl-strike', mark: 'StrikethroughMark' },
+  // `<sub>` and `<sup>`, whose tags are the marks (script.ts).
+  Subscript: { className: 'rl-sub', mark: 'SubscriptMark' },
+  Superscript: { className: 'rl-sup', mark: 'SuperscriptMark' },
 };
 
 /** Nodes whose URL is part of their own syntax rather than a bare link. */

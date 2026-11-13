@@ -9,20 +9,28 @@ const SCALE = '--rl-text-scale';
 
 let zooms: TextZoom[] = [];
 
-/** A real editor whose layout is stubbed (as reading-place.test.ts does), the caret on line two. */
-function setup(size = 1) {
+/**
+ * A real editor whose layout is stubbed (as reading-place.test.ts does), the caret on line two. The
+ * scroller starts 52 px down, under a bar above it; with `floating` it reaches the top of the
+ * window, and the bar's 52 px floating over it are a scroll margin: the same arrangement.
+ */
+function setup(size = 1, floating = false) {
   const scroller = document.createElement('div');
   document.body.append(scroller);
-  scroller.getBoundingClientRect = () => new DOMRect(0, 52, 800, 720);
-  Object.defineProperty(scroller, 'clientHeight', { value: 720 });
+  const box = floating ? { top: 0, height: 772 } : { top: 52, height: 720 };
+  scroller.getBoundingClientRect = () => new DOMRect(0, box.top, 800, box.height);
+  Object.defineProperty(scroller, 'clientHeight', { value: box.height });
   const edits = vi.fn();
   const view = new EditorView({
     state: EditorState.create({
       doc: DOC,
       selection: { anchor: 14 },
-      extensions: EditorView.updateListener.of((update) => {
-        if (update.docChanged) edits();
-      }),
+      extensions: [
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) edits();
+        }),
+        floating ? EditorView.scrollMargins.of(() => ({ top: 52 })) : [],
+      ],
     }),
     parent: scroller,
   });
@@ -194,6 +202,40 @@ describe('followTextZoom', () => {
     zoom.follow(1.25);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(scroller.scrollTop).toBe(2);
+  });
+
+  it('puts the place right by the room under a bar that floats over the scroller', async () => {
+    const { zoom, view } = setup(1, true);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    zoom.follow(1.1);
+    // The caret's row was 100 px down the window, 48 below the bar; CodeMirror left it 2 px low.
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 102 - scroller.scrollTop,
+      bottom: 122 - scroller.scrollTop,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(2);
+  });
+
+  it('keeps a line near the bottom of the window in sight, by the room under the bar', async () => {
+    const { zoom, view } = setup(1, true);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    // The caret's row is drawn at 750 to 770, in a window 772 high with 52 of it under the bar:
+    // 698 below the bar, and a line can go 772 - 52 - 27 = 693 below it, no more.
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 750 - scroller.scrollTop,
+      bottom: 770 - scroller.scrollTop,
+    });
+    zoom.follow(1.1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Wanted 693 below the bar, which is 745 down: the row at 750 is 5 too low.
+    expect(scroller.scrollTop).toBe(5);
   });
 
   it('rounds the correction to whole pixels, which is all WebKit keeps of a scroll', async () => {

@@ -26,6 +26,7 @@ function ledgerComment(text: string): string {
 const rich: Ledger = {
   version: 1,
   tracking: 'everyone',
+  view: 'redlines',
   history: 'full',
   people: [
     { handle: 'ada', name: 'Ada Lovelace', email: 'ada@example.org', accounts: ['github:ada-l'] },

@@ -193,6 +193,8 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     }),
+    /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
+    recordView: vi.fn(() => {}),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -981,6 +983,92 @@ describe('DocumentController', () => {
     controller.markEdited('One more\n');
     expect(state()?.dirty).toBe(true);
     expect(editor.getDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('the view a save records (format §5.6)', () => {
+  /** An editor whose record of the view is a line after the text, as the ledger's is. */
+  function recording(files: Record<string, string>) {
+    const made = setup(files);
+    made.editor.recordView.mockImplementation(() => {
+      const text = made.editor.getDoc();
+      if (!text.endsWith('\nview: clean\n')) made.editor.type(`${text}view: clean\n`);
+    });
+    return made;
+  }
+
+  it('is recorded before the edits are written, so that the file holds what the editor shows', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Two\n');
+    await controller.save();
+    expect(editor.recordView).toHaveBeenCalledTimes(1);
+    expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'Two\nview: clean\n' }]);
+    // The editor holds what was written, so the document is not edited again.
+    expect(state()?.dirty).toBe(false);
+    expect(editor.getDoc()).toBe('Two\nview: clean\n');
+  });
+
+  it('is not recorded, and nothing is written, for a document with no edits', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.save()).toBe(true);
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(host.writes).toEqual([]);
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('is not recorded when the person is asked about a file that changed and says Cancel', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', 'Theirs\n');
+    host.overwriteChoice = 'cancel';
+    expect(await controller.save()).toBe(false);
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('is recorded for a document with no file, in the file that is written', async () => {
+    const { host, editor, controller, state } = recording({});
+    editor.type('Hello\n');
+    await controller.save();
+    expect(host.writes).toEqual([{ path: '/docs/new.md', text: 'Hello\nview: clean\n' }]);
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('is recorded by Save As for a document with edits, and not for one that has none', async () => {
+    const edited = recording({ '/docs/plan.md': 'One\n' });
+    await edited.controller.open('/docs/plan.md');
+    edited.editor.type('Two\n');
+    await edited.controller.saveAs();
+    expect(edited.host.writes).toEqual([{ path: '/docs/new.md', text: 'Two\nview: clean\n' }]);
+
+    // A document with none is not made edited by a Save As that was cancelled, or that wrote a copy.
+    const clean = recording({ '/docs/plan.md': 'One\n' });
+    await clean.controller.open('/docs/plan.md');
+    clean.host.saveAsPath = null;
+    await clean.controller.saveAs();
+    expect(clean.editor.recordView).not.toHaveBeenCalled();
+    expect(clean.state()?.dirty).toBe(false);
+  });
+
+  it('leaves the edits unsaved when the file can not be written', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Two\n');
+    host.write = () => Promise.reject(new Error('disk full'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await controller.save()).toBe(false);
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('is no part of an agent’s edit written to the file, which is no save', async () => {
+    const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    await controller.applyAgentEdit('One agent\n', { group: 'run-1', agent: 'Claude' });
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One agent\n' }]);
   });
 });
 

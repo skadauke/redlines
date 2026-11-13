@@ -14,6 +14,7 @@ import {
   agentStep,
   followsText,
   history,
+  joinsNewestStep,
   redo,
   redoDepth,
   undo,
@@ -331,5 +332,75 @@ describe('steps with an owner', () => {
     expect(followsText(editor.last)).toBe(false);
     editor.undo();
     expect(followsText(editor.last)).toBe(false);
+  });
+});
+
+describe('a change that joins the newest step', () => {
+  /** Inserts `text` at the start, joined to the newest step. */
+  const joinAt = (
+    editor: ReturnType<typeof start>,
+    text: string,
+    time: number,
+    more: TransactionSpec = {},
+  ) =>
+    editor.apply({
+      changes: { from: 0, insert: text },
+      annotations: [at(time), joinsNewestStep.of(true)],
+      ...more,
+    });
+
+  it('is taken back and brought back with that step, whatever the time and the selections between', () => {
+    const editor = start('one');
+    typeAt(editor, ' two', 1000);
+    editor.apply({ selection: { anchor: 0 }, userEvent: 'select.pointer', annotations: at(4000) });
+    joinAt(editor, '> ', 20_000);
+    expect(editor.state.doc.toString()).toBe('> one two');
+    expect(undoDepth(editor.state)).toBe(1);
+    expect(editor.undo()).toBe(true);
+    expect(editor.state.doc.toString()).toBe('one');
+    expect(editor.redo()).toBe(true);
+    expect(editor.state.doc.toString()).toBe('> one two');
+  });
+
+  it('joins a step of an agent’s as well, which stays the agent’s', () => {
+    const editor = start('one');
+    agentAt(editor, ' two', 'run-1', 1000);
+    joinAt(editor, '> ', 9000);
+    expect(undoDepth(editor.state)).toBe(1);
+    editor.undo();
+    expect(editor.state.doc.toString()).toBe('one');
+    expect(agentOf(editor.last)?.agent).toBe('Claude');
+  });
+
+  it('joins a step another change followed outside the history, which the steps below still fit', () => {
+    const editor = start('hello world');
+    editor.apply({ changes: { from: 11, insert: '!' }, userEvent: 'input.type' });
+    editor.apply({ changes: { from: 0, insert: '>> ' }, annotations: Tr.addToHistory.of(false) });
+    joinAt(editor, '# ', 9000);
+    expect(undoDepth(editor.state)).toBe(1);
+    editor.undo();
+    expect(editor.state.doc.toString()).toBe('>> hello world');
+  });
+
+  it('leaves what comes after a step of its own, when it says so', () => {
+    const apart = start('one');
+    typeAt(apart, ' two', 1000);
+    joinAt(apart, '> ', 1005, {
+      annotations: [at(1005), joinsNewestStep.of(true), isolateHistory.of('after')],
+    });
+    typeAt(apart, ' three', 1010);
+    expect(undoDepth(apart.state)).toBe(2);
+    apart.undo();
+    expect(apart.state.doc.toString()).toBe('> one two');
+  });
+
+  it('is a step of its own when there is none to join, and the usual step without the annotation', () => {
+    const alone = start('one');
+    joinAt(alone, '> ', 1000);
+    expect(undoDepth(alone.state)).toBe(1);
+    const plain = start('one');
+    typeAt(plain, ' two', 1000);
+    plain.apply({ changes: { from: 0, insert: '> ' }, annotations: at(9000) });
+    expect(undoDepth(plain.state)).toBe(2);
   });
 });
