@@ -28,7 +28,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
 | `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
-| `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |
+| `plugins/agent-acp`     | `@redlines/agent-acp`: Agent Client Protocol agents, and OpenClaw's bridge |
 | `plugins/code`          | `@redlines/code`: syntax colors in code blocks                            |
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |

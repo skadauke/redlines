@@ -8,7 +8,13 @@ import {
   undo,
 } from '@redlines/editor';
 import { isId, parse } from '@redlines/format';
-import type { AgentRequest, AgentScope, AgentState, ProjectRoot } from '@redlines/plugin-api';
+import type {
+  AgentEvent,
+  AgentRequest,
+  AgentScope,
+  AgentState,
+  ProjectRoot,
+} from '@redlines/plugin-api';
 import { createReview, type PostedComment, type ReviewController } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -2049,7 +2055,8 @@ describe('an agent with no toolbox', () => {
   const answering = (text: string, seen: { request?: AgentRequest } = {}): FakeScript =>
     async function* ({ request }) {
       seen.request = request;
-      yield { type: 'status', text: 'Thinking…' };
+      // One at a time, as a program's lines arrive.
+      yield await Promise.resolve<AgentEvent>({ type: 'status', text: 'Thinking…' });
       yield { type: 'done', finalText: text };
     };
 
@@ -2120,7 +2127,10 @@ describe('an agent with no toolbox', () => {
   it('fails with the agent’s own words when it can’t be reached', async () => {
     const s = setup({
       moby: async function* () {
-        yield { type: 'error', message: 'Moby stopped: Gateway connect failed.' };
+        yield await Promise.resolve<AgentEvent>({
+          type: 'error',
+          message: 'Moby stopped: Gateway connect failed.',
+        });
       },
       consent: { 'moby|/repo': 'folder' },
     });

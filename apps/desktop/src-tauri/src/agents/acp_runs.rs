@@ -487,4 +487,104 @@ mod tests {
         ) {}
         assert_eq!(answer["result"]["protocolVersion"], 1);
     }
+
+    /// A stand-in for `openclaw acp`, which says what the bridge says: it opens a session only for a
+    /// `session/new` that names no MCP server, rejects one that does as the bridge does, and answers
+    /// a prompt in a piece and an end.
+    fn write_stand_in(folder: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let script = folder.join("openclaw");
+        fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}' ;;
+    *'"method":"session/new"'*)
+      case "$line" in
+        *'"mcpServers":[]'*)
+          echo '{"jsonrpc":"2.0","id":1,"result":{"sessionId":"sess-1"}}' ;;
+        *)
+          echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error","data":{"details":"ACP bridge mode does not support per-session MCP servers."}}}' ;;
+      esac ;;
+    *'"method":"session/prompt"'*)
+      echo '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Cut it by 12 words."}}}}'
+      echo '{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    #[test]
+    fn a_run_of_openclaws_bridge_goes_through_the_gate_to_the_process_with_no_toolbox() {
+        use crate::agents::allowed::tests::provider_lines;
+        let temp = TempFolder::new("acp-runs-bridge");
+        let stand_in = write_stand_in(temp.path());
+        let token = temp.path().join("moby-token");
+        fs::write(&token, "not-a-real-token\n").unwrap();
+        let agents = AcpAgents::new(temp.path().join("acp-agents.json"));
+        agents
+            .add(
+                "Moby",
+                &format!(
+                    "openclaw acp --url wss://gateway.example.org --token-file {} --session agent:moby:main",
+                    token.display()
+                ),
+                |_| Some(Found::at(stand_in.to_str().unwrap().to_owned())),
+                |_| true,
+            )
+            .unwrap();
+        // The messages the provider writes, which the window sends one at a time.
+        let lines = provider_lines();
+        let acp_lines = &lines.acp;
+        let launch = spec_for(&agents, "moby", &acp_lines.folder, info()).unwrap();
+        assert_eq!(
+            launch.bridge,
+            Some(Bridge {
+                agent: Some("moby".to_owned())
+            })
+        );
+        let (acp, runs) = (AcpRuns::default(), Runs::default());
+        let (started, receiver) = start(&acp, &runs, &temp, launch);
+        let send = |message: &Value| acp.send("main", started.id, &message.to_string(), &[]);
+
+        send(&acp_lines.messages["initialize"]).unwrap();
+        let handshake: Value = serde_json::from_str(&next_line(&receiver)).unwrap();
+        assert_eq!(handshake["result"]["protocolVersion"], 1);
+
+        // The session the bridge accepts, and not the toolbox's, which it rejects and the gate
+        // never lets by.
+        let toolbox_session = &acp_lines.messages["session/new"];
+        assert!(
+            send(toolbox_session).is_err(),
+            "the toolbox, to an agent with none"
+        );
+        send(&acp_lines.bridge.messages["session/new"]).unwrap();
+        let opened: Value = serde_json::from_str(&next_line(&receiver)).unwrap();
+        assert_eq!(opened["result"]["sessionId"], acp_lines.session_id);
+
+        send(&acp_lines.bridge.messages["session/prompt"]).unwrap();
+        let said: Value = serde_json::from_str(&next_line(&receiver)).unwrap();
+        assert_eq!(
+            said["params"]["update"]["content"]["text"],
+            "Cut it by 12 words."
+        );
+        let ended: Value = serde_json::from_str(&next_line(&receiver)).unwrap();
+        assert_eq!(ended["result"]["stopReason"], "end_turn");
+
+        runs.stop("main", started.id).unwrap();
+        // The log has what went in, and no token: the agent was given a file's name, not its words.
+        let log = std::fs::read_to_string(&started.log_path).unwrap();
+        assert!(
+            log.contains("redlines-"),
+            "the session's key is in what went in: {log}"
+        );
+        assert!(!log.contains("not-a-real-token"), "{log}");
+        assert!(!log.contains("mcp --relay"), "no toolbox: {log}");
+    }
 }

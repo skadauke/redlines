@@ -256,8 +256,14 @@ const agents = createMacAgents(
   isTauri
     ? {
         more: async () =>
-          (await acpAgents.list()).map(({ id, name, program, args }) =>
-            createAcpProvider(processes, { id, name, command: program, args }),
+          (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+            createAcpProvider(processes, {
+              id,
+              name,
+              command: program,
+              args,
+              ...(bridge === undefined ? {} : { bridge }),
+            }),
           ),
       }
     : {},
