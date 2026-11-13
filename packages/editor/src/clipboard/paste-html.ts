@@ -41,6 +41,8 @@ type Run =
 interface Context {
   cell: boolean;
   noBold: boolean;
+  /** Inside the body of an alert that is written: GitHub reads none in another. */
+  inAlert?: boolean;
 }
 
 const SKIPPED = new Set([
@@ -852,7 +854,8 @@ class Converter {
    * first paragraph of the body: an alert has no title of its own.
    */
   alert(el: Element, format: Format, ctx: Context): string | null {
-    if (ctx.cell || el.parentElement?.closest('blockquote, li, dd, td, th')) return null;
+    if (ctx.cell || ctx.inAlert || el.parentElement?.closest('blockquote, li, dd, td, th'))
+      return null;
     const found = webAlert(el);
     if (!found) return null;
     const copy = el.cloneNode(true) as Element;
@@ -863,7 +866,7 @@ class Converter {
     if (title && (title.textContent ?? '').replace(/\s+/g, '').toLowerCase() === found.kind) {
       title.remove();
     }
-    const blocks = this.blocks(copy, format, ctx);
+    const blocks = this.blocks(copy, format, { ...ctx, inAlert: true });
     if (found.label && blocks[0]) {
       blocks[0] = blocks[0].replace(/^\*\*(?:Note|Warning)(?::\*\*|\*\*:)\s*/i, '');
     }

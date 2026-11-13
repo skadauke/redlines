@@ -101,6 +101,40 @@ describe('the menu in an alert’s title', () => {
     expect(items(openMenu(plain.editor)).map(([type]) => type)).toHaveLength(5);
   });
 
+  it('offers a type only where the file has it as an alert, not in code or a quote’s later lines', () => {
+    const doc =
+      '> [!NOTE]\n> One.\n\n```\n> [!ghost]\n```\n\n> Text\n> [!phantom]\n\n> [!info]\n> Two.\n\n- Item\n\n  > [!nested]\n  > Three.\n';
+    const { editor } = mount(doc);
+    expect(items(openMenu(editor)).map(([type]) => type)).toEqual([
+      'note',
+      'tip',
+      'important',
+      'warning',
+      'caution',
+      'info',
+    ]);
+  });
+
+  it('is shut by a second press of its button, and tells a screen reader whether it is open', () => {
+    const { editor } = mount(ALERT);
+    const button = () => editor.view.dom.querySelector<HTMLElement>('button.rl-callout-menu')!;
+    expect(button().getAttribute('aria-expanded')).toBe('false');
+    openMenu(editor);
+    expect(button().getAttribute('aria-expanded')).toBe('true');
+    // Pressing it again is not a close and a reopening: the menu is put away.
+    button().dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }),
+    );
+    expect(editor.view.dom.querySelector('.rl-callout-popover')).toBeNull();
+    expect(button().getAttribute('aria-expanded')).toBe('false');
+    // And a third press opens it again.
+    button().dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }),
+    );
+    expect(editor.view.dom.querySelector('.rl-callout-popover')).not.toBeNull();
+    expect(button().getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('chooses a type, written plainly with Track Changes off, and one step to undo', () => {
     const { editor } = mount(ALERT);
     const menu = openMenu(editor);
@@ -159,6 +193,9 @@ describe('the menu in an alert’s title', () => {
     expect(editor.view.dom.querySelector('.rl-callout-popover')).toBeNull();
     const menu = openMenu(editor);
     editor.view.dispatch({ changes: { from: 0, to: 0, insert: 'X' } });
+    // The menu was for text that is no longer there: it is put away by the change itself.
+    expect(editor.view.dom.querySelector('.rl-callout-popover')).toBeNull();
+    // And a click on a row it left behind changes nothing.
     (menu.querySelector('[data-type="tip"]') as HTMLElement).click();
     expect(editor.getDoc().startsWith('XIntro.')).toBe(true);
     expect(editor.getDoc()).toContain('[!NOTE]');

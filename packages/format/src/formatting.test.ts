@@ -1915,6 +1915,11 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     { kind: 'check', checked: false },
     { kind: 'indent', by: 1 },
     { kind: 'indent', by: -1 },
+    // The type of an alert (#311): refused where there is none, written where there is.
+    { kind: 'callout', type: 'tip' },
+    { kind: 'callout', type: 'note' },
+    { kind: 'callout', type: 'info' },
+    { kind: 'callout', type: 'my-type2' },
   ];
   const cy: Person = { handle: 'cy', name: 'Cy Young' };
 
@@ -2026,6 +2031,8 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
   const letters = (text: string) =>
     newestView(text)
       .text.replace(/^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/gm, '')
+      // The type of an alert is syntax, as bold's stars are (#311).
+      .replace(/^\[![A-Za-z][A-Za-z0-9-]*\]/gm, '')
       // A tag that a backslash escapes is text.
       .replace(/(?<=(?:^|[^\\])(?:\\\\)*)<\/?(?:sub|sup)>/g, '')
       .replace(/[^\p{L}\p{N}]+/gu, '');

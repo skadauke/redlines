@@ -15,8 +15,9 @@ export interface CalloutMenu {
   choose(type: string): void;
 }
 
-/** The menu that is open on a view, so that there is never more than one. */
-const open = new WeakMap<EditorView, () => void>();
+/** The menu that is open on a view, so that there is never more than one, and the button it hangs
+ * from, which a second press of puts it away. */
+const open = new WeakMap<EditorView, { close: () => void; anchor: HTMLElement }>();
 
 const GAP = 4;
 const MARGIN = 8;
@@ -62,12 +63,17 @@ export const calloutMenuTheme = EditorView.baseTheme({
 
 /** Closes the menu open on `view`, if any, without choosing. */
 export function closeCalloutMenu(view: EditorView): void {
-  open.get(view)?.();
+  open.get(view)?.close();
 }
 
-/** Opens the menu on `view`, with the focus on the type the alert has. One already open is closed. */
+/**
+ * Opens the menu on `view`, with the focus on the type the alert has. One already open is closed, and
+ * if it hung from the same button, that is all: a second press of the button puts the menu away.
+ */
 export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
-  open.get(view)?.();
+  const shown = open.get(view);
+  shown?.close();
+  if (shown && shown.anchor === menu.anchor) return;
 
   const list = document.createElement('div');
   list.className = 'rl-callout-popover';
@@ -108,17 +114,23 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
 
   let closed = false;
   const outside = (event: MouseEvent) => {
-    if (!(event.target instanceof Node && list.contains(event.target))) close(false);
+    // A press on the button that opened the menu is the button's: it puts the menu away itself.
+    const own =
+      event.target instanceof Node &&
+      (list.contains(event.target) || menu.anchor.contains(event.target));
+    if (!own) close(false);
   };
   const close = (refocus: boolean) => {
     if (closed) return;
     closed = true;
     document.removeEventListener('mousedown', outside, true);
     open.delete(view);
+    menu.anchor.setAttribute('aria-expanded', 'false');
     list.remove();
     if (refocus) view.focus();
   };
-  open.set(view, () => close(false));
+  open.set(view, { close: () => close(false), anchor: menu.anchor });
+  menu.anchor.setAttribute('aria-expanded', 'true');
 
   const pick = (item: HTMLButtonElement) => {
     const type = item.dataset['type'];

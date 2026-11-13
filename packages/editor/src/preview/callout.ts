@@ -53,9 +53,10 @@ const NAMES: Record<string, string> = {
   caution: 'Caution',
 };
 
-/** What a title says for a type: its name. */
-export function calloutName(type: string): string {
-  return NAMES[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
+/** What a title says for a type: its name, or for a type that GitHub doesn't have, the word as the
+ * file writes it (`word`, which is the type's own where none is given) with a capital. */
+export function calloutName(type: string, word = type): string {
+  return Object.hasOwn(NAMES, type) ? NAMES[type]! : word.charAt(0).toUpperCase() + word.slice(1);
 }
 
 /**
@@ -111,7 +112,7 @@ function drawIcon(type: string): SVGSVGElement {
   svg.setAttribute('class', 'rl-callout-icon');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('aria-hidden', 'true');
-  for (const d of ICONS[type] ?? ICONS['note']!) {
+  for (const d of Object.hasOwn(ICONS, type) ? ICONS[type]! : ICONS['note']!) {
     const path = document.createElementNS(SVG, 'path');
     path.setAttribute('d', d);
     svg.append(path);
@@ -190,13 +191,13 @@ export class CalloutTitleWidget extends WidgetType {
     head.setAttribute('role', 'group');
     head.setAttribute(
       'aria-label',
-      `${calloutName(callout.type)} alert${pending ? `, ${pending.note}` : ''}`,
+      `${calloutName(callout.type, callout.word)} alert${pending ? `, ${pending.note}` : ''}`,
     );
     head.append(drawIcon(callout.type));
     if (callout.title === '') {
       const name = document.createElement('span');
       name.className = 'rl-callout-name';
-      name.textContent = calloutName(callout.type);
+      name.textContent = calloutName(callout.type, callout.word);
       head.append(name);
     }
     const button = document.createElement('button');
@@ -204,6 +205,7 @@ export class CalloutTitleWidget extends WidgetType {
     button.className = 'rl-callout-menu';
     button.setAttribute('aria-label', 'Alert type');
     button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'false');
     button.append(drawChevron());
     const ask = () => {
       const from = view.posAtDOM(head);

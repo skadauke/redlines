@@ -10,7 +10,7 @@ import { parseFormatOps } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
-import { ada, bo, bodyOf, context, expectEveryDecision, file, thread } from './test-helpers.ts';
+import { ada, bodyOf, context, expectEveryDecision, file, thread } from './test-helpers.ts';
 import type { Range } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -158,6 +158,15 @@ describe('where an alert’s type can not change (#311)', () => {
     expect(refusals('> > [!NOTE]\n> > Body.\n', 'Body')).toMatch(/not an alert/);
   });
 
+  it('is refused where the type is followed by more text with no space: GitHub reads no alert', () => {
+    for (const first of ['> [!NOTE]more', '> [!NOTE]-x', '> [!NOTE]!']) {
+      expect(refusals(`${first}\n> Body.\n`, 'Body'), first).toMatch(/not an alert/);
+    }
+    // A fold mark and a title after a space are read, and the markers of changes are no text.
+    const fine = '> [!NOTE]- Title\n> Body.\n';
+    expect(body(change(fine, inside(fine, 'Body'), callout('tip')))).toContain('[!TIP]- Title');
+  });
+
   it('is refused for a type that is no word', () => {
     for (const type of ['', 'Two words', 'NO!', '1up', 'a]b']) {
       expect(
@@ -167,7 +176,7 @@ describe('where an alert’s type can not change (#311)', () => {
     }
   });
 
-  it('is refused while another person has a pending change in the alert, naming it', () => {
+  it('is refused while another person has a pending change in the alert, which is to be decided first', () => {
     const marked = file('> [!NOTE]\n> Useful <!--ins k3x9-->new <!--/k3x9-->information.', {
       k3x9: 'bo',
     });
@@ -181,8 +190,33 @@ describe('where an alert’s type can not change (#311)', () => {
     expect(refusals(lazy, 'Useful')).toMatch(/on its own|blank line/);
   });
 
-  it('is refused inside code and front matter', () => {
+  it('is refused, in words that name the alert, when it ends in a code fence or a rule', () => {
+    for (const text of [
+      '> [!NOTE]\n> Run:\n> ```bash\n> npm i\n> ```\n',
+      '> [!NOTE]\n> Run:\n>\n> ---\n',
+    ]) {
+      expect(refusals(text, 'Run'), text).toMatch(/This alert ends in a line/);
+    }
+    // Any other line that takes no marker at its end is refused as well, with the reason it has.
+    for (const last of ['> <div>x</div>', '>     indented']) {
+      const text = `> [!NOTE]\n> Run:\n>\n${last}\n`;
+      expect(refusals(text, 'Run'), last).not.toBe('no error');
+    }
+  });
+
+  it('is refused inside code, and is made after front matter as anywhere', () => {
     expect(refusals('```\n> [!NOTE]\n> Body.\n```\n', 'Body')).toMatch(/code/);
+    for (const text of [
+      '---\ntitle: x\n---\n\n> [!NOTE]\n> Body.\n',
+      '---\ntitle: x\n---\n> [!NOTE]\n> Body.\n',
+    ]) {
+      const after = change(text, inside(text, 'Body'), callout('tip'));
+      expect(body(after), text).toContain(
+        '<!--fmt m2bd was=callout-note-->\n\n> [!TIP]\n> Body.<!--/m2bd-->',
+      );
+      expect(body(after).startsWith('---\ntitle: x\n---\n'), text).toBe(true);
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+    }
   });
 });
 
@@ -226,8 +260,7 @@ describe('an alert’s type in your own new text (#311)', () => {
       messageOf(() =>
         trackedFormat(theirs, inside(theirs, 'Typed'), callout('tip'), context(ada, ['z9z9'])),
       ),
-    ).not.toBe('no error');
-    expect(bo.handle).toBe('bo');
+    ).toBe('no-legal-placement: Accept or reject the changes in this paragraph first.');
   });
 });
 
@@ -287,5 +320,48 @@ describe('an alert’s type with other changes around it (#311)', () => {
     const after = change(ALERT, inside(ALERT, 'Useful'), callout('important'));
     expect(newestView(after).text).toBe(ALERT.replace('NOTE', 'IMPORTANT'));
     expect(originalView(after).text).toBe(ALERT);
+  });
+});
+
+describe('a type word with digits or hyphens (#311)', () => {
+  const alertOf = (word: string, title = '') =>
+    `Intro.\n\n> [!${word}]${title}\n> Useful information.\n\nAfter.\n`;
+
+  it.each(['my-type', 'q1-x', 'type2', 'a1', 'My-Type9'])(
+    'changes %s to GitHub’s tip and back, and rejecting writes the word as it was',
+    (word) => {
+      const text = alertOf(word);
+      const to = change(text, inside(text, word), callout('tip'));
+      expect(body(to)).toContain('> [!TIP]');
+      expect(rejected(to, 'm2bd')).toBe(text);
+      expect(accepted(to, 'm2bd')).toBe(alertOf('TIP'));
+      // And to a type like it.
+      const from = alertOf('NOTE');
+      const back = change(from, inside(from, 'NOTE'), callout(word.toLowerCase()));
+      expect(body(back)).toContain(`> [!${word.toLowerCase()}]`);
+      expect(rejected(back, 'm2bd')).toBe(from);
+    },
+  );
+
+  it('takes no marker inside the word: a format of part of it is refused, not written', () => {
+    const bold: FormatOp = { kind: 'inline', format: 'bold', on: true };
+    for (const word of ['my-type2', 'q1-x']) {
+      const text = alertOf(word, ' A title');
+      const at = text.indexOf(word);
+      const why = messageOf(() =>
+        trackedFormat(text, { from: at + 3, to: at + word.length }, bold, ctx()),
+      );
+      expect(why, word).toMatch(/alert's type/);
+    }
+  });
+
+  it('is read as the alert it is by every order of decisions: the type word is no word', () => {
+    const text = alertOf('my-type2');
+    const op = callout('warning');
+    const result = trackedFormat(text, inside(text, 'my-type2'), op, ctx('f3x9'));
+    const after = applyChanges(text, result.changes);
+    expect(
+      expectEveryDecision('digits', text, after, result.markIds, { structure: op }),
+    ).toBeGreaterThan(1);
   });
 });

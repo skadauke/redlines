@@ -17,11 +17,16 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function editorAt(doc: string, cursor: number): Editor {
+function editorAt(
+  doc: string,
+  cursor: number,
+  mode?: 'raw' | 'redlines' | 'simple' | 'clean',
+): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author });
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+  if (mode) editor.setViewMode(mode);
   editor.view.dispatch({ selection: { anchor: cursor } });
   open.push(editor);
   return editor;
@@ -117,6 +122,22 @@ describe('an alert in the preview (#311)', () => {
     }
   });
 
+  it('draws a type that is a name of JavaScript’s objects as any other, with the note’s icon', () => {
+    for (const word of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const doc = `> [!${word}]\n> Body.\n`;
+      const editor = editorAt(doc, doc.length);
+      expect(title(editor)?.textContent, word).toContain(
+        word.charAt(0).toUpperCase() + word.slice(1),
+      );
+      expect(title(editor)?.querySelector('svg.rl-callout-icon'), word).not.toBeNull();
+    }
+    // One of them written into a live editor is drawn too.
+    const editor = editorAt('Intro.\n\n', 0);
+    editor.view.dispatch({ changes: { from: 8, insert: '> [!constructor]\n> Body.\n' } });
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    expect(title(editor)?.textContent).toContain('Constructor');
+  });
+
   it('shows the source in the syntax color while the caret is in the title line', () => {
     const editor = editorAt(ALERT, ALERT.indexOf('NOTE') + 2);
     expect(title(editor)).toBeNull();
@@ -138,6 +159,17 @@ describe('an alert in the preview (#311)', () => {
       marks.some((mark) => mark.from === 0 && doc.slice(mark.from, mark.to).includes('[!info]')),
     ).toBe(true);
     expect(marks.every((mark) => doc.slice(mark.from, mark.to) !== ' A title')).toBe(true);
+  });
+
+  it('marks the whole title as its text, whatever markers of changes are inside it', () => {
+    const doc = '> [!info] A <!--ins k3x9-->new<!--/k3x9--> title\n> Body.\n';
+    const editor = editorAt(doc, doc.length);
+    const found: { from: number; to: number }[] = [];
+    const { state } = editor.view;
+    previewDecorations(state).between(0, state.doc.length, (from, to, value) => {
+      if ((value.spec as { class?: string }).class === 'rl-callout-text') found.push({ from, to });
+    });
+    expect(found).toEqual([{ from: '> [!info]'.length, to: doc.indexOf('\n') }]);
   });
 
   it('is an alert with the markers of tracked changes after its type, which are no text', () => {
@@ -164,6 +196,37 @@ describe('an alert in the preview (#311)', () => {
       ).toBe(false);
       expect(title(editor), JSON.stringify(doc)).toBeNull();
     }
+  });
+
+  describe('with a pending change of its type', () => {
+    const pending =
+      'Intro.\n\n<!--fmt q2hw was=callout-note-->\n\n> [!TIP]\n> Useful information.<!--/q2hw-->\n\nAfter.\n\n' +
+      '<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\n  bo: {name: Bo Chen}\nmarks:\n' +
+      '  q2hw: {by: bo, at: 2026-10-31T09:00Z}\n-->\n';
+
+    it('is drawn in the author’s color in Redlines, and told to a screen reader', () => {
+      const editor = editorAt(pending, 0, 'redlines');
+      const head = title(editor);
+      expect(head?.classList.contains('rl-callout-pending')).toBe(true);
+      expect([...(head?.classList ?? [])].some((name) => /^rl-author-\d$/.test(name))).toBe(true);
+      expect(head?.getAttribute('aria-label')).toBe('Tip alert, type changed by Bo Chen, pending');
+      // The type shown is the new one, and the box is drawn as that type's.
+      expect(head?.textContent).toContain('Tip');
+      expect(lineClasses(editor).get(pending.indexOf('> [!TIP]'))).toContain('rl-callout-tip');
+    });
+
+    it('is pending but in no author’s color in Simple, and not in Raw', () => {
+      const simple = title(editorAt(pending, 0, 'simple'));
+      expect(simple?.classList.contains('rl-callout-pending')).toBe(true);
+      expect(simple?.className).not.toMatch(/rl-author/);
+      expect(title(editorAt(pending, 0, 'raw'))).toBeNull();
+    });
+
+    it('is not drawn for an alert that has no pending change', () => {
+      const head = title(editorAt(ALERT, 0, 'redlines'));
+      expect(head?.classList.contains('rl-callout-pending')).toBe(false);
+      expect(head?.getAttribute('aria-label')).toBe('Note alert');
+    });
   });
 
   it('asks for the menu with its place and type, and changes nothing itself', () => {

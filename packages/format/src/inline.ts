@@ -141,7 +141,8 @@ const FOOTNOTE = /\[\^[^\]\s]+\]/g;
 const MATH = /(?<![\\$])\$(?=\S)[^$\n]*?(?<=[^\s\\$])\$(?![\d$])|(?<![\\$])\$[^\s$\\]\$(?![\d$])/g;
 const SHORTCODE = /(?<![A-Za-z0-9]):[a-z][a-z0-9_+-]*:(?![A-Za-z0-9])/g;
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
-const ALERT = /^[ \t>]*\[![A-Za-z]+\]/gm;
+/** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
+const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
 /** The end of a URL in running text: GitHub leaves out the punctuation that ends a sentence, and
  * a closing parenthesis that has no opening one. */

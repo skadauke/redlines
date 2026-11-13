@@ -300,8 +300,10 @@ function calloutBox(b: Builder, node: SyntaxNode, callout: Callout): void {
     const widget = new CalloutTitleWidget(callout, pendingCallout(state, callout.from));
     b.push(Decoration.replace({ widget }).range(callout.from, callout.to));
   }
-  if (callout.title !== '')
-    b.mark(callout.to, callout.to + callout.title.length, 'rl-callout-text');
+  // The title is the rest of the line, with the markers of changes inside it, which are no text.
+  if (callout.title !== '') {
+    b.mark(callout.to, b.state.doc.lineAt(callout.from).to, 'rl-callout-text');
+  }
 }
 
 function quoteMark(b: Builder, node: SyntaxNode): void {

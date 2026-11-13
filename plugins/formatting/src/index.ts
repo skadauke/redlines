@@ -6,7 +6,7 @@
 // off the syntax is written directly, and what a block adds is an insertion like typing.
 
 import { isolateHistory } from '@codemirror/commands';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { ChangeSet, type EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
@@ -15,6 +15,7 @@ import {
   boxChange,
   calloutMenuEffect,
   calloutName,
+  calloutOf,
   type CalloutMenuRequest,
   checkBoxEffect,
   type Editor,
@@ -844,10 +845,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
       // GitHub's types, and any other that a file has already: it is the file's to offer.
       const others: string[] = [];
-      for (const found of doc.toString().matchAll(/^>[ \t]?\[!([A-Za-z][A-Za-z0-9-]*)\]/gm)) {
-        const other = (found[1] ?? '').toLowerCase();
-        if (!GITHUB_TYPES.includes(other) && !others.includes(other)) others.push(other);
-      }
+      // An alert is a quote at the left edge, which the editor reads as it draws it: a type in code,
+      // or in a later line of a quote, is no alert's.
+      ensureSyntaxTree(view.state, doc.length, 100)?.iterate({
+        enter: (node) => {
+          if (node.name !== 'Blockquote')
+            return node.name !== 'FencedCode' && node.name !== 'CodeBlock';
+          const found = calloutOf(view.state, node.node);
+          if (found && !GITHUB_TYPES.includes(found.type) && !others.includes(found.type)) {
+            others.push(found.type);
+          }
+          return false;
+        },
+      });
       openCalloutMenu(view, {
         anchor,
         types: [...GITHUB_TYPES, ...others].map((each) => ({

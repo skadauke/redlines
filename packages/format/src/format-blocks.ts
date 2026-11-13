@@ -98,6 +98,8 @@ const NOT_AN_ALERT =
   'This is not an alert: an alert is a quote at the left edge whose first line is a type in brackets, such as [!NOTE].';
 const ALERT_ON_ITS_OWN =
   'An alert changes type only with a blank line before and after it (or right under a heading, a thematic break or a closing fence), so that no line goes on from it.';
+const ALERT_END =
+  "This alert ends in a line that takes no marker at its end, such as a code block's fence, a rule or HTML, so its type can't change here. Change it in Raw, or add a line of text at the end of the alert.";
 const ALERT_LOST =
   "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Raw with Track Changes off.";
 
@@ -1125,6 +1127,12 @@ function alertAt(reader: BlockReader, paragraph: Range): Alert {
   const lead = /^>[ \t]?/.exec(lineAt(text, line))?.[0].length ?? 0;
   const found = ALERT_LINE.exec(lineAt(text, line).slice(lead));
   if (!found) throw refused(NOT_AN_ALERT);
+  // `[!NOTE]more` is no alert to GitHub: the type ends at a space, or at the end of the line (the
+  // markers of changes are no text).
+  const after = lineAt(text, line)
+    .slice(lead + found[0].length)
+    .replace(/<!--.*?-->/g, '');
+  if (after !== '' && !/^[+-]?(?:[ \t]|$)/.test(after)) throw refused(NOT_AN_ALERT);
   const written = found[1] ?? '';
   const from = line + lead + 2;
   const alert: Alert = {
@@ -1208,7 +1216,14 @@ function planCallout(
     throw refused(ALERT_ON_ITS_OWN);
   }
   assertNoBreakPending(reader, block, alert.end);
-  assertPlace(reader, alert.end);
+  try {
+    assertPlace(reader, alert.end);
+  } catch (error) {
+    // The closer stands at the end of the alert's last line, where the reasons are the line's, not
+    // the alert's: a fence, a rule, HTML or code.
+    if (error instanceof EditError) throw refused(ALERT_END);
+    throw error;
+  }
   const word = calloutWord(to);
   const replaced: TextChange = { ...alert.word, insert: word };
   if (own) {

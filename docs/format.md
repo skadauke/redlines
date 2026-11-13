@@ -905,8 +905,8 @@ the brackets is the new type.
   away. The new type is any word of lowercase letters, digits and hyphens that starts with a
   letter. A title or a fold mark after the type, which GitHub shows as text, is kept as written.
 - Only an alert at the left edge changes type: a quote that every line of starts with `>`, whose
-  first line is the type, with a blank line before it (or the start of the file, or a heading, a
-  thematic break or a closing fence) and after it (or the end of the file). A quote in a list item
+  first line is the type, with a blank line before it (or the start of the file, the end of front
+  matter, a heading, a thematic break or a closing fence) and after it (or the end of the file). A quote in a list item
   or in another quote, a quote whose first line is anything else, and a quote with a line of text
   that goes on from it are refused, in words that say what they are. The caret may be in any line
   of the alert.
@@ -1088,8 +1088,11 @@ The importer ships in April.
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
   line at the item's content column.
-- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark at the start of the
-  alert's body uses a blank `>` line after `[!TYPE]`.
+- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark that starts at the start
+  of the alert's body is written as any mark at the start of a wrapped line is (§3.2): its opener
+  goes at the end of the `[!TYPE]` line and the line break is in the change, so that no marker
+  starts the body's line and the alert stays one. The blank `>` line that the research found as a
+  workaround for the renderers that lose the alert is never written.
 - An image alone in its paragraph gets own-line markers with blank lines around them. Any marker
   inside that paragraph stops pandoc from making the image a figure.
 - An own-line marker never sits between two lines of one paragraph, heading or table, between

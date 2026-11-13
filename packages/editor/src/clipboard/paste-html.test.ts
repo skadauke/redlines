@@ -582,10 +582,20 @@ describe('htmlToMarkdown, the callouts of web pages (#311)', () => {
   it('writes no alert where one would not be read: in a quote, a list item or a table cell', () => {
     const inner = github('note', 'Note', '<p>Body.</p>');
     expect(htmlToMarkdown(`<blockquote>${inner}</blockquote>`)).toBe('> Note\n>\n> Body.');
-    expect(htmlToMarkdown(`<ul><li>Item ${inner}</li></ul>`)).not.toContain('[!NOTE]');
-    expect(
-      htmlToMarkdown(`<table><tr><th>a</th></tr><tr><td>${inner}</td></tr></table>`),
-    ).not.toContain('[!NOTE]');
+    expect(htmlToMarkdown(`<ul><li>Item ${inner}</li></ul>`)).toBe('- Item\n\n  Note\n\n  Body.');
+    expect(htmlToMarkdown(`<table><tr><th>a</th></tr><tr><td>${inner}</td></tr></table>`)).toBe(
+      '| a |\n| --- |\n| Note<br>Body. |',
+    );
+  });
+
+  it('writes no alert inside an alert: the inner callout is its text, as GitHub reads it', () => {
+    const html =
+      '<div class="admonition note"><p class="admonition-title">Note</p><p>Outer.</p>' +
+      '<div class="admonition tip"><p class="admonition-title">Tip</p><p>Inner.</p></div>' +
+      '<p>After inner.</p></div>';
+    expect(htmlToMarkdown(html)).toBe(
+      ['> [!NOTE]', '> Outer.', '>', '> Tip', '>', '> Inner.', '>', '> After inner.'].join('\n'),
+    );
   });
 
   it('keeps an ordinary div, and a callout it does not know, as the blocks they hold', () => {
