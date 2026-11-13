@@ -18,6 +18,7 @@ import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
+import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -25,6 +26,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { watchAgentsChanged } from './agent-changes.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
@@ -45,6 +47,7 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
@@ -57,13 +60,14 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
-import { createTitleBar } from './ui/titlebar.ts';
+import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
@@ -165,6 +169,26 @@ function beep(): void {
   if (isTauri) void invoke('beep').catch(() => {});
 }
 
+/**
+ * Whether the app can hand the document's file to another app by a drag: the Mac's, which draws the
+ * title bar's document icon for it (src-tauri/src/drag.rs). A plain browser has no file to hand
+ * over, and Windows and Linux no drag to hand it by.
+ */
+const canDragFile = isTauri && /Macintosh/.test(navigator.userAgent);
+
+/**
+ * Starts dragging the document's file out of the window, once the title bar's document icon has
+ * been dragged: the app does it, as a native title bar's proxy icon would, and a drop in Finder,
+ * Mail or Terminal hands over the file.
+ */
+function dragFile(): void {
+  const path = doc?.path;
+  if (!path || !canDragFile) return;
+  invoke<boolean>('start_file_drag', { path }).catch((error: unknown) => {
+    console.error('Could not drag the file', error);
+  });
+}
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
@@ -207,8 +231,8 @@ const editor = createEditor(element('#editor'), {
 });
 ui = editor.getUiState();
 // The agents on this Mac, run through their own programs; a plain browser has none. Claude and
-// Codex have providers of their own, and the agents the person added in Preferences, which the
-// app keeps, are each run through the Agent Client Protocol provider.
+// Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
+// doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
 const agents = createMacAgents(
   isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
@@ -222,8 +246,10 @@ const agents = createMacAgents(
       }
     : {},
 );
-// An agent added or removed in Preferences is in the next comment box's picker.
+// An agent added or removed by another window, or one that Preferences has updated, signed in or
+// found changed, is looked for again at the next comment box.
 if (isTauri) acpAgents.watch(() => agents.forget());
+watchAgentsChanged(() => agents.forget());
 /**
  * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
  * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
@@ -307,6 +333,25 @@ const review = createReview(editor, {
     // A resolved thread's note stays while its run asks, so that Show has a note to show.
     keepShown: (thread) => liveLines.keepsShown(thread),
   },
+});
+
+// The formatting palette: hidden while writing, it opens from a handle at the bottom center and on
+// right-click, in place of WebKit's own menu. Its items are commands of the registry, so it
+// registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
+// A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
+const palette = createPalette(editor, {
+  container: main,
+  tooltipMs: TOOLTIP_MS,
+  notice: (message) => notice.flash(message),
+  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  ...(isTauri
+    ? {
+        spelling: systemSpelling({
+          enabled: () => settings.spellCheck,
+          learned: () => checkSpellingAgain(editor.view.contentDOM),
+        }),
+      }
+    : {}),
 });
 
 const documentHost: Host = {
@@ -486,6 +531,7 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
   showThread: (thread) => review.showThread(thread),
   focusDocument: () => editor.focus(),
   notify: ({ key, text, action }) =>
@@ -505,6 +551,20 @@ const liveLines = createLiveLines({
         : {}),
     }),
 });
+
+/**
+ * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed
+ * run's line offers when the agent is too old or signed out. The window can't update or sign in an
+ * agent itself; it asks for the pane, and Preferences shows it.
+ */
+function openAgentPreferences(): void {
+  if (!isTauri) return notice.flash('Preferences are in the app.');
+  requestPane('agents');
+  invoke('open_preferences').catch((error: unknown) => {
+    console.error('Could not open Preferences', error);
+    notice.flash('Couldn’t open Preferences.');
+  });
+}
 
 /** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
 function showAgentLogs(): void {
@@ -582,12 +642,23 @@ const toggleResolved = () => {
   render();
 };
 
+/**
+ * File › Rename, and a double-click on the file name: a document with a file gets a field for its
+ * name, and an Untitled one, which has no name to change, Save As, which asks for one.
+ */
+function renameDocument(): void {
+  if (doc?.path) titleBar.beginRename();
+  else void controller.saveAs();
+}
+
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (mode) => editor.setViewMode(mode),
   toggleTracking,
   openReview,
   toggleResolved,
   toggleSidebar,
+  renameDocument: () => renameDocument(),
+  dragFile,
   rename: async (newName) => {
     const from = controller.state.path;
     const renamed = await controller.rename(newName);
@@ -636,8 +707,7 @@ const commands: MenuCommands = {
   },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
-  // A document with no file has no name to change: Save As asks for one.
-  rename: () => (doc?.path ? titleBar.beginRename() : void controller.saveAs()),
+  rename: renameDocument,
   revealInFinder: () => {
     if (doc?.path) {
       void host.reveal(doc.path).catch((error: unknown) => {
@@ -744,6 +814,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
+    fileDraggable: doc.path !== null && canDragFile,
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -785,10 +856,11 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null };
+    return { path: null, line: null, text: null };
   });
   if (start.path === null) {
-    await controller.create();
+    // A window opened for text starts with an Untitled document that holds it, unsaved.
+    await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -811,6 +883,7 @@ if (isTauri) {
       kept = readingPlace(editor.view, scroller);
       titleBar.closeMenus();
       review.closePopovers();
+      palette.hide();
     },
     after: (level, from) => {
       if (kept) {
@@ -847,8 +920,9 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, with Track Changes on if Preferences ask for it.
-  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it. A
+  // window opened for text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) editor.setTracking(true);
   windows?.ready();
   const about = await loadAbout().catch((error: unknown) => {
     console.error('Could not read the build tag for About Redlines', error);

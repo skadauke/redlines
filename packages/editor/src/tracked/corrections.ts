@@ -140,7 +140,8 @@ export function correctionEdits(
  * Makes a correction of the text the page shows from `at.from` to `at.to`, which must read
  * `replaced`, into `text`: the edits `correctionEdits` plans, as typing, in a step of their own.
  * Unless `picked`, as a suggestion from the context menu is, it is made only where the Mac corrects
- * on its own (`autocorrects`). Returns whether anything was changed.
+ * on its own (`autocorrects`). Returns whether anything was changed. A suggestion you picked leaves
+ * the caret after the word, as the Mac does, and not after the stretch of it that differs.
  */
 export function correctText(
   view: EditorView,
@@ -158,8 +159,8 @@ export function correctText(
   const changes = ChangeSet.of(edits, state.doc.length);
   view.dispatch({
     changes,
-    // A suggestion you picked leaves the caret after it, as typing over the word would.
-    selection: picked ? EditorSelection.cursor(changes.mapPos(edits.at(-1)!.to, 1)) : undefined,
+    // A suggestion you picked leaves the caret after the word, as the Mac does.
+    selection: picked ? EditorSelection.cursor(changes.mapPos(at.to, 1)) : undefined,
     userEvent: picked ? PICKED : AUTOCORRECTION,
     annotations: isolateHistory.of('full'),
     scrollIntoView: true,
