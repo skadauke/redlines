@@ -99,11 +99,12 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
 
   /** The finder of the passages in the document as it is now, made once for each text. */
   let finder: { doc: typeof view.state.doc; find: ReturnType<typeof quoteFinder> } | null = null;
+  /** Where `quote` is: of several places, the one nearest the text the question is about. */
   const find = (quote: string) => {
     if (!finder || finder.doc !== view.state.doc) {
       finder = { doc: view.state.doc, find: quoteFinder(view.state.doc.toString()) };
     }
-    return finder.find(quote);
+    return finder.find(quote, targetOf(view.state)?.from);
   };
 
   const rangeOf = (): { from: number; to: number } | null => {

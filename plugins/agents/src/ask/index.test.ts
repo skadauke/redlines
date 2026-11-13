@@ -432,6 +432,26 @@ describe('citations', () => {
     expect(document.querySelector('.rl-qa-source.rl-qa-lost')).not.toBeNull();
   });
 
+  it('go to the place nearest the text asked about, where a quote is in several', async () => {
+    const script = answers('It binds [1].\n\nSources:\n[1] "shall"');
+    const { editor } = mount({ script });
+    const doc = editor.view.state.doc.toString();
+    // Asked about the Borrower's sentence, it is the second "shall" that is cited.
+    select(editor, 'Borrower');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    document.querySelector<HTMLButtonElement>('.rl-qa-answer p .rl-qa-cite')?.click();
+    expect(rangeOf(editor)).toEqual([doc.lastIndexOf('shall'), doc.lastIndexOf('shall') + 5]);
+    // Asked about the Lender's, the first.
+    select(editor, 'Lender');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await vi.waitFor(() => expect(answerOf()?.textContent).toContain('It binds'));
+    document.querySelector<HTMLButtonElement>('.rl-qa-answer p .rl-qa-cite')?.click();
+    expect(rangeOf(editor)).toEqual([doc.indexOf('shall'), doc.indexOf('shall') + 5]);
+  });
+
   it('say so when the passage went from the document after the answer', async () => {
     const { editor, notices } = mount({ script: answers(CITED) });
     select(editor, 'first lien');
