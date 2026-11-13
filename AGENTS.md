@@ -64,7 +64,8 @@ repo root.
   `src-tauri/binaries/redlines-<triple>` (Python 3; a triple as its argument, or
   `TAURI_ENV_TARGET_TRIPLE`, picks the target, and `universal-apple-darwin` makes three files)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
-  (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
+  (it opens `src/sample.md`, signs in as Ada, keeps saves in memory and has a scripted agent in place of
+  the agent programs, `src/dev-agents.ts`, which answers an Ask); `pnpm tauri dev` runs the
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
   and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
   image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. The image's background,
@@ -81,11 +82,13 @@ repo root.
   replaced is open (nothing else ever quits it)
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
-  cost of a keystroke) and `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
-  over them, their bars and cards, in Redlines and Simple) serve the page, and `pnpm tauri dev` runs
-  it in WKWebView; each writes its results to the console and ends with a `... done <n> passed,
-  <n> failed` line (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`). They read
-  nothing in a release build, and are no part of CI
+  cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
+  over them, their bars and cards, in Redlines and Simple) and `VITE_PALETTE_CHECK=1 pnpm dev` (the
+  formatting palette's handle, right-click and hints, and Ask's bubble, answered by the page's
+  scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its results
+  to the console and ends with a `... done <n> passed, <n> failed` line (`src/block-check.ts`,
+  `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They read nothing in a
+  release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

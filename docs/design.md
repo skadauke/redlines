@@ -1293,7 +1293,9 @@ Agent edits are animated, like a streaming chat answer.
     written to the file or its ledger. Each run still writes its log.
   - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
     live line while it works (what it is doing, with Stop), then the answer. The selection stays
-    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going.
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going. A
+    failure stays on the line with its log, and with a button that opens Preferences where they
+    can put it right (the agent is signed out or too old), as a comment's run does.
   - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
     "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
     an agent's `comment` finds its quote, and makes the marker a link that selects the passage; a
