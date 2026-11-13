@@ -516,6 +516,21 @@ async function textKeysKeepTheCaret({
     const now = top();
     if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
   }
+  // Up the whole ladder, to 400%, and down again: the line keeps its place at every rung (#318).
+  const rungs = [1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+  const climb = [
+    ...rungs.map((size) => [1, size] as const),
+    ...[...rungs.slice(0, -1).reverse(), 1].map((size) => [-1, size] as const),
+  ];
+  for (const [by, size] of climb) {
+    textZoom.step(by);
+    await frames();
+    const name = `step(${by}) to ${size * 100}%`;
+    if (scale() !== String(size))
+      failures.push({ name, why: 'wrong text size', scale: scale(), expected: size });
+    const now = top();
+    if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
+  }
   return failures;
 }
 
