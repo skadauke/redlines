@@ -155,8 +155,15 @@ The window, on the desktop:
   the top of the window and the text scrolls under the bar, fading out as it passes, so that the
   window reads as one page, with no hard edge below the bar. The file name is centered in small
   gray type, and the document starts below the bar, so that nothing is hidden at rest. The bar
-  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar
-  and no status bar.
+  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar,
+  and no status bar: the one line along the bottom is the word count, below.
+- **A small word count** sits in the lower right corner, "1,204 words", and stays visible while you
+  write; with a selection it says how many of the words are selected, "120 of 1,204 words". It is
+  one gray line of small text, not a status bar. It counts what a reader sees, the newest text and
+  never the markers or the ledger, a moment after you stop typing, so that a long document stays
+  fast. It rests on a fade of the page's color, as the title bar does, so that nothing scrolls under
+  it unfaded, and what scrolls into view, the line being typed on included, stops above the fade. It
+  follows the theme and the zoom. Preferences › Editor › Show word count hides it.
 - **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
   icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
   hands over a copy of the file as it is saved. It never moves the file the window has open, and
@@ -226,8 +233,8 @@ The window, on the desktop:
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
   default app for Markdown, and installing the `redlines` command line), Appearance (Match
   System, Light or Dark, the theme, zoom and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, whether Track Changes starts on, and whether line breaks show their
-  marks, §5.5) and Agents (§8.6). Changes apply at once.
+  dashes, closing brackets, whether Track Changes starts on, whether line breaks show their
+  marks, §5.5, and whether the word count shows) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).

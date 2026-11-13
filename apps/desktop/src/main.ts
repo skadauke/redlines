@@ -69,6 +69,7 @@ import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
+import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
@@ -420,8 +421,10 @@ const focusEditor = () => {
 function showDocument(state: DocumentState): void {
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
-    // Another document took this one's place: the old one's runs have nothing to act on.
+    // Another document took this one's place: the old one's runs have nothing to act on, and its
+    // words are not this one's.
     runs.documentReplaced();
+    wordCount.refresh();
   }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
@@ -739,6 +742,11 @@ const titleBar = createTitleBar(element('#titlebar'), {
 editor.addExtension(topRoom(() => titleBar.room()));
 followScrollbar(scroller, main);
 
+// The word count in the lower right corner, counted on idle after the text or the selection last
+// changed (a document that opens is counted by `showDocument`), and what the editor scrolls to is
+// kept clear of its fade (word-count.ts).
+const wordCount = createEditorWordCount(main, editor, { visible: settings.showWordCount });
+
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
 // unsaved edits first, as quitting does, and the new version reopens the documents. The app checks,
@@ -1020,6 +1028,7 @@ watchSettings((changed) => {
   // A text size another window saved takes the reading place before it is applied.
   textZoom.follow(settings.textSize);
   review.setShowResolved(settings.showResolved);
+  wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);

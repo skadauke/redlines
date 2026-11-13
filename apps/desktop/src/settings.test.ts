@@ -66,6 +66,7 @@ describe('settings', () => {
       closePairs: true,
       trackNewDocuments: false,
       showLineBreakMarks: false,
+      showWordCount: true,
       agentScope: 'folder',
       consent: {},
       people: [],
@@ -92,6 +93,7 @@ describe('settings', () => {
       closePairs: false,
       trackNewDocuments: true,
       showLineBreakMarks: true,
+      showWordCount: false,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [
@@ -290,6 +292,15 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
+  it('shows the word count unless the person hides it, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().showWordCount).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showWordCount: false });
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":true}');
+    expect(loadSettings().showWordCount).toBe(true);
+  });
+
   it('keeps a text size of any whole percent from 80 to 400, and takes the default for any other', () => {
     for (const kept of [1.5, 1.37, 2.01, 2.5, 3, 4]) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${kept}}`);
@@ -376,6 +387,7 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
+        showWordCount: 'no',
         agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
