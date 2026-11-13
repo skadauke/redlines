@@ -387,18 +387,20 @@ export function errorLine(className: string): HTMLElement {
 
 /**
  * The part of the window where the editor can be seen: the window, less what its scrolling
- * ancestors hide, such as a title bar above the scrolling page. The editor's own scroller computes
- * `overflow-y: auto` beside its `overflow-x`, while the page may scroll in an ancestor instead, so
- * it counts only while it really scrolls.
+ * ancestors hide, such as a title bar above the scrolling page, or one floating over it, whose
+ * room the page keeps as its top padding: the text starts below the bar and passes under it. The
+ * editor's own scroller computes `overflow-y: auto` beside its `overflow-x`, while the page may
+ * scroll in an ancestor instead, so it counts only while it really scrolls.
  */
 export function visibleSpace(view: EditorView): Rect {
   const win = view.dom.ownerDocument.defaultView ?? window;
   const space = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
   for (let el: HTMLElement | null = view.scrollDOM; el; el = el.parentElement) {
-    if (!/auto|scroll/.test(win.getComputedStyle(el).overflowY)) continue;
+    const style = win.getComputedStyle(el);
+    if (!/auto|scroll/.test(style.overflowY)) continue;
     if (el === view.scrollDOM && el.scrollHeight <= el.clientHeight) continue;
     const rect = el.getBoundingClientRect();
-    space.top = Math.max(space.top, rect.top);
+    space.top = Math.max(space.top, rect.top + (Number.parseFloat(style.paddingTop) || 0));
     space.bottom = Math.min(space.bottom, rect.bottom);
   }
   return space;

@@ -301,6 +301,10 @@ export async function openWindow(doc: string): Promise<Window> {
       postBox(editor, text);
       const thread = editor.getParsed().ledger.comments.find(({ id }) => !before.has(id));
       if (!thread) throw new Error('Nothing was posted');
+      // A comment that starts a run saves the document first, and a save records the view (format
+      // §5.6): done here at once, so that the text a test takes after posting is the text the run
+      // starts from.
+      editor.recordView();
       return thread.id;
     },
     replyIn(thread, text) {
@@ -312,6 +316,8 @@ export async function openWindow(doc: string): Promise<Window> {
       if (!button) throw new Error(`No Reply button in ${thread}`);
       button.click();
       postBox(editor, text);
+      // As `post` does, for a reply that starts a run.
+      editor.recordView();
     },
     type(at, text) {
       editor.view.dispatch({
