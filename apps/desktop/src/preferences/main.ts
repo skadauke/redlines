@@ -9,7 +9,12 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
-import { agentSetup, createDetectionProcesses } from '../agent-preferences.ts';
+import {
+  agentSetup,
+  createDetectionProcesses,
+  homeAccess,
+  openFilesAndFoldersSettings,
+} from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
@@ -160,6 +165,8 @@ const deps: PaneDeps = {
           : {}),
       })),
       copy: copyText,
+      // What macOS holds back from Redlines, asked when the person picks the home folder.
+      ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),

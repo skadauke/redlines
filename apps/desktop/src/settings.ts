@@ -11,8 +11,12 @@ import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { LADDER } from './text-size.ts';
 
-/** How much of the surroundings an agent may read (design, Scope). */
-export type AgentScope = 'folder' | 'document';
+/**
+ * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
+ * folder and the home folder, which the plugin API calls `everything` (Preferences › Agents says
+ * "This folder and my home folder").
+ */
+export type AgentScope = 'document' | 'folder' | 'everything';
 
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;
@@ -146,7 +150,9 @@ export function loadSettings(): Settings {
     closePairs: typing('closePairs'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
-    agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
+    agentScope: isAgentScope(value['agentScope'])
+      ? value['agentScope']
+      : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
     newDocumentFolder:
@@ -204,7 +210,7 @@ function consentOf(value: unknown): Settings['consent'] {
   const consent: Settings['consent'] = {};
   if (typeof value !== 'object' || value === null) return consent;
   for (const [key, answer] of Object.entries(value as Record<string, unknown>)) {
-    if (answer === 'folder' || answer === 'document' || answer === 'no') consent[key] = answer;
+    if (isAgentScope(answer) || answer === 'no') consent[key] = answer;
   }
   return consent;
 }
@@ -319,6 +325,10 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isAgentScope(value: unknown): value is AgentScope {
+  return value === 'document' || value === 'folder' || value === 'everything';
 }
 
 function isAppearanceChoice(value: unknown): value is AppearanceChoice {
