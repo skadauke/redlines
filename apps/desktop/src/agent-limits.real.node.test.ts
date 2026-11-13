@@ -77,8 +77,9 @@ const hasHidden = (path: string) =>
 /**
  * Whether a folder, as it really is, may be granted, as `may_grant` in reach.rs says: not `/`, the
  * home folder or a folder above it, nothing hidden, `~/Library` only for its cloud folders, and
- * outside the home folder at least two levels down. A copy of the Rust, so what is run here is what
- * the app grants; reach.rs tests the same rules against links in a scratch home of its own.
+ * outside the home folder only strictly below `/Volumes` or in `/Users/Shared`. A copy of the Rust,
+ * so what is run here is what the app grants; reach.rs tests the same rules against links in a
+ * scratch home of its own.
  */
 function mayGrant(home: string, real: string): boolean {
   if (real === home || home.startsWith(real.endsWith('/') ? real : `${real}/`)) return false;
@@ -89,7 +90,9 @@ function mayGrant(home: string, real: string): boolean {
     if (first === 'Library') return second === 'CloudStorage' || second === 'Mobile Documents';
     return true;
   }
-  return real.split('/').filter(Boolean).length >= 2 && !hasHidden(real);
+  const onAVolume = real.startsWith('/Volumes/') && real.length > '/Volumes/'.length;
+  const shared = real === '/Users/Shared' || real.startsWith('/Users/Shared/');
+  return (onAVolume || shared) && !hasHidden(real);
 }
 
 /** The folders to grant, as `reach.rs` makes them: visible folders but Library, and the cloud folders. */

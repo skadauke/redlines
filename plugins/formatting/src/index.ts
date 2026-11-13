@@ -1,5 +1,6 @@
-// Formatting commands (spec: Menus): bold, italic, code, strikethrough, links and clearing for
-// text, and the type of a paragraph, its lists, and the table, rule and code block that start one.
+// Formatting commands (spec: Menus): bold, italic, code, strikethrough, subscript, superscript,
+// links and clearing for text, and the type of a paragraph, its lists, and the table, rule and code
+// block that start one.
 // They are commands of the registry, which binds their keys and draws the Format and Paragraph
 // menus; none has a button. With Track Changes on a format change is a tracked `fmt` mark, with it
 // off the syntax is written directly, and what a block adds is an insertion like typing.
@@ -54,6 +55,10 @@ export interface FormattingOptions {
 
 const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
+ * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
+const TAGS_NOT_A_PAIR =
+  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Raw.";
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
@@ -80,6 +85,9 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   italic: 'Emphasis',
   strike: 'Strikethrough',
   code: 'InlineCode',
+  // The tags `<sub>` and `<sup>`, which the editor's parse reads as nodes (preview/script.ts).
+  sub: 'Subscript',
+  sup: 'Superscript',
 };
 /** What a format makes text, for a sentence. */
 const INLINE_WORD: Record<InlineFormat, string> = {
@@ -87,6 +95,8 @@ const INLINE_WORD: Record<InlineFormat, string> = {
   italic: 'italic',
   strike: 'struck through',
   code: 'code',
+  sub: 'subscript',
+  sup: 'superscript',
 };
 
 /** Whether the text of a cell is inside one node of `name` from end to end (hidden markers aside). */
@@ -242,7 +252,8 @@ function personOf(author: Author): Person {
 
 /**
  * Adds the formatting commands to an editor: Bold ⌘B, Italic ⌘I, Code ⌃`, Strikethrough ⌃⇧`,
- * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⇧⌘N, Headings
+ * Subscript ⌥⌘, Superscript ⌥⌘., Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the
+ * Paragraph menu Body ⇧⌘N, Headings
  * ⌘1 to ⌘6, Quote, lists, Check Item ⇧⌘U, Code Block, Table, Horizontal Rule, Indent ⌘] and
  * Outdent ⌘[. Returns a function that takes them out again.
  *
@@ -250,7 +261,12 @@ function personOf(author: Author): Person {
  */
 export function createFormatting(editor: Editor, options: FormattingOptions): () => void {
   const { view } = editor;
-  const notice = (message: string) => options.notice(message);
+  /** How many notices have been shown, to know whether a refusal said something. */
+  let noticed = 0;
+  const notice = (message: string) => {
+    noticed++;
+    options.notice(message);
+  };
   const removeTheme = editor.addExtension(linkTheme);
 
   /** Whether the selection can be edited at all: Raw is read-only while edits are tracked. */
@@ -420,7 +436,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         return false;
       }
       const on = !atSelection(view.state).some(({ name }) => name === INLINE_NODE[format_]);
-      return format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      const saidBefore = noticed;
+      const done = format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      // The parse says the format is on and the format's reader finds none to take off, as it can
+      // pair a tag otherwise (it reads emphasis first): nothing happened, and says why.
+      if (!done && !on && noticed === saidBefore && (format_ === 'sub' || format_ === 'sup')) {
+        notice(TAGS_NOT_A_PAIR);
+      }
+      return done;
     };
 
   const block =
@@ -783,6 +806,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     inlineCommand('format.italic', 'Italic', 'Mod-i', 'italic'),
     inlineCommand('format.code', 'Code', 'Ctrl-`', 'code'),
     inlineCommand('format.strike', 'Strikethrough', 'Ctrl-Shift-`', 'strike'),
+    // Word's keys for these, ⌘= and ⇧⌘=, are View's Zoom In. Google Docs' ⌘, and ⌘. are Preferences and
+    // Cancel on the Mac, so these take ⌥ too.
+    inlineCommand('format.sub', 'Subscript', 'Mod-Alt-,', 'sub'),
+    inlineCommand('format.sup', 'Superscript', 'Mod-Alt-.', 'sup'),
     command('format', 'link', {
       id: 'format.link',
       title: 'Link…',
@@ -882,6 +909,8 @@ export const plugin: Plugin = {
         { id: 'format.italic', title: 'Italic', shortcut: 'Mod-i' },
         { id: 'format.code', title: 'Code', shortcut: 'Ctrl-`' },
         { id: 'format.strike', title: 'Strikethrough', shortcut: 'Ctrl-Shift-`' },
+        { id: 'format.sub', title: 'Subscript', shortcut: 'Mod-Alt-,' },
+        { id: 'format.sup', title: 'Superscript', shortcut: 'Mod-Alt-.' },
         { id: 'format.link', title: 'Link…', shortcut: 'Mod-k' },
         { id: 'format.clear', title: 'Clear Formatting', shortcut: 'Mod-\\' },
         { id: 'block.body', title: 'Body', shortcut: 'Mod-Shift-n' },

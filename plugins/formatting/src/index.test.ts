@@ -623,6 +623,8 @@ describe('registration', () => {
       'format.italic': 'Mod-i',
       'format.code': 'Ctrl-`',
       'format.strike': 'Ctrl-Shift-`',
+      'format.sub': 'Mod-Alt-,',
+      'format.sup': 'Mod-Alt-.',
       'format.link': 'Mod-k',
       'format.clear': 'Mod-\\',
       'block.body': 'Mod-Shift-n',

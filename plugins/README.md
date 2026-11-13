@@ -10,6 +10,7 @@ ship with the app; each one can be turned off. These are written:
 | `themes` ([`@redlines/themes`](themes)) | The built-in themes and their fonts                               |
 | `code` ([`@redlines/code`](code))       | Syntax colors in code blocks                                      |
 | `find` ([`@redlines/find`](find))       | Find and replace, in the Edit menu                                |
+| `outline` ([`@redlines/outline`](outline)) | The outline of the headings, in the left margin                |
 | `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
 | `tables` ([`@redlines/tables`](tables)) | The Table menu and its commands |
 | `palette` ([`@redlines/palette`](palette)) | The formatting palette: from a handle at the bottom center, and on right-click |
@@ -28,7 +29,6 @@ The others are planned:
 | `word`       | Copy for Word, and `.docx` import and export              |
 | `print`      | Printing and PDF export                                   |
 | `export`     | Export to HTML, clean Markdown and the review view        |
-| `outline`    | The document outline                                      |
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |
 | `git`        | Optional git features                                     |
 | `collab`     | Live sessions: presence and invitations                   |
