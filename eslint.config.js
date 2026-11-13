@@ -14,6 +14,7 @@ export default defineConfig(
     'apps/desktop/src-tauri/permissions/',
     'apps/desktop/redlines/bundle/',
     'apps/desktop/redlines/target/',
+    'apps/desktop/quicklook/build/',
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,

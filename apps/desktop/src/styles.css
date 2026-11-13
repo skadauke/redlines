@@ -98,8 +98,46 @@ body {
   user-select: none;
 }
 
-.rl-title {
+/* The file name and the document's icon beside it, centered as one. */
+.rl-title-group {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: calc(4 * var(--rl-frame));
+  min-width: 0;
+}
+
+/*
+ * The document's icon, which drags the file as a proxy icon does (the bar's own drag moves the
+ * window, and this is left out of it). Quiet, and a step darker under the pointer.
+ */
+.rl-doc-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(20 * var(--rl-frame));
+  height: calc(28 * var(--rl-frame));
+  color: var(--rl-ink-2);
+}
+
+.rl-doc-icon:hover {
+  color: var(--rl-ink);
+}
+
+.rl-doc-icon svg {
+  width: calc(16 * var(--rl-frame));
+  height: calc(16 * var(--rl-frame));
+}
+
+/*
+ * The file name takes the pointer: a double-click on it renames, and the facts under it show on
+ * hover. Its padding makes a target about as tall as the icons beside it; a drag on it still moves
+ * the window, as the rest of the bar does.
+ */
+.rl-title {
+  min-width: 0;
+  padding: calc(8 * var(--rl-frame)) calc(4 * var(--rl-frame));
   overflow: hidden;
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-frame);
@@ -107,7 +145,6 @@ body {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
 }
 
 .rl-title-field {
@@ -122,7 +159,6 @@ body {
   font: inherit;
   text-align: center;
   outline: none;
-  pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
 }

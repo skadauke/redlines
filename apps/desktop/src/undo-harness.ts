@@ -172,7 +172,7 @@ export async function openWindow(doc: string): Promise<Window> {
     },
     askToDiscardDraft: () => Promise.resolve(false),
     openWindow: () => Promise.resolve(),
-    windowStart: () => Promise.resolve({ path: null, line: null }),
+    windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };

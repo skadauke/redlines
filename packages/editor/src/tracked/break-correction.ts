@@ -45,7 +45,7 @@ interface Ask extends Range {
 }
 
 /** The text of the table cell that holds `pos`, or null outside a table. */
-function cellText(state: EditorState, pos: number): Range | null {
+export function cellText(state: EditorState, pos: number): Range | null {
   const tables = state.field(tablesField, false);
   const table = tables?.find((t) => t.from <= pos && pos <= t.to);
   const cell = table?.rows
@@ -59,6 +59,27 @@ function lastChars(text: string): string {
   const cut = text.slice(-CONTEXT_CHARS);
   const first = cut.charCodeAt(0);
   return text.length > CONTEXT_CHARS && first >= 0xdc00 && first < 0xe000 ? cut.slice(1) : cut;
+}
+
+/**
+ * The block's text up to `from`, as the host reads it for the word's language: the lines back to a
+ * blank one (at most `CONTEXT_LINES`), or a table cell's text back to its start, as the page shows
+ * it, and its last `CONTEXT_CHARS` characters.
+ */
+export function blockBefore(state: EditorState, from: number, cell: Range | null): string {
+  const line = state.doc.lineAt(from);
+  let first = line.number;
+  while (
+    !cell &&
+    first > 1 &&
+    line.number - first < CONTEXT_LINES &&
+    state.doc.line(first - 1).length > 0
+  ) {
+    first--;
+  }
+  return lastChars(
+    shownText(state, shownRuns(state, cell ? cell.from : state.doc.line(first).from, from)),
+  );
 }
 
 /** The word before the caret and the block's text before it, or null where nobody is asked. */
@@ -85,21 +106,7 @@ function wordBeforeCaret(
   const from = pointAt(runs, found.index, 1);
   const to = pointAt(runs, found.index + found[0].length, -1);
   if (!autocorrects(state, from, to) || view.composing) return null;
-  // The block up to the word: its lines back to a blank one; a cell's text back to its start.
-  let first = line.number;
-  while (
-    !cell &&
-    first > 1 &&
-    line.number - first < CONTEXT_LINES &&
-    state.doc.line(first - 1).length > 0
-  ) {
-    first--;
-  }
-  const before = shownText(
-    state,
-    shownRuns(state, cell ? cell.from : state.doc.line(first).from, from),
-  );
-  return { ask: { from, to, word: found[0] }, before: lastChars(before) };
+  return { ask: { from, to, word: found[0] }, before: blockBefore(state, from, cell) };
 }
 
 /**

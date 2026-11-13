@@ -61,6 +61,9 @@ mod updates;
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
 
+// Dragging the window's file out of it, from the title bar's document icon.
+mod drag;
+
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
@@ -89,6 +92,13 @@ fn about(app: AppHandle) -> About {
         version: env!("REDLINES_VERSION"),
         build: env!("REDLINES_BUILD"),
     }
+}
+
+/// Whether a file dropped on the window `label` goes on to the windows (`offer`): when the windows
+/// take it (`Windows::dropped_on`), and it isn't the file this window's own icon dragged out,
+/// which the person let go of on it (`drag.rs`).
+fn drop_is_offered(windows: &windows::Windows, label: &str, dropped: &[PathBuf]) -> bool {
+    !drag::ignores_drop(label, dropped) && windows.dropped_on(label, dropped)
 }
 
 /// The person using the app: the author of their changes and comments.
@@ -343,10 +353,13 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            drag::start_file_drag,
             about,
             appearance::set_appearance,
             edit_menu::beep,
             spelling::correct_word,
+            spelling::spelling_suggestions,
+            spelling::spelling_learn,
             edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,
@@ -387,6 +400,14 @@ pub fn run() {
             agents::agent_stop,
             #[cfg(unix)]
             agents::agent_logs_open,
+            #[cfg(unix)]
+            agents::agent_update,
+            #[cfg(unix)]
+            agents::agent_sign_in,
+            #[cfg(unix)]
+            agents::agent_setup_stop,
+            #[cfg(unix)]
+            agents::agent_terminal_sign_in,
             #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]
@@ -436,7 +457,7 @@ pub fn run() {
             } = &event
             {
                 let dropped = dropped_paths(paths.iter().cloned());
-                if app.state::<windows::Windows>().dropped_on(label, &dropped) {
+                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped) {
                     offer(app, dropped);
                 }
             }
@@ -507,6 +528,28 @@ mod tests {
                 "{build}"
             );
         }
+    }
+
+    #[test]
+    fn the_file_a_window_dragged_out_is_not_offered_when_it_is_dropped_back_on_it() {
+        let _turn = drag::take_turn();
+        let dir = std::env::temp_dir().join(format!("redlines-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plan.md");
+        std::fs::write(&file, "mine").unwrap();
+        let windows = windows::Windows::with_document("doc-1", file.to_str().unwrap());
+        let dropped = vec![file.clone()];
+        drag::forget();
+        // The file dropped on the window, with no drag of it going, is a drop like Finder's.
+        assert!(drop_is_offered(&windows, "doc-1", &dropped));
+        // While the window's own icon drags it, and just after, it is not.
+        drag::remember("doc-1", &file);
+        assert!(!drop_is_offered(&windows, "doc-1", &dropped));
+        // Another window's drop of it is.
+        let other = windows::Windows::with_document("doc-2", file.to_str().unwrap());
+        assert!(drop_is_offered(&other, "doc-2", &dropped));
+        drag::forget();
+        assert!(drop_is_offered(&windows, "doc-1", &dropped));
     }
 
     #[test]

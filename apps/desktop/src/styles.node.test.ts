@@ -165,6 +165,20 @@ describe('styles.css', () => {
     expect(240 + 360).toBe(600);
   });
 
+  it('lets the file name take the pointer, for its double-click and the facts shown on hover', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // With `pointer-events: none` the pointer never reaches the name: the bar is under it.
+    expect(declared('.rl-title')).not.toContain('pointer-events');
+    // The name and the document's icon are one group in the bar's middle column, and the icon
+    // does not shrink when a long name is cut short.
+    expect(declared('.rl-title-group')).toContain('grid-column: 2');
+    expect(declared('.rl-title')).toContain('min-width: 0');
+    expect(declared('.rl-doc-icon')).toContain('flex: none');
+    // Its size is in the frame's units, as the other controls' are.
+    expect(declared('.rl-doc-icon')).toContain('width: calc(20 * var(--rl-frame))');
+  });
+
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
     const declared = (selector: string, css = all) =>
       css.find((rule) => rule.selector === selector)?.declarations ?? '';

@@ -170,6 +170,32 @@ describe('the host in a browser tab', () => {
     await host.forgetDocuments();
     expect(await host.read('sample.md')).toContain('Redlines');
   });
+
+  it('was opened for no file, no line and no text: a tab starts from sample.md', async () => {
+    const host = createHost();
+    expect(await host.windowStart()).toEqual({ path: null, line: null, text: null });
+    // Another tab starts from sample.md, whatever it was asked for.
+    const open = vi.fn<(url?: string | URL) => Window | null>(() => null);
+    vi.stubGlobal('open', open);
+    await host.openWindow();
+    await host.openWindow('sample.md', 3);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledWith(location.href);
+    expect(await host.windowStart()).toEqual({ path: null, line: null, text: null });
+  });
+
+  it('opens no tab for text, which a tab can’t be given, and says so', async () => {
+    const open = vi.fn<(url?: string | URL) => Window | null>(() => null);
+    vi.stubGlobal('open', open);
+    const host = createHost();
+    await expect(host.openWindow(undefined, undefined, '# The answer\n')).rejects.toThrow(
+      'A browser tab can’t be opened for text.',
+    );
+    expect(open).not.toHaveBeenCalled();
+    // An empty text is none, as it is for the app.
+    await host.openWindow(undefined, undefined, '');
+    expect(open).toHaveBeenCalledOnce();
+  });
 });
 
 describe('the host in the app', () => {
@@ -183,19 +209,50 @@ describe('the host in the app', () => {
     listen.mockReset();
   });
 
-  it('opens a new window, for a file and a line if it is given them', async () => {
+  it('opens a new window, for a file and a line, or for text, if it is given them', async () => {
     vi.mocked(invoke).mockResolvedValue('doc-1');
     const host = createHost();
     await host.openWindow();
     await host.openWindow('/docs/plan.md');
     await host.openWindow('/docs/plan.md', 42);
+    await host.openWindow(undefined, undefined, '# The answer\n\nIt is 42.\n');
     // src-tauri/src/windows.rs: open_window.
-    expect(invoke).toHaveBeenNthCalledWith(1, 'open_window', { path: null, line: null });
+    expect(invoke).toHaveBeenNthCalledWith(1, 'open_window', {
+      path: null,
+      line: null,
+      text: null,
+    });
     expect(invoke).toHaveBeenNthCalledWith(2, 'open_window', {
       path: '/docs/plan.md',
       line: null,
+      text: null,
     });
-    expect(invoke).toHaveBeenNthCalledWith(3, 'open_window', { path: '/docs/plan.md', line: 42 });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'open_window', {
+      path: '/docs/plan.md',
+      line: 42,
+      text: null,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(4, 'open_window', {
+      path: null,
+      line: null,
+      text: '# The answer\n\nIt is 42.\n',
+    });
+  });
+
+  it('passes the text on as it is, to the byte, whatever it holds', async () => {
+    vi.mocked(invoke).mockResolvedValue('doc-1');
+    const text = '\uFEFF# Café 🚀\r\n\r\n    code\r\n\n';
+    await createHost().openWindow(undefined, undefined, text);
+    expect(invoke).toHaveBeenCalledWith('open_window', { path: null, line: null, text });
+    // An empty text is the app's to treat as none (src-tauri/src/windows.rs: WindowStart::new).
+    await createHost().openWindow(undefined, undefined, '');
+    expect(invoke).toHaveBeenLastCalledWith('open_window', { path: null, line: null, text: '' });
+  });
+
+  it('rejects with the app’s reason when it won’t open the window', async () => {
+    const reason = 'A window opens for a file or for text, not both. Ask for one of them.';
+    vi.mocked(invoke).mockRejectedValue(reason);
+    await expect(createHost().openWindow('/docs/plan.md', undefined, 'Text')).rejects.toBe(reason);
   });
 
   it('finds the project folder of a document', async () => {
@@ -391,10 +448,24 @@ describe('the host in the app', () => {
   });
 
   it('asks the app what this window was opened for', async () => {
-    vi.mocked(invoke).mockResolvedValue({ path: '/docs/plan.md', line: 42 });
-    expect(await createHost().windowStart()).toEqual({ path: '/docs/plan.md', line: 42 });
+    vi.mocked(invoke).mockResolvedValue({ path: '/docs/plan.md', line: 42, text: null });
+    expect(await createHost().windowStart()).toEqual({
+      path: '/docs/plan.md',
+      line: 42,
+      text: null,
+    });
     // src-tauri/src/windows.rs: window_start.
     expect(invoke).toHaveBeenCalledWith('window_start');
+  });
+
+  it('is told the text of a window opened for text, each time it asks', async () => {
+    const start = { path: null, line: null, text: '# The answer\n\nIt is 42.\n' };
+    vi.mocked(invoke).mockResolvedValue(start);
+    const host = createHost();
+    // A page that reloads asks again, and the app answers the same (src-tauri/src/windows.rs).
+    expect(await host.windowStart()).toEqual(start);
+    expect(await host.windowStart()).toEqual(start);
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 
   it('opens the files the app was asked to open, and reports those it could not allow', async () => {

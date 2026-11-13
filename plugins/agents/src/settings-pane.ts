@@ -1,8 +1,10 @@
-// The Agents pane of Preferences (design, Preferences and The log): the agents found on this Mac
-// and their state, the other agents the person added (any agent that speaks the Agent Client
-// Protocol, as a name and a command), what agents may read, the answers remembered per folder,
-// and the logs. The window it draws in is the app's; this knows only the rows, and takes what it
-// needs from `deps`.
+// The Agents pane of Preferences (design, Preferences and The log): the agents found on this Mac,
+// their state and the next step for each (Update, Sign In, or the command that installs it, and
+// Check Again always), what agents may read, the answers remembered per folder, and the logs.
+// Where the host keeps a list of other agents (any agent that speaks the Agent Client Protocol, as
+// a name and a command), they are listed too; the app keeps that list out of the pane for now.
+// The window it draws in is the app's; this knows only the rows, and takes what it needs from
+// `deps`.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
 import type { AgentState } from '@redlines/plugin-api';
@@ -22,9 +24,50 @@ export interface OtherAgent {
   command: string;
 }
 
+/** What an update or a sign-in said when it ended. */
+export interface SetupResult {
+  ok: boolean;
+  /** One line of what it said last: why it failed, or what an update that changed nothing said. */
+  message: string;
+  /** It ended at once without signing in, as a login that wants a terminal does. */
+  needsTerminal?: boolean;
+  /** The person stopped it, or the window that asked for it closed. */
+  stopped?: true;
+}
+
+/** An update or a sign-in under way, which the pane shows and follows to its end. */
+export interface SetupUnderWay {
+  doing: 'update' | 'sign-in';
+  ended: Promise<SetupResult>;
+}
+
+/** An agent of the pane, and what the host can do about it. */
+export interface PaneAgent {
+  id: string;
+  name: string;
+  /** `fresh` asks the program again, where the host keeps what it found. */
+  detect(fresh?: boolean): Promise<AgentState>;
+  /** Runs the agent's own updater, for the way it was installed, which the host knows. */
+  update?(): Promise<SetupResult>;
+  /** Runs the agent's own login, which opens the browser; Redlines never sees the credentials. */
+  signIn?(): Promise<SetupResult>;
+  /** Opens Terminal with the login's command, for a login that needs one. */
+  signInInTerminal?(): Promise<void>;
+  /** Stops the update or the sign-in under way, which then ends as stopped. */
+  stop?(): Promise<void>;
+  /**
+   * An update or a sign-in already under way for the agent, as the host keeps it: the pane is drawn
+   * again when another window changes a setting, and a row drawn then follows what the one before
+   * it started, instead of offering to start it again.
+   */
+  running?(): SetupUnderWay | undefined;
+}
+
 export interface AgentsPaneDeps {
   /** The agents to list. Each is asked when the pane is drawn, never before. */
-  agents: readonly { id: string; name: string; detect(): Promise<AgentState> }[];
+  agents: readonly PaneAgent[];
+  /** Puts text on the clipboard, for the install command's Copy. Without it, there is no Copy. */
+  copy?(text: string): Promise<void>;
   /**
    * The other agents, where the host keeps a list. Adding and removing ask the person first, in
    * the host's own question, and reject with a line to show when they say no.
@@ -73,12 +116,6 @@ function row(label: string, control: HTMLElement, note?: HTMLElement): HTMLEleme
   return root;
 }
 
-function showState(control: HTMLElement, note: HTMLElement, state: AgentState): void {
-  const status = !state.found ? 'Not found' : state.signedIn ? 'Signed in' : 'Not signed in';
-  control.textContent = state.found && state.version ? `${status} · ${state.version}` : status;
-  note.textContent = state.help ?? '';
-}
-
 /**
  * Draws the pane in `container`, after what it holds. Returns a function that stops late answers
  * from being drawn once the pane is gone.
@@ -87,23 +124,29 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   let alive = true;
   const names = new Map(deps.agents.map(({ id, name }) => [id, name]));
 
+  // A login that needed a terminal ends where the person finishes it, outside this window: coming
+  // back to it, the pane looks again, once, for each agent that waits on that and has nothing
+  // under way. One look that still finds it signed out is the last, until Check Again.
+  const waiting = new Set<string>();
+  const comeBack = () => {
+    for (const look of looks) {
+      if (waiting.has(look.id) && !look.busy()) look.check(true, { viaFocus: true });
+    }
+  };
+  const looks: { id: string; check: AgentRow['check']; busy: () => boolean }[] = [];
+  window.addEventListener('focus', comeBack);
+
   for (const agent of deps.agents) {
-    const status = el('div', 'rl-pref-status', 'Checking…');
-    status.setAttribute('role', 'status');
-    const note = el('div', 'rl-pref-note');
-    container.append(row(agent.name, status, note));
-    // Run now that the pane is open: nothing in the app asks at launch.
-    void Promise.resolve()
-      .then(() => agent.detect())
-      .then(
-        (state) => state,
-        (): null => null,
-      )
-      .then((state) => {
-        if (!alive) return;
-        if (state) showState(status, note, state);
-        else status.textContent = 'Couldn’t check';
-      });
+    const drawn = agentRow(agent, deps, () => alive, waiting);
+    looks.push({
+      id: agent.id,
+      check: (fresh, options) => drawn.check(fresh, options),
+      busy: () => drawn.busy(),
+    });
+    container.append(drawn.row);
+    // Run now that the pane is open: nothing in the app asks at launch. An update or a sign-in
+    // that is already under way is followed instead.
+    drawn.start();
   }
 
   if (deps.others) container.append(otherAgents(deps.others, () => alive));
@@ -176,6 +219,231 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
 
   return () => {
     alive = false;
+    window.removeEventListener('focus', comeBack);
+  };
+}
+
+/** What the row's first line says of an agent. */
+function statusOf(state: AgentState): string {
+  if (!state.found) return state.unchecked === true ? 'Couldn’t check' : 'Not installed';
+  if (state.signedIn) return 'Signed in';
+  if (state.reason === 'signed-out') return 'Signed out';
+  // Sign-in is reported once the program has been asked, and only as it said.
+  if (state.account === undefined) return 'Needs an update';
+  return `Needs an update · ${state.account === 'signed-in' ? 'signed in' : 'signed out'}`;
+}
+
+/** What a row says while an update or a sign-in runs. */
+const DOING = { update: 'Updating…', 'sign-in': 'Signing in…' } as const;
+
+/** One agent's row, and how the pane drives it. */
+interface AgentRow {
+  row: HTMLElement;
+  /**
+   * Asks the program again, `fresh` when the host keeps an answer. `updated` is an update that
+   * just ended well, and `viaFocus` a look made because the window came back to the front.
+   */
+  check(fresh: boolean, options?: { updated?: SetupResult; viaFocus?: boolean }): void;
+  /** Draws the row for the first time: looks, or follows what is under way already. */
+  start(): void;
+  /** Whether an update or a sign-in is under way in this row. */
+  busy(): boolean;
+}
+
+/**
+ * One agent's row: its state, the version and the path of the program found (so that a stale
+ * second copy earlier on the PATH shows), and the next step as a button. The host runs the update
+ * and the sign-in, each its own fixed command; the pane only asks, can stop them, and looks again
+ * when one ends.
+ */
+function agentRow(
+  agent: PaneAgent,
+  deps: AgentsPaneDeps,
+  alive: () => boolean,
+  waiting: Set<string>,
+): AgentRow {
+  const status = el('div', 'rl-pref-status', 'Checking…');
+  status.setAttribute('role', 'status');
+  const where = el('div', 'rl-pref-note');
+  const help = el('div', 'rl-pref-note');
+  const install = el('div', 'rl-pref-inline rl-pref-actions');
+  const actions = el('div', 'rl-pref-inline rl-pref-actions');
+  const said = el('div', 'rl-pref-note rl-pref-failure');
+  said.setAttribute('role', 'status');
+  const rest = el('div');
+  rest.append(where, help, install, actions, said);
+  const root = row(agent.name, status, rest);
+
+  /** The latest question asked, so that an older answer never draws over a newer one. */
+  let asked = 0;
+  /** An update or a sign-in is under way: nothing else is started meanwhile. */
+  let activity: 'update' | 'sign-in' | null = null;
+  let last: AgentState | null = null;
+
+  /** A button of the row, which waits while the row says something is happening (`busy`). */
+  const make = (text: string, label: string, run: () => void, busy: boolean) => {
+    const made = button(text, label);
+    made.disabled = busy;
+    made.addEventListener('click', () => run());
+    return made;
+  };
+
+  const draw = (state: AgentState | null, shown?: string) => {
+    last = state;
+    status.textContent = shown ?? (state === null ? 'Couldn’t check' : statusOf(state));
+    where.textContent = state?.found
+      ? [state.version, state.path].filter((part) => part !== undefined).join(' · ')
+      : '';
+    const tooOld = state?.found === true && !state.signedIn && state.reason === 'too-old';
+    const signedOut = state?.found === true && !state.signedIn && state.reason === 'signed-out';
+    const canUpdate = tooOld && agent.update !== undefined;
+    const canSignIn = signedOut && agent.signIn !== undefined;
+    // The button says what to do, so help that told the person what to type is left out.
+    help.textContent = canSignIn ? '' : (state?.help ?? '');
+    if (activity === 'sign-in') help.textContent = 'Finish in your browser.';
+    const command = state !== null && !state.found ? state.install : undefined;
+    // While the row says something is happening, its buttons wait.
+    const busy = shown !== undefined;
+    install.replaceChildren();
+    if (command !== undefined) {
+      const code = el('code', 'rl-pref-code', command);
+      install.append(code);
+      if (deps.copy) {
+        const label = `Copy the command that installs ${agent.name}`;
+        install.append(make('Copy', label, () => copy(command), busy));
+      }
+    }
+    actions.replaceChildren();
+    if (canUpdate) {
+      actions.append(make('Update', `Update ${agent.name}`, () => updateIt(), busy));
+    }
+    if (canSignIn) {
+      actions.append(make('Sign In', `Sign in to ${agent.name}`, () => signInIt(), busy));
+    }
+    actions.append(make('Check Again', `Check ${agent.name} again`, () => check(true), busy));
+    // What is under way can be stopped, which a login the person walked away from needs.
+    if (activity !== null && agent.stop) {
+      const what = activity === 'update' ? 'update' : 'sign-in';
+      actions.append(make('Cancel', `Cancel the ${what} of ${agent.name}`, () => stopIt(), false));
+    }
+  };
+
+  const check: AgentRow['check'] = (fresh, options) => {
+    // An update or a sign-in is what the row is about; it looks again by itself when it ends.
+    if (activity !== null) return;
+    const mine = ++asked;
+    draw(null, 'Checking…');
+    void Promise.resolve()
+      .then(() => (fresh ? agent.detect(true) : agent.detect()))
+      .then(
+        (state): AgentState | null => state ?? null,
+        (): null => null,
+      )
+      .then((state) => {
+        if (!alive() || mine !== asked || activity !== null) return;
+        draw(state);
+        const ready = state?.found === true && state.signedIn;
+        if (ready) {
+          waiting.delete(agent.id);
+          // What failed before is no longer so.
+          said.textContent = '';
+        } else if (options?.viaFocus) {
+          waiting.delete(agent.id);
+        }
+        // An update that ran and left the program as old as it was says what it said, as there
+        // is nothing else to tell why: a package manager's list may lag the version needed.
+        if (options?.updated && state?.found && !state.signedIn && state.reason === 'too-old') {
+          const was = state.version === undefined ? agent.name : `${agent.name} ${state.version}`;
+          const words = options.updated.message;
+          said.textContent = `The update ran, but ${was} is still too old.${words ? ` It said: ${words}` : ''}`;
+        }
+      });
+  };
+
+  const copy = (text: string) => {
+    void deps.copy?.(text).then(
+      () => {
+        if (!alive()) return;
+        const made = [...install.querySelectorAll('button')].find((b) => b.textContent === 'Copy');
+        if (made) made.textContent = 'Copied';
+      },
+      () => {
+        if (alive()) said.textContent = 'Couldn’t copy the command.';
+      },
+    );
+  };
+
+  /**
+   * Follows an update or a sign-in, as the host runs it, to its end: says how it ended, and looks
+   * again. A login that failed at once wants a terminal, and gets one; an update that failed at
+   * once doesn't. One the person stopped says nothing.
+   */
+  const follow = async (doing: 'update' | 'sign-in', started: Promise<SetupResult>) => {
+    activity = doing;
+    said.textContent = '';
+    draw(last, DOING[doing]);
+    let note = '';
+    let finished: SetupResult | undefined;
+    try {
+      finished = await started;
+      if (finished.stopped === true) {
+        note = '';
+      } else if (!finished.ok) {
+        note =
+          doing === 'sign-in' && finished.needsTerminal && agent.signInInTerminal
+            ? await openTerminal()
+            : `${doing === 'update' ? 'The update didn’t finish' : 'Sign-in didn’t finish'}: ${finished.message}`;
+      }
+    } catch (error) {
+      note = reasonOf(error);
+    }
+    if (!alive()) return;
+    activity = null;
+    said.textContent = note;
+    check(true, finished?.ok === true && doing === 'update' ? { updated: finished } : undefined);
+  };
+
+  /** A login that wants a terminal gets one, with its command, and the pane waits for the person. */
+  const openTerminal = async (): Promise<string> => {
+    await agent.signInInTerminal?.();
+    waiting.add(agent.id);
+    return 'Sign-in needs a terminal, so Redlines opened one. Finish there, then come back here.';
+  };
+
+  const begin = (doing: 'update' | 'sign-in', running: () => Promise<SetupResult>) => {
+    if (activity !== null) return;
+    // Asked of the host from here, so that it is the host's, and so is still going if the pane is
+    // drawn again before it ends.
+    let started: Promise<SetupResult>;
+    try {
+      started = running();
+    } catch (error) {
+      started = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    void follow(doing, started);
+  };
+  const updateIt = () => begin('update', () => agent.update!());
+  const signInIt = () => begin('sign-in', () => agent.signIn!());
+  const stopIt = () => {
+    const stopped = (error?: unknown) => {
+      if (error !== undefined && alive()) said.textContent = 'Couldn’t stop it.';
+    };
+    try {
+      void Promise.resolve(agent.stop?.()).catch((error: unknown) => stopped(error ?? 'no'));
+    } catch (error) {
+      stopped(error ?? 'no');
+    }
+  };
+
+  return {
+    row: root,
+    check,
+    busy: () => activity !== null,
+    start() {
+      const going = agent.running?.();
+      if (going) void follow(going.doing, going.ended);
+      else check(false);
+    },
   };
 }
 
