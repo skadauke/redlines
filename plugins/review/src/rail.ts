@@ -61,6 +61,7 @@ import {
   changesOf,
   changeTexts,
   decideSuggestion,
+  describeChanges,
   editContext,
   element,
   errorLine,
@@ -1169,6 +1170,15 @@ function changeLine(shown: readonly ChangeShown[]): HTMLElement {
   return line;
 }
 
+/**
+ * What the changes of a suggestion did, in the card's words (`Replaced “March” with “April”`), as
+ * the note's line in the simple look, where the page shows no old text: so that Accept and Reject
+ * are not decided blind. The line is clipped to the note's lines as the arrows' is (styles.ts).
+ */
+function changeSentence(text: string, several: boolean): HTMLElement {
+  return element('div', several ? 'rl-note-change rl-note-changes' : 'rl-note-change', text);
+}
+
 class NoteView {
   readonly dom: HTMLElement;
   /** The note's dot, shown in place of the note in a narrow editor. */
@@ -1331,18 +1341,30 @@ class NoteView {
       at,
       text,
     }));
-    const change = note.change ? changesShown(parsed, note.changes ?? [note.change]) : null;
+    const marks = note.change ? (note.changes ?? [note.change]) : null;
+    const change = marks ? changesShown(parsed, marks) : null;
+    // The simple look hides the old text, so the note says in words what a click decides.
+    const sentence =
+      marks && this.rail.view.state.field(viewModeField) === 'simple'
+        ? describeChanges(parsed, marks)
+        : null;
     const first = items[0];
     const label = settled ? 'Resolved note' : 'Note';
     this.dot.setAttribute('aria-label', first ? `${label} by ${first.who.name}` : label);
-    const drawn = JSON.stringify([items, change, resolver, resolvedBy]);
+    const drawn = JSON.stringify([items, change, sentence, resolver, resolvedBy]);
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
       ...items.map(({ id, by, who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
-        if (change) item.append(changeLine(change));
+        if (change) {
+          item.append(
+            sentence === null
+              ? changeLine(change)
+              : changeSentence(sentence, (marks?.length ?? 0) > 1),
+          );
+        }
         // A new comment has no text yet, and an orphaned reply no comment: only who is writing,
         // over the box.
         if (note.id !== NEW_COMMENT && !note.orphan) {

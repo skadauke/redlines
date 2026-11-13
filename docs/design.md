@@ -397,7 +397,8 @@ mode has no counterpart in the desktop app.
   the simple look closes it, because a person who chooses to read has stopped deciding, and while
   it is open a click on a change bar opens that change's card in place of switching the look. It
   floats at the bottom of the window and closes with Esc or its close button; without it, a
-  change's card still accepts or rejects that change. It holds:
+  change's card, or its note in the rail (§5.7, in the simple look too), still accepts or rejects
+  that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
@@ -439,8 +440,9 @@ mode has no counterpart in the desktop app.
     Adding a comment in Clean switches to Redlines, as a tracked change does. In the simple look
     a change's card doesn't open on hover or on a click in the text, because the text reads as
     accepted; the bar, the note and the review bar are the ways in. Accept and Reject on a note
-    in the simple look show the change in the full markup; nothing is decided where its old text
-    is hidden.
+    decide it in place, in the simple look as in Redlines, in one step to undo, and the view and
+    the scroll stay as they were; so that the decision isn't blind, the note says what it decides
+    in the card's words ("Replaced 'March' with 'April'") where the page shows no old text.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks

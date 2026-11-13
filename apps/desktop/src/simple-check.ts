@@ -408,7 +408,7 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
-    name: 'accept-on-a-note-in-simple-decides-nothing',
+    name: 'accept-on-a-note-in-simple-decides-in-place',
     async run(editor) {
       await open(editor, 'simple');
       const before = editor.getDoc();
@@ -421,15 +421,26 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
           /Accept/.test(b.textContent + (b.getAttribute('aria-label') ?? '')),
         );
       if (!accept) return { note: 'no note with an Accept button was drawn' };
+      // What the note says it decides, before the click: in words, as a card does.
+      const says = note.querySelector('.rl-note-change')?.textContent ?? null;
+      // What scrolls the page, and where it is: a decision leaves it there.
+      const scroller = [...document.querySelectorAll<HTMLElement>('*')].find(
+        (el) =>
+          el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY),
+      );
+      const scrolled = scroller?.scrollTop ?? 0;
       accept.click();
       await frames();
-      const range = editor.view.state.selection.main;
       const problems: Problem = {};
-      if (editor.getDoc() !== before) problems['decided'] = true;
-      if (editor.getUiState().view !== 'redlines') problems['view'] = editor.getUiState().view;
+      if (!says || !/^(Replaced|Inserted|Deleted)/.test(says)) problems['says'] = says;
+      if (editor.getDoc() === before || editor.getDoc().includes('<!--sub p7qd')) {
+        problems['decided'] = false;
+      }
+      if (editor.getUiState().view !== 'simple') problems['view'] = editor.getUiState().view;
       if (editor.getUiState().markupView !== 'simple')
         problems['markupView'] = editor.getUiState().markupView;
-      if (range.empty) problems['selection'] = 'empty';
+      const moved = (scroller?.scrollTop ?? 0) - scrolled;
+      if (Math.abs(moved) > 1) problems['scroll'] = moved;
       return Object.keys(problems).length ? problems : null;
     },
   },

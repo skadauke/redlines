@@ -1,9 +1,8 @@
 // What the parts of the review interface share: the editor they work on and its changes, how they
 // write to the ledger, and how a refused action shows.
 
-import { EditorSelection } from '@codemirror/state';
-import { EditorView, type Rect } from '@codemirror/view';
-import { type Author, type Editor, setViewModeEffect, viewModeField } from '@redlines/editor';
+import type { EditorView, Rect } from '@codemirror/view';
+import type { Author, Editor } from '@redlines/editor';
 import {
   type BlockType,
   EditError,
@@ -61,44 +60,16 @@ export function suggestionRange(ctx: ReviewContext, id: string): Range | null {
 
 /**
  * Accepts or rejects the whole suggestion that change `id` is in, in one step to undo, or none of
- * it when one mark is refused. A mark alone is decided by its id, as always. Returns whether it
- * decided.
- *
- * Nothing is decided in Simple, where the old text of a change is hidden (design: No decision is
- * made in Simple): the view switches to Redlines and the suggestion is shown, selected and in view,
- * for the person to decide where it can be read. This one function holds the rule, so the notes,
- * the cards and the review bar's buttons all obey it, and it returns false.
+ * it when one mark is refused. A mark alone is decided by its id, as always. It decides in any
+ * view and changes none: in the simple look, where the page doesn't show the old text, the note
+ * says what it decides before the click (#326), and the selection and the scroll stay where they
+ * were. This is the one place that decides, for the notes, the cards and the review bar alike.
  *
  * @throws EditError when the editor refuses.
  */
-export function decideSuggestion(
-  ctx: ReviewContext,
-  how: 'accept' | 'reject',
-  id: string,
-): boolean {
-  const { view } = ctx.editor;
-  if (view.state.field(viewModeField) === 'simple') {
-    const range = suggestionRange(ctx, id);
-    // The switch alone, not a choice: the markup view stays Simple.
-    view.dispatch({
-      ...(range ? { selection: EditorSelection.range(range.from, range.to) } : {}),
-      effects: [
-        setViewModeEffect.of('redlines'),
-        ...(range
-          ? [
-              EditorView.scrollIntoView(EditorSelection.range(range.from, range.to), {
-                y: 'center' as const,
-              }),
-            ]
-          : []),
-      ],
-      userEvent: 'select.review',
-    });
-    return false;
-  }
+export function decideSuggestion(ctx: ReviewContext, how: 'accept' | 'reject', id: string): void {
   const ids = suggestionIn(ctx, id).map((mark) => mark.id);
   ctx.editor[how](ids.length > 1 ? ids : id);
-  return true;
 }
 
 /**
@@ -271,6 +242,45 @@ export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   const added =
     change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
   return { old, added };
+}
+
+/** Text as a card quotes it, in quotation marks (see `readable`). */
+const quote = (text: string) => `“${readable(text)}”`;
+
+/**
+ * Whether deleted text is a break alone: a block break with the next block's prefix (`## `, `- `,
+ * `> `), or a hard line break, which joins what it separated (format §3.4).
+ */
+function isBreak(text: string): boolean {
+  return text.includes('\n') && /^(?:[\s>\\]|#{1,6} |[-*+] |\d{1,9}[.)] )*$/.test(text);
+}
+
+/**
+ * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
+ * `Formatted: Bold`. A
+ * substitution with no old text, such as the second part of one that untracked typing split
+ * (format §3.10), inserted its text.
+ */
+export function describeChange(parsed: Parsed, change: MarkRange): string {
+  const row = rowsDone([change]);
+  if (row !== null) return row;
+  const { old, added, label } = changeTexts(parsed, change);
+  if (label !== undefined) return `Formatted: ${label}`;
+  if (change.kind === 'split') return 'Inserted paragraph break';
+  if (change.kind === 'ins' || (change.kind === 'sub' && old === '')) {
+    return `Inserted ${quote(added)}`;
+  }
+  if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
+  return `Replaced ${quote(old)} with ${quote(added)}`;
+}
+
+/** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
+ * change's words. */
+export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
+  const rows = changes.length > 1 ? rowsDone(changes) : null;
+  if (rows !== null) return rows;
+  return changes.map((change) => describeChange(parsed, change)).join(' · ');
 }
 
 const INLINE_NAMES: Record<InlineFormat, string> = {

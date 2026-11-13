@@ -50,7 +50,7 @@ These would make it a failure even if it technically works:
 - **Another person's words credited to an agent:** a join that takes in someone else's pending text, or a comment's anchor, and writes it again as the agent's.
 - **A change hidden without a trace.** Simple hides how a line changed, never that it did.
 - **A click in the margin that moves the text under the pointer,** or the caret or the selection.
-- **Deciding blind:** the review bar stepping through changes that the page doesn't show.
+- **Deciding blind:** the review bar stepping through changes that the page doesn't show, or a note's Accept that doesn't say what it accepts.
 - **New chrome:** a toolbar, a mode switch, a badge, a second margin.
 - **Slower typing.**
 
@@ -262,9 +262,9 @@ The setting reaches every window, for the documents each opens next and for its 
 ### The rail, cards and the review bar in the simple look
 
 - **The rail** is as in Redlines: threads, the notes of noted suggestions, drafts, resolved threads by the setting, dots in a narrow window. Selecting a suggestion's note tints its changed text, as it does in Redlines, which in Simple is how its new words show.
-- **Cards.** **Call:** none appears on hover in Simple, and a click on the text pins none, because the text reads as accepted, and a card over plain-looking words would surprise; the bar, the note and the review bar are the ways in. A note's Accept and Reject decide as in Redlines.
+- **Cards.** **Call:** none appears on hover in Simple, and a click on the text pins none, because the text reads as accepted, and a card over plain-looking words would surprise; the bar, the note and the review bar are the ways in. A note's Accept and Reject decide as in Redlines, in place (below).
 - **The review bar** shows the full markup when it opens or moves, from the simple look as from Clean and Raw (today's `opening` in `plugins/review/src/bar.ts`, unchanged). **Call:** because the bar is for deciding change by change, and in Simple a deletion is invisible: nothing is decided blind. Closing the bar leaves Redlines. **Call:** closing it leaves the view as it is, as it does today, because the person may still be reading the changes.
-- **No decision is made in Simple.** **Call:** a note's Accept or Reject, in Simple, switches to Redlines and shows the change, selected and in view, without deciding it; the person then decides it where its old text shows, with the note, the card or the review bar. One function decides for all of them (`decideSuggestion`), so the rule holds for the review bar's buttons too. **Call:** while the review bar is open the view stays Redlines: a click on a change bar then opens that change's card, in place of switching, and showing the simple look any other way closes the review bar, because a person who chooses to read has stopped deciding. Reason, for all three: the anti-goal "deciding blind", for a one-change rewrite would otherwise be a whole paragraph accepted away unseen.
+- **A note decides in place (#326).** This design held a rule, "no decision is made in Simple": a note's Accept or Reject switched to Redlines and showed the change, selected and in view, without deciding it, so that nobody decided a change whose old text the page hides. #326 overruled it for the notes. **Call:** in the simple look a note's Accept and Reject decide the suggestion, as in Redlines, in one step to undo (⌘Z), and the view stays as it is, with the selection and the scroll where they were. **Call:** so that the decision isn't blind, the note says what it decides before the click, in the card's words (`Replaced “March” with “April”`, `Deleted “The old exporter stays as it is.”`, shortened as a card's quote is, at 40 characters), where Redlines' notes show the old text struck and an arrow, since there the page strikes the old text too. One function still decides for all of them (`decideSuggestion`), for the notes, the cards and the review bar alike. **Call (the issue's open question):** the review bar keeps showing the full markup when it opens or moves, because it is for deciding change by change, and its Accept and Reject don't say what they decide, as a note's now does; the person who wants to decide from the simple look uses the notes. **Call:** while the review bar is open the view stays Redlines: a click on a change bar then opens that change's card, in place of switching, and showing the simple look any other way closes the review bar, because a person who chooses to read has stopped deciding.
 
 ### What the file gets
 
@@ -377,7 +377,7 @@ Simple adds to `analyze` one comparison per mark and no new work: it draws less 
 | `plugins/formatting/src/index.ts` | 2 | Switch to the markup view |
 | `plugins/review/src/rail.ts` | 2 | The rail in Simple; switch to the markup view |
 | `plugins/review/src/cards.ts` | 3 | Cards on struck blocks |
-| `plugins/review/src/shared.ts`, `bar.ts`, `rail.ts` | 2 | No decision in Simple; the bar's click when the review bar is open |
+| `plugins/review/src/shared.ts`, `bar.ts`, `rail.ts` | 2 | The bar's click when the review bar is open; since #326 a note decides in place in Simple and says what in the card's words (`describeChange`, moved to `shared.ts`) |
 | `packages/editor/src/preview/table.ts` | 3 | A rewritten cell: old above new |
 | `apps/desktop/src/menu-model.ts`, `ui/titlebar.ts`, `ui/icons.ts` | 2 | Three views (Simple is a look, #303), keys, icons |
 | `apps/desktop/src/settings.ts`, `main.ts` | 2 | The markup view kept and passed |
@@ -462,7 +462,7 @@ Each stage is one PR, ships on its own and is worth having without the others.
 2. **People's edits are never joined:** they are recorded as typed, as in Word, Google Docs and Pages.
 3. **No deletion balloons in the margin,** newer Word for Mac's default: #183 is answered by one change for a rewrite, struck blocks, and Simple.
 4. **Simple is Redlines' simple look, no fourth view (#303), and the view keys follow the menu's order** (Redlines ⌥⌘2, Raw ⌥⌘3); a click on a bar switches the looks both ways, and nothing else does.
-5. **The look you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in the simple look; and the simple look keeps the rail, shows no hover cards, hands the review bar to Redlines, and decides nothing: Accept and Reject there show the change in Redlines.
+5. **The look you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in the simple look; and the simple look keeps the rail, shows no hover cards and hands the review bar to Redlines; a note's Accept and Reject there decide in place and say what they decide (#326, which overruled "decides nothing").
 
 ## Left to the builder
 
