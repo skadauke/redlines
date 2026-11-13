@@ -30,38 +30,38 @@ describe('segmentsOf', () => {
 
   it('marks only the screen line that holds a change, though the paragraph wraps over three', () => {
     expect(segmentsOf(line, screen, [{ from: 200, to: 205, color: 3 }])).toEqual([
-      { from: 180, top: 34, bottom: 58, colors: [3] },
+      { from: 180, to: 290, top: 34, bottom: 58, colors: [3] },
     ]);
   });
 
   it('is one bar as tall as the paragraph when every screen line holds a change', () => {
     expect(segmentsOf(line, screen, [{ from: 100, to: 400, color: 3 }])).toEqual([
-      { from: 100, top: 0, bottom: 82, colors: [3] },
+      { from: 100, to: 400, top: 0, bottom: 82, colors: [3] },
     ]);
   });
 
   it('joins the screen lines that a change runs over, and no others', () => {
     expect(segmentsOf(line, screen, [{ from: 250, to: 350, color: 3 }])).toEqual([
-      { from: 180, top: 34, bottom: 82, colors: [3] },
+      { from: 180, to: 400, top: 34, bottom: 82, colors: [3] },
     ]);
   });
 
   it('puts a point, a deletion the view hides, on the screen line it stands at', () => {
     const at = (pos: number) => segmentsOf(line, screen, [{ from: pos, to: pos, color: 2 }]);
-    expect(at(150)).toEqual([{ from: 100, top: 0, bottom: 34, colors: [2] }]);
+    expect(at(150)).toEqual([{ from: 100, to: 180, top: 0, bottom: 34, colors: [2] }]);
     // Where one screen line ends and the next begins, it is on the next; at the paragraph's end, on
     // the last.
-    expect(at(180)).toEqual([{ from: 180, top: 34, bottom: 58, colors: [2] }]);
-    expect(at(400)).toEqual([{ from: 290, top: 58, bottom: 82, colors: [2] }]);
-    expect(at(100)).toEqual([{ from: 100, top: 0, bottom: 34, colors: [2] }]);
+    expect(at(180)).toEqual([{ from: 180, to: 290, top: 34, bottom: 58, colors: [2] }]);
+    expect(at(400)).toEqual([{ from: 290, to: 400, top: 58, bottom: 82, colors: [2] }]);
+    expect(at(100)).toEqual([{ from: 100, to: 180, top: 0, bottom: 34, colors: [2] }]);
   });
 
   it('leaves the next screen line alone when a change ends where the line breaks', () => {
     expect(segmentsOf(line, screen, [{ from: 120, to: 180, color: 3 }])).toEqual([
-      { from: 100, top: 0, bottom: 34, colors: [3] },
+      { from: 100, to: 180, top: 0, bottom: 34, colors: [3] },
     ]);
     expect(segmentsOf(line, screen, [{ from: 180, to: 200, color: 3 }])).toEqual([
-      { from: 180, top: 34, bottom: 58, colors: [3] },
+      { from: 180, to: 290, top: 34, bottom: 58, colors: [3] },
     ]);
   });
 
@@ -72,8 +72,8 @@ describe('segmentsOf', () => {
         { from: 300, to: 310, color: 4 },
       ]),
     ).toEqual([
-      { from: 100, top: 0, bottom: 34, colors: [3] },
-      { from: 290, top: 58, bottom: 82, colors: [4] },
+      { from: 100, to: 180, top: 0, bottom: 34, colors: [3] },
+      { from: 290, to: 400, top: 58, bottom: 82, colors: [4] },
     ]);
   });
 
@@ -85,14 +85,14 @@ describe('segmentsOf', () => {
         { from: 200, to: 210, color: 3 },
       ]),
     ).toEqual([
-      { from: 100, top: 0, bottom: 34, colors: [3, 4] },
-      { from: 180, top: 34, bottom: 58, colors: [3] },
+      { from: 100, to: 180, top: 0, bottom: 34, colors: [3, 4] },
+      { from: 180, to: 290, top: 34, bottom: 58, colors: [3] },
     ]);
   });
 
   it('is a change that began above and ends below the paragraph: all of it', () => {
     expect(segmentsOf(line, screen, [{ from: 10, to: 900, color: 3 }])).toEqual([
-      { from: 100, top: 0, bottom: 82, colors: [3] },
+      { from: 100, to: 400, top: 0, bottom: 82, colors: [3] },
     ]);
   });
 
@@ -111,7 +111,7 @@ describe('segmentsOf', () => {
       { top: 38, bottom: 56, color: 2 },
     ];
     expect(segmentsOf(line, screen, spans, pieces)).toEqual([
-      { from: 100, top: 0, bottom: 58, colors: [2] },
+      { from: 100, to: 290, top: 0, bottom: 58, colors: [2] },
     ]);
     // A piece on a screen line with other changes of other authors adds its color there.
     expect(
@@ -121,7 +121,7 @@ describe('segmentsOf', () => {
         [{ from: 200, to: 205, color: 3 }],
         [{ top: 38, bottom: 56, color: 2 }],
       ),
-    ).toEqual([{ from: 180, top: 34, bottom: 58, colors: [2, 3] }]);
+    ).toEqual([{ from: 180, to: 290, top: 34, bottom: 58, colors: [2, 3] }]);
     // A piece that is on no screen line of this paragraph is nobody's.
     expect(segmentsOf(line, screen, [], [{ top: 500, bottom: 520, color: 2 }])).toEqual([]);
   });
@@ -130,7 +130,7 @@ describe('segmentsOf', () => {
     const one = { from: 0, to: 20 };
     expect(
       segmentsOf(one, [{ from: 0, to: 20, top: 0, bottom: 20 }], [{ from: 5, to: 6, color: 3 }]),
-    ).toEqual([{ from: 0, top: 0, bottom: 20, colors: [3] }]);
+    ).toEqual([{ from: 0, to: 20, top: 0, bottom: 20, colors: [3] }]);
   });
 });
 

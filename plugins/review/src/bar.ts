@@ -385,13 +385,14 @@ class Bar {
  * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
  * the card of the change on that line opens, in place of the switch between Redlines' two looks,
  * which the review bar would leave to the person who has stopped deciding. Nothing otherwise.
- * `pos` is where the bar's line starts.
+ * `pos` is where the bar's line starts, and `span` the part of a line that wraps which the piece
+ * of the bar that was clicked stands beside: the change there is the one.
  */
 export function barClickHandler(
   ctx: ReviewContext,
   pin: (view: EditorView, id: string) => void,
-): (view: EditorView, pos: number, mark?: string) => boolean {
-  return (view, pos, mark) => {
+): (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean {
+  return (view, pos, mark, span) => {
     if (!isBarOpen(view.state)) return false;
     // The bar of a struck block is its change's own: found by its id, not by its place.
     if (mark !== undefined) {
@@ -412,7 +413,14 @@ export function barClickHandler(
         const span = segmentSpan(segment);
         return span.to < line.from && !view.state.sliceDoc(span.to, line.from).trim();
       });
-    const found = changes.find(onLine) ?? changes.findLast(above);
+    // The piece of the bar beside some screen lines of a paragraph that wraps: the change there.
+    const beside = (change: MarkRange) =>
+      !!span &&
+      change.segments.some((segment) => {
+        const at = segmentSpan(segment);
+        return at.from < span.to && at.to > span.from;
+      });
+    const found = changes.find(beside) ?? changes.find(onLine) ?? changes.findLast(above);
     if (found) pin(view, found.id);
     // The bar is open: a click never switches the view.
     return true;
