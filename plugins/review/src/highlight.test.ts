@@ -109,6 +109,46 @@ describe('the Highlight command', () => {
     }
   });
 
+  it('leaves the underscores of `_emphasis_` out of the word under the caret', () => {
+    // CodeMirror's word holds them. At the end of the body the closer would have no place after
+    // the closing `_` (format §3.1), and the highlight is on the word that the emphasis is on.
+    for (const [body, word] of [
+      ['This is _important_', 'important'],
+      ['This is _important_ now.', 'important'],
+      ['This is __important__', 'important'],
+      ['Use snake_case_', 'snake_case'],
+      ['A _snake_case_ here', 'snake_case'],
+    ] as const) {
+      for (const offset of [0, 3, word.length]) {
+        const { editor, notices } = mount(file(body, PEOPLE));
+        caretAt(editor, place(editor, word).from + Math.min(offset, word.length));
+        expect(editor.commands.run(HIGHLIGHT_COMMAND), `${body} at ${offset}`).toBe(true);
+        const [mark] = highlights(editor);
+        expect(doc(editor), `${body} at ${offset}`).toContain(
+          `<!--hl ${mark!.id}-->${word}<!--/${mark!.id}-->`,
+        );
+        // The underscores are outside it, as they were.
+        expect(doc(editor).replace(/<!--\/?(?:hl )?[a-z0-9]{4}-->/g, '')).toContain(body);
+        expect(notices, `${body} at ${offset}`).toEqual([]);
+        unmountAll();
+      }
+    }
+    // `*emphasis*` has no underscores to leave out, and is on the word as before.
+    const { editor } = mount(file('This is *important*', PEOPLE));
+    caretAt(editor, place(editor, 'important').from + 2);
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    const [mark] = highlights(editor);
+    expect(doc(editor)).toContain(`*<!--hl ${mark!.id}-->important<!--/${mark!.id}-->*`);
+  });
+
+  it('says there is no text when the word under the caret is nothing but underscores', () => {
+    const { editor, notices } = mount(file('One ___ two.', PEOPLE));
+    caretAt(editor, place(editor, '___').from + 1);
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(false);
+    expect(notices).toEqual(['Select some text to highlight.']);
+    expect(highlights(editor)).toEqual([]);
+  });
+
   it('finds the word at a caret beside a hidden marker, at either end of it', () => {
     const commented = file('The <!--cmt c2dk-->importer<!--/c2dk--> ships.', [
       ...PEOPLE,

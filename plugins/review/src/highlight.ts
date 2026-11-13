@@ -74,8 +74,23 @@ export function highlightTitle(state: EditorState): string {
 }
 
 /**
+ * The word without the underscores at its ends, or null for a word of nothing else. CodeMirror's
+ * words hold `_`, which is the delimiter of `_emphasis_`: a marker would change how it flanks, and
+ * at the end of the body a highlight on the word with its underscores has no place (format §3.1,
+ * rule 5). The underscores inside a word (`snake_case`) stay.
+ */
+function withoutUnderscores(state: EditorState, word: Range): Range | null {
+  const text = state.sliceDoc(word.from, word.to);
+  const start = /^_*/.exec(text)?.[0].length ?? 0;
+  if (start === text.length) return null;
+  const end = /_*$/.exec(text)?.[0].length ?? 0;
+  return { from: word.from + start, to: word.to - end };
+}
+
+/**
  * What a new highlight is on: the selection, or else the word under the caret (on screen, a caret
- * beside a hidden marker is at the end of the word past it), or else nothing.
+ * beside a hidden marker is at the end of the word past it) without the underscores of emphasis
+ * around it, or else nothing.
  */
 function highlightTarget(state: EditorState): Range | null {
   const { from, to, empty, head } = state.selection.main;
@@ -84,7 +99,7 @@ function highlightTarget(state: EditorState): Range | null {
     state.wordAt(head) ??
     state.wordAt(pastHidden(state, head, true)) ??
     state.wordAt(pastHidden(state, head, false));
-  return word ? { from: word.from, to: word.to } : null;
+  return word ? withoutUnderscores(state, { from: word.from, to: word.to }) : null;
 }
 
 /**
