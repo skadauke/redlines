@@ -235,6 +235,18 @@ export class DocumentController {
   }
 
   /**
+   * Starts an untitled document that holds `text`, as if it had been typed or pasted into an empty
+   * one: it has unsaved edits, so closing it asks whether to save, and Save asks where. Like any
+   * document with edits, it is clean again if the text is all taken away. The text goes in as a
+   * document is loaded: not as an edit, which Track Changes would mark, and with no history to
+   * undo it away. An empty `text` is `create()`.
+   */
+  async createWith(text: string): Promise<void> {
+    if (text === '') return this.create();
+    if (await this.#confirmReplace()) this.#load(null, text, '');
+  }
+
+  /**
    * Saves the unsaved edits, or asks where when there is no file yet. When the file changed on
    * disk since the editor last synced with it, asks first whether to overwrite it. Resolves to
    * whether the edits are saved.
@@ -566,12 +578,17 @@ export class DocumentController {
     }
   }
 
-  #load(path: string | null, text: string): void {
+  /**
+   * Shows `text` as the document at `path`, the text of the file. `saved` is what the document
+   * counts as saved, which is `text` unless it starts with unsaved edits: an untitled document made
+   * with text starts from an empty one (`createWith`), and the text is its edit.
+   */
+  #load(path: string | null, text: string, saved: string = text): void {
     this.#generation++;
     this.#diskSteps = 0;
     // Set first: replacing the editor's text may report an edit, which compares against it.
-    this.#base = text;
-    this.#disk = text;
+    this.#base = saved;
+    this.#disk = saved;
     this.#savedAt = null;
     this.#onLoading(path);
     this.#editor.setDoc(text);
@@ -579,7 +596,7 @@ export class DocumentController {
     this.#state = {
       path,
       name: path === null ? UNTITLED : basename(path),
-      dirty: false,
+      dirty: text !== saved,
       notice: everyone ? TRACKING_FOR_EVERYONE : null,
       writing: this.#agentPending > 0,
     };

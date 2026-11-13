@@ -91,7 +91,7 @@ function nodeHost(): Host {
     askToOverwrite: () => Promise.resolve('cancel'),
     askToDiscardDraft: () => Promise.resolve(false),
     openWindow: () => Promise.resolve(),
-    windowStart: () => Promise.resolve({ path: null, line: null }),
+    windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => Promise.resolve(''),
     askToSaveForImage: () => Promise.resolve(false),
     chooseImages: () => Promise.resolve(null),

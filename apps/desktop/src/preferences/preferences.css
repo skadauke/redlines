@@ -293,6 +293,30 @@ select:focus-visible {
   padding-top: 2px;
 }
 
+/* An agent's next step, and the command that installs it, under its state; nothing, no space. */
+.rl-pref-actions {
+  margin-top: 8px;
+}
+
+.rl-pref-actions:empty {
+  display: none;
+}
+
+.rl-pref-actions .rl-pref-button {
+  flex: none;
+}
+
+.rl-pref-code {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--rl-font-mono);
+  font-size: var(--rl-size-ui-small);
+  line-height: 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .rl-pref-list {
   display: flex;
   flex-direction: column;

@@ -1,0 +1,30 @@
+---
+title: "Penguin bills"
+author: Ada Lovelace
+date: 2026-11-13
+format:
+  html:
+    code-fold: true
+---
+
+## Setup
+
+Quarto and R Markdown keep their options in the chunk's header, and Quarto in lines that start with `#|`:
+
+```{r setup, include=FALSE}
+library(palmerpenguins)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{python}
+#| label: fig-bills
+#| echo: false
+import matplotlib.pyplot as plt
+plt.hist(penguins["bill_length_mm"])
+```
+
+The mean bill is `r round(mean(penguins$bill_length_mm, na.rm = TRUE), 1)` mm long, as @fig-bills shows.
+
+::: {.callout-note}
+A callout, which a preview shows as the text it holds.
+:::

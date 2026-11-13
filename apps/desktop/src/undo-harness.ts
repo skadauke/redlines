@@ -176,7 +176,7 @@ export async function openWindow(doc: string): Promise<Window> {
     addImages: () => Promise.resolve({ paths: [], refused: [] }),
     listenForImageDrops: () => Promise.resolve(() => {}),
     openWindow: () => Promise.resolve(),
-    windowStart: () => Promise.resolve({ path: null, line: null }),
+    windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
