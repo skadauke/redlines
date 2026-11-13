@@ -93,6 +93,14 @@ describe('Editor.wordAt', () => {
     expect(editor.wordAt(12)?.word).toBe('plain');
   });
 
+  it('is no word when it is longer than any word, which no checker is asked about', () => {
+    const long = 'a'.repeat(101);
+    const editor = load(`Hello ${long} there`);
+    expect(editor.wordAt(20)).toBeNull();
+    const fits = 'a'.repeat(100);
+    expect(load(`Hello ${fits} there`).wordAt(20)?.word).toBe(fits);
+  });
+
   it('reads the text before the word from the start of its paragraph', () => {
     const editor = load('First paragraph.\n\nSecond one has teh word.');
     const found = editor.wordAt(18 + 15);
