@@ -26,6 +26,11 @@ const BEFORE = /[\p{L}\p{N}'’]*$/u;
 const AFTER = /^[\p{L}\p{N}'’]*/u;
 /** Letters, with an apostrophe inside: what the checker is asked about. */
 const WORD = /^\p{L}+(?:['’]\p{L}+)*$/u;
+/**
+ * The longest word asked about: a run of letters longer than any word, such as a long line of
+ * `a`s, goes to no checker, and into no dictionary.
+ */
+const MAX_WORD = 100;
 
 /**
  * How many characters of the shown text `runs` come before the document position `pos`: a position
@@ -64,7 +69,7 @@ export function wordAt(view: EditorView, pos: number): WordAt | null {
   while (end > start && /['’]/.test(shown[end - 1] ?? '')) end--;
   if (at < start || at > end || start === end) return null;
   const word = shown.slice(start, end);
-  if (!WORD.test(word)) return null;
+  if (word.length > MAX_WORD || !WORD.test(word)) return null;
   const from = pointAt(runs, start, 1);
   const to = pointAt(runs, end, -1);
   if (!autocorrects(state, from, to) || view.composing) return null;

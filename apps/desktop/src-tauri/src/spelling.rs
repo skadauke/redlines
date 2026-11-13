@@ -40,9 +40,17 @@ pub struct Query {
 /// nothing a paragraph further back would add.
 const CONTEXT_CHARS: usize = 500;
 
-/// Whether `word` is one the editor may ask about: letters, with an apostrophe inside. Anything else
-/// is left unsaid, so that no one is sent whatever text a page sends.
+/// The most characters of a word the checker is asked about, or the dictionary is given: a run of
+/// letters longer than any word is no word.
+const MAX_WORD_CHARS: usize = 100;
+
+/// Whether `word` is one the editor may ask about: letters, with an apostrophe inside, and no more
+/// than `MAX_WORD_CHARS`. Anything else is left unsaid, so that no one is sent whatever text a page
+/// sends.
 fn is_word(word: &str) -> bool {
+    if word.chars().count() > MAX_WORD_CHARS {
+        return false;
+    }
     let mut chars = word.chars().peekable();
     let mut previous_letter = false;
     let mut any = false;
@@ -432,6 +440,13 @@ mod tests {
         ] {
             assert!(query(word, "").is_none(), "{word:?} is no word");
         }
+    }
+
+    #[test]
+    fn a_run_of_letters_longer_than_any_word_is_no_word() {
+        assert!(query(&"a".repeat(MAX_WORD_CHARS), "").is_some());
+        assert!(query(&"a".repeat(MAX_WORD_CHARS + 1), "").is_none());
+        assert!(!is_word(&"é".repeat(MAX_WORD_CHARS + 1)));
     }
 
     #[test]
