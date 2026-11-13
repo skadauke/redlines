@@ -247,6 +247,21 @@ The window, on the desktop:
   Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
+- **Outline.** In a document with two or more headings, a column of short lines stands in the left
+  margin, one for each heading, longer for the higher levels, with the line of the section you are
+  reading in ink as you scroll. Where the page can go no further, so that the last headings can't
+  reach the top, it is the last one in view, and a heading you clicked stays the one you are
+  reading until the page moves from its end. Hovering over it opens it, with a short animation,
+  into a list of the headings' text with the section you are reading in view, and moving the pointer
+  away closes it; a click on a heading goes to it, the caret on its line and the line at the top of
+  the page. It stands in the pane the text scrolls in, so it moves with the file sidebar, takes no
+  click but its own (the margin beside it holds the change bars), and shows its lines only where the
+  margin has room for them beside the bars; where it has none, View › Show Outline (⌃⌘O) opens the
+  list, and says so when there are fewer than two headings. The list is a navigation landmark of
+  buttons for VoiceOver: ⌃⌘O puts the focus on the heading you are reading, the arrows move between
+  headings, Return goes to one and Escape gives the focus back to the text. Headings read as the
+  text does with every pending change accepted, in every view: a heading deleted whole isn't listed,
+  Redlines included, where its card is. It doesn't print.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
   over or select them, not at rest.
 - **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
@@ -987,8 +1002,8 @@ the same identity and the sandbox entitlement that an app extension must have
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `tables` (the Table menu), `agents` and
-the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu),
+`agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
@@ -1002,7 +1017,7 @@ written.
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
 | `export`     | HTML, clean Markdown and review-view export                                  | Files                      |
-| `outline`    | The outline panel and dragging sections                                      | —                          |
+| `outline`    | The outline of the headings in the left margin; dragging sections to come    | —                          |
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
