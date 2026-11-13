@@ -582,11 +582,13 @@ const ask = createAsk(editor, {
   showThread: (thread) => review.showThread(thread),
   showLog: () => showAgentLogs(),
   openPreferences: () => openAgentPreferences(),
-  // A long answer worth keeping or editing: an Untitled document in a new window.
+  // A long answer worth keeping or editing: an Untitled document in a new window. Ask keeps the
+  // bubble until the window is open, and says so in a notice when it can't be (a browser tab is
+  // refused text on purpose); this logs why.
   openInNewWindow: (text) =>
-    void host.openWindow(undefined, undefined, text).catch((error: unknown) => {
+    host.openWindow(undefined, undefined, text).catch((error: unknown) => {
       console.error('Could not open a new window', error);
-      notice.flash('Couldn’t open a new window.');
+      throw error;
     }),
 });
 

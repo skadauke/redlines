@@ -30,9 +30,10 @@ export interface AskOptions extends AskDeps {
   showThread?: (thread: string) => boolean;
   /**
    * Opens `text`, Markdown, as an Untitled document in a new window. Without it, Open in New Window
-   * is not offered.
+   * is not offered. The bubble goes once the window is open; if this rejects, it stays, and says
+   * so in a notice.
    */
-  openInNewWindow?: (text: string) => void;
+  openInNewWindow?: (text: string) => void | Promise<void>;
   /** Puts text on the clipboard. Default: the page's own. */
   copy?: (text: string) => Promise<void> | void;
   /** Shows a failed run's log. */
@@ -83,6 +84,8 @@ interface Open {
    * after a stop or a failure, and not after an answer.
    */
   lastQuestion: { text: string; answers: number };
+  /** Whether a new window is being opened for it, so that a second press waits for that. */
+  opening: boolean;
   unsubscribe: () => void;
 }
 
@@ -203,14 +206,26 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       makeComment,
       openWindow: () => {
         const turns = session.state.turns;
-        if (turns.length === 0) return;
-        options.openInNewWindow?.(exchangeAsMarkdown(quote, turns));
-        close(true);
+        const mine = open;
+        if (!mine || turns.length === 0 || mine.opening) return;
+        const text = exchangeAsMarkdown(quote, turns);
+        mine.opening = true;
+        // The window may take a moment, and may not open: the exchange stays until it has.
+        void new Promise<void>((resolve) => resolve(options.openInNewWindow?.(text)))
+          .then(
+            () => {
+              if (open === mine) close(true);
+            },
+            () => options.notice('Couldn’t open a new window.'),
+          )
+          .finally(() => {
+            mine.opening = false;
+          });
       },
       copy: () => {
         const answer = session.state.turns.at(-1)?.answer;
         if (answer === undefined) return;
-        void Promise.resolve((options.copy ?? copyText)(answer)).then(
+        void new Promise<void>((resolve) => resolve((options.copy ?? copyText)(answer))).then(
           () => options.notice('Copied the answer.'),
           () => options.notice('Couldn’t copy the answer.'),
         );
@@ -241,6 +256,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       quote,
       generation: options.document.generation(),
       lastQuestion: { text: '', answers: 0 },
+      opening: false,
       unsubscribe: session.subscribe(render),
     };
     doc.addEventListener('keydown', onKey);

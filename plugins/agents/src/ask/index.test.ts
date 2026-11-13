@@ -41,6 +41,10 @@ interface Options {
   scope?: 'folder' | 'document';
   consent?: Record<string, AgentScope | 'no'>;
   window?: boolean;
+  /** What opening a window does, besides recording the text: it may take a while, or fail. */
+  openWindow?: (text: string) => void | Promise<void>;
+  /** What Copy does, besides recording the text: it may fail. */
+  copyTo?: (text: string) => void | Promise<void>;
   view?: 'clean' | 'raw' | 'redlines';
   generation?: { value: number };
 }
@@ -100,12 +104,20 @@ function mount(options: Options = {}) {
     },
     copy: (text) => {
       copied.push(text);
+      return options.copyTo?.(text);
     },
     attachToField: (field) => {
       attached.push(field);
       return () => {};
     },
-    ...(options.window === false ? {} : { openInNewWindow: (text: string) => opened.push(text) }),
+    ...(options.window === false
+      ? {}
+      : {
+          openInNewWindow: (text: string) => {
+            opened.push(text);
+            return options.openWindow?.(text);
+          },
+        }),
   };
   const ask = createAsk(editor, base);
   mounted.push({ editor, ask });
@@ -914,7 +926,101 @@ describe('keeping an answer', () => {
     await answered();
     label('Open in New Window')?.click();
     expect(opened).toEqual(['# What is a lien?\n\n> first lien\n\nA lien is a claim.\n']);
-    expect(asking.isOpen()).toBe(false);
+    // The bubble goes once the window is open.
+    await vi.waitFor(() => expect(asking.isOpen()).toBe(false));
+  });
+
+  it('Open in New Window: the bubble stays until the window is open, and a second press waits', async () => {
+    let opens: () => void = () => {};
+    const {
+      editor,
+      opened,
+      ask: asking,
+    } = mount({
+      openWindow: () =>
+        new Promise<void>((resolve) => {
+          opens = resolve;
+        }),
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Open in New Window')?.click();
+    label('Open in New Window')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(opened).toHaveLength(1);
+    expect(asking.isOpen()).toBe(true);
+    opens();
+    await vi.waitFor(() => expect(asking.isOpen()).toBe(false));
+    expect(opened).toHaveLength(1);
+  });
+
+  it('Open in New Window: says so, and keeps the bubble and the exchange, when no window opens', async () => {
+    const {
+      editor,
+      opened,
+      notices,
+      ask: asking,
+    } = mount({
+      openWindow: () => Promise.reject(new Error('A browser tab can’t be opened for text.')),
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await answered();
+    label('Open in New Window')?.click();
+    await vi.waitFor(() => expect(notices).toEqual(['Couldn’t open a new window.']));
+    expect(asking.isOpen()).toBe(true);
+    expect(answerOf()?.textContent).toBe('A lien is a claim.');
+    expect(document.querySelector('.rl-qa-question')?.textContent).toBe('What is a lien?');
+    // It can be tried again.
+    label('Open in New Window')?.click();
+    await vi.waitFor(() => expect(opened).toHaveLength(2));
+    await vi.waitFor(() => expect(notices).toHaveLength(2));
+    expect(asking.isOpen()).toBe(true);
+  });
+
+  it('Open in New Window: a host that throws is the same as one that rejects', async () => {
+    const {
+      editor,
+      notices,
+      ask: asking,
+    } = mount({
+      openWindow: () => {
+        throw new Error('No windows.');
+      },
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Open in New Window')?.click();
+    await vi.waitFor(() => expect(notices).toEqual(['Couldn’t open a new window.']));
+    expect(asking.isOpen()).toBe(true);
+  });
+
+  it('Open in New Window: leaves a bubble that another has taken the place of', async () => {
+    let opens: () => void = () => {};
+    const { editor, ask: asking } = mount({
+      openWindow: () =>
+        new Promise<void>((resolve) => {
+          opens = resolve;
+        }),
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Open in New Window')?.click();
+    // The person asks about something else while the window opens: the new bubble is not the one
+    // whose window it was.
+    select(editor, 'Borrower');
+    editor.commands.run('ask.start');
+    opens();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asking.isOpen()).toBe(true);
+    expect(bubble()).not.toBeNull();
   });
 
   it('Open in New Window: not offered where the host cannot open a window with text', async () => {
@@ -937,6 +1043,40 @@ describe('keeping an answer', () => {
     label('Copy')?.click();
     await vi.waitFor(() => expect(notices).toEqual(['Copied the answer.']));
     expect(copied).toEqual(['A lien is a claim.']);
+  });
+
+  it('Copy: says so when the answer can’t be put on the clipboard, and never that it was copied', async () => {
+    const {
+      editor,
+      notices,
+      ask: asking,
+    } = mount({
+      copyTo: () => Promise.reject(new Error('The page wouldn’t copy')),
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Copy')?.click();
+    await vi.waitFor(() => expect(notices).toEqual(['Couldn’t copy the answer.']));
+    // The bubble stays, and nothing else is said.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(notices).toEqual(['Couldn’t copy the answer.']);
+    expect(asking.isOpen()).toBe(true);
+  });
+
+  it('Copy: a clipboard that throws is the same as one that fails', async () => {
+    const { editor, notices } = mount({
+      copyTo: () => {
+        throw new Error('The page wouldn’t copy');
+      },
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What?');
+    await answered();
+    label('Copy')?.click();
+    await vi.waitFor(() => expect(notices).toEqual(['Couldn’t copy the answer.']));
   });
 
   it('has no actions until there is an answer, and none while the next is being answered', async () => {
