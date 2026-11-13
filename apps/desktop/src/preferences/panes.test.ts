@@ -335,6 +335,53 @@ describe('the panes', () => {
     expect(update).toHaveBeenCalled();
   });
 
+  describe('the Quick Look row', () => {
+    const LABEL = 'Quick Look previews of Markdown files';
+
+    it('is drawn after the default app, where the app can open the settings', () => {
+      const labels = rowLabels(
+        draw('general', { openQuickLookSettings: () => Promise.resolve() }).container,
+      );
+      expect(labels.indexOf(LABEL)).toBe(labels.indexOf('Default app for Markdown') + 1);
+      expect(labels.indexOf('Command line')).toBe(labels.indexOf(LABEL) + 1);
+    });
+
+    it('is not drawn where there is no Quick Look to turn off', () => {
+      expect(rowLabels(draw('general').container)).not.toContain(LABEL);
+    });
+
+    it('opens System Settings from its button, and says where to turn the preview off', () => {
+      const open = vi.fn(() => Promise.resolve());
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const row = container.querySelector<HTMLElement>(`[data-row="${LABEL}"]`);
+      const status = row?.querySelector('[role="status"]');
+      expect(status?.textContent).toBe(
+        'Turn the preview off in System Settings › General › Login Items & Extensions › Quick Look.',
+      );
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      expect(button.textContent).toBe('Open System Settings');
+      button.click();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+    });
+
+    it('says why when it could not, and the next press starts again', async () => {
+      const open = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error('System Settings didn’t open.'))
+        .mockResolvedValue(undefined);
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      button.click();
+      await vi.waitFor(() => expect(status?.textContent).toBe('System Settings didn’t open.'));
+      expect(status?.classList.contains('rl-pref-failure')).toBe(true);
+      button.click();
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+      expect(status?.textContent).toContain('Login Items & Extensions');
+    });
+  });
+
   describe('the Command line row', () => {
     /** The row's line under its buttons, and its buttons, by their words. */
     const commandLine = (container: HTMLElement) => {

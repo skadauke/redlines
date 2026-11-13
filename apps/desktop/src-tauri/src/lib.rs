@@ -64,6 +64,9 @@ mod files;
 // Dragging the window's file out of it, from the title bar's document icon.
 mod drag;
 
+// The Mac's settings pane for the Quick Look preview of Markdown files, which Preferences opens.
+mod quick_look;
+
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
@@ -366,6 +369,7 @@ pub fn run() {
             command_line::install_command_line_at_home,
             default_app::default_app,
             default_app::make_default_app,
+            quick_look::open_quick_look_settings,
             install::answer_install,
             project::project_root,
             project::list_folder,

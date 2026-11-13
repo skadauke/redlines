@@ -103,6 +103,9 @@ const installCommandLine = <T>(command: string) =>
 const defaultAppCommand = <T>(command: string) =>
   appCommand<T>(command, 'The default app is set from the app.');
 
+/** Quick Look is the Mac's, and its settings open from the app. */
+const hasQuickLook = isTauri && navigator.userAgent.includes('Macintosh');
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -123,6 +126,12 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  ...(hasQuickLook
+    ? {
+        openQuickLookSettings: () =>
+          appCommand<void>('open_quick_look_settings', 'Quick Look settings open from the app.'),
+      }
+    : {}),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({

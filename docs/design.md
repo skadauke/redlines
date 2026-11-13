@@ -184,6 +184,9 @@ The window, on the desktop:
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
   did. Finder's Get Info changes the choice again.
+  Preferences › General › Quick Look previews of Markdown files, on the Mac, opens System Settings
+  at General › Login Items & Extensions, with its sheet of Quick Look extensions, where the app's
+  preview (§10) is listed, on, and can be turned off.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -1431,7 +1434,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     Applications and removing the app removes it. It needs macOS 13.3, the first whose
     JavaScriptCore has the regular-expression lookbehind that the format library's patterns use
     (its array methods came with 13.0). System Settings › General › Login Items & Extensions ›
-    Quick Look turns it off.
+    Quick Look lists it, on, and turns it off; Preferences › General › Quick Look previews of
+    Markdown files has a button that opens that list (§5.1).
   - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
     no type for R Markdown and Quarto: a file of either gets a type made from its extension
     (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the

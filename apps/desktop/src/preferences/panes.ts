@@ -73,6 +73,12 @@ export interface PaneDeps {
    * asked or couldn't, as for a copy of the app on its disk image.
    */
   makeDefaultApp: () => Promise<DefaultAppChange>;
+  /**
+   * Opens the Mac's System Settings at the Quick Look extensions, where Redlines' preview of
+   * Markdown files can be turned off; rejects with a sentence that says why it couldn't. Given only
+   * where there is a Quick Look to turn off: the row is not drawn without it.
+   */
+  openQuickLookSettings?: () => Promise<void>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -298,8 +304,38 @@ function general(deps: PaneDeps): HTMLElement[] {
       toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
     ),
     defaultAppRow(deps),
+    ...(deps.openQuickLookSettings ? [quickLookRow(deps.openQuickLookSettings)] : []),
     row('Command line', command, status),
   ];
+}
+
+/** What the line under the Quick Look button says until it has something to say about the button. */
+const QUICK_LOOK_HINT =
+  'Turn the preview off in System Settings › General › Login Items & Extensions › Quick Look.';
+
+/**
+ * Quick Look previews of Markdown files: the app comes with one, which macOS registers by itself
+ * and lists in System Settings, so that is where it is turned off. The button opens that list. If
+ * it can't, the line under it says why, and goes back to the hint on the next press.
+ */
+function quickLookRow(open: () => Promise<void>): HTMLElement {
+  const status = el('div', 'rl-pref-note', QUICK_LOOK_HINT);
+  status.setAttribute('role', 'status');
+  const button = el('button', 'rl-pref-button', 'Open System Settings');
+  button.type = 'button';
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  button.addEventListener('click', () => {
+    say(QUICK_LOOK_HINT, false);
+    open().catch((error: unknown) =>
+      say(error instanceof Error ? error.message : String(error), true),
+    );
+  });
+  const control = el('div', 'rl-pref-inline');
+  control.append(button);
+  return row('Quick Look previews of Markdown files', control, status);
 }
 
 /** What the line under the button says of the app that opens Markdown files. */
