@@ -63,8 +63,11 @@ repeats from its seed. To try more:
 
 ```sh
 REDLINES_FUZZ=5000 pnpm exec vitest run packages/format/src/<suite>.test.ts   # more documents
-REDLINES_SEED=2027 pnpm exec vitest run packages/format/src/table-cols-random.test.ts   # from one seed
+REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.test.ts   # from one seed
 ```
+
+`REDLINES_SEED` starts the table suites (`table-cols-random`, `table-format-random`) and
+`format-apart` at one seed.
 
 The tables have a **pair model** besides: every pair of operations on rows and columns by two
 people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7).
@@ -73,7 +76,7 @@ people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) 
 
 A change to how an edit is written is run against main on the same random documents, and every
 decision where the two disagree is looked at. This is done by the reviewer, in the review, and its
-numbers are in the pull request. For the one that made a bold change, a row move and a typed edit
+numbers are in the pull request. For the change that made a bold change, a row move and a typed edit
 read alike in every order (#297), the review's differential covered 10,451 random documents with
 pending row moves, 571,930 single decisions: the branch refused 42 decisions that main wrote, and in
 every one of them main's result read otherwise in some order, or reached a dead end.
@@ -95,7 +98,7 @@ shows it, in `walk-seeds.test.ts`, with the fix.
 `cost.test.ts` measures what the keys cost on a 16 KB and a 150 KB document with 200 marks, against
 numbers recorded from main's own build (the same file runs in a checkout of main with
 `REDLINES_COST=record`). A key may take at most twice what main's takes. `hidden.test.ts` holds the
-hidden lines' pass to a linear cost, and `preview/long-document.test.ts` the long document's.
+hidden lines' pass to a linear cost, and `preview/long-document.test.ts` the cost of a long document.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
 busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
 which CI's check job sets.
@@ -106,9 +109,9 @@ happy-dom lays out nothing, and the app's page is drawn by WKWebView. The block 
 deleted and replaced blocks, the Simple view, printing and zoom each have a check that runs in the
 page (`block-check.ts`, `table-check.ts`, `struck-check.ts`, `simple-check.ts`, `print-check.ts`,
 `zoom-check.ts`). `VITE_BLOCK_CHECK=1 pnpm dev` in `apps/desktop` serves one in a browser, and
-`pnpm tauri dev` runs it in WKWebView; each ends with a `done <n> passed, <n> failed` line. They are
-no part of CI: they are run by hand, in the sweep before a release, and a layout, selection or
-input-method problem is only found there.
+`pnpm tauri dev` runs it in WKWebView; the block, table and struck checks end with a
+`... done <n> passed, <n> failed` line. They are no part of CI: they are run by hand before a
+release, and a layout, selection or input-method problem is only found there.
 
 ### How a change is reviewed
 
@@ -120,8 +123,9 @@ they had been refused, a review found a window that read short of a far opener; 
 a widening into another person's text and a Return case; two fix rounds and two re-reviews
 followed. The re-review's own probe of the branch against main, judged by micromark in every order
 of decisions, ran 66,587 cases: none newly wrong, 5,081 newly sound, 812 newly refused, and over
-23,000 of main's wrong writes refused now. In #288, which made list layouts sound, a new test held
-every line that the reading calls an item to micromark's reading over 40,000 layouts.
+23,000 of main's wrong writes refused now. In #288 (Tab in numbered lists under review, among other things), a new
+test held every line that the reading calls an item to micromark 4.0.2's reading over 40,000 list
+layouts.
 
 ## How to add a rule
 
@@ -148,9 +152,11 @@ every line that the reading calls an item to micromark's reading over 40,000 lay
   Word import into full history, and live sessions with several authors in full history), and §2.6's
   *What the proof doesn't give* lists the numbered-list shapes that are tried or refused. A block
   change in a list under review with more than five changes pending is refused for their count.
-- **Refusals that are planned to go away.** Aligning a column with Track Changes on (#281); code
-  that starts a list item, and indented code in an item or a quote (#284); typing in code that holds
-  another person's pending code change (#285). Each is refused today, in words that say so.
+- **Refusals that are planned to go away, and what is not built.** Code that starts a list item,
+  and indented code in an item or a quote, are refused with Track Changes on (#284), and so is
+  typing in code that holds another person's pending code change (#285), each in words that say so.
+  Aligning a column with Track Changes on is not built (#281): the format reads an alignment change
+  that another tool wrote, and refuses every column operation while one is pending.
 - **What only the app can show.** Layout, the system's selection and input methods, and the
   animation of a card are not in happy-dom; the WKWebView checks cover some and the sweep the rest.
 - **Timings on a loaded machine.** The cost gates compare with main's numbers scaled by a
