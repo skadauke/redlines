@@ -51,7 +51,14 @@ import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
-import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
+import {
+  DELIMITER,
+  INLINE_FORMATS,
+  closingOf,
+  encodeValue,
+  opsOf,
+  removedOp,
+} from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
   LINES_ABOVE,
@@ -658,8 +665,11 @@ function planOn(planning: Planning, layout: Layout, clamp: Piece, format: Inline
 }
 
 /** The syntax around text of a format. Code takes more backticks than the text has in a row, and a
- * space inside them next to a backtick. */
+ * space inside them next to a backtick. A tag has its closing tag behind the text. */
 function syntaxFor(format: InlineFormat, text: string): [string, string] {
+  if (format === 'sub' || format === 'sup') {
+    return [DELIMITER[format], closingOf(format, DELIMITER[format])];
+  }
   if (format !== 'code') return [DELIMITER[format], DELIMITER[format]];
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const run = '`'.repeat(longest + 1);

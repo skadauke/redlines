@@ -1,5 +1,6 @@
-// Formatting commands (spec: Menus): bold, italic, code, strikethrough, links and clearing for
-// text, and the type of a paragraph, its lists, and the table, rule and code block that start one.
+// Formatting commands (spec: Menus): bold, italic, code, strikethrough, subscript, superscript,
+// links and clearing for text, and the type of a paragraph, its lists, and the table, rule and code
+// block that start one.
 // They are commands of the registry, which binds their keys and draws the Format and Paragraph
 // menus; none has a button. With Track Changes on a format change is a tracked `fmt` mark, with it
 // off the syntax is written directly, and what a block adds is an insertion like typing.
@@ -80,6 +81,9 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   italic: 'Emphasis',
   strike: 'Strikethrough',
   code: 'InlineCode',
+  // The tags `<sub>` and `<sup>`, which the editor's parse reads as nodes (preview/script.ts).
+  sub: 'Subscript',
+  sup: 'Superscript',
 };
 /** What a format makes text, for a sentence. */
 const INLINE_WORD: Record<InlineFormat, string> = {
@@ -87,6 +91,8 @@ const INLINE_WORD: Record<InlineFormat, string> = {
   italic: 'italic',
   strike: 'struck through',
   code: 'code',
+  sub: 'subscript',
+  sup: 'superscript',
 };
 
 /** Whether the text of a cell is inside one node of `name` from end to end (hidden markers aside). */
@@ -242,7 +248,8 @@ function personOf(author: Author): Person {
 
 /**
  * Adds the formatting commands to an editor: Bold ⌘B, Italic ⌘I, Code ⌃`, Strikethrough ⌃⇧`,
- * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⇧⌘N, Headings
+ * Subscript ⌥⌘, Superscript ⌥⌘., Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the
+ * Paragraph menu Body ⇧⌘N, Headings
  * ⌘1 to ⌘6, Quote, lists, Check Item ⇧⌘U, Code Block, Table, Horizontal Rule, Indent ⌘] and
  * Outdent ⌘[. Returns a function that takes them out again.
  *
@@ -783,6 +790,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     inlineCommand('format.italic', 'Italic', 'Mod-i', 'italic'),
     inlineCommand('format.code', 'Code', 'Ctrl-`', 'code'),
     inlineCommand('format.strike', 'Strikethrough', 'Ctrl-Shift-`', 'strike'),
+    // Word's keys for these, ⌘= and ⇧⌘=, are View's Zoom In. Google Docs' ⌘, and ⌘. are Preferences and
+    // Cancel on the Mac, so these take ⌥ too.
+    inlineCommand('format.sub', 'Subscript', 'Mod-Alt-,', 'sub'),
+    inlineCommand('format.sup', 'Superscript', 'Mod-Alt-.', 'sup'),
     command('format', 'link', {
       id: 'format.link',
       title: 'Link…',
@@ -882,6 +893,8 @@ export const plugin: Plugin = {
         { id: 'format.italic', title: 'Italic', shortcut: 'Mod-i' },
         { id: 'format.code', title: 'Code', shortcut: 'Ctrl-`' },
         { id: 'format.strike', title: 'Strikethrough', shortcut: 'Ctrl-Shift-`' },
+        { id: 'format.sub', title: 'Subscript', shortcut: 'Mod-Alt-,' },
+        { id: 'format.sup', title: 'Superscript', shortcut: 'Mod-Alt-.' },
         { id: 'format.link', title: 'Link…', shortcut: 'Mod-k' },
         { id: 'format.clear', title: 'Clear Formatting', shortcut: 'Mod-\\' },
         { id: 'block.body', title: 'Body', shortcut: 'Mod-Shift-n' },

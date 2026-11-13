@@ -330,6 +330,17 @@ describe('openConstructs', () => {
     ]);
   });
 
+  it('finds subscript and superscript, whose delimiters are the tags', () => {
+    expect(constructs('H<sub>2‸0</sub> and x<sup>a‸b</sup>.')).toEqual([
+      { kind: 'sub', open: '<sub>', close: '</sub>' },
+    ]);
+    expect(constructs('H<sub>20</sub> and x<sup>a‸b</sup>.')).toEqual([
+      { kind: 'sup', open: '<sup>', close: '</sup>' },
+    ]);
+    // At the edge of the text, the break goes outside the tags.
+    expect(constructs('H<sub>‸20</sub>')).toEqual([]);
+  });
+
   it("gives a link's destination as its tail", () => {
     expect(constructs('See [the ‸guide](https://x.example) now.')).toEqual([
       { kind: 'link', open: '[', close: ']', tail: '](https://x.example)' },

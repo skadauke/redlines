@@ -471,7 +471,7 @@ export function breakAfter(state: EditorState, block: Block): Break | null {
 
 /** An inline construct that a position is inside of. */
 export interface OpenConstruct {
-  kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'link' | 'atom';
+  kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'sub' | 'sup' | 'link' | 'atom';
   /** The construct, its delimiters included. */
   from: number;
   to: number;
@@ -487,6 +487,9 @@ const DELIMITED: Record<string, { kind: OpenConstruct['kind']; mark: string }> =
   StrongEmphasis: { kind: 'strong', mark: 'EmphasisMark' },
   Strikethrough: { kind: 'strike', mark: 'StrikethroughMark' },
   InlineCode: { kind: 'code', mark: 'CodeMark' },
+  // The tags are the delimiters: a break inside closes `</sub>` and opens `<sub>` again.
+  Subscript: { kind: 'sub', mark: 'SubscriptMark' },
+  Superscript: { kind: 'sup', mark: 'SuperscriptMark' },
 };
 
 /** Constructs that can't be parted: the break goes after them. */

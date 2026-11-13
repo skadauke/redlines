@@ -277,10 +277,28 @@ applies its inverse:
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
-- The serializer writes formatting in the file's dialect: `<sub>` in `.md`, `~x~` in pandoc files
-  (§9.1). New emphasis is `*` and `**`, strikethrough is `~~`, and code has one more backtick than
-  its text has in a row, with a space inside them next to a backtick. Emphasis written with `_`
-  stays as it is.
+- The serializer writes formatting in the file's dialect (§9.1), except subscript and superscript,
+  which are the tags `<sub>` and `<sup>` in every file type. New emphasis is `*` and `**`,
+  strikethrough is `~~`, and code has one more backtick than its text has in a row, with a space
+  inside them next to a backtick. Emphasis written with `_` stays as it is.
+- **Subscript and superscript** are the first of a short list of inline HTML tags that are formats:
+  `<!--fmt m2bd +sub--><sub>2</sub><!--/m2bd-->`. Any other tag is an inline HTML tag, which shows as
+  written and takes no marker inside it (§3.5). What is read as a format is the tag as the
+  serializer writes it: `<sub>`, `</sub>`, `<sup>` and `</sup>`, in lowercase, with no attributes
+  and no space in them, so `-sub` and `-sup` carry no syntax and rejecting writes the tag back.
+  - A closing tag pairs with the nearest opening tag of its name before it that has no closing tag,
+    as HTML pairs them, in one paragraph, and in one link text or one table cell, as emphasis does.
+    A tag with no pair, an escaped tag (`\<sub>`), one in code, in an HTML comment, in an image or
+    in a link's address, a pair that crosses another format's syntax, and a tag written otherwise
+    (`<SUB>`, `<sub class="x">`) are no format: the text stays as written, and turning a format off
+    does nothing to it.
+  - Formats nest as they do for emphasis: one around all of another goes outside its syntax, and a
+    piece that crosses the edge of a format is cut there. Turning a format off takes the whole run of
+    it, and the same tag inside itself (`<sub>a <sub>b</sub></sub>`) is two runs, in a mark each.
+    Clear Formatting takes them off with the other formats (`-sub`, `-sup`).
+  - A tag takes no marker inside it (§3.1, rule 1), and the markers of a format change stand outside
+    its tags, as they stand outside any syntax (the example above). Text typed inside a pair is
+    typed text, in an insertion of its own, whose markers may stand against a tag.
 - An inline format change stays inside one block. A block format change opens on its own line
   before the block (§3.3) and closes at the end of the block.
 - A range that crosses blocks is one mark per block, and the marks share a `group` (§5.4).
@@ -940,7 +958,8 @@ at the outer edge of a whole inline construct. A marker never goes:
    can be, and `- ` there is the bullet of the next item;
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
-9. inside pandoc's `~x~` or `^x^`; after or inside `{…}` attributes; on `:::` lines; before or
+9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
+   (§9.1); after or inside `{…}` attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
 
@@ -2934,10 +2953,16 @@ Agents edit the newest view, and the library turns their edits into tracked chan
 
 - A Redlines file keeps its extension: `.md`, `.qmd`, `.Rmd` or `.txt`. A new extension would lose
   GitHub's rendering and every Markdown, R Markdown and Quarto tool.
-- `.md` files are written in GitHub Flavored Markdown: `<sub>`, `<sup>`, `<mark>`, `<ins>` for
-  underline, `<img width>`, `<dl>`, GitHub alerts.
-- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `~x~`, `^x^`, `[x]{.mark}`,
-  `{width=}`, `{#id}`, Quarto callouts.
+- `.md` files are written in GitHub Flavored Markdown: `<mark>`, `<ins>` for underline,
+  `<img width>`, `<dl>`, GitHub alerts.
+- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `[x]{.mark}`, `{width=}`, `{#id}`,
+  Quarto callouts.
+- Subscript and superscript are `<sub>` and `<sup>` in every file type (§2.6). pandoc's `~x~` and
+  `^x^` would not read the same in both dialects: a single `~x~` is strikethrough on GitHub, and
+  `^x^` shows there as text. pandoc reads the tags as raw HTML, which its Word output drops (§9.4),
+  so a `.qmd` or `.Rmd` file rendered to Word through pandoc loses them; Redlines' own Word export
+  keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept byte for byte
+  and shown as written: it is no format, and nothing changes it.
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and
