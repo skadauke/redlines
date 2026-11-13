@@ -1,6 +1,7 @@
 //! The app's appearance: light, dark, or as the system is (Match System), as Preferences ›
 //! Appearance says (design §6.6). It is every window's at once, the window itself with its title
-//! bar, scroll bars and the system's menus and dialogs, and About Redlines', the system's panel.
+//! bar, scroll bars and the system's menus and dialogs. About Redlines is a window of the app's own
+//! and takes it as the others do.
 //!
 //! The person's choice is in the windows' settings, which the app can't read before a window
 //! opens. So the app keeps a copy, in `appearance.json` in its data folder, and takes that

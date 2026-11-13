@@ -247,7 +247,12 @@ The window, on the desktop:
   mark that says where text goes. While it runs, its Dock icon shows another mark of the same
   family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
   insertion above it), a different one at each launch. Turning off Redlines › Preferences › General
-  › Rotate the Dock Icon keeps the caret.
+  › Rotate the Dock Icon keeps the caret. About Redlines is a small window of the app's own, as
+  Preferences is, on every system: the icon, the name, the version and build, and the copyright,
+  as the system's panel has them. It opens once, and Esc and ⌘W close it. A click on its icon
+  changes it to the next mark of the family, drawn as a tracked change, the old mark struck through
+  with a red line and the new one underlined, in about half a second (a plain crossfade under
+  Reduce Motion); nothing says so, and the Dock icon follows the mark until the next launch.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
   nothing and tries again later. The app holds the download, not a window, so closing a window loses
