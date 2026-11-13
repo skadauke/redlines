@@ -70,22 +70,30 @@ describe('walk seeds 14 and 170 (lists side by side): the caret ends in no hidde
 });
 
 describe('walk seed 23 (lists side by side): Return at the start of a nested first item of a loose list, tracked', () => {
-  // The empty item goes in above the first one, at the end of the parent item's text; the blank line
-  // that keeps the list loose follows it, between it and the item that was first, and not before it
-  // (two blank lines in a row were written as two splits, the second a marker line in column 0,
-  // which ended the parent item: micromark read the sublist as a list of its own).
+  // The empty item goes in above the first one, at the end of the parent item's text, with the one
+  // blank line that a split's break holds above it. With Track Changes off a loose list also gets a
+  // blank line below the new item; tracked, that second blank line would follow the first, and two
+  // in a row were written as two splits, the second a marker line in column 0, which ended the
+  // parent item (micromark read the sublist as a list of its own). The list is as loose as it was.
   scriptRows([
     {
       name: 'a nested list with a blank line between its items, Track Changes on (the seed)',
       doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
       keys: ['Enter'],
       tc: true,
-      expect: {},
+      expect: { file: '* plan beta<split>⏎⏎  * ⏎  * note note⏎⏎  * review gamma' },
+    },
+    {
+      name: 'the same list with no blank line between its items writes the same form',
+      doc: '* plan beta⏎  * ‸note note⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '* plan beta<split>⏎⏎  * ⏎  * note note⏎  * review gamma' },
     },
     {
       // The seed's other keys, Backspace, Delete and Shift-Return over the selection, are refused in
       // words, which the walk allows.
-      name: 'the seed’s own text: items, a continuation line and a loose numbered list under them',
+      name: 'the seed’s own text: a continuation line, and a loose sublist with a numbered list in it',
       doc: '* note delta⏎* gamma gamma⏎* plan beta⏎  * ‸note note⏎    note delta⏎  * review gamma⏎    2. code plan⏎       delta alpha⏎⏎    2. delta ship⏎       code text⏎',
       keys: ['Enter', 'Shift-ArrowLeft'],
       tc: true,
@@ -113,11 +121,11 @@ describe('walk seed 23 (lists side by side): Return at the start of a nested fir
       expect: {},
     },
     {
-      name: 'Track Changes off writes the blank line after the new item as well',
+      name: 'Track Changes off writes the blank line below the new item as well',
       doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
       keys: ['Enter'],
       tc: false,
-      expect: {},
+      expect: { file: '* plan beta⏎⏎  * ⏎⏎  * note note⏎⏎  * review gamma⏎' },
     },
   ]);
 });
