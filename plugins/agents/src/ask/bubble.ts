@@ -35,6 +35,8 @@ export interface BubbleHandlers {
   consent(answer: 'folder' | 'document' | 'no'): void;
   dismiss(): void;
   showLog?: (path: string) => void;
+  /** Opens Preferences › Agents, for a failure they can put right. */
+  openPreferences?: () => void;
   makeComment(): void;
   openWindow(): void;
   copy(): void;
@@ -138,6 +140,7 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
     stop: () => handlers.stop(),
     dismiss: () => handlers.dismiss(),
     ...(handlers.showLog ? { showLog: (path) => handlers.showLog?.(path) } : {}),
+    ...(handlers.openPreferences ? { openPreferences: () => handlers.openPreferences?.() } : {}),
     focusDocument: () => handlers.focusDocument(),
   };
 

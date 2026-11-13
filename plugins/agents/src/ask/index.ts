@@ -37,6 +37,11 @@ export interface AskOptions extends AskDeps {
   copy?: (text: string) => Promise<void> | void;
   /** Shows a failed run's log. */
   showLog?: (path: string) => void;
+  /**
+   * Opens Preferences › Agents, where an agent is updated or signed in: what a failed line offers
+   * when Preferences can put the failure right. Without it, such a failure offers no way there.
+   */
+  openPreferences?: () => void;
 }
 
 export interface Ask {
@@ -196,6 +201,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       consent: (answer) => session.answerConsent(answer),
       dismiss: () => session.dismiss(),
       ...(options.showLog ? { showLog: options.showLog } : {}),
+      ...(options.openPreferences ? { openPreferences: options.openPreferences } : {}),
       makeComment,
       openWindow: () => {
         const turns = session.state.turns;

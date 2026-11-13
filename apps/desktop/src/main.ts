@@ -581,6 +581,7 @@ const ask = createAsk(editor, {
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
   showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
   // A long answer worth keeping or editing: an Untitled document in a new window.
   openInNewWindow: (text) =>
     void host.openWindow(undefined, undefined, text).catch((error: unknown) => {

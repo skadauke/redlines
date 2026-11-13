@@ -176,7 +176,14 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     set({ pending: null, ...next });
   };
 
-  const fail = (mine: number, agent: AgentInfo | null, message: string, logPath?: string) =>
+  /** `setup` says Preferences › Agents can put it right (signed out, too old): the line offers them. */
+  const fail = (
+    mine: number,
+    agent: AgentInfo | null,
+    message: string,
+    logPath?: string,
+    setup = false,
+  ) =>
     finish(mine, {
       line: {
         kind: 'failed',
@@ -184,6 +191,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         agentName: agent?.name ?? 'Agent',
         message,
         ...(logPath === undefined ? {} : { logPath }),
+        ...(setup ? { setup: true as const } : {}),
       },
     });
 
@@ -277,7 +285,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       set({ agent: { id: agent.id, name: agent.name }, line: running(agent, STARTING) });
       if (agent.state.found && !agent.state.signedIn) {
         deps.agents.forget?.();
-        return fail(mine, agent, cannotRun(agent, agent.state.reason));
+        return fail(mine, agent, cannotRun(agent, agent.state.reason), undefined, true);
       }
       const path = deps.document.path();
       const reach = await reachOf(mine, agent, path);
@@ -378,8 +386,9 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         const event: AgentEvent = next.value;
         if (event.type === 'started') logPath = event.logPath;
         else if (event.type === 'status') set({ line: running(agent, event.text) });
-        else if (event.type === 'error') return fail(mine, agent, event.message, logPath);
-        else {
+        else if (event.type === 'error') {
+          return fail(mine, agent, event.message, logPath, event.setup === true);
+        } else {
           const answer = event.finalText?.trim() ?? '';
           if (answer === '') {
             return fail(mine, agent, `${agent.name} ended with nothing to say.`, logPath);

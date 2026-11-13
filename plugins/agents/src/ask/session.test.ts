@@ -353,9 +353,28 @@ describe('what goes wrong', () => {
       kind: 'failed',
       agentName: 'Claude',
       message: "Claude isn't signed in. Run `claude auth login`.",
+      // Preferences can sign it in: the line offers them.
+      setup: true,
     });
     session.dismiss();
     expect(session.state.line).toBeNull();
+  });
+
+  it('flags a failure that Preferences can put right, and no other', async () => {
+    const signedOut = setup({
+      claude: events({ type: 'error', message: "Claude isn't signed in.", setup: true }),
+    });
+    signedOut.session.ask('What?');
+    await done(signedOut.session);
+    expect(signedOut.session.state.line).toMatchObject({ kind: 'failed', setup: true });
+
+    const limit = setup({
+      claude: events({ type: 'error', message: 'Claude has hit its usage limit.' }),
+    });
+    limit.session.ask('What?');
+    await done(limit.session);
+    expect(limit.session.state.line).toMatchObject({ kind: 'failed' });
+    expect(limit.session.state.line).not.toHaveProperty('setup');
   });
 
   it('shows the failure the agent reports, with its log', async () => {

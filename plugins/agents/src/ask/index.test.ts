@@ -61,6 +61,7 @@ function mount(options: Options = {}) {
   const opened: string[] = [];
   const copied: string[] = [];
   const shown: string[] = [];
+  const preferences: string[] = [];
   const attached: HTMLTextAreaElement[] = [];
   const base: AskOptions = {
     agents,
@@ -83,6 +84,9 @@ function mount(options: Options = {}) {
       shown.push(thread);
       return true;
     },
+    openPreferences: () => {
+      preferences.push('agents');
+    },
     copy: (text) => {
       copied.push(text);
     },
@@ -94,7 +98,19 @@ function mount(options: Options = {}) {
   };
   const ask = createAsk(editor, base);
   mounted.push({ editor, ask });
-  return { editor, ask, claude, notices, opened, copied, shown, attached, focus, generation };
+  return {
+    editor,
+    ask,
+    claude,
+    notices,
+    opened,
+    copied,
+    shown,
+    preferences,
+    attached,
+    focus,
+    generation,
+  };
 }
 
 const bubble = () => document.querySelector<HTMLElement>('.rl-qa');
@@ -313,6 +329,24 @@ describe('asking', () => {
     );
     // The question is in the box again, to ask once more.
     await vi.waitFor(() => expect(field()?.value).toBe('What is a lien?'));
+    // A usage limit is not for Preferences to put right: no way there is offered.
+    expect(button('Open Preferences')).toBeUndefined();
+  });
+
+  it('offers to open Preferences for a failure they can put right', async () => {
+    const { editor, preferences } = mount({
+      script: async function* ({ tools }) {
+        await tools.initialize();
+        yield { type: 'error', message: 'Claude isn’t signed in.', setup: true };
+      },
+    });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await vi.waitFor(() => expect(button('Open Preferences')).toBeDefined());
+    expect(preferences).toEqual([]);
+    button('Open Preferences')?.click();
+    expect(preferences).toEqual(['agents']);
   });
 
   it('asks the first-run question in the bubble, and goes on when the folder is allowed', async () => {
