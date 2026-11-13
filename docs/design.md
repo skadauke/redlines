@@ -1281,14 +1281,38 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 | ------ | ----------- | ------------- | ----- |
 | **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
 | **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
-| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written |
+| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written; Preferences doesn't offer adding one yet |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
-(for example, "Claude isn't signed in. Run `claude auth login`."). The UI says "Claude" and
-"Codex"; "Claude Code" appears only in plain text saying the app runs it.
+(for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
+Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
+runs it.
+
+**Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
+the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
+button, and Check Again always:
+
+- **Too old** (older than the version the provider was tested with): the row says an update is
+  needed, and what the program said when asked whether it is signed in, if it said (an older
+  program may not know the question). Update runs the agent's own updater for the way it was
+  installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
+  <package>@latest` for a global npm install, and the agent's own `update` for any other
+  (`claude update`, `codex update`). Redlines looks again when it ends.
+- **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
+  opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
+  the same command and looks again when the person comes back.
+- **Not installed:** the command that installs it, with Copy. Redlines never runs an installer.
+
+Each is a fixed command that the app makes for an agent the window names, never a program, an
+argument or a word of a document, and the name that goes to `brew` is one of a short list. Only
+Preferences may ask for them; a failed run's line in a document opens Preferences instead. An
+update or a sign-in under way has a Cancel, and stops when Preferences closes or the app quits; it
+goes on when the pane is drawn again, and the row follows it. What a failure shows of a command's
+output is its last line, with what looks like a secret left out as far as a heuristic can tell
+(the query of a link, a value after `token` or `key`, a long run that looks like a credential).
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:
@@ -1309,7 +1333,7 @@ it was asked to:
 the repository's root, or else the document's folder) or This document. The first run of an agent
 in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
 in the app's settings, never in the document. Preferences › Agents lists the agents found on this
-Mac with their state (not found, not signed in, signed in, and their version), the remembered
+Mac with their state (not installed, needs an update, signed out, signed in), the remembered
 answers with a Forget button for each, and Show Agent Logs.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/

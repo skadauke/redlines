@@ -93,7 +93,11 @@ pub fn clean_environment(
 }
 
 /// A command for a program: in a group of its own, with stdin closed and only this environment.
-fn command_for(program: &str, args: &[String], environment: &[(OsString, OsString)]) -> Command {
+pub(super) fn command_for(
+    program: &str,
+    args: &[String],
+    environment: &[(OsString, OsString)],
+) -> Command {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -202,19 +206,20 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
 }
 
 /// A started process leads its own group, so its id is the group's.
-fn group_of(child: &Child) -> i32 {
+pub(super) fn group_of(child: &Child) -> i32 {
     i32::try_from(child.id()).expect("a process id fits an i32")
 }
 
-fn signal_group(group: i32, signal: i32) {
-    // SAFETY: `kill` has no memory effects. `group` is a group this module made, so the negative
-    // id reaches that group and no other, and never every process, which is what -1 would mean.
+pub(super) fn signal_group(group: i32, signal: i32) {
+    // SAFETY: `kill` has no memory effects. `group` is a group this module or `setup.rs` made, with
+    // `command_for`, so the negative id reaches that group and no other, and never every process,
+    // which is what -1 would mean.
     unsafe { libc::kill(-group, signal) };
 }
 
 /// Whether anything is left in a group. A member that has ended and not yet been collected may or
 /// may not count, depending on the system.
-fn group_is_alive(group: i32) -> bool {
+pub(super) fn group_is_alive(group: i32) -> bool {
     // SAFETY: as above, and signal 0 only asks.
     unsafe { libc::kill(-group, 0) == 0 }
 }

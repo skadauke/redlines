@@ -26,6 +26,7 @@ function actions(): LiveLineActions & { calls: string[] } {
     stop: () => calls.push('stop'),
     dismiss: () => calls.push('dismiss'),
     showLog: (path) => calls.push(`log ${path}`),
+    openPreferences: () => calls.push('preferences'),
   };
 }
 
@@ -261,6 +262,39 @@ describe('renderLiveLine', () => {
     expect(act.calls).toEqual(['log /logs/run.jsonl', 'dismiss']);
   });
 
+  it('offers to open Preferences for a failure they can put right, beside its log', () => {
+    const act = actions();
+    const signedOut: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      setup: true,
+    };
+    const el = renderLiveLine(signedOut, act);
+    // A run that never started has no log: only Preferences, which has the Sign In button.
+    expect(buttons(el).map(named)).toEqual(['Open Preferences', 'Dismiss']);
+    press(el, 'Open Preferences');
+    expect(act.calls).toEqual(['preferences']);
+
+    const logged = renderLiveLine({ ...signedOut, logPath: '/logs/run.jsonl' }, actions());
+    expect(buttons(logged).map(named)).toEqual(['Show log', 'Open Preferences', 'Dismiss']);
+  });
+
+  it('offers no way to Preferences for any other failure, or where the host has none', () => {
+    const other: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude can't reach the network.",
+    };
+    expect(buttons(renderLiveLine(other, actions())).map(named)).toEqual(['Dismiss']);
+    const without = actions();
+    delete without.openPreferences;
+    const el = renderLiveLine({ ...other, setup: true }, without);
+    expect(buttons(el).map(named)).toEqual(['Dismiss']);
+  });
+
   it('names the agent before a failure that doesn’t, and offers no log without one', () => {
     const el = renderLiveLine(
       { kind: 'failed', agent: 'claude', agentName: 'Claude', message: 'Stopped.' },
@@ -317,6 +351,7 @@ function liveLines(overrides: Partial<LiveLinesDeps> = {}) {
     getParsed: () => PLAIN,
     refresh: (thread) => refreshed.push(thread),
     showLog: (path) => logs.push(path),
+    openPreferences: () => logs.push('preferences'),
     notify: (notice) => {
       const shown = { notice, closed: false };
       notices.push(shown);
@@ -506,6 +541,26 @@ describe('createLiveLines', () => {
     // Dismissing the line takes its notification away.
     s.set('c3fm', null);
     expect(shown?.closed).toBe(true);
+  });
+
+  it('sends Open Preferences to the window, in the line and in the notification', async () => {
+    const s = liveLines({ inView: () => false });
+    const setupFailure: LiveLine = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      logPath: '/logs/run.jsonl',
+      setup: true,
+    };
+    s.set('c2dk', setupFailure);
+    press(s.lines.footer('c2dk')!, 'Open Preferences');
+    expect(s.logs).toEqual(['preferences']);
+    await frame();
+    // What the person can do about it is open Preferences, so that is the notification's button.
+    expect(s.notices.map(({ notice }) => notice.action?.label)).toEqual(['Open Preferences']);
+    s.notices[0]?.notice.action?.run();
+    expect(s.logs).toEqual(['preferences', 'preferences']);
   });
 
   it('names the agent in a notification for a failure that doesn’t, and offers no log without one', async () => {
