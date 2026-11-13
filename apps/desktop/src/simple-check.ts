@@ -423,12 +423,12 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       if (!accept) return { note: 'no note with an Accept button was drawn' };
       // What the note says it decides, before the click: in words, as a card does.
       const says = note.querySelector('.rl-note-change')?.textContent ?? null;
-      // What scrolls the page, and where it is: a decision leaves it there.
-      const scroller = [...document.querySelectorAll<HTMLElement>('*')].find(
+      // Whatever scrolls, and where it is: a decision leaves every one of them there.
+      const scrollers = [...document.querySelectorAll<HTMLElement>('*')].filter(
         (el) =>
           el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY),
       );
-      const scrolled = scroller?.scrollTop ?? 0;
+      const scrolled = scrollers.map((el) => el.scrollTop);
       accept.click();
       await frames();
       const problems: Problem = {};
@@ -439,8 +439,9 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       if (editor.getUiState().view !== 'simple') problems['view'] = editor.getUiState().view;
       if (editor.getUiState().markupView !== 'simple')
         problems['markupView'] = editor.getUiState().markupView;
-      const moved = (scroller?.scrollTop ?? 0) - scrolled;
-      if (Math.abs(moved) > 1) problems['scroll'] = moved;
+      const moved = scrollers.map((el, i) => el.scrollTop - (scrolled[i] ?? 0));
+      if (moved.some((by) => Math.abs(by) > 1)) problems['scroll'] = moved;
+      if (!scrollers.length) problems['scrollers'] = 'nothing scrolls, so the page was not tried';
       return Object.keys(problems).length ? problems : null;
     },
   },

@@ -383,7 +383,15 @@ describe('margin notes', () => {
       const { editor } = mount(reasons, { real: true });
       editor.setViewMode('simple');
       const before = editor.getDoc();
+      const dispatched = vi.spyOn(editor.view, 'dispatch');
       button(notes(editor)[0]!, 'Accept').click();
+      // The decision's own transaction, with no selection and no effect: nothing to scroll to.
+      expect(dispatched).toHaveBeenCalled();
+      for (const [spec] of dispatched.mock.calls) {
+        expect(spec).not.toHaveProperty('selection');
+        expect(spec).not.toHaveProperty('effects');
+        expect(spec).not.toHaveProperty('scrollIntoView');
+      }
       expect(editor.getDoc()).toContain('The exporter goes');
       expect(editor.getDoc()).not.toContain('p7qd');
       expect(editor.getUiState().view).toBe('simple');
@@ -487,6 +495,19 @@ describe('margin notes', () => {
     const [note] = notes(editor);
     button(note!, 'Accept').click();
     expect(editor.getDoc()).toBe(before);
+    const error = note!.querySelector<HTMLElement>('.rl-note-error');
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toBe(REFUSAL);
+  });
+
+  it('a refused decision in the simple look says why in the note too, and changes nothing', () => {
+    const { editor } = mount(reasons, { refuse: true });
+    editor.setViewMode('simple');
+    const before = editor.getDoc();
+    const [note] = notes(editor);
+    button(note!, 'Accept').click();
+    expect(editor.getDoc()).toBe(before);
+    expect(editor.getUiState().view).toBe('simple');
     const error = note!.querySelector<HTMLElement>('.rl-note-error');
     expect(error?.hidden).toBe(false);
     expect(error?.textContent).toBe(REFUSAL);

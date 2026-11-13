@@ -94,6 +94,22 @@ describe('a suggestion of several marks', () => {
     expect(note!.querySelector('.rl-note-change')?.textContent).toBe('will · March → April · now');
   });
 
+  it('says every change of a suggestion in the simple look, in the card’s words, unclipped', () => {
+    const { editor } = mount(suggestion);
+    editor.setViewMode('simple');
+    const [note] = notes(editor);
+    const line = note!.querySelector('.rl-note-change');
+    // All three, in order: Accept decides them all, and here the note is the only place that says.
+    expect(line?.textContent).toBe(
+      'Inserted “will” · Replaced “March” with “April” · Inserted “now”',
+    );
+    expect(line?.classList.contains('rl-note-changes')).toBe(false);
+    editor.setViewMode('redlines');
+    expect(notes(editor)[0]!.querySelector('.rl-note-change')?.textContent).toBe(
+      'will · March → April · now',
+    );
+  });
+
   it('keeps two suggestions of one run apart when their notes differ', () => {
     const { editor } = mount(two);
     const shown = notes(editor);

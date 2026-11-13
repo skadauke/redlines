@@ -124,7 +124,8 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  // A change's note: what the change did, the old text struck through, and then why, quieter.
+  // A change's note: what the change did (in the full markup the old text struck through, in the
+  // simple look a sentence in the card's words), and then why, quieter.
   '.rl-note-change': { marginTop: notePx(1), overflowWrap: 'anywhere' },
   // A suggestion of several marks: its changes in one line, clipped to three with an ellipsis.
   '.rl-note-changes': {

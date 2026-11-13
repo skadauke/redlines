@@ -394,11 +394,11 @@ mode has no counterpart in the desktop app.
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
   next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
   Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
-  the simple look closes it, because a person who chooses to read has stopped deciding, and while
-  it is open a click on a change bar opens that change's card in place of switching the look. It
-  floats at the bottom of the window and closes with Esc or its close button; without it, a
-  change's card, or its note in the rail (§5.7, in the simple look too), still accepts or rejects
-  that change. It holds:
+  the simple look closes it, because a person who chooses to read has stopped stepping through
+  changes, and while it is open a click on a change bar opens that change's card in place of
+  switching the look. It floats at the bottom of the window and closes with Esc or its close
+  button; without it, a change's card, or its note in the rail (§5.7, in the simple look too),
+  still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
