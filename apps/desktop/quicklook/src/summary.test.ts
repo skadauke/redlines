@@ -61,8 +61,10 @@ describe('noticeOf', () => {
     expect(noticeOf(file('Plain.\n', MARK('k3x9', 'ada')))).toBeNull();
   });
 
-  it('leaves out a thread that has no place in the text', () => {
-    expect(noticeOf(file('Plain.\n', '', THREAD('c8d2', 'bo')))).toBeNull();
+  it('counts a thread whose anchor is gone, which is kept and shown at the end (format §4)', () => {
+    expect(noticeOf(file('Plain.\n', '', THREAD('c8d2', 'bo')))).toBe(
+      '1 comment by Bo Chen. Open in Redlines to read it.',
+    );
   });
 
   it('counts a thread about a change, with no range of its own', () => {

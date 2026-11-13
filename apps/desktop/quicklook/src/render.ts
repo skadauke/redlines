@@ -17,11 +17,15 @@ export const MAX_CHARS = 300_000;
 const CUT_SHORT =
   'This preview shows the first part of a long document. Open it in Redlines to read all of it.';
 
+/** A blank line, in a file with LF or CRLF line breaks. */
+const BLANK_LINE = /\r?\n[ \t]*\r?\n/g;
+
 /** `text` cut short at the last blank line under `limit`, or at `limit` when there is none in its
  * second half. */
 export function firstPart(text: string, limit: number): string {
   if (text.length <= limit) return text;
-  const blank = text.lastIndexOf('\n\n', limit);
+  let blank = -1;
+  for (const found of text.slice(0, limit).matchAll(BLANK_LINE)) blank = found.index;
   return text.slice(0, blank > limit / 2 ? blank : limit);
 }
 

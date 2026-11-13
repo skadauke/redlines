@@ -1,8 +1,8 @@
 // What a file has waiting in it, in one line over the preview ("4 changes and 2 comments by Claude
 // and Bo. Open in Redlines to review them."). The count is the editor's: the changes it lists and
 // decides, as suggestions (format §6), the way the review bar counts them, and the comment threads
-// that are still open. A resolved thread, a highlight and the history that a ledger keeps are not
-// waiting for anyone.
+// that are still open, a detached one too. A resolved thread, a highlight and the history that a
+// ledger keeps are not waiting for anyone.
 
 import { isDecidable, parse, suggestions } from '@redlines/format';
 import type { MarkRange, Parsed } from '@redlines/format';
@@ -51,13 +51,14 @@ const startOf = (mark: MarkRange): number => mark.segments[0]?.open.from ?? 0;
 export function pendingOf(parsed: Parsed): Pending {
   const marks = new Map(parsed.marks.map((mark) => [mark.id, mark]));
   const changes = parsed.marks.filter(isChange);
-  // A thread belongs to the text when a comment mark stands in it, or when it is about a mark that
-  // does: the ledger can hold a thread that no longer has either (format §12), which isn't shown.
+  // Every thread that isn't resolved waits, as the review rail's notes do: one whose anchor is gone
+  // too, which is kept (format §4) and shown at the end of the document.
+  const end = parsed.ledgerRange?.from ?? parsed.text.length;
   const open: { by: string; at: number }[] = [];
   for (const thread of parsed.ledger.comments) {
     if (thread.resolved) continue;
     const anchor = marks.get(thread.id) ?? (thread.about ? marks.get(thread.about) : undefined);
-    if (anchor) open.push({ by: thread.by, at: startOf(anchor) });
+    open.push({ by: thread.by, at: anchor ? startOf(anchor) : end });
   }
   const people = new Map(parsed.ledger.people.map((person) => [person.handle, person.name]));
   const nameOf = (handle: string) =>

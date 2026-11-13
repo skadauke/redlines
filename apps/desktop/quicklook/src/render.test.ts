@@ -232,6 +232,11 @@ describe('firstPart', () => {
     expect(firstPart('aaaa\n\nbbbb\n\ncccc', 12)).toBe('aaaa\n\nbbbb');
   });
 
+  it('cuts at a blank line whatever the line breaks are', () => {
+    expect(firstPart('aaaa\r\n\r\nbbbb\r\n\r\ncccc', 16)).toBe('aaaa\r\n\r\nbbbb');
+    expect(firstPart('aaaa\r\n \t\r\nbbbb\r\n\r\ncccc', 18)).toBe('aaaa\r\n \t\r\nbbbb');
+  });
+
   it('cuts at the limit when the second half has no blank line', () => {
     expect(firstPart('a\n\n' + 'b'.repeat(30), 20)).toBe('a\n\n' + 'b'.repeat(17));
   });

@@ -1,7 +1,8 @@
 // Markdown as the HTML of a preview: micromark with GitHub's extensions, the reader that the format's
 // tests hold every file to (packages/format/src/oracle.ts), and the same rules as a copy (design
 // §5.10): everything is escaped and raw HTML in the source is text, never live. A preview has no
-// script and no network, so it also draws no image and keeps no address that a click would load.
+// script and no network, so it also draws no image. A link keeps its address, which only a click
+// would load, and a `javascript:` address is gone.
 //
 // Four things are changed from micromark's own HTML:
 //
@@ -109,17 +110,19 @@ function extension(): HtmlExtension {
         this.resume();
         if (chunk !== null) options = this.sliceSerialize(token);
       },
+      // micromark's own handler of a fence's end: the first fence closes the tag, and every fence,
+      // the closing one too, is counted, which is how the end of the block tells whether it was closed.
       codeFencedFence() {
         const count = this.getData('fencesCount') ?? 0;
-        // The closing fence ends nothing here.
-        if (count) return;
-        if (chunk !== null) {
-          this.tag(` data-chunk="${this.encode(chunkHeader(`${chunk} ${options}`))}"`);
+        if (count === 0) {
+          if (chunk !== null) {
+            this.tag(` data-chunk="${this.encode(chunkHeader(`${chunk} ${options}`))}"`);
+          }
+          chunk = null;
+          options = '';
+          this.tag('>');
+          this.setData('slurpOneLineEnding', true);
         }
-        chunk = null;
-        options = '';
-        this.tag('>');
-        this.setData('slurpOneLineEnding', true);
         this.setData('fencesCount', count + 1);
       },
     },

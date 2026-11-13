@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { micromark } from 'micromark';
+import { gfm, gfmHtml } from 'micromark-extension-gfm';
 import { chunkEngine, chunkHeader, markdownToHtml, withoutComments } from './markdown.ts';
 
 describe('markdownToHtml', () => {
@@ -136,7 +138,7 @@ describe('markdownToHtml', () => {
 
     it('keeps what its braces hold as a line over its code', () => {
       expect(chunk('{r setup, include=FALSE}')).toBe(
-        '<pre><code class="language-r" data-chunk="r setup, include=FALSE">code()\n</code></pre>\n\n',
+        '<pre><code class="language-r" data-chunk="r setup, include=FALSE">code()\n</code></pre>\n',
       );
       expect(chunk('{r, echo=FALSE}')).toContain('class="language-r" data-chunk="r, echo=FALSE"');
       expect(chunk('{r}')).toContain('class="language-r" data-chunk="r"');
@@ -152,15 +154,15 @@ describe('markdownToHtml', () => {
 
     it('shows Pandoc’s attributes as the line, with no language', () => {
       expect(chunk('{.python .numberLines}')).toBe(
-        '<pre><code data-chunk=".python .numberLines">code()\n</code></pre>\n\n',
+        '<pre><code data-chunk=".python .numberLines">code()\n</code></pre>\n',
       );
     });
 
     it('leaves other fences as they were', () => {
-      expect(chunk('js')).toBe('<pre><code class="language-js">code()\n</code></pre>\n\n');
-      expect(chunk('')).toBe('<pre><code>code()\n</code></pre>\n\n');
+      expect(chunk('js')).toBe('<pre><code class="language-js">code()\n</code></pre>\n');
+      expect(chunk('')).toBe('<pre><code>code()\n</code></pre>\n');
       expect(chunk('js title="a.js"')).toBe(
-        '<pre><code class="language-js">code()\n</code></pre>\n\n',
+        '<pre><code class="language-js">code()\n</code></pre>\n',
       );
     });
 
@@ -236,5 +238,41 @@ describe('a list item', () => {
 
   it('is never made by the text of a document', () => {
     expect(markdownToHtml('A <li><input type="checkbox"> here\n')).not.toContain('rl-task');
+  });
+});
+
+describe('markdownToHtml, where the text has nothing of what it changes', () => {
+  // What micromark makes of text with no table, task, image, comment or braced fence is what the
+  // preview makes of it, byte for byte, but for the class of a loose item: its handlers repeat
+  // micromark's, and the fences' were once a count short, which put a blank line at the end of every
+  // fence in a list or a quote.
+  const inputs = [
+    '# A title\n\nA paragraph with *emphasis*, **strength** and `code`.\n',
+    '```js\ncode\n```\n',
+    '```\nno language\n```\n\nafter\n',
+    '~~~ts\nlet x = 1;\n~~~\n',
+    '````md\n```\nnested\n```\n````\n',
+    '```js\nnever closed\n',
+    '- item\n\n  ```js\n  code\n  ```\n',
+    '- item\n  ```js\n  code\n  ```\n- next\n',
+    '- item\n  ```js\n  never closed\n',
+    '> quoted\n>\n> ```js\n> code\n> ```\n',
+    '> ```js\n> never closed\n',
+    '1. one\n   ```\n   code\n   ```\n2. two\n',
+    '    indented code\n\nafter\n',
+    'A line  \nwith a hard break and a\\\nbackslash one.\n',
+    '> a quote\n> over two lines\n\n---\n\n- a\n- b\n  - c\n',
+    'Raw <b>HTML</b> and <div>blocks</div> are text.\n\n<div>\nblock\n</div>\n',
+    '[a link](https://example.com "title") and <https://example.org> and https://example.net\n',
+    'Setext\n======\n\nSetext two\n----------\n',
+    '~~struck~~ text and a footnote.[^1]\n\n[^1]: The note.\n',
+    '',
+    '\n\n',
+  ];
+
+  it.each(inputs)('draws %j as micromark does', (source) => {
+    expect(markdownToHtml(source).replaceAll(' class="rl-loose"', '')).toBe(
+      micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()] }),
+    );
   });
 });
