@@ -1958,9 +1958,9 @@ it, one per line:
   row with no pipe at its start can't hold a marker at its start. Decide the change first, or
   start the highlight after the first cell of the row."). So is one that would start in front of
   the mark of a pending row, at the start of its first cell, or between the mark and the space
-  after it, which hides the mark from the table ("... this highlight would start in front of the
-  mark of a row that is inserted or moved, at the very start of its first cell. Decide the change
-  first, or start the highlight at the text of the row."). A highlight inside one row, from the
+  after it, which hides the mark from the table ("... this highlight would start at the very start
+  of the first cell of a row that is inserted or moved, where the mark of the row is. Decide the
+  change first, or start the highlight at the text of the row."). A highlight inside one row, from the
   text of a cell on, and one over the whole table, from the text before it to the text after it,
   are made, and every decision of the rows is possible with them there. Deleting the header is
   refused in the same two cases (the row that would be the header has another number of cells, or a

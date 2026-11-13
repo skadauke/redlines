@@ -1052,7 +1052,7 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     // A marker in front of the mark of a row hides it from the table: neither accepting nor
     // rejecting the row could be done. The text of the row is fine.
     const hides =
-      "Claude's change of rows in this table is pending, and this highlight would start in front of the mark of a row that is inserted or moved, at the very start of its first cell. Decide the change first, or start the highlight at the text of the row.";
+      "Claude's change of rows in this table is pending, and this highlight would start at the very start of the first cell of a row that is inserted or moved, where the mark of the row is. Decide the change first, or start the highlight at the text of the row.";
     for (const table of [FRUIT, BARE]) {
       const base = around(table);
       const at2 = readTables(base, parse(base))[0]?.from ?? 0;

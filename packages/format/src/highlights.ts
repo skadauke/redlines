@@ -73,7 +73,7 @@ function refuseAcrossPendingRows(text: string, parsed: Parsed, wanted: Range, pl
     const inOneRow = first !== -1 && first === rowOf(wanted.to);
     let words: string;
     if (trouble === 'hides') {
-      words = `${pendingRows}, and this highlight would start in front of the mark of a row that is inserted or moved, at the very start of its first cell. Decide the change first, or start the highlight at the text of the row.`;
+      words = `${pendingRows}, and this highlight would start at the very start of the first cell of a row that is inserted or moved, where the mark of the row is. Decide the change first, or start the highlight at the text of the row.`;
     } else if (inOneRow) {
       words = `${pendingRows}, and this highlight would start at the end of the row above, as a row with no pipe at its start can't hold a marker at its start. Decide the change first, or start the highlight after the first cell of the row.`;
     } else {
