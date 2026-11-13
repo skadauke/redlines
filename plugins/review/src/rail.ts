@@ -1049,7 +1049,8 @@ class Rail {
           this.selectedId === NEW_COMMENT,
         )
       ] ?? 0;
-    if (pinned !== layout.placedFor) {
+    const arranged = pinned !== layout.placedFor;
+    if (arranged) {
       layout.placed = this.arrange(layout, pinned);
       layout.placedFor = pinned;
       const id = layout.notes[pinned]?.id ?? null;
@@ -1058,6 +1059,7 @@ class Rail {
       this.pinnedId = id;
     }
     this.flush(layout, seen, full);
+    if (full || arranged) this.holdNotes(layout, full);
   }
 
   /** Where each note, or each dot, goes with the note at index `pinned` level with its anchor. */
@@ -1114,9 +1116,6 @@ class Rail {
         set(view.dom, top, height);
       }
     });
-    // The page is as long as the notes need, whichever is level with its anchor: they reach their
-    // lowest when the first is, which a scroll doesn't change, so a scroll leaves it be.
-    if (full) this.holdNotes(layout);
   }
 
   /** The note that slides is the one that moves because another is now level with its anchor. */
@@ -1129,17 +1128,27 @@ class Rail {
   /**
    * Makes the editor as long as its notes, so that the page scrolls to the foot of the last. A note
    * that reaches past the text, such as a long comment on its last line, would otherwise hang out
-   * of the editor's own scroller, which would show a scroll bar of its own for it.
+   * of the editor's own scroller, which would show a scroll bar of its own for it. The notes reach
+   * their lowest with the first level with its anchor (a resolved note can go lower in another
+   * layout), so a measure holds the page as long as that needs, and as the layout shown needs if it
+   * is longer; a scroll only makes it longer, since a page that changed its length with the note
+   * level with its anchor would move under the person at its end.
    */
-  private holdNotes(layout: Layout): void {
-    const { noteScale: k } = layout;
-    // As low as they go: the first open note level with its anchor, the rest below it.
+  private holdNotes(layout: Layout, full: boolean): void {
+    const bottomOf = (placed: readonly number[]) => {
+      const lift = layout.compact ? POPOVER_LIFT * layout.noteScale : 0;
+      return Math.max(...placed.map((top, i) => top - lift + (layout.heights[i] ?? 0)));
+    };
     const first = layout.open[0] ?? 0;
     const lowest = first === layout.placedFor ? layout.placed : this.arrange(layout, first);
-    const lift = layout.compact ? POPOVER_LIFT * k : 0;
-    const bottom = Math.max(...lowest.map((top, i) => top - lift + (layout.heights[i] ?? 0)));
-    const room = `${bottom + NOTES_FOOT * k}px`;
-    if (this.view.scrollDOM.style.minHeight !== room) this.view.scrollDOM.style.minHeight = room;
+    const bottom = full
+      ? Math.max(bottomOf(lowest), bottomOf(layout.placed))
+      : bottomOf(layout.placed);
+    const room = bottom + NOTES_FOOT * layout.noteScale;
+    const { style } = this.view.scrollDOM;
+    if (full ? style.minHeight !== `${room}px` : room > (parseFloat(style.minHeight) || 0)) {
+      style.minHeight = `${room}px`;
+    }
   }
 
   /** Shrinks the rail to dots, or brings it back; the editor then redraws the column's width. */

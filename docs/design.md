@@ -519,7 +519,11 @@ mode has no counterpart in the desktop app.
     of a narrow window follow the same rule. A scroll places the notes again from what was last
     measured, only when another note is the one, and writes the notes within a screen of the page,
     and the rest as the page comes near them, so that it stays cheap in a long document. A
-    resolved note gives way as before: it is never the one that keeps its anchor's height.
+    resolved note gives way as before: it is never the one that keeps its anchor's height. The
+    page is as long as the notes need when the first is level with its anchor, where they reach
+    their lowest, as it was before the notes followed the view, so that a crowded end of a document
+    leaves room under its text; it doesn't shrink as the page scrolls, which would move the page
+    under the person at its end, and grows only where a resolved note, shown, goes lower.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks

@@ -888,20 +888,22 @@ describe('stackAround', () => {
       gap: number,
       pinned: number,
       settled: boolean[],
+      floor: number | undefined,
     ) => {
-      const placed = stackAround(tops, heights, gap, pinned);
       const chain = tops.flatMap((_, i) => (!settled[i] || i === pinned ? [i] : []));
       const open = stackAround(
         chain.map((i) => tops[i] ?? 0),
         chain.map((i) => heights[i] ?? 0),
         gap,
         Math.max(chain.indexOf(pinned), 0),
+        undefined,
+        floor,
       );
       const taken = chain.map((i, k) => ({
         top: open[k] ?? 0,
         bottom: (open[k] ?? 0) + (heights[i] ?? 0),
       }));
-      const result = [...placed];
+      const result: number[] = [];
       chain.forEach((i, k) => (result[i] = open[k] ?? 0));
       tops.forEach((top, i) => {
         if (!settled[i] || i === pinned) return;
@@ -921,15 +923,17 @@ describe('stackAround', () => {
       seed = (seed * 1103515245 + 12345) % 2147483648;
       return seed / 2147483648;
     };
-    for (let round = 0; round < 200; round++) {
+    for (let round = 0; round < 400; round++) {
       const n = 1 + Math.floor(random() * 14);
-      let at = 0;
+      let at = random() < 0.2 ? -30 : 0;
       const tops = Array.from({ length: n }, () => (at += Math.floor(random() * 40)));
-      const heights = tops.map(() => 20 + Math.floor(random() * 60));
+      // Some notes have no height, and some pages have a top that the notes can't go above.
+      const heights = tops.map(() => (random() < 0.15 ? 0 : 20 + Math.floor(random() * 60)));
       const settled = tops.map(() => random() < 0.4);
       const pinned = Math.floor(random() * n);
-      expect(stackAround(tops, heights, 8, pinned, settled)).toEqual(
-        reference(tops, heights, 8, pinned, settled),
+      const floor = random() < 0.5 ? 0 : undefined;
+      expect(stackAround(tops, heights, 8, pinned, settled, floor)).toEqual(
+        reference(tops, heights, 8, pinned, settled, floor),
       );
     }
   });
@@ -2580,15 +2584,21 @@ describe('the notes follow the view', () => {
    * Anchors on a page 100, 110, 900 and 910 px down, in notes 60 high, in a window that is 768 px
    * high and scrolled `scroll.by` px: the page, not the window, is where the anchors stand.
    */
-  function load(doc = four) {
+  function load(
+    doc = four,
+    {
+      page = [100, 110, 900, 910],
+      words = ['beta', 'gamma', 'delta'],
+      resolved = false,
+    }: { page?: number[]; words?: string[]; resolved?: boolean } = {},
+  ) {
     const scroll = { by: 0 };
     const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 22 });
-    const { editor, review } = mount(doc);
-    const starts = ['beta', 'gamma', 'delta'].map((word) => place(editor, word).from);
-    const page = [100, 110, 900, 910];
+    const { editor, review } = mount(doc, { review: { showResolved: resolved } });
+    const starts = words.map((word) => place(editor, word).from);
     vi.spyOn(editor.view, 'coordsAtPos').mockImplementation((pos) => {
       const n = starts.filter((start) => pos >= start - 1).length;
-      const top = (page[n] ?? 910) - scroll.by;
+      const top = (page[n] ?? page.at(-1) ?? 0) - scroll.by;
       return { left: 0, right: 5, top, bottom: top + 20 };
     });
     const scrollTo = async (by: number) => {
@@ -2764,6 +2774,77 @@ describe('the notes follow the view', () => {
     } finally {
       restore();
     }
+  });
+
+  describe('the length of the page', () => {
+    const lengthOf = (editor: Editor) => parseFloat(editor.view.scrollDOM.style.minHeight);
+
+    it('holds the notes as low as they go, and does not change as the page scrolls', async () => {
+      const { editor, scrollTo, restore } = load();
+      try {
+        await frame();
+        // The notes stacked down from the first, 963 + 60 high, and a foot of 24 below the last.
+        expect(lengthOf(editor)).toBe(1047);
+        // A scroll that pins another note moves the page's end under the person if it changes.
+        await scrollTo(700);
+        expect(tops(editor)).toEqual([37, 105, 895, 963]);
+        expect(lengthOf(editor)).toBe(1047);
+        await scrollTo(0);
+        expect(lengthOf(editor)).toBe(1047);
+      } finally {
+        restore();
+      }
+    });
+
+    it('is as long as a resolved note needs, which a note level with its anchor can push lower', async () => {
+      // Three notes 70 px apart, the first resolved: it sits above the others while the second is
+      // the one level with its anchor, and goes below them both once the third is.
+      const body = file(
+        'One <!--cmt c2dk-->alpha<!--/c2dk--> two <!--cmt c3fm-->beta<!--/c3fm-->\n\nThree <!--cmt c4gn-->gamma<!--/c4gn-->.',
+        [
+          ...PEOPLE,
+          'comments:',
+          ...thread('c2dk', 'bo', 'A', [], 'bo 2026-11-01T10:00Z'),
+          ...thread('c3fm', 'bo', 'B'),
+          ...thread('c4gn', 'bo', 'C'),
+        ],
+      );
+      const { editor, scrollTo, restore } = load(body, {
+        page: [100, 170, 230],
+        words: ['beta', 'gamma'],
+        resolved: true,
+      });
+      try {
+        await frame();
+        expect(tops(editor)).toEqual([95, 165, 233]);
+        expect(lengthOf(editor)).toBe(293 + 24);
+        await scrollTo(200);
+        // The resolved note takes the first place below both: bottom 293 + 60.
+        expect(tops(editor)).toEqual([293, 157, 225]);
+        expect(lengthOf(editor)).toBeGreaterThanOrEqual(293 + 60 + 24);
+        // Back at the top, the page keeps what it needed: it changes when the notes are read again.
+        await scrollTo(0);
+        expect(tops(editor)).toEqual([95, 165, 233]);
+        expect(lengthOf(editor)).toBeGreaterThanOrEqual(293 + 60 + 24);
+      } finally {
+        restore();
+      }
+    });
+
+    it('holds the notes of a narrow window, shown from their dots, as low as they go', async () => {
+      const { editor, restore } = load();
+      try {
+        await frame();
+        stubWidth(editor.view.scrollDOM, 700);
+        editor.view.dispatch({ selection: { anchor: 1 } });
+        await frame();
+        await tick();
+        // Dots 106, 118, 906 and 918 high, their notes 7 above them and 60 high, and the foot.
+        expect(lengthOf(editor)).toBe(911 + 60 + 24);
+      } finally {
+        restore();
+      }
+    });
   });
 
   it('keeps a new comment where it is while it is written, and the others out of its way', async () => {
