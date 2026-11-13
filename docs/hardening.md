@@ -1,73 +1,91 @@
 # How the format is kept sound
 
-For contributors. It says what a Redlines file promises, what holds each promise, and how to add a
-rule without loosening one. The page for readers and adopters has its own draft
-([website-hardening-draft.md](website-hardening-draft.md)).
+For contributors. It says what a Redlines file is built to hold, what holds each property, what is
+known not to hold, and how to add a rule without loosening one. A draft of the page for readers and
+adopters is [website-hardening-draft.md](website-hardening-draft.md).
 
-A Redlines file is a Markdown file first. Its changes and comments are HTML comments in the text,
-and its people and history are a block at the end ([format.md](format.md) §1). Anything that edits
-it, a keystroke, an agent, a merge, has to leave a file that every Markdown reader still reads as
-the document it shows. That is easy to promise and easy to break by a character: a marker in front
-of a line turns it into an HTML block, a blank line turns a tight list loose, and a pending change
-that is decided in another order reads another way.
+A Redlines file is a Markdown file first. Its changes and comments are HTML comments in the text; a
+ledger, one more HTML comment at the end, lists the people, each mark's author and time, the
+comment threads and the settings; and a file that keeps its full history has a comment for each
+save between the two ([format.md](format.md) §1.3). Anything that edits it, a keystroke, an agent, a
+merge, has to leave a file that every Markdown reader still reads as the document it shows. That is
+easy to promise and easy to break by a character: a marker in front of a line turns it into an HTML
+block, a blank line turns a tight list loose, and a pending change that is decided in another order
+reads another way.
 
-## The guarantees
+## The four properties
 
-One sentence each. A change that breaks one is a bug, whether or not a test says so.
+What the format and the editor are built to hold, in one sentence each. They are what the tests try
+to break, not a promise that nothing breaks: where a gap is known it is listed under *What isn't
+held*, and a known gap is a bug.
 
-1. **Every edit Redlines allows reads the same in every order the pending changes could be decided
-   in.** Each change can be accepted or rejected, in any order; every order gives the same text,
-   and the text is judged exactly, by micromark 4.0.2 with GFM tables and strikethrough, the oracle
-   of the suites ([format.md](format.md) §12). "Close" is not a pass, and a reading by eye is not
-   a judge.
-2. **Redlines refuses rather than repairs, and a refusal always says why.** An edit that no form
+1. **Every edit Redlines writes is meant to read the same in every order the same decisions can be
+   made in.** A file with pending changes can have each of them accepted or rejected, in any order;
+   the words the file reads as must not depend on the order, and are judged by micromark 4.0.2 with
+   GFM tables and strikethrough, the oracle of the suites ([format.md](format.md) §12), and not by
+   eye.
+2. **Redlines is meant to refuse rather than repair, and a refusal says why.** An edit that no form
    can write soundly is refused, in words that name the cause and the way out ("This would change
    how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."). A key that does
    nothing and says nothing is a bug.
-3. **No marker starts a line.** In CommonMark a line that starts with `<!--` starts an HTML block,
-   which changes how the rest of the line reads. A marker stays at the end of the previous line
-   ([format.md](format.md) §3.2).
-4. **A keystroke costs what it does on main.** Typing, Return and Backspace, in a long document
-   with many pending changes, may take at most twice what the same key takes in the build that the
-   numbers were recorded from, plus a millisecond for noise, on the machine that runs the test
+3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
+   marker.** In CommonMark a line that starts with `<!--` starts an HTML block, which changes how
+   the rest of the line reads, so a marker stays at the end of the previous line
+   ([format.md](format.md) §3.2). Two things stand alone on a line by design: the opener and the
+   closer of a change to a whole block, which are an HTML block that ends on that line (§3.3); and
+   inside an HTML block's own content a marker may start a line (§3.5).
+4. **A keystroke is meant to cost what it did before the block keys were written.** Typing, Return
+   and Backspace, in a long document with many pending changes, may take at most twice what the
+   same key took in the build that the numbers were recorded from (main at `4ca53fc`, where the
+   keys were CodeMirror's own, inside Redlines' tracked layer), plus a millisecond for noise, on
+   test documents of 16 KB and 150 KB with 200 changes, scaled to the machine by a calibration
    (`cost.test.ts`, below).
 
 ## What holds them
 
-### The rules and their proofs: `docs/format.md`
+### The written rules, and the proofs that exist
 
-Every rule that places a marker is written in `docs/format.md` with its argument, and the spec
-decides where code and spec disagree. The places to read first:
+`docs/format.md` holds every rule that places a marker, and the spec decides where code and spec
+disagree. *Proved* is said only where it has a written argument, and there are two places. They are
+arguments in prose, checked by review and by the suites below, not by a machine, and the spec
+records one earlier shortcut in them that was "wrong on both counts" (§2.6):
 
-- **§2.6, format changes.** The rule of *marks apart* (an inline change is tried against the marks
-  that can't change how its line reads, and not against every pending mark) comes with a written
-  proof, a second one for block changes in a list under review, and a section called *What the
-  proof doesn't give*: the shapes that are still tried one mark at a time, and the ones that are
-  refused, with the count and the reason.
-- **§3.2, line starts.** The rule behind guarantee 3.
-- **§3.4, block breaks, splits and joins.** A block break is text, and a deletion may contain it.
-- **§3.5, atomic content, rule 9.** Content that can't hold a marker (code, display math,
-  raw-text HTML) is changed whole, as a substitution with the old block as its payload.
-- **§3.7, tables.** The reader agrees with micromark 4.0.2 with GFM tables on what a table is, and
-  every allowed edit to a table's text is judged by how its cells read.
+- **§2.6, marks apart.** A format change is tried, before it is written, on the block it is in:
+  every order of accepting and rejecting every mark there, the new marks and the others but those
+  *apart* from it. A mark is apart when no decision can make it anything but words of its own
+  paragraph: an insertion, deletion, substitution or highlight of text with no line break,
+  backtick, `<`, `>`, backslash or `|`, on lines that start with a letter or a digit that no
+  marker holds, and so on (the section has the whole condition). Marks apart stay pending and are
+  neither tried nor counted; more than five marks to try (fewer in a long block) is refused, in
+  words that go by the marks tried. The section has one argument for inline changes and a second for
+  block changes in a list under review, and *what the proof doesn't give*: five shapes of numbered
+  items keep their marks tried, and the change is refused for their count past five.
+- **§3.7, cells apart.** A format change inside one table cell is checked against that cell's marks
+  only.
 
-*Proved* means that one of those sections has the argument. Everywhere else the word is *tested*,
-and the next sections say by what.
+Every other rule is a rule held by tests, and the word for it here is *tested*: §3.2 (line starts),
+§3.4 (block breaks, splits and joins), §3.5's rule 9 (content that can't hold a marker, such as
+code, is changed whole, as a substitution with the old block as its payload), and §3.7's
+agreement with micromark on what a table is.
 
 ### The random suites: `packages/format/src`
 
-`random-docs.ts` makes seeded documents that hold every kind of mark by other people
-(`randomDocument`, `listDocument`, `adjacentListsDocument`). The `*-random.test.ts` suites (code
-substitutions, first prefixes, joins, table columns, table format changes, table rows) and most of
-the other suites of the package draw from it and hold what they write to guarantee 1. A failure
-repeats from its seed. To try more:
+`random-docs.ts` has the seeded generators: `randomDocument` (blocks with other people's insertions,
+deletions, substitutions, comments and highlights, a ledger, front matter), `listDocument` and
+`adjacentListsDocument` (plain words in the shapes lists take, with no marks), and `seeded` and
+`fuzzCount`. The `*-random.test.ts` suites, and others, draw documents or tables from them or from
+generators of their own, and each says in its header what it holds: usually that every order of
+decisions reads alike, that all accepted is the newest view and all rejected the original; the table
+suites and `first-prefix-random` also judge what is written by micromark's reading, and
+`join-random`, which holds the join of an agent's edit to what the word form writes, does not. A
+failure repeats from its seed. To try more:
 
 ```sh
-REDLINES_FUZZ=5000 pnpm exec vitest run packages/format/src/<suite>.test.ts   # more documents
+REDLINES_FUZZ=300 pnpm exec vitest run packages/format/src/<suite>.test.ts   # more documents
 REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.test.ts   # from one seed
 ```
 
-`REDLINES_SEED` starts the table suites (`table-cols-random`, `table-format-random`) and
+`REDLINES_SEED` starts `table-cols-random`, `table-format-random`, `table-rows-random` and
 `format-apart` at one seed.
 
 The tables have a **pair model** besides: every pair of operations on rows and columns by two
@@ -75,35 +93,47 @@ people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) 
 
 ### Differential runs against main
 
-A change to how an edit is written is run against main on the same random documents, and every
-decision where the two disagree is looked at. This is done by the reviewer, in the review, and its
-numbers are in the pull request. For the change that made a bold change, a row move and a typed edit
-read alike in every order (#297), the review's differential covered 10,451 random documents with
-pending row moves, 571,930 single decisions: the branch refused 42 decisions that main wrote, and in
-every one of them main's result read otherwise in some order, or reached a dead end.
+A change to how an edit is written is run by its reviewer against main on the same random documents,
+and every decision where the two disagree is looked at. Those scripts are the reviewer's own, kept in
+the reviewer's scratch folder and not in the repository (#276 says so of the probes it reports), and
+CI runs the suites at their default counts only: the numbers are in the pull request, and are not
+re-run. For the change that made a bold change, a row move and a typed edit read alike in every order
+(#297), the review's differential covered 10,451 random documents with pending row moves, 571,930
+single decisions: the branch refused 42 decisions that main wrote, and in every one of them main's
+result read otherwise in some order, or reached a dead end.
 
 ### The block walks: `packages/editor/src/blocks`
 
 `walk.test.ts` plays seeded walks of keys (Return, Backspace, Tab, typing, ⌘Z, an agent's edit, a
 decision) from random places in the random documents, with Track Changes on and off. `script.ts` is
-the harness: `runScript` plays a script on a real editor, through its keymaps, and
-`invariantProblems` holds the result to what no key may break: a hidden caret, an empty paragraph
-in the file, a marker at a line's start, a refusal no one expected, a file whose decisions read
-differently in different orders, a Return that Backspace can't take back, a step that Undo can't
-take back. A refusal is allowed; nothing else is. `REDLINES_FUZZ=200` plays 200 walks of each kind
-in the default heap (it takes a few minutes). A walk that finds something becomes the smallest script that
-shows it, in `walk-seeds.test.ts`, with the fix.
+the harness: `runScript` plays a script on a real editor, through its keymaps, and `invariantProblems`
+reads what no key may break from the result. A walk is held to the invariants that its starting
+document holds: a hidden caret, an empty paragraph in the file, a stray blank line, micromark's
+reading of the file against the newest view, structural warnings, more markers at a line start than
+before, the order of decisions, Undo, the caret in an open empty paragraph, and the history. A
+refusal is allowed in a walk, and a break of one of those is not, except in the seeds that are
+skipped by name for known failures (46, 130 and 146 of the Tab walks, #258 and #257) and in one
+form of Return that has a row of its own. A script row (`scriptRows`, for
+the findings in `walk-seeds.test.ts` and the suites of keys) is held further: to no refusal that it
+does not name, and to the rule that a skipped invariant that now holds fails; and a script of a
+single Return must be taken back by Backspace. `REDLINES_FUZZ=200` plays 200 walks of each kind; they
+run in Node's default heap since #286 was fixed (they had run out of memory at that count), and take
+a few minutes. A walk that finds something becomes the smallest script that shows it, in
+`walk-seeds.test.ts`, with the fix.
 
 ### The cost gates
 
 `cost.test.ts` measures what the keys cost on a 16 KB and a 150 KB document with 200 marks, against
-numbers recorded from main's own build, where the keys were CodeMirror's own (the same file runs in
-a checkout of main with `REDLINES_COST=record`, which prints them). A key may take at most twice
-what that build's took. `hidden.test.ts` holds the
-hidden lines' pass to a linear cost, and `preview/long-document.test.ts` the cost of a long document.
-`held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
-busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
-which CI's check job sets.
+numbers recorded from main at `4ca53fc`, before `blocks/` existed, when the keys were CodeMirror's
+own: to record them again, check out that commit and run the same file there with
+`REDLINES_COST=record` (on today's main it would measure the block keys against themselves). A key
+may take at most twice what that build's took. `hidden.test.ts` holds the hidden lines' pass to a
+linear cost, and `preview/long-document.test.ts` holds the drawing, and a keystroke, in long
+documents with deleted blocks and tables to bounds that are a multiple of the markdown parse of the
+document alone. `held()` retries a
+timing over its bound twice, with its yardstick timed again beside it, so that a busy machine fails a
+bound only when it keeps failing. These run only with `REDLINES_COST=check`, which CI's check job
+sets.
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
@@ -112,55 +142,82 @@ deleted and replaced blocks, the Simple view, printing and zoom each have a chec
 page (`block-check.ts`, `table-check.ts`, `struck-check.ts`, `simple-check.ts`, `print-check.ts`,
 `zoom-check.ts`). `VITE_BLOCK_CHECK=1 pnpm dev` in `apps/desktop` serves one in a browser, and
 `pnpm tauri dev` runs it in WKWebView; the block, table and struck checks end with a
-`... done <n> passed, <n> failed` line. They are no part of CI: they are run by hand before a
-release, and a layout, selection or input-method problem is only found there.
+`... done <n> passed, <n> failed` line. They are no part of CI and no step of
+[releasing.md](releasing.md): they are run by hand, and the pull request says when. A layout,
+selection or input-method problem is only found by running them, or by using the app.
 
-### How a change is reviewed
+### How changes have been reviewed
 
-A change to how an edit is written is reviewed by someone who did not write it, whose job is to
-break it: write probes against main, mutate the code, run the suites at more draws. The findings
-are fixed in rounds, and each round is re-reviewed on what it changed. The pull request says what
-each round found. In #277, which made keys next to backslashes and emphasis closers written where
-they had been refused, a review found a window that read short of a far opener; its re-review found
-a widening into another person's text and a Return case; two fix rounds and two re-reviews
-followed. The re-review's own probe of the branch against main, judged by micromark in every order
-of decisions, ran 66,587 cases: none newly wrong, 5,081 newly sound, 812 newly refused, and over
-23,000 of main's wrong writes refused now. In #288 (Tab in numbered lists under review, among other things), a new
-test held every line that the reading calls an item to micromark 4.0.2's reading over 40,000 list
-layouts.
+There is no written review policy; this is what the pull requests show. A change to how an edit is
+written is reviewed by someone who did not write it, whose job is to break it: write probes against
+main, mutate the code, run the suites at more draws. The findings are fixed in rounds, and each round
+is re-reviewed on what it changed, and the pull request says what each round found. In #277, which
+made keys next to backslashes and emphasis closers written where they had been refused, a review
+found a window that read short of a far opener; its re-review found a widening into another person's
+text and a Return case; two fix rounds and two re-reviews followed. The re-review's own probe of the
+branch against main, judged by micromark in every order of decisions, ran 66,587 cases: none newly
+wrong, 5,081 newly sound, 812 newly refused, and over 23,000 of main's wrong writes refused now. In
+#288 (Tab in numbered lists under review, among other things), the new list-layout test of
+`format-apart.test.ts` held every line that the reading calls an item to micromark 4.0.2's reading;
+it draws 4,000 layouts by default, and its checks ran it over 40,000.
 
 ## How to add a rule
 
-1. **Write it in `docs/format.md`, with its argument.** Say where the marker goes, what each
-   order of decisions reads, and what is refused and in what words. Where you can prove it, write
-   the proof; where you can't, say "tested" and name the suite. If the code and the spec
-   disagree, the spec decides: change it deliberately.
-2. **Make a random suite draw it.** Add the shape to the generator, or a suite of its own, so
-   that every order of decisions of what the new rule writes is tried, with other people's marks
-   around it. A shape that no random document draws is a shape nothing has tested.
-3. **Hold it to micromark.** The judge is micromark 4.0.2 with GFM, on the file and on every
-   decision of it (`newestView`, `originalView`, `accept`, `reject`), and not your reading of the
-   spec.
-4. **Refuse where no form reads alike, and say why.** A refusal names the cause and the way out,
-   and a test holds its words. Don't repair: a form that reads alike only in most orders is not a
-   form.
-5. **If it is a key, keep it cheap**, and add a row to the cost gate.
+1. **Write it in `docs/format.md`, with its argument.** Say where the marker goes, what each order of
+   decisions reads, and what is refused and in what words. Where you can write a proof, write it;
+   where you can't, say "tested" and name the suite. If the code and the spec disagree, the spec
+   decides: change it deliberately.
+2. **Make a random suite draw it.** Add the shape to a generator, or write a suite of its own, so that
+   every order of decisions of what the new rule writes is tried, with other people's marks around
+   it. A shape that no random document draws is a shape nothing has tested.
+3. **Hold it to micromark.** The judge is micromark 4.0.2 with GFM, on the file and on every decision
+   of it (`newestView`, `originalView`, `accept`, `reject`), and not your reading of the spec.
+4. **Refuse where no form reads alike, and say why.** A refusal names the cause and the way out, and a
+   test holds its words. Don't repair: a form that reads alike in most orders only is not a form.
+5. **If it is a key, keep it cheap,** and add a row to the cost gate.
 6. **If it is drawn or measured, add a check for WKWebView.**
 7. **Have it reviewed** by someone who will try to break it.
 
 ## What isn't held
 
-- **The gaps the spec names.** [format.md](format.md) §13 lists what is not yet tested (among them
-  Word import into full history, and live sessions with several authors in full history), and §2.6's
-  *What the proof doesn't give* lists the numbered-list shapes that are tried or refused. A block
-  change in a list under review with more than five changes pending is refused for their count.
-- **Refusals that are planned to go away, and what is not built.** Code that starts a list item,
-  and indented code in an item or a quote, are refused with Track Changes on (#284), and so is
-  typing in code that holds another person's pending code change (#285), each in words that say so.
-  Aligning a column with Track Changes on is not built (#281): the format reads an alignment change
-  that another tool wrote, and refuses every column operation while one is pending.
-- **What only the app can show.** Layout, the system's selection and input methods, and the
-  animation of a card are not in happy-dom; the WKWebView checks cover some and the sweep the rest.
-- **Timings on a loaded machine.** The cost gates compare with main's numbers scaled by a
-  calibration, and a machine that is busy for a moment can still fail one. A failure that passes
-  alone is noise, and is reported as such, not skipped.
+**Silent wrong writes that are known today.** Each is an open issue with its case; each is a bug.
+
+- Numbered lists: Backspace on `1. a⏎   - ‸plan⏎   2. ship`, and with Track Changes off Backspace at
+  a first item above an item that a pending deletion empties; the walks of `walk-248.test.ts` fail
+  four seeds at `REDLINES_FUZZ=2000` (#292).
+- A prefix edit of a blank quote line between two paragraphs is written without its line breaks
+  (#358).
+- Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
+  skips micromark's reading for that shape (#299).
+- Return writes a plain blank line that changes what renders in two rare layouts: a quote whose last
+  line is a lazy continuation, followed by another quote, and a paragraph followed by a line that
+  looks like a fence and isn't (#136).
+- The backslash and emphasis fixes leave five cases in one shape wrong, as on main, and refuse
+  keys next to chains of another person's marks that main wrote (#276).
+- Failures of Stage 1's keys that the walks found are skipped by name (seeds 46, 130 and 146 of the
+  Tab walks), and more are not drawn by the walks as they are (#258, #257).
+- Pandoc's `~x~` and `^x^` in `.qmd` and `.Rmd` files are not protected from markers: the reader has
+  no file type yet (#370). `pre` and `title` inside a quote or a list item are not read as raw text,
+  so markers can go in them (#284, [format.md](format.md) §3.5).
+
+**Refusals that are meant to go away.** Code that starts a list item, and indented code in an item or
+a quote, are refused with Track Changes on (#284). Typing in code that holds another person's pending
+code change is refused (#285): the issue asks for a form that reads alike in every order, or a proof
+that none exists, with the refusal kept. Aligning a column with Track Changes on is refused ("Aligning
+a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.", #281). Bold over
+more than five cells of a table was one of them, and is not any more (#267).
+
+**What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word import
+into full history and live sessions with several authors in full history. §7 says what merging gives:
+a conflict in the ledger is resolved by keeping both sides, with a stale entry that is ignored and a
+duplicate handle that is renamed as the exceptions, and with plain git, parallel work often conflicts
+there. §9 says what other tools do to the file: formatters that re-wrap prose push markers to line
+starts, the visual editors of RStudio and Quarto rewrite the file, and a renderer that passes HTML
+through publishes the hidden text.
+
+**What only the app can show.** Layout, the system's selection and input methods, and the animation
+of a card are not in happy-dom; the WKWebView checks cover some of them, by hand.
+
+**Timings on a loaded machine.** The cost gates compare with recorded numbers scaled by a calibration,
+and a machine that is busy for a moment can still fail one. A failure that passes alone is noise,
+and is reported as such, not skipped.
