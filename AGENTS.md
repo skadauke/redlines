@@ -212,7 +212,9 @@ repo root.
 
 - Keep PRs small and focused on one change.
 - When you change format behavior, update `docs/format.md` (and `docs/design.md` if it describes
-  the behavior) in the same PR.
+  the behavior) in the same PR. Before you change how an edit is written, read
+  [docs/hardening.md](docs/hardening.md): the four guarantees, what holds them, and how to add a
+  rule without loosening one.
 - Add or update vitest tests for new or changed behavior, next to the code.
 - Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm format:check` before finishing. Run
   `pnpm format` to fix formatting.

@@ -28,8 +28,9 @@ One sentence each. A change that breaks one is a bug, whether or not a test says
    which changes how the rest of the line reads. A marker stays at the end of the previous line
    ([format.md](format.md) §3.2).
 4. **A keystroke costs what it does on main.** Typing, Return and Backspace, in a long document
-   with many pending changes, may take at most twice what the same key takes in main's own build,
-   plus a millisecond for noise, on the machine that runs the test (`cost.test.ts`, below).
+   with many pending changes, may take at most twice what the same key takes in the build that the
+   numbers were recorded from, plus a millisecond for noise, on the machine that runs the test
+   (`cost.test.ts`, below).
 
 ## What holds them
 
@@ -96,8 +97,9 @@ shows it, in `walk-seeds.test.ts`, with the fix.
 ### The cost gates
 
 `cost.test.ts` measures what the keys cost on a 16 KB and a 150 KB document with 200 marks, against
-numbers recorded from main's own build (the same file runs in a checkout of main with
-`REDLINES_COST=record`). A key may take at most twice what main's takes. `hidden.test.ts` holds the
+numbers recorded from main's own build, where the keys were CodeMirror's own (the same file runs in
+a checkout of main with `REDLINES_COST=record`, which prints them). A key may take at most twice
+what that build's took. `hidden.test.ts` holds the
 hidden lines' pass to a linear cost, and `preview/long-document.test.ts` the cost of a long document.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
 busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
