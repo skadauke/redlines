@@ -846,10 +846,11 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null };
+    return { path: null, line: null, text: null };
   });
   if (start.path === null) {
-    await controller.create();
+    // A window opened for text starts with an Untitled document that holds it, unsaved.
+    await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
