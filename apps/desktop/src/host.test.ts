@@ -8,6 +8,7 @@ import {
   DISCARD_DRAFT_BUTTONS,
   dirname,
   isDocument,
+  joinPath,
   NOT_A_DOCUMENT,
   NotADocumentError,
   opensInDefaultApp,
@@ -49,6 +50,17 @@ describe('dirname', () => {
     expect(dirname('/plan.md')).toBe('/');
     expect(dirname('plan.md')).toBe('');
     expect(dirname('C:\\docs\\plan.md')).toBe('C:\\docs');
+  });
+});
+
+describe('joinPath', () => {
+  it('puts a file name in a folder, once between them, in the separator the folder uses', () => {
+    expect(joinPath('/docs', 'plan.md')).toBe('/docs/plan.md');
+    expect(joinPath('/docs/', 'plan.md')).toBe('/docs/plan.md');
+    expect(joinPath('/', 'plan.md')).toBe('/plan.md');
+    expect(joinPath('C:\\docs', 'plan.md')).toBe('C:\\docs\\plan.md');
+    expect(joinPath('C:\\docs\\', 'plan.md')).toBe('C:\\docs\\plan.md');
+    expect(joinPath('C:\\', 'plan.md')).toBe('C:\\plan.md');
   });
 });
 
@@ -402,13 +414,19 @@ describe('the host in the app', () => {
         expect(startedAt()).toBe('/Untitled.md');
       });
 
-      it('keeps the extension a name typed without one takes', async () => {
-        dialog.save.mockResolvedValue(null);
-        vi.mocked(invoke).mockResolvedValue(true);
-        await createHost().saveAs('Text', 'Untitled.txt', '/Users/ada/Notes');
-        const [options] = dialog.save.mock.calls[0] ?? [];
-        const filters = (options as { filters: { extensions: string[] }[] }).filters;
-        expect(filters[0]?.extensions[0]).toBe('txt');
+      it('does not wait for a folder that doesn’t answer, which would hold Save up', async () => {
+        vi.useFakeTimers();
+        try {
+          dialog.save.mockResolvedValue(null);
+          // A volume that has gone away leaves the question unanswered.
+          vi.mocked(invoke).mockReturnValueOnce(new Promise(() => {}));
+          const saving = createHost().saveAs('Text', 'Untitled.md', '/Volumes/Gone/Notes');
+          await vi.advanceTimersByTimeAsync(5000);
+          await saving;
+          expect(startedAt()).toBe('Untitled.md');
+        } finally {
+          vi.useRealTimers();
+        }
       });
     });
 

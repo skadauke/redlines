@@ -172,9 +172,11 @@ ignorePinch(window);
 watchSettings((next) => {
   settings = next;
   // The main window saves the last document at every change of its file. Redrawing the pane while
-  // someone types their name would take the caret away, so what is being edited is left alone.
+  // someone types their name would take the caret away, so what is being edited is left alone, and
+  // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) show(current);
+  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');

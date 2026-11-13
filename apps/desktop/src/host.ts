@@ -239,20 +239,31 @@ function panelFilters(name = '') {
   return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
 }
 
+/** How long Save waits to hear whether the default folder is there, before it goes without. */
+const FOLDER_CHECK_MS = 1000;
+
 /**
  * Where the save panel starts: a full path as it is, in its own folder; and for a name alone,
  * the name in `folder`, once the app says the folder is there (src-tauri/src/files.rs), else the
  * name alone, which leaves the folder to macOS, where it last saved. A folder the app can't be
- * asked about is no reason not to save.
+ * asked about, or doesn't answer about within a moment, as one on a volume that has gone away
+ * doesn't, is no reason to hold Save up.
  */
 async function savePanelStart(name: string, folder: string | null | undefined): Promise<string> {
   if (!folder || basename(name) !== name) return name;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return (await invoke<boolean>('folder_exists', { path: folder }))
-      ? joinPath(folder, name)
-      : name;
+    const there = await Promise.race([
+      invoke<boolean>('folder_exists', { path: folder }),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), FOLDER_CHECK_MS);
+      }),
+    ]);
+    return there ? joinPath(folder, name) : name;
   } catch {
     return name;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
