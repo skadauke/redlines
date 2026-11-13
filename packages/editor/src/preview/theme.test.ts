@@ -14,6 +14,13 @@ describe('the column', () => {
     });
   });
 
+  it('lets the column be narrower than the widest thing in it, which scrolls in its own box', () => {
+    // At 400% a table's cells can't fit the column, and the table scrolls inside its box; the
+    // column must not grow to its width, or the page would scroll sideways.
+    expect(baseThemeSpec['.cm-content']).toMatchObject({ minWidth: '0' });
+    expect(baseThemeSpec['.rl-tbl-scroll']).toMatchObject({ overflowX: 'auto' });
+  });
+
   it('writes every length inside the column times the text size', () => {
     const spec = baseThemeSpec;
     expect(spec['.rl-quote']).toMatchObject({ paddingLeft: s(18) });

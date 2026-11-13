@@ -38,6 +38,9 @@ pub struct Programs {
     environment: Vec<(OsString, OsString)>,
     /// The only program that may be an agent's MCP server.
     bundled: PathBuf,
+    /// The home folder, whose visible folders an agent may read at This folder and my home folder
+    /// (`reach.rs`). Empty where there is none, and then there are none to read.
+    home: PathBuf,
     execs: Execs,
     remembered: Mutex<Remembered>,
 }
@@ -66,9 +69,34 @@ impl Programs {
             login_shell_timeout: LOGIN_SHELL_TIMEOUT,
             environment,
             bundled,
+            home: PathBuf::new(),
             execs: Execs::default(),
             remembered: Mutex::default(),
         }
+    }
+
+    /// The same, with `home` as the home folder.
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = home;
+        self
+    }
+
+    /// The folders of the home folder an agent may read at This folder and my home folder: the
+    /// same list each time it is asked, which a window's command line for an agent is checked
+    /// against (`allowed.rs`).
+    pub fn home_reach(&self) -> Option<super::reach::HomeReach> {
+        super::reach::of(&self.home)
+    }
+
+    /// The protected folders among those, which macOS isn't letting this program read: found by
+    /// listing each, which is what makes macOS ask the person the first time.
+    pub fn home_refused(&self) -> Vec<super::reach::Protected> {
+        // The home folder as the reach names it, which is how the roots below it are written.
+        let Some(reach) = self.home_reach() else {
+            return Vec::new();
+        };
+        let places = super::reach::protected(Path::new(&reach.home), &reach.roots);
+        super::reach::refused(&places)
     }
 
     /// Finds programs as this app, as this user, on this machine.
@@ -94,6 +122,11 @@ impl Programs {
             shell,
             clean_environment(std::env::vars_os()),
             bundled,
+        )
+        .with_home(
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
         )
     }
 
@@ -197,12 +230,31 @@ impl Programs {
         args: &[String],
         sockets: &[String],
     ) -> Result<(), String> {
+        let agent = self.agent_at(program)?;
         let known = Known {
             bundled: self.bundled.to_str().unwrap_or_default(),
             sockets,
             program_folders: &program_folders(program),
+            reach: None,
         };
-        check_run_line(self.agent_at(program)?, args, &known)
+        let first = check_run_line(agent, args, &known);
+        if first.is_ok() {
+            return first;
+        }
+        // Only a line of the home folder scope is made from what is in the home folder, which is
+        // listed and resolved here, so that a start at any other scope never waits on it (a link
+        // into a mount that has gone, say).
+        match self.home_reach() {
+            Some(reach) => check_run_line(
+                agent,
+                args,
+                &Known {
+                    reach: Some(&reach),
+                    ..known
+                },
+            ),
+            None => first,
+        }
     }
 
     /// Whether `program` may be run to its end with these arguments: what `which` returned for its

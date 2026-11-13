@@ -280,6 +280,8 @@ const INLINE_NAMES: Record<InlineFormat, string> = {
   italic: 'Italic',
   strike: 'Strikethrough',
   code: 'Code',
+  sub: 'Subscript',
+  sup: 'Superscript',
 };
 
 const BLOCK_NAMES: Record<BlockType, string> = {

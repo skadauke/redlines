@@ -8,7 +8,7 @@ import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
 import type { AppearanceChoice, Settings } from '../settings.ts';
-import { stepSize } from '../text-size.ts';
+import { stepSize, ZOOM_LADDER } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
 
@@ -54,7 +54,7 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms every window of the app to a level of the ladder, and keeps it (zoom.ts). */
+  /** Zooms every window of the app to a level of the window zoom's ladder, and keeps it (zoom.ts). */
   setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
@@ -73,6 +73,12 @@ export interface PaneDeps {
    * asked or couldn't, as for a copy of the app on its disk image.
    */
   makeDefaultApp: () => Promise<DefaultAppChange>;
+  /**
+   * Asks for a folder with the system's panel, which opens in `start` when there is one: its full
+   * path, or null when the person cancels; rejects with a sentence that says why it couldn't ask,
+   * as in a plain browser.
+   */
+  chooseFolder: (start: string | null) => Promise<string | null>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -289,6 +295,7 @@ function general(deps: PaneDeps): HTMLElement[] {
   return [
     row('Name and handle', identity, line('As they appear on your changes.')),
     row('On launch', onLaunch),
+    newDocumentFolderRow(deps),
     row(
       'Check for updates automatically',
       toggle(current.checkForUpdates, (value) => update({ checkForUpdates: value })),
@@ -300,6 +307,98 @@ function general(deps: PaneDeps): HTMLElement[] {
     defaultAppRow(deps),
     row('Command line', command, status),
   ];
+}
+
+/** The line under the default folder's row, which says what Save does, until something fails. */
+const FOLDER_NOTES = {
+  unset: 'Save opens where macOS last saved.',
+  set: 'Save opens in this folder.',
+};
+
+/** A folder's name for the row: the last name in its path, or the whole path for the disk's root. */
+function folderName(folder: string): string {
+  return (
+    folder
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || folder
+  );
+}
+
+/**
+ * Default folder for new documents: where the Save dialog opens for a document that has no file
+ * yet (#309). The row shows the folder by its name, with its whole path as the hint; Choose… asks
+ * for another with the system's panel, and Clear, there only while one is set, goes back to leaving
+ * it to macOS. A folder that is gone by the time Save looks is no problem for the row: Save falls
+ * back to what it did before.
+ */
+function newDocumentFolderRow(deps: PaneDeps): HTMLElement {
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  const path = el('span', 'rl-pref-path');
+  const choose = el('button', 'rl-pref-button', 'Choose…');
+  choose.type = 'button';
+  const clear = el('button', 'rl-pref-button', 'Clear');
+  clear.type = 'button';
+  const control = el('div', 'rl-pref-inline');
+  // Its buttons are named for the row, as a stepper's are (`stepper`).
+  control.setAttribute('role', 'group');
+  control.append(path, choose);
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  /**
+   * Shows the folder, with the line that says what Save does, and a Clear button only while there
+   * is one. Choose… is never moved.
+   */
+  const show = (folder: string | null) => {
+    path.textContent = folder === null ? 'Not set' : folderName(folder);
+    path.title = folder ?? '';
+    path.classList.toggle('rl-pref-unset', folder === null);
+    if (folder === null) clear.remove();
+    else if (!clear.isConnected) control.append(clear);
+    say(folder === null ? FOLDER_NOTES.unset : FOLDER_NOTES.set, false);
+  };
+  show(deps.settings().newDocumentFolder);
+  /**
+   * The wait is over and the button is back: so is the focus, which it lost while it was disabled,
+   * unless the person put it somewhere else meanwhile.
+   */
+  const back = () => {
+    choose.disabled = false;
+    delete control.dataset['waiting'];
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== choose) return;
+    choose.focus();
+  };
+  choose.addEventListener('click', () => {
+    choose.disabled = true;
+    // The panel is a sheet of this window, over the page: another window's change to the settings
+    // meanwhile mustn't draw the pane again (`watchSettings`), which would leave this row to
+    // answer into a row that is gone.
+    control.dataset['waiting'] = '';
+    void deps.chooseFolder(deps.settings().newDocumentFolder).then(
+      (folder) => {
+        if (folder !== null) {
+          deps.update({ newDocumentFolder: folder });
+          show(folder);
+        }
+        back();
+      },
+      (error: unknown) => {
+        say(error instanceof Error ? error.message : String(error), true);
+        back();
+      },
+    );
+  });
+  clear.addEventListener('click', () => {
+    deps.update({ newDocumentFolder: null });
+    show(null);
+    // The button the person pressed is gone: Choose… is the next stop.
+    choose.focus();
+  });
+  return row('Default folder for new documents', control, status);
 }
 
 /** What the line under the button says of the app that opens Markdown files. */
@@ -387,8 +486,9 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  // Both walk the ladder of text-size.ts: the zoom of every window, and the text alone.
-  const zoom = stepper(current.zoom, (level) => deps.setZoom(level));
+  // They walk the ladders of text-size.ts: the zoom of every window, which stops at 200%, and the
+  // text alone, which goes on to 400%.
+  const zoom = stepper(current.zoom, (level) => deps.setZoom(level), ZOOM_LADDER);
   const text = stepper(current.textSize, (textSize) => update({ textSize }));
 
   return [
@@ -403,7 +503,11 @@ function appearance(deps: PaneDeps): HTMLElement[] {
  * A − 100% + control that steps `start` along the ladder and calls `change` with each size. The
  * value is a live region, so that VoiceOver reads it as it changes.
  */
-function stepper(start: number, change: (size: number) => void): HTMLElement {
+function stepper(
+  start: number,
+  change: (size: number) => void,
+  ladder?: readonly number[],
+): HTMLElement {
   // Another level lands from outside (`showZoom`): shown in place, so that the button pressed
   // keeps the focus and the live region is read.
   let size = start;
@@ -416,11 +520,11 @@ function stepper(start: number, change: (size: number) => void): HTMLElement {
   larger.setAttribute('aria-label', 'Larger');
   const show = () => {
     value.textContent = `${Math.round(size * 100)}%`;
-    smaller.disabled = stepSize(size, -1) === size;
-    larger.disabled = stepSize(size, 1) === size;
+    smaller.disabled = stepSize(size, -1, ladder) === size;
+    larger.disabled = stepSize(size, 1, ladder) === size;
   };
   const move = (by: number) => {
-    size = stepSize(size, by);
+    size = stepSize(size, by, ladder);
     show();
     change(size);
   };

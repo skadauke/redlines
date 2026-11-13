@@ -197,7 +197,10 @@ The window, on the desktop:
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
   Print. Printing holds the whole document in light ink and prints the view as it shows, without
-  the rail: Redlines in its simple look prints the newest text with its change bars.
+  the rail: Redlines in its simple look prints the newest text with its change bars. Saving a
+  document that has no file yet opens the Save dialog in the default folder for new documents
+  (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
+  As of a saved document starts in that document's own folder.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
@@ -209,18 +212,22 @@ The window, on the desktop:
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
   the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
   system's dialogs keep the system's size. Text Zoom changes only the document's text and the
-  notes and cards on it, from 80% to 200%: a pinch follows the fingers and keeps the line under the
-  pointer in place, and Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the
-  same sizes. The notes and cards grow with the text above 100%
-  and never go below their size at 100%. The text column grows with the text until it meets the
-  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
-  launches; neither reaches the file, a print, the clipboard or an export.
+  notes and cards on it, and goes twice as far, from 80% to 400%, so that the text can be made
+  really big: a pinch follows the fingers and keeps the line under the pointer in place, and
+  Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the sizes, which go on past
+  the window zoom's 200% to 250%, 300% and 400%, and Preferences offers them all. The window zoom
+  keeps its own range. The notes and cards grow with the text above 100% and never go below their
+  size at 100%. The text column grows with the text until it meets the margins, and only then do
+  lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
+  and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
+  neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and
-  text size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
-  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
-  once.
+  opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
+  default app for Markdown, and installing the `redlines` command line), Appearance (Match
+  System, Light or Dark, the theme, zoom and text size), Editor (spell check, smart quotes and
+  dashes, closing brackets, whether Track Changes starts on, and whether line breaks show their
+  marks, §5.5) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -243,6 +250,21 @@ The window, on the desktop:
   Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
+- **Outline.** In a document with two or more headings, a column of short lines stands in the left
+  margin, one for each heading, longer for the higher levels, with the line of the section you are
+  reading in ink as you scroll. Where the page can go no further, so that the last headings can't
+  reach the top, it is the last one in view, and a heading you clicked stays the one you are
+  reading until the page moves from its end. Hovering over it opens it, with a short animation,
+  into a list of the headings' text with the section you are reading in view, and moving the pointer
+  away closes it; a click on a heading goes to it, the caret on its line and the line at the top of
+  the page. It stands in the pane the text scrolls in, so it moves with the file sidebar, takes no
+  click but its own (the margin beside it holds the change bars), and shows its lines only where the
+  margin has room for them beside the bars; where it has none, View › Show Outline (⌃⌘O) opens the
+  list, and says so when there are fewer than two headings. The list is a navigation landmark of
+  buttons for VoiceOver: ⌃⌘O puts the focus on the heading you are reading, the arrows move between
+  headings, Return goes to one and Escape gives the focus back to the text. Headings read as the
+  text does with every pending change accepted, in every view: a heading deleted whole isn't listed,
+  Redlines included, where its card is. It doesn't print.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
   over or select them, not at rest.
 - **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
@@ -295,6 +317,12 @@ Redlines covers everything in the Markdown Guide's
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
+- **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
+  lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
+  are in the Format menu and the command palette (and in the formatting palette, §5.12, when it
+  lists inline formats), and are tracked as format changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
+  renders as formats; any other tag shows as written. pandoc's `~x~` and `^x^` in a `.qmd` or
+  `.Rmd` file are kept byte for byte and shown as written.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
@@ -754,6 +782,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
+| Subscript, superscript         | ⌥⌘, and ⌥⌘. (Word's ⌘= and ⇧⌘= are Zoom In here)                                              | Ctrl+Alt+, and Ctrl+Alt+. |
 | Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
 | Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
@@ -1023,8 +1052,8 @@ the same identity and the sandbox entitlement that an app extension must have
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `tables` (the Table menu), `agents` and
-the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu),
+`agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
@@ -1038,7 +1067,7 @@ written.
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
 | `export`     | HTML, clean Markdown and review-view export                                  | Files                      |
-| `outline`    | The outline panel and dragging sections                                      | —                          |
+| `outline`    | The outline of the headings in the left margin; dragging sections to come    | —                          |
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
@@ -1422,17 +1451,82 @@ it was asked to:
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
   hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
+- At **This folder and my home folder** the same limits hold with the home folder added, and what
+  is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
+  the home folder (`--add-dir`, a link by its name and its target), so that a hidden folder and
+  `~/Library` aren't readable at all however it searches, plus the cloud folders in `~/Library`,
+  and its settings deny `.env` files and hidden files and folders below the home folder. Codex's
+  profile grants the home folder whole, denies hidden names and `.env` files by glob wherever they
+  are and `~/Library` but for its cloud folders, and grants a folder a link leads to outside the
+  home folder by its real path. Both are checked against the real programs
+  (`agent-limits.real.node.test.ts`, on request) and the command lines against the rule that lets
+  only them through.
 - Both change the document only through the toolbox's tools, which record tracked changes in the
   agent's name. They can't accept, reject or resolve.
 - A run whose toolbox never connected counts as failed, because both agents otherwise carry on
   without it and exit 0.
 
-**Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
-the repository's root, or else the document's folder) or This document. The first run of an agent
-in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
-in the app's settings, never in the document. Preferences › Agents lists the agents found on this
-Mac with their state (not installed, needs an update, signed out, signed in), the remembered
-answers with a Forget button for each, and Show Agent Logs.
+**Scope** is the setting What agents may read, in Preferences › Agents: This document, This folder
+(the default; the repository's root, or else the document's folder) or This folder and my home
+folder. The setting is the most that any answer can give. The first run of an agent in a folder
+asks in its thread (§5.7) what it may read, within the setting (the home folder is an answer only
+while the setting allows it), and the answer is remembered for that agent and folder in the app's
+settings, never in the document: an answer narrower than the setting stands, and one wider than
+it is held to it and kept, and stands again if the setting is widened. A document in the home
+folder itself, or in the disk's root, has no folder to read, and is read as This document.
+Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
+update, signed out, signed in), the remembered answers with a Forget button for each, and Show
+Agent Logs.
+
+**The home folder.** This folder and my home folder lets an agent read related files anywhere
+under the home folder, such as a reference document in another project. The default stays This
+folder, and the pane says plainly what the choice means:
+
+- **Left out even there:** hidden files and folders (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`,
+  `.env` files) and `~/Library` (mail, messages, browser data, keychains), except the cloud
+  folders in it (`~/Library/CloudStorage`: Dropbox, Google Drive, OneDrive, Box; `~/Library/Mobile
+  Documents`: iCloud Drive), where people's documents live, often behind a link in the home
+  folder. The limits name both a link and the folder it leads to, and a link is followed only to
+  where it may be: never to `/`, to the home folder or to a folder above it, to a hidden folder, or
+  into `~/Library` but for its cloud folders, and, where it leaves the home folder, only to a
+  volume or what is in one (`/Volumes/Backup`, not `/Volumes`) or to the shared folder
+  (`/Users/Shared`): the system's own folders are the same files as the home folder's under another
+  name (`/System/Volumes/Data/Users/...`), or not a person's. A link that leads anywhere else gets
+  neither its name nor its target, since the name alone would reach it. The home folder is named as it really
+  is, the agents' limits looking at real paths, and a hidden name is left out below each folder a
+  link leads to outside it too. A home folder whose name holds a character of a glob (or a quote or
+  a backslash), or that holds no folder to read, gives the folder alone, and the line says so.
+- **Writes don't change.** The agent still writes only through Redlines' tools, to the document.
+- **The risk:** text in a document that someone else wrote (a comment, a reply, deleted text)
+  could try to make an agent read a private file and quote it into a comment or a suggestion,
+  which then travels with the document. The note says so, and so does the question's answer.
+- **macOS asks.** Documents, Desktop, Downloads, iCloud Drive, other cloud folders and removable
+  and network volumes are protected, and macOS counts what an agent that Redlines starts reads as
+  Redlines' own, so it asks whether *Redlines* may read the folder, in words the bundle gives
+  (`document-types.plist`, true whenever Redlines itself touches the folder). The app lists each
+  protected folder itself, from its own process, when the person picks the choice, and before each
+  run at it, which is what makes macOS ask, at a moment they expect: the first-run question says
+  so, and the run's line says it is checking what macOS allows, for as long as the person takes to
+  answer, up to twenty seconds (a network volume that has gone never answers), before the folders
+  are listed again for the agent's line. A folder macOS refuses is said in a line with a button to
+  Privacy & Security › Files and Folders; the run goes on, and the agent is told which folders are
+  out of reach, so that its reply doesn't guess.
+- **A read that fails inside the scope** is said in a notification as it happens: which file, the
+  likely cause, and what to do. macOS isn't letting Redlines read a folder (a button to System
+  Settings); the file's own permissions refuse it; the agent's own settings, or an organization's,
+  do; or the agent's own words with Show Log, where they read as a refusal or a failed read. A
+  refusal outside the scope, or of what the scope leaves out (hidden names and `.env` files by any
+  name), is a limit doing its work, and is never told of, nor is a failure that is no refusal: a
+  file that isn't there, a folder, a file too large. It is read from Claude's tool results, and
+  from what Codex's commands print, which is best effort: the newer Codex models run most commands
+  through a tool that makes no event, and a command that prints a refusal's words is taken for
+  refused. The limit holds either way; only the message is missed.
+
+Not done: search that skips files not downloaded from a cloud folder (macOS marks them dataless),
+which the agents' own search tools decide; the agents are not stopped from downloading a file they
+read; and a message of its own for a cloud file that isn't on the Mac, which reads as the agent's
+own words where the agent says it timed out. Search skips links in both agents, and the prompt says
+so, so that the agent names a folder that is a link.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
 agents/`: what was started (the agent, its version, the flags, the folder), each event the agent

@@ -23,22 +23,30 @@ import {
   type ToolAnswer,
 } from './fake-provider.ts';
 import { createMacAgents } from './mac-agents.ts';
-import { createRuns, type RunController } from './runs.ts';
+import { createRuns, type BlockedNotice, type RunController } from './runs.ts';
 
 const me: Author = { handle: 'ada', name: 'Ada Lovelace' };
 
 const PLAN = 'The importer ships in April.\n\nThe tests run in CI.\n';
 const REPO: ProjectRoot = { folder: '/repo', isRepo: true, tooBroad: false };
+const HOME = '/Users/ada';
+const HOME_ROOTS = ['/Users/ada/Documents', '/Users/ada/code'];
 
 interface Options {
   doc?: string;
   path?: string | null;
   root?: ProjectRoot;
-  scope?: 'folder' | 'document';
+  scope?: AgentScope;
   consent?: Record<string, AgentScope | 'no'>;
   claude?: FakeScript;
   codex?: FakeScript;
   claudeReads?: 'folder' | 'machine';
+  /** The folders of the home folder the host lists; none where the host can't, or fails to. */
+  homeRoots?: readonly string[] | Error;
+  /** Where the home folder is, for the host to name. */
+  homeFolder?: string;
+  /** The folders macOS isn't letting Redlines read; none, or the host fails to say. */
+  refused?: readonly { name: string; folder: string }[] | Error;
   /** How Claude is detected, for a test that holds detection. */
   detect?: () => Promise<AgentState>;
   claudeState?: AgentState;
@@ -72,6 +80,8 @@ interface Setup {
     steps: AgentStep[];
   };
   consent: Record<string, AgentScope | 'no'>;
+  /** What the runs told of reads the agents couldn't make. */
+  blocked: BlockedNotice[];
   ended: () => number;
   /** How many times the project was looked up. */
   lookups: () => number;
@@ -125,6 +135,7 @@ function setup(options: Options = {}): Setup {
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
   let lookups = 0;
+  const blocked: BlockedNotice[] = [];
   const runs = createRuns({
     agents: createMacAgents([claude, codex], relay),
     author: me,
@@ -157,6 +168,18 @@ function setup(options: Options = {}): Setup {
         consent[`${agent}|${folder}`] = answer;
       },
     },
+    onBlocked: (notice) => blocked.push(notice),
+    homeAccess: () =>
+      options.refused instanceof Error
+        ? Promise.reject(options.refused)
+        : Promise.resolve([...(options.refused ?? [])]),
+    homeReach: () =>
+      options.homeRoots instanceof Error
+        ? Promise.reject(options.homeRoots)
+        : Promise.resolve({
+            home: options.homeFolder ?? HOME,
+            roots: [...(options.homeRoots ?? HOME_ROOTS)],
+          }),
     onEnded: () => ended++,
   });
   if (options.wired !== false) changed = () => runs.documentChanged();
@@ -178,6 +201,7 @@ function setup(options: Options = {}): Setup {
     posted,
     doc,
     consent,
+    blocked,
     ended: () => ended,
     lookups: () => lookups,
   };
@@ -536,6 +560,392 @@ describe('what an agent may read', () => {
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
   });
 
+  describe('the home folder', () => {
+    it('offers it among the answers only while Preferences allow it, and remembers it', async () => {
+      const s = setup({ consent: {}, scope: 'everything' });
+      const thread = ask(s, '@Claude look at the other project');
+      await vi.waitFor(() =>
+        expect(s.runs.line(thread)).toEqual({
+          kind: 'asking',
+          agent: 'claude',
+          agentName: 'Claude',
+          folder: '/repo',
+          readLimit: 'folder',
+          home: true,
+        }),
+      );
+      s.runs.answerConsent(thread, 'everything');
+      await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+      expect(s.consent).toEqual({ 'claude|/repo': 'everything' });
+      expect(s.claude.requests[0]).toMatchObject({ scope: 'everything', folder: '/repo' });
+      expect(s.claude.requests[0]?.systemPrompt).toContain('home folder');
+
+      // Remembered: not asked again.
+      replyInBox(s, '@Claude and the tests?');
+      await vi.waitFor(() => expect(s.claude.requests).toHaveLength(2));
+      expect(s.claude.requests[1]).toMatchObject({ scope: 'everything', folder: '/repo' });
+    });
+
+    it('puts the question away as soon as it is answered, and holds the answer to what Preferences allow now', async () => {
+      const s = setup({ consent: {}, scope: 'everything' });
+      const runs = createRuns({
+        ...depsLike(s),
+        agents: createMacAgents([s.claude], s.relay),
+        settings: {
+          defaultScope: () => 'everything' as const,
+          consent: () => undefined,
+          setConsent: () => {},
+        },
+        homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+        // The wait for macOS never ends, to look at the line meanwhile.
+        homeAccess: () => new Promise(() => {}),
+      });
+      const thread = ask(s, 'Look here.');
+      runs.posted({ thread, id: thread, text: '@Claude look' });
+      await vi.waitFor(() => expect(runs.line(thread)?.kind).toBe('asking'));
+      runs.answerConsent(thread, 'everything');
+      // Not the question with buttons that do nothing: the run, which is under way.
+      await vi.waitFor(() => {
+        const line = runs.line(thread);
+        expect(line?.kind === 'running' && line.status).toBe('Checking what macOS allows…');
+      });
+      runs.stop(thread);
+
+      // Preferences are narrowed while the question is up, and the person allows the home folder:
+
+      // the run is at the folder, as Preferences allow it now.
+      const t = setup({ consent: {}, scope: 'everything' });
+      let narrowed: 'folder' | 'everything' = 'everything';
+      const again = createRuns({
+        ...depsLike(t),
+        agents: createMacAgents([t.claude], t.relay),
+        settings: {
+          defaultScope: () => narrowed,
+          consent: () => undefined,
+          setConsent: () => {},
+        },
+        homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+        homeAccess: () => Promise.resolve([]),
+      });
+      const second = ask(t, 'Look here.');
+      again.posted({ thread: second, id: second, text: '@Claude look' });
+      await vi.waitFor(() => expect(again.line(second)?.kind).toBe('asking'));
+      narrowed = 'folder';
+      again.answerConsent(second, 'everything');
+      await vi.waitFor(() => expect(t.claude.requests).toHaveLength(1));
+      expect(t.claude.requests[0]).toMatchObject({ scope: 'folder', folder: '/repo' });
+      expect(t.claude.requests[0]).not.toHaveProperty('homeRoots');
+    });
+
+    it('gives the agent the folders the host lists, and only at this scope', async () => {
+      const home = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+      ask(home, '@Claude look');
+      await vi.waitFor(() => expect(home.claude.requests).toHaveLength(1));
+      expect(home.claude.requests[0]).toMatchObject({ scope: 'everything', folder: '/repo' });
+      expect(home.claude.requests[0]?.homeFolder).toBe(HOME);
+      // The agent is told which folders it may look in, one by one.
+      expect(home.claude.requests[0]?.systemPrompt).toContain(
+        'you may read are: "~/Documents", "~/code".',
+      );
+      expect(home.claude.requests[0]?.homeRoots).toEqual(HOME_ROOTS);
+
+      // At the folder, or the document, the host is not even asked.
+      const asked: string[] = [];
+      const narrow = setup({ consent: { 'claude|/repo': 'folder' }, scope: 'everything' });
+      const runs = createRuns({
+        ...depsLike(narrow),
+        agents: createMacAgents([narrow.claude], narrow.relay),
+        settings: {
+          defaultScope: () => 'everything',
+          consent: () => 'folder',
+          setConsent: () => {},
+        },
+        homeReach: () => {
+          asked.push('asked');
+          return Promise.resolve({ home: HOME, roots: HOME_ROOTS });
+        },
+      });
+      const c1 = ask(narrow, 'Look here.');
+      runs.posted({ thread: c1, id: c1, text: '@Claude?' });
+      await vi.waitFor(() => expect(narrow.claude.requests).toHaveLength(1));
+      expect(narrow.claude.requests[0]).toMatchObject({ scope: 'folder' });
+      expect(narrow.claude.requests[0]).not.toHaveProperty('homeRoots');
+      expect(narrow.claude.requests[0]).not.toHaveProperty('homeFolder');
+      expect(asked).toEqual([]);
+    });
+
+    it('runs at the folder, and says so, where the host lists no home folder', async () => {
+      for (const homeRoots of [[], new Error('no home')]) {
+        const release = gate();
+        const s = setup({
+          consent: { 'claude|/repo': 'everything' },
+          scope: 'everything',
+          homeRoots,
+          claude: waits(release.opened),
+        });
+        const thread = ask(s, '@Claude look');
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        expect(s.claude.requests[0]).toMatchObject({ scope: 'folder', folder: '/repo' });
+        expect(s.claude.requests[0]).not.toHaveProperty('homeRoots');
+        expect(s.claude.requests[0]).not.toHaveProperty('homeFolder');
+        expect(s.claude.requests[0]?.systemPrompt).not.toContain('home folder');
+        const line = s.runs.line(thread);
+        expect(line?.kind === 'running' && line.status).toBe(
+          'No home folder found: this folder only',
+        );
+        // What the person allowed is not forgotten.
+        expect(s.consent).toEqual({ 'claude|/repo': 'everything' });
+        release.open();
+        await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+      }
+    });
+
+    describe('what macOS is holding back', () => {
+      const documents = { name: 'Documents', folder: '/Users/ada/Documents' };
+      const dropbox = { name: 'Dropbox', folder: '/Users/ada/Library/CloudStorage/Dropbox' };
+
+      it('is told to the person and to the agent before the run, which goes on', async () => {
+        const s = setup({
+          consent: { 'claude|/repo': 'everything' },
+          scope: 'everything',
+          refused: [documents, dropbox],
+        });
+        const thread = ask(s, '@Claude look at the spec');
+        await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+        // The run went on, at the scope the person gave, and says which folders are out of reach.
+        expect(s.claude.requests).toHaveLength(1);
+        expect(s.claude.requests[0]).toMatchObject({ scope: 'everything' });
+        const prompt = s.claude.requests[0]?.systemPrompt ?? '';
+        expect(prompt).toContain('"/Users/ada/Documents"');
+        expect(prompt).toContain('"/Users/ada/Library/CloudStorage/Dropbox"');
+        expect(prompt).toContain('do not guess');
+        // And the person is told, once for each folder, as a notification says it.
+        expect(s.blocked).toEqual([
+          {
+            agent: 'claude',
+            agentName: 'Claude',
+            thread,
+            path: documents.folder,
+            cause: 'privacy',
+            place: 'Documents',
+          },
+          {
+            agent: 'claude',
+            agentName: 'Claude',
+            thread,
+            path: dropbox.folder,
+            cause: 'privacy',
+            place: 'Dropbox',
+          },
+        ]);
+      });
+
+      it('is not asked at any other scope, and says nothing when nothing is held back or it cannot be asked', async () => {
+        const asked: string[] = [];
+        const narrow = setup({ consent: { 'claude|/repo': 'folder' }, scope: 'everything' });
+        const runs = createRuns({
+          ...depsLike(narrow),
+          agents: createMacAgents([narrow.claude], narrow.relay),
+          settings: {
+            defaultScope: () => 'everything',
+            consent: () => 'folder',
+            setConsent: () => {},
+          },
+          homeAccess: () => {
+            asked.push('asked');
+            return Promise.resolve([documents]);
+          },
+        });
+        const c1 = ask(narrow, 'Look here.');
+        runs.posted({ thread: c1, id: c1, text: '@Claude?' });
+        await vi.waitFor(() => expect(narrow.claude.requests).toHaveLength(1));
+        expect(asked).toEqual([]);
+        expect(narrow.claude.requests[0]?.systemPrompt).not.toContain("macOS isn't letting");
+
+        for (const refused of [[], new Error('no app')]) {
+          const s = setup({
+            consent: { 'claude|/repo': 'everything' },
+            scope: 'everything',
+            refused,
+          });
+          ask(s, '@Claude look');
+          await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+          expect(s.claude.requests[0]?.systemPrompt).not.toContain("macOS isn't letting");
+          expect(s.blocked).toEqual([]);
+        }
+      });
+
+      it('says it is checking what macOS allows while it waits, and goes on with the answer', async () => {
+        const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+        let answer: (found: { name: string; folder: string }[]) => void = () => {};
+        const runs = createRuns({
+          ...depsLike(s),
+          agents: createMacAgents([s.claude], s.relay),
+          settings: {
+            defaultScope: () => 'everything' as const,
+            consent: () => 'everything' as const,
+            setConsent: () => {},
+          },
+          homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+          homeAccess: () =>
+            new Promise((resolve) => {
+              answer = resolve;
+            }),
+        });
+        const thread = ask(s, 'Look here.');
+        runs.posted({ thread, id: thread, text: '@Claude look' });
+        await vi.waitFor(() => {
+          const line = runs.line(thread);
+          expect(line?.kind === 'running' && line.status).toBe('Checking what macOS allows…');
+        });
+        expect(s.claude.requests).toHaveLength(0);
+        answer([documents]);
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        expect(s.claude.requests[0]?.systemPrompt).toContain('"/Users/ada/Documents"');
+      });
+
+      it('does not wait for macOS for ever: after twenty seconds the run goes on', async () => {
+        vi.useFakeTimers();
+        try {
+          const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+          const runs = createRuns({
+            ...depsLike(s),
+            agents: createMacAgents([s.claude], s.relay),
+            settings: {
+              defaultScope: () => 'everything' as const,
+              consent: () => 'everything' as const,
+              setConsent: () => {},
+            },
+            homeReach: () => Promise.resolve({ home: HOME, roots: [...HOME_ROOTS] }),
+            // A folder on a volume that has gone never says.
+            homeAccess: () => new Promise(() => {}),
+          });
+          const thread = ask(s, 'Look here.');
+          runs.posted({ thread, id: thread, text: '@Claude look' });
+          await vi.advanceTimersByTimeAsync(19_000);
+          expect(s.claude.requests).toHaveLength(0);
+          await vi.advanceTimersByTimeAsync(1_500);
+          await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+          // Nothing is known of what macOS holds back, and nothing is told.
+          expect(s.claude.requests[0]).toMatchObject({ scope: 'everything' });
+          expect(s.blocked).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('lists the home folder again after macOS was asked, which the app checks the line against', async () => {
+        const s = setup({ consent: { 'claude|/repo': 'everything' }, scope: 'everything' });
+        const reaches = [HOME_ROOTS, [...HOME_ROOTS, '/Users/ada/new-folder']];
+        let listed = 0;
+        const runs = createRuns({
+          ...depsLike(s),
+          agents: createMacAgents([s.claude], s.relay),
+          settings: {
+            defaultScope: () => 'everything' as const,
+            consent: () => 'everything' as const,
+            setConsent: () => {},
+          },
+          homeReach: () =>
+            Promise.resolve({
+              home: HOME,
+              roots: [...(reaches[Math.min(listed++, reaches.length - 1)] ?? [])],
+            }),
+          homeAccess: () => Promise.resolve([]),
+        });
+        const thread = ask(s, 'Look here.');
+        runs.posted({ thread, id: thread, text: '@Claude look' });
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        // A folder made while macOS's question was up is in what the agent is given.
+        expect(s.claude.requests[0]?.homeRoots).toEqual([...HOME_ROOTS, '/Users/ada/new-folder']);
+        expect(listed).toBe(2);
+      });
+
+      it('is not asked of a run that fell back to the folder, which reads none of it', async () => {
+        const s = setup({
+          consent: { 'claude|/repo': 'everything' },
+          scope: 'everything',
+          homeRoots: [],
+          refused: [documents],
+        });
+        ask(s, '@Claude look');
+        await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+        expect(s.claude.requests[0]).toMatchObject({ scope: 'folder' });
+        expect(s.claude.requests[0]?.systemPrompt).not.toContain("macOS isn't letting");
+        expect(s.blocked).toEqual([]);
+      });
+    });
+
+    it('does not offer it, and ignores it, where Preferences keep to the folder', async () => {
+      const s = setup({ consent: {}, scope: 'folder' });
+      const thread = ask(s, '@Claude look');
+      await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+      expect(s.runs.line(thread)).not.toHaveProperty('home');
+      s.runs.answerConsent(thread, 'everything');
+      await settle();
+      expect(s.runs.line(thread)?.kind).toBe('asking');
+      expect(s.claude.requests).toHaveLength(0);
+      s.runs.answerConsent(thread, 'folder');
+      await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+      expect(s.claude.requests[0]).toMatchObject({ scope: 'folder' });
+    });
+
+    it('holds an earlier answer to what Preferences allow now, and keeps the answer', async () => {
+      const cases: [AgentScope, AgentScope, AgentScope][] = [
+        // [Preferences, remembered answer, scope of the run]
+        ['everything', 'everything', 'everything'],
+        // Narrower than Preferences allow now: the person's own answer stands.
+        ['everything', 'folder', 'folder'],
+        ['everything', 'document', 'document'],
+        // Wider than Preferences allow now: held to them.
+        ['folder', 'everything', 'folder'],
+        ['document', 'everything', 'document'],
+        ['document', 'folder', 'document'],
+      ];
+      for (const [scope, answer, ran] of cases) {
+        const s = setup({ consent: { 'claude|/repo': answer }, scope });
+        ask(s, '@Claude look');
+        await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+        expect(s.claude.requests[0]?.scope, `${scope} / ${answer}`).toBe(ran);
+        // Nothing was asked, and nothing was forgotten.
+        expect(s.consent).toEqual({ 'claude|/repo': answer });
+        await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+      }
+    });
+
+    it('offers it to an agent held to the folder, never to one that reads the machine', async () => {
+      const s = setup({ consent: {}, scope: 'everything', claudeReads: 'machine' });
+      const thread = ask(s, '@Claude look');
+      await vi.waitFor(() =>
+        expect(s.runs.line(thread)).toEqual({
+          kind: 'asking',
+          agent: 'claude',
+          agentName: 'Claude',
+          folder: '/repo',
+          readLimit: 'machine',
+        }),
+      );
+      s.runs.answerConsent(thread, 'everything');
+      await settle();
+      expect(s.runs.line(thread)?.kind).toBe('asking');
+      s.runs.answerConsent(thread, 'folder');
+      await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    });
+
+    it('keeps to the document for a folder too broad to be one, even where the home folder is allowed', async () => {
+      const s = setup({
+        consent: {},
+        scope: 'everything',
+        root: { folder: '/Users/ada', isRepo: false, tooBroad: true },
+      });
+      ask(s, '@Claude look');
+      await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+      expect(s.claude.requests[0]?.scope).toBe('document');
+      expect(s.claude.requests[0]).not.toHaveProperty('folder');
+      expect(s.consent).toEqual({});
+    });
+  });
+
   it('asks a machine-wide agent "Let it read files on this Mac?" and offers no Just this document', async () => {
     // A fake provider: Claude and Codex both hold their reads to the folder.
     const s = setup({ consent: {}, scope: 'document', claudeReads: 'machine' });
@@ -558,6 +968,94 @@ describe('what an agent may read', () => {
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
     expect(s.consent).toEqual({ 'claude|/repo': 'folder' });
     expect(s.claude.requests[0]).toMatchObject({ scope: 'folder', folder: '/repo' });
+  });
+});
+
+describe('a read an agent could not make', () => {
+  const privacy = {
+    type: 'status' as const,
+    text: 'Couldn’t read plan.md',
+    blocked: {
+      path: '/Users/ada/Documents/plan.md',
+      cause: 'privacy' as const,
+      place: 'Documents',
+    },
+  };
+
+  it('is told of with the agent, the thread and the log, once for a cause and a place', async () => {
+    const s = setup({
+      claude: events(
+        { type: 'started', logPath: '/logs/claude.jsonl' },
+        privacy,
+        { ...privacy, blocked: { ...privacy.blocked, path: '/Users/ada/Documents/other.md' } },
+        {
+          ...privacy,
+          blocked: { path: '/Users/ada/Desktop/x.md', cause: 'privacy', place: 'Desktop' },
+        },
+        { type: 'done', finalText: 'Could not read it.' },
+      ),
+    });
+    const thread = ask(s, '@Claude look at the spec');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.blocked).toEqual([
+      {
+        agent: 'claude',
+        agentName: 'Claude',
+        thread,
+        logPath: '/logs/claude.jsonl',
+        path: '/Users/ada/Documents/plan.md',
+        cause: 'privacy',
+        place: 'Documents',
+      },
+      {
+        agent: 'claude',
+        agentName: 'Claude',
+        thread,
+        logPath: '/logs/claude.jsonl',
+        path: '/Users/ada/Desktop/x.md',
+        cause: 'privacy',
+        place: 'Desktop',
+      },
+    ]);
+  });
+
+  it('shows on the line as the status it comes with, and tells nobody when there is none', async () => {
+    const release = gate();
+    const s = setup({
+      claude: async function* ({ tools }) {
+        await tools.initialize();
+        yield privacy;
+        await release.opened;
+        yield { type: 'done', finalText: 'ok' };
+      },
+    });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => {
+      const line = s.runs.line(thread);
+      expect(line?.kind === 'running' && line.status).toBe('Couldn’t read plan.md');
+    });
+    release.open();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.blocked).toHaveLength(1);
+
+    const quiet = setup({
+      claude: events(
+        { type: 'status', text: 'Reading plan.md' },
+        { type: 'done', finalText: 'ok' },
+      ),
+    });
+    ask(quiet, '@Claude look');
+    await vi.waitFor(() => expect(quiet.runs.isLive()).toBe(false));
+    expect(quiet.blocked).toEqual([]);
+  });
+
+  it('is told of by the agent that is not named, only when the run is its own', async () => {
+    const s = setup({ codex: events(privacy, { type: 'done', finalText: 'ok' }) });
+    const thread = ask(s, '@Codex look');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.blocked.map(({ agent, thread: where }) => [agent, where])).toEqual([
+      ['codex', thread],
+    ]);
   });
 });
 
