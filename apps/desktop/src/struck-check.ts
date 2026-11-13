@@ -152,7 +152,7 @@ function pressBar(editor: Editor, x: number, y: number): boolean {
  * the text is scrolled to as the page's own scrolling would.
  */
 async function open(editor: Editor, view: View, needle: string): Promise<void> {
-  editor.setTracking(false);
+  editor.setTracking(false, { inFile: false });
   editor.reloadDoc(DOC);
   editor.setViewMode(view);
   editor.view.focus();
@@ -905,7 +905,7 @@ export async function runStruckCheck(editor: Editor): Promise<void> {
         console.log(`STRUCK-CHECK ${check.name} FAIL ${JSON.stringify({ threw: String(error) })}`);
       }
     }
-    editor.setTracking(false);
+    editor.setTracking(false, { inFile: false });
     editor.reloadDoc(sample);
     console.log(`STRUCK-CHECK done ${passed} passed, ${failed} failed`);
   };
