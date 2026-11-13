@@ -1,14 +1,28 @@
 # Checks the workspace (type checks, lint, tests, formatting) and that the desktop app's Rust code
 # and the `redlines` program compile cleanly and pass their tests. Changes that touch only docs, the
-# website or Markdown files skip it; the website has its own workflow, website.yml.
+# website or Markdown files skip it, except the skill's files, which are Markdown that a test checks
+# against its source (apps/desktop/src/skills.node.test.ts); the website has its own workflow,
+# website.yml. A later pattern of `paths` brings a file back that an earlier `!` pattern left out.
 name: CI
 
 on:
   pull_request:
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
   push:
     branches: [main]
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
 
 permissions:
   contents: read

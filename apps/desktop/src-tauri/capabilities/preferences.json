@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "preferences",
-  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage. The app's own commands are granted one by one (build.rs lists them all), those its code calls and no others, as src/command-permissions.node.test.ts checks: the command line, the default app, the list of agents and detecting them, updating an agent, signing it in and stopping either (each a fixed command of the agent's own, for an agent the window names and nothing more), the appearance and the zoom. Adding or removing an agent, updating one and signing one in are this window's alone.",
+  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage. The app's own commands are granted one by one (build.rs lists them all), those its code calls and no others, as src/command-permissions.node.test.ts checks: the command line, the default app, the list of agents and detecting them, updating an agent, signing it in and stopping either (each a fixed command of the agent's own, for an agent the window names and nothing more), installing the Redlines skill in the folder an agent reads skills from and looking at what is there (the app's own text, for an agent the window names and nothing more), the appearance and the zoom. Adding or removing an agent, updating one, signing one in and installing a skill are this window's alone.",
   "windows": ["preferences"],
   "permissions": [
     "core:default",
@@ -26,6 +26,8 @@
     "allow-open-files-and-folders-settings",
     "allow-set-appearance",
     "allow-set-zoom",
+    "allow-skill-install",
+    "allow-skill-status",
     "allow-zoom-level"
   ]
 }

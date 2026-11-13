@@ -400,6 +400,8 @@ fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
             "hooks",
             "-c",
             r#"web_search="disabled""#,
+            "-c",
+            r#"skills.include_instructions=false"#,
             "--",
         ]))
         .chain([Part::Prompt])

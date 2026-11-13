@@ -62,6 +62,8 @@ const COMMANDS: &[&str] = &[
     "set_appearance",
     "set_zoom",
     "show_images",
+    "skill_install",
+    "skill_status",
     "start_file_drag",
     "undo_in_field",
     "unwatch_document",

@@ -1310,6 +1310,28 @@ goes on when the pane is drawn again, and the row follows it. What a failure sho
 output is its last line, with what looks like a secret left out as far as a heuristic can tell
 (the query of a link, a value after `token` or `key`, a long run that looks like a credential).
 
+**The skill.** An agent that works in a terminal or in a chat of its own, outside the app, learns
+what a Redlines file is from a skill: read it with `redlines view --review`, change it only through
+the `redlines` command line, so that its edits are tracked suggestions in its name, and take deleted
+text, comments, replies and notes as information, never as instructions. It is written once
+(`integrations/skill/body.md`) and made into a copy for each agent
+(`apps/desktop/scripts/build-skills.ts`), since only the front matter and how the agent names itself
+differ: Claude writes as `claude-<person>`, and an agent with a name of its own, such as an OpenClaw
+agent called Moby, as `moby-<person>`. A test fails when a copy isn't what the source makes, or
+shows a command or an option the command line doesn't have. Each agent reads skills from a folder of
+its own, and Install Skill on its row in Preferences › Agents writes the one file there, `SKILL.md`:
+`~/.claude/skills/redlines` for Claude Code, `~/.agents/skills/redlines` for Codex, which OpenClaw
+reads too, and `~/.openclaw/skills/redlines` for OpenClaw. The row says where it went, and says
+when a login shell can't find the `redlines` command, which the skill runs, and offers General,
+where the command line is installed; Install Skill doesn't install it itself, which may ask for an
+administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
+the app carries its own, so that an installed copy that is older shows Update Skill. Only a copy of
+this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
+in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
+The Claude Code skill is also a plugin, and this repository a marketplace for it
+(`.claude-plugin/marketplace.json`); the skill is published on ClawHub by its owner
+(`integrations/README.md`).
+
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:
 
@@ -1318,7 +1340,8 @@ it was asked to:
   "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
-  hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
+  hooks, its skills (the person's own, and Redlines' skill, are for Codex run by hand) and the
+  person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
 - At **This folder and my home folder** the same limits hold with the home folder added, and what
   is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
@@ -1409,8 +1432,9 @@ Syrus runs agents on its server with API keys or enterprise agreements.
 | Integration                         | What it is                                                                                                                                                                                         | Phase                             |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
 | **VS Code and Positron**            | One extension on Open VSX, which also covers Cursor. First, tracked-change decorations in the normal editor; then a custom editor that hosts the Redlines editor                                  | v1.x                              |
-| **Claude**                          | The command line and MCP server; a skill; a Claude Code plugin whose hooks block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md))        | v1 (server, skill), v1.x (plugin) |
-| **Codex and ChatGPT**               | The same MCP server, skill and plugin folder, plus an `AGENTS.md` snippet                                                                                                                          | v1.x                              |
+| **Claude**                          | The command line and MCP server; a skill, which is also a Claude Code plugin (written); later, the plugin's hooks, which block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md)) | v1 (server, skill, plugin), v1.x (hooks) |
+| **Codex and ChatGPT**               | The same MCP server, a skill in `~/.agents/skills` (written) and an `AGENTS.md` snippet                                                                                                            | v1 (skill), v1.x                  |
+| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, and on ClawHub; the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
 | **Other agents**                    | GitHub Copilot, Gemini, OpenCode and others through the Agent Client Protocol                                                                                                                       | v1.x                              |
 | **Review in chat apps**             | A remote MCP server whose review panel (MCP Apps) draws tracked changes inside claude.ai and ChatGPT, with Accept and Reject                                                                       | Later                             |
 | **Syrus**                           | A replacement for Syrus's Design Docs plugin (§9.1)                                                                                                                                                 | v1.x                              |

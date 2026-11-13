@@ -92,6 +92,8 @@
       "hooks",
       "-c",
       "web_search=\"disabled\"",
+      "-c",
+      "skills.include_instructions=false",
       "--",
       "- a comment that starts like --a-flag"
     ],
@@ -140,6 +142,8 @@
       "hooks",
       "-c",
       "web_search=\"disabled\"",
+      "-c",
+      "skills.include_instructions=false",
       "--",
       "- a comment that starts like --a-flag"
     ],
@@ -221,6 +225,8 @@
       "hooks",
       "-c",
       "web_search=\"disabled\"",
+      "-c",
+      "skills.include_instructions=false",
       "--",
       "- a comment that starts like --a-flag"
     ]

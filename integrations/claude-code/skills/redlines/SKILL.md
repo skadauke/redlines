@@ -106,3 +106,5 @@ Only when your person asks, and only the changes they name: `redlines accept <fi
 
 When you are done, run `redlines view <file> --review` and tell your person what you suggested,
 with the ids.
+
+<!-- redlines-skill 1 -->

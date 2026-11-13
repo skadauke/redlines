@@ -34,7 +34,8 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
-| `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
+| `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
+| `.claude-plugin/`       | This repository as a Claude Code marketplace (`marketplace.json`)         |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
@@ -102,6 +103,14 @@ repo root.
   again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
+- The skill (`integrations/skill/body.md`) is one text, and `scripts/build-skills.ts` makes its copies
+  for Claude Code, Codex and OpenClaw (`integrations/*/skills/redlines/SKILL.md`), the Claude Code
+  plugin's manifest and `integrations/skill/version.json`: after changing the text, or what differs
+  per agent in the script, run `node scripts/build-skills.ts --write` in `apps/desktop` (Node 24)
+  and commit what it wrote. `src/skills.node.test.ts` fails when a copy isn't what the source
+  makes, or shows a command or option that `redlines` doesn't have, and CI runs for these files
+  though they are Markdown. The app embeds the copies (`src-tauri/src/agents/skills.rs`) and
+  installs them from Preferences › Agents
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
   `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`
@@ -118,7 +127,8 @@ repo root.
 - `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
   `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
-  changes that touch only `docs/**`, `website/**` or `**/*.md`.
+  changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
+  test checks.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
