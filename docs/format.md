@@ -2451,10 +2451,11 @@ front matter in R Markdown and Quarto.
 - The word `redlines` comes first, so other tools don't mistake the comment for their own. Marp,
   for one, reads a leading YAML comment as slide settings.
 - The ledger appears with the first tracked change, comment or setting, and is removed when
-  nothing is left in it.
+  nothing is left in it. The view (§5.6) is a setting that never keeps one: a file with no ledger
+  gets none for it, and a ledger left with nothing but a view is removed.
 - The file's last line break stays its last. The ledger goes in front of it, after a blank line
-  of two line breaks, or after none when nothing comes before that line break; a file without a
-  final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
+  of two line breaks, also in a file with no text, where the blank line keeps what is typed first
+  apart from the ledger; a file without a final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
   so do the two of its blank line, except after a body that ends in a CR alone: there they are
   two CRLFs, because an LF would make one CRLF of that CR and itself for a CommonMark reader.
   The blank line is written with a new ledger only: writing the ledger again leaves the blank
@@ -2486,6 +2487,7 @@ front matter in R Markdown and Quarto.
 # If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.
 version: 1
 tracking: everyone
+view: redlines
 history: full
 people:
   ada: {name: Ada Lovelace, email: ada@example.org, accounts: [github:ada-l]}
@@ -2522,6 +2524,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
+| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2581,7 +2584,9 @@ same values.
   (§7.3). Readers ignore it, and the serializer always writes it.
 - Readers keep every value a string and reject duplicate keys: the JavaScript `yaml` package with
   `schema: 'failsafe'`, js-yaml with `FAILSAFE_SCHEMA`, PyYAML's `BaseLoader` plus a duplicate
-  check, and R's `yaml` with string handlers.
+  check, and R's `yaml` with string handlers. The settings `tracking`, `view` and `history`, which
+  a merge that keeps both sides can leave twice (§7.3), are the exception: a reader takes each from
+  its last line, and the next write puts one.
 - Keys are ids, handles and fixed names, none of which YAML can read as another type. They are
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
@@ -2606,17 +2611,44 @@ same values.
 ### 5.6 Settings
 
 - **`tracking: everyone`** works like Word's Track Changes "For Everyone": everyone who opens the
-  file in Redlines starts with Track Changes on, under a notice that says so. Without it, whether
-  each person's changes are tracked is their own setting and is never saved, as with Word's "Just
-  Mine".
-  - Someone has to turn it on. It is never added by default.
+  file in Redlines starts with Track Changes on, under a notice that says so.
+  - Turning Track Changes on in Redlines writes it, and turning it off takes it away, as Word saves
+    Track Changes in the document. The file is edited like any other change to it: the switch is
+    written at once, so the document has unsaved edits until it is saved, and switching back
+    leaves the file as it was. A file with no text yet gets the ledger after a blank line, like
+    any file (§5.1).
+  - A file that can't take a ledger, because its ledger can't be read (§5.1) or its end is inside a
+    code block or a comment that is never closed, can't have Track Changes turned on. Redlines says
+    why, in the words of the refusal, and leaves it off: with it on, no tracked change could be
+    written there either.
   - A plain file can't enforce it. It is a default, like Word's Lock Tracking without a password.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
+- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
+  it was last saved. Redlines opens the file in it, in place of the markup view that the person
+  has remembered, which opens the files that have none.
+  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
+    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
+    markup views, is written as `redlines`.
+  - Switching views never changes the file, and so never makes a document edited. The view is
+    written when the file is written for another reason, a Save, so reading a document changes
+    nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
+    it as it is. Recording it changes that one line, its value or a new line after `tracking`'s or
+    `version`'s, and no other byte of the ledger: a Save never rewrites what a person didn't touch,
+    whatever tool or version wrote it.
+  - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
+    nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
+    file with no changes or comments, Clean and Redlines look the same anyway.
+  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+  - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
+    of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
+    `w:view` is the page layout (Print, Web, Draft), not how markup is shown.
 - **No owners list.** Permissions belong to hosts, not to files.
-- **Per-person state never goes in the file:** view, mode, zoom and text size, filters, comment
-  drafts, folds, the last version someone saw, and presence.
+- **Per-person state never goes in the file:** mode, zoom and text size, the markup view a person
+  has remembered, filters, comment drafts, folds, the last version someone saw, and presence. The
+  two settings above are the exceptions: they belong to the document, and anyone who saves it
+  records them.
 
 ### 5.7 Layout
 
@@ -2795,8 +2827,11 @@ A conflict in the ledger is resolved by keeping both sides:
 In the tests, keeping both sides gave the right result in every ledger conflict, apart from those
 stale entries and one rare case: two different people given the same handle on two branches. That
 leaves a duplicate key, which the merge driver and the editor repair by renaming the newer handle;
-since markers carry no handles, the rename touches only the ledger. In GitHub's conflict editor,
-keeping both sides means deleting the three conflict-marker lines.
+since markers carry no handles, the rename touches only the ledger. A second such case is
+two branches that saved the document in different views (§5.6): keeping both sides leaves two
+`view` lines. A reader takes the last (§5.5) and the next write puts one: either is right, because
+the setting only records how the document was last saved. In GitHub's conflict editor, keeping both sides means deleting the three
+conflict-marker lines.
 
 ### 7.4 Resolving conflicts automatically
 
@@ -3071,6 +3106,7 @@ Pending changes map onto Word's revisions
 | Split, join              | An inserted or deleted paragraph mark                                                |
 | Comment thread           | A comment with replies, resolved state and durable ids, in Word's comment parts      |
 | `tracking: everyone`     | `w:trackRevisions`                                                                   |
+| `view`                   | Not exported. Word's `w:view` is the page layout; how markup is shown is its own state |
 | People                   | Author names, with the `org` appended when names collide                             |
 | History                  | Not exported. Word keeps no history                                                  |
 
