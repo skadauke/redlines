@@ -155,15 +155,15 @@ The window, on the desktop:
   the top of the window and the text scrolls under the bar, fading out as it passes, so that the
   window reads as one page, with no hard edge below the bar. The file name is centered in small
   gray type, and the document starts below the bar, so that nothing is hidden at rest. The bar
-  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar
-  and no status bar.
+  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar,
+  and no status bar: the one line along the bottom is the word count, below.
 - **A small word count** sits in the lower right corner, "1,204 words", and stays visible while you
   write; with a selection it says how many of the words are selected, "120 of 1,204 words". It is
   one gray line of small text, not a status bar. It counts what a reader sees, the newest text and
   never the markers or the ledger, a moment after you stop typing, so that a long document stays
   fast. It rests on a fade of the page's color, as the title bar does, so that nothing scrolls under
-  it unfaded, and it follows the theme and the zoom. Preferences › Editor › Show word count hides
-  it.
+  it unfaded, and what scrolls into view, the line being typed on included, stops above the fade. It
+  follows the theme and the zoom. Preferences › Editor › Show word count hides it.
 - **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
   icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
   hands over a copy of the file as it is saved. It never moves the file the window has open, and

@@ -211,12 +211,21 @@ describe('styles.css', () => {
       all.find((rule) => rule.selector === selector)?.declarations ?? '';
     // The fade rises from the window's lower edge, in the page's color, as the title bar's falls from
     // the top, so that what scrolls under the label is gone before it meets it. It stops short of a
-    // classic scrollbar, and is over the page's text and under everything that floats.
+    // classic scrollbar, and of the edge where an overlay one is drawn, and is over the page's text
+    // and under everything that floats.
     const footer = declared('.rl-footer');
     expect(footer).toContain('position: absolute');
     expect(footer).toContain('bottom: 0');
-    expect(footer).toContain('right: var(--rl-scrollbar, 0px)');
+    expect(footer).toContain('right: max(var(--rl-scrollbar, 0px), 12px)');
     expect(footer).toContain('z-index: 0');
+    // Its height is one number, which what scrolls into view keeps clear of (the editor measures
+    // the fade; the scroller's padding below is the same number): a caret or a comment box scrolled
+    // in from below would otherwise rest where the page is already faded out.
+    expect(footer).toContain('height: var(--rl-footer-room)');
+    expect(declared('.rl-main')).toMatch(/--rl-footer-room: \d+px/);
+    expect(declared('.rl-has-footer .rl-scroller')).toContain(
+      'scroll-padding-bottom: var(--rl-footer-room)',
+    );
     expect(footer).toContain('pointer-events: none');
     expect(footer).toMatch(/linear-gradient\(\s*to top,\s*var\(--rl-page/);
     // The label is the interface's small text, in the theme's gray, which follows the theme and the
@@ -225,6 +234,10 @@ describe('styles.css', () => {
     expect(label).toContain('font-size: var(--rl-size-ui-small)');
     expect(label).toContain('color: var(--rl-ink-2)');
     expect(label).toContain('position: absolute');
+    // Level with the notifications' lowest card (16 px from the window's edge), so that under one
+    // it is hidden whole and none of it shows below the card.
+    expect(label).toContain('bottom: 16px');
+    expect(declared('.rl-notifications')).toContain('bottom: 16px');
     expect(label).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
     // A printed page has neither.
     const printed = css.slice(css.indexOf('@media print'));

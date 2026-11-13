@@ -51,6 +51,8 @@ body {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  /* How much of the page's lower edge the word count's fade covers (see .rl-footer). */
+  --rl-footer-room: 44px;
 }
 
 .rl-titlebar-host {
@@ -119,15 +121,16 @@ body {
  * the page's color that rises from the window's lower edge as the title bar's falls from the top,
  * so that the text and the notes that scroll under it are gone before they meet it. Over the page's
  * text, under the review bar, the notifications and whatever else floats; it takes no pointer, and
- * stops short of a classic scrollbar. It follows the theme and the window zoom as any text does.
+ * stops short of a classic scrollbar, and of the edge where an overlay one is drawn. It follows the
+ * theme and the window zoom as any text does.
  */
 .rl-footer {
   position: absolute;
-  right: var(--rl-scrollbar, 0px);
+  right: max(var(--rl-scrollbar, 0px), 12px);
   bottom: 0;
   left: 0;
   z-index: 0;
-  height: 44px;
+  height: var(--rl-footer-room);
   background: linear-gradient(
     to top,
     var(--rl-page, Canvas) 0,
@@ -137,10 +140,20 @@ body {
   pointer-events: none;
 }
 
+/*
+ * What scrolls into view stops short of the fade, as of the title bar above: a comment box opened
+ * near the bottom, a find match. (The editor keeps its own caret clear of it by a scroll margin.)
+ * The page is marked while the count is shown.
+ */
+.rl-has-footer .rl-scroller {
+  scroll-padding-bottom: var(--rl-footer-room);
+}
+
+/* Level with the notifications' lowest card, which hides it whole when one is shown. */
 .rl-word-count {
   position: absolute;
   right: 16px;
-  bottom: 10px;
+  bottom: 16px;
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
