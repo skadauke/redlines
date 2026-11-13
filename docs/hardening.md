@@ -91,7 +91,7 @@ the harness: `runScript` plays a script on a real editor, through its keymaps, a
 in the file, a marker at a line's start, a refusal no one expected, a file whose decisions read
 differently in different orders, a Return that Backspace can't take back, a step that Undo can't
 take back. A refusal is allowed; nothing else is. `REDLINES_FUZZ=200` plays 200 walks of each kind
-in the default heap (about 200 s). A walk that finds something becomes the smallest script that
+in the default heap (it takes a few minutes). A walk that finds something becomes the smallest script that
 shows it, in `walk-seeds.test.ts`, with the fix.
 
 ### The cost gates
