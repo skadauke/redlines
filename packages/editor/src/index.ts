@@ -67,6 +67,7 @@ import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
+import { barLayer } from './tracked/bar-layer.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
@@ -213,7 +214,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const extensions = [
     markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
-    barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
+    barLayer(),
+    barSwitch(),
     trackedTyping(),
     openBlocks(),
     emptyLineTyping,

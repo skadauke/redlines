@@ -761,4 +761,15 @@ body {
   #editor .rl-bar-mixed::before {
     border-left-color: var(--rl-mixed);
   }
+
+  /* The bars of the text, drawn in a layer beside the screen lines that hold a change. */
+  #editor .rl-bar-seg {
+    width: 0;
+    background: none;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .rl-bar-seg.rl-bar-mixed {
+    border-left-color: var(--rl-mixed);
+  }
 }

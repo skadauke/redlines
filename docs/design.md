@@ -340,11 +340,16 @@ mode has no counterpart in the desktop app.
   the machine), the later-met takes the next free color in that document only. Agents get colors of
   their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
   colors repeat.
-- **Change bars** in the left margin mark each line with a pending change, in its author's color,
-  or gray when several people changed the line. In Redlines a click on a bar switches between its
-  two looks, the full markup and the simple look, and is the only way to choose one: the bar is a
-  target 24 px wide, it widens under the pointer, and its hint names the look a click gives. Printing draws the
-  bars as a left border, which prints.
+- **Change bars** in the left margin mark the screen lines that hold a pending change, in its
+  author's color, or gray when several people changed the same screen line: a paragraph that wraps
+  over many lines gets a bar only beside those that hold part of a change, one word on one line
+  marks that line alone, and the bars are drawn again when the text wraps differently (a resize, a
+  zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
+  the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
+  their own. In Redlines a click on a bar switches between its two looks, the full markup and the
+  simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
+  lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  prints.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");

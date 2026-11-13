@@ -55,6 +55,10 @@ describe('the column', () => {
       paddingTop: s(40),
       fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     });
-    expect(trackedThemeSpec['.rl-bar::before']).toMatchObject({ left: '-24px', width: '2px' });
+    // A struck block's bar; the bars of the text are the layer's (bar-layer.test.ts).
+    expect(trackedThemeSpec['.rl-bar:not(.cm-line)::before']).toMatchObject({
+      left: '-24px',
+      width: '2px',
+    });
   });
 });
