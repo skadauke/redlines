@@ -261,27 +261,60 @@ export function commentAcrossRows(
   table: TableRead,
   parsed: Parsed,
 ): { mark: MarkRange; name: string } | null {
-  return annotationAcrossRows(table, parsed, 'cmt');
-}
-
-/**
- * A comment (`cmt`) or a highlight (`hl`) whose markers are in different rows of the table: the
- * first, or the one with the id `only`. Returns the person's name with the mark, or null.
- */
-export function annotationAcrossRows(
-  table: TableRead,
-  parsed: Parsed,
-  kind: 'cmt' | 'hl',
-  only?: string,
-): { mark: MarkRange; name: string } | null {
   const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
   for (const mark of parsed.marks) {
-    if (mark.kind !== kind || (only !== undefined && mark.id !== only)) continue;
+    if (mark.kind !== 'cmt') continue;
     for (const { open, close } of mark.segments) {
       if (!close) continue;
       const a = rowOf(open.from);
       const b = rowOf(close.from);
       if (a !== -1 && b !== -1 && a !== b) return { mark, name: nameOf(parsed, mark.entry.by) };
+    }
+  }
+  return null;
+}
+
+/**
+ * What a highlight whose markers are to be written at `range.from` and `range.to` of `text` would do
+ * to the rows of `table` that a decision of an inserted or moved row can't undo, which the highlight
+ * is refused for when it is made if such a row is pending (a highlight has no point form to be left
+ * as, `commentsOf`, so deciding the row would leave one of its markers, or could not be made at all):
+ *
+ * - `leaves`: the markers are in different rows, or one is in a row, or among the deleted rows kept
+ *   under the table, and the other outside the table, before it or after it. A highlight that
+ *   starts a row with no pipe at its start does, as a comment does: its opener is at the end of the
+ *   row above.
+ * - `hides`: both are in one row, and one is in front of the mark of that row, which the table is
+ *   read by at the start of the row's first cell and would no longer find there, or right behind it,
+ *   between it and the space that deciding the row takes away with it.
+ *
+ * `table` is read from `text`, as it is before the highlight: a marker of the highlight in front of
+ * the mark of a row, or of a deleted row, would hide it from the reader.
+ */
+export function highlightAgainstRows(
+  table: TableRead,
+  text: string,
+  range: Range,
+): 'leaves' | 'hides' | null {
+  // The deleted rows are kept below the table, each on a line that starts with its marker: they
+  // are the table's, and a marker in front of one hides it as it would a row's mark.
+  const end = table.deletions.reduce(
+    (last, deletion) => Math.max(last, deletion.mark.segments[0]?.open.to ?? last),
+    table.to,
+  );
+  const rowOf = (at: number) => {
+    const row = table.rows.findIndex((candidate) => candidate.from <= at && at <= candidate.to);
+    return row !== -1 || at <= table.to || at > end ? row : table.rows.length;
+  };
+  const a = rowOf(range.from);
+  const b = rowOf(range.to);
+  if ((a !== -1 || b !== -1) && a !== b) return 'leaves';
+  for (const at of [range.from, range.to]) {
+    const row = table.rows[rowOf(at)];
+    const mark = row?.insertion?.segments[0]?.open;
+    if (!row || !mark) continue;
+    if (at === mark.to || (at <= mark.from && /^[\s|]*$/.test(text.slice(row.from, at)))) {
+      return 'hides';
     }
   }
   return null;

@@ -1790,7 +1790,9 @@ as typed.
   and format changes in the row are marked as usual, and accepting one leaves its text in the row,
   still pending with the row. Typing at the start of the first cell goes after the marker.
 - Accepting the row removes the marker; other pending marks inside stay pending. Rejecting the row
-  removes it with everything in it.
+  removes it with everything in it, and a highlight with a marker in it and the other outside the
+  row would be left with one: while a row is pending, a highlight is not made across rows or out
+  of the table, or in front of the row's marker (the end of "Moving rows", below, has the words).
 - A new header row has the marker in its first header cell. The old header becomes body row 1, and
   rejecting the insertion makes it the header again. Making an existing row the header is a move
   to the top.
@@ -1913,12 +1915,26 @@ it, one per line:
   Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
   at its start has its opener at the end of the row above, so it crosses the line break, and moving
   rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
-  table with a row move pending is refused, naming the person who moved the rows, and so is adding
-  a highlight that runs from one row into another ("Ada Lovelace's move of rows in this table is
-  pending, and this highlight would run from one row into the next. Decide the move first, or
-  highlight inside one row."). Deleting the header is refused in the same two cases (the row that
-  would be the header has another number of cells, or a comment's marker after its closing pipe is
-  a cell too many), tracked or not. A
+  table with a row move pending is refused, naming the person who moved the rows. A highlight is
+  refused more widely, as deciding a row takes away or moves the markers in it and a highlight has
+  no point form to be left as (a comment becomes one): in a table with a row inserted or moved and
+  pending, adding a highlight whose markers are in different rows, or one in a row, or among the
+  deleted rows kept under the table, and the other outside it, is refused, naming the person whose
+  change it is ("Ada Lovelace's change of rows in this table is pending, and this highlight would
+  run from one row into the next, or out of the table. Decide the change first, or highlight
+  inside one row."). Highlighting the first cell of a row with no pipe at its start is refused in
+  the same table, which puts the opener at the end of the row above, in words that say so, as
+  "inside one row" would not help ("... this highlight would start at the end of the row above, as a
+  row with no pipe at its start can't hold a marker at its start. Decide the change first, or
+  start the highlight after the first cell of the row."). So is one that would start in front of
+  the mark of a pending row, at the start of its first cell, or between the mark and the space
+  after it, which hides the mark from the table ("... this highlight would start in front of the
+  mark of a row that is inserted or moved, at the very start of its first cell. Decide the change
+  first, or start the highlight at the text of the row."). A highlight inside one row, from the
+  text of a cell on, and one over the whole table, from the text before it to the text after it,
+  are made, and every decision of the rows is possible with them there. Deleting the header is
+  refused in the same two cases (the row that would be the header has another number of cells, or a
+  comment's marker after its closing pipe is a cell too many), tracked or not. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first
@@ -2392,8 +2408,8 @@ A comment thread is anchored in the body and stored in the ledger under the same
   would not be read (`inside-code`, "A highlight can't be made inside code or an HTML comment, …"),
   in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
   the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the
-  reason, and "Select other text to highlight."), and across rows of a table while a move of rows
-  is pending in it (§3.7). A highlight has no point form, and covers text: a range that covers no
+  reason, and "Select other text to highlight."), and across rows of a table, or out of it, while a
+  row is inserted or moved and pending in it (§3.7). A highlight has no point form, and covers text: a range that covers no
   text that reads in the newest view, once its ends are placed, is refused with the error code
   `empty-range` ("Select some text to highlight."). That is a point, the line breaks between two
   blocks, markers alone (the opener or the closer of an insertion, a comment's anchor, a

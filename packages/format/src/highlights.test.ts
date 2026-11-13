@@ -875,6 +875,8 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
   const FRUIT =
     '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| Pears  | 5     |\n| Plums  | 7     |';
   const BARE = 'Fruit | Count\n----- | -----\nApples | 3\nPears | 5\nPlums | 7';
+  /** A table with text before it and after it, as a person highlights across its edges. */
+  const around = (table: string) => file(`Intro words.\n\n${table}\n\nOutro words.`);
 
   /** The table of `text` with ada's move of its row `row` to the top, pending. */
   function moved(text: string, row: number): string {
@@ -883,14 +885,48 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     return applyChanges(text, tableEdit(text, op, context(ada, ['m2bd', 'n3cd'])).changes);
   }
 
-  const said = (run: () => unknown) => {
+  /** The table of `text` with ada's new row after its row `after`, pending, with `texts` in it. */
+  function inserted(text: string, after: number, texts?: string[][]): string {
+    const table = readTables(text, parse(text))[0]?.from ?? 0;
+    const op: TableOp = { kind: 'insertRows', table, after, count: 1, ...(texts ? { texts } : {}) };
+    return applyChanges(text, tableEdit(text, op, context(ada, ['m2bd'])).changes);
+  }
+
+  /** The error that a highlight on `range` is refused with. */
+  function refusedWith(text: string, range: Range): EditError {
     try {
-      run();
+      addHighlight(text, range, context(bo, ['h4kz']));
     } catch (error) {
-      return error instanceof EditError ? error : String(error);
+      if (error instanceof EditError) return error;
+      throw error;
     }
-    return 'no error';
-  };
+    throw new Error(`A highlight was made on ${JSON.stringify(text.slice(range.from, range.to))}`);
+  }
+
+  /** What deciding the pending changes of `text` gives: whether each decision of each is possible. */
+  function decisions(text: string): Map<string, string> {
+    const found = new Map<string, string>();
+    const marks = parse(text).marks.filter((m) => m.kind !== 'cmt' && m.kind !== 'hl');
+    for (const { id } of marks) {
+      for (const [how, decide] of [
+        ['accept', accept],
+        ['reject', reject],
+      ] as const) {
+        try {
+          applyChanges(text, decide(text, id));
+          found.set(`${how} ${id}`, 'works');
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          found.set(`${how} ${id}`, error.code ?? 'refused');
+        }
+      }
+    }
+    return found;
+  }
+
+  /** The words of a highlight that runs from one row of a table into another, or out of it. */
+  const ACROSS =
+    "Ada Lovelace's change of rows in this table is pending, and this highlight would run from one row into the next, or out of the table. Decide the change first, or highlight inside one row.";
 
   it('goes in a cell, across the cells of a row, and across rows, and is decided in every order', () => {
     const text = file(FRUIT, {});
@@ -909,43 +945,220 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     expect(bodyOf(highlight(text, cells).result)).toContain('| <!--hl h4kz-->Fruit  | Count |');
   });
 
-  it('is refused across rows while a move of rows is pending, naming who moved them, as a comment is', () => {
-    for (const table of [FRUIT, BARE]) {
-      const text = moved(file(table), 3);
-      const across = { from: text.indexOf('Apples'), to: text.indexOf('Pears') + 5 };
-      const error = said(() => addHighlight(text, across, context(bo, ['h4kz'])));
-      expect(error, table).toBeInstanceOf(EditError);
-      expect((error as EditError).code).toBe('no-legal-placement');
-      expect((error as EditError).message).toBe(
-        "Ada Lovelace's move of rows in this table is pending, and this highlight would run from one row into the next. Decide the move first, or highlight inside one row.",
-      );
-    }
-    // Inside one row it is made, and the move is decided in every order, with it there.
-    const text = moved(file(FRUIT), 3);
-    const { result } = highlight(text, at(text, 'Apples'));
-    expect(expectNoDecisionRefused('inside one row', result)).toBeGreaterThan(0);
-    const both = highlight(text, {
-      from: text.indexOf('Apples'),
-      to: text.indexOf('3') + 1,
-    }).result;
-    expect(expectNoDecisionRefused('across the cells of one row', both)).toBeGreaterThan(0);
-  });
-
-  it('is made across rows when no row is moved: rows inserted or deleted are decided in every order', () => {
+  it('is made across rows when no row is inserted or moved: deleted rows are decided in every order', () => {
     const base = file(FRUIT);
     const table = readTables(base, parse(base))[0]?.from ?? 0;
-    const ops: TableOp[] = [
-      { kind: 'deleteRows', table, rows: [3] },
-      { kind: 'insertRows', table, after: 2, count: 1 },
-    ];
-    for (const op of ops) {
-      const text = applyChanges(base, tableEdit(base, op, context(ada, ['m2bd'])).changes);
-      const { result } = highlight(text, {
-        from: text.indexOf('Apples'),
-        to: text.indexOf('Pears') + 5,
-      });
-      expect(expectNoDecisionRefused(op.kind, result), op.kind).toBeGreaterThan(0);
+    const op: TableOp = { kind: 'deleteRows', table, rows: [3] };
+    const text = applyChanges(base, tableEdit(base, op, context(ada, ['m2bd'])).changes);
+    const { result } = highlight(text, {
+      from: text.indexOf('Apples'),
+      to: text.indexOf('Pears') + 5,
+    });
+    expect(expectNoDecisionRefused(op.kind, result), op.kind).toBeGreaterThan(0);
+  });
+
+  it('is refused across rows, and out of the table, while a row is inserted or moved, naming who did', () => {
+    for (const table of [FRUIT, BARE]) {
+      for (const [what, text] of [
+        ['a move of rows', moved(around(table), 3)],
+        ['an inserted row', inserted(around(table), 2)],
+      ] as const) {
+        const label = `${what}, ${table === FRUIT ? 'with' : 'without'} outer pipes`;
+        // From one row into the next, from a cell to the text after the table, and from the text
+        // before it into a cell.
+        for (const range of [
+          { from: text.indexOf('3'), to: text.indexOf('Pears') + 5 },
+          { from: text.indexOf('Pears') + 3, to: text.indexOf('Outro') + 5 },
+          { from: text.indexOf('Intro'), to: text.indexOf('Apples') + 3 },
+        ]) {
+          const error = refusedWith(text, range);
+          expect(error.code, label).toBe('no-legal-placement');
+          expect(error.message, `${label}: ${JSON.stringify(range)}`).toBe(ACROSS);
+        }
+      }
     }
+  });
+
+  it('is refused out of the table from a cell of a moved row, while the move is pending', () => {
+    // The row that is moved, now at the top, and the text after the table: its decision would take
+    // the cell away and leave the closer.
+    for (const table of [FRUIT, BARE]) {
+      const text = moved(around(table), 2);
+      const cell = text.indexOf('5');
+      expect(text.slice(cell - 2, cell + 1), table).toMatch(/\| ?5|\| 5/);
+      const error = refusedWith(text, { from: cell, to: text.indexOf('Outro') + 5 });
+      expect(error.message, table).toBe(ACROSS);
+    }
+  });
+
+  it('says what fails, not what does not help, for the first cell of a row with no pipe at its start', () => {
+    // The row has no pipe in front of its first cell to put an opener after: the highlight would
+    // start at the end of the row above, which is the inserted row.
+    const text = inserted(around(BARE), 2);
+    const first =
+      "Ada Lovelace's change of rows in this table is pending, and this highlight would start at the end of the row above, as a row with no pipe at its start can't hold a marker at its start. Decide the change first, or start the highlight after the first cell of the row.";
+    for (const range of [
+      at(text, 'Plums'),
+      { from: text.indexOf('Plums'), to: text.indexOf('7') + 1 },
+    ]) {
+      expect(refusedWith(text, range).message, JSON.stringify(range)).toBe(first);
+    }
+    // The rows below, to the end of the table and past it, run out of the row, and are told so.
+    const below = { from: text.indexOf('Plums'), to: text.indexOf('Outro') + 5 };
+    expect(refusedWith(text, below).message).toBe(ACROSS);
+    // After the first cell it does what the words say: it is made, and decided in every order.
+    const { result } = highlight(text, at(text, '7'));
+    expect(bodyOf(result)).toContain('Plums | <!--hl h4kz-->7<!--/h4kz-->');
+    expect(expectNoDecisionRefused('after the first cell', result)).toBeGreaterThan(0);
+    // A table with its outer pipes has a place for the opener inside the row.
+    const piped = inserted(around(FRUIT), 2);
+    const inside = highlight(piped, at(piped, 'Plums')).result;
+    expect(bodyOf(inside)).toContain('| <!--hl h4kz-->Plums<!--/h4kz-->  | 7     |');
+    expect(expectNoDecisionRefused('with outer pipes', inside)).toBeGreaterThan(0);
+  });
+
+  it('is made inside one row, over the whole table, and elsewhere, while a row is inserted or moved', () => {
+    for (const table of [FRUIT, BARE]) {
+      for (const [what, text] of [
+        ['a move of rows', moved(around(table), 3)],
+        ['an inserted row', inserted(around(table), 2)],
+      ] as const) {
+        const label = `${what}, ${table === FRUIT ? 'with' : 'without'} outer pipes`;
+        // Inside one row, from after its first cell (a first cell with no pipe in front of it
+        // can't hold the opener), across its cells.
+        const row = text.indexOf('Pears');
+        for (const range of [
+          { from: text.indexOf('5', row), to: text.indexOf('5', row) + 1 },
+          { from: text.indexOf('|', row) + 1, to: text.indexOf('5', row) + 1 },
+        ]) {
+          const { result } = highlight(text, range);
+          expect(expectNoDecisionRefused(label, result), label).toBeGreaterThan(0);
+        }
+        // Over the whole table, from the text before it to the text after it, and over the text
+        // around it: no marker is in the table.
+        for (const range of [
+          { from: text.indexOf('Intro'), to: text.indexOf('Outro') + 5 },
+          at(text, 'Intro words.'),
+          at(text, 'Outro words.'),
+        ]) {
+          const { result } = highlight(text, range);
+          expect(expectNoDecisionRefused(label, result), label).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('is refused at the very start of a row that is inserted or moved, in front of its mark', () => {
+    // A marker in front of the mark of a row hides it from the table: neither accepting nor
+    // rejecting the row could be done. The text of the row is fine.
+    const hides =
+      "Claude's change of rows in this table is pending, and this highlight would start in front of the mark of a row that is inserted or moved, at the very start of its first cell. Decide the change first, or start the highlight at the text of the row.";
+    for (const table of [FRUIT, BARE]) {
+      const base = around(table);
+      const at2 = readTables(base, parse(base))[0]?.from ?? 0;
+      const op: TableOp = {
+        kind: 'insertRows',
+        table: at2,
+        after: 2,
+        count: 1,
+        texts: [['Kiwis', '9']],
+      };
+      const text = applyChanges(base, tableEdit(base, op, context(claudeAda, ['m2bd'])).changes);
+      const mark = text.indexOf('<!--ins m2bd row-->');
+      const row = { from: mark, to: text.indexOf('Kiwis') + 5 };
+      expect(refusedWith(text, row).message, table).toBe(hides);
+      // Or just the space in front of it, which the opener would stand in.
+      expect(refusedWith(text, { from: mark - 1, to: mark }).message, table).toBe(hides);
+      // From its text on, it is made, and the row is decided in every order.
+      const { result } = highlight(text, {
+        from: text.indexOf('Kiwis'),
+        to: text.indexOf('9') + 1,
+      });
+      expect(expectNoDecisionRefused(table, result), table).toBeGreaterThan(0);
+    }
+  });
+
+  it('never makes a decision of a pending row impossible that the table allows without it', () => {
+    // Every highlight that is made, on the words of the file and on a coarse grid of offsets, in
+    // tables with rows inserted, moved and deleted: each pending change is decided as it was.
+    const checked = { made: 0, refused: 0 };
+    for (const table of [FRUIT, BARE]) {
+      const base = around(table);
+      const start = readTables(base, parse(base))[0]?.from ?? 0;
+      const ops: TableOp[] = [
+        { kind: 'insertRows', table: start, after: 0, count: 1 },
+        { kind: 'insertRows', table: start, after: 2, count: 1 },
+        { kind: 'insertRows', table: start, after: 4, count: 1 },
+        { kind: 'moveRows', table: start, rows: [3], to: 0 },
+        { kind: 'moveRows', table: start, rows: [2], to: 4 },
+        { kind: 'deleteRows', table: start, rows: [3] },
+      ];
+      for (const op of ops) {
+        let text: string;
+        try {
+          text = applyChanges(base, tableEdit(base, op, context(ada, ['m2bd', 'n3cd'])).changes);
+        } catch (error) {
+          if (error instanceof EditError) continue;
+          throw error;
+        }
+        const body = bodyOf(text);
+        const markers = parse(text).marks.flatMap((mark) =>
+          mark.segments.flatMap((s) => [s.open, ...(s.close ? [s.close] : [])]),
+        );
+        const words: Range[] = [];
+        for (const match of body.matchAll(/[A-Za-z0-9]+/g)) {
+          const range = { from: match.index, to: match.index + match[0].length };
+          if (!markers.some((m) => m.from < range.to && range.from < m.to)) words.push(range);
+        }
+        const ranges: Range[] = [];
+        for (let i = 0; i < words.length; i++) {
+          for (const j of [i, i + 1, i + 2, i + 5, i + 9]) {
+            const from = words[i];
+            const to = words[j];
+            if (from && to) ranges.push({ from: from.from, to: to.to });
+          }
+        }
+        // And ranges that start and end anywhere, among the markers, the pipes and the spaces. (Not
+        // for deleted rows: a marker in front of a deleted row's line, which a range from inside the
+        // hidden line gives, makes a decision impossible for a comment as it does for a highlight.)
+        if (op.kind !== 'deleteRows') {
+          // (Nor after the closing pipe of the header row: the header would have a cell more than
+          // the delimiter row, and the table would stop reading as one, with or without a pending
+          // row, as it does for a comment.)
+          const header = readTables(text, parse(text))[0]?.rows[0]?.to ?? -1;
+          const unsafe = text[header - 1] === '|' ? header : -1;
+          for (let from = text.indexOf('Intro'); from < body.length; from += 3) {
+            for (let to = from + 1; to <= body.length; to += 5) {
+              if (from !== unsafe && to !== unsafe) ranges.push({ from, to });
+            }
+          }
+        }
+        const baseline = decisions(text);
+        for (const range of ranges) {
+          let result: string;
+          try {
+            const { changes } = addHighlight(text, range, context(bo, ['h4kz']));
+            result = applyChanges(text, changes);
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+            checked.refused++;
+            continue;
+          }
+          checked.made++;
+          const now = decisions(result);
+          for (const [decision, was] of baseline) {
+            expect(
+              now.get(decision),
+              `${op.kind}, ${table === FRUIT ? 'piped' : 'bare'}, ${JSON.stringify(text.slice(range.from, range.to))} ${JSON.stringify(range)}: ${decision}`,
+            ).toBe(was);
+          }
+        }
+      }
+    }
+    // Some are made, and more are refused: those across rows and out of the table, and those
+    // that cover no text.
+    expect(checked.made).toBeGreaterThan(400);
+    expect(checked.refused).toBeGreaterThan(checked.made);
   });
 });
 

@@ -6,14 +6,13 @@
 
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
-import { applyChanges } from './changes.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { annotationAcrossRows } from './table-rules.ts';
-import type { EditContext, MarkEntry, Range, TextChange } from './types.ts';
+import { highlightAgainstRows } from './table-rules.ts';
+import type { EditContext, MarkEntry, Parsed, Range, TextChange } from './types.ts';
 import { viewsOnce } from './views.ts';
 
 /** Why a highlight can't be made on a range that covers no text. */
@@ -46,23 +45,41 @@ function coversText(text: string, from: number, to: number): boolean {
 }
 
 /**
- * A highlight that would run from one row of a table into another, in a table with a row move
- * pending, is refused when it is made, as a comment is: the move could then be accepted but not
- * rejected. (A row with no pipe at its start can't begin with a marker, so a highlight on its first
- * word starts at the end of the row above.) The words name the person who moved the rows.
+ * A highlight that would leave a row of a table, into another or out of the table, is refused when
+ * it is made if a row of the table is inserted or moved and still pending, as a comment that would
+ * run across the rows of a table with a move pending is: a decision that takes the row of one of
+ * its markers away, or moves it, would leave the other, and could not be made one way or the other.
+ * A highlight has no point form to be left as. So is one that would stand in front of the mark of
+ * a pending row, at the start of its first cell, where the table is read by it
+ * (`highlightAgainstRows`). A row with no pipe at its start can't begin with a marker, so a
+ * highlight on its first cell starts at the end of the row above, and is refused too; the words say
+ * so, as "highlight inside one row" would not help it. The words name the person who made the
+ * change of rows. `wanted` is the range the person asked for, and `placed` where the markers go,
+ * in offsets of `text`.
  */
-function refuseAcrossMovedRows(after: string, id: string): void {
-  if (!after.includes(' row-->')) return;
-  const parsed = parse(after);
-  for (const table of readTables(after, parsed)) {
-    const moved = table.rows.find((row) => row.insertion?.entry.move !== undefined);
-    if (!moved?.insertion || !annotationAcrossRows(table, parsed, 'hl', id)) continue;
-    const by = moved.insertion.entry.by;
+function refuseAcrossPendingRows(text: string, parsed: Parsed, wanted: Range, placed: Range): void {
+  if (!text.includes(' row-->')) return;
+  for (const table of readTables(text, parsed)) {
+    const pending = table.rows.find((row) => row.insertion !== null)?.insertion;
+    const trouble = pending ? highlightAgainstRows(table, text, placed) : null;
+    if (!pending || !trouble) continue;
+    const by = pending.entry.by;
     const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
-    throw new EditError(
-      `${name}'s move of rows in this table is pending, and this highlight would run from one row into the next. Decide the move first, or highlight inside one row.`,
-      'no-legal-placement',
-    );
+    const pendingRows = `${name}'s change of rows in this table is pending`;
+    // Where the range asked for is in one row of the table, the highlight leaves it only because
+    // it starts at the end of the row above.
+    const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
+    const first = rowOf(wanted.from);
+    const inOneRow = first !== -1 && first === rowOf(wanted.to);
+    let words: string;
+    if (trouble === 'hides') {
+      words = `${pendingRows}, and this highlight would start in front of the mark of a row that is inserted or moved, at the very start of its first cell. Decide the change first, or start the highlight at the text of the row.`;
+    } else if (inOneRow) {
+      words = `${pendingRows}, and this highlight would start at the end of the row above, as a row with no pipe at its start can't hold a marker at its start. Decide the change first, or start the highlight after the first cell of the row.`;
+    } else {
+      words = `${pendingRows}, and this highlight would run from one row into the next, or out of the table. Decide the change first, or highlight inside one row.`;
+    }
+    throw new EditError(words, 'no-legal-placement');
   }
 }
 
@@ -80,8 +97,8 @@ function refuseAcrossMovedRows(after: string, id: string): void {
  * @throws EditError when the range covers no text that reads in the newest view, which a highlight
  *   has no form for (`empty-range`): a point, line breaks, markers or a deletion alone; or is in
  *   front matter, or would put the markers inside code or an HTML comment,
- *   or where no place keeps the text as it reads, or across rows of a table with a row move
- *   pending; and when the ledger can't be read.
+ *   or where no place keeps the text as it reads, or across rows of a table, or out of it, with a
+ *   row inserted or moved and pending; and when the ledger can't be read.
  */
 export function addHighlight(
   text: string,
@@ -128,6 +145,6 @@ export function addHighlight(
     verify: (after) => checkAnchor(after, id, true, HIGHLIGHT_WORDS.inCode),
     inCode: HIGHLIGHT_WORDS.inCode,
   });
-  refuseAcrossMovedRows(applyChanges(text, changes), id);
+  refuseAcrossPendingRows(text, parsed, wanted, placed);
   return { changes, id };
 }
