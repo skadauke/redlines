@@ -330,9 +330,9 @@ a label, and the page then draws it with no change of its own.
 switch and Reset already exist on the site as React (`ViewSwitch`, `SheetBar`), in the site's type
 and tokens, with the site's focus rings and `aria-pressed` pattern. The embed supplies state and
 actions; it draws only the document and the review interface inside it. The view buttons come from
-`DemoState.views`, so when the simple-markup view of
-[#182](https://github.com/skadauke/redlines/issues/182) lands, the page shows it with no change to
-the site.
+`DemoState.views`, which lists Clean, Redlines and Raw. The simple look of
+[#182](https://github.com/skadauke/redlines/issues/182) is no view of its own (#303 folded it into
+Redlines): a click on a change bar in the document switches to it, so the page has no button for it.
 
 `mountDemo` does, in order, what `embed-smoke`'s `mountEmbed` does and `apps/desktop` does for a
 window: `createEditor` (typing: `smartPunctuation: true`, `spellCheck: false`, `closePairs: false`;
@@ -1117,9 +1117,10 @@ and 7. The old `AgentDemo` and its animation code are deleted.
 
 **Stage 4 — polish and keeping it true.**
 The `saveData` button, `npm run perf` and a trim if the budget is tight, and the list of checks by
-hand for Stephan. The fourth view (simple markup,
-[#182](https://github.com/skadauke/redlines/issues/182)) lands with #182: the page picks it up from
-`DemoState.views`, and the hero caption gets a line then.
+hand for Stephan. The simple look (simple markup,
+[#182](https://github.com/skadauke/redlines/issues/182)), first planned as a fourth view button and
+since #303 a look of Redlines reached by a click on a change bar, needs no button: the hero caption
+may get a line about the click.
 
 **Stage 5 — publish (each step on Stephan's yes).**
 The push trigger in `deploy-website.yml`, with the lines in its header, `website/README.md` and

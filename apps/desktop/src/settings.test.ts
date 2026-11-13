@@ -109,6 +109,12 @@ describe('settings', () => {
     expect(loadSettings()).toEqual(changed);
   });
 
+  it('keeps a look saved as Simple, which a document opens in as Redlines in its simple look', () => {
+    // Stored by a build that listed Simple in the View menu: the value stays what it was.
+    localStorage.setItem(SETTINGS_KEY, '{"markupView":"simple"}');
+    expect(loadSettings().markupView).toBe('simple');
+  });
+
   it('keeps the markup view like the other settings, reaching the other windows but setting no view', () => {
     expect(DEFAULT_SETTINGS.markupView).toBe('redlines');
     updateSettings({ markupView: 'simple' });

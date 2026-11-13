@@ -44,8 +44,9 @@ const barOpen = StateField.define<boolean>({
   create: () => false,
   update(open, tr) {
     for (const effect of tr.effects) if (effect.is(setBarOpen)) open = effect.value;
-    // A person who chooses to read has stopped deciding: choosing Simple closes the bar, so that
-    // it never steps through changes the page doesn't show.
+    // A person who chooses to read has stopped deciding: showing the simple look closes the bar, so
+    // that it never steps through changes the page doesn't show. In the app nothing but a click on
+    // a change bar shows it, and while the bar is open that click opens a card instead.
     const simple = (state: EditorState) => state.field(viewModeField) === 'simple';
     return open && simple(tr.state) && !simple(tr.startState) ? false : open;
   },
@@ -382,7 +383,7 @@ class Bar {
 
 /**
  * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
- * the card of the change on that line opens, in place of the switch between Simple and Redlines,
+ * the card of the change on that line opens, in place of the switch between Redlines' two looks,
  * which the review bar would leave to the person who has stopped deciding. Nothing otherwise.
  * `pos` is where the bar's line starts.
  */

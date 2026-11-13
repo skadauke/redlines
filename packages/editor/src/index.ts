@@ -82,6 +82,7 @@ import {
   lineBreakMarksFacet,
   markupViewCompartment,
   markupViewFacet,
+  menuViewOf,
   parsedField,
   peopleFacet,
   trackedEditAnnotation,
@@ -143,6 +144,7 @@ export {
   chooseViewEffects,
   isChange,
   markupViewFacet,
+  menuViewOf,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -389,6 +391,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    showView: (menuView) => {
+      if (menuView !== 'redlines') {
+        view.dispatch({ effects: chooseViewEffects(menuView) });
+        return;
+      }
+      // Redlines shown already, in either look, stays as it is: only a click on a change bar
+      // switches the looks. Otherwise it comes back in the look chosen last.
+      if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
+      view.dispatch({ effects: chooseViewEffects(view.state.facet(markupViewFacet)) });
+    },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });

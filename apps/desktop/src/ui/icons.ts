@@ -16,10 +16,7 @@ const ICONS = {
   /** The Clean view: a page of text. */
   clean:
     '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/>',
-  /** The Simple view: the page with a change bar in its margin. */
-  simple:
-    '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4M7 10.5h2.5"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
-  /** The Redlines view: Simple's page with one mark of markup on it, a line struck through. */
+  /** The Redlines view: the page with a change bar in its margin and one mark of markup on it, a line struck through. */
   redlines:
     '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4"/><path d="M7 10.5h4"/><path d="M6.3 12l5.4-3.1" stroke-width="1.1"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
   /** The Raw view: angle brackets. */

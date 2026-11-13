@@ -4,7 +4,13 @@
 
 import { Prec } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { createEditor, type Author, type EditorUiState, type MetPerson } from '@redlines/editor';
+import {
+  createEditor,
+  menuViewOf,
+  type Author,
+  type EditorUiState,
+  type MetPerson,
+} from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
 import {
   attachPicker,
@@ -81,7 +87,8 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
     const tell = () => {
       if (!ui) return;
       const state: DemoState = {
-        view: ui.view,
+        // Redlines in either of its looks: the button stays pressed when a click on a bar switches.
+        view: menuViewOf(ui.view),
         views: VIEWS,
         tracking: ui.tracking,
         changes: ui.changes.length,
@@ -232,7 +239,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
 
     let destroyed = false;
     return {
-      setView: (view) => editor.setViewMode(view),
+      setView: (view) => editor.showView(view),
       setTracking: (on) => editor.setTracking(on),
       startComment: () => review.startComment(),
       askClaude() {

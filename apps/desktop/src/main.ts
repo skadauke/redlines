@@ -188,7 +188,6 @@ const editor = createEditor(element('#editor'), {
     : undefined,
   showLineBreakMarks: settings.showLineBreakMarks,
   markupView: settings.markupView,
-  viewKeys: { simple: '⌥⌘2', redlines: '⌥⌘3' },
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -583,7 +582,7 @@ const toggleResolved = () => {
 };
 
 const titleBar = createTitleBar(element('#titlebar'), {
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
   toggleTracking,
   openReview,
   toggleResolved,
@@ -656,7 +655,7 @@ const commands: MenuCommands = {
       notice.flash('Couldn’t print.');
     }),
   quit: () => void windows?.quit(),
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
   toggleSidebar,
   toggleTracking,
   openReview,
