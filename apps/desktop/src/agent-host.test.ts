@@ -373,6 +373,7 @@ describe('agentSetup', () => {
     code: 0,
     last_line: '',
     timed_out: false,
+    stopped: false,
     quick: false,
     ...change,
   });
@@ -382,10 +383,12 @@ describe('agentSetup', () => {
     expect(await agentSetup.update('codex')).toEqual({ ok: true, message: '' });
     expect(await agentSetup.signIn('claude')).toEqual({ ok: true, message: '' });
     await agentSetup.signInInTerminal('claude');
+    await agentSetup.stop('codex');
     // src-tauri/src/agents/mod.rs: agent_update, agent_sign_in and agent_terminal_sign_in.
     expect(invoke).toHaveBeenNthCalledWith(1, 'agent_update', { agent: 'codex' });
     expect(invoke).toHaveBeenNthCalledWith(2, 'agent_sign_in', { agent: 'claude' });
     expect(invoke).toHaveBeenNthCalledWith(3, 'agent_terminal_sign_in', { agent: 'claude' });
+    expect(invoke).toHaveBeenNthCalledWith(4, 'agent_setup_stop', { agent: 'codex' });
   });
 
   it('passes the app’s refusal on, as a line to show', async () => {
@@ -401,6 +404,7 @@ describe('setupResult', () => {
     code: 1,
     last_line: 'stdin is not a TTY',
     timed_out: false,
+    stopped: false,
     quick: true,
   };
 
@@ -429,19 +433,37 @@ describe('setupResult', () => {
     );
   });
 
-  it('is ok when it ended well, whatever it printed', () => {
+  it('is ok when it ended well, and keeps what it said last, for an update that changed nothing', () => {
     expect(
       setupResult(
         {
           ran: 'claude update',
           ok: true,
           code: 0,
-          last_line: 'Updated',
+          last_line: 'Already up to date.',
           timed_out: false,
+          stopped: false,
           quick: false,
         },
         true,
       ),
-    ).toEqual({ ok: true, message: '' });
+    ).toEqual({ ok: true, message: 'Already up to date.' });
+  });
+
+  it('says it was stopped, which is no failure to explain', () => {
+    expect(
+      setupResult(
+        {
+          ran: 'claude auth login',
+          ok: false,
+          code: null,
+          last_line: '',
+          timed_out: false,
+          stopped: true,
+          quick: false,
+        },
+        true,
+      ),
+    ).toEqual({ ok: false, message: '', stopped: true });
   });
 });

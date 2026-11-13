@@ -8,6 +8,7 @@ import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { announceAgentsChanged } from '../agent-changes.ts';
 import { agentSetup, createDetectionProcesses } from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
@@ -19,6 +20,7 @@ import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
+import { createSetupRegistry } from './setup-registry.ts';
 import {
   PANES,
   renderPane,
@@ -75,6 +77,13 @@ const providers: AgentProvider[] = [
   createCodexProvider(processes),
 ];
 const detections = new Map<string, Promise<AgentState>>();
+// The updates and sign-ins asked of the app go on when the pane is drawn again, as it is whenever
+// another window changes a setting: a row drawn then follows what is under way. When one ends, what
+// was found is stale, and the document windows, which keep it for a minute, are told.
+const setups = createSetupRegistry((id) => {
+  detections.delete(id);
+  announceAgentsChanged();
+});
 
 /**
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
@@ -123,15 +132,23 @@ const deps: PaneDeps = {
           if (fresh) detections.delete(provider.id);
           const kept = detections.get(provider.id) ?? provider.detect();
           detections.set(provider.id, kept);
+          // A look the person asked for may have found the agent changed under the documents too.
+          if (fresh)
+            void kept.then(
+              () => announceAgentsChanged(),
+              () => {},
+            );
           return kept;
         },
         // The app updates and signs in an agent with its own command, for the agent named and
         // nothing more; in a plain browser there is no app to ask.
         ...(isTauri
           ? {
-              update: () => agentSetup.update(provider.id),
-              signIn: () => agentSetup.signIn(provider.id),
+              update: () => setups.track(provider.id, 'update', agentSetup.update(provider.id)),
+              signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
               signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
+              stop: () => agentSetup.stop(provider.id),
+              running: () => setups.running(provider.id),
             }
           : {}),
       })),

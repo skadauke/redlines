@@ -199,6 +199,8 @@ export type AgentState =
       help: string;
       /** The command that installs it, to show and copy; never run by Redlines. */
       install?: string;
+      /** It couldn't be checked, which isn't the same as not being there. */
+      unchecked?: true;
     }
   | { found: true; signedIn: true; version?: string; path?: string; help?: string }
   | {
@@ -239,7 +241,10 @@ export type AgentEvent =
   | { type: 'status'; text: string }
   /** `finalText` is the last message, for an agent that never called reply. */
   | { type: 'done'; finalText?: string }
-  /** `setup` is true when Preferences › Agents can put it right: the agent is signed out. */
+  /**
+   * `setup` is true when Preferences › Agents can put it right: the agent is signed out, or too
+   * old to run here.
+   */
   | { type: 'error'; message: string; setup?: true };
 
 /** How an agent's program reaches Redlines' tools: a command that speaks MCP. */

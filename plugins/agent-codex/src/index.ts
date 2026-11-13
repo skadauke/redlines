@@ -240,8 +240,6 @@ export function createCodexProvider(
         // standard error, which the app doesn't read: the exit code is the answer.
         statusArgs: ['login', 'status'],
         isSignedIn: (status) => status.code === 0,
-        // A question an older Codex doesn't know is a usage error, which exits 2.
-        isSignedOut: (status) => status.code === 1,
       });
       version = state.found ? state.version : undefined;
       return state;

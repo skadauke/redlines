@@ -27,10 +27,18 @@ export interface OtherAgent {
 /** What an update or a sign-in said when it ended. */
 export interface SetupResult {
   ok: boolean;
-  /** One line of what it said, for the line that tells why it failed. */
+  /** One line of what it said last: why it failed, or what an update that changed nothing said. */
   message: string;
   /** It ended at once without signing in, as a login that wants a terminal does. */
   needsTerminal?: boolean;
+  /** The person stopped it, or the window that asked for it closed. */
+  stopped?: true;
+}
+
+/** An update or a sign-in under way, which the pane shows and follows to its end. */
+export interface SetupUnderWay {
+  doing: 'update' | 'sign-in';
+  ended: Promise<SetupResult>;
 }
 
 /** An agent of the pane, and what the host can do about it. */
@@ -45,6 +53,14 @@ export interface PaneAgent {
   signIn?(): Promise<SetupResult>;
   /** Opens Terminal with the login's command, for a login that needs one. */
   signInInTerminal?(): Promise<void>;
+  /** Stops the update or the sign-in under way, which then ends as stopped. */
+  stop?(): Promise<void>;
+  /**
+   * An update or a sign-in already under way for the agent, as the host keeps it: the pane is drawn
+   * again when another window changes a setting, and a row drawn then follows what the one before
+   * it started, instead of offering to start it again.
+   */
+  running?(): SetupUnderWay | undefined;
 }
 
 export interface AgentsPaneDeps {
@@ -109,20 +125,28 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   const names = new Map(deps.agents.map(({ id, name }) => [id, name]));
 
   // A login that needed a terminal ends where the person finishes it, outside this window: coming
-  // back to it, the pane looks again, for as long as an agent still waits on that.
+  // back to it, the pane looks again, once, for each agent that waits on that and has nothing
+  // under way. One look that still finds it signed out is the last, until Check Again.
   const waiting = new Set<string>();
   const comeBack = () => {
-    for (const look of looks) if (waiting.has(look.id)) look.check(true);
+    for (const look of looks) {
+      if (waiting.has(look.id) && !look.busy()) look.check(true, { viaFocus: true });
+    }
   };
-  const looks: { id: string; check: (fresh: boolean) => void }[] = [];
+  const looks: { id: string; check: AgentRow['check']; busy: () => boolean }[] = [];
   window.addEventListener('focus', comeBack);
 
   for (const agent of deps.agents) {
     const drawn = agentRow(agent, deps, () => alive, waiting);
-    looks.push({ id: agent.id, check: drawn.check });
+    looks.push({
+      id: agent.id,
+      check: (fresh, options) => drawn.check(fresh, options),
+      busy: () => drawn.busy(),
+    });
     container.append(drawn.row);
-    // Run now that the pane is open: nothing in the app asks at launch.
-    drawn.check(false);
+    // Run now that the pane is open: nothing in the app asks at launch. An update or a sign-in
+    // that is already under way is followed instead.
+    drawn.start();
   }
 
   if (deps.others) container.append(otherAgents(deps.others, () => alive));
@@ -201,7 +225,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
 
 /** What the row's first line says of an agent. */
 function statusOf(state: AgentState): string {
-  if (!state.found) return 'Not installed';
+  if (!state.found) return state.unchecked === true ? 'Couldn’t check' : 'Not installed';
   if (state.signedIn) return 'Signed in';
   if (state.reason === 'signed-out') return 'Signed out';
   // Sign-in is reported once the program has been asked, and only as it said.
@@ -209,17 +233,35 @@ function statusOf(state: AgentState): string {
   return `Needs an update · ${state.account === 'signed-in' ? 'signed in' : 'signed out'}`;
 }
 
+/** What a row says while an update or a sign-in runs. */
+const DOING = { update: 'Updating…', 'sign-in': 'Signing in…' } as const;
+
+/** One agent's row, and how the pane drives it. */
+interface AgentRow {
+  row: HTMLElement;
+  /**
+   * Asks the program again, `fresh` when the host keeps an answer. `updated` is an update that
+   * just ended well, and `viaFocus` a look made because the window came back to the front.
+   */
+  check(fresh: boolean, options?: { updated?: SetupResult; viaFocus?: boolean }): void;
+  /** Draws the row for the first time: looks, or follows what is under way already. */
+  start(): void;
+  /** Whether an update or a sign-in is under way in this row. */
+  busy(): boolean;
+}
+
 /**
  * One agent's row: its state, the version and the path of the program found (so that a stale
  * second copy earlier on the PATH shows), and the next step as a button. The host runs the update
- * and the sign-in, each its own fixed command; the pane only asks, and looks again when one ends.
+ * and the sign-in, each its own fixed command; the pane only asks, can stop them, and looks again
+ * when one ends.
  */
 function agentRow(
   agent: PaneAgent,
   deps: AgentsPaneDeps,
   alive: () => boolean,
   waiting: Set<string>,
-): { row: HTMLElement; check: (fresh: boolean) => void } {
+): AgentRow {
   const status = el('div', 'rl-pref-status', 'Checking…');
   status.setAttribute('role', 'status');
   const where = el('div', 'rl-pref-note');
@@ -234,8 +276,8 @@ function agentRow(
 
   /** The latest question asked, so that an older answer never draws over a newer one. */
   let asked = 0;
-  /** An update or a sign-in is running: nothing else is started meanwhile. */
-  let activity: string | null = null;
+  /** An update or a sign-in is under way: nothing else is started meanwhile. */
+  let activity: 'update' | 'sign-in' | null = null;
   let last: AgentState | null = null;
 
   /** A button of the row, which waits while the row says something is happening (`busy`). */
@@ -258,7 +300,7 @@ function agentRow(
     const canSignIn = signedOut && agent.signIn !== undefined;
     // The button says what to do, so help that told the person what to type is left out.
     help.textContent = canSignIn ? '' : (state?.help ?? '');
-    if (shown === 'Signing in…') help.textContent = 'Finish in your browser.';
+    if (activity === 'sign-in') help.textContent = 'Finish in your browser.';
     const command = state !== null && !state.found ? state.install : undefined;
     // While the row says something is happening, its buttons wait.
     const busy = shown !== undefined;
@@ -273,15 +315,22 @@ function agentRow(
     }
     actions.replaceChildren();
     if (canUpdate) {
-      actions.append(make('Update', `Update ${agent.name}`, () => void updateIt(), busy));
+      actions.append(make('Update', `Update ${agent.name}`, () => updateIt(), busy));
     }
     if (canSignIn) {
-      actions.append(make('Sign In', `Sign in to ${agent.name}`, () => void signInIt(), busy));
+      actions.append(make('Sign In', `Sign in to ${agent.name}`, () => signInIt(), busy));
     }
     actions.append(make('Check Again', `Check ${agent.name} again`, () => check(true), busy));
+    // What is under way can be stopped, which a login the person walked away from needs.
+    if (activity !== null && agent.stop) {
+      const what = activity === 'update' ? 'update' : 'sign-in';
+      actions.append(make('Cancel', `Cancel the ${what} of ${agent.name}`, () => stopIt(), false));
+    }
   };
 
-  const check = (fresh: boolean): void => {
+  const check: AgentRow['check'] = (fresh, options) => {
+    // An update or a sign-in is what the row is about; it looks again by itself when it ends.
+    if (activity !== null) return;
     const mine = ++asked;
     draw(null, 'Checking…');
     void Promise.resolve()
@@ -293,7 +342,21 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
-        if (state?.found && state.signedIn) waiting.delete(agent.id);
+        const ready = state?.found === true && state.signedIn;
+        if (ready) {
+          waiting.delete(agent.id);
+          // What failed before is no longer so.
+          said.textContent = '';
+        } else if (options?.viaFocus) {
+          waiting.delete(agent.id);
+        }
+        // An update that ran and left the program as old as it was says what it said, as there
+        // is nothing else to tell why: a package manager's list may lag the version needed.
+        if (options?.updated && state?.found && !state.signedIn && state.reason === 'too-old') {
+          const was = state.version === undefined ? agent.name : `${agent.name} ${state.version}`;
+          const words = options.updated.message;
+          said.textContent = `The update ran, but ${was} is still too old.${words ? ` It said: ${words}` : ''}`;
+        }
       });
   };
 
@@ -311,27 +374,25 @@ function agentRow(
   };
 
   /**
-   * Runs one of the host's fixed commands, says how it ended, and looks again. A login that failed
-   * at once wants a terminal (`terminal`), and gets one; an update that failed at once doesn't.
+   * Follows an update or a sign-in, as the host runs it, to its end: says how it ended, and looks
+   * again. A login that failed at once wants a terminal, and gets one; an update that failed at
+   * once doesn't. One the person stopped says nothing.
    */
-  const run = async (
-    doing: string,
-    running: () => Promise<SetupResult>,
-    failed: string,
-    terminal: boolean,
-  ) => {
-    if (activity !== null) return;
+  const follow = async (doing: 'update' | 'sign-in', started: Promise<SetupResult>) => {
     activity = doing;
     said.textContent = '';
-    draw(last, doing);
+    draw(last, DOING[doing]);
     let note = '';
+    let finished: SetupResult | undefined;
     try {
-      const result = await running();
-      if (!result.ok) {
+      finished = await started;
+      if (finished.stopped === true) {
+        note = '';
+      } else if (!finished.ok) {
         note =
-          terminal && result.needsTerminal && agent.signInInTerminal
+          doing === 'sign-in' && finished.needsTerminal && agent.signInInTerminal
             ? await openTerminal()
-            : `${failed}: ${result.message}`;
+            : `${doing === 'update' ? 'The update didn’t finish' : 'Sign-in didn’t finish'}: ${finished.message}`;
       }
     } catch (error) {
       note = reasonOf(error);
@@ -339,7 +400,7 @@ function agentRow(
     if (!alive()) return;
     activity = null;
     said.textContent = note;
-    check(true);
+    check(true, finished?.ok === true && doing === 'update' ? { updated: finished } : undefined);
   };
 
   /** A login that wants a terminal gets one, with its command, and the pane waits for the person. */
@@ -349,10 +410,41 @@ function agentRow(
     return 'Sign-in needs a terminal, so Redlines opened one. Finish there, then come back here.';
   };
 
-  const updateIt = () => run('Updating…', () => agent.update!(), 'The update didn’t finish', false);
-  const signInIt = () => run('Signing in…', () => agent.signIn!(), 'Sign-in didn’t finish', true);
+  const begin = (doing: 'update' | 'sign-in', running: () => Promise<SetupResult>) => {
+    if (activity !== null) return;
+    // Asked of the host from here, so that it is the host's, and so is still going if the pane is
+    // drawn again before it ends.
+    let started: Promise<SetupResult>;
+    try {
+      started = running();
+    } catch (error) {
+      started = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    void follow(doing, started);
+  };
+  const updateIt = () => begin('update', () => agent.update!());
+  const signInIt = () => begin('sign-in', () => agent.signIn!());
+  const stopIt = () => {
+    const stopped = (error?: unknown) => {
+      if (error !== undefined && alive()) said.textContent = 'Couldn’t stop it.';
+    };
+    try {
+      void Promise.resolve(agent.stop?.()).catch((error: unknown) => stopped(error ?? 'no'));
+    } catch (error) {
+      stopped(error ?? 'no');
+    }
+  };
 
-  return { row: root, check };
+  return {
+    row: root,
+    check,
+    busy: () => activity !== null,
+    start() {
+      const going = agent.running?.();
+      if (going) void follow(going.doing, going.ended);
+      else check(false);
+    },
+  };
 }
 
 function button(text: string, label?: string): HTMLButtonElement {

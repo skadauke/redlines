@@ -1291,9 +1291,11 @@ button, and Check Again always:
 
 Each is a fixed command that the app makes for an agent the window names, never a program, an
 argument or a word of a document, and the name that goes to `brew` is one of a short list. Only
-Preferences may ask for them; a failed run's line in a document opens Preferences instead. What a
-failure shows of a command's output is its last line, with anything that looks like a secret left
-out.
+Preferences may ask for them; a failed run's line in a document opens Preferences instead. An
+update or a sign-in under way has a Cancel, and stops when Preferences closes or the app quits; it
+goes on when the pane is drawn again, and the row follows it. What a failure shows of a command's
+output is its last line, with what looks like a secret left out as far as a heuristic can tell
+(the query of a link, a value after `token` or `key`, a long run that looks like a credential).
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:

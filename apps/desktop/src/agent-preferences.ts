@@ -25,6 +25,8 @@ interface SetupOutcome {
   /** The last thing it printed, with nothing in it that could be a secret. */
   last_line: string;
   timed_out: boolean;
+  /** The person asked for it to stop, or the window closed. */
+  stopped: boolean;
   /** It failed at once, as a login that wants a terminal does. */
   quick: boolean;
 }
@@ -34,7 +36,9 @@ interface SetupOutcome {
  * what else failed says its last line, or how it ended.
  */
 export function setupResult(outcome: SetupOutcome, terminal: boolean): SetupResult {
-  if (outcome.ok) return { ok: true, message: '' };
+  // What an update that ended well said last: the pane quotes it when nothing changed.
+  if (outcome.ok) return { ok: true, message: outcome.last_line };
+  if (outcome.stopped) return { ok: false, message: '', stopped: true };
   const message = outcome.timed_out
     ? `${outcome.ran} took too long, and Redlines stopped it.`
     : outcome.last_line ||
@@ -56,6 +60,8 @@ export const agentSetup = {
     invoke<SetupOutcome>('agent_sign_in', { agent }).then((outcome) => setupResult(outcome, true)),
   /** Opens Terminal with the login's command, for a login that needs one. */
   signInInTerminal: (agent: string) => invoke<void>('agent_terminal_sign_in', { agent }),
+  /** Stops the update or the sign-in under way, which then ends as stopped. */
+  stop: (agent: string) => invoke<void>('agent_setup_stop', { agent }),
 };
 
 /**

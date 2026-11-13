@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "acp_start",
     "agent_exec",
     "agent_logs_open",
+    "agent_setup_stop",
     "agent_sign_in",
     "agent_start",
     "agent_stop",

@@ -62,10 +62,14 @@ pub fn set_up(app: &AppHandle) {
     }
 }
 
-/// A window has closed: its runs stop, and their relays close.
+/// A window has closed: its runs stop, and their relays close. Preferences closing stops the
+/// updates and sign-ins it asked for, which have nowhere left to report.
 pub fn window_closed(app: &AppHandle, window: &str) {
     app.state::<Runs>().stop_owned_by(window);
     app.state::<Relays>().close_owned_by(window);
+    if window == crate::windows::PREFERENCES_WINDOW {
+        app.state::<Setups>().stop_running();
+    }
 }
 
 /// The app is quitting: every status command is killed, and every run, update and sign-in stops,
@@ -254,6 +258,17 @@ pub fn agent_sign_in(app: AppHandle, agent: String) -> Result<Outcome, String> {
         .environment_for(Path::new(&line.program));
     app.state::<Setups>()
         .run(agent, &line, &environment, SIGN_IN_TIME)
+}
+
+/// Stops the update or sign-in under way for an agent: SIGINT, then SIGTERM, then SIGKILL, as
+/// quitting does. It returns at once, and what was under way ends as stopped. Only Preferences is
+/// granted the command (`capabilities/`).
+#[tauri::command]
+pub fn agent_setup_stop(app: AppHandle, agent: String) -> Result<(), String> {
+    let agent =
+        Agent::named(&agent).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    app.state::<Setups>().stop(agent);
+    Ok(())
 }
 
 /// Opens Terminal with an agent's own login command, for a login that needs a terminal. Only

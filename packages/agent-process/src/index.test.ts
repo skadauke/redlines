@@ -323,6 +323,7 @@ describe('detectAgent', () => {
     expect(await detectAgent(processes, spec)).toEqual({
       found: false,
       help: "Claude Code couldn't be checked: boom",
+      unchecked: true,
     });
   });
 });

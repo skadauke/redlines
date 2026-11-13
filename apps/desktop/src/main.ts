@@ -25,6 +25,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { watchAgentsChanged } from './agent-changes.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
@@ -208,8 +209,8 @@ const editor = createEditor(element('#editor'), {
 });
 ui = editor.getUiState();
 // The agents on this Mac, run through their own programs; a plain browser has none. Claude and
-// Codex have providers of their own, and the agents the person added in Preferences, which the
-// app keeps, are each run through the Agent Client Protocol provider.
+// Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
+// doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
 const agents = createMacAgents(
   isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
@@ -223,8 +224,10 @@ const agents = createMacAgents(
       }
     : {},
 );
-// An agent added or removed in Preferences is in the next comment box's picker.
+// An agent added or removed by another window, or one that Preferences has updated, signed in or
+// found changed, is looked for again at the next comment box.
 if (isTauri) acpAgents.watch(() => agents.forget());
+watchAgentsChanged(() => agents.forget());
 /**
  * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
  * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.

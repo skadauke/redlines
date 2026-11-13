@@ -132,7 +132,11 @@ export async function detectAgent(processes: HostProcesses, spec: DetectSpec): P
       help: spec.signedOutHelp,
     };
   } catch (error) {
-    return { found: false, help: `${spec.name} couldn't be checked: ${reasonOf(error)}` };
+    return {
+      found: false,
+      help: `${spec.name} couldn't be checked: ${reasonOf(error)}`,
+      unchecked: true,
+    };
   }
 }
 

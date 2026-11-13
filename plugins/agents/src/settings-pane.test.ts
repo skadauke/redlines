@@ -7,6 +7,7 @@ import {
   type AgentsPaneSettings,
   type OtherAgent,
   type SetupResult,
+  type SetupUnderWay,
 } from './settings-pane.ts';
 
 afterEach(() => document.body.replaceChildren());
@@ -34,6 +35,9 @@ function setup(
   const signer = vi.fn<(id: string) => Promise<SetupResult>>(() => Promise.resolve(done));
   const terminal = vi.fn<(id: string) => Promise<void>>(() => Promise.resolve());
   const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+  const stopper = vi.fn<(id: string) => Promise<void>>(() => Promise.resolve());
+  /** What the host says is under way, by agent. */
+  const under: Record<string, SetupUnderWay | undefined> = {};
   const deps: AgentsPaneDeps = {
     agents: ['claude', 'codex'].map((id) => ({
       id,
@@ -42,6 +46,8 @@ function setup(
       update: () => updater(id),
       signIn: () => signer(id),
       signInInTerminal: () => terminal(id),
+      stop: () => stopper(id),
+      running: () => under[id],
     })),
     copy,
     settings: () => settings,
@@ -60,6 +66,8 @@ function setup(
     signer,
     terminal,
     copy,
+    stopper,
+    under,
     now: () => settings,
   };
 }
@@ -291,7 +299,8 @@ describe('the Agents pane', () => {
       expect(updater).toHaveBeenCalledWith('claude');
       expect(statusOf(container, 'Claude')).toBe('Updating…');
       for (const button of row(container, 'Claude').querySelectorAll('button')) {
-        expect(button.disabled).toBe(true);
+        // Everything waits but Cancel, which stops it.
+        expect(button.disabled).toBe(button.textContent !== 'Cancel');
       }
       // Asking twice at once would run the updater twice.
       buttonOf(container, 'Claude', 'Update').click();
@@ -466,6 +475,200 @@ describe('the Agents pane', () => {
       await settle();
       expect(detect.mock.calls.length).toBe(calls);
     });
+  });
+
+  describe('while something is under way', () => {
+    const tooOld: AgentState = {
+      found: true,
+      signedIn: false,
+      reason: 'too-old',
+      version: '2.1.201',
+      path: claude,
+    };
+    const signedOut: AgentState = {
+      found: true,
+      signedIn: false,
+      reason: 'signed-out',
+      version: '0.170.0',
+      path: '/opt/homebrew/bin/codex',
+    };
+
+    it('follows an update the host already runs when the pane is drawn again, and looks when it ends', async () => {
+      const { deps, container, under, updater, detect } = setup({
+        claude: tooOld,
+        codex: { found: true, signedIn: true },
+      });
+      let finish: (result: SetupResult) => void = () => {};
+      const first = renderAgentsPane(container, deps);
+      await settle();
+      updater.mockImplementationOnce(
+        () => new Promise<SetupResult>((resolve) => (finish = resolve)),
+      );
+      buttonOf(container, 'Claude', 'Update').click();
+      under['claude'] = {
+        doing: 'update',
+        ended: new Promise<SetupResult>((resolve) => (finish = resolve)),
+      };
+
+      // Another window changes a setting: the pane is tidied up and drawn again.
+      first();
+      container.replaceChildren();
+      renderAgentsPane(container, deps);
+      expect(statusOf(container, 'Claude')).toBe('Updating…');
+      // Not offered again, and not asked about while it runs.
+      expect(buttons(container, 'Claude')).toEqual(['Check Again', 'Cancel']);
+      for (const button of row(container, 'Claude').querySelectorAll('button')) {
+        expect(button.textContent === 'Cancel' ? false : button.disabled).toBe(
+          button.textContent !== 'Cancel',
+        );
+      }
+      const asked = detect.mock.calls.filter(([id]) => id === 'claude').length;
+      await settle();
+      expect(detect.mock.calls.filter(([id]) => id === 'claude').length).toBe(asked);
+
+      detect.mockImplementation((id) =>
+        Promise.resolve(
+          id === 'claude'
+            ? { found: true as const, signedIn: true as const, version: '2.1.400' }
+            : { found: true as const, signedIn: true as const },
+        ),
+      );
+      finish(done);
+      await settle();
+      expect(detect).toHaveBeenLastCalledWith('claude', true);
+      expect(statusOf(container, 'Claude')).toBe('Signed in');
+      expect(row(container, 'Claude').textContent).toContain('2.1.400');
+    });
+
+    it('offers Cancel while an update or a sign-in runs, and nothing is said of one that was stopped', async () => {
+      const { deps, container, updater, stopper, detect } = setup({
+        claude: tooOld,
+        codex: signedOut,
+      });
+      let finish: (result: SetupResult) => void = () => {};
+      updater.mockImplementationOnce(
+        () => new Promise<SetupResult>((resolve) => (finish = resolve)),
+      );
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(buttons(container, 'Claude')).not.toContain('Cancel');
+      buttonOf(container, 'Claude', 'Update').click();
+      expect(buttons(container, 'Claude')).toContain('Cancel');
+      // The others wait, and Cancel doesn't.
+      expect(buttonOf(container, 'Claude', 'Cancel').disabled).toBe(false);
+      buttonOf(container, 'Claude', 'Cancel').click();
+      expect(stopper).toHaveBeenCalledWith('claude');
+
+      finish({ ok: false, message: '', stopped: true });
+      await settle();
+      expect(row(container, 'Claude').textContent).not.toContain('didn’t finish');
+      expect(row(container, 'Claude').textContent).not.toContain('Stopped');
+      expect(buttons(container, 'Claude')).toEqual(['Update', 'Check Again']);
+      expect(detect).toHaveBeenLastCalledWith('claude', true);
+    });
+
+    it('offers no Cancel where the host cannot stop', async () => {
+      const { deps, container, updater } = setup({ claude: tooOld, codex: signedOut });
+      deps.agents = deps.agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        detect: (fresh) => agent.detect(fresh),
+        update: () => agent.update!(),
+      }));
+      updater.mockImplementationOnce(() => new Promise<SetupResult>(() => {}));
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonOf(container, 'Claude', 'Update').click();
+      expect(buttons(container, 'Claude')).not.toContain('Cancel');
+    });
+
+    it('says what an update said when it ended well and left the program as old as it was', async () => {
+      const { deps, container, updater } = setup({
+        claude: tooOld,
+        codex: { found: true, signedIn: true },
+      });
+      updater.mockResolvedValueOnce({ ok: true, message: 'Already up to date.' });
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonOf(container, 'Claude', 'Update').click();
+      await settle();
+      expect(row(container, 'Claude').textContent).toContain(
+        'The update ran, but Claude 2.1.201 is still too old. It said: Already up to date.',
+      );
+      // With nothing said, nothing is quoted.
+      updater.mockResolvedValueOnce({ ok: true, message: '' });
+      buttonOf(container, 'Claude', 'Update').click();
+      await settle();
+      expect(row(container, 'Claude').textContent).toContain(
+        'The update ran, but Claude 2.1.201 is still too old.',
+      );
+      expect(row(container, 'Claude').textContent).not.toContain('It said');
+    });
+
+    it('puts away what failed before once a look finds the agent ready', async () => {
+      const { deps, container, updater, detect } = setup({
+        claude: tooOld,
+        codex: { found: true, signedIn: true },
+      });
+      updater.mockResolvedValueOnce({ ok: false, message: 'EACCES' });
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonOf(container, 'Claude', 'Update').click();
+      await settle();
+      expect(row(container, 'Claude').textContent).toContain('EACCES');
+      detect.mockImplementation(() => Promise.resolve({ found: true, signedIn: true }));
+      buttonOf(container, 'Claude', 'Check Again').click();
+      await settle();
+      expect(row(container, 'Claude').textContent).not.toContain('EACCES');
+    });
+
+    it('does not look when the window comes back while a sign-in runs, and stops looking after one look that finds it signed out', async () => {
+      const { deps, container, signer, terminal, detect } = setup({
+        claude: { found: true, signedIn: true },
+        codex: signedOut,
+      });
+      signer.mockResolvedValueOnce({ ok: false, message: 'no tty', needsTerminal: true });
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonOf(container, 'Codex', 'Sign In').click();
+      await settle();
+      expect(terminal).toHaveBeenCalledOnce();
+
+      // A second sign-in, whose browser hands the focus back while it runs.
+      let finish: (result: SetupResult) => void = () => {};
+      signer.mockImplementationOnce(
+        () => new Promise<SetupResult>((resolve) => (finish = resolve)),
+      );
+      buttonOf(container, 'Codex', 'Sign In').click();
+      const calls = detect.mock.calls.length;
+      window.dispatchEvent(new Event('focus'));
+      await settle();
+      expect(detect.mock.calls.length).toBe(calls);
+      expect(statusOf(container, 'Codex')).toBe('Signing in…');
+      finish({ ok: false, message: 'cancelled' });
+      await settle();
+
+      // Back from Terminal: one look, and still signed out, so no more until Check Again.
+      const before = detect.mock.calls.length;
+      window.dispatchEvent(new Event('focus'));
+      await settle();
+      const looked = detect.mock.calls.length - before;
+      window.dispatchEvent(new Event('focus'));
+      await settle();
+      expect(detect.mock.calls.length - before).toBe(looked);
+    });
+  });
+
+  it('says it could not check what could not be checked, which is not the same as not installed', async () => {
+    const { deps, container } = setup({
+      claude: { found: false, help: "Claude Code couldn't be checked: boom", unchecked: true },
+      codex: { found: false, help: "Codex isn't installed on this Mac." },
+    });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(statusOf(container, 'Claude')).toBe('Couldn’t check');
+    expect(row(container, 'Claude').textContent).toContain("couldn't be checked: boom");
+    expect(statusOf(container, 'Codex')).toBe('Not installed');
   });
 
   it('shows one failed check as a line and carries on with the others', async () => {

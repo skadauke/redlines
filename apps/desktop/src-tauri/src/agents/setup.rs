@@ -11,7 +11,7 @@
 //! what it shows of a command's output is its last line, with anything that looks like a secret
 //! left out.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -19,6 +19,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,12 +31,16 @@ use super::process::{STOP_GRACE, command_for, group_is_alive, group_of, signal_g
 use super::which::Programs;
 
 /// How a program was installed, as its path says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Install {
     /// Homebrew's: a cask (`brew upgrade --cask <name>`) or a formula (`brew upgrade <name>`).
     Homebrew { name: &'static str, cask: bool },
-    /// A global npm install of the agent's package.
-    Npm { package: &'static str },
+    /// A global npm install of the agent's package, in the global folder `prefix` names: the one
+    /// npm updates is the prefix of the `node` that runs it, which may not be the copy's.
+    Npm {
+        package: &'static str,
+        prefix: String,
+    },
     /// Anything else, which the agent's own `update` knows how to update.
     Own,
 }
@@ -62,7 +67,7 @@ impl Agent {
 
 /// Folders that hold a global package of another package manager than npm, where `npm install -g`
 /// would put a second copy elsewhere instead of updating this one.
-const OTHER_MANAGERS: [&str; 5] = [".pnpm", "pnpm", ".bun", ".yarn", ".volta"];
+const OTHER_MANAGERS: [&str; 7] = [".pnpm", "pnpm", ".bun", ".yarn", "yarn", ".volta", ".nvs"];
 
 /// How a program was installed, from the path it really is (every link followed).
 pub fn classify(agent: Agent, real: &Path) -> Install {
@@ -87,13 +92,23 @@ pub fn classify(agent: Agent, real: &Path) -> Install {
             return Install::Homebrew { name, cask };
         }
     }
+    // A global install of npm's own: `<prefix>/lib/node_modules/<scope>/<name>`. A package in a
+    // project's `node_modules` is no global install, and the folder before `lib` is the prefix.
     let package = agent.npm_package();
     let (scope, name) = package.split_once('/').unwrap_or_default();
-    let in_package = parts
-        .windows(3)
-        .any(|window| window == ["node_modules", scope, name]);
-    if in_package && !parts.iter().any(|part| OTHER_MANAGERS.contains(part)) {
-        return Install::Npm { package };
+    let at = parts
+        .windows(4)
+        .position(|window| window == ["lib", "node_modules", scope, name]);
+    if let Some(at) = at
+        && !parts.iter().any(|part| OTHER_MANAGERS.contains(part))
+    {
+        let prefix = real.components().take(at).collect::<PathBuf>();
+        if let Some(prefix) = prefix.to_str().filter(|prefix| !prefix.is_empty()) {
+            return Install::Npm {
+                package,
+                prefix: prefix.to_owned(),
+            };
+        }
     }
     Install::Own
 }
@@ -136,10 +151,10 @@ pub struct Tools<'a> {
 pub fn update_line(
     agent: Agent,
     program: &str,
-    install: Install,
+    install: &Install,
     tools: &Tools,
 ) -> Result<Line, String> {
-    match install {
+    match *install {
         Install::Own => Ok(Line::new(program, &["update"])),
         Install::Homebrew { name, cask } => {
             let by_hand = if cask {
@@ -159,7 +174,10 @@ pub fn update_line(
                 Line::new(brew, &["upgrade", name])
             })
         }
-        Install::Npm { package } => {
+        Install::Npm {
+            package,
+            ref prefix,
+        } => {
             let npm = tools.npm.ok_or_else(|| {
                 format!(
                     "Redlines can't find npm, which installed {}. Update it in Terminal: npm install -g {package}@latest",
@@ -167,7 +185,10 @@ pub fn update_line(
                 )
             })?;
             let latest = format!("{package}@latest");
-            Ok(Line::new(npm, &["install", "-g", &latest]))
+            Ok(Line::new(
+                npm,
+                &["install", "-g", "--prefix", prefix, &latest],
+            ))
         }
     }
 }
@@ -201,7 +222,7 @@ pub fn update_line_for(programs: &Programs, agent: Agent, program: &str) -> Resu
     update_line(
         agent,
         program,
-        install,
+        &install,
         &Tools {
             brew: brew.as_deref(),
             npm: npm.as_deref(),
@@ -220,6 +241,8 @@ pub struct Outcome {
     pub last_line: String,
     /// It was still going when its time was up, and was stopped.
     pub timed_out: bool,
+    /// The person asked for it to stop, or the window that asked for it closed.
+    pub stopped: bool,
     /// It failed at once, as a login that wants a terminal does.
     pub quick: bool,
 }
@@ -240,6 +263,9 @@ const TIMING: Timing = Timing {
     quick: QUICK,
 };
 
+/// How long what a command left behind gets to close its pipes once the command has ended.
+const LEFTOVER_GRACE: Duration = Duration::from_millis(500);
+
 /// How much of what a command prints is kept, from the end.
 const KEPT: usize = 16 * 1024;
 
@@ -248,6 +274,8 @@ const KEPT: usize = 16 * 1024;
 pub struct Setups {
     /// The process group of each agent's command.
     running: Mutex<HashMap<Agent, i32>>,
+    /// The agents whose command was asked to stop, until it has ended.
+    stopping: Mutex<HashSet<Agent>>,
     closing: AtomicBool,
 }
 
@@ -296,15 +324,32 @@ impl Setups {
             child
         };
         let group = group_of(&child);
+        self.stopping().remove(&agent);
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            signal_group(group, libc::SIGKILL);
+        }
 
+        // The readers each hold a sender, which drops as the reader ends: when both have, this
+        // hears so, and no sooner than the pipes close.
         let printed: Arc<Mutex<Vec<u8>>> = Arc::default();
-        let readers: Vec<_> = [
-            child.stdout.take().map(|pipe| keep_reading(pipe, &printed)),
-            child.stderr.take().map(|pipe| keep_reading(pipe, &printed)),
+        let (reader_ended, readers) = mpsc::channel::<()>();
+        for pipe in [
+            child
+                .stdout
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
         ]
         .into_iter()
         .flatten()
-        .collect();
+        {
+            keep_reading(pipe, &printed, reader_ended.clone());
+        }
+        drop(reader_ended);
 
         let deadline = started + timeout;
         let mut timed_out = false;
@@ -332,13 +377,16 @@ impl Setups {
                 signal_group(group, libc::SIGKILL);
             }
         }
-        for reader in readers {
-            let _ = reader.join();
-        }
+        // The agent is free to be set up again the moment its command has ended, whatever still
+        // holds its pipes.
         self.running().remove(&agent);
+        let stopped = self.stopping().remove(&agent);
+        // Something that has left the group can hold the pipes open forever, and what was printed
+        // by then still counts: this is as long as that can hold the end back.
+        let _ = readers.recv_timeout(LEFTOVER_GRACE);
 
         let code = status.and_then(|status| status.code());
-        let ok = !timed_out && code == Some(0);
+        let ok = !timed_out && !stopped && code == Some(0);
         let last_line = last_line_of(&printed.lock().unwrap_or_else(PoisonError::into_inner));
         Ok(Outcome {
             ran: line.shown(),
@@ -346,8 +394,33 @@ impl Setups {
             code,
             last_line,
             timed_out,
-            quick: !ok && !timed_out && started.elapsed() < quick,
+            stopped,
+            quick: !ok && !timed_out && !stopped && started.elapsed() < quick,
         })
+    }
+
+    fn stopping(&self) -> MutexGuard<'_, HashSet<Agent>> {
+        self.stopping.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Asks the agent's update or sign-in to stop, and returns at once: SIGINT, then SIGTERM, then
+    /// SIGKILL, a grace apart, as the app quitting does. What ends is reported as stopped.
+    pub fn stop(&self, agent: Agent) {
+        let Some(group) = self.running().get(&agent).copied() else {
+            return;
+        };
+        if self.stopping().insert(agent) {
+            thread::spawn(move || stop_group(group, STOP_GRACE));
+        }
+    }
+
+    /// Stops whatever is running, for when the window that asked for it closes: it has nowhere to
+    /// report to. Unlike `stop_all`, it leaves the app free to run the next.
+    pub fn stop_running(&self) {
+        let agents: Vec<Agent> = self.running().keys().copied().collect();
+        for agent in agents {
+            self.stop(agent);
+        }
     }
 
     /// Stops what is running, and runs nothing more, for when the app quits. Waits for it to end,
@@ -379,17 +452,20 @@ fn stop_group(group: i32, grace: Duration) {
     }
 }
 
-/// Reads a pipe to its end into `printed`, keeping the last `KEPT` bytes of everything read.
+/// Reads a pipe to its end into `printed`, keeping the last `KEPT` bytes of everything read, on a
+/// thread of its own. `ended` drops with the thread, so that whoever waits can tell.
 fn keep_reading(
     mut pipe: impl Read + Send + 'static,
     printed: &Arc<Mutex<Vec<u8>>>,
-) -> thread::JoinHandle<()> {
+    ended: mpsc::Sender<()>,
+) {
     let printed = Arc::clone(printed);
     thread::spawn(move || {
+        let _ended = ended;
         let mut piece = [0; 4096];
         loop {
             match pipe.read(&mut piece) {
-                Ok(0) | Err(_) => return,
+                Ok(0) => return,
                 Ok(count) => {
                     let mut kept = printed.lock().unwrap_or_else(PoisonError::into_inner);
                     kept.extend_from_slice(&piece[..count]);
@@ -398,9 +474,13 @@ fn keep_reading(
                         kept.drain(..excess);
                     }
                 }
+                // A signal that came while it read: read on, or a chatty command would fill the
+                // pipe and wait for a reader that has gone.
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => return,
             }
         }
-    })
+    });
 }
 
 /// The text of a command's output with its terminal escapes taken out: color, cursor movement and
@@ -440,36 +520,155 @@ fn strip_escapes(text: &str) -> String {
     plain
 }
 
-/// Whether a word of output could be a credential: a long run of what tokens are made of, or one
-/// that starts as the common kinds do.
-fn looks_secret(word: &str) -> bool {
-    let tokenish = |c: char| c.is_ascii_alphanumeric() || "_-+=.".contains(c);
-    let starts = ["sk-", "sk_", "eyJ", "ghp_", "gho_", "xox"];
-    (word.len() >= 32 && word.chars().all(tokenish))
-        || (word.len() >= 12 && starts.iter().any(|start| word.starts_with(start)))
+/// How a credential may begin: the common kinds.
+const SECRET_STARTS: [&str; 9] = [
+    "sk-",
+    "sk_",
+    "eyJ",
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "github_pat_",
+    "xox",
+    "AKIA",
+];
+
+/// Whether a run of what tokens are made of could be a credential: at least 32 characters, mixing
+/// upper case, lower case and digits (a base64 or base62 token), or all hex (a key, a hash).
+/// `slash` lets a `/` be part of the token, as base64 has it; a path's pieces are told apart by
+/// their own names instead.
+fn secret_run(run: &str, slash: bool) -> bool {
+    let tokenish =
+        |c: char| c.is_ascii_alphanumeric() || "_-+=.".contains(c) || (slash && c == '/');
+    if run.len() < 32 || !run.chars().all(tokenish) {
+        return false;
+    }
+    let has = |test: fn(&char) -> bool| run.chars().any(|c| test(&c));
+    let mixed =
+        has(char::is_ascii_uppercase) && has(char::is_ascii_lowercase) && has(char::is_ascii_digit);
+    let hex = run.chars().all(|c| c.is_ascii_hexdigit());
+    mixed || hex
 }
 
-/// A word of output with what could be a secret in it left out: a link's query and fragment, the
-/// value of `token=`, `key=`, `secret=`, `password=`, `code=` and the like, and a credential's look.
-fn plain_word(word: &str) -> String {
-    let word = match word.find("://") {
-        Some(_) => word.split(['?', '#']).next().unwrap_or(word),
-        None => word,
+/// Whether a piece of output could be a credential: one that starts as the common kinds do, or a
+/// long run of what tokens are made of. A piece that starts with a `/` is a path, whose parts are
+/// looked at one by one (`mask_path`).
+fn looks_secret(piece: &str) -> bool {
+    (piece.len() >= 12 && SECRET_STARTS.iter().any(|start| piece.starts_with(start)))
+        || (!piece.starts_with('/') && secret_run(piece, true))
+}
+
+/// A path with each part that could be a credential left out, so that a long path stays one.
+fn mask_path(path: &str) -> String {
+    path.split('/')
+        .map(|part| {
+            let starts =
+                part.len() >= 12 && SECRET_STARTS.iter().any(|start| part.starts_with(start));
+            if starts || secret_run(part, false) {
+                "…"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// A name that says what follows it is a secret: `token`, `OPENAI_API_KEY`, `password`.
+fn names_a_secret(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "credential",
+        "apikey",
+    ]
+    .iter()
+    .any(|secret| name.contains(secret))
+        || name.ends_with("key")
+}
+
+/// Words after which comes a credential: `Bearer abc`, `Basic abc`.
+const SCHEMES: [&str; 3] = ["bearer", "basic", "token"];
+
+/// What stands between the parts of a word: the punctuation of JSON, queries and assignments.
+fn separates(c: char) -> bool {
+    matches!(
+        c,
+        '"' | '\''
+            | '`'
+            | ','
+            | ';'
+            | ':'
+            | '='
+            | '{'
+            | '}'
+            | '['
+            | ']'
+            | '('
+            | ')'
+            | '<'
+            | '>'
+            | '&'
+    )
+}
+
+/// A link with what could be a secret in it left out: the user and password before an `@`, the
+/// query and the fragment. What isn't a link is returned as it is.
+fn without_link_secrets(word: &str) -> String {
+    let Some(at) = word.find("://") else {
+        return word.to_owned();
     };
-    if let Some((name, _)) = word.split_once('=') {
-        let name = name.to_ascii_lowercase();
-        let secret = [
-            "token", "key", "secret", "password", "pass", "code", "state", "auth",
-        ];
-        if secret.iter().any(|secret| name.contains(secret)) {
-            return format!("{}=…", &word[..name.len()]);
+    let (scheme, rest) = word.split_at(at + 3);
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let (authority, path) = rest
+        .split_once('/')
+        .map_or((rest, None), |(authority, path)| (authority, Some(path)));
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    match path {
+        Some(path) => format!("{scheme}{host}/{path}"),
+        None => format!("{scheme}{host}"),
+    }
+}
+
+/// A word of output with what could be a secret in it left out: a link's user, password, query and
+/// fragment; the value after a name that says it is a secret (`token=`, `"access_token":`,
+/// `OPENAI_API_KEY=`); and any part that looks like a credential. `after_name` carries from one
+/// word to the next whether the last part was such a name.
+fn plain_word(word: &str, after_name: &mut bool) -> String {
+    let word = without_link_secrets(word);
+    let mut plain = String::with_capacity(word.len());
+    let mut part = String::new();
+    let flush = |part: &mut String, plain: &mut String, after_name: &mut bool| {
+        if part.is_empty() {
+            return;
+        }
+        if *after_name || looks_secret(part) {
+            plain.push('…');
+            *after_name = false;
+        } else if part.starts_with('/') {
+            *after_name = false;
+            plain.push_str(&mask_path(part));
+        } else {
+            *after_name = names_a_secret(part);
+            plain.push_str(part);
+        }
+        part.clear();
+    };
+    for c in word.chars() {
+        if separates(c) {
+            flush(&mut part, &mut plain, after_name);
+            plain.push(c);
+        } else {
+            part.push(c);
         }
     }
-    if looks_secret(word) {
-        "…".to_owned()
-    } else {
-        word.to_owned()
-    }
+    flush(&mut part, &mut plain, after_name);
+    plain
 }
 
 /// How much of a last line is kept.
@@ -484,9 +683,17 @@ pub fn last_line_of(output: &[u8]) -> String {
     let line = plain
         .split(['\n', '\r'])
         .map(|line| {
+            let mut after_scheme = false;
+            let mut after_name = false;
             line.split_whitespace()
                 .map(|word| {
-                    plain_word(&word.chars().filter(|c| !c.is_control()).collect::<String>())
+                    let word: String = word.chars().filter(|c| !c.is_control()).collect();
+                    if std::mem::take(&mut after_scheme) {
+                        return "…".to_owned();
+                    }
+                    after_scheme =
+                        SCHEMES.contains(&word.trim_end_matches(':').to_lowercase().as_str());
+                    plain_word(&word, &mut after_name)
                 })
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -582,7 +789,7 @@ pub fn open_in_terminal(script: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     use super::*;
     use crate::agents::test_support::TempFolder;
@@ -666,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn a_program_in_a_global_npm_install_is_updated_by_npm() {
+    fn a_program_in_a_global_npm_install_is_updated_by_npm_in_the_prefix_it_is_in() {
         assert_eq!(
             classify(
                 Agent::Claude,
@@ -675,7 +882,8 @@ mod tests {
                 )
             ),
             Install::Npm {
-                package: "@anthropic-ai/claude-code"
+                package: "@anthropic-ai/claude-code",
+                prefix: "/Users/ada/.nvm/versions/node/v22.14.0".to_owned()
             }
         );
         assert_eq!(
@@ -684,7 +892,8 @@ mod tests {
                 &real("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js")
             ),
             Install::Npm {
-                package: "@openai/codex"
+                package: "@openai/codex",
+                prefix: "/opt/homebrew".to_owned()
             }
         );
         // Not the other agent's package.
@@ -695,6 +904,20 @@ mod tests {
             ),
             Install::Own
         );
+    }
+
+    #[test]
+    fn a_package_that_is_no_global_npm_install_is_left_to_the_agents_own_update() {
+        // A project's own copy, or one an `npx` cache holds, is no global install: `npm install -g`
+        // would put a second copy elsewhere.
+        for path in [
+            "/Users/ada/code/app/node_modules/@openai/codex/bin/codex.js",
+            "/Users/ada/.npm/_npx/4e0d/node_modules/@openai/codex/bin/codex.js",
+            "/Users/ada/.config/yarn/global/node_modules/@anthropic-ai/claude-code/cli.js",
+        ] {
+            assert_eq!(classify(Agent::Codex, &real(path)), Install::Own, "{path}");
+            assert_eq!(classify(Agent::Claude, &real(path)), Install::Own, "{path}");
+        }
     }
 
     #[test]
@@ -723,7 +946,7 @@ mod tests {
         let own = update_line(
             Agent::Claude,
             "/Users/ada/.local/bin/claude",
-            Install::Own,
+            &Install::Own,
             &tools(None, None),
         )
         .unwrap();
@@ -734,7 +957,7 @@ mod tests {
         let cask = update_line(
             Agent::Codex,
             "/opt/homebrew/bin/codex",
-            Install::Homebrew {
+            &Install::Homebrew {
                 name: "codex",
                 cask: true,
             },
@@ -748,7 +971,7 @@ mod tests {
         let formula = update_line(
             Agent::Codex,
             "/opt/homebrew/bin/codex",
-            Install::Homebrew {
+            &Install::Homebrew {
                 name: "codex",
                 cask: false,
             },
@@ -760,20 +983,24 @@ mod tests {
         let npm = update_line(
             Agent::Claude,
             "/Users/ada/.nvm/versions/node/v22/bin/claude",
-            Install::Npm {
+            &Install::Npm {
                 package: "@anthropic-ai/claude-code",
+                prefix: "/Users/ada/.nvm/versions/node/v22".to_owned(),
             },
             &tools(None, Some("/Users/ada/.nvm/versions/node/v22/bin/npm")),
         )
         .unwrap();
         assert_eq!(npm.program, "/Users/ada/.nvm/versions/node/v22/bin/npm");
+        // Into the prefix the copy is in, not the one the `node` that runs npm has.
         assert_eq!(
             npm.args,
-            strings(&["install", "-g", "@anthropic-ai/claude-code@latest"])
-        );
-        assert_eq!(
-            npm.shown(),
-            "npm install -g @anthropic-ai/claude-code@latest"
+            strings(&[
+                "install",
+                "-g",
+                "--prefix",
+                "/Users/ada/.nvm/versions/node/v22",
+                "@anthropic-ai/claude-code@latest"
+            ])
         );
     }
 
@@ -782,7 +1009,7 @@ mod tests {
         let brew = update_line(
             Agent::Codex,
             "/opt/homebrew/bin/codex",
-            Install::Homebrew {
+            &Install::Homebrew {
                 name: "codex",
                 cask: true,
             },
@@ -793,8 +1020,9 @@ mod tests {
         let npm = update_line(
             Agent::Codex,
             "/x/bin/codex",
-            Install::Npm {
+            &Install::Npm {
                 package: "@openai/codex",
+                prefix: "/x".to_owned(),
             },
             &tools(None, None),
         )
@@ -907,6 +1135,191 @@ mod tests {
     }
 
     #[test]
+    fn a_helper_that_left_the_group_and_holds_the_pipes_does_not_hold_the_end_back() {
+        // Something that calls `setsid` is out of reach of the group's signals, and holds the
+        // command's output until it ends; the command's own end can't wait for that.
+        if Command::new("perl").arg("-v").output().is_err() {
+            return;
+        }
+        let started = Instant::now();
+        let outcome = run(
+            &sh("perl -MPOSIX -e 'POSIX::setsid(); sleep 4' & sleep 0.2; echo started"),
+            A_WHILE,
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(outcome.ok);
+        assert_eq!(outcome.last_line, "started");
+    }
+
+    #[test]
+    fn an_agent_is_free_to_be_set_up_again_once_its_command_has_ended() {
+        // Even with a helper still holding the pipes.
+        if Command::new("perl").arg("-v").output().is_err() {
+            return;
+        }
+        let setups = Setups::default();
+        let line = sh("perl -MPOSIX -e 'POSIX::setsid(); sleep 3' & echo up");
+        let first = setups
+            .run_timed(Agent::Codex, &line, &environment(), A_WHILE, SHORT)
+            .unwrap();
+        assert!(first.ok);
+        let again = setups
+            .run_timed(
+                Agent::Codex,
+                &sh("echo again"),
+                &environment(),
+                A_WHILE,
+                SHORT,
+            )
+            .unwrap();
+        assert!(again.ok);
+    }
+
+    #[test]
+    fn a_command_asked_to_stop_ends_as_stopped_and_the_next_is_free_to_start() {
+        let setups = Arc::new(Setups::default());
+        let running = {
+            let setups = Arc::clone(&setups);
+            thread::spawn(move || {
+                setups.run_timed(
+                    Agent::Codex,
+                    &sh("echo waiting; exec sleep 30"),
+                    &environment(),
+                    A_WHILE,
+                    SHORT,
+                )
+            })
+        };
+        while setups.running().is_empty() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        setups.stop(Agent::Codex);
+        let outcome = running.join().unwrap().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(outcome.stopped);
+        assert!(!outcome.ok);
+        assert!(!outcome.timed_out);
+        // Stopped by the person isn't a failure at once, which would open Terminal.
+        assert!(!outcome.quick);
+        // Asking again for what isn't running does nothing, and the app isn't closed by it.
+        setups.stop(Agent::Codex);
+        setups.stop_running();
+        let next = setups
+            .run_timed(Agent::Codex, &sh("echo hi"), &environment(), A_WHILE, SHORT)
+            .unwrap();
+        assert!(next.ok);
+        assert!(!next.stopped);
+    }
+
+    #[test]
+    fn stopping_what_runs_stops_each_agent_and_nothing_more() {
+        let setups = Arc::new(Setups::default());
+        let both: Vec<_> = [Agent::Claude, Agent::Codex]
+            .into_iter()
+            .map(|agent| {
+                let setups = Arc::clone(&setups);
+                thread::spawn(move || {
+                    setups.run_timed(agent, &sh("exec sleep 30"), &environment(), A_WHILE, SHORT)
+                })
+            })
+            .collect();
+        while setups.running().len() < 2 {
+            thread::sleep(Duration::from_millis(5));
+        }
+        setups.stop_running();
+        for run in both {
+            assert!(run.join().unwrap().unwrap().stopped);
+        }
+    }
+
+    #[test]
+    fn the_program_found_through_a_link_is_updated_the_way_its_real_path_says() {
+        let make = |path: &Path| {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "#!/bin/sh\n").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let programs = |known: PathBuf| {
+            Programs::new(
+                vec![known],
+                PathBuf::from("/bin/sh"),
+                environment(),
+                PathBuf::from("/x/redlines"),
+            )
+        };
+
+        // A Homebrew cask: /bin/codex is a link into the Caskroom, as on a Mac.
+        let temp = TempFolder::new("setup-brew-link");
+        let root = fs::canonicalize(temp.path()).unwrap();
+        make(&root.join("Caskroom/codex/0.166.0/bin/codex"));
+        make(&root.join("bin/brew"));
+        symlink(
+            "../Caskroom/codex/0.166.0/bin/codex",
+            root.join("bin/codex"),
+        )
+        .unwrap();
+        let line = update_line_for(
+            &programs(root.join("bin")),
+            Agent::Codex,
+            root.join("bin/codex").to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(line.program, root.join("bin/brew").to_str().unwrap());
+        assert_eq!(line.args, strings(&["upgrade", "--cask", "codex"]));
+
+        // A global npm install: /bin/codex is a link into lib/node_modules, with npm beside it.
+        let temp = TempFolder::new("setup-npm-link");
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let node = root.join("node/v22");
+        make(&node.join("lib/node_modules/@openai/codex/bin/codex.js"));
+        make(&node.join("bin/npm"));
+        symlink(
+            "../lib/node_modules/@openai/codex/bin/codex.js",
+            node.join("bin/codex"),
+        )
+        .unwrap();
+        let line = update_line_for(
+            &programs(root.join("elsewhere")),
+            Agent::Codex,
+            node.join("bin/codex").to_str().unwrap(),
+        )
+        .unwrap();
+        // The npm beside the program, and the prefix of the copy it updates.
+        assert_eq!(line.program, node.join("bin/npm").to_str().unwrap());
+        assert_eq!(
+            line.args,
+            strings(&[
+                "install",
+                "-g",
+                "--prefix",
+                node.to_str().unwrap(),
+                "@openai/codex@latest"
+            ])
+        );
+
+        // Any other: the agent's own update, on the program as found.
+        let temp = TempFolder::new("setup-own");
+        let root = fs::canonicalize(temp.path()).unwrap();
+        make(&root.join("share/claude/versions/2.1.318"));
+        fs::create_dir_all(root.join("bin")).unwrap();
+        let found = root.join("bin/claude");
+        symlink("../share/claude/versions/2.1.318", &found).unwrap();
+        let line = update_line_for(
+            &programs(root.join("bin")),
+            Agent::Claude,
+            found.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(line.program, found.to_str().unwrap());
+        assert_eq!(line.args, strings(&["update"]));
+    }
+
+    #[test]
     fn a_program_that_cannot_start_says_so() {
         let line = Line::new("/nonexistent/claude", &["update"]);
         let refused = Setups::default()
@@ -1010,7 +1423,7 @@ mod tests {
     #[test]
     fn a_line_never_shows_what_could_be_a_secret() {
         let line = |text: &str| last_line_of(text.as_bytes());
-        // A link keeps its place, not its query or its fragment.
+        // A link keeps its place, not its query, its fragment, its user or its password.
         assert_eq!(
             line(
                 "Visit https://claude.ai/oauth/authorize?client_id=x&state=abc123&code_challenge=zzz to sign in"
@@ -1021,25 +1434,68 @@ mod tests {
             line("see https://example.com/a#frag"),
             "see https://example.com/a"
         );
-        // A value that is named as a secret is, whatever it looks like.
+        assert_eq!(
+            line("git clone https://ada:hunter2@example.com/a/b.git"),
+            "git clone https://example.com/a/b.git"
+        );
+        assert_eq!(
+            line("fetch https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/a/b"),
+            "fetch https://github.com/a/b"
+        );
+        // A value that is named as a secret is, whatever it looks like or how it is written.
         assert_eq!(line("export OPENAI_API_KEY=abc"), "export OPENAI_API_KEY=…");
         assert_eq!(line("token=short"), "token=…");
-        assert_eq!(line("Authorization=Bearer"), "Authorization=…");
-        // A word that looks like a credential.
+        assert_eq!(line("access_token:abc123"), "access_token:…");
+        assert_eq!(
+            line(r#"{"access_token":"abc","token_type":"bearer"}"#),
+            r#"{"access_token":"…","token_type":"…"}"#
+        );
+        assert_eq!(
+            line("Authorization: Bearer abc123def456"),
+            "Authorization: Bearer …"
+        );
+        assert_eq!(
+            line("Authorization: Basic YWRhOnB3"),
+            "Authorization: Basic …"
+        );
+        // A word that looks like a credential, in quotes or not.
         assert_eq!(
             line(&format!("failed with {}", "a1B2".repeat(10))),
             "failed with …"
         );
         assert_eq!(line("key sk-ant-api03-abcdef"), "key …");
+        assert_eq!(line(r#"key "sk-proj-abcdef123456""#), r#"key "…""#);
         assert_eq!(line("jwt eyJhbGciOiJIUzI1NiJ9"), "jwt …");
-        // But a path, a version and a package name are no secrets.
+        // Base64 holds a `/` and a `+`: most random tokens of it do.
+        assert_eq!(
+            line("secret aB3/dE5+fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA"),
+            "secret …"
+        );
+        assert_eq!(
+            line("got aB3/dE5+fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA ok"),
+            "got … ok"
+        );
+        // A token in a link's path is no less one.
+        assert_eq!(
+            line("GET https://example.com/dl/Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2Yz3/file"),
+            "GET https://example.com/dl/…/file"
+        );
+        // But a path, a version and a package name are no secrets, with capitals and digits.
         assert_eq!(
             line(
                 "EACCES: mkdir '/Users/ada/.nvm/versions/node/v22.14.0/lib/node_modules/@openai/codex'"
             ),
             "EACCES: mkdir '/Users/ada/.nvm/versions/node/v22.14.0/lib/node_modules/@openai/codex'"
         );
+        assert_eq!(
+            line(
+                "downloaded /Users/Ada/Library/Caches/Homebrew/downloads/0a1b2c--codex-0.169.0.zip"
+            ),
+            "downloaded /Users/Ada/Library/Caches/Homebrew/downloads/0a1b2c--codex-0.169.0.zip"
+        );
         assert_eq!(line("codex-cli 0.169.0"), "codex-cli 0.169.0");
+        assert_eq!(line("exit_code=1"), "exit_code=1");
+        assert_eq!(line("npm error code EACCES"), "npm error code EACCES");
     }
 
     #[test]

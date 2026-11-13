@@ -402,8 +402,10 @@ describe('detect', () => {
       path: '/opt/homebrew/bin/codex',
       account: 'signed-in',
     });
-    expect(await ask({ code: 1, stdout: '' })).toMatchObject({ account: 'signed-out' });
-    // An older Codex that doesn't know the question exits 2: no claim.
+    // Exit 1 is "Not logged in", and also a configuration this Codex can't read, which a newer
+    // Codex wrote: no claim of signed out for a Codex too old to be trusted with the question.
+    expect(await ask({ code: 1, stdout: '' })).not.toHaveProperty('account');
+    // An older Codex that doesn't know the question exits 2: no claim either.
     expect(await ask({ code: 2, stdout: '' })).not.toHaveProperty('account');
   });
 
