@@ -9,12 +9,16 @@ import { barsOnLine, hotBar, setHotBar } from './bar-layer.ts';
 import { chooseViewEffects, viewModeField } from './field.ts';
 
 /**
- * Handlers asked, in order, when a bar is clicked, with the position where its line starts; the
- * first to return true has handled the click and nothing switches. A plugin that knows a mode of
- * its own, such as the review bar's, adds one.
+ * Handlers asked, in order, when a bar is clicked, with the position where its line starts, the id
+ * of the change when the bar is a struck block's, and for a line of text the part of the line that
+ * the piece of the bar stands beside (a line that wraps has several); the first to return true has
+ * handled the click and nothing switches. A plugin that knows a mode of its own, such as the
+ * review bar's, adds one.
  */
 export const barClickHandlers =
-  Facet.define<(view: EditorView, pos: number, mark?: string) => boolean>();
+  Facet.define<
+    (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean
+  >();
 
 /**
  * The bar a pointer is over: its line (or a table row's first cell), and where the line starts. The
@@ -29,6 +33,8 @@ export interface LocatedBar {
    * it is. Absent for a table row's bar and for a struck block's, which are the element's own.
    */
   from?: number;
+  /** For a bar of a line of text, the part of the line that its piece stands beside. */
+  span?: { from: number; to: number };
   /** The id of the change a struck block is of, when the bar is its own (Part 3). */
   mark?: string;
   /** Where the bar is on the screen, in the viewport's coordinates. */
@@ -127,6 +133,7 @@ const pageGeometry: BarGeometry = {
         element,
         pos: from,
         from: piece.from,
+        span: { from: piece.from, to: piece.to },
         rect: { left: found.left, top: piece.top, bottom: piece.bottom },
       };
     }
@@ -308,7 +315,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         if (mode !== 'simple' && mode !== 'redlines') return;
         this.unhover();
         for (const handler of view.state.facet(barClickHandlers)) {
-          if (handler(view, target.pos, target.mark)) return;
+          if (handler(view, target.pos, target.mark, target.span)) return;
         }
         // The line under the pointer keeps its place: its distance from the top of the screen is
         // noted now and put back once the new view is measured. A line the new view doesn't draw

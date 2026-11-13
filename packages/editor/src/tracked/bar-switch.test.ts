@@ -297,6 +297,32 @@ describe('the click on a change bar', () => {
       expect(editor.view.state.field(hotBar)).toBeNull();
     });
 
+    it('tells the handlers which piece of the bar was clicked, so the one beside those screen lines', () => {
+      const asked: [number, string | undefined, { from: number; to: number } | undefined][] = [];
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: wrapped,
+        author: ada,
+        view: 'simple',
+        extensions: [
+          barMeasure.of(measure),
+          barClickHandlers.of((_view, pos, mark, span) => {
+            asked.push([pos, mark, span]);
+            return true;
+          }),
+        ],
+      });
+      open.push(editor);
+      Object.assign(editor.view.contentDOM, {
+        getBoundingClientRect: () => ({ left: LEFT, right: LEFT + 600, top: 0, bottom: 72 }),
+      });
+      Object.assign(editor.view, { posAtCoords: () => idx });
+      click(editor, { x: LEFT - 23, y: 30 });
+      // The start of the line, and the part of it that the bar's piece stands beside.
+      expect(asked).toEqual([[0, undefined, { from: breaks[0], to: breaks[1] }]]);
+    });
+
     it('works the same in Redlines, where the bar is just as short', () => {
       const editor = loadWrapped('redlines');
       expect(press(editor, 10)).toBe(false);
