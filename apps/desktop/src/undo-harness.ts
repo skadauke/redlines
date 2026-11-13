@@ -171,6 +171,10 @@ export async function openWindow(doc: string): Promise<Window> {
       return Promise.resolve('cancel');
     },
     askToDiscardDraft: () => Promise.resolve(false),
+    askToSaveForImage: () => Promise.resolve(false),
+    chooseImages: () => Promise.resolve(null),
+    addImages: () => Promise.resolve({ paths: [], refused: [] }),
+    listenForImageDrops: () => Promise.resolve(() => {}),
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null }),
     readClipboardText: () => Promise.resolve(''),

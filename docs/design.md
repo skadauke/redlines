@@ -204,8 +204,8 @@ The window, on the desktop:
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
   default app for Markdown, and installing the `redlines` command line), Appearance (Match
   System, Light or Dark, the theme, zoom and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, whether Track Changes starts on, and whether line breaks show their
-  marks, §5.5) and Agents (§8.6). Changes apply at once.
+  dashes, closing brackets, whether Track Changes starts on, whether line breaks show their marks,
+  §5.5, and where images are saved, §5.10) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -696,6 +696,30 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
+  in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
+  asks for files in the system's panel) all do the same. The file is copied into the folder for
+  images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
+  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. The
+  image shows at once: the preview draws an image only while the caret is off its link, so the
+  caret steps past it. Several images go in as links a space apart. A dropped file keeps its name,
+  and a pasted image gets one made of the time (`image-2026-11-12-153012.png`). A name that is taken
+  gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the folder already is
+  linked, not copied. With Track Changes on, the link is the person's own tracked insertion, and
+  Undo, named Insert Image, takes it back in one step. Rejecting the insertion or undoing it takes
+  back the link only: the file stays beside the document, where it can be seen and deleted by hand,
+  because Redlines never deletes a file it might not be the only one to want. A document with no
+  file yet asks to be saved first, since there is no folder to save beside.
+- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
+  `images` (the name can be changed), a folder named for the document (`plan.assets` for
+  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
+  preview loads images from, and the setting can't name another place on the disk. A document in
+  the home folder, whose project is too broad to load images from but for its own folder, takes
+  images in that folder alone, and says so for the other two. Only image files go in, by their
+  names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
+  or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
+  pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
+  browser, is left to the HTML.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean, Simple and Redlines copy the newest text, and Raw
@@ -995,10 +1019,16 @@ without each: a half-written comment is gone with the page, and nothing is saved
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
 nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
-images, as any document the person opens is; a folder or any other file dropped opens nothing, and
-lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
-scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
-and builds Tauri without that protocol.
+images, as any document the person opens is. Image files dropped alone, every file of the drop an
+image, are the window's to add to its document (§5.10), and are the one exception: the app, which
+has them from the system's drop, keeps them for that window and tells it only how many there are
+and where they landed. It copies them into the folder for the document's images when the window
+asks, so the window never names a file to copy and reads none of them, and a pasted image's bytes,
+which the window has, are written the same way. What is copied is an image by its name and its
+first bytes, inside the folder of the window's own document, and never replaces a file. A folder or
+any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
+adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
+holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
 ### 6.6 Styling
 

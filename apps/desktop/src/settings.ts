@@ -17,6 +17,31 @@ export type AgentScope = 'folder' | 'document';
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;
 
+/**
+ * Where the images added to a document are saved (#308): in a folder beside it, named by
+ * `imageFolderName`; in a folder named for the document, `<name>.assets`; or in the document's own
+ * folder. All of them are inside the folder of the document, where the preview loads images from.
+ */
+export type ImagePlace = 'folder' | 'assets' | 'same';
+
+/** The most characters the name of the folder for images may have. */
+const MAX_FOLDER_NAME = 100;
+
+/**
+ * The name of a folder for images as typed, without the spaces around it, or null when a folder
+ * beside the document can't have it: one name, with no slash and not a hidden one, which the
+ * preview wouldn't load images from (src-tauri/src/image_files.rs says the same).
+ */
+export function imageFolderNameOf(typed: string): string | null {
+  const name = typed.trim();
+  const plain =
+    name !== '' &&
+    name.length <= MAX_FOLDER_NAME &&
+    !name.startsWith('.') &&
+    ![...name].some((char) => char === '/' || char === '\\' || char < ' ' || char === '\u007f');
+  return plain ? name : null;
+}
+
 export interface Settings {
   /** The theme of every window, in light and dark alike. */
   theme: ThemeName;
@@ -77,6 +102,10 @@ export interface Settings {
    * a saved document starts in that document's own folder, whatever this says.
    */
   newDocumentFolder: string | null;
+  /** Where the images dropped or pasted into a document are saved (#308). */
+  imagePlace: ImagePlace;
+  /** The name of the folder beside the document, for `imagePlace: 'folder'`. */
+  imageFolderName: string;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -104,6 +133,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   consent: {},
   people: [],
   newDocumentFolder: null,
+  imagePlace: 'folder',
+  imageFolderName: 'images',
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -153,6 +184,13 @@ export function loadSettings(): Settings {
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
         ? value['newDocumentFolder']
         : null,
+    imagePlace: isImagePlace(value['imagePlace'])
+      ? value['imagePlace']
+      : DEFAULT_SETTINGS.imagePlace,
+    imageFolderName:
+      (typeof value['imageFolderName'] === 'string' &&
+        imageFolderNameOf(value['imageFolderName'])) ||
+      DEFAULT_SETTINGS.imageFolderName,
   };
 }
 
@@ -319,6 +357,10 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isImagePlace(value: unknown): value is ImagePlace {
+  return value === 'folder' || value === 'assets' || value === 'same';
 }
 
 function isAppearanceChoice(value: unknown): value is AppearanceChoice {

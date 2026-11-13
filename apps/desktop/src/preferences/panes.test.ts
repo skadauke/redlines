@@ -110,6 +110,7 @@ describe('the panes', () => {
       'Close brackets and Markdown pairs',
       'Track Changes on for new documents',
       'Show line break marks (¶)',
+      'Images',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
   });
@@ -607,6 +608,126 @@ describe('the panes', () => {
       installing.resolve({ outcome: 'cancelled' });
       await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
       expect(document.activeElement).toBe(name);
+    });
+  });
+
+  describe('the Images row', () => {
+    /** The row's parts: the place's menu, the folder's name, and the line that says where images go. */
+    const imagesRow = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const place = row?.querySelector<HTMLSelectElement>('select');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      if (!row || !place || !status) throw new Error('no Images row');
+      return {
+        place,
+        /** The field for the folder's name, which is there only for a folder beside the document. */
+        name: () => row.querySelector<HTMLInputElement>('input[type="text"]'),
+        said: () => status.textContent,
+        failed: () => status.classList.contains('rl-pref-failure'),
+        choose: (value: string) => {
+          place.value = value;
+          place.dispatchEvent(new Event('change'));
+        },
+        type: (field: HTMLInputElement, text: string) => {
+          field.value = text;
+          field.dispatchEvent(new Event('input'));
+        },
+      };
+    };
+
+    it('offers a folder beside the document, one named for it, and the document’s own, in a folder named images', () => {
+      const row = imagesRow(draw('editor').container);
+      expect([...row.place.options].map((option) => [option.value, option.textContent])).toEqual([
+        ['folder', 'In a folder beside the document'],
+        ['assets', 'In a folder named for the document'],
+        ['same', 'In the document’s folder'],
+      ]);
+      expect(row.place.value).toBe('folder');
+      expect(row.name()?.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('starts at the stored settings, with the folder’s name only where it is used', () => {
+      const { container } = setup();
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        imagePlace: 'assets' as const,
+        imageFolderName: 'pictures',
+      };
+      renderPane('editor', container, { ...setup().deps, settings: () => settings });
+      const row = imagesRow(container);
+      expect(row.place.value).toBe('assets');
+      expect(row.name()).toBeNull();
+      expect(row.said()).toBe('Saved in a folder like “plan.assets” next to the document.');
+    });
+
+    it('saves a place at once, and shows the folder’s name only for a folder beside the document', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      row.choose('same');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'same' });
+      expect(now().imagePlace).toBe('same');
+      expect(row.name()).toBeNull();
+      expect(row.said()).toBe('Saved next to the document.');
+      row.choose('assets');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'assets' });
+      expect(row.name()).toBeNull();
+      row.choose('folder');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'folder' });
+      expect(row.name()?.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+    });
+
+    it('saves the folder’s name as it is typed, without the spaces around it', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      row.type(field, ' Bilder 2026 ');
+      expect(update).toHaveBeenLastCalledWith({ imageFolderName: 'Bilder 2026' });
+      expect(now().imageFolderName).toBe('Bilder 2026');
+      expect(row.said()).toBe('Saved in “Bilder 2026” next to the document.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('saves no name that a folder beside the document can’t have, and says why', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      for (const typed of ['', '  ', '.images', 'a/b', '../images', 'a\\b']) {
+        update.mockClear();
+        row.type(field, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe('A folder’s name has no slash and doesn’t start with a dot.');
+        expect(row.failed()).toBe(true);
+      }
+      expect(now().imageFolderName).toBe('images');
+    });
+
+    it('goes back to the saved name when the field is left with one that isn’t a name', () => {
+      const { container } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      row.type(field, 'a/b');
+      // While it is being typed it is left as it is.
+      expect(field.value).toBe('a/b');
+      field.dispatchEvent(new Event('blur'));
+      expect(field.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.failed()).toBe(false);
+      // A name that was fine is shown as it was saved, trimmed.
+      row.type(field, ' pics ');
+      field.dispatchEvent(new Event('blur'));
+      expect(field.value).toBe('pics');
+    });
+
+    it('is a group named for the row', () => {
+      const { container } = draw('editor');
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const group = row?.querySelector<HTMLElement>('[role="group"]');
+      const label = row?.querySelector<HTMLElement>('.rl-pref-label');
+      expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
+      expect(group?.querySelector('select')).not.toBeNull();
     });
   });
 

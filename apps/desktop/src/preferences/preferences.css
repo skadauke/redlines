@@ -247,6 +247,22 @@ select:focus-visible {
   flex: none;
 }
 
+/* A control of several parts, one under another: a menu, a field that belongs to it, a line. */
+.rl-pref-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.rl-pref-stack .rl-pref-note {
+  margin-top: 0;
+}
+
+.rl-pref-stack .rl-pref-text {
+  width: 190px;
+}
+
 .rl-pref-button:enabled:hover {
   background: var(--rl-pressed);
 }

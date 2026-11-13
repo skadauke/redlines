@@ -10,6 +10,7 @@ import {
   isDocument,
   joinPath,
   NOT_A_DOCUMENT,
+  SAVE_FOR_IMAGE_BUTTONS,
   NotADocumentError,
   opensInDefaultApp,
   toPluginHost,
@@ -544,6 +545,259 @@ describe('the host in the app', () => {
     (onOpened as () => void)();
     await vi.waitFor(() => expect(opened).toEqual(['/docs/later.md']));
     expect(refused).toEqual(['/docs/refused.md']);
+  });
+});
+
+describe('adding images in the app', () => {
+  beforeEach(() => {
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    listen.mockResolvedValue(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(invoke).mockReset();
+    listen.mockReset();
+    dialog.message.mockReset();
+    vi.useRealTimers();
+  });
+
+  /** An image file, with the bytes `bytes`. */
+  const image = (name: string, type: string, bytes = 'PNGDATA') =>
+    new File([bytes], name, { type });
+
+  it('asks whether to save the document first, and takes only Save… as a yes', async () => {
+    dialog.message.mockResolvedValueOnce('Save…');
+    expect(await createHost().askToSaveForImage()).toBe(true);
+    dialog.message.mockResolvedValueOnce('Cancel');
+    expect(await createHost().askToSaveForImage()).toBe(false);
+    dialog.message.mockResolvedValueOnce(undefined);
+    expect(await createHost().askToSaveForImage()).toBe(false);
+    // The first button is Return's and the one called Cancel is Escape's: Save… is the default.
+    expect(SAVE_FOR_IMAGE_BUTTONS).toEqual({ ok: 'Save…', cancel: 'Cancel' });
+    const options = (dialog.message.mock.calls[0] as unknown[] | undefined)?.[1];
+    expect(options).toMatchObject({ buttons: SAVE_FOR_IMAGE_BUTTONS });
+  });
+
+  it('asks the app for the images the person chooses, which it keeps, and names none of them', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ id: 7, count: 2 });
+    expect(await createHost().chooseImages()).toEqual({ kind: 'given', id: 7 });
+    // src-tauri/src/image_files.rs: pick_images.
+    expect(invoke).toHaveBeenCalledWith('pick_images');
+    vi.mocked(invoke).mockResolvedValueOnce(null);
+    expect(await createHost().chooseImages()).toBeNull();
+  });
+
+  it('says why the panel couldn’t be shown', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce('The panel wasn’t shown.');
+    await expect(createHost().chooseImages()).rejects.toThrow('The panel wasn’t shown.');
+  });
+
+  it('has the app copy the images it was given, by their id, into the folder', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ paths: ['images/a.png'], refused: [] });
+    const added = await createHost().addImages('/docs/plan.md', 'images', { kind: 'given', id: 7 });
+    expect(added).toEqual({ paths: ['images/a.png'], refused: [] });
+    expect(invoke).toHaveBeenCalledWith('add_images', {
+      id: 7,
+      document: '/docs/plan.md',
+      folder: 'images',
+    });
+  });
+
+  it('says what the app refused with', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce('/docs/plan.md: not this window’s file');
+    await expect(
+      createHost().addImages('/docs/plan.md', 'images', { kind: 'given', id: 7 }),
+    ).rejects.toThrow('/docs/plan.md: not this window’s file');
+  });
+
+  it('sends the data of a pasted image to the app, under a name made of the time', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 12, 15, 30, 12));
+    vi.mocked(invoke).mockResolvedValueOnce({
+      paths: ['images/image-2026-11-12-153012.png'],
+      refused: [],
+    });
+    const added = await createHost().addImages('/Users/ada/My Notes/plan.md', 'images', {
+      kind: 'files',
+      files: [image('image.png', 'image/png')],
+      pasted: true,
+    });
+    expect(added).toEqual({ paths: ['images/image-2026-11-12-153012.png'], refused: [] });
+    // The bytes are the body, and the rest is in headers, as percent codes.
+    const [command, body, options] = vi.mocked(invoke).mock.calls[0] ?? [];
+    expect(command).toBe('add_pasted_image');
+    expect(new TextDecoder().decode(body as Uint8Array)).toBe('PNGDATA');
+    expect(options).toEqual({
+      headers: {
+        'x-redlines-document': encodeURIComponent('/Users/ada/My Notes/plan.md'),
+        'x-redlines-folder': 'images',
+        'x-redlines-name': 'image-2026-11-12-153012.png',
+      },
+    });
+  });
+
+  it('keeps the name of a file dropped, and writes a name with spaces and accents as codes', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ paths: ['Bilder/Über uns.png'], refused: [] });
+    await createHost().addImages('/docs/plan.md', 'Bilder', {
+      kind: 'files',
+      files: [image('Über uns.png', 'image/png')],
+      pasted: false,
+    });
+    const [, , options] = vi.mocked(invoke).mock.calls[0] ?? [];
+    expect((options as { headers: Record<string, string> }).headers).toMatchObject({
+      'x-redlines-folder': 'Bilder',
+      'x-redlines-name': encodeURIComponent('Über uns.png'),
+    });
+  });
+
+  it('sends several images one after another, and joins what the app says of each', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ paths: ['images/a.png'], refused: [] })
+      .mockResolvedValueOnce({ paths: [], refused: ['“b.png” isn’t an image Redlines can show.'] })
+      .mockResolvedValueOnce({ paths: ['images/c.png'], refused: [] });
+    const added = await createHost().addImages('/docs/plan.md', 'images', {
+      kind: 'files',
+      files: [
+        image('a.png', 'image/png'),
+        image('b.png', 'image/png'),
+        image('c.png', 'image/png'),
+      ],
+      pasted: false,
+    });
+    expect(added).toEqual({
+      paths: ['images/a.png', 'images/c.png'],
+      refused: ['“b.png” isn’t an image Redlines can show.'],
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it('refuses a file that isn’t an image the preview shows without sending it', async () => {
+    const added = await createHost().addImages('/docs/plan.md', 'images', {
+      kind: 'files',
+      files: [image('paper.pdf', 'application/pdf')],
+      pasted: false,
+    });
+    expect(added).toEqual({
+      paths: [],
+      refused: ['“paper.pdf” isn’t an image Redlines can show.'],
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('tells of an image the app couldn’t take as it tells of any other it refuses', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(
+      'The folder for images leads outside the document’s folder.',
+    );
+    const added = await createHost().addImages('/docs/plan.md', 'images', {
+      kind: 'files',
+      files: [image('a.png', 'image/png')],
+      pasted: true,
+    });
+    expect(added).toEqual({
+      paths: [],
+      refused: ['The folder for images leads outside the document’s folder.'],
+    });
+  });
+
+  it('hears of the images dropped on the window, from the app, and stops when it is told to', async () => {
+    const unlisten = vi.fn();
+    listen.mockResolvedValueOnce(unlisten);
+    const drops: unknown[] = [];
+    const stop = await createHost().listenForImageDrops((drop) => void drops.push(drop));
+    // src-tauri/src/image_files.rs: the event it sends to the window the images landed on.
+    expect(listen).toHaveBeenCalledWith('images-dropped', expect.any(Function));
+    const [, onDrop] = (listen.mock.calls[0] ?? []) as unknown[];
+    (onDrop as (event: { payload: unknown }) => void)({
+      payload: { id: 3, count: 2, x: 40, y: 12 },
+    });
+    expect(drops).toEqual([{ id: 3, count: 2, x: 40, y: 12 }]);
+    stop();
+    expect(unlisten).toHaveBeenCalled();
+  });
+});
+
+describe('adding images in a browser tab', () => {
+  const image = (name: string, type = 'image/png') => new File(['x'], name, { type });
+  let urls = 0;
+  beforeEach(() => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: () => `blob:tab/${++urls}`,
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the images in memory, in the folder, where the preview finds them', async () => {
+    const host = createHost();
+    const added = await host.addImages('sample.md', 'images', {
+      kind: 'files',
+      files: [image('shot.png'), image('shot.png')],
+      pasted: false,
+    });
+    // A name that is taken gets a number, as in the app.
+    expect(added).toEqual({ paths: ['images/shot.png', 'images/shot-2.png'], refused: [] });
+    expect(await host.allowImages('sample.md')).toBe(true);
+    const first = host.imageUrl('images/shot.png');
+    expect(first).toMatch(/^blob:/);
+    // The same address each time, or the preview would draw the image again at each look.
+    expect(host.imageUrl('images/shot.png')).toBe(first);
+    expect(host.imageUrl('images/shot-2.png')).not.toBe(first);
+    expect(host.imageUrl('images/missing.png')).toBeNull();
+  });
+
+  it('links an image of the document’s own folder by its name', async () => {
+    const added = await createHost().addImages('sample.md', '', {
+      kind: 'files',
+      files: [image('a b.png')],
+      pasted: false,
+    });
+    expect(added.paths).toEqual(['a b.png']);
+  });
+
+  it('refuses a file that isn’t an image, and a source only the app has', async () => {
+    const host = createHost();
+    const added = await host.addImages('sample.md', 'images', {
+      kind: 'files',
+      files: [image('paper.pdf', 'application/pdf')],
+      pasted: false,
+    });
+    expect(added.refused).toEqual(['“paper.pdf” isn’t an image Redlines can show.']);
+    await expect(host.addImages('sample.md', 'images', { kind: 'given', id: 1 })).rejects.toThrow();
+  });
+
+  it('asks to save with the page’s own dialog, and takes OK as a yes', async () => {
+    const confirm = vi.fn<(message?: string) => boolean>().mockReturnValueOnce(true);
+    vi.stubGlobal('confirm', confirm);
+    expect(await createHost().askToSaveForImage()).toBe(true);
+    confirm.mockReturnValueOnce(false);
+    expect(await createHost().askToSaveForImage()).toBe(false);
+  });
+
+  it('chooses images with the browser’s own panel', async () => {
+    const chosen = [image('a.png'), image('b.png')];
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (
+      this: HTMLInputElement,
+    ) {
+      Object.defineProperty(this, 'files', { value: chosen });
+      this.dispatchEvent(new Event('change'));
+    });
+    expect(await createHost().chooseImages()).toEqual({
+      kind: 'files',
+      files: chosen,
+      pasted: false,
+    });
+    click.mockImplementation(function (this: HTMLInputElement) {
+      this.dispatchEvent(new Event('cancel'));
+    });
+    expect(await createHost().chooseImages()).toBeNull();
+    click.mockRestore();
+  });
+
+  it('hears of no drops, which its page gets itself', async () => {
+    const stop = await createHost().listenForImageDrops(() => {
+      throw new Error('no drop');
+    });
+    stop();
   });
 });
 
