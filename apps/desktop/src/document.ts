@@ -84,6 +84,12 @@ export interface DocumentOptions {
    * Without it, none is.
    */
   author?: () => Handle;
+  /**
+   * The folder the save dialog opens in for a document with no file yet (Preferences, General), or
+   * null for none. Asked each time the dialog opens, so a change in Preferences counts at once. A
+   * saved document's Save As starts in its own folder, whatever this says.
+   */
+  newDocumentFolder?: () => string | null;
 }
 
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
@@ -114,6 +120,7 @@ export class DocumentController {
   readonly #hasDraft: () => boolean;
   readonly #onLoading: (path: string | null) => void;
   readonly #author: (() => Handle) | null;
+  readonly #newDocumentFolder: () => string | null;
   /** Counts the document's changes on disk that became steps, for each its own group. */
   #diskSteps = 0;
   /** Counts the documents this window has held: a new one each time another replaces it. */
@@ -136,6 +143,7 @@ export class DocumentController {
     this.#hasDraft = options.hasDraft ?? (() => false);
     this.#onLoading = options.onLoading ?? (() => {});
     this.#author = options.author ?? null;
+    this.#newDocumentFolder = options.newDocumentFolder ?? (() => null);
   }
 
   /**
@@ -261,7 +269,12 @@ export class DocumentController {
     const text = this.#editor.getDoc();
     let path: string | null;
     try {
-      path = await this.#host.saveAs(text, this.#state.path ?? `${this.#state.name}.md`);
+      // A document with no file starts in the folder Preferences name; a saved one, in its own.
+      path = await this.#host.saveAs(
+        text,
+        this.#state.path ?? `${this.#state.name}.md`,
+        this.#state.path === null ? this.#newDocumentFolder() : null,
+      );
     } catch (error) {
       // A name that isn't a document's says so, and nothing was written.
       const why =

@@ -230,6 +230,23 @@ select:focus-visible {
   padding: 0 12px;
 }
 
+/* A folder's name before the buttons that change it, its whole path in the hint. */
+.rl-pref-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--rl-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rl-pref-path.rl-pref-unset {
+  color: var(--rl-ink-3);
+}
+
+.rl-pref-inline > .rl-pref-button {
+  flex: none;
+}
+
 .rl-pref-button:enabled:hover {
   background: var(--rl-pressed);
 }

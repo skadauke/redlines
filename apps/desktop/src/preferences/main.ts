@@ -82,10 +82,14 @@ const shownOthers = (list: AcpAgent[]) =>
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
  * Outside the app, in a plain browser, `outside` is.
  */
-async function appCommand<T>(command: string, outside: string): Promise<T> {
+async function appCommand<T>(
+  command: string,
+  outside: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri) throw new Error(outside);
   try {
-    return await invoke<T>(command);
+    return await invoke<T>(command, args);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
@@ -116,6 +120,9 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  // The app shows the panel, a sheet of this window, and hands back only the folder's path.
+  chooseFolder: (start) =>
+    appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', { start }),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({

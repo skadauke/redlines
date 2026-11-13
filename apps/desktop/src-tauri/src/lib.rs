@@ -343,6 +343,8 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            files::folder_exists,
+            files::choose_folder,
             about,
             appearance::set_appearance,
             edit_menu::beep,

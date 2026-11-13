@@ -73,6 +73,12 @@ export interface PaneDeps {
    * asked or couldn't, as for a copy of the app on its disk image.
    */
   makeDefaultApp: () => Promise<DefaultAppChange>;
+  /**
+   * Asks for a folder with the system's panel, which opens in `start` when there is one: its full
+   * path, or null when the person cancels; rejects with a sentence that says why it couldn't ask,
+   * as in a plain browser.
+   */
+  chooseFolder: (start: string | null) => Promise<string | null>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -289,6 +295,7 @@ function general(deps: PaneDeps): HTMLElement[] {
   return [
     row('Name and handle', identity, line('As they appear on your changes.')),
     row('On launch', onLaunch),
+    newDocumentFolderRow(deps),
     row(
       'Check for updates automatically',
       toggle(current.checkForUpdates, (value) => update({ checkForUpdates: value })),
@@ -300,6 +307,86 @@ function general(deps: PaneDeps): HTMLElement[] {
     defaultAppRow(deps),
     row('Command line', command, status),
   ];
+}
+
+/** The line under the default folder's row, until something needs saying. */
+const FOLDER_NOTE = 'Save opens here for a document that has no file yet.';
+
+/** A folder's name for the row: the last name in its path, or the whole path for the disk's root. */
+function folderName(folder: string): string {
+  return (
+    folder
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || folder
+  );
+}
+
+/**
+ * Default folder for new documents: where the Save dialog opens for a document that has no file
+ * yet (#309). The row shows the folder by its name, with its whole path as the hint; Choose… asks
+ * for another with the system's panel, and Clear, there only while one is set, goes back to leaving
+ * it to macOS. A folder that is gone by the time Save looks is no problem for the row: Save falls
+ * back to what it did before.
+ */
+function newDocumentFolderRow(deps: PaneDeps): HTMLElement {
+  const status = el('div', 'rl-pref-note', FOLDER_NOTE);
+  status.setAttribute('role', 'status');
+  const path = el('span', 'rl-pref-path');
+  const choose = el('button', 'rl-pref-button', 'Choose…');
+  choose.type = 'button';
+  const clear = el('button', 'rl-pref-button', 'Clear');
+  clear.type = 'button';
+  const control = el('div', 'rl-pref-inline');
+  control.append(path, choose);
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  /** Shows the folder, and a Clear button only while there is one. Choose… is never moved. */
+  const show = (folder: string | null) => {
+    path.textContent = folder === null ? 'Not set' : folderName(folder);
+    path.title = folder ?? '';
+    path.classList.toggle('rl-pref-unset', folder === null);
+    if (folder === null) clear.remove();
+    else if (!clear.isConnected) control.append(clear);
+  };
+  show(deps.settings().newDocumentFolder);
+  /**
+   * The wait is over and the button is back: so is the focus, which it lost while it was disabled,
+   * unless the person put it somewhere else meanwhile.
+   */
+  const back = () => {
+    choose.disabled = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== choose) return;
+    choose.focus();
+  };
+  choose.addEventListener('click', () => {
+    choose.disabled = true;
+    void deps.chooseFolder(deps.settings().newDocumentFolder).then(
+      (folder) => {
+        if (folder !== null) {
+          deps.update({ newDocumentFolder: folder });
+          show(folder);
+          say(FOLDER_NOTE, false);
+        }
+        back();
+      },
+      (error: unknown) => {
+        say(error instanceof Error ? error.message : String(error), true);
+        back();
+      },
+    );
+  });
+  clear.addEventListener('click', () => {
+    deps.update({ newDocumentFolder: null });
+    show(null);
+    say(FOLDER_NOTE, false);
+    // The button the person pressed is gone: Choose… is the next stop.
+    choose.focus();
+  });
+  return row('Default folder for new documents', control, status);
 }
 
 /** What the line under the button says of the app that opens Markdown files. */

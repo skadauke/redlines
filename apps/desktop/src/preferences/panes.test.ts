@@ -36,6 +36,7 @@ function setup(extra: Partial<PaneDeps> = {}) {
       Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: true }),
     defaultApp: () => Promise.resolve({ status: 'other', app: 'TextEdit' }),
     makeDefaultApp: () => Promise.resolve({ outcome: 'made' }),
+    chooseFolder: () => Promise.resolve(null),
     ...extra,
   };
   const container = document.createElement('div');
@@ -91,6 +92,7 @@ describe('the panes', () => {
     expect(rowLabels(draw('general').container)).toEqual([
       'Name and handle',
       'On launch',
+      'Default folder for new documents',
       'Check for updates automatically',
       iconRotationLabel(),
       'Default app for Markdown',
@@ -605,6 +607,156 @@ describe('the panes', () => {
       installing.resolve({ outcome: 'cancelled' });
       await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
       expect(document.activeElement).toBe(name);
+    });
+  });
+
+  describe('the Default folder for new documents row', () => {
+    /** The row's parts: the folder's name, the line under it, and its two buttons. */
+    const folderRow = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>(
+        '[data-row="Default folder for new documents"]',
+      );
+      const path = row?.querySelector<HTMLElement>('.rl-pref-path');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      const choose = [...(row?.querySelectorAll('button') ?? [])].find(
+        (button) => button.textContent === 'Choose…',
+      );
+      if (!row || !path || !status || !choose) throw new Error('no Default folder row');
+      return {
+        choose,
+        shown: () => path.textContent,
+        hint: () => path.title,
+        said: () => status.textContent,
+        failed: () => status.classList.contains('rl-pref-failure'),
+        /** The Clear button, which is there only while a folder is set. */
+        clear: () =>
+          [...row.querySelectorAll('button')].find((button) => button.textContent === 'Clear'),
+        /** Presses Choose… as from the keyboard: it has the focus. */
+        press: () => {
+          choose.focus();
+          choose.click();
+        },
+      };
+    };
+
+    it('says that no folder is set, and offers to choose one', () => {
+      const row = folderRow(draw('general').container);
+      expect(row.shown()).toBe('Not set');
+      expect(row.hint()).toBe('');
+      expect(row.clear()).toBeUndefined();
+      expect(row.said()).toBe('Save opens here for a document that has no file yet.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('shows the folder by its name, with its whole path as the hint, and offers to clear it', () => {
+      const { container } = setup();
+      const settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' };
+      renderPane('general', container, {
+        ...setup().deps,
+        settings: () => settings,
+      });
+      const row = folderRow(container);
+      expect(row.shown()).toBe('Notes');
+      expect(row.hint()).toBe('/Users/ada/Notes');
+      expect(row.clear()).toBeDefined();
+    });
+
+    it('shows the disk’s root by its whole path, which has no name', () => {
+      const { container } = setup();
+      const settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/' };
+      renderPane('general', container, { ...setup().deps, settings: () => settings });
+      expect(folderRow(container).shown()).toBe('/');
+    });
+
+    it('keeps the folder the panel picks, which the next panel starts in', async () => {
+      const chooseFolder = vi.fn<PaneDeps['chooseFolder']>(() =>
+        Promise.resolve('/Users/ada/Notes'),
+      );
+      const { container, update, now } = draw('general', { chooseFolder });
+      const row = folderRow(container);
+      row.press();
+      // The first time, there is nowhere to start from.
+      expect(chooseFolder).toHaveBeenLastCalledWith(null);
+      await vi.waitFor(() => expect(row.shown()).toBe('Notes'));
+      expect(update).toHaveBeenCalledWith({ newDocumentFolder: '/Users/ada/Notes' });
+      expect(now().newDocumentFolder).toBe('/Users/ada/Notes');
+      expect(row.hint()).toBe('/Users/ada/Notes');
+      expect(row.clear()).toBeDefined();
+      expect(row.failed()).toBe(false);
+      row.press();
+      expect(chooseFolder).toHaveBeenLastCalledWith('/Users/ada/Notes');
+    });
+
+    it('changes nothing when the panel is cancelled', async () => {
+      const answer = later<string | null>();
+      const { container, update } = draw('general', { chooseFolder: () => answer.promise });
+      const row = folderRow(container);
+      row.press();
+      answer.resolve(null);
+      await answer.promise;
+      await vi.waitFor(() => expect(row.choose.disabled).toBe(false));
+      expect(update).not.toHaveBeenCalled();
+      expect(row.shown()).toBe('Not set');
+    });
+
+    it('clears the folder, which leaves Save where macOS has it', () => {
+      const { container, update, now } = setup();
+      let settings: Settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' };
+      const deps = {
+        ...setup().deps,
+        settings: () => settings,
+        update: (change: Partial<Settings>) => {
+          settings = { ...settings, ...change };
+          update(change);
+        },
+      };
+      renderPane('general', container, deps);
+      const row = folderRow(container);
+      row.clear()?.click();
+      expect(update).toHaveBeenCalledWith({ newDocumentFolder: null });
+      expect(row.shown()).toBe('Not set');
+      expect(row.hint()).toBe('');
+      expect(row.clear()).toBeUndefined();
+      expect(now().newDocumentFolder).toBeNull();
+    });
+
+    it('waits for the panel with the button off, and gives it the focus back', async () => {
+      const answer = later<string | null>();
+      const { container } = draw('general', { chooseFolder: () => answer.promise });
+      const row = folderRow(container);
+      row.press();
+      // The panel is the app's, over this window: a second press would open another.
+      expect(row.choose.disabled).toBe(true);
+      loseFocus();
+      answer.resolve('/Users/ada/Drafts');
+      await vi.waitFor(() => expect(row.choose.disabled).toBe(false));
+      expect(document.activeElement).toBe(row.choose);
+    });
+
+    it('says why when the app can’t ask for a folder, and leaves the setting as it was', async () => {
+      const chooseFolder = vi.fn(() => Promise.reject(new Error('Folders are chosen in the app.')));
+      const { container, update } = draw('general', { chooseFolder });
+      const row = folderRow(container);
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe('Folders are chosen in the app.'));
+      expect(row.failed()).toBe(true);
+      expect(row.choose.disabled).toBe(false);
+      expect(update).not.toHaveBeenCalled();
+      expect(row.shown()).toBe('Not set');
+    });
+
+    it('goes back to its own line once a folder is chosen after a failure', async () => {
+      const chooseFolder = vi
+        .fn<PaneDeps['chooseFolder']>()
+        .mockRejectedValueOnce(new Error('No panel.'))
+        .mockResolvedValueOnce('/Users/ada/Notes');
+      const row = folderRow(draw('general', { chooseFolder }).container);
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe('No panel.'));
+      row.press();
+      await vi.waitFor(() => expect(row.shown()).toBe('Notes'));
+      expect(row.said()).toBe('Save opens here for a document that has no file yet.');
+      expect(row.failed()).toBe(false);
     });
   });
 
