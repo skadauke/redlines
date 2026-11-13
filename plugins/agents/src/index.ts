@@ -16,3 +16,12 @@ export type {
 export { renderAgentsPane, type AgentsPaneDeps, type AgentsPaneSettings } from './settings-pane.ts';
 export { findCitations, renderCommentText, resolveCitation } from './comment-text.ts';
 export type { Citation, CommentTextDeps, CommentTextEntry } from './comment-text.ts';
+export {
+  createAsk,
+  createAskSession,
+  exchangeAsMarkdown,
+  findQuote,
+  keepAsComment,
+  parseAnswer,
+} from './ask/index.ts';
+export type { Ask, AskDeps, AskOptions, AskSession, AskState, AskTurn } from './ask/index.ts';

@@ -274,6 +274,12 @@ importers:
 
   plugins/agents:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools

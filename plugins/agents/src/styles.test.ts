@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ASK_STYLE } from './ask/styles.ts';
 import { LIVE_LINE_STYLE } from './live-line.ts';
 import { PICKER_STYLE } from './picker.ts';
 
@@ -17,8 +18,8 @@ function bare(style: string): string {
 }
 
 describe('the agents plugin styles', () => {
-  it("writes the live line's and the picker's lengths times the note scale", () => {
-    for (const style of [LIVE_LINE_STYLE, PICKER_STYLE]) {
+  it("writes the live line's, the picker's and the Ask bubble's lengths times the note scale", () => {
+    for (const style of [LIVE_LINE_STYLE, PICKER_STYLE, ASK_STYLE]) {
       expect(bare(style)).not.toMatch(/\b([2-9]|\d{2,})(\.\d+)?px/);
     }
   });
