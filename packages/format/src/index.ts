@@ -50,6 +50,7 @@ export type {
 export { trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export { setTracking, setView } from './settings.ts';
 export { trackedEdit, trackedEdits } from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';

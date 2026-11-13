@@ -67,6 +67,7 @@ function userName(event: string | null): string | null {
   if (is(event, 'table.move.col')) return 'Move Column';
   if (is(event, 'input.drop') || is(event, 'move.drop')) return 'Drag';
   if (is(event, 'format') || is(event, 'input.format')) return 'Formatting';
+  if (event === 'track.switch') return 'Track Changes';
   if (is(event, 'input.replace.all')) return 'Replace All';
   if (is(event, 'input.replace')) return 'Replace';
   if (event === 'accept') return 'Accept';

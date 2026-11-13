@@ -101,6 +101,16 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-strong': { fontWeight: '700' },
   '.rl-em': { fontStyle: 'italic' },
   '.rl-strike': { textDecoration: 'line-through', color: 'var(--rl-ink-2)' },
+  // Subscript and superscript are smaller, and moved from the baseline without changing the line's
+  // height, so that a line with one is as tall as the others.
+  '.rl-sub, .rl-sup': {
+    fontSize: '0.75em',
+    lineHeight: '0',
+    position: 'relative',
+    verticalAlign: 'baseline',
+  },
+  '.rl-sub': { bottom: '-0.25em' },
+  '.rl-sup': { top: '-0.5em' },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.84em',

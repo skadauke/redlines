@@ -284,10 +284,38 @@ applies its inverse:
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
-- The serializer writes formatting in the file's dialect: `<sub>` in `.md`, `~x~` in pandoc files
-  (§9.1). New emphasis is `*` and `**`, strikethrough is `~~`, and code has one more backtick than
-  its text has in a row, with a space inside them next to a backtick. Emphasis written with `_`
-  stays as it is.
+- The serializer writes formatting in the file's dialect (§9.1), except subscript and superscript,
+  which are the tags `<sub>` and `<sup>` in every file type. New emphasis is `*` and `**`,
+  strikethrough is `~~`, and code has one more backtick than its text has in a row, with a space
+  inside them next to a backtick. Emphasis written with `_` stays as it is.
+- **Subscript and superscript** are the first of a short list of inline HTML tags that are formats:
+  `<!--fmt m2bd +sub--><sub>2</sub><!--/m2bd-->`. The list is `<sub>` and `<sup>`, built; `<mark>`
+  (highlight, `+mark`) and `<ins>` (underline, `+underline`), which §2.2 names and nothing writes
+  yet; and `<br>`, the line break of a table cell (§3.7), which is not a format of text. No other tag
+  is on it. Any other tag is an inline HTML tag, which shows as written and takes no marker inside
+  it (§3.5). What is read as a format is the tag as the serializer writes it: `<sub>`, `</sub>`,
+  `<sup>` and `</sup>`, in lowercase, with no attributes and no space in them, so `-sub` and `-sup`
+  carry no syntax and rejecting writes the tag back.
+  - A closing tag pairs with the nearest opening tag of its name before it that is read as a format
+    and has no closing tag yet, in one paragraph, and in one link text or one table cell, as
+    emphasis does. A tag with no pair, an escaped tag (`\<sub>`, which is text), a tag in code, in an
+    HTML comment, in an image, in a link's address, in math, in a footnote reference, in an entity or
+    a shortcode, in a URL or in an attribute block, a pair that crosses another format's syntax, and
+    a tag written otherwise (`<SUB>`, `<sub class="x">`) are no format: the text stays as written,
+    and turning a format off does nothing to it, with a notice that says so.
+  - A format is written only around text whose tags of its name are whole pairs: a stray `</sub>`
+    or `<sub>` in the text would pair with the one written, and the change is refused, in words
+    that say so ("This text has a <sub> or <sup> tag without its pair…"). A backslash in front of
+    the text, which would escape the opening tag, goes into the pair with the character it
+    escapes (`<sub>\b</sub>`); text that ends in a backslash, which would escape the closing tag,
+    is refused, as it is for the other formats.
+  - Formats nest as they do for emphasis: one around all of another goes outside its syntax, and a
+    piece that crosses the edge of a format is cut there. Turning a format off takes the whole run of
+    it, and the same tag inside itself (`<sub>a <sub>b</sub></sub>`) is two runs, in a mark each.
+    Clear Formatting takes them off with the other formats (`-sub`, `-sup`).
+  - A tag takes no marker inside it (§3.1, rule 1), and the markers of a format change stand outside
+    its tags, as they stand outside any syntax (the example above). Text typed inside a pair is
+    typed text, in an insertion of its own, whose markers may stand against a tag.
 - An inline format change stays inside one block. A block format change opens on its own line
   before the block (§3.3) and closes at the end of the block.
 - A range that crosses blocks is one mark per block, and the marks share a `group` (§5.4).
@@ -947,7 +975,9 @@ at the outer edge of a whole inline construct. A marker never goes:
    can be, and `- ` there is the bullet of the next item;
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
-9. inside pandoc's `~x~` or `^x^`; after or inside `{…}` attributes; on `:::` lines; before or
+9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
+   (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
+   attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
 
@@ -2472,10 +2502,11 @@ front matter in R Markdown and Quarto.
 - The word `redlines` comes first, so other tools don't mistake the comment for their own. Marp,
   for one, reads a leading YAML comment as slide settings.
 - The ledger appears with the first tracked change, comment or setting, and is removed when
-  nothing is left in it.
+  nothing is left in it. The view (§5.6) is a setting that never keeps one: a file with no ledger
+  gets none for it, and a ledger left with nothing but a view is removed.
 - The file's last line break stays its last. The ledger goes in front of it, after a blank line
-  of two line breaks, or after none when nothing comes before that line break; a file without a
-  final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
+  of two line breaks, also in a file with no text, where the blank line keeps what is typed first
+  apart from the ledger; a file without a final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
   so do the two of its blank line, except after a body that ends in a CR alone: there they are
   two CRLFs, because an LF would make one CRLF of that CR and itself for a CommonMark reader.
   The blank line is written with a new ledger only: writing the ledger again leaves the blank
@@ -2507,6 +2538,7 @@ front matter in R Markdown and Quarto.
 # If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.
 version: 1
 tracking: everyone
+view: redlines
 history: full
 people:
   ada: {name: Ada Lovelace, email: ada@example.org, accounts: [github:ada-l]}
@@ -2543,6 +2575,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
+| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2602,7 +2635,9 @@ same values.
   (§7.3). Readers ignore it, and the serializer always writes it.
 - Readers keep every value a string and reject duplicate keys: the JavaScript `yaml` package with
   `schema: 'failsafe'`, js-yaml with `FAILSAFE_SCHEMA`, PyYAML's `BaseLoader` plus a duplicate
-  check, and R's `yaml` with string handlers.
+  check, and R's `yaml` with string handlers. The settings `tracking`, `view` and `history`, which
+  a merge that keeps both sides can leave twice (§7.3), are the exception: a reader takes each from
+  its last line, and the next write puts one.
 - Keys are ids, handles and fixed names, none of which YAML can read as another type. They are
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
@@ -2627,17 +2662,44 @@ same values.
 ### 5.6 Settings
 
 - **`tracking: everyone`** works like Word's Track Changes "For Everyone": everyone who opens the
-  file in Redlines starts with Track Changes on, under a notice that says so. Without it, whether
-  each person's changes are tracked is their own setting and is never saved, as with Word's "Just
-  Mine".
-  - Someone has to turn it on. It is never added by default.
+  file in Redlines starts with Track Changes on, under a notice that says so.
+  - Turning Track Changes on in Redlines writes it, and turning it off takes it away, as Word saves
+    Track Changes in the document. The file is edited like any other change to it: the switch is
+    written at once, so the document has unsaved edits until it is saved, and switching back
+    leaves the file as it was. A file with no text yet gets the ledger after a blank line, like
+    any file (§5.1).
+  - A file that can't take a ledger, because its ledger can't be read (§5.1) or its end is inside a
+    code block or a comment that is never closed, can't have Track Changes turned on. Redlines says
+    why, in the words of the refusal, and leaves it off: with it on, no tracked change could be
+    written there either.
   - A plain file can't enforce it. It is a default, like Word's Lock Tracking without a password.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
+- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
+  it was last saved. Redlines opens the file in it, in place of the markup view that the person
+  has remembered, which opens the files that have none.
+  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
+    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
+    markup views, is written as `redlines`.
+  - Switching views never changes the file, and so never makes a document edited. The view is
+    written when the file is written for another reason, a Save, so reading a document changes
+    nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
+    it as it is. Recording it changes that one line, its value or a new line after `tracking`'s or
+    `version`'s, and no other byte of the ledger: a Save never rewrites what a person didn't touch,
+    whatever tool or version wrote it.
+  - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
+    nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
+    file with no changes or comments, Clean and Redlines look the same anyway.
+  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+  - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
+    of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
+    `w:view` is the page layout (Print, Web, Draft), not how markup is shown.
 - **No owners list.** Permissions belong to hosts, not to files.
-- **Per-person state never goes in the file:** view, mode, zoom and text size, filters, comment
-  drafts, folds, the last version someone saw, and presence.
+- **Per-person state never goes in the file:** mode, zoom and text size, the markup view a person
+  has remembered, filters, comment drafts, folds, the last version someone saw, and presence. The
+  two settings above are the exceptions: they belong to the document, and anyone who saves it
+  records them.
 
 ### 5.7 Layout
 
@@ -2816,8 +2878,11 @@ A conflict in the ledger is resolved by keeping both sides:
 In the tests, keeping both sides gave the right result in every ledger conflict, apart from those
 stale entries and one rare case: two different people given the same handle on two branches. That
 leaves a duplicate key, which the merge driver and the editor repair by renaming the newer handle;
-since markers carry no handles, the rename touches only the ledger. In GitHub's conflict editor,
-keeping both sides means deleting the three conflict-marker lines.
+since markers carry no handles, the rename touches only the ledger. A second such case is
+two branches that saved the document in different views (§5.6): keeping both sides leaves two
+`view` lines. A reader takes the last (§5.5) and the next write puts one: either is right, because
+the setting only records how the document was last saved. In GitHub's conflict editor, keeping both sides means deleting the three
+conflict-marker lines.
 
 ### 7.4 Resolving conflicts automatically
 
@@ -2985,10 +3050,19 @@ Agents edit the newest view, and the library turns their edits into tracked chan
 
 - A Redlines file keeps its extension: `.md`, `.qmd`, `.Rmd` or `.txt`. A new extension would lose
   GitHub's rendering and every Markdown, R Markdown and Quarto tool.
-- `.md` files are written in GitHub Flavored Markdown: `<sub>`, `<sup>`, `<mark>`, `<ins>` for
-  underline, `<img width>`, `<dl>`, GitHub alerts.
-- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `~x~`, `^x^`, `[x]{.mark}`,
-  `{width=}`, `{#id}`, Quarto callouts.
+- `.md` files are written in GitHub Flavored Markdown: `<mark>`, `<ins>` for underline,
+  `<img width>`, `<dl>`, GitHub alerts.
+- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `[x]{.mark}`, `{width=}`, `{#id}`,
+  Quarto callouts.
+- Subscript and superscript are `<sub>` and `<sup>` in every file type (§2.6). pandoc's `~x~` and
+  `^x^` would not read the same in both dialects: a single `~x~` is strikethrough on GitHub, and
+  `^x^` shows there as text. pandoc reads the tags as raw HTML, which its Word output drops
+  ([research](research/syntax.md)), so a `.qmd` or `.Rmd` file rendered to Word through pandoc
+  loses them; Redlines' own Word export keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept as written:
+  Redlines never writes either, never turns one into a tag, and doesn't read it as subscript or
+  superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
+  strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
+  would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and
@@ -3083,6 +3157,7 @@ Pending changes map onto Word's revisions
 | Split, join              | An inserted or deleted paragraph mark                                                |
 | Comment thread           | A comment with replies, resolved state and durable ids, in Word's comment parts      |
 | `tracking: everyone`     | `w:trackRevisions`                                                                   |
+| `view`                   | Not exported. Word's `w:view` is the page layout; how markup is shown is its own state |
 | People                   | Author names, with the `org` appended when names collide                             |
 | History                  | Not exported. Word keeps no history                                                  |
 
