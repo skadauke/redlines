@@ -18,8 +18,6 @@ export interface BubbleView {
   pending: string | null;
   /** What the run shows, or null. */
   line: LiveLine | null;
-  /** Who answers, once someone has. */
-  agentName: string | null;
   /** What the field starts with when it comes back after a stop or a failure. */
   draft: string;
   /** Whether Open in New Window is offered: the host can open a window with text. */
@@ -158,20 +156,20 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
     return made;
   };
 
-  const turn = (question: string, answer: string | null, agentName: string | null) => {
+  const turn = (question: string, answered: AskTurn | null) => {
     const block = el('div', 'rl-qa-turn');
     const asked = el('div', 'rl-qa-question');
     asked.textContent = shownQuestion(question);
     block.append(asked);
-    if (answer !== null) {
+    if (answered !== null) {
       const head = el('div', 'rl-note-head rl-author-0');
       const dot = el('span', 'rl-dot');
       const name = el('span', 'rl-note-name');
-      name.textContent = agentName ?? 'Agent';
+      name.textContent = answered.agent.name;
       head.append(dot, name);
       block.append(
         head,
-        renderAnswer(answer, {
+        renderAnswer(answered.answer, {
           has: (quote) => handlers.has(quote),
           show: (quote) => handlers.show(quote),
         }),
@@ -197,8 +195,8 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
       const working = view.pending !== null;
       const answered = view.turns.length > 0;
       exchange.replaceChildren(
-        ...view.turns.map(({ question, answer }) => turn(question, answer, view.agentName)),
-        ...(view.pending === null ? [] : [turn(view.pending, null, view.agentName)]),
+        ...view.turns.map((answered) => turn(answered.question, answered)),
+        ...(view.pending === null ? [] : [turn(view.pending, null)]),
       );
 
       // The live line: a running one changes its words in place, so its dot keeps its pulse and

@@ -34,6 +34,10 @@ const answers = (text: string): FakeScript =>
 interface Options {
   doc?: string;
   script?: FakeScript;
+  /** Codex too, for a follow-up that names it. */
+  codex?: FakeScript;
+  /** What Claude can be held to reading: its folder, or, as an agent the person added, the Mac. */
+  reads?: 'folder' | 'machine';
   scope?: 'folder' | 'document';
   consent?: Record<string, AgentScope | 'no'>;
   window?: boolean;
@@ -53,8 +57,15 @@ function mount(options: Options = {}) {
   // middle of the update that writes it: the keyboard stays out of the editor here.
   const focus = vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
   const relay = fakeRelay();
-  const claude = fakeProvider({ relay, script: options.script ?? answers('A lien is a claim.') });
-  const agents = createMacAgents([claude], relay);
+  const claude = fakeProvider({
+    relay,
+    script: options.script ?? answers('A lien is a claim.'),
+    ...(options.reads ? { readLimit: options.reads } : {}),
+  });
+  const codex = options.codex
+    ? fakeProvider({ relay, id: 'codex', name: 'Codex', script: options.codex })
+    : null;
+  const agents = createMacAgents(codex ? [claude, codex] : [claude], relay);
   const generation = options.generation ?? { value: 0 };
   const notices: string[] = [];
   const consent: Record<string, AgentScope | 'no'> = { ...options.consent };
@@ -102,6 +113,7 @@ function mount(options: Options = {}) {
     editor,
     ask,
     claude,
+    codex,
     notices,
     opened,
     copied,
@@ -596,6 +608,26 @@ describe('follow-up', () => {
       'Who holds it?',
     ]);
   });
+
+  it('names the agent that gave each answer, when a follow-up goes to another', async () => {
+    const { editor, claude, codex } = mount({ codex: answers('Codex agrees.') });
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await answered();
+    ask('@Codex do you agree?');
+    await vi.waitFor(() => expect(document.querySelectorAll('.rl-qa-answer')).toHaveLength(2));
+    // Each header is its own answer's agent's, not the latest's.
+    expect(
+      [...document.querySelectorAll('.rl-qa .rl-note-name')].map((n) => n.textContent),
+    ).toEqual(['Claude', 'Codex']);
+    expect([...document.querySelectorAll('.rl-qa-answer')].map((a) => a.textContent)).toEqual([
+      'A lien is a claim.',
+      'Codex agrees.',
+    ]);
+    expect(claude.requests).toHaveLength(1);
+    expect(codex?.requests).toHaveLength(1);
+  });
 });
 
 describe('keeping an answer', () => {
@@ -655,6 +687,40 @@ describe('keeping an answer', () => {
       ['ada', 'Who holds it?'],
       ['claude-ada', 'A lien is a claim.'],
     ]);
+  });
+
+  it('Make Comment: each reply is its own agent’s, when a follow-up went to another', async () => {
+    const { editor, ask: asking } = mount({ codex: answers('Codex agrees.') });
+    const before = editor.getDoc();
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    ask('What is a lien?');
+    await answered();
+    ask('@Codex do you agree?');
+    await vi.waitFor(() => expect(document.querySelectorAll('.rl-qa-answer')).toHaveLength(2));
+    label('Make Comment')?.click();
+    const { ledger } = parse(editor.getDoc());
+    const [thread] = ledger.comments;
+    // Claude's answer is Claude's, the person's question is theirs, and Codex's answer is Codex's.
+    expect(thread?.replies.map(({ by, text }) => [by, text])).toEqual([
+      ['claude-ada', 'A lien is a claim.'],
+      ['ada', 'do you agree?'],
+      ['codex-ada', 'Codex agrees.'],
+    ]);
+    // Both agents are among the people, each acting for the person who asked.
+    expect(
+      ledger.people
+        .filter(({ agent }) => agent === true)
+        .map(({ handle, name, for: by }) => [handle, name, by]),
+    ).toEqual([
+      ['claude-ada', 'Claude', 'ada'],
+      ['codex-ada', 'Codex', 'ada'],
+    ]);
+    expect(asking.isOpen()).toBe(false);
+    // One Undo takes the whole thread back.
+    expect(undo(editor.view)).toBe(true);
+    expect(editor.getDoc()).toBe(before);
+    expect(undo(editor.view)).toBe(false);
   });
 
   it('Make Comment: a refusal says why, and keeps the bubble', async () => {

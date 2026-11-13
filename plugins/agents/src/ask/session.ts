@@ -52,15 +52,17 @@ export interface AskDeps {
   defaultAgent?: () => string | undefined;
 }
 
-/** One question and what it was answered. */
+/**
+ * One question and what it was answered, with the agent that answered it: a follow-up may name
+ * another agent, so each answer is its own agent's.
+ */
 export interface AskTurn {
   question: string;
   answer: string;
+  agent: { id: string; name: string };
 }
 
 export interface AskState {
-  /** Who is answering, once a question went to one. */
-  agent: { id: string; name: string } | null;
   /** The exchange so far. */
   turns: readonly AskTurn[];
   /** The question being answered, or null. */
@@ -138,13 +140,15 @@ function withoutMentions(question: string, agents: readonly AgentInfo[], named: 
  * Starts a session about `quote`, the text the person selected, as it reads.
  */
 export function createAskSession(deps: AskDeps, about: { quote: string }): AskSession {
-  let state: AskState = { agent: null, turns: [], pending: null, line: null };
+  let state: AskState = { turns: [], pending: null, line: null };
   const listeners = new Set<(state: AskState) => void>();
   let closed = false;
   /** Counts the questions, so that a stopped one's late events are not taken for the next's. */
   let epoch = 0;
   let run: {
     abort: AbortController;
+    /** The agent that was asked, once there is one. */
+    agent?: AgentInfo;
     answer?: (answer: 'folder' | 'document' | 'no' | null) => void;
     over: boolean;
   } | null = null;
@@ -282,7 +286,8 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
           'No agent is set up. Install Claude Code or Codex, and sign in, to ask.',
         );
       }
-      set({ agent: { id: agent.id, name: agent.name }, line: running(agent, STARTING) });
+      if (run) run.agent = agent;
+      set({ line: running(agent, STARTING) });
       if (agent.state.found && !agent.state.signedIn) {
         deps.agents.forget?.();
         return fail(mine, agent, cannotRun(agent, agent.state.reason), undefined, true);
@@ -393,8 +398,12 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
           if (answer === '') {
             return fail(mine, agent, `${agent.name} ended with nothing to say.`, logPath);
           }
+          // The answer is this agent's, whoever answers the next question.
           return finish(mine, {
-            turns: [...state.turns, { question, answer }],
+            turns: [
+              ...state.turns,
+              { question, answer, agent: { id: agent.id, name: agent.name } },
+            ],
             line: null,
           });
         }

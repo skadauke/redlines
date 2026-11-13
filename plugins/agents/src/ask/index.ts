@@ -121,7 +121,6 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       turns: state.turns,
       pending: state.pending,
       line: state.line,
-      agentName: state.agent?.name ?? null,
       draft: state.turns.length > open.lastQuestion.answers ? '' : open.lastQuestion.text,
       canOpenWindow: options.openInNewWindow !== undefined,
     });
@@ -161,13 +160,11 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
   const makeComment = () => {
     const range = targetOf(view.state);
     const { session } = open ?? {};
-    const agent = session?.state.agent;
-    if (!open || !range || !agent || session.state.turns.length === 0) return;
+    if (!open || !range || !session || session.state.turns.length === 0) return;
     try {
       const thread = keepAsComment(editor, {
         range,
         turns: session.state.turns,
-        agent,
         author: options.author,
       });
       close(true);

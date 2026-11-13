@@ -28,21 +28,32 @@ function replyText(answer: string): string {
   return more === null ? shown.trim() : joinReply(shown.trim(), more);
 }
 
+/** An agent as the ledger knows it: `<agent>-<you>`, acting for the person who asked. */
+function personOfAgent(agent: { id: string; name: string }, me: Author): Person {
+  return {
+    handle: agentHandle(agent.id, me.handle),
+    name: agent.name,
+    agent: true,
+    for: me.handle,
+  };
+}
+
 export interface KeepAsComment {
   /** What the questions are about: the range of the document, as the bubble tracked it. */
   range: { from: number; to: number };
+  /** The exchange: each answer is written as the reply of the agent that gave it. */
   turns: readonly AskTurn[];
-  /** The agent that answered. */
-  agent: { id: string; name: string };
   author: Author;
   now?: () => Date;
 }
 
 /**
  * Makes a comment of the exchange, as one step to undo: the first question is the person's comment
- * on the range, its answer is the agent's reply, in its name, and each follow-up is a reply of the
- * person's and an answer of the agent's after it. From then on it is an ordinary thread. It is made
- * without anything that would start a run: the agent has answered.
+ * on the range, its answer is the reply of the agent that gave it, in its name, and each follow-up
+ * is a reply of the person's and an answer of the agent that gave it after it, which may be another
+ * agent. Every agent that wrote a reply is among the people of the ledger, as in any thread. From
+ * then on it is an ordinary thread. It is made without anything that would start a run: the agents
+ * have answered.
  *
  * @returns the thread's id.
  * @throws EditError when the comment can't be anchored there (in code, in front matter), or the
@@ -53,12 +64,6 @@ export function keepAsComment(editor: Editor, keep: KeepAsComment): string {
   const [first, ...rest] = keep.turns;
   if (!first) throw new Error('There is no answer to keep');
   const me = personOf(keep.author);
-  const agent: Person = {
-    handle: agentHandle(keep.agent.id, keep.author.handle),
-    name: keep.agent.name,
-    agent: true,
-    for: keep.author.handle,
-  };
   const time = ledgerTime((keep.now ?? (() => new Date()))());
   const by = (author: Person): EditContext => ({ author, time });
 
@@ -72,10 +77,10 @@ export function keepAsComment(editor: Editor, keep: KeepAsComment): string {
   };
   const made = addComment(text, keep.range, questionText(first.question), by(me));
   apply(made.changes);
-  apply(reply(text, made.id, replyText(first.answer), by(agent)));
+  apply(reply(text, made.id, replyText(first.answer), by(personOfAgent(first.agent, keep.author))));
   for (const turn of rest) {
     apply(reply(text, made.id, questionText(turn.question), by(me)));
-    apply(reply(text, made.id, replyText(turn.answer), by(agent)));
+    apply(reply(text, made.id, replyText(turn.answer), by(personOfAgent(turn.agent, keep.author))));
   }
   // Not typing, so Track Changes leaves it alone; Undo takes the whole thread back at once.
   view.dispatch({ changes: total, userEvent: 'review.comment' });
