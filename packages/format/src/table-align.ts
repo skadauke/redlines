@@ -4,6 +4,9 @@
 // its deletion lines. Accepting takes the markers away; rejecting writes the old delimiter row back.
 // With Track Changes off the delimiter row is changed as it says, in the change's `align=` too, so
 // that both views have it.
+//
+// The same change is also read as a point: an `align=` mark with no closer, in a row of the table,
+// at the end of the header's last cell (#281). Its decisions touch the delimiter row alone.
 
 import { lineEnd, lineStart, openerRange } from './blocks.ts';
 import { eolOf } from './changes.ts';
@@ -73,6 +76,19 @@ export function isAlignMark(mark: MarkRange): boolean {
   return mark.kind === 'fmt' && mark.segments.some((s) => isAlignOps(opsOf(mark, s)));
 }
 
+/** Whether a mark is the point form of an alignment change: an `align=` format change of one
+ * segment with no closer (format §3.7). The writer puts it at the end of the header's last cell. */
+export function isAlignPoint(mark: MarkRange): boolean {
+  const [segment, ...more] = mark.segments;
+  return (
+    mark.kind === 'fmt' &&
+    segment !== undefined &&
+    more.length === 0 &&
+    segment.close === undefined &&
+    isAlignOps(opsOf(mark, segment))
+  );
+}
+
 /** The alignments an alignment change's old delimiter row has, for a table of `columns` columns, or
  * null when it has none for them. */
 export function alignWas(mark: MarkRange, columns: number): TableAlign[] | null {
@@ -88,11 +104,18 @@ function specOf(mark: MarkRange, segment: Segment): { spec: string; source: stri
   return op?.value === undefined ? undefined : { spec: op.value, source: op.source };
 }
 
-/** An alignment change of `table`, as it stands around it: a format change whose one operation is
- * `align=`, its opener on the line before the table and its closer below the table and its
- * deletion lines, with nothing but markers and white space between. */
+/** An alignment change of `table`: the point form, a mark with no closer in a row of the table (a
+ * merge can leave it in any row; the writer puts it at the end of the header's last cell), or the
+ * span form, a format change whose one operation is `align=`, its opener on the line before the table
+ * and its closer below the table and its deletion lines, with nothing but markers and white space
+ * between. */
 export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undefined {
   const { text } = parsed;
+  const point = parsed.marks.find((mark) => {
+    const open = isAlignPoint(mark) ? mark.segments[0]?.open : undefined;
+    return open !== undefined && table.from <= open.from && open.to <= table.to;
+  });
+  if (point) return point;
   return parsed.marks.find((mark) => {
     if (mark.kind !== 'fmt' || mark.segments.length !== 1) return false;
     const segment = mark.segments[0];
@@ -137,11 +160,18 @@ export function alignHide(text: string, segment: Segment): TextChange[] {
   return changes;
 }
 
-/** The table that an alignment change's segment is around, in the text of `parsed`. */
+/** The table that an alignment change's segment belongs to, in the text of `parsed`: the one around
+ * which its range form stands, or the one whose rows hold the opener of its point form. A point that
+ * no table holds, as the opener of a range whose closer is gone, belongs to none. */
 function tableOfSegment(parsed: Parsed, segment: Segment): TableRead | undefined {
+  const tables = tablesOfText(parsed.text, parsed);
+  const { close } = segment;
+  if (!close) {
+    const { open } = segment;
+    return tables.find((table) => table.from <= open.from && open.to <= table.to);
+  }
   const head = segment.carrier?.to ?? segment.open.to;
-  const to = segment.close?.from ?? head;
-  return tablesOfText(parsed.text, parsed).find((table) => table.from >= head && table.to <= to);
+  return tables.find((table) => table.from >= head && table.to <= close.from);
 }
 
 /** The alignments of a delimiter row `line` for `columns` columns, or null when it is none. */
@@ -394,9 +424,11 @@ export function checkAlignGap(text: string, edits: readonly TextChange[], parsed
   if (marks.length === 0) return;
   const end = parsed.ledgerRange?.from ?? text.length;
   for (const mark of marks) {
+    // The point form has no closer on a line below its table, so it has no gap, and no table is read.
     const segment = mark.segments[0];
-    const table = segment ? tableOfSegment(parsed, segment) : undefined;
-    if (!segment?.close || !table) continue;
+    if (!segment?.close) continue;
+    const table = tableOfSegment(parsed, segment);
+    if (!table) continue;
     let gapEnd = segment.close.to;
     while (gapEnd < end && /\s/.test(text.charAt(gapEnd))) gapEnd++;
     for (const edit of edits) {

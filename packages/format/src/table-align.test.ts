@@ -5,9 +5,11 @@ import { applyChanges } from './changes.ts';
 import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { formatChange } from './format-blocks.ts';
+import { encodeValue } from './format-ops.ts';
+import * as format from './index.ts';
 import { parse } from './parse.ts';
-import { alignLabel } from './table-align.ts';
-import { ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+import { alignLabel, alignMarkOf, isAlignPoint } from './table-align.ts';
+import { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
 import type { TableAlign } from './table.ts';
@@ -578,5 +580,198 @@ describe('rule 5 in ruleTwo', () => {
     for (const op of ['insertRows', 'deleteRows', 'moveRows'] as const) {
       expect(ruleTwo(op, { ...none, align: true }, true)).toBeNull();
     }
+  });
+});
+
+// The point form (#281): another tool or person wrote a tracked alignment change as one mark with no
+// closer at the end of the header row's last cell, `<!--fmt ID align=SPEC-->`. It is read, named,
+// viewed and decided like the span form around a table, and touches nothing outside the table's first
+// two lines. (Writing it, and deciding it among other changes, are the next tasks of the same work.)
+describe('a point alignment change, written by another person', () => {
+  const MARK = `<!--fmt k3x9 align=${SPEC}-->`;
+  const CENTERED = FRUIT.replace('| ----- |', '| :---: |');
+  const POINT = file(
+    `| Fruit  | Count | Price${MARK} |\n| :----- | :---: | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |`,
+    { k3x9: 'bo' },
+  );
+  const LOST =
+    "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Raw with Track Changes off.";
+  const NOTE = 'Price{>>[k3x9 bo] Formatted: column Count centered (was default)<<} |';
+  const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+
+  it('is the new table with the mark at the end of its header, and SPEC is the old row', () => {
+    expect(encodeValue('| :----- | ----- | ----: |')).toBe(SPEC);
+    expect(trim(POINT)).toBe(CENTERED.replace('Price |', `Price${MARK} |`));
+  });
+
+  it('is pending, and names the column it changed', () => {
+    const parsed = parse(POINT);
+    expect(problemsOf(parsed)).toEqual([]);
+    const table = readTables(POINT, parsed)[0];
+    expect(table && pendingOf(table, parsed)).toEqual({
+      rowsInserted: false,
+      rowsChanged: false,
+      colsInserted: false,
+      colsChanged: false,
+      align: true,
+    });
+    const mark = parsed.marks[0];
+    expect(mark && formatChange(parsed, mark)).toEqual([
+      { kind: 'align', columns: [{ col: 1, name: 'Count', now: 'center', was: '' }] },
+    ]);
+    expect(mark && canReject(parsed, mark)).toBe(true);
+  });
+
+  it('names the last column by its text, with no mark in it', () => {
+    const old = encodeValue('| :----- | ----- | ----- |');
+    const last = file(
+      `| Fruit  | Count | Price<!--fmt k3x9 align=${old}--> |\n| :----- | ----- | ----: |\n| Apples | 3     | 1.20  |`,
+      { k3x9: 'bo' },
+    );
+    const parsed = parse(last);
+    const mark = parsed.marks[0];
+    expect(mark && formatChange(parsed, mark)).toEqual([
+      { kind: 'align', columns: [{ col: 2, name: 'Price', now: 'right', was: '' }] },
+    ]);
+    expect(reviewView(last)).toContain(
+      'Price{>>[k3x9 bo] Formatted: column Price right (was default)<<} |',
+    );
+  });
+
+  it('is accepted by taking the mark away and nothing else, and leaves no entry in the ledger', () => {
+    const accepted = applyChanges(POINT, accept(POINT, 'k3x9'));
+    expect(trim(accepted)).toBe(trim(POINT).replace(MARK, ''));
+    expect(trim(accepted)).toBe(CENTERED);
+    expect(parse(accepted).marks).toEqual([]);
+    expect(parse(accepted).ledger.marks).toEqual({});
+  });
+
+  it('is rejected by writing the old row back, and the file is as it was, byte for byte', () => {
+    const rejected = applyChanges(POINT, reject(POINT, 'k3x9'));
+    same(rejected, file(FRUIT));
+    expect(trim(rejected)).toBe(FRUIT);
+    expect(parse(rejected).marks).toEqual([]);
+    expect(parse(rejected).ledger.marks).toEqual({});
+  });
+
+  it('is shown as it is decided: the new row with no mark, the old table, a note where the mark stands', () => {
+    expect(trim(newestView(POINT).text)).toBe(CENTERED);
+    expect(trim(originalView(POINT).text)).toBe(FRUIT);
+    expect(reviewView(POINT)).toContain(`| Fruit  | Count | ${NOTE}`);
+    expect(reviewView(POINT)).not.toContain('align=');
+    expect(reviewView(POINT)).not.toContain('<!--');
+    // The two ways of deciding everything agree with the views.
+    expect(trim(applyChanges(POINT, acceptAll(POINT)))).toBe(trim(newestView(POINT).text));
+    expect(trim(applyChanges(POINT, rejectAll(POINT)))).toBe(trim(originalView(POINT).text));
+  });
+
+  it('is decided in every order, and no decision of it is refused', () => {
+    expectEveryOrderAlike('a point', POINT, exactly);
+    expect(expectNoDecisionRefused('a point', POINT)).toBeGreaterThan(1);
+  });
+
+  it('is the same in a CRLF file, and no line break is touched', () => {
+    const text = crlf(POINT);
+    const parsed = parse(text);
+    expect(problemsOf(parsed)).toEqual([]);
+    const mark = parsed.marks[0];
+    expect(mark && formatChange(parsed, mark)).toEqual([
+      { kind: 'align', columns: [{ col: 1, name: 'Count', now: 'center', was: '' }] },
+    ]);
+    const accepted = applyChanges(text, accept(text, 'k3x9'));
+    expect(trim(accepted)).toBe(trim(text).replace(MARK, ''));
+    expect(trim(accepted)).toBe(crlf(CENTERED));
+    same(applyChanges(text, reject(text, 'k3x9')), crlf(file(FRUIT)));
+    expect(trim(newestView(text).text)).toBe(crlf(CENTERED));
+    expect(trim(originalView(text).text)).toBe(crlf(FRUIT));
+    expect(reviewView(text)).toContain(`| Fruit  | Count | ${NOTE}\r\n`);
+    expect(trim(applyChanges(text, acceptAll(text)))).toBe(trim(newestView(text).text));
+    expect(trim(applyChanges(text, rejectAll(text)))).toBe(trim(originalView(text).text));
+  });
+
+  it('is read, shown and decided in the second of two tables, with the first as it was', () => {
+    const first = FRUIT.replace('Fruit ', 'Veg   ');
+    const body = (table: string) => `${first}\n\n${table}`;
+    const two = file(
+      body(
+        `| Fruit  | Count | Price${MARK} |\n| :----- | :---: | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |`,
+      ),
+      { k3x9: 'bo' },
+    );
+    const parsed = parse(two);
+    const [one, other] = readTables(two, parsed);
+    expect(one && alignMarkOf(parsed, one)).toBeUndefined();
+    expect(other && alignMarkOf(parsed, other)?.id).toBe('k3x9');
+    expect(one && pendingOf(one, parsed).align).toBe(false);
+    expect(other && pendingOf(other, parsed).align).toBe(true);
+    const mark = parsed.marks[0];
+    expect(mark && formatChange(parsed, mark)).toEqual([
+      { kind: 'align', columns: [{ col: 1, name: 'Count', now: 'center', was: '' }] },
+    ]);
+    same(applyChanges(two, accept(two, 'k3x9')), file(body(CENTERED)));
+    same(applyChanges(two, reject(two, 'k3x9')), file(body(FRUIT)));
+    expect(trim(newestView(two).text)).toBe(body(CENTERED));
+    expect(trim(originalView(two).text)).toBe(body(FRUIT));
+    // The note stands in the second table, and the first has none.
+    expect(reviewView(two)).toContain(`${first}\n\n| Fruit  | Count | ${NOTE}`);
+    expect(reviewView(two).match(/\{>>/g)).toHaveLength(1);
+    expectEveryOrderAlike('second table', two, exactly);
+  });
+
+  it('is read in the first of two tables, with the second as it was', () => {
+    const later = FRUIT.replace('Fruit ', 'Veg   ');
+    const two = file(`${POINT.slice(0, POINT.indexOf('\n\n<!-- redlines'))}\n\n${later}`, {
+      k3x9: 'bo',
+    });
+    const parsed = parse(two);
+    const [one, other] = readTables(two, parsed);
+    expect(one && alignMarkOf(parsed, one)?.id).toBe('k3x9');
+    expect(other && alignMarkOf(parsed, other)).toBeUndefined();
+    same(applyChanges(two, reject(two, 'k3x9')), file(`${FRUIT}\n\n${later}`));
+    same(applyChanges(two, accept(two, 'k3x9')), file(`${CENTERED}\n\n${later}`));
+  });
+
+  it('can be accepted but not rejected when its old row has more cells than the table has columns', () => {
+    // SPEC has three cells, and the table has two columns.
+    const wide = file(`| Fruit | Price${MARK} |\n| :---- | ----: |\n| Apples | 1.20 |`, {
+      k3x9: 'bo',
+    });
+    const parsed = parse(wide);
+    const mark = parsed.marks[0];
+    expect(mark && canReject(parsed, mark)).toBe(false);
+    expect(said(() => reject(wide, 'k3x9'))).toBe(LOST);
+    const accepted = applyChanges(wide, accept(wide, 'k3x9'));
+    expect(trim(accepted)).toBe('| Fruit | Price |\n| :---- | ----: |\n| Apples | 1.20 |');
+    expect(parse(accepted).marks).toEqual([]);
+  });
+
+  it('is read from the opener of a span whose closer is gone as a point that no table holds', () => {
+    const lost = file(`${MARK}\n\n${FRUIT}`, { k3x9: 'bo' });
+    const parsed = parse(lost);
+    expect(problemsOf(parsed)).toEqual([]);
+    expect(readTables(lost, parsed).map((table) => alignMarkOf(parsed, table))).toEqual([
+      undefined,
+    ]);
+    // Accepting takes the opener away; rejecting is refused, in words.
+    const accepted = applyChanges(lost, accept(lost, 'k3x9'));
+    expect(parse(accepted).marks).toEqual([]);
+    expect(trim(accepted).trim()).toBe(FRUIT);
+    expect(said(() => reject(lost, 'k3x9'))).toBe(LOST);
+  });
+
+  it('is told from the span form and from other format changes', () => {
+    const only = (text: string) => parse(text).marks[0];
+    const span = only(file(`${MARK}\n\n${FRUIT}\n\n<!--/k3x9-->`, { k3x9: 'bo' }));
+    const point = only(POINT);
+    const bold = only(file('a <!--fmt k3x9 +bold-->b<!--/k3x9--> c', { k3x9: 'bo' }));
+    const box = only(file('- [x] a<!--fmt k3x9 +check-->', { k3x9: 'bo' }));
+    const garbage = only(
+      file('| a | b<!--fmt k3x9 align=nonsense--> |\n| - | - |', { k3x9: 'bo' }),
+    );
+    const kinds = [span, point, bold, box, garbage].map(
+      (mark) => mark !== undefined && isAlignPoint(mark),
+    );
+    expect(kinds).toEqual([false, true, false, false, false]);
+    expect(format.isAlignPoint).toBe(isAlignPoint);
   });
 });

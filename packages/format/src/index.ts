@@ -65,5 +65,5 @@ export type {
 } from './table.ts';
 export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
-export { alignLabel, alignWas, isAlignMark } from './table-align.ts';
+export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';
