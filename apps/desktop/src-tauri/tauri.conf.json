@@ -84,7 +84,10 @@
     ],
     "resources": { "icons/family/*.png": "icons/family/" },
     "externalBin": ["binaries/redlines"],
-    "macOS": { "infoPlist": "document-types.plist" }
+    "macOS": {
+      "infoPlist": "document-types.plist",
+      "files": { "PlugIns/RedlinesPreview.appex": "../quicklook/build/RedlinesPreview.appex" }
+    }
   },
   "plugins": {
     "fs": {

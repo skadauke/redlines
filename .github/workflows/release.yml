@@ -15,7 +15,10 @@
 #     published.
 #
 # One universal app, for Apple silicon and Intel, built on an Apple silicon runner. The `redlines`
-# program goes inside it (bundle.externalBin), and the same steps compile and sign it.
+# program goes inside it (bundle.externalBin), and the same steps compile and sign it. So does the
+# Quick Look extension (apps/desktop/quicklook), which goes in Contents/PlugIns (bundle.macOS.files).
+# Tauri signs the app and the programs it copies, never a plug-in, so the extension is signed in a
+# step of its own, with the identity and its entitlements, before Tauri seals the app around it.
 #
 # The credentials are secrets of the `release` environment, which only `main` and tags `v*` may
 # use, so that no other branch's code is ever signed (docs/releasing.md says how each is made):
@@ -196,11 +199,17 @@ jobs:
 
       # beforeBuildCommand compiles the `redlines` program here too (scripts/build-redlines), for
       # both architectures, and `tauri bundle` then finds it in src-tauri/binaries. That script's
-      # cargo takes the crates it fetched above, and no others.
+      # cargo takes the crates it fetched above, and no others. It builds the Quick Look extension
+      # too (scripts/build-quicklook), for both architectures, signed ad hoc until there is an identity.
       - name: Compile the app
         env:
           CARGO_NET_OFFLINE: true
         run: pnpm exec tauri build --target universal-apple-darwin --no-bundle -- --locked --offline
+
+      # The extension's renderer runs in the JavaScriptCore of this runner, on the fixtures of the
+      # extension's folder, as it runs in Quick Look, and its layout, Info.plist and entitlements are read.
+      - name: Check the Quick Look extension as built
+        run: scripts/build-quicklook --check-only
 
       # From here to the clean-up, the credentials exist. The certificate goes in a keychain of its
       # own, which codesign finds it in, for Tauri to sign the app and for the disk image after it.
@@ -269,6 +278,17 @@ jobs:
             echo "::error::notarytool refused the API key. It must be a team key with the Developer role, and APPLE_API_KEY_ID and APPLE_API_ISSUER must be its key ID and issuer ID."
             exit 1
           fi
+
+      # Tauri copies the extension into the app as it is, and signs what it is told to: the app and
+      # the `redlines` program. Notarization needs the extension signed with the same identity, the
+      # hardened runtime and a secure timestamp, and the sandbox entitlement that an app extension
+      # must have, which signing it again without them would take away. So it is signed here, once,
+      # and never again.
+      - name: Sign the Quick Look extension
+        if: steps.credentials.outputs.sign == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: scripts/build-quicklook --sign-only
 
       # Tauri signs the app and the `redlines` program in it with the identity, notarizes and
       # staples the app, and makes the update from the stapled app, signed with the updater key.
@@ -411,6 +431,21 @@ jobs:
           bare --help > /dev/null
           bare str-replace "$document" --old March --new April --as release-check
           test "$(bare view "$document" 2> /dev/null)" = 'We ship in April.'
+
+      # Where the extension is in the app, that it holds both architectures, and, for a signed build,
+      # that it is signed with the identity and a timestamp by the app's own team, with the hardened
+      # runtime, the sandbox and nothing else but JavaScriptCore's compiler, and that the app's seal
+      # still holds with it inside. After notarization, the stapled app is the one that is checked.
+      - name: Check the Quick Look extension in the app
+        env:
+          SIGN: ${{ steps.credentials.outputs.sign }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGN" = true ]; then
+            scripts/build-quicklook --check-app "$APP" --signed
+          else
+            scripts/build-quicklook --check-app "$APP"
+          fi
 
       # The manifest is only written once the update's signature is checked against the public key
       # in tauri.conf.json, as installed copies will check it.

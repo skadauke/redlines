@@ -19,6 +19,12 @@ export const MIN_VERSION = '0.166.0';
 
 export const SIGNED_OUT_HELP = 'Run `codex login`.';
 
+/** How Codex's own page says to install it. Redlines shows it and never runs it. */
+export const INSTALL_COMMAND = 'brew install --cask codex';
+
+/** What Codex says when it isn't signed in: said in `failureFrom`, and asked for here. */
+const NOT_SIGNED_IN = `Codex isn't signed in. ${SIGNED_OUT_HELP}`;
+
 /**
  * What Codex hands the model by default that Redlines turns off: the person's ChatGPT connectors
  * (GitHub commits, deleting files...), plugins, image generation, goals and the browsers, and its
@@ -114,7 +120,7 @@ export function newCodexState(): CodexState {
 /** One quiet line for a failure message from Codex. */
 function failureFrom(message: string): string {
   if (/\b401\b|unauthorized|not logged in|bearer/i.test(message)) {
-    return `Codex isn't signed in. ${SIGNED_OUT_HELP}`;
+    return NOT_SIGNED_IN;
   }
   if (/usage limit|rate.?limit|\b429\b/i.test(message)) {
     return 'Codex has hit its usage limit. Try again later.';
@@ -226,10 +232,12 @@ export function createCodexProvider(
       const state = await detectAgent(processes, {
         name: 'Codex',
         binary: 'codex',
-        notFoundHelp: "Codex isn't installed on this Mac. Install it (brew install --cask codex).",
+        notFoundHelp: "Codex isn't installed on this Mac.",
+        installCommand: INSTALL_COMMAND,
         minVersion: MIN_VERSION,
         signedOutHelp: SIGNED_OUT_HELP,
-        // Prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1.
+        // Prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1, on its
+        // standard error, which the app doesn't read: the exit code is the answer.
         statusArgs: ['login', 'status'],
         isSignedIn: (status) => status.code === 0,
       });
@@ -254,6 +262,8 @@ export function createCodexProvider(
           parse: parseCodexLine,
           failure: (state) =>
             state.lastError === undefined ? undefined : failureFrom(state.lastError),
+          // Signing in again is Preferences' to offer; a usage limit or a network error isn't.
+          setup: (message) => message === NOT_SIGNED_IN,
         },
         options,
         request,

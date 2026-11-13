@@ -98,8 +98,46 @@ body {
   user-select: none;
 }
 
-.rl-title {
+/* The file name and the document's icon beside it, centered as one. */
+.rl-title-group {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: calc(4 * var(--rl-frame));
+  min-width: 0;
+}
+
+/*
+ * The document's icon, which drags the file as a proxy icon does (the bar's own drag moves the
+ * window, and this is left out of it). Quiet, and a step darker under the pointer.
+ */
+.rl-doc-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(20 * var(--rl-frame));
+  height: calc(28 * var(--rl-frame));
+  color: var(--rl-ink-2);
+}
+
+.rl-doc-icon:hover {
+  color: var(--rl-ink);
+}
+
+.rl-doc-icon svg {
+  width: calc(16 * var(--rl-frame));
+  height: calc(16 * var(--rl-frame));
+}
+
+/*
+ * The file name takes the pointer: a double-click on it renames, and the facts under it show on
+ * hover. Its padding makes a target about as tall as the icons beside it; a drag on it still moves
+ * the window, as the rest of the bar does.
+ */
+.rl-title {
+  min-width: 0;
+  padding: calc(8 * var(--rl-frame)) calc(4 * var(--rl-frame));
   overflow: hidden;
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-frame);
@@ -107,7 +145,6 @@ body {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
 }
 
 .rl-title-field {
@@ -122,7 +159,6 @@ body {
   font: inherit;
   text-align: center;
   outline: none;
-  pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
 }
@@ -762,14 +798,30 @@ body {
     border-left-color: var(--rl-mixed);
   }
 
-  /* The bars of the text, drawn in a layer beside the screen lines that hold a change. */
-  #editor .rl-bar-seg {
+  /*
+   * The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the text
+   * differently: the layer is left out, and each line that holds a change prints a bar down its
+   * whole paragraph, as the lines drew it before the layer.
+   */
+  #editor .rl-bar-layer {
+    display: none;
+  }
+
+  #editor .cm-line.rl-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -24px;
     width: 0;
-    background: none;
     border-left: 2px solid var(--rl-color);
   }
 
-  #editor .rl-bar-seg.rl-bar-mixed {
+  #editor .cm-line.rl-bar-mixed::before {
     border-left-color: var(--rl-mixed);
+  }
+
+  #editor .cm-line.rl-quote.rl-bar::before {
+    left: -26px;
   }
 }

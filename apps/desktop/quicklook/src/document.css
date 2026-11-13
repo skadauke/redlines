@@ -1,0 +1,317 @@
+/*
+ * The finished document as the Default theme draws it (design §5.3, §6.6): what the editor's Clean
+ * view shows, as the CSS of a page with no script. The sizes, fonts, colors and spaces are the
+ * theme's tokens (theme.ts), the shapes are those of packages/editor/src/preview/theme.ts: a
+ * centered column on the page, headings with more space above than below, links as text and never
+ * as color (color means a person), a quiet front matter, a header row on the darker rule.
+ */
+
+html {
+  background: var(--rl-page);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--rl-ink);
+  background: var(--rl-page);
+  font-family: var(--rl-font-body);
+  font-size: var(--rl-size-body);
+  line-height: var(--rl-line-height);
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.rl-page {
+  box-sizing: border-box;
+  max-width: calc(var(--rl-column) + 2 * var(--rl-margin));
+  margin: 0 auto;
+  padding: 32px var(--rl-margin) 56px;
+}
+
+/* The space between blocks, by the kind of the block above: each block keeps the space of the
+   block before it, and a heading adds the space it keeps above itself (--above). */
+.rl-doc > * {
+  margin: calc(var(--rl-space-block) + var(--above, 0px)) 0 0;
+}
+.rl-doc > h1 + * {
+  margin-top: calc(var(--rl-space-h1) + var(--above, 0px));
+}
+.rl-doc > h2 + *,
+.rl-doc > h3 + *,
+.rl-doc > h4 + *,
+.rl-doc > h5 + *,
+.rl-doc > h6 + * {
+  margin-top: calc(var(--rl-space-heading) + var(--above, 0px));
+}
+.rl-doc > :first-child {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--rl-font-heading);
+  font-weight: var(--rl-weight-heading);
+  line-height: 1.25;
+}
+h1 {
+  --above: 0.3em;
+  font-size: var(--rl-size-h1);
+  letter-spacing: var(--rl-tracking-h1);
+  line-height: 1.15;
+}
+h2 {
+  --above: 0.8em;
+  font-size: var(--rl-size-h2);
+}
+h3 {
+  --above: 0.7em;
+  font-size: var(--rl-size-h3);
+}
+h4,
+h5,
+h6 {
+  --above: 0.5em;
+  font-size: 1em;
+}
+h6 {
+  color: var(--rl-ink-2);
+}
+.rl-doc > :first-child:is(h1, h2, h3, h4, h5, h6) {
+  --above: 0px;
+}
+
+p,
+ul,
+ol,
+blockquote,
+pre,
+table,
+hr,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+}
+
+strong {
+  font-weight: 700;
+}
+em {
+  font-style: italic;
+}
+del {
+  color: var(--rl-ink-2);
+  text-decoration: line-through;
+}
+sup {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+/* Links are text, not color: color means a person. */
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rl-ink-3);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+/* An image the preview doesn't load: its alt text, quietly. */
+.rl-image {
+  color: var(--rl-ink-3);
+}
+
+code {
+  padding: 0.12em 0.38em;
+  border-radius: 5px;
+  background: var(--rl-tint);
+  font-family: var(--rl-font-mono);
+  font-size: 0.84em;
+}
+
+pre {
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: var(--rl-tint);
+  font-family: var(--rl-font-mono);
+  font-size: 0.86em;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}
+
+/* The header of an R Markdown or Quarto chunk, its engine and options, as the file has them. */
+code[data-chunk]::before {
+  content: attr(data-chunk);
+  display: block;
+  margin-bottom: 0.6em;
+  color: var(--rl-ink-3);
+}
+
+/* Front matter is about the document rather than part of it: dimmed, in code's face. */
+.rl-frontmatter {
+  color: var(--rl-ink-2);
+  white-space: pre-wrap;
+}
+
+blockquote {
+  padding-left: 18px;
+  border-left: 2px solid var(--rl-rule);
+  color: var(--rl-quote-color);
+  font-family: var(--rl-quote-font);
+  font-size: var(--rl-quote-size);
+  font-style: var(--rl-quote-style);
+}
+blockquote > * + * {
+  margin-top: var(--rl-space-loose);
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rl-rule);
+}
+
+ul,
+ol {
+  padding-left: 1.6em;
+}
+li::marker {
+  color: var(--rl-ink-2);
+}
+li > p {
+  margin: 0;
+}
+li > * + * {
+  margin-top: var(--rl-space-item);
+}
+li + li {
+  margin-top: var(--rl-space-item);
+}
+/* A loose list, whose items hold paragraphs, keeps the space of paragraphs. */
+.rl-loose + .rl-loose,
+li > p + *,
+li > * + p {
+  margin-top: var(--rl-space-loose);
+}
+
+/* Task boxes: a small box in the third ink, filled in the second when checked, never red. It takes
+   the place of the item's marker, and the text stays where the other items' text is. */
+.rl-task {
+  margin-left: -1.6em;
+  list-style: none;
+}
+input[type='checkbox'] {
+  box-sizing: border-box;
+  display: inline-block;
+  position: relative;
+  width: 0.8em;
+  height: 0.8em;
+  margin: 0 0.8em 0 0;
+  border: 1.25px solid var(--rl-ink-3);
+  border-radius: 0.18em;
+  vertical-align: middle;
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type='checkbox']:checked {
+  border-color: var(--rl-ink-2);
+  background: var(--rl-ink-2);
+}
+input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 0.22em;
+  top: 0.04em;
+  width: 0.18em;
+  height: 0.38em;
+  border: solid var(--rl-page);
+  border-width: 0 0.12em 0.12em 0;
+  transform: rotate(45deg);
+}
+
+/* Tables: a header row and horizontal rules only. */
+.rl-tbl-scroll {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.94em;
+  line-height: 1.45;
+}
+th,
+td {
+  padding: 10px 16px 10px 0;
+  border-bottom: 1px solid var(--rl-rule);
+  text-align: left;
+  vertical-align: top;
+}
+th:last-child,
+td:last-child {
+  padding-right: 0;
+}
+th {
+  padding-top: 0;
+  padding-bottom: 8px;
+  border-bottom-color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
+  font-family: var(--rl-th-font);
+  font-size: var(--rl-th-size);
+  font-weight: 700;
+  letter-spacing: var(--rl-th-track);
+  text-transform: var(--rl-th-case);
+}
+[align='center'] {
+  text-align: center;
+}
+[align='right'] {
+  text-align: right;
+}
+
+/* Footnotes, which a reader finds below the text. */
+section[data-footnotes] {
+  margin-top: calc(var(--rl-space-block) * 2);
+  padding-top: var(--rl-space-block);
+  border-top: 1px solid var(--rl-rule);
+  color: var(--rl-ink-2);
+  font-size: 0.92em;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* What the preview says about itself: the changes waiting in the file, and a document cut short. A
+   caption, in the theme's interface face and its small size, under a rule. */
+.rl-notice {
+  margin: 0 0 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rl-rule);
+  color: var(--rl-ink-2);
+  font-family: var(--rl-font-ui);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1.4;
+}
+.rl-notice.rl-notice-after {
+  margin: 32px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--rl-rule);
+  border-bottom: 0;
+}

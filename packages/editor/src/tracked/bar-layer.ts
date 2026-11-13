@@ -140,6 +140,41 @@ function struckPieces(el: Element): DrawnPiece[] {
   return pieces;
 }
 
+/**
+ * The screen lines of a line of the file from where each stretch of its text starts and how tall
+ * the text is there (`stops`, in the viewport's coordinates), and the line's own `box`. A stop on
+ * the row of the one before it is no new screen line: CodeMirror gives the position before a marker
+ * the view hides as the end of a row, and what follows it is on the same row. The bands of the
+ * screen lines meet halfway between their text, and the first and last reach the box's top and
+ * bottom, with its spacing: a bar as tall as the line where every screen line holds a change.
+ */
+export function bandsOf(
+  stops: readonly ScreenLine[],
+  box: { top: number; bottom: number },
+  line: { from: number; to: number },
+): ScreenLine[] {
+  const rows: ScreenLine[] = [];
+  for (const stop of stops) {
+    const row = rows.at(-1);
+    // A new row starts below the middle of the text of the one before, not below its bottom: the
+    // text boxes of lines set tight overlap.
+    if (row && stop.top < (row.top + row.bottom) / 2) row.to = stop.to;
+    else rows.push({ ...stop });
+  }
+  const last = rows.at(-1);
+  // The walk can stop short, where the page gives no position (a hidden range): the rest of the line
+  // is the last row's.
+  if (last) last.to = line.to;
+  if (!rows.length) return [{ from: line.from, to: line.to, top: box.top, bottom: box.bottom }];
+  return rows.map((row, i) => ({
+    from: row.from,
+    to: row.to,
+    top: i === 0 ? box.top : ((rows[i - 1]?.bottom ?? row.top) + row.top) / 2,
+    bottom:
+      i === rows.length - 1 ? box.bottom : (row.bottom + (rows[i + 1]?.top ?? row.bottom)) / 2,
+  }));
+}
+
 /** The real page: the screen lines found by where CodeMirror says each one starts and ends. */
 const pageMeasure: BarMeasure = {
   screenLines(view, line) {
@@ -147,9 +182,9 @@ const pageMeasure: BarMeasure = {
     if (!el) return null;
     const box = el.getBoundingClientRect();
     if (!box.height) return null;
-    // Where each screen line starts, its end and the text's own height there.
-    const found: ScreenLine[] = [];
-    for (let pos = line.from; found.length < MAX_SCREEN_LINES;) {
+    // Where each stretch of the text starts, its end and the text's own height there.
+    const stops: ScreenLine[] = [];
+    for (let pos = line.from; stops.length < MAX_SCREEN_LINES;) {
       const coords = view.coordsAtPos(pos, 1);
       if (!coords) break;
       let end = Math.min(
@@ -157,32 +192,12 @@ const pageMeasure: BarMeasure = {
         view.moveToLineBoundary(EditorSelection.cursor(pos, 1), true).head,
       );
       // A boundary that doesn't go on leaves the rest of the line as one screen line.
-      if (end <= pos || found.length === MAX_SCREEN_LINES - 1) end = line.to;
-      found.push({ from: pos, to: end, top: coords.top, bottom: coords.bottom });
+      if (end <= pos || stops.length === MAX_SCREEN_LINES - 1) end = line.to;
+      stops.push({ from: pos, to: end, top: coords.top, bottom: coords.bottom });
       if (end >= line.to) break;
       pos = end;
     }
-    const drawn = struckPieces(el);
-    if (!found.length) {
-      return {
-        left: box.left,
-        lines: [{ from: line.from, to: line.to, top: box.top, bottom: box.bottom }],
-        drawn,
-      };
-    }
-    // The bands meet halfway between the text of neighboring screen lines, and the first and last
-    // reach the line's own top and bottom, with its spacing: a bar as tall as the line, as before.
-    return {
-      left: box.left,
-      drawn,
-      lines: found.map((s, i) => ({
-        from: s.from,
-        to: s.to,
-        top: i === 0 ? box.top : ((found[i - 1]?.bottom ?? s.top) + s.top) / 2,
-        bottom:
-          i === found.length - 1 ? box.bottom : (s.bottom + (found[i + 1]?.top ?? s.bottom)) / 2,
-      })),
-    };
+    return { left: box.left, lines: bandsOf(stops, box, line), drawn: struckPieces(el) };
   },
 };
 

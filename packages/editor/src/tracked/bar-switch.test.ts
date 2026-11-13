@@ -253,14 +253,14 @@ describe('the click on a change bar', () => {
     };
 
     /** The editor with its own real geometry, the layout stood in for by the measure and three stubs. */
-    function loadWrapped(view: 'simple' | 'redlines' = 'simple') {
+    function loadWrapped(view: 'simple' | 'redlines' = 'simple', page: BarMeasure = measure) {
       const parent = document.createElement('div');
       document.body.append(parent);
       const editor = createEditor(parent, {
         doc: wrapped,
         author: ada,
         view,
-        extensions: [barMeasure.of(measure)],
+        extensions: [barMeasure.of(page)],
       });
       open.push(editor);
       Object.assign(editor.view.contentDOM, {
@@ -295,6 +295,38 @@ describe('the click on a change bar', () => {
       expect(editor.view.state.field(hotBar)).toEqual({ from: breaks[0] });
       scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 60 }));
       expect(editor.view.state.field(hotBar)).toBeNull();
+    });
+
+    it('measures nothing for a pointer beside a line that holds no change', () => {
+      // A plain line above the paragraph: it is measured only where it holds a change, since a long
+      // paragraph is costly to measure and the pointer crosses many lines.
+      const plain = 'Plain line.\n\n';
+      const measured: number[] = [];
+      const counting: BarMeasure = {
+        screenLines: (view, line) => {
+          measured.push(line.from);
+          return measure.screenLines(view, line);
+        },
+      };
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: plain + wrapped,
+        author: ada,
+        view: 'simple',
+        extensions: [barMeasure.of(counting)],
+      });
+      open.push(editor);
+      Object.assign(editor.view.contentDOM, {
+        getBoundingClientRect: () => ({ left: LEFT, right: LEFT + 600, top: 0, bottom: 72 }),
+      });
+      Object.assign(editor.view, { posAtCoords: () => 3 });
+      editor.view.scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 10 }));
+      expect(measured).toEqual([]);
+      // Beside a line that holds one it measures, to know which screen lines the bar is beside.
+      Object.assign(editor.view, { posAtCoords: () => plain.length + idx });
+      editor.view.scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 30 }));
+      expect(measured).toEqual([plain.length]);
     });
 
     it('tells the handlers which piece of the bar was clicked, so the one beside those screen lines', () => {
