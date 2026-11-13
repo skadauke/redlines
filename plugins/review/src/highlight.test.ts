@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { EditorState } from '@codemirror/state';
-import { baseTitle, type Editor } from '@redlines/editor';
+import { baseTitle, parsedField, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { highlightsAt, highlightTitle } from './highlight.ts';
 import { HIGHLIGHT_COMMAND } from './index.ts';
 import { file, mount, PEOPLE, press, thread, unmountAll } from './test-helpers.ts';
@@ -202,6 +202,10 @@ describe('the Highlight command', () => {
     expect(notices).toEqual(['Select some text to highlight.']);
     expect(doc(editor)).toBe(file('One  two.', PEOPLE));
     // The ledger's people are no text: a caret in the ledger, which is hidden, is no word either.
+    caretAt(editor, place(editor, 'Ada Lovelace').from + 1);
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(false);
+    expect(notices).toEqual(['Select some text to highlight.', 'Select some text to highlight.']);
+    expect(doc(editor)).toBe(file('One  two.', PEOPLE));
     expect(highlights(editor)).toEqual([]);
   });
 
@@ -493,10 +497,26 @@ describe('what the Format menu and the palette show of Highlight', () => {
     }
   });
 
-  it('reads the highlights of a parse once, and of the state it is asked about', () => {
-    const { editor } = mount(marked);
+  it('reads the highlights of a parse once, however often it is asked, and of the parse it is asked about', () => {
+    const { editor } = mount(marked, { real: true });
+    caretAt(editor, place(editor, 'importer').from + 2);
     const state = editor.view.state;
-    expect(highlightsAt(state)).toEqual(highlightsAt(state));
-    expect(parse(doc(editor)).marks.filter((mark) => mark.kind === 'hl')).toHaveLength(2);
+    const parsed = state.field(parsedField);
+    // Asked again and again, as a menu and a palette do at every change, a parse is filtered for its
+    // highlights once at most: it already was, when the menu first asked, or it is by the first call
+    // here. Nothing else runs between the calls, so the filter that is counted is the memo's.
+    const filter = vi.spyOn(parsed.marks, 'filter');
+    for (let asked = 0; asked < 5; asked++) {
+      expect(highlightsAt(state).map((mark) => mark.id)).toEqual(['h4kz']);
+    }
+    expect(filter.mock.calls.length).toBeLessThanOrEqual(1);
+    filter.mockRestore();
+    // Another parse has its own highlights: the memo is of the parse, not of the editor.
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    expect(editor.view.state.field(parsedField)).not.toBe(parsed);
+    expect(highlightsAt(editor.view.state)).toEqual([]);
+    caretAt(editor, place(editor, 'April').from + 2);
+    expect(highlightsAt(editor.view.state).map((mark) => mark.id)).toEqual(['w8nn']);
+    expect(parse(doc(editor)).marks.filter((mark) => mark.kind === 'hl')).toHaveLength(1);
   });
 });
