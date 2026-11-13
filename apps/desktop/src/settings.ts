@@ -71,6 +71,12 @@ export interface Settings {
    * given (design §5.5). Never you, who always have the first color.
    */
   people: readonly MetPerson[];
+  /**
+   * The folder the Save dialog opens in for a document that has no file yet (Preferences, General,
+   * #309), as a full path; null leaves it to macOS, which opens it where it last saved. Save As of
+   * a saved document starts in that document's own folder, whatever this says.
+   */
+  newDocumentFolder: string | null;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -97,6 +103,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   agentScope: 'folder',
   consent: {},
   people: [],
+  newDocumentFolder: null,
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -142,6 +149,10 @@ export function loadSettings(): Settings {
     agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
+    newDocumentFolder:
+      typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
+        ? value['newDocumentFolder']
+        : null,
   };
 }
 

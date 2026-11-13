@@ -4,7 +4,9 @@
 import { decodePayload, encodePayload } from './payload.ts';
 import type { MarkRange, Segment } from './types.ts';
 
-export type InlineFormat = 'bold' | 'italic' | 'strike' | 'code';
+/** The inline formats a person asks for. `sub` and `sup` are the HTML tags `<sub>` and `<sup>`, in
+ * every file type (format §2.6): the first of the short list of tags that are formats. */
+export type InlineFormat = 'bold' | 'italic' | 'strike' | 'code' | 'sub' | 'sup';
 
 export type BlockType =
   'p' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'ul' | 'ol' | 'task' | 'quote';
@@ -49,7 +51,14 @@ export interface ParsedFormatOp {
   inverse?: FormatOp;
 }
 
-export const INLINE_FORMATS: readonly InlineFormat[] = ['bold', 'italic', 'strike', 'code'];
+export const INLINE_FORMATS: readonly InlineFormat[] = [
+  'bold',
+  'italic',
+  'strike',
+  'code',
+  'sub',
+  'sup',
+];
 const BLOCK_TYPES: readonly string[] = [
   'p',
   'h1',
@@ -70,7 +79,19 @@ export const DELIMITER: Record<InlineFormat, string> = {
   italic: '*',
   strike: '~~',
   code: '`',
+  sub: '<sub>',
+  sup: '<sup>',
 };
+
+/** The formats that are written with a tag: what stands behind the text is the closing tag, not the
+ * mirror image of the opening one. */
+const CLOSING_TAG: Partial<Record<InlineFormat, string>> = { sub: '</sub>', sup: '</sup>' };
+
+/** What closes `syntax`, the opening syntax of `format`, behind the text: the closing tag of a tag,
+ * otherwise the mirror image of the syntax (`__`, backticks and a space inside them). */
+export function closingOf(format: InlineFormat, syntax: string): string {
+  return CLOSING_TAG[format] ?? [...syntax].reverse().join('');
+}
 
 export const isInlineFormat = (name: string): name is InlineFormat =>
   (INLINE_FORMATS as readonly string[]).includes(name);
@@ -208,6 +229,9 @@ const REMOVED_SYNTAX: Record<InlineFormat, RegExp> = {
   italic: /^[*_]$/,
   strike: /^~~?$/,
   code: /^`+ ?$/,
+  // Only the tag as the serializer writes it is read as a format: another is a tag shown as written.
+  sub: /^<sub>$/,
+  sup: /^<sup>$/,
 };
 
 /** Whether rejecting knows what an operation of the inline formats or a link asks for. */
