@@ -1,0 +1,116 @@
+// Highlights (format §2.2, §4): a reviewer's highlight is a range of text written as
+// `<!--hl ID-->text<!--/ID-->`, with its entry in the ledger. It changes no text, so no view is
+// different once it is made. It has no thread and no point form. Where its markers go is where a
+// comment's go (anchors.ts), and accepting or rejecting it, which dismisses it and leaves the text
+// (decide.ts), is how it is taken away.
+
+import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
+import type { AnchorWords } from './anchors.ts';
+import { applyChanges } from './changes.ts';
+import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
+import { EditError } from './errors.ts';
+import { idsIn, newId } from './ids.ts';
+import { parse } from './parse.ts';
+import { readTables } from './table.ts';
+import { annotationAcrossRows } from './table-rules.ts';
+import type { EditContext, MarkEntry, Range, TextChange } from './types.ts';
+
+/** Why a highlight can't be made on a range that covers no text. */
+const NO_TEXT = 'Select some text to highlight.';
+
+/** What a person can do when the markers of a highlight have no place where they chose. */
+const SELECT_OTHER = 'Select other text to highlight.';
+
+/** What a refused highlight says (see `AnchorWords`). Code, fenced or indented or in a code span,
+ * and an HTML comment, read their markers as text (format §2.1). */
+const HIGHLIGHT_WORDS: AnchorWords = {
+  frontMatter: "A highlight can't be made in front matter yet. Select text in the body instead.",
+  noPlace: 'There is no place for the markers of this highlight.',
+  inCode:
+    "A highlight can't be made inside code or an HTML comment, where its markers would not be read. Highlight the whole code span or comment instead, or the text around a code block.",
+};
+
+/**
+ * A highlight that would run from one row of a table into another, in a table with a row move
+ * pending, is refused when it is made, as a comment is: the move could then be accepted but not
+ * rejected. (A row with no pipe at its start can't begin with a marker, so a highlight on its first
+ * word starts at the end of the row above.) The words name the person who moved the rows.
+ */
+function refuseAcrossMovedRows(after: string, id: string): void {
+  if (!after.includes(' row-->')) return;
+  const parsed = parse(after);
+  for (const table of readTables(after, parsed)) {
+    const moved = table.rows.find((row) => row.insertion?.entry.move !== undefined);
+    if (!moved?.insertion || !annotationAcrossRows(table, parsed, 'hl', id)) continue;
+    const by = moved.insertion.entry.by;
+    const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
+    throw new EditError(
+      `${name}'s move of rows in this table is pending, and this highlight would run from one row into the next. Decide the move first, or highlight inside one row.`,
+      'no-legal-placement',
+    );
+  }
+}
+
+/**
+ * Adds a highlight by `ctx.author` on a range of the file, which is written as
+ * `<!--hl ID-->text<!--/ID-->`, with an entry for it in the ledger: its author and time, and the
+ * note and group that `ctx` has. An end of the range that falls inside a marker is moved out of it,
+ * so the highlight covers the marker, and the ends go where a comment's go (format §3.1 to §3.3,
+ * §4): out of a link destination and an image, off a delimiter whose flanking a marker would
+ * change, and off the start of a block, where its opener gets a line of its own. A range that
+ * reaches into the ledger ends where the body does. No text changes.
+ *
+ * @returns the changes, in offsets of `text`, and the id of the highlight.
+ * @throws RangeError when the range lies outside the text.
+ * @throws EditError when the range covers no text, which a highlight has no form for
+ *   (`empty-range`), is in front matter, or would put the markers inside code or an HTML comment,
+ *   or where no place keeps the text as it reads, or across rows of a table with a row move
+ *   pending; and when the ledger can't be read.
+ */
+export function addHighlight(
+  text: string,
+  range: Range,
+  ctx: EditContext,
+): { changes: TextChange[]; id: string } {
+  assertRange(text, range);
+  const parsed = parse(text);
+  const bodyEnd = parsed.ledgerRange?.from ?? text.length;
+  const wanted = { from: Math.min(range.from, bodyEnd), to: Math.min(range.to, bodyEnd) };
+  if (wanted.from === wanted.to) throw new EditError(NO_TEXT, 'empty-range');
+  const markers = markerRanges(parsed);
+  let placed: Range;
+  try {
+    placed = anchorRange(text, parsed, markers, wanted, HIGHLIGHT_WORDS);
+  } catch (error) {
+    // Where a marker can't go is told in words that every edit shares, which say why but not what
+    // to do (format §3.1): a highlight says that too.
+    if (error instanceof EditError && error.code === 'no-legal-placement') {
+      throw new EditError(`${error.message} ${SELECT_OTHER}`, error.code);
+    }
+    throw error;
+  }
+  const { from, to } = placed;
+  // The ends moved together: the range was white space between blocks, or lines, with no text.
+  if (from === to) throw new EditError(NO_TEXT, 'empty-range');
+
+  const id = newId(idsIn(text), ctx.random);
+  const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
+  if (ctx.group !== undefined) entry.group = ctx.group;
+  if (ctx.note !== undefined) entry.note = ctx.note;
+  const ledger = workingLedger(parsed.ledger);
+  addPerson(ledger, ctx.author);
+  ledger.marks[id] = entry;
+
+  const anchors: TextChange[] = [
+    { from, to: from, insert: `<!--hl ${id}-->` },
+    { from: to, to, insert: `<!--/${id}-->` },
+  ];
+  const changes = commitEdit(text, anchors, ledger, {
+    parsed,
+    created: [id],
+    verify: (after) => checkAnchor(after, id, true, HIGHLIGHT_WORDS.inCode),
+    inCode: HIGHLIGHT_WORDS.inCode,
+  });
+  refuseAcrossMovedRows(applyChanges(text, changes), id);
+  return { changes, id };
+}

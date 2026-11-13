@@ -261,9 +261,22 @@ export function commentAcrossRows(
   table: TableRead,
   parsed: Parsed,
 ): { mark: MarkRange; name: string } | null {
+  return annotationAcrossRows(table, parsed, 'cmt');
+}
+
+/**
+ * A comment (`cmt`) or a highlight (`hl`) whose markers are in different rows of the table: the
+ * first, or the one with the id `only`. Returns the person's name with the mark, or null.
+ */
+export function annotationAcrossRows(
+  table: TableRead,
+  parsed: Parsed,
+  kind: 'cmt' | 'hl',
+  only?: string,
+): { mark: MarkRange; name: string } | null {
   const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
   for (const mark of parsed.marks) {
-    if (mark.kind !== 'cmt') continue;
+    if (mark.kind !== kind || (only !== undefined && mark.id !== only)) continue;
     for (const { open, close } of mark.segments) {
       if (!close) continue;
       const a = rowOf(open.from);

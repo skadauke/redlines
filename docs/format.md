@@ -171,8 +171,12 @@ mark's markers there than the file had.
 - Joining two blocks deletes the break between them (§3.4). There is no separate kind for it.
 - A highlight is a review annotation, hidden outside Redlines like every mark. Highlighting as
   part of the content (`==text==`, `<mark>`) is formatting, and adding it is a format change
-  (`+mark`). Accepting or rejecting a highlight dismisses it and leaves the text; a highlight
-  whose text is all removed by a decision goes with it.
+  (`+mark`). A highlight is made on a range of text, and on nothing else: it has no point form, so
+  a range that covers no text is refused ("Select some text to highlight."), and it changes no
+  text, so neither view reads otherwise once it is made. Making one writes its markers, placed as
+  a comment's are (§4), and its entry in the ledger (`by` and `at`, §5.4), and adds its author to
+  `people`. Accepting or rejecting a highlight dismisses it and leaves the text, which is how it is
+  taken away; a highlight whose text is all removed by a decision goes with it.
 
 ### 2.3 Ids
 
@@ -1906,9 +1910,12 @@ it, one per line:
   Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
   at its start has its opener at the end of the row above, so it crosses the line break, and moving
   rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
-  table with a row move pending is refused, naming the person who moved the rows. Deleting the header
-  is refused in the same two cases (the row that would be the header has another number of cells,
-  or a comment's marker after its closing pipe is a cell too many), tracked or not. A
+  table with a row move pending is refused, naming the person who moved the rows, and so is adding
+  a highlight that runs from one row into another ("Ada Lovelace's move of rows in this table is
+  pending, and this highlight would run from one row into the next. Decide the move first, or
+  highlight inside one row."). Deleting the header is refused in the same two cases (the row that
+  would be the header has another number of cells, or a comment's marker after its closing pipe is
+  a cell too many), tracked or not. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first
@@ -2119,8 +2126,8 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
 `frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
-an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
-edited with Track Changes on yet."
+an edit, a comment or a highlight there is refused with the error code `front-matter`: "Front
+matter can't be edited with Track Changes on yet."
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
 the body's, and are written plain; anything else typed there is refused as an edit of front matter.
@@ -2368,6 +2375,19 @@ A comment thread is anchored in the body and stored in the ledger under the same
   start of the body, and under another blank line, where no text is right above it, it starts at
   the text of the block below: an opener alone on the blank line would take its line break for its
   carrier (§3.3).
+- **Highlights** (§2.2) are anchored as comments are, and have no thread:
+  `<!--hl ID-->text<!--/ID-->`, a range that may span blocks, with its entry in `marks` (§5.4).
+  Making one changes no text. Its ends are placed as a comment's are (above, and §3.1 to §3.3),
+  and a range that reaches into the ledger ends where the body does. It is refused where a
+  comment's anchor is, in words about highlights: in code or an HTML comment, where its markers
+  would not be read (`inside-code`, "A highlight can't be made inside code or an HTML comment, …"),
+  in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
+  the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the
+  reason, and "Select other text to highlight."), and across rows of a table while a move of rows
+  is pending in it (§3.7). A highlight has no point form: a range that covers no text, such as a
+  point, or the line breaks between two blocks once its ends are placed, is refused with the error
+  code `empty-range` ("Select some text to highlight."). Accepting or rejecting a highlight, which
+  dismisses it and leaves the text, takes it away again.
 - **Typing** at the end of a comment's range extends it. Typing at its start doesn't. A highlight's
   range takes typed text the same way, with Track Changes on or off. A line break is not text of
   the range: Enter at its end goes after the closer, and in front of it after the opener, so that
