@@ -9,7 +9,7 @@ import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
-import { LADDER } from './text-size.ts';
+import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
 
 /**
  * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
@@ -53,7 +53,7 @@ export interface Settings {
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   /**
-   * The zoom of every window (zoom.ts), a rung of the ladder (text-size.ts). The app keeps the
+   * The zoom of every window (zoom.ts), a rung of the window zoom's ladder (`ZOOM_LADDER`, text-size.ts). The app keeps the
    * level in its own file and sets it on every window; this is the copy each window asks from.
    */
   zoom: number;
@@ -335,16 +335,18 @@ function isAppearanceChoice(value: unknown): value is AppearanceChoice {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-/** A text size: any whole percent from 80 to 200, where a pinch may leave it (text-size.ts). */
+/** A text size: any whole percent from 80 to 400, where a pinch may leave it (text-size.ts). */
 function isTextSize(value: unknown): value is number {
   if (typeof value !== 'number') return false;
   const percent = value * 100;
   return (
-    percent >= 80 - 1e-9 && percent <= 200 + 1e-9 && Math.abs(percent - Math.round(percent)) < 1e-9
+    percent >= TEXT_LEAST * 100 - 1e-9 &&
+    percent <= TEXT_MOST * 100 + 1e-9 &&
+    Math.abs(percent - Math.round(percent)) < 1e-9
   );
 }
 
-/** A rung of the ladder (text-size.ts): the zoom is always one. */
+/** A rung of the window zoom's ladder (text-size.ts): the zoom is always one. */
 function isRung(value: unknown): value is number {
-  return typeof value === 'number' && LADDER.includes(value);
+  return typeof value === 'number' && ZOOM_LADDER.includes(value);
 }
