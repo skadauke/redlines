@@ -218,7 +218,7 @@ The window, on the desktop:
   size at 100%. The text column grows with the text until it meets the margins, and only then do
   lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
   and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
-  are dots that open on hover. Both are each person's, for every window, kept across launches;
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
   neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing

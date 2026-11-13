@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { ZOOM_LADDER } from './text-size.ts';
+import { stepSize, ZOOM_LADDER } from './text-size.ts';
 
 /** The event the app sends a window with the level, just before it sets the window's zoom. */
 export const ZOOM_EVENT = 'zoom';
@@ -22,6 +22,14 @@ export const RESIZE_WAIT_MS = 500;
 export function initialZoom(): number | null {
   const level = (window as unknown as { __REDLINES_ZOOM__?: unknown }).__REDLINES_ZOOM__;
   return typeof level === 'number' && ZOOM_LADDER.includes(level) ? level : null;
+}
+
+/**
+ * The level a change of the window zoom comes to: `by` steps of the window zoom's own ladder (it
+ * stops at 200%, where the text size goes on), or `to` a level, as Actual Size does.
+ */
+export function nextZoom(from: number, change: { by: number } | { to: number }): number {
+  return 'to' in change ? change.to : stepSize(from, change.by, ZOOM_LADDER);
 }
 
 /** Sets `--rl-zoom` on `root`. */

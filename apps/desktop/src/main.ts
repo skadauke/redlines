@@ -61,7 +61,7 @@ import {
 } from './settings.ts';
 import { followScrollbar } from './scrollbar.ts';
 import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
-import { applyTextSize, stepSize, ZOOM_LADDER } from './text-size.ts';
+import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
@@ -71,7 +71,14 @@ import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from './zoom.ts';
+import {
+  applyZoom,
+  followZoom,
+  initialZoom,
+  nextZoom,
+  tauriZoomLink,
+  type PageZoom,
+} from './zoom.ts';
 import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -620,7 +627,7 @@ const percent = (level: number) => `${Math.round(level * 100)}%`;
 const changeZoom = (change: { by: number } | { to: number }) => {
   if (!zoom) return;
   const from = zoom.level();
-  const level = 'to' in change ? change.to : stepSize(from, change.by, ZOOM_LADDER);
+  const level = nextZoom(from, change);
   if (level === from) return;
   void zoom.ask(level).catch((error: unknown) => {
     console.error('Could not zoom the windows', error);

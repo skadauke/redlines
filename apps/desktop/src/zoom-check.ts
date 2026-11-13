@@ -78,6 +78,16 @@ const frames = async (count = 2) => {
   await new Promise((resolve) => setTimeout(resolve, 50));
 };
 
+/** Waits, a few frames at a time and for up to two seconds, for `done` to hold: a loaded machine settles a layout late. */
+async function settled(done: () => boolean): Promise<boolean> {
+  const until = performance.now() + 2000;
+  while (!done()) {
+    if (performance.now() > until) return false;
+    await frames(1);
+  }
+  return true;
+}
+
 /** The width of the column's text, without its padding. */
 function textWidth(content: HTMLElement): number {
   const style = getComputedStyle(content);
@@ -88,10 +98,17 @@ function textWidth(content: HTMLElement): number {
   );
 }
 
-/** The lines of text the editor shows: its rects, grouped by the line they are on. */
+/**
+ * How many source lines of the top of the page `visualLines` counts: CodeMirror draws only what is
+ * near the window, and at the largest sizes that is a part of the sample, the same part at each
+ * size only where the count starts at the top and stops at a fixed line.
+ */
+const COUNTED_LINES = 8;
+
+/** The lines of text the editor shows, of the first source lines: its rects, grouped by the line they are on. */
 function visualLines(editor: Editor): number {
   let count = 0;
-  for (const line of editor.view.dom.querySelectorAll('.cm-line')) {
+  for (const line of [...editor.view.dom.querySelectorAll('.cm-line')].slice(0, COUNTED_LINES)) {
     const range = document.createRange();
     range.selectNodeContents(line);
     const rects = [...range.getClientRects()]
@@ -197,17 +214,17 @@ export async function runZoomCheck({
       await setSize(size);
       await setWidth(beside);
       const full = textWidth(content);
-      if (!editor.view.dom.classList.contains('rl-has-rail'))
+      if (!(await settled(() => editor.view.dom.classList.contains('rl-has-rail'))))
         states.push({ size, beside, rail: false });
       if (Math.abs(full - COLUMN * size) > 1)
         states.push({ size, beside, full, expected: COLUMN * size });
       await setWidth(dots + 1);
-      if (!editor.view.dom.classList.contains('rl-has-rail'))
+      if (!(await settled(() => editor.view.dom.classList.contains('rl-has-rail'))))
         states.push({ size, dots: dots + 1, rail: false });
       await setWidth(dots - 2);
-      const rail = editor.view.dom.querySelector('.rl-rail');
-      if (!rail?.classList.contains('rl-rail-compact'))
-        states.push({ size, dots: dots - 2, compact: false });
+      const compact = () =>
+        editor.view.dom.querySelector('.rl-rail')?.classList.contains('rl-rail-compact') === true;
+      if (!(await settled(compact))) states.push({ size, dots: dots - 2, compact: false });
     }
     report('rail-states', states);
 
@@ -229,8 +246,11 @@ export async function runZoomCheck({
       if (scrollDOM.scrollWidth > scrollDOM.clientWidth + 1)
         spill.push({ size, width, scroll: scrollDOM.scrollWidth, client: scrollDOM.clientWidth });
       const edge = scrollDOM.getBoundingClientRect().right + 1;
+      // The rows of a table run past the edge by design, inside the box that scrolls them.
       const wide = [...content.querySelectorAll<HTMLElement>('.cm-line, .rl-tbl-scroll')].filter(
-        (element) => element.getBoundingClientRect().right > edge,
+        (element) =>
+          (element.classList.contains('rl-tbl-scroll') || !element.closest('.rl-tbl-scroll')) &&
+          element.getBoundingClientRect().right > edge,
       );
       if (wide.length) spill.push({ size, width, wide: wide.map((e) => e.className) });
     }

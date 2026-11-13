@@ -54,7 +54,7 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms every window of the app to a level of the ladder, and keeps it (zoom.ts). */
+  /** Zooms every window of the app to a level of the window zoom's ladder, and keeps it (zoom.ts). */
   setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };

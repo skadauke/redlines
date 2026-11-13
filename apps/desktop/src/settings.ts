@@ -49,7 +49,7 @@ export interface Settings {
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   /**
-   * The zoom of every window (zoom.ts), a rung of the ladder (text-size.ts). The app keeps the
+   * The zoom of every window (zoom.ts), a rung of the window zoom's ladder (`ZOOM_LADDER`, text-size.ts). The app keeps the
    * level in its own file and sets it on every window; this is the copy each window asks from.
    */
   zoom: number;

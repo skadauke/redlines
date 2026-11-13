@@ -6,6 +6,10 @@
  * ladder (`LADDER` in src-tauri/src/zoom.rs) says the same. */
 export const ZOOM_LADDER: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
+/** The least and the most the window zoom may be: the ends of its ladder. */
+export const ZOOM_LEAST = 0.8;
+export const ZOOM_MOST = 2;
+
 /** The least and the most a text size may be, as multiples of the theme's size: what a pinch
  * reaches, and the ends of `LADDER`. */
 export const TEXT_LEAST = 0.8;
