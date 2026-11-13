@@ -220,7 +220,7 @@ fn image(
 /// Opens the file at `real`, a path with no link in it: never through a link put in its place
 /// since (`O_NOFOLLOW`), and without waiting for a writer, should it be a pipe by now
 /// (`O_NONBLOCK`), which is no image anyway.
-fn open(real: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open(real: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

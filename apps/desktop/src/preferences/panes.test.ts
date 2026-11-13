@@ -694,11 +694,23 @@ describe('the panes', () => {
       const { container, update, now } = draw('editor');
       const row = imagesRow(container);
       const field = row.name()!;
-      for (const typed of ['', '  ', '.images', 'a/b', '../images', 'a\\b']) {
+      for (const typed of ['.images', 'a/b', '../images', 'a\\b', 'a\u0085b']) {
         update.mockClear();
         row.type(field, typed);
         expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
         expect(row.said()).toBe('A folder’s name has no slash and doesn’t start with a dot.');
+        expect(row.failed()).toBe(true);
+      }
+      // What is wrong is what is said: a name that is missing or too long has no slash to blame.
+      for (const [typed, said] of [
+        ['', 'A folder needs a name.'],
+        ['  ', 'A folder needs a name.'],
+        ['x'.repeat(101), 'A folder’s name can’t be longer than 100 characters.'],
+      ] as const) {
+        update.mockClear();
+        row.type(field, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe(said);
         expect(row.failed()).toBe(true);
       }
       expect(now().imageFolderName).toBe('images');
@@ -721,13 +733,17 @@ describe('the panes', () => {
       expect(field.value).toBe('pics');
     });
 
-    it('is a group named for the row', () => {
+    it('is a group named for the row, whose menu and field have names of their own', () => {
       const { container } = draw('editor');
       const row = container.querySelector<HTMLElement>('[data-row="Images"]');
       const group = row?.querySelector<HTMLElement>('[role="group"]');
       const label = row?.querySelector<HTMLElement>('.rl-pref-label');
       expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
-      expect(group?.querySelector('select')).not.toBeNull();
+      // The group's name is not read for what is inside it by every screen reader.
+      expect(group?.querySelector('select')?.getAttribute('aria-label')).toBe(
+        'Where images are saved',
+      );
+      expect(group?.querySelector('input')?.getAttribute('aria-label')).toBe('Folder name');
     });
   });
 

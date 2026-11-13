@@ -28,18 +28,27 @@ export type ImagePlace = 'folder' | 'assets' | 'same';
 const MAX_FOLDER_NAME = 100;
 
 /**
- * The name of a folder for images as typed, without the spaces around it, or null when a folder
- * beside the document can't have it: one name, with no slash and not a hidden one, which the
- * preview wouldn't load images from (src-tauri/src/image_files.rs says the same).
+ * What is wrong with the name typed for a folder for images, as a sentence for the person, or null
+ * when a folder beside the document can have it: a name, of no more than `MAX_FOLDER_NAME`
+ * characters, with no slash and no control character, and not a hidden one, which the preview
+ * wouldn't load images from (src-tauri/src/image_files.rs says the same of all but the length).
  */
-export function imageFolderNameOf(typed: string): string | null {
+export function imageFolderNameProblem(typed: string): string | null {
   const name = typed.trim();
+  if (name === '') return 'A folder needs a name.';
+  if (name.length > MAX_FOLDER_NAME) {
+    return `A folder’s name can’t be longer than ${MAX_FOLDER_NAME} characters.`;
+  }
+  const control = (char: string) => char < ' ' || (char >= '\u007f' && char <= '\u009f');
   const plain =
-    name !== '' &&
-    name.length <= MAX_FOLDER_NAME &&
     !name.startsWith('.') &&
-    ![...name].some((char) => char === '/' || char === '\\' || char < ' ' || char === '\u007f');
-  return plain ? name : null;
+    ![...name].some((char) => char === '/' || char === '\\' || control(char));
+  return plain ? null : 'A folder’s name has no slash and doesn’t start with a dot.';
+}
+
+/** The name of a folder for images as typed, without the spaces around it, or null if it has none. */
+export function imageFolderNameOf(typed: string): string | null {
+  return imageFolderNameProblem(typed) === null ? typed.trim() : null;
 }
 
 export interface Settings {

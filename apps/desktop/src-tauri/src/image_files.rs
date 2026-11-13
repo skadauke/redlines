@@ -23,6 +23,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
+use tauri::http::HeaderMap;
+use tauri::ipc::InvokeBody;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::FsExt;
@@ -117,6 +119,11 @@ const TOO_BROAD: &str = "Redlines shows images only from this document’s own f
 /// Why images aren't added to a folder that leads out of the document's folder.
 const OUTSIDE: &str = "The folder for images leads outside the document’s folder, so Redlines doesn’t add images to it.";
 
+/// Why images aren't added to a document whose folder isn't there: it was moved or deleted since,
+/// and a folder made again for it would hold images that no document links to.
+const MOVED: &str =
+    "The document’s folder isn’t there any more, so Redlines doesn’t add images to it.";
+
 fn not_an_image(name: &str) -> String {
     format!("“{name}” isn’t an image Redlines can show.")
 }
@@ -169,19 +176,30 @@ fn destination(document: &Path, folder: &str, too_broad: bool) -> Result<PathBuf
 
 /// Makes the folder `target`, in the folder `own` of its document or that folder itself, and gives
 /// it as it really is, if it is inside `own`: a folder that is a link to somewhere else holds no
-/// image the preview would load, and Redlines doesn't write there.
+/// image the preview would load, and Redlines doesn't write there. The document's own folder has to
+/// be there already: only the one folder named in the settings is made, never the way to it, so that
+/// a folder that was moved is not made again.
 fn ensure_folder(own: &Path, target: &Path) -> Result<PathBuf, String> {
     let made = |error: io::Error| format!("Couldn’t make the folder for images: {error}.");
-    std::fs::create_dir_all(target).map_err(made)?;
-    let (own, real) = (
-        std::fs::canonicalize(own).map_err(made)?,
-        std::fs::canonicalize(target).map_err(made)?,
-    );
-    if real.starts_with(&own) {
-        Ok(real)
-    } else {
-        Err(OUTSIDE.to_owned())
+    let real_own = std::fs::canonicalize(own).map_err(|_| MOVED.to_owned())?;
+    if target != own {
+        match std::fs::create_dir(target) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(made(error)),
+        }
     }
+    let real = std::fs::canonicalize(target).map_err(made)?;
+    if !real.starts_with(&real_own) {
+        return Err(OUTSIDE.to_owned());
+    }
+    if !real.is_dir() {
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        return Err(format!(
+            "“{name}” is a file, so Redlines can’t keep images in it."
+        ));
+    }
+    Ok(real)
 }
 
 /// Makes a new file in `folder` called `name`, or `name-2`, `name-3` and on before its extension
@@ -248,7 +266,8 @@ fn copy_image(folder: &Path, source: &Path, max: u64) -> Result<String, String> 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let cannot = |error: io::Error| cannot_add(&name, &error);
-    let mut file = File::open(source).map_err(cannot)?;
+    // Never through a link put in the file's place since it was given (`images::open`).
+    let mut file = crate::images::open(source).map_err(cannot)?;
     let metadata = file.metadata().map_err(cannot)?;
     if !metadata.is_file() {
         return Err(not_an_image(&name));
@@ -264,8 +283,10 @@ fn copy_image(folder: &Path, source: &Path, max: u64) -> Result<String, String> 
     if image_type(source, &head).is_none() {
         return Err(not_an_image(&name));
     }
+    // Already where it would go, under a name the preview loads: the document links to it.
     if let (Ok(here), Ok(there)) = (std::fs::canonicalize(source), std::fs::canonicalize(folder))
         && here.parent() == Some(there.as_path())
+        && clean_name(&name) == name
     {
         return Ok(name);
     }
@@ -312,44 +333,62 @@ fn link_path(folder: &str, name: &str) -> String {
     }
 }
 
-/// Makes the folder for the images of `document`, runs `add` in it, and takes the folder away again
-/// when it was made for this and nothing was added.
-fn adding(
-    document: &Path,
-    folder: &str,
-    too_broad: bool,
-    add: impl FnOnce(&Path) -> AddedImages,
-) -> Result<AddedImages, String> {
+/// The folder made for the images of a document, as it really is, and whether it was there before.
+struct Prepared {
+    real: PathBuf,
+    existed: bool,
+}
+
+/// Makes the folder for the images of `document` (`destination`, `ensure_folder`), or says why it
+/// can't be, before anything else is done.
+fn prepare(document: &Path, folder: &str, too_broad: bool) -> Result<Prepared, String> {
     let target = destination(document, folder, too_broad)?;
     let existed = target.is_dir();
     let own = document.parent().unwrap_or(&target);
     let real = ensure_folder(own, &target)?;
-    let added = add(&real);
-    if added.paths.is_empty() && !existed {
-        let _ = std::fs::remove_dir(&real);
-    }
-    Ok(added)
+    Ok(Prepared { real, existed })
 }
 
-/// Copies each of `files` into the folder for the images of `document` (`destination`, `copy_image`):
+/// Takes the folder away again when it was made for this and nothing went in.
+fn finish(prepared: &Prepared, added: &AddedImages) {
+    if added.paths.is_empty() && !prepared.existed {
+        let _ = std::fs::remove_dir(&prepared.real);
+    }
+}
+
+/// Copies each of `files` into `real`, the folder for images that `folder` names in the settings:
 /// the paths to link, and a sentence for each file that couldn't be added.
-fn add_files(
+fn copy_all(real: &Path, folder: &str, files: &[PathBuf], max: u64) -> AddedImages {
+    let mut added = AddedImages::default();
+    for file in files {
+        match copy_image(real, file, max) {
+            Ok(name) => added.paths.push(link_path(folder, &name)),
+            Err(sentence) => added.refused.push(sentence),
+        }
+    }
+    added
+}
+
+/// Adds the images kept for the window `label` under `id` to the document: the folder is made, or
+/// refused, first, so that a refusal leaves the images with the window, which can ask again with
+/// another folder; they are taken only then, and once.
+fn add_given(
+    sources: &ImageSources,
+    label: &str,
+    id: u64,
     document: &Path,
     folder: &str,
     too_broad: bool,
-    files: &[PathBuf],
     max: u64,
 ) -> Result<AddedImages, String> {
-    adding(document, folder, too_broad, |real| {
-        let mut added = AddedImages::default();
-        for file in files {
-            match copy_image(real, file, max) {
-                Ok(name) => added.paths.push(link_path(folder, &name)),
-                Err(sentence) => added.refused.push(sentence),
-            }
-        }
-        added
-    })
+    let prepared = prepare(document, folder, too_broad)?;
+    let Some(files) = sources.take(label, id) else {
+        finish(&prepared, &AddedImages::default());
+        return Err("Those images were added already, or weren’t given to this window.".to_owned());
+    };
+    let added = copy_all(&prepared.real, folder, &files, max);
+    finish(&prepared, &added);
+    Ok(added)
 }
 
 /// Writes the pasted image `bytes` into the folder for the images of `document`.
@@ -361,13 +400,54 @@ fn add_data(
     bytes: &[u8],
     max: u64,
 ) -> Result<AddedImages, String> {
-    adding(document, folder, too_broad, |real| {
-        let mut added = AddedImages::default();
-        match write_image(real, name, bytes, max) {
-            Ok(made) => added.paths.push(link_path(folder, &made)),
-            Err(sentence) => added.refused.push(sentence),
-        }
-        added
+    let prepared = prepare(document, folder, too_broad)?;
+    let mut added = AddedImages::default();
+    match write_image(&prepared.real, name, bytes, max) {
+        Ok(made) => added.paths.push(link_path(folder, &made)),
+        Err(sentence) => added.refused.push(sentence),
+    }
+    finish(&prepared, &added);
+    Ok(added)
+}
+
+/// What a pasted image's request says: the document, the folder and the file name, which the page
+/// writes as percent codes in headers, and the image's bytes, which are the request's body.
+struct Pasted<'a> {
+    document: String,
+    folder: String,
+    name: String,
+    bytes: &'a [u8],
+}
+
+/// Reads a pasted image's request (`add_pasted_image`). The document and the name have to be there;
+/// no folder is the document's own, which the page writes as an empty header and a client may leave
+/// out. A header that isn't text, or whose codes aren't UTF-8, is refused, as is a body that isn't
+/// the image's bytes.
+fn pasted_request<'a>(headers: &HeaderMap, body: &'a InvokeBody) -> Result<Pasted<'a>, String> {
+    let InvokeBody::Raw(bytes) = body else {
+        return Err("The pasted image didn’t come as data.".to_owned());
+    };
+    let header = |name: &str, needed: bool| -> Result<String, String> {
+        let Some(value) = headers.get(name) else {
+            return if needed {
+                Err(format!("The request has no {name}."))
+            } else {
+                Ok(String::new())
+            };
+        };
+        let text = value
+            .to_str()
+            .map_err(|_| format!("The request’s {name} isn’t text."))?;
+        percent_decode_str(text)
+            .decode_utf8()
+            .map(|decoded| decoded.into_owned())
+            .map_err(|_| format!("The request’s {name} isn’t UTF-8."))
+    };
+    Ok(Pasted {
+        document: header("x-redlines-document", true)?,
+        folder: header("x-redlines-folder", false)?,
+        name: header("x-redlines-name", true)?,
+        bytes,
     })
 }
 
@@ -479,8 +559,8 @@ pub fn pick_images(app: AppHandle, window: WebviewWindow) -> Result<Option<Given
 
 /// Copies the image files the window was given under `id` (`dropped`, `pick_images`) into the
 /// folder for the images of its document, which is `folder` inside the document's folder (or the
-/// document's folder itself for ''): the paths to link, and a sentence for each file that
-/// couldn't be added.
+/// document's folder itself for ''): the paths to link, and a sentence for each file that couldn't
+/// be added.
 #[tauri::command(async)]
 pub fn add_images(
     app: AppHandle,
@@ -490,13 +570,15 @@ pub fn add_images(
     folder: String,
 ) -> Result<AddedImages, String> {
     let (document, too_broad) = own_document(&app, &window, &document)?;
-    let files = app
-        .state::<ImageSources>()
-        .take(window.label(), id)
-        .ok_or_else(|| {
-            "Those images were added already, or weren’t given to this window.".to_owned()
-        })?;
-    add_files(&document, &folder, too_broad, &files, MAX_IMAGE_BYTES)
+    add_given(
+        &app.state::<ImageSources>(),
+        window.label(),
+        id,
+        &document,
+        &folder,
+        too_broad,
+        MAX_IMAGE_BYTES,
+    )
 }
 
 /// Writes a pasted image into the folder for the images of the window's document, as
@@ -509,27 +591,14 @@ pub fn add_pasted_image(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> Result<AddedImages, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("The pasted image didn’t come as data.".to_owned());
-    };
-    let header = |name: &str| -> Result<String, String> {
-        let value = request
-            .headers()
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| format!("The request has no {name}."))?;
-        percent_decode_str(value)
-            .decode_utf8()
-            .map(|decoded| decoded.into_owned())
-            .map_err(|error| format!("{name}: {error}"))
-    };
-    let (document, too_broad) = own_document(&app, &window, &header("x-redlines-document")?)?;
+    let read = pasted_request(request.headers(), request.body())?;
+    let (document, too_broad) = own_document(&app, &window, &read.document)?;
     add_data(
         &document,
-        &header("x-redlines-folder")?,
+        &read.folder,
         too_broad,
-        &header("x-redlines-name")?,
-        bytes,
+        &read.name,
+        read.bytes,
         MAX_IMAGE_BYTES,
     )
 }
@@ -550,6 +619,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         folder
+    }
+
+    /// Adds `files`, which the window was given, to the document as the command does.
+    fn add_files(
+        document: &Path,
+        folder: &str,
+        too_broad: bool,
+        files: &[PathBuf],
+        max: u64,
+    ) -> Result<AddedImages, String> {
+        let sources = ImageSources::default();
+        let id = sources.keep("main", files.to_vec());
+        add_given(&sources, "main", id, document, folder, too_broad, max)
     }
 
     /// A document in a new folder, and the folder.
@@ -830,6 +912,143 @@ mod tests {
         // A folder named like an image is no image.
         assert!(!images_only(&at(&["folder.png"])));
         assert!(!images_only(&at(&["missing.png"])));
+    }
+
+    #[test]
+    fn a_document_folder_that_is_gone_is_not_made_again() {
+        let (own, document) = document("moved");
+        std::fs::remove_dir_all(&own).unwrap();
+        let refused = add_data(&document, "images", false, "a.png", PNG, 1000);
+        assert_eq!(refused, Err(MOVED.to_owned()));
+        // Not even its parents: images no document links to would be all that was there.
+        assert!(!own.exists());
+    }
+
+    #[test]
+    fn a_file_that_has_the_name_of_the_folder_is_no_folder_for_images() {
+        let (own, document) = document("file-named");
+        std::fs::write(own.join("images"), "not a folder").unwrap();
+        let refused = add_data(&document, "images", false, "a.png", PNG, 1000).unwrap_err();
+        assert!(refused.contains("is a file"), "{refused}");
+        assert_eq!(std::fs::read(own.join("images")).unwrap(), b"not a folder");
+    }
+
+    #[test]
+    fn a_refusal_of_the_folder_leaves_the_images_with_the_window_to_ask_again() {
+        let (own, document) = document("kept");
+        let from = folder("kept-from");
+        std::fs::write(from.join("a.png"), PNG).unwrap();
+        let sources = ImageSources::default();
+        let id = sources.keep("main", vec![from.join("a.png")]);
+        // A project too broad for a folder: refused, and nothing taken.
+        assert_eq!(
+            add_given(&sources, "main", id, &document, "images", true, 1000),
+            Err(TOO_BROAD.to_owned())
+        );
+        // The person chooses the document's own folder, and the same images go in, once.
+        let added = add_given(&sources, "main", id, &document, "", true, 1000).unwrap();
+        assert_eq!(added.paths, ["a.png"]);
+        assert!(own.join("a.png").is_file());
+        assert!(add_given(&sources, "main", id, &document, "", true, 1000).is_err());
+    }
+
+    #[test]
+    fn images_that_were_not_given_to_the_window_are_refused_and_leave_no_folder() {
+        let (own, document) = document("not-given");
+        let sources = ImageSources::default();
+        let other = sources.keep("doc-1", vec![PathBuf::from("/a.png")]);
+        // Another window's, and ones nobody was given.
+        for id in [other, other + 100] {
+            let refused = add_given(&sources, "main", id, &document, "images", false, 1000);
+            assert!(refused.is_err(), "{id}");
+        }
+        assert!(!own.join("images").exists());
+        // The other window's are still its own.
+        assert!(sources.take("doc-1", other).is_some());
+    }
+
+    #[test]
+    fn a_pasted_request_is_read_from_its_headers_as_percent_codes() {
+        use tauri::http::HeaderValue;
+        let mut headers = HeaderMap::new();
+        for (name, value) in [
+            (
+                "x-redlines-document",
+                "%2FUsers%2Fada%2FMy%20Notes%2Fplan.md",
+            ),
+            ("x-redlines-folder", "Bilder"),
+            ("x-redlines-name", "%C3%9Cber%20uns.png"),
+        ] {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+        let body = InvokeBody::Raw(PNG.to_vec());
+        let read = pasted_request(&headers, &body).unwrap();
+        assert_eq!(read.document, "/Users/ada/My Notes/plan.md");
+        assert_eq!(read.folder, "Bilder");
+        assert_eq!(read.name, "Über uns.png");
+        assert_eq!(read.bytes, PNG);
+    }
+
+    #[test]
+    fn a_pasted_request_with_no_folder_means_the_documents_own() {
+        use tauri::http::HeaderValue;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-redlines-document",
+            HeaderValue::from_static("%2Fa%2Fplan.md"),
+        );
+        headers.insert("x-redlines-name", HeaderValue::from_static("a.png"));
+        let body = InvokeBody::Raw(PNG.to_vec());
+        assert_eq!(pasted_request(&headers, &body).unwrap().folder, "");
+    }
+
+    #[test]
+    fn a_pasted_request_that_is_incomplete_or_broken_is_refused() {
+        use tauri::http::HeaderValue;
+        let raw = InvokeBody::Raw(PNG.to_vec());
+        let with = |pairs: &[(&'static str, &'static str)]| {
+            let mut headers = HeaderMap::new();
+            for (name, value) in pairs {
+                headers.insert(*name, HeaderValue::from_static(value));
+            }
+            headers
+        };
+        // No document, and no name.
+        assert!(pasted_request(&with(&[("x-redlines-name", "a.png")]), &raw).is_err());
+        assert!(pasted_request(&with(&[("x-redlines-document", "%2Fa.md")]), &raw).is_err());
+        // Codes that aren't UTF-8.
+        let broken = with(&[("x-redlines-document", "%FF"), ("x-redlines-name", "a.png")]);
+        assert!(pasted_request(&broken, &raw).is_err());
+        // A body that isn't the image's bytes.
+        let whole = with(&[
+            ("x-redlines-document", "%2Fa.md"),
+            ("x-redlines-name", "a.png"),
+        ]);
+        let json = InvokeBody::Json(serde_json::json!({ "bytes": [1, 2, 3] }));
+        assert!(pasted_request(&whole, &json).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_put_in_place_of_a_file_to_copy_is_not_followed() {
+        let (own, _) = document("source-link");
+        let from = folder("source-link-from");
+        std::fs::write(from.join("real.png"), PNG).unwrap();
+        std::os::unix::fs::symlink(from.join("real.png"), from.join("link.png")).unwrap();
+        assert!(copy_image(&own, &from.join("link.png"), 1000).is_err());
+        assert_eq!(std::fs::read_dir(&own).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn an_image_already_in_the_folder_under_a_name_the_preview_wouldnt_load_is_copied_to_one_it_would()
+     {
+        let (own, _) = document("hidden-in-folder");
+        std::fs::write(own.join(".hidden.png"), PNG).unwrap();
+        assert_eq!(
+            copy_image(&own, &own.join(".hidden.png"), 1000),
+            Ok("hidden.png".to_owned())
+        );
+        assert!(own.join("hidden.png").is_file());
     }
 
     #[test]

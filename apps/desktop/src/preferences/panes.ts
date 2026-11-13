@@ -9,6 +9,7 @@ import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
 import {
   imageFolderNameOf,
+  imageFolderNameProblem,
   type AppearanceChoice,
   type ImagePlace,
   type Settings,
@@ -548,9 +549,6 @@ const IMAGE_PLACES: readonly { value: ImagePlace; label: string }[] = [
   { value: 'same', label: 'In the document’s folder' },
 ];
 
-/** What the Images row says of a name that a folder beside the document can't have. */
-const FOLDER_NAME_RULE = 'A folder’s name has no slash and doesn’t start with a dot.';
-
 /** What the Images row says of where images go, for the settings as they are. */
 function whereImagesGo(settings: Settings): string {
   switch (settings.imagePlace) {
@@ -575,6 +573,7 @@ function imagesRow(deps: PaneDeps): HTMLElement {
     deps.update({ imagePlace: value });
     show();
   });
+  place.setAttribute('aria-label', 'Where images are saved');
   const name = el('input', 'rl-pref-text');
   name.type = 'text';
   name.value = deps.settings().imageFolderName;
@@ -597,8 +596,9 @@ function imagesRow(deps: PaneDeps): HTMLElement {
   name.addEventListener('input', () => {
     const typed = imageFolderNameOf(name.value);
     if (typed === null) {
+      // What is wrong with it, which is not always a slash.
       status.classList.add('rl-pref-failure');
-      status.textContent = FOLDER_NAME_RULE;
+      status.textContent = imageFolderNameProblem(name.value);
       return;
     }
     deps.update({ imageFolderName: typed });
