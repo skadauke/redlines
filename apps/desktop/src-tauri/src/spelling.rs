@@ -274,11 +274,12 @@ fn suggestions_in(window: &str, word: &str, before: &str) -> Option<Vec<String>>
 /// Spelling. Only a word is learned: nothing else a page sends goes into the dictionary.
 #[tauri::command]
 pub fn spelling_learn(word: String) {
-    if !is_word(&word) {
-        return;
-    }
     #[cfg(target_os = "macos")]
-    macos::learn(&word);
+    if is_word(&word) {
+        macos::learn(&word);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = word;
 }
 
 /// Registers the switch as on. First thing in `run`, before the app is built: WebKit reads it once,
@@ -621,7 +622,13 @@ mod tests {
         let offered = suggestions(
             "wrold",
             "Hello ",
-            |_| vec![misspelled_at(0, 5), misspelled_at(6, 4), misspelled_at(7, 5)],
+            |_| {
+                vec![
+                    misspelled_at(0, 5),
+                    misspelled_at(6, 4),
+                    misspelled_at(7, 5),
+                ]
+            },
             no_guess,
         );
         assert_eq!(offered, None);
@@ -648,7 +655,11 @@ mod tests {
         );
         assert_eq!(
             offered,
-            Some(vec!["the".to_string(), "tea".to_string(), "ten".to_string()])
+            Some(vec![
+                "the".to_string(),
+                "tea".to_string(),
+                "ten".to_string()
+            ])
         );
     }
 
