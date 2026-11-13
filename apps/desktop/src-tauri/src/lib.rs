@@ -61,6 +61,9 @@ mod updates;
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
 
+// Dragging the window's file out of it, from the title bar's document icon.
+mod drag;
+
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
@@ -343,6 +346,7 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            drag::start_file_drag,
             about,
             appearance::set_appearance,
             edit_menu::beep,
@@ -436,7 +440,10 @@ pub fn run() {
             } = &event
             {
                 let dropped = dropped_paths(paths.iter().cloned());
-                if app.state::<windows::Windows>().dropped_on(label, &dropped) {
+                // Not the file the window's own icon dragged, which the person let go of on it.
+                if !drag::ignores_drop(label, &dropped)
+                    && app.state::<windows::Windows>().dropped_on(label, &dropped)
+                {
                     offer(app, dropped);
                 }
             }

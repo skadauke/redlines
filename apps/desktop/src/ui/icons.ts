@@ -4,6 +4,9 @@
 const ICONS = {
   /** Files: a window with a sidebar. */
   files: '<rect x="2" y="3" width="12" height="10" rx="1.8"/><path d="M6 3v10"/>',
+  /** The document's own icon beside its name in the title bar: a page with a turned corner. */
+  document:
+    '<path d="M4.6 1.8h4.2l3.9 3.9v7a1.5 1.5 0 0 1-1.5 1.5H4.6a1.5 1.5 0 0 1-1.5-1.5V3.3a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M8.6 1.9v2.7a1.1 1.1 0 0 0 1.1 1.1h2.9"/>',
   /** View: an eye. */
   eye: '<path d="M1.6 8s2.3-4.3 6.4-4.3S14.4 8 14.4 8s-2.3 4.3-6.4 4.3S1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/>',
   /** Resolved comments: a check mark in a circle. */

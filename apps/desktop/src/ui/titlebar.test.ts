@@ -6,6 +6,7 @@ import { createTitleBar, documentFactsLine, wordCount, type TitleBarState } from
 const BASE: TitleBarState = {
   name: 'launch-plan.md',
   dirty: false,
+  hasFile: true,
   view: 'redlines',
   tracking: false,
   hasRedlines: true,
@@ -23,6 +24,8 @@ function setup(state: Partial<TitleBarState> = {}) {
     toggleResolved: vi.fn(),
     toggleSidebar: vi.fn(),
     rename: vi.fn(() => Promise.resolve(true)),
+    renameDocument: vi.fn(),
+    dragFile: vi.fn(),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
@@ -150,6 +153,223 @@ describe('renaming from the title bar', () => {
     press(input, 'Enter');
     input.dispatchEvent(new FocusEvent('blur'));
     expect(actions.rename).toHaveBeenCalledOnce();
+  });
+});
+
+describe('double-clicking the file name', () => {
+  // Tauri's drag script zooms the window on the mouseup of a double-click anywhere in the bar
+  // (macOS), and it listens on the document. This stands in for it. In the app WebKit sends the
+  // page no dblclick for it (nor the click before it), so that mouseup is all there is to go by.
+  const zoomed = vi.fn();
+  beforeEach(() => {
+    zoomed.mockClear();
+    document.addEventListener('mouseup', zoomed);
+  });
+  afterEach(() => document.removeEventListener('mouseup', zoomed));
+
+  const mouse = (target: Element, type: string, detail: number, button = 0) =>
+    target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button, detail }));
+  const doubleClick = (target: Element) => {
+    mouse(target, 'mousedown', 1);
+    mouse(target, 'mouseup', 1);
+    mouse(target, 'mousedown', 2);
+    mouse(target, 'mouseup', 2);
+  };
+  const nameOf = (root: HTMLElement) => {
+    const found = root.querySelector<HTMLElement>('.rl-title');
+    if (!found) throw new Error('no file name');
+    return found;
+  };
+
+  it('asks to rename the document, as File › Rename does', () => {
+    const { root, actions } = setup();
+    doubleClick(nameOf(root));
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+    // It is the app's to say what that is: a field for a file, Save As for an Untitled document.
+    expect(actions.rename).not.toHaveBeenCalled();
+  });
+
+  it('asks the same for an Untitled document, which has no file to rename', () => {
+    const { root, actions } = setup({ name: 'Untitled.md', hasFile: false });
+    doubleClick(nameOf(root));
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+  });
+
+  it('asks once, whether or not the system also sends a dblclick', () => {
+    const { root, actions } = setup();
+    doubleClick(nameOf(root));
+    mouse(nameOf(root), 'click', 2);
+    mouse(nameOf(root), 'dblclick', 2);
+    expect(actions.renameDocument).toHaveBeenCalledOnce();
+  });
+
+  it('takes the double-click away from the window, which would zoom on it', () => {
+    const { root } = setup();
+    doubleClick(nameOf(root));
+    // The first click's mouseup is the window's, as a drag's end is; the second's is the name's.
+    expect(zoomed).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a single click on the name to the window, which a drag starts with', () => {
+    const { root, actions } = setup();
+    mouse(nameOf(root), 'mousedown', 1);
+    mouse(nameOf(root), 'mouseup', 1);
+    expect(zoomed).toHaveBeenCalledOnce();
+    expect(actions.renameDocument).not.toHaveBeenCalled();
+  });
+
+  it('answers only the primary button, and a double-click only', () => {
+    const { root, actions } = setup();
+    mouse(nameOf(root), 'mouseup', 2, 2);
+    mouse(nameOf(root), 'mouseup', 3);
+    expect(actions.renameDocument).not.toHaveBeenCalled();
+    // A triple-click's third press is nobody's: it reaches the window as it did.
+    expect(zoomed).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves a double-click anywhere else on the bar to the window, which zooms', () => {
+    const { root, actions } = setup();
+    const bar = root.querySelector('.rl-titlebar');
+    const group = root.querySelector('.rl-title-group');
+    if (!bar || !group) throw new Error('no bar');
+    mouse(bar, 'mouseup', 2);
+    mouse(group, 'mouseup', 2);
+    expect(zoomed).toHaveBeenCalledTimes(2);
+    expect(actions.renameDocument).not.toHaveBeenCalled();
+    expect(root.querySelector('.rl-title-field')).toBeNull();
+  });
+
+  it('does not start another rename from a double-click in the field', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = root.querySelector<HTMLInputElement>('.rl-title-field');
+    if (!input) throw new Error('no field');
+    doubleClick(input);
+    expect(actions.renameDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe('the document icon', () => {
+  const iconOf = (root: HTMLElement) => root.querySelector<HTMLElement>('.rl-doc-icon');
+  const pointer = (type: string, x: number, buttons: number, target: Element | Document) =>
+    target.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerType: 'mouse',
+        button: 0,
+        buttons,
+        clientX: x,
+        clientY: 20,
+      }),
+    );
+
+  it('sits left of the file name, for a document with a file', () => {
+    const { root } = setup();
+    const icon = iconOf(root);
+    const name = root.querySelector('.rl-title');
+    if (!icon || !name) throw new Error('no icon');
+    expect(shown(icon)).toBe(true);
+    expect(icon.querySelector('svg')).not.toBeNull();
+    expect(icon.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Beside the name, in the group the two are centered as one.
+    expect(icon.parentElement).toBe(name.parentElement);
+  });
+
+  it('is hidden for an Untitled document, and shown once it has a file', () => {
+    const { root, bar } = setup({ name: 'Untitled.md', hasFile: false });
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    expect(shown(icon)).toBe(false);
+    bar.update({ ...BASE, hasFile: true });
+    expect(shown(icon)).toBe(true);
+    bar.update({ ...BASE, hasFile: false });
+    expect(shown(icon)).toBe(false);
+  });
+
+  it('is left out of the bar’s drag region, so that a drag on it is not the window’s', () => {
+    const { root } = setup();
+    // Tauri's drag script: "false" blocks the bar's "deep" region for what is under it.
+    expect(root.querySelector('.rl-titlebar')?.getAttribute('data-tauri-drag-region')).toBe('deep');
+    expect(iconOf(root)?.getAttribute('data-tauri-drag-region')).toBe('false');
+  });
+
+  it('starts dragging the file once the pointer has moved a few pixels with the button down', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    pointer('pointerdown', 100, 1, icon);
+    pointer('pointermove', 102, 1, document);
+    expect(actions.dragFile).not.toHaveBeenCalled();
+    pointer('pointermove', 106, 1, document);
+    expect(actions.dragFile).toHaveBeenCalledOnce();
+    // One drag for one press, however far the pointer goes on.
+    pointer('pointermove', 140, 1, document);
+    pointer('pointermove', 180, 1, document);
+    expect(actions.dragFile).toHaveBeenCalledOnce();
+  });
+
+  it('starts nothing on a click, and takes no part in what the pointer does after it', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    pointer('pointerdown', 100, 1, icon);
+    pointer('pointerup', 100, 0, document);
+    pointer('pointermove', 160, 1, document);
+    pointer('pointermove', 200, 0, document);
+    expect(actions.dragFile).not.toHaveBeenCalled();
+  });
+
+  it('forgets a press whose release it never saw, as a drag the system took over leaves', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    pointer('pointerdown', 100, 1, icon);
+    // The button is up when the pointer next moves.
+    pointer('pointermove', 160, 0, document);
+    pointer('pointermove', 200, 1, document);
+    expect(actions.dragFile).not.toHaveBeenCalled();
+    // And the next press starts afresh.
+    pointer('pointerdown', 300, 1, icon);
+    pointer('pointermove', 310, 1, document);
+    expect(actions.dragFile).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the keyboard where it was, and takes no other button than the left', () => {
+    const { root, actions } = setup();
+    const icon = iconOf(root);
+    if (!icon) throw new Error('no icon');
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+    icon.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    icon.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerType: 'mouse',
+        button: 2,
+        buttons: 2,
+      }),
+    );
+    pointer('pointermove', 400, 2, document);
+    expect(actions.dragFile).not.toHaveBeenCalled();
+  });
+
+  it('says what it is for, for those who cannot see it', () => {
+    const { root } = setup();
+    const icon = iconOf(root);
+    expect(icon?.getAttribute('role')).toBe('img');
+    expect(icon?.getAttribute('aria-label')).toBe('launch-plan.md, document icon');
+    expect(icon?.title).toBe('Drag to copy the file');
+  });
+
+  it('stays away from the hover facts and the rename field', () => {
+    const { root, bar } = setup();
+    bar.beginRename();
+    // The field takes the name's place, and the icon stays beside it.
+    const icon = iconOf(root);
+    const input = root.querySelector('.rl-title-field');
+    expect(icon && shown(icon)).toBe(true);
+    expect(icon?.parentElement).toBe(input?.parentElement?.parentElement);
   });
 });
 

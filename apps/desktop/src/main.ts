@@ -165,6 +165,19 @@ function beep(): void {
   if (isTauri) void invoke('beep').catch(() => {});
 }
 
+/**
+ * Starts dragging the document's file out of the window, once the title bar's document icon has
+ * been dragged: the app does it, as a native title bar's proxy icon would, and a drop in Finder,
+ * Mail or Terminal hands over the file. A plain browser has no file to hand over.
+ */
+function dragFile(): void {
+  const path = doc?.path;
+  if (!path || !isTauri) return;
+  invoke<boolean>('start_file_drag', { path }).catch((error: unknown) => {
+    console.error('Could not drag the file', error);
+  });
+}
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
@@ -582,12 +595,23 @@ const toggleResolved = () => {
   render();
 };
 
+/**
+ * File › Rename, and a double-click on the file name: a document with a file gets a field for its
+ * name, and an Untitled one, which has no name to change, Save As, which asks for one.
+ */
+function renameDocument(): void {
+  if (doc?.path) titleBar.beginRename();
+  else void controller.saveAs();
+}
+
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (mode) => editor.setViewMode(mode),
   toggleTracking,
   openReview,
   toggleResolved,
   toggleSidebar,
+  renameDocument: () => renameDocument(),
+  dragFile,
   rename: async (newName) => {
     const from = controller.state.path;
     const renamed = await controller.rename(newName);
@@ -636,8 +660,7 @@ const commands: MenuCommands = {
   },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
-  // A document with no file has no name to change: Save As asks for one.
-  rename: () => (doc?.path ? titleBar.beginRename() : void controller.saveAs()),
+  rename: renameDocument,
   revealInFinder: () => {
     if (doc?.path) {
       void host.reveal(doc.path).catch((error: unknown) => {
@@ -744,6 +767,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
+    hasFile: doc.path !== null,
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,

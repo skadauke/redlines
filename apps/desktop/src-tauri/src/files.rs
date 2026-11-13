@@ -54,7 +54,7 @@ pub fn rename_file(
 /// `plain`, a plain file: not a folder, and not a link, whose own name a rename would change and not
 /// the file's. A window's document is what it says it is (`window_document`), or the file it was
 /// opened for (`open_window`), which the page names too: only the scope says what it may use.
-fn check_own_file(
+pub(crate) fn check_own_file(
     windows: &Windows,
     label: &str,
     path: &Path,

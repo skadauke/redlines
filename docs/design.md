@@ -150,6 +150,14 @@ The window, on the desktop:
 
 - **The title bar is the page:** the same color, with no line under it, and the file name centered
   in small gray type. There is no toolbar and no status bar.
+- **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
+  icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
+  hands over a copy of the file as it is saved. It never moves the file the window has open, and
+  while the document is Untitled, with no file yet, the icon is hidden. A double-click on the name
+  renames the document, as File › Rename does, or opens Save As for an Untitled one; a
+  double-click anywhere else on the bar zooms the window, and a drag anywhere on the bar, the
+  name included, moves it. Hovering over the name shows the words and when the document was last
+  saved.
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
@@ -177,7 +185,8 @@ The window, on the desktop:
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
+  Print. Printing holds the whole
   document in light ink and prints the view as it shows, without the rail: Simple prints the newest
   text with its change bars.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
