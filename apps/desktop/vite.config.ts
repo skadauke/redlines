@@ -16,11 +16,13 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // The app's window, the window that asks to install the app from its disk image, and Preferences.
+      // The app's window, the window that asks to install the app from its disk image, Preferences
+      // and About Redlines.
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         install: resolve(import.meta.dirname, 'install.html'),
         preferences: resolve(import.meta.dirname, 'preferences.html'),
+        about: resolve(import.meta.dirname, 'about.html'),
       },
     },
   },

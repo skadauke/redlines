@@ -2,7 +2,7 @@
 // the one theme, light or dark as Preferences say, or as the system is under Match System. The
 // window takes the appearance too: its title bar, its scroll bars, and the system's menus and
 // dialogs in it. That is the app's appearance, the same for all its windows at once, About
-// Redlines (the system's panel) and the windows opened later among them. The app keeps a copy of
+// Redlines and the windows opened later among them. The app keeps a copy of
 // it and takes it before it opens a window (src-tauri/src/appearance.rs), so that no window shows
 // another one first. Preferences sets it as the person chooses it, and each document window as it
 // opens and as the choice changes, which keeps that copy the same as the settings.
