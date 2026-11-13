@@ -64,8 +64,33 @@ const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] =
   () => '\\*literal\\*',
 ];
 
+/** Constructs added since the tests that pin a seed were written (`RandomDocumentOptions.legacy`
+ * leaves them out). The tags that are formats (format §2.6): subscript and superscript, on their
+ * own, around and inside other formats, and around a space; and tags that are not read, which show
+ * as written. */
+const NEWER_CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] = [
+  (pick) => `<sub>${pick(WORDS)}</sub>`,
+  (pick) => `<sup>${pick(WORDS)} ${pick(WORDS)}</sup>`,
+  (pick) => `**<sub>${pick(WORDS)}</sub>**`,
+  (pick) => `<sup>*${pick(WORDS)}*</sup>`,
+  (pick) => `H<sub>${pick(WORDS)}</sub>O`,
+  (pick) => `x<sup>${pick(WORDS)}</sup>y`,
+  (pick) => `<SUB>${pick(WORDS)}</SUB>`,
+  (pick) => `<sub class="s">${pick(WORDS)}</sub>`,
+  // A tag with no pair, one that a backslash escapes, and a word that ends in a backslash: the
+  // tags are text, and a pair written around them must still pair with itself.
+  () => '<sub>',
+  () => '</sup>',
+  (pick) => `\\<sup>${pick(WORDS)}</sup>`,
+  (pick) => `${pick(WORDS)}\\\\`,
+];
+
 /** What a random document holds besides the blocks every one may have. */
 export interface RandomDocumentOptions {
+  /** Draw only what the generator drew before the forms of #310 and after, so that a test that pins
+   * a seed it found by a long run makes the document it was found with. The other documents of
+   * every suite hold the newer forms (`NEWER_CONSTRUCTS`). */
+  legacy?: boolean;
   /** Now and then an indented code block of plain words, with a blank line or a line of `>` alone
    * among its lines, at the top level, in a list item or in a quote; and now and then a paragraph
    * or an item whose wrapped lines are indented four columns past its text, which goes on the
@@ -82,6 +107,7 @@ export interface RandomDocumentOptions {
  * no marker starts a line. */
 export function randomDocument(random: () => number, options: RandomDocumentOptions = {}): string {
   const taken = new Set<string>();
+  const constructs = options.legacy === true ? CONSTRUCTS : [...CONSTRUCTS, ...NEWER_CONSTRUCTS];
   const marks: Ledger['marks'] = {};
   const comments: Thread[] = [];
   const below = (n: number) => Math.floor(random() * n);
@@ -130,7 +156,7 @@ export function randomDocument(random: () => number, options: RandomDocumentOpti
    * people's, as in format §3.6. Such a container holds no insertion: it holds deletions and
    * substitutions. */
   function unit(depth: number, container?: string): string {
-    if (random() < 0.12) return pick(CONSTRUCTS)(pick);
+    if (random() < 0.12) return pick(constructs)(pick);
     const roll = random();
     if (roll < 0.34 || depth > 3) return plain(3);
     if (roll < 0.5 && depth < 3) {

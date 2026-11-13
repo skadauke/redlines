@@ -657,7 +657,7 @@ describe('+ typed as a key', () => {
     expect(c.zoomIn).not.toHaveBeenCalled();
     // The text size has its own limit.
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(true);
-    state = documentState({ textSize: 2 });
+    state = documentState({ textSize: 4 });
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(false);
     expect(c.biggerText).toHaveBeenCalledOnce();
     stop();

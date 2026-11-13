@@ -108,10 +108,14 @@ function rowBox(line: HTMLElement): { top: number; bottom: number } {
   };
 }
 
-/** What is measured of each table, kept until the state (the text, the selection, a decoration), the scroll or the table's place changes. */
+/**
+ * What is measured of each table, kept until the state (the text, the selection, a decoration), the
+ * scroll or the table's place changes: its place is its top and its left, which moves when the
+ * table scrolls sideways in its box.
+ */
 const measured = new WeakMap<
   HTMLElement,
-  { state: unknown; scroll: number; top: number; drawn: Drawn }
+  { state: unknown; scroll: number; top: number; left: number; drawn: Drawn }
 >();
 
 /**
@@ -140,6 +144,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
       known.state === view.state &&
       known.scroll === view.scrollDOM.scrollTop &&
       known.top === box.top &&
+      known.left === box.left &&
       known.drawn.table === table
     ) {
       drawn.push(known.drawn);
@@ -166,6 +171,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
       state: view.state,
       scroll: view.scrollDOM.scrollTop,
       top: box.top,
+      left: box.left,
       drawn: one,
     });
     drawn.push(one);
@@ -199,6 +205,10 @@ class Grips {
   private readonly onMove = (event: MouseEvent) => this.moved(event);
   private readonly onLeave = (event: MouseEvent) => {
     if (!this.drag && !this.layer.contains(event.relatedTarget as Node | null)) this.hide();
+  };
+  private readonly onBoxScroll = (event: Event) => {
+    // The editor's own scroll is heard by the plugin's observer; this is what scrolls inside it.
+    if (event.target !== this.view.scrollDOM && !this.drag) this.hide();
   };
   private readonly onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && (this.drag || this.menu)) {
@@ -237,6 +247,9 @@ class Grips {
     view.dom.append(this.layer);
     view.dom.addEventListener('mousemove', this.onMove);
     view.dom.addEventListener('mouseleave', this.onLeave);
+    // A table scrolls sideways in its own box, and a scroll doesn't bubble to the editor: the grip
+    // would stay where the column was.
+    view.dom.addEventListener('scroll', this.onBoxScroll, true);
     window.addEventListener('keydown', this.onKey, true);
     window.addEventListener('mouseup', this.onUp);
     window.addEventListener('mousedown', this.onAway, true);
@@ -252,6 +265,7 @@ class Grips {
     this.drag = null;
     this.view.dom.removeEventListener('mousemove', this.onMove);
     this.view.dom.removeEventListener('mouseleave', this.onLeave);
+    this.view.dom.removeEventListener('scroll', this.onBoxScroll, true);
     window.removeEventListener('keydown', this.onKey, true);
     window.removeEventListener('mouseup', this.onUp);
     window.removeEventListener('mousedown', this.onAway, true);

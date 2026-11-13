@@ -10,11 +10,12 @@
 import { LIMITS } from '@redlines/agent-tools';
 import { assignColors, type Author, type MetPerson } from '@redlines/editor';
 import type { Parsed } from '@redlines/format';
+import type { AgentScope } from '@redlines/plugin-api';
 import { icon } from '@redlines/review';
 import { agentHandle, type LiveLine, type RunController } from './runs.ts';
 
 export interface LiveLineActions {
-  answer(answer: 'folder' | 'document' | 'no'): void;
+  answer(answer: AgentScope | 'no'): void;
   stop(): void;
   dismiss(): void;
   /** Shows a failed run's log. Without it, a failure offers none. */
@@ -402,6 +403,8 @@ function asking(
 ): Node[] {
   const { agentName } = line;
   const machine = line.readLimit === 'machine';
+  // An agent that reads the whole machine can't be held to a home folder either.
+  const home = line.home === true && !machine;
   const id = `rl-ask-${++askCount}`;
   const title = block('rl-ask-title', askTitle(line));
   title.id = `${id}-title`;
@@ -423,13 +426,24 @@ function asking(
   note.id = `${id}-note`;
   described.push(note.id);
   children.push(note);
+  if (home) {
+    // The wider answer, said plainly where it is given: what it opens, what it leaves out, and the
+    // risk of what someone else wrote in the document.
+    const wider = block(
+      'rl-ask-note',
+      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
+    );
+    wider.id = `${id}-home`;
+    described.push(wider.id);
+    children.push(wider);
+  }
 
   panel.setAttribute('aria-labelledby', title.id);
   panel.setAttribute('aria-describedby', described.join(' '));
 
   // An answer from the keyboard gives it back to where it was, else to the document, for the
   // button that had it is gone, and a Return must never land on the running line's Stop.
-  const give = (answer: 'folder' | 'document' | 'no') => {
+  const give = (answer: AgentScope | 'no') => {
     if (panel.contains(document.activeElement)) {
       const back = cameFrom.get(panel);
       if (back?.isConnected && !panel.contains(back) && back instanceof HTMLElement) back.focus();
@@ -442,6 +456,7 @@ function asking(
   answers.className = 'rl-ask-answers';
   answers.append(
     button('rl-ask-allow', 'Allow', () => give('folder')),
+    ...(home ? [button('', 'Allow Folder and Home Folder', () => give('everything'))] : []),
     // An agent that reads the whole machine can't be held to this document.
     ...(machine ? [] : [button('', 'Just This Document', () => give('document'))]),
     button('', 'Not Now', () => give('no')),

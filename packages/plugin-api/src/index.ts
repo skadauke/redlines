@@ -230,15 +230,47 @@ export interface AgentRequest {
   documentPath?: string;
   folder?: string;
   scope: AgentScope;
+  /**
+   * At `scope: 'everything'`, the home folder, which the host names, and with it the folders of
+   * it the agent may read besides `folder`: the visible folders of the home folder, never a hidden
+   * one and never `~/Library` but its cloud folders, each by its name and by where a link leads.
+   * The provider holds the agent's reads to them, each in the way the agent can be held, so that
+   * nothing else is readable.
+   */
+  homeFolder?: string;
+  homeRoots?: readonly string[];
   author: { handle: string; name: string; for: string };
+}
+
+/**
+ * A read an agent couldn't make inside what it may read, with the cause as far as the host can
+ * tell, for a message that says which file, why, and what to do (design §8.6, Scope).
+ */
+export interface BlockedRead {
+  /** The file or folder, as the agent named it. */
+  path: string;
+  /**
+   * `privacy`: macOS isn't letting Redlines read the folder (Documents, Desktop, Downloads, iCloud
+   * Drive, cloud folders, removable and network volumes). `permission`: the file's own permissions
+   * refuse it. `settings`: the agent's own settings, or an organization's, refuse it. `other`:
+   * none of those, and `words` is the agent's own.
+   */
+  cause: 'privacy' | 'permission' | 'settings' | 'other';
+  /** For `privacy`: the folder macOS protects, such as `Documents` or `iCloud Drive`. */
+  place?: string;
+  /** For `other`: what the agent said, on one line. */
+  words?: string;
 }
 
 /** What happens during a run. */
 export type AgentEvent =
   /** The program started, and its log is at `logPath`, for a failure to point to. */
   | { type: 'started'; logPath: string }
-  /** From the event stream; the status tool goes straight to the thread. */
-  | { type: 'status'; text: string }
+  /**
+   * From the event stream; the status tool goes straight to the thread. `blocked` is set when the
+   * status tells of a read inside what the agent may read that it couldn't make.
+   */
+  | { type: 'status'; text: string; blocked?: BlockedRead }
   /** `finalText` is the last message, for an agent that never called reply. */
   | { type: 'done'; finalText?: string }
   /**

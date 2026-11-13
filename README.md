@@ -65,7 +65,9 @@ and when, and the comment threads, are in a block at the end of the file.
   is installed, and offers the next step: Update when it is too old, Sign In when it is signed out
   (each runs the agent's own command), or the command that installs it. A run that fails for one of
   those reasons says so in its line, which offers to open Preferences. The first time an agent runs
-  in a folder it asks whether it may read the folder, or only the document. A document it cites,
+  in a folder it asks whether it may read the folder, or only the document, or, if Preferences
+  allow it, the folder and your home folder (never hidden files and folders, or `~/Library` but
+  its cloud folders). A document it cites,
   such as `plan.md:42`, opens at that line, and an image or a PDF in its default app.
   Every run writes a log, which Help › Show Agent Logs opens.
 - **Quick Look.** Space on a Markdown file in Finder, Mail, Spotlight or the Open dialog shows it
