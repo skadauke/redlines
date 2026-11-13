@@ -9,12 +9,17 @@
 import type { SetupResult } from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
-import { findProgram, runProgram, type AcpAgent } from './agent-programs.ts';
+import { findProgram, homeAccess, runProgram, type AcpAgent } from './agent-programs.ts';
 
 export const acpAgentEdits = {
   add: (name: string, command: string) => invoke<AcpAgent[]>('acp_agent_add', { name, command }),
   remove: (id: string) => invoke<AcpAgent[]>('acp_agent_remove', { id }),
 };
+
+export { homeAccess };
+
+/** Opens System Settings at Privacy & Security › Files and Folders (agents/mod.rs). */
+export const openFilesAndFoldersSettings = () => invoke<void>('open_files_and_folders_settings');
 
 /** How an update or a sign-in ended (`Outcome` in agents/setup.rs). */
 interface SetupOutcome {

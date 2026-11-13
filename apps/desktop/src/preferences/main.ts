@@ -9,7 +9,12 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
-import { agentSetup, createDetectionProcesses } from '../agent-preferences.ts';
+import {
+  agentSetup,
+  createDetectionProcesses,
+  homeAccess,
+  openFilesAndFoldersSettings,
+} from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
@@ -89,10 +94,14 @@ const setups = createSetupRegistry((id) => {
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
  * Outside the app, in a plain browser, `outside` is.
  */
-async function appCommand<T>(command: string, outside: string): Promise<T> {
+async function appCommand<T>(
+  command: string,
+  outside: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri) throw new Error(outside);
   try {
-    return await invoke<T>(command);
+    return await invoke<T>(command, args);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
@@ -133,6 +142,9 @@ const deps: PaneDeps = {
   ...(hasQuickLook
     ? { openQuickLookSettings: () => invoke<void>('open_quick_look_settings') }
     : {}),
+  // The app shows the panel, a sheet of this window, and hands back only the folder's path.
+  chooseFolder: (start) =>
+    appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', { start }),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
@@ -163,6 +175,8 @@ const deps: PaneDeps = {
           : {}),
       })),
       copy: copyText,
+      // What macOS holds back from Redlines, asked when the person picks the home folder.
+      ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),
@@ -190,9 +204,11 @@ ignorePinch(window);
 watchSettings((next) => {
   settings = next;
   // The main window saves the last document at every change of its file. Redrawing the pane while
-  // someone types their name would take the caret away, so what is being edited is left alone.
+  // someone types their name would take the caret away, so what is being edited is left alone, and
+  // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) show(current);
+  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');
