@@ -1,0 +1,14 @@
+---
+title: "Weekly report"
+output: html_document
+---
+
+# Summary
+
+Last week's numbers, with the code that made them.
+
+```{r, echo=FALSE, message=FALSE}
+summary(cars)
+```
+
+Inline code, `r 1 + 1`, stays code.

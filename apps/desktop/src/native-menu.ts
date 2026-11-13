@@ -12,7 +12,6 @@ import {
   Submenu,
   type SubmenuOptions,
 } from '@tauri-apps/api/menu';
-import { aboutMetadata, type About } from './about.ts';
 import type { ActionRow, MenuModel, MenuRow, MenuState, SubmenuRow } from './menu-model.ts';
 
 type DrawnRow = NonNullable<SubmenuOptions['items']>[number];
@@ -27,11 +26,8 @@ export interface NativeMenu {
   activate(): Promise<void>;
 }
 
-/**
- * Builds this window's menu bar. `about` is what About Redlines shows; without it, the item shows
- * what the app's bundle says.
- */
-export async function createNativeMenu(model: MenuModel, about: About | null): Promise<NativeMenu> {
+/** Builds this window's menu bar. */
+export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
   let state: MenuState | null = null;
   /** One for each thing on the menu that follows the state. */
   const followers: ((next: MenuState) => void)[] = [];
@@ -114,9 +110,6 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
   const drawRows = (rows: readonly MenuRow[]) => Promise.all(rows.map(drawRow));
 
   const drawRow = async (row: MenuRow): Promise<DrawnRow> => {
-    if ('about' in row) {
-      return { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' };
-    }
     if ('item' in row) return { ...row };
     if ('rows' in row && row.dynamic) return drawDynamic({ ...row, dynamic: row.dynamic });
     if ('rows' in row) return Submenu.new({ text: row.text, items: await drawRows(row.rows) });

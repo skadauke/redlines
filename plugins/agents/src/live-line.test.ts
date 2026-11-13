@@ -8,6 +8,7 @@ import {
   createLiveLines,
   fitStatus,
   renderLiveLine,
+  shownInWindow,
   type LiveLineNotice,
   type LiveLineActions,
   type LiveLinesDeps,
@@ -1000,5 +1001,40 @@ describe('the live line in a thread', () => {
     expect(allow.isConnected).toBe(true);
     allow.click();
     await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
+  });
+});
+
+describe('a note in the window', () => {
+  /** A page that scrolls, at `top`, with `padding` of room at its top, and a note at `at`. */
+  function page(top: number, padding: string, at: { top: number; bottom: number }) {
+    // The document itself clips nothing, as in a browser (happy-dom leaves its overflow unset).
+    document.documentElement.style.overflowY = 'visible';
+    document.body.style.overflowY = 'visible';
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    scroller.style.paddingTop = padding;
+    scroller.getBoundingClientRect = () => new DOMRect(0, top, 800, 700);
+    const note = document.createElement('div');
+    note.getBoundingClientRect = () => new DOMRect(0, at.top, 200, at.bottom - at.top);
+    note.getClientRects = () => [note.getBoundingClientRect()] as unknown as DOMRectList;
+    scroller.append(note);
+    document.body.append(scroller);
+    return note;
+  }
+  afterEach(() => document.body.replaceChildren());
+
+  it('shows while it is below the top of what its page shows', () => {
+    expect(shownInWindow(page(52, '0px', { top: 60, bottom: 90 }))).toBe(true);
+    // Under a bar above the page, which hides what is scrolled up to it.
+    expect(shownInWindow(page(52, '0px', { top: 20, bottom: 40 }))).toBe(false);
+  });
+
+  it('is hidden under a title bar that floats over the page, whose room is its top padding', () => {
+    // The page reaches the top of the window, and keeps the bar's room as padding: a note that has
+    // scrolled up into it is under the bar, though it is inside the page's own box.
+    expect(shownInWindow(page(0, '52px', { top: 10, bottom: 40 }))).toBe(false);
+    expect(shownInWindow(page(0, '52px', { top: 60, bottom: 90 }))).toBe(true);
+    // Partly under it, partly below: it shows.
+    expect(shownInWindow(page(0, '52px', { top: 40, bottom: 80 }))).toBe(true);
   });
 });

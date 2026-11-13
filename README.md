@@ -71,6 +71,14 @@ and when, and the comment threads, are in a block at the end of the file.
   its cloud folders). A document it cites,
   such as `plan.md:42`, opens at that line, and an image or a PDF in its default app.
   Every run writes a log, which Help › Show Agent Logs opens.
+- **Quick Look.** Space on a Markdown file in Finder, Mail, Spotlight or the Open dialog shows it
+  as the Clean view does: every change accepted, in the Default theme, under one line that says
+  what is waiting in the file ("3 changes and 1 comment by Ada, Claude and Bo. Open in Redlines to
+  review them."). R Markdown and Quarto files preview the same way, unless another app on the Mac
+  declares those extensions as its own type, in which case macOS asks that app. It comes with the
+  app and needs nothing installed (macOS 13.3 or later; System Settings › General › Login Items &
+  Extensions › Quick Look turns it off); it draws no script, loads nothing and shows an image as
+  its alt text.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
   Terminal window. macOS asks for an administrator's password if that folder needs one; without

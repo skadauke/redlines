@@ -529,17 +529,19 @@ function noticeText({ agentName, message }: LiveLine & { kind: 'failed' }): stri
 
 /**
  * Whether `el` shows in the window: in the page, laid out, and not scrolled out of anything that
- * clips it.
+ * clips it. What clips it starts below its top padding: a title bar floating over the page keeps
+ * its room there, and a note scrolled up into it is under the bar.
  */
-function shownInWindow(el: HTMLElement): boolean {
+export function shownInWindow(el: HTMLElement): boolean {
   if (!el.isConnected || el.getClientRects().length === 0) return false;
   const rect = el.getBoundingClientRect();
   let top = Math.max(rect.top, 0);
   let bottom = Math.min(rect.bottom, window.innerHeight);
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    if (getComputedStyle(parent).overflowY === 'visible') continue;
+    const style = getComputedStyle(parent);
+    if (style.overflowY === 'visible') continue;
     const clip = parent.getBoundingClientRect();
-    top = Math.max(top, clip.top);
+    top = Math.max(top, clip.top + (Number.parseFloat(style.paddingTop) || 0));
     bottom = Math.min(bottom, clip.bottom);
   }
   return bottom > top;
