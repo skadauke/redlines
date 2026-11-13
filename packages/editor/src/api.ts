@@ -4,7 +4,7 @@
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 
 /** How the document is shown (design §5.3). */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
@@ -153,6 +153,12 @@ export interface EditorOptions {
    */
   tracking?: boolean;
   /**
+   * Whether turning Track Changes on or off is written to the document, as `tracking: everyone` in
+   * its ledger (format §5.6), so that the file remembers it, and is edited like by any change.
+   * Default: false, and `setTracking` changes only this editor's state, for a host with no file.
+   */
+  saveTracking?: boolean;
+  /**
    * How typing helps. Default: the browser's own spell check and nothing else. The help goes
    * through the normal input path, so Track Changes records it like any typing.
    */
@@ -179,6 +185,13 @@ export interface EditorOptions {
    * code stays plain. @redlines/code provides it, with the colors.
    */
   codeLanguages?: (info: string) => Language | LanguageDescription | null;
+  /**
+   * Opens a link's address, for a ⌘-click on a link (Ctrl-click off a Mac): the host decides how, in
+   * the browser or the mail app. Only `http`, `https` and `mailto` addresses reach it (a `www.`
+   * address is the web's), and a hint on the link names the click after the title bar's pause.
+   * Default: none, and a link is text like any other: no click opens it and no hint shows.
+   */
+  openLink?: (address: string) => void;
   /**
    * Turns the path of a local image, as written in the document and decoded (`img/a b.png`), into
    * a URL the page can load, or null to show the image's alt text. The host knows where the
@@ -256,8 +269,9 @@ export interface Editor {
   /**
    * Replaces the whole document and clears the undo history, as when a file is opened. The
    * file's line ending is taken from the new string, and the view and Track Changes start over
-   * from their defaults: Redlines when the document has redlines, else Clean, and tracking on
-   * when the file asks for it (`tracking: everyone`).
+   * from their defaults: the view the ledger says (`view: clean` or `view: redlines`, format
+   * §5.6) or else the markup view when the document has redlines and Clean when it has none, and
+   * tracking on when the file asks for it (`tracking: everyone`).
    */
   setDoc(doc: string): void;
   /**
@@ -303,8 +317,30 @@ export interface Editor {
    * the text itself (format §3.10): what you type joins no pending change, and what you delete is
    * gone, with the marks that have no text left; an edit with no legal form says why through
    * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
+   *
+   * With `saveTracking`, the switch is written to the document (format §5.6): the ledger gains or
+   * loses `tracking: everyone`, in a step of its own that Undo takes back with Track Changes
+   * itself, and `onChange` hears of it. A file that can't take a ledger refuses it, says why
+   * through `onNotice`, and stays as it was.
+   *
+   * `options.inFile` says whether this switch is written to the document: by default as the
+   * `saveTracking` option says, and `false` keeps it to this editor, for a Track Changes that is a
+   * person's own preference and not the file's (new documents that start tracked).
+   *
+   * @returns false when the file refused, and Track Changes is as it was.
    */
-  setTracking(on: boolean): void;
+  setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+  /**
+   * Writes the view the document is in to its ledger, as `view: clean` or `view: redlines` (format
+   * §5.6): for the host to call when it saves the file, so that the document opens in it. Simple
+   * is written as Redlines, and Raw leaves the view the file had. A view alone is no reason for a
+   * ledger, so a file with none gets none, and a ledger that can't be read is left as it is. It is
+   * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
+   * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
+   * for the next save. It is made in no empty paragraph's place, so a save never loses a blank line.
+   * Switching views never calls it: only a save does.
+   */
+  recordView(): void;
   /** Changes how typing helps, in this document and the ones opened later. */
   setTyping(typing: EditorTyping): void;
   /**
@@ -345,6 +381,23 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * The word at a position of the document, as the host's spell checker is asked about it: letters
+   * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
+   * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * formatting palette asks it for the word under a right-click.
+   */
+  wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
+  /**
+   * Makes a spelling suggestion the person picked: the text of `at`, which must read `replaced`, is
+   * made `text`, as the Mac's own corrections are made (design §5.1): as typing, in a step of its
+   * own that Undo takes back, with the caret after it. With Track Changes on, a word of the
+   * person's own pending insertion changes the insertion's text, and other text becomes a tracked
+   * change of the part that differs. Returns false, changing nothing, where the page shows other
+   * text than `replaced`.
+   */
+  pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
    * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
