@@ -6,6 +6,8 @@
 //   is `was=TYPE`, with the old syntax after the type when the serializer writes it otherwise, so
 //   that rejecting gives back the bytes. A heading's `#`s are inside the mark; a bullet, a box and a
 //   `> ` are in front of it, and a quote's `> ` starts each of its lines.
+// - The type of an alert, `> [!NOTE]`, is a mark that covers the whole alert, `was=callout-TYPE`,
+//   alone on the line before it, so that the alert's own lines are as they were in every renderer.
 // - An indent is a mark after the bullet that covers the item and the lines under it, `was=indent=N`.
 // - A box is a point mark at the end of the item's first line, `+check` or `-check`.
 // - A block that Markdown would read into the block next to it once changed is refused, not
@@ -23,6 +25,16 @@ import {
   onlyMarkers,
   viewBreaks,
 } from './blocks.ts';
+import {
+  ALERT_LINE,
+  CALLOUT_TYPE,
+  type CalloutWas,
+  calloutWas,
+  calloutWord,
+  readCalloutWas,
+  typeOfWord,
+} from './callout.ts';
+import { eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import {
   encodeValue,
@@ -82,6 +94,12 @@ const STACKED =
   "This change of a block's type can't be rejected while another change starts the block. Decide that one first.";
 const LOST =
   "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Raw with Track Changes off.";
+const NOT_AN_ALERT =
+  'This is not an alert: an alert is a quote at the left edge whose first line is a type in brackets, such as [!NOTE].';
+const ALERT_ON_ITS_OWN =
+  'An alert changes type only with a blank line before and after it (or right under a heading, a thematic break or a closing fence), so that no line goes on from it.';
+const ALERT_LOST =
+  "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Raw with Track Changes off.";
 
 /** The syntax that the serializer writes for each type. */
 const SYNTAX: Record<BlockType, string> = {
@@ -1053,9 +1071,208 @@ function planIndent(
   };
 }
 
+/** An alert, as a change of its type sees it. Positions are in the file. */
+interface Alert {
+  /** The start of its first line, the one with the type, and of the first line it takes, which is
+   * the opener's of the author's own mark alone on the line before it. */
+  line: number;
+  top: number;
+  /** The word between `[!` and `]`, as written, and where it is. */
+  word: Range;
+  written: string;
+  /** What type it is. */
+  type: string;
+  /** The end of its last line, and the starts of its lines after the first. */
+  end: number;
+  lines: number[];
+  /** The author's pending change of its type. */
+  own?: { mark: MarkRange; segment: Segment; ops: ParsedFormatOp[]; was: CalloutWas };
+}
+
+/** Throws unless `type` is one that an alert can have. */
+export function assertCalloutType(type: string): void {
+  if (!CALLOUT_TYPE.test(type)) {
+    throw new EditError(
+      `"${type}" is not a type of alert: a type is a word of lowercase letters, digits and hyphens.`,
+      'not-supported',
+    );
+  }
+}
+
+/**
+ * The alert that the paragraph is in: the run of lines that start with `>` around it, whose first line
+ * is a type in brackets (`[!NOTE]`, in any case), at the left edge. A quote in a list item or in
+ * another quote, and a quote that starts with anything else, is no alert.
+ *
+ * @throws EditError where it is none.
+ */
+function alertAt(reader: BlockReader, paragraph: Range): Alert {
+  const { text, parsed } = reader;
+  const quoted = (at: number) => lineAt(text, at).startsWith('>');
+  let line = lineStart(text, paragraph.from);
+  if (!quoted(line)) throw refused(NOT_AN_ALERT);
+  while (!isBodyStart(text, line)) {
+    const above = lineStart(text, line - 1);
+    if (!quoted(above)) break;
+    line = above;
+  }
+  const lines: number[] = [];
+  let last = line;
+  for (let at = nextLine(reader, line); at !== undefined && quoted(at); at = nextLine(reader, at)) {
+    lines.push(at);
+    last = at;
+  }
+  const lead = /^>[ \t]?/.exec(lineAt(text, line))?.[0].length ?? 0;
+  const found = ALERT_LINE.exec(lineAt(text, line).slice(lead));
+  if (!found) throw refused(NOT_AN_ALERT);
+  const written = found[1] ?? '';
+  const from = line + lead + 2;
+  const alert: Alert = {
+    line,
+    top: line,
+    word: { from, to: from + written.length },
+    written,
+    type: typeOfWord(written),
+    end: lineEnd(text, last),
+    lines,
+  };
+  // A mark that starts the alert: the author's own change of its type, alone on the line before it,
+  // and nobody else's.
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      if ((segment.carrier?.to ?? segment.open.to) !== line || segment.open.to > line) continue;
+      const ops = mark.kind === 'fmt' ? opsOf(mark, segment) : [];
+      const was =
+        ops.length === 1 && ops[0]?.name === 'was' ? readCalloutWas(ops[0].value) : undefined;
+      if (!was || mark.entry.by !== reader.owner) throw refused(AT_START);
+      if (!segment.close || lineEnd(text, segment.content.to) !== alert.end)
+        throw refused(OWN_FIRST);
+      alert.top = lineStart(text, segment.open.from);
+      alert.own = { mark, segment, ops, was };
+    }
+  }
+  return alert;
+}
+
+/**
+ * The plan of a change of an alert's type, or undefined where it has that type already. The mark is
+ * the whole alert's: its opener alone on the line before it, with a blank line after, and its closer
+ * at the end of the alert's last line, so that no line of the alert starts with a marker and the
+ * alert reads as one in every renderer. Rejecting writes the old word back.
+ *
+ * @throws EditError where the block is no alert, or can't change type.
+ */
+function planCallout(
+  reader: BlockReader,
+  paragraph: Range,
+  to: string,
+  tracked: boolean,
+): BlockPlan | undefined {
+  const { text } = reader;
+  const alert = alertAt(reader, paragraph);
+  const { own } = alert;
+  const extent = { from: alert.top, to: alert.end };
+  if (own) {
+    if (!tracked) throw refused(OWN_FIRST);
+    if (own.was.type === to) {
+      return {
+        kind: 'edit',
+        at: alert.top,
+        extent,
+        id: own.mark.id,
+        kept: false,
+        changes: calloutUndo(reader, own.segment, own.was),
+      };
+    }
+  }
+  if (to === alert.type) return undefined;
+  const block: Block = {
+    type: 'quote',
+    line: alert.line,
+    indent: alert.line,
+    prefix: alert.line + 1,
+    head: alert.line + 1,
+    start: alert.line + 1,
+    end: alert.end,
+    lines: alert.lines,
+    syntax: '> ',
+    top: alert.top,
+  };
+  const after = nextLine(reader, alert.end);
+  const stands = standsAfterBlank(text, alert.top) || endsBlockAbove(text, alert.top);
+  if (!stands || (after !== undefined && !isBlank(text, after))) throw refused(ALERT_ON_ITS_OWN);
+  // The same in the original text, with every pending change rejected.
+  const before = linesBefore(reader, block);
+  const blankOr = (line: string | undefined) => line === undefined || line.trim() === '';
+  if (before && !((blankOr(before.previous) || before.ends) && blankOr(before.next))) {
+    throw refused(ALERT_ON_ITS_OWN);
+  }
+  assertNoBreakPending(reader, block, alert.end);
+  assertPlace(reader, alert.end);
+  const word = calloutWord(to);
+  const replaced: TextChange = { ...alert.word, insert: word };
+  if (own) {
+    return {
+      kind: 'edit',
+      at: alert.top,
+      extent,
+      id: own.mark.id,
+      kept: true,
+      changes: [replaced],
+    };
+  }
+  const was = calloutWas(alert.written, encodeValue);
+  // The opener is alone on its line, with a blank line after it, in the file's line breaks.
+  const eol = eolOf(text, reader.parsed.ledgerRange);
+  return {
+    kind: 'mark',
+    at: alert.top,
+    extent,
+    write: (open, close) =>
+      open === ''
+        ? [replaced]
+        : merged(
+            [
+              {
+                from: alert.line,
+                to: alert.line,
+                insert: `${open.replace('{op}', was)}${eol}${eol}`,
+              },
+              replaced,
+              { from: alert.end, to: alert.end, insert: close },
+            ].toSorted((a, b) => a.from - b.from || a.to - b.to),
+          ),
+  };
+}
+
+/**
+ * The changes that reject one segment of a change of an alert's type: its markers go, and the
+ * type in the brackets is the word it was written with.
+ *
+ * @throws EditError when the alert no longer has a type in brackets on its first line.
+ */
+function calloutUndo(reader: FormatReader, segment: Segment, was: CalloutWas): TextChange[] {
+  const { text } = reader;
+  const head = segment.carrier?.to ?? segment.open.to;
+  // The opener's line break, and its blank line, are the carrier; the alert starts there.
+  if (!text.startsWith('>', head)) throw refused(ALERT_LOST);
+  const lead = /^>[ \t]?/.exec(lineAt(text, head))?.[0].length ?? 0;
+  const found = ALERT_LINE.exec(lineAt(text, head).slice(lead));
+  if (!found) throw refused(ALERT_LOST);
+  const from = head + lead + 2;
+  const close = segment.close ?? { from: segment.content.to, to: segment.content.to };
+  return merged(
+    [
+      { from: segment.open.from, to: head, insert: '' },
+      { from, to: from + (found[1]?.length ?? 0), insert: was.word },
+      { ...close, insert: '' },
+    ].toSorted((a, b) => a.from - b.from || a.to - b.to),
+  );
+}
+
 /** Whether an operation is one of a block format change. */
 export const isBlockOp = (op: FormatOp): boolean =>
-  op.kind === 'block' || op.kind === 'check' || op.kind === 'indent';
+  op.kind === 'block' || op.kind === 'callout' || op.kind === 'check' || op.kind === 'indent';
 
 /**
  * What a block format change does to the block of `paragraph`: undefined where it has what is asked
@@ -1071,6 +1288,7 @@ export function planBlock(
   tracked: boolean,
   range: Range,
 ): BlockPlan | undefined {
+  if (op.kind === 'callout') return planCallout(reader, paragraph, op.type, tracked);
   const block = readBlock(reader, paragraph, op.kind === 'indent' || op.kind === 'check');
   switch (op.kind) {
     case 'block':
@@ -1164,6 +1382,8 @@ export function blockUndo(
     changes.push({ from: opener.from, to: head, insert: '' }, { ...close, insert: '' });
     return merged(changes.toSorted((a, b) => a.from - b.from || a.to - b.to));
   }
+  const alert = readCalloutWas(op.value);
+  if (alert) return calloutUndo(reader, segment, alert);
   const read = readWas(op.value);
   if (!read) throw refused(LOST);
   const was = { type: read.type, syntax: read.syntax ?? SYNTAX[read.type] };
@@ -1236,6 +1456,12 @@ function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatO
       const lead = /^ */.exec(unquoted(text, line))?.[0].length ?? 0;
       const was = Number(op.value.slice('indent='.length));
       if (lead !== was) done.push({ kind: 'indent', by: lead > was ? 1 : -1 });
+    } else if (op.name === 'was' && readCalloutWas(op.value)) {
+      // The type the alert has now, on the line the mark's carrier ends at.
+      const head = segment.carrier?.to ?? segment.open.to;
+      const lead = /^>[ \t]?/.exec(lineAt(text, head))?.[0].length ?? 0;
+      const word = ALERT_LINE.exec(lineAt(text, head).slice(lead))?.[1];
+      if (word !== undefined) done.push({ kind: 'callout', type: typeOfWord(word) });
     } else if (op.name === 'was' && readWas(op.value)) {
       // The number an indented item had says no change of type.
       if (isIndentOps(opsOf(mark, segment)) && op.value?.startsWith('ol=')) continue;

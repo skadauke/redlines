@@ -18,6 +18,7 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemir
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
+import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
@@ -138,6 +139,8 @@ class Builder {
   private readonly ranges: Range<Decoration>[] = [];
   private readonly lines = new Map<number, LineStyle>();
   private readonly indented = new Set<number>();
+  /** The first lines of the alerts, whose syntax their title stands for: their quote mark is none. */
+  readonly titled = new Set<number>();
 
   constructor(state: EditorState) {
     this.state = state;
@@ -273,7 +276,36 @@ function setextHeading(b: Builder, node: SyntaxNode, level: string): void {
   else b.syntax(underline.from - 1, underline.to, false);
 }
 
+/**
+ * An alert (#311): the lines of its quote are a box, tinted, and its first line a title, with an
+ * icon, the type's name and a menu, in the place of `> [!NOTE]`. The source shows while the
+ * selection touches that syntax. A title that follows the type in the text stays text, set apart.
+ */
+function calloutBox(b: Builder, node: SyntaxNode, callout: Callout): void {
+  const { state } = b;
+  const active = touches(state, node.from, node.to);
+  b.eachLine(node.from, node.to, (line, first, last) => {
+    b.lineClass(line, 'rl-callout');
+    b.lineClass(line, `rl-callout-${callout.type}`);
+    if (first) {
+      b.lineClass(line, 'rl-callout-first');
+      b.lineClass(line, 'rl-callout-title');
+      if (active) b.lineClass(line, 'rl-callout-active');
+    }
+    if (last) b.lineClass(line, 'rl-callout-last');
+  });
+  b.titled.add(callout.from);
+  if (touches(state, callout.from, callout.to)) b.syntax(callout.from, callout.to, true);
+  else {
+    const widget = new CalloutTitleWidget(callout, pendingCallout(state, callout.from));
+    b.push(Decoration.replace({ widget }).range(callout.from, callout.to));
+  }
+  if (callout.title !== '')
+    b.mark(callout.to, callout.to + callout.title.length, 'rl-callout-text');
+}
+
 function quoteMark(b: Builder, node: SyntaxNode): void {
+  if (b.titled.has(node.from)) return;
   const line = b.state.doc.lineAt(node.from);
   // Shown only while the caret is at the marker, as a heading's `#`s.
   if (touches(b.state, node.from, node.to)) b.syntax(node.from, node.to, true);
@@ -467,9 +499,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
       if (name.startsWith('ATXHeading')) {
         if (!loneMark(state, node, 'HeaderMark')) atxHeading(b, node, name.slice(-1));
       } else if (name.startsWith('SetextHeading')) setextHeading(b, node, name.slice(-1));
-      else if (name === 'Blockquote')
-        b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
-      else if (name === 'QuoteMark') quoteMark(b, node);
+      else if (name === 'Blockquote') {
+        const callout = calloutOf(state, node);
+        if (callout) calloutBox(b, node, callout);
+        else b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
+      } else if (name === 'QuoteMark') quoteMark(b, node);
       else if (name === 'OrderedList' && live) countedNumbers(state, node, numbers);
       else if (name === 'ListItem') {
         if (!loneMark(state, node, 'ListMark')) listItem(b, node, numbers);

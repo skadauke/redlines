@@ -272,8 +272,9 @@ applies its inverse:
 | `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above (§3.7)      |
 
-- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
-  `md-image`, which restores Markdown image syntax when an image resize is rejected.
+- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE` (an alert's
+  old type, below), and `md-image`, which restores Markdown image syntax when an image resize is
+  rejected.
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
@@ -881,6 +882,43 @@ away.
   list are pending…". Whether a change is in the region counts every pending change there, apart
   or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
+
+**Alerts.** A quote whose first line is a type in brackets, `> [!NOTE]`, is a GitHub alert, and
+the editor draws it as a box with an icon and a title. The type is syntax, not words, as bold's
+stars are: GitHub's five types (`NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`) are written in
+capitals, and any other type that a file has, as `[!info]`, in lowercase, and all are read in any
+case. A change of the type is one mark on the whole alert, `was=callout-TYPE`, with the old type in
+lowercase, and `was=callout-TYPE=WORD` with the old word as written where the serializer would
+write it otherwise (`was=callout-note=note` for `[!note]`). The opener stands alone on the line
+before the alert, with a blank line after it, and the closer at the end of the alert's last line,
+so that every line of the alert is as it was and every renderer reads an alert (§3.3); the word in
+the brackets is the new type.
+
+```markdown
+<!--fmt q2hw was=callout-note-->
+
+> [!TIP]
+> Useful information.<!--/q2hw-->
+```
+
+- Rejecting writes the old word back and takes the markers away, and accepting takes the markers
+  away. The new type is any word of lowercase letters, digits and hyphens that starts with a
+  letter. A title or a fold mark after the type, which GitHub shows as text, is kept as written.
+- Only an alert at the left edge changes type: a quote that every line of starts with `>`, whose
+  first line is the type, with a blank line before it (or the start of the file, or a heading, a
+  thematic break or a closing fence) and after it (or the end of the file). A quote in a list item
+  or in another quote, a quote whose first line is anything else, and a quote with a line of text
+  that goes on from it are refused, in words that say what they are. The caret may be in any line
+  of the alert.
+- It works with the pending changes of the author's own in the alert, and with comments and
+  highlights. Another person's pending change in it, and one that adds or takes away a line break in
+  or around it, is decided first, as for every block change.
+- The author's own change of the type is changed in place: turned back to the old type it goes,
+  and changed again it stays one mark, with the first old type. In an alert of the author's own
+  pending insertion the type is written plainly, with no mark. With Track Changes off the new type
+  is written plainly.
+- A change of the type changes no words (the readings that decisions are held to leave the type
+  out), so every order of decisions reads alike.
 
 ## 3. Where markers go
 

@@ -110,6 +110,7 @@ export { followText } from './anchor.ts';
 export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
+export { calloutMenuEffect, calloutName, type CalloutMenuRequest } from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';

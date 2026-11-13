@@ -523,6 +523,8 @@ function plainOf(layout: Layout): string {
     else if (kind === 'autolink') dropped.add(from).add(to - 1);
     else if (kind === 'symbol' || kind === 'footnote' || kind === 'reference') symbols.add(from);
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
+    // The type of an alert is syntax, as bold's stars are: changing it changes no words (#311).
+    else if (kind === 'alert') drop(from + 2, to - 1);
     else if (alt) {
       drop(from, alt.from);
       drop(alt.to, to);

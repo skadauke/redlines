@@ -3,7 +3,13 @@
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView, type Rect } from '@codemirror/view';
-import { type Author, type Editor, setViewModeEffect, viewModeField } from '@redlines/editor';
+import {
+  type Author,
+  type Editor,
+  calloutName,
+  setViewModeEffect,
+  viewModeField,
+} from '@redlines/editor';
 import {
   type BlockType,
   EditError,
@@ -309,6 +315,8 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return op.url === null ? 'No link' : 'Link';
       case 'block':
         return BLOCK_NAMES[op.to];
+      case 'callout':
+        return `Alert: ${calloutName(op.type)}`;
       case 'indent':
         return op.by > 0 ? 'Indent' : 'Outdent';
       case 'check':

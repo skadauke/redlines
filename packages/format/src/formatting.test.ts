@@ -1750,7 +1750,24 @@ describe('parseFormatOps', () => {
     expect(parseFormatOps('was=h2')[0]?.inverse).toEqual({ kind: 'block', to: 'h2' });
     expect(parseFormatOps('+check')[0]?.inverse).toEqual({ kind: 'check', checked: false });
     expect(parseFormatOps('-check')[0]?.inverse).toEqual({ kind: 'check', checked: true });
-    for (const op of ['+mark', 'was=callout-note', '@width=10', 'align=x', '+html=<u>']) {
+    // An alert's old type is a block change too (#311), which only a word of its type can be.
+    expect(parseFormatOps('was=callout-note')[0]?.inverse).toEqual({
+      kind: 'callout',
+      type: 'note',
+    });
+    expect(parseFormatOps('was=callout-note=Note')[0]?.inverse).toEqual({
+      kind: 'callout',
+      type: 'note',
+    });
+    for (const op of [
+      '+mark',
+      'was=callout-note=tip',
+      'was=callout-Note',
+      'was=callout-',
+      '@width=10',
+      'align=x',
+      '+html=<u>',
+    ]) {
       expect(parseFormatOps(op)[0]?.inverse, op).toBeUndefined();
     }
     expect(parseFormatOps('')).toEqual([]);
