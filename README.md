@@ -58,14 +58,16 @@ and when, and the comment threads, are in a block at the end of the file.
   images inside the project show in the document.
 - **Preferences** (⌘,): your name and handle, themes, zoom and text size, the editor's habits, and the
   agents.
-- **Agents.** Write `@Claude`, `@Codex` or the name of an agent you added in a comment and post
-  it, and that agent works on the thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
+- **Agents.** Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
+  thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
   thread, and any change it makes is a tracked change in its name, for you to accept or reject. An
-  agent is your own Claude Code or Codex, or another agent you add in Preferences that speaks the
-  Agent Client Protocol, signed in the way you signed it in; Redlines never
-  handles those credentials. The first time an agent runs in a folder it asks whether it may read
-  the folder, or only the document. A document it cites, such as `plan.md:42`, opens at that
-  line, and an image or a PDF in its default app.
+  agent is your own Claude Code or Codex, signed in the way you signed it in; Redlines never
+  handles those credentials. Preferences › Agents shows each one's state, its version and where it
+  is installed, and offers the next step: Update when it is too old, Sign In when it is signed out
+  (each runs the agent's own command), or the command that installs it. A run that fails for one of
+  those reasons says so in its line, which offers to open Preferences. The first time an agent runs
+  in a folder it asks whether it may read the folder, or only the document. A document it cites,
+  such as `plan.md:42`, opens at that line, and an image or a PDF in its default app.
   Every run writes a log, which Help › Show Agent Logs opens.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
