@@ -45,6 +45,7 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
@@ -486,6 +487,7 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
   showThread: (thread) => review.showThread(thread),
   focusDocument: () => editor.focus(),
   notify: ({ key, text, action }) =>
@@ -505,6 +507,20 @@ const liveLines = createLiveLines({
         : {}),
     }),
 });
+
+/**
+ * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed
+ * run's line offers when the agent is too old or signed out. The window can't update or sign in an
+ * agent itself; it asks for the pane, and Preferences shows it.
+ */
+function openAgentPreferences(): void {
+  if (!isTauri) return notice.flash('Preferences are in the app.');
+  requestPane('agents');
+  invoke('open_preferences').catch((error: unknown) => {
+    console.error('Could not open Preferences', error);
+    notice.flash('Couldn’t open Preferences.');
+  });
+}
 
 /** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
 function showAgentLogs(): void {
