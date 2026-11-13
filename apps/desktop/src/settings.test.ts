@@ -279,12 +279,12 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
-  it('keeps a text size of any whole percent from 80 to 200, and takes the default for any other', () => {
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
-    expect(loadSettings().textSize).toBe(1.5);
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.37}');
-    expect(loadSettings().textSize).toBe(1.37);
-    for (const stored of ['"1.5"', '3', '0', 'null', '1.375', '0.79', '2.01']) {
+  it('keeps a text size of any whole percent from 80 to 400, and takes the default for any other', () => {
+    for (const kept of [1.5, 1.37, 2.01, 2.5, 3, 4]) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${kept}}`);
+      expect(loadSettings().textSize).toBe(kept);
+    }
+    for (const stored of ['"1.5"', '4.01', '5', '0', 'null', '1.375', '0.79', '3.999']) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
     }
@@ -386,7 +386,7 @@ describe('settings', () => {
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
     localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
     expect(loadSettings().zoom).toBe(1.25);
-    for (const stored of ['"1.25"', '1.3', '3', '0', 'null']) {
+    for (const stored of ['"1.25"', '1.3', '2.5', '3', '4', '0', 'null']) {
       localStorage.setItem(SETTINGS_KEY, `{"zoom":${stored}}`);
       expect(loadSettings().zoom).toBe(1);
     }
@@ -439,7 +439,7 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
-        agentScope: 'everything',
+        agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
     );
@@ -456,6 +456,33 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
       expect(loadSettings().identity).toBeNull();
     }
+  });
+
+  it('keeps the three scopes an agent may read, and the answers that name them', () => {
+    for (const agentScope of ['document', 'folder', 'everything']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ agentScope }));
+      expect(loadSettings().agentScope).toBe(agentScope);
+    }
+    // The default stays This folder, for a setting that is missing or not a scope.
+    localStorage.setItem(SETTINGS_KEY, '{}');
+    expect(loadSettings().agentScope).toBe('folder');
+    expect(DEFAULT_SETTINGS.agentScope).toBe('folder');
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        consent: {
+          'claude|/notes': 'everything',
+          'codex|/notes': 'document',
+          'claude|/a': 'no',
+          'codex|/b': 'machine',
+        },
+      }),
+    );
+    expect(loadSettings().consent).toEqual({
+      'claude|/notes': 'everything',
+      'codex|/notes': 'document',
+      'claude|/a': 'no',
+    });
   });
 
   it('keeps what other windows saved when one setting changes', () => {

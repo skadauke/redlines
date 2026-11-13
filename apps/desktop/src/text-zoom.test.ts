@@ -137,8 +137,13 @@ describe('followTextZoom', () => {
     // From 150% the next one down is 125%.
     zoom.step(-1);
     expect(save).toHaveBeenLastCalledWith(1.25);
+    // 200% was the top of the ladder once: the text goes on to 250%, 300% and 400%.
+    const past = setup(2);
+    past.zoom.step(1);
+    expect(past.save).toHaveBeenCalledWith(2.5);
+    expect(past.say).toHaveBeenCalledWith('Text size 250%');
     // The top of the ladder.
-    const top = setup(2);
+    const top = setup(4);
     top.zoom.step(1);
     expect(top.save).not.toHaveBeenCalled();
     expect(top.seen).toEqual([]);
