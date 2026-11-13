@@ -315,7 +315,7 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       };
       return hot === 1 &&
         cursor === 'pointer' &&
-        hint === 'Show Redlines⌥⌘3' &&
+        hint === 'Show full markup' &&
         left.hot === 0 &&
         !left.hint
         ? null

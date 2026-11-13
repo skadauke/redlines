@@ -269,14 +269,14 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
   (Word's No Markup).
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there, with its shortcut, whatever the document holds and whether Track Changes is on or
-  off, so the View menu always offers the same three views. A document without redlines looks nearly
-  the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is the
-  only thing that switches them: the **full markup**, and the **simple look** ("Simple" for short),
-  the same text as Clean with a change bar beside each line that has a pending change, in its author's color, and the
-  comments with their notes: deletions are hidden, and inserted and reformatted text is plain
-  (Word's Simple Markup). The click switches from the one to the other, with the line where it was.
-  The simple look is no view of its own: the View menu has no entry for it and no key shows it, so
-  the menu says "Redlines" in both looks.
+  off, so the View menu always offers the same three views. A document without redlines looks
+  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
+  the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
+  short), the same text as Clean with a change bar beside each line that has a pending change, in
+  its author's color, and the comments with their notes: deletions are hidden, and inserted and
+  reformatted text is plain (Word's Simple Markup). The click switches from the one to the other,
+  with the line where it was. The simple look is no view of its own: the View menu has no entry for
+  it and no key shows it, so the menu says "Redlines" in both looks.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
@@ -284,20 +284,23 @@ Clean and Redlines draw the blank lines between blocks as the space between them
 Raw shows them.
 
 Redlines remembers its look, the one a click on a change bar chose last, the full markup at first.
-It shows that look wherever it is chosen for you, and when you choose Redlines in the View menu from
-Clean or Raw; in Redlines already, in either look, the menu leaves the look as it is. A document
-with redlines (pending changes, highlights or comment threads) opens in Redlines; one without opens
-in Clean. Making a tracked change in Clean, or adding a comment there, switches to Redlines, so
-suggestions are never invisible to their author, and so does a document shown Clean that gains
-redlines; a tracked change made in the simple look stays in it, where its bar shows it. Reviewing
-(§5.6) shows the full markup, where each change shows. Otherwise the view stays as you chose it:
-deciding the last change doesn't switch it. The view, and the look remembered, are each person's
-own and are never saved in the file; the look is kept in the app's settings (a look saved as Simple
-opens in Redlines' simple look) and reaches every window for the documents each opens next, without
-changing the view any of them shows. The View menu also previews the original (every change
-rejected) and one person's changes alone (everyone else's rejected). The previews are read-only.
-Raw can be edited while Track Changes is off; while it is on, or locked on, Raw is read-only,
-because typing there could forge or break markers.
+A document with redlines (pending changes, highlights or comment threads) opens in Redlines in that
+look; one without opens in Clean. Making a tracked change in Clean, or adding a comment there,
+switches to Redlines in that look, so suggestions are never invisible to their author, and so does
+a document shown Clean that gains redlines; a tracked change made in the simple look stays in it,
+where its bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look
+that was shown last, so that a trip through Clean or Raw comes back to where it began; in Redlines
+already, in either look, the menu leaves the look as it is. Reviewing (§5.6) shows the full markup,
+where each change shows, and what it showed is what comes back. With no change pending there is no
+bar to click, and the two looks differ only in the ordinary HTML comments that the full markup draws
+as dimmed notes. Otherwise the view stays as you chose it: deciding the last change doesn't switch
+it. The view, and the look remembered, are each person's own and are never saved in the file; the
+look is kept in the app's settings (a look saved as Simple opens in Redlines' simple look) and
+reaches every window for the documents each opens next, without changing the view any of them
+shows. The View menu also previews the original (every change rejected) and one person's changes
+alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
+Changes is off; while it is on, or locked on, Raw is read-only, because typing there could forge
+or break markers.
 
 ### 5.4 Track Changes
 
@@ -339,8 +342,8 @@ mode has no counterpart in the desktop app.
   colors repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
   or gray when several people changed the line. In Redlines a click on a bar switches between its
-  two looks, the full markup and the simple look, and nothing else does: the bar is a target 24 px
-  wide, it widens under the pointer, and its hint names the look a click gives. Printing draws the
+  two looks, the full markup and the simple look, and is the only way to choose one: the bar is a
+  target 24 px wide, it widens under the pointer, and its hint names the look a click gives. Printing draws the
   bars as a left border, which prints.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card

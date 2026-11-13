@@ -130,6 +130,32 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
   });
 
+  it('brings back the look that was shown last, so that a trip through Clean or Raw comes back', () => {
+    const editor = load(marked, { markupView: 'simple' });
+    // The review bar shows the full markup without choosing it: the simple look stays the one
+    // chosen, and what was shown is what comes back.
+    editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    editor.showView('clean');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+    editor.showView('raw');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+    // A click on a change bar chooses a look, and that is the one shown again.
+    editor.setViewMode('simple');
+    editor.showView('clean');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+  });
+
+  it('starts another document from the look chosen, whatever was shown in the one before', () => {
+    const editor = load(marked, { markupView: 'simple' });
+    editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    editor.setDoc(plain);
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('shows Clean and Raw as they are, and never changes the look', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.showView('raw');

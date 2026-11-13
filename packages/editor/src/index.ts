@@ -85,6 +85,7 @@ import {
   menuViewOf,
   parsedField,
   peopleFacet,
+  setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
@@ -196,6 +197,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
+  /**
+   * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
+   * the markup view, unless the review bar showed the full markup without choosing it, and starts
+   * over from it with each document.
+   */
+  let shownLook: MarkupView = markupView;
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
   let told: string | null = null;
@@ -247,6 +254,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       }
       const { startState, state } = update;
       markupView = state.facet(markupViewFacet);
+      const shown = state.field(viewModeField);
+      if (shown === 'simple' || shown === 'redlines') shownLook = shown;
       const viewChanged =
         startState.field(viewModeField) !== state.field(viewModeField) ||
         startState.facet(markupViewFacet) !== markupView;
@@ -352,6 +361,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     commands,
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
+      shownLook = markupView;
       view.setState(stateFor(loadFile(doc)));
       told = fileText(view.state);
       report();
@@ -397,9 +407,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         return;
       }
       // Redlines shown already, in either look, stays as it is: only a click on a change bar
-      // switches the looks. Otherwise it comes back in the look chosen last.
+      // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
+      // nothing: the look chosen stays the one a click made.
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
-      view.dispatch({ effects: chooseViewEffects(view.state.facet(markupViewFacet)) });
+      view.dispatch({ effects: setViewModeEffect.of(shownLook) });
     },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;

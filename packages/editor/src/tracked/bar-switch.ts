@@ -170,7 +170,7 @@ interface Hover {
 
 const setHover = StateEffect.define<Hover | null>();
 
-const LABELS = { simple: 'Show Simple', redlines: 'Show Redlines' } as const;
+const LABELS = { simple: 'Show simple look', redlines: 'Show full markup' } as const;
 
 /** The keys that show each view, as the host writes them for the hint (none: the hint names none). */
 export type ViewKeys = Partial<Record<'simple' | 'redlines', string>>;

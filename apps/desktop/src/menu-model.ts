@@ -24,8 +24,8 @@ export interface MenuCommands {
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   /**
-   * Shows a view of the View menu. Redlines is shown in the look chosen last with a click on a
-   * change bar, and does nothing when it is shown already (`Editor.showView`).
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
+   * nothing when it is shown already (`Editor.showView`).
    */
   setView(view: MenuView): void;
   toggleSidebar(): void;

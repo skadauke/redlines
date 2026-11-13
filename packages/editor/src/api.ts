@@ -17,14 +17,13 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
  * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
- * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look chosen last.
+ * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
 /**
  * The look of Redlines that a click on a change bar chose last, the full markup (`'redlines'`) or
- * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you,
- * and when a host's View menu shows Redlines.
+ * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
 
@@ -308,10 +307,11 @@ export interface Editor {
    */
   setViewMode(mode: ViewMode): void;
   /**
-   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is shown
-   * in the look chosen last with a click on a change bar (`EditorUiState.markupView`), and when
-   * Redlines is shown already, in either look, it does nothing: only a click on a change bar
-   * switches the looks.
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
+   * shown in the look that was shown last: the one a click on a change bar chose
+   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: only a
+   * click on a change bar chooses a look.
    */
   showView(view: MenuView): void;
   /**

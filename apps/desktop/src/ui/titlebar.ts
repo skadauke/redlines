@@ -19,7 +19,7 @@ export interface TitleBarState {
 }
 
 export interface TitleBarActions {
-  /** Shows a view of the View menu: Redlines in the look chosen last (`Editor.showView`). */
+  /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
   setView(view: MenuView): void;
   toggleTracking(): void;
   openReview(): void;

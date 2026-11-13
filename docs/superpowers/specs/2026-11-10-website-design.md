@@ -281,7 +281,7 @@ Paint never wait for 400 KB, and a visitor on a metered connection chooses to pa
 ```ts
 /** The two demos; the bundle holds their documents. */
 export type DemoName = 'plan' | 'design';
-/** The editor's views, as `ViewMode` has them (a type test in the embed holds them equal). */
+/** The views a View menu lists, as `MenuView` has them (a type test in the embed holds them equal). */
 export type DemoView = 'clean' | 'redlines' | 'raw';
 
 export interface DemoOptions {
@@ -322,8 +322,8 @@ and a document the page passed in would be a second copy.
 site's TypeScript can't resolve `@redlines/*` from `website/`, and a hand-kept copy of the types
 would drift. A type-only import is erased before the bundler sees it.
 **Call: the embed holds the view list** (`[{ view: 'clean', label: 'Clean' }, ...]`) in an object
-that `satisfies Record<ViewMode, string>`, because the editor exports no list of its views (the
-app's View menu writes them out too): a fourth `ViewMode` fails the embed's type check until it has
+that `satisfies Record<MenuView, string>`, because the editor exports no list of its views (the
+app's View menu writes them out too): a fourth `MenuView` fails the embed's type check until it has
 a label, and the page then draws it with no change of its own.
 
 **Call: the controls are drawn by the page, not by the embed.** The view switch, the Track Changes
@@ -1036,8 +1036,8 @@ The conformance suite for this work, where each line fails if the property break
    and clean text (the drift guard).
 10. **Size:** `pnpm --filter @redlines/website-embed size` fails over budget, and when the JS is
     split.
-11. **Types:** `DemoView` and the editor's `ViewMode` are each assignable to the other, and the view
-    list covers every `ViewMode` (a compile-time test, run by `pnpm typecheck`).
+11. **Types:** `DemoView` and the editor's `MenuView` are each assignable to the other, and the view
+    list covers every `MenuView` (a compile-time test, run by `pnpm typecheck`).
 
 **In `plugins/review` / `plugins/agents`:** `startComment(initialText)` opens the box with the text,
 returns false in Raw, posts nothing by itself, and leaves a draft set aside on that anchor, or one

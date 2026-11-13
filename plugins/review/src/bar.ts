@@ -268,7 +268,7 @@ class Bar {
       if (open) this.show();
       else {
         this.hide();
-        // Closed from outside the bar, as when Simple is chosen: the host hears of it too.
+        // Closed from outside the bar, as when the simple look is shown: the host hears of it too.
         this.changed();
       }
     } else if (this.bar) {

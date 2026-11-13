@@ -592,7 +592,7 @@ in.
 ## Views
 
 - **Clean:** the newest table: no ghosts, no tints; edited as in Redlines. A tracked edit in Clean
-  switches to Redlines, in the look chosen last (the full markup or the simple look), as today.
+  switches to Redlines, as today.
 - **Redlines:** as above.
 - **Simple,** Redlines' simple look (review views, `2026-11-10-review-views-design.md`), applies to
   tables as it does everywhere: deleted rows, deleted columns and deleted cell text are hidden; inserted rows, columns

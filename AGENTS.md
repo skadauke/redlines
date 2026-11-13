@@ -81,10 +81,10 @@ repo root.
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke) and `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
-  over them, their bars and cards, in Redlines and its simple look) serve the page, and `pnpm tauri dev` runs
-  it in WKWebView; each writes its results to the console and ends with a `... done <n> passed,
-  <n> failed` line (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`). They read
-  nothing in a release build, and are no part of CI
+  over them, their bars and cards, in Redlines and its simple look) serve the page, and
+  `pnpm tauri dev` runs it in WKWebView; each writes its results to the console and ends with a
+  `... done <n> passed, <n> failed` line (`src/block-check.ts`, `src/table-check.ts`,
+  `src/struck-check.ts`). They read nothing in a release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
