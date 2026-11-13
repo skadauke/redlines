@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  What the Quick Look extension may do. An app extension must be sandboxed, and the sandbox lets it
+  read the one file that Quick Look hands it. It has no network entitlement, so that a preview never
+  tells anyone that a file was opened, and no other. The one thing it asks for is JavaScriptCore's
+  compiler (allow-jit): the renderer is JavaScript, and without the compiler it runs about three
+  times slower (a megabyte of Markdown in 14 seconds instead of 1.5), which Quick Look doesn't wait
+  for. The hardened runtime, which notarization requires, takes the compiler away unless asked.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

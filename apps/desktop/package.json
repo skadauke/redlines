@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "scripts/build-redlines && pnpm run typecheck && vite build",
+    "build": "scripts/build-redlines && scripts/build-quicklook && pnpm run typecheck && vite build",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },

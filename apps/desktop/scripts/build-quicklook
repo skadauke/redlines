@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+"""Builds the Quick Look extension that goes inside the app (apps/desktop/quicklook, #316): the
+preview of Markdown, R Markdown and Quarto files in the Clean view, which macOS draws for a press of
+Space on one in Finder, and in Mail, Spotlight and the Open dialog.
+
+    scripts/build-quicklook [--sign-only] [--check | --check-only] [--check-app APP [--signed]]
+
+With no argument it bundles the renderer (quicklook/src, run in JavaScriptCore), compiles the
+extension for Apple silicon and Intel (Swift, with no Xcode project: swiftc), and assembles
+quicklook/build/RedlinesPreview.appex. The extension is signed there, with the sandbox entitlement
+and the hardened runtime: ad hoc, or with the identity in APPLE_SIGNING_IDENTITY when that is set.
+`bundle.macOS.files` in src-tauri/tauri.conf.json copies the whole folder to
+Redlines.app/Contents/PlugIns, and Tauri signs the app around it without touching what is inside
+(it signs the app and the programs it copies, never a plug-in), so the extension must be signed
+when `tauri bundle` runs, and with the same identity as the app.
+
+`pnpm build` runs this, so `tauri build` makes the extension as part of compiling the app, as it
+makes the `redlines` program (scripts/build-redlines). `pnpm tauri dev` doesn't bundle, and needs
+none. The release workflow compiles the app before any credential is unpacked, so it signs the
+extension afterwards: `--sign-only` signs the built extension again with APPLE_SIGNING_IDENTITY,
+with a secure timestamp, which notarization asks for.
+
+`--check` builds the extension, then renders the folder's fixtures (quicklook/fixtures) with
+`preview-render`, a command line that runs the same Swift and the same renderer as the extension in
+the system's JavaScriptCore, and checks the extension's layout, its Info.plist, its entitlements and
+its signature; `--check-only` does the checks of what is built, without building it again. `--check-app
+APP` checks the extension inside a built app: where it is, that it holds both architectures, that it
+is signed with the hardened runtime and the sandbox, and, with `--signed`, that it is signed with a
+Developer ID and a secure timestamp, by the team that signed the app, and that the app's own seal
+holds with it inside.
+
+The extension is for the Mac: on any other system this does nothing, so that the rest of the
+workspace builds there as it always did.
+"""
+
+from __future__ import annotations
+
+import plistlib
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import List, NoReturn, Optional
+
+DESKTOP = Path(__file__).resolve().parent.parent
+QUICKLOOK = DESKTOP / "quicklook"
+SWIFT = QUICKLOOK / "swift"
+FIXTURES = QUICKLOOK / "fixtures"
+BUILD = QUICKLOOK / "build"
+CARGO_TOML = DESKTOP / "src-tauri" / "Cargo.toml"
+ROLLDOWN = QUICKLOOK / "node_modules" / ".bin" / "rolldown"
+
+NAME = "RedlinesPreview"
+APPEX = BUILD / f"{NAME}.appex"
+HARNESS = BUILD / "preview-render"
+ENTITLEMENTS = SWIFT / f"{NAME}.entitlements"
+HARNESS_ENTITLEMENTS = SWIFT / "harness" / "preview-render.entitlements"
+# Inside Redlines.app/Contents, where bundle.macOS.files puts it.
+IN_APP = Path("PlugIns") / f"{NAME}.appex"
+
+# The extension's identifier starts with the app's (md.redlines.editor), as an extension's must.
+BUNDLE_ID = "md.redlines.editor.preview"
+# JavaScriptCore before macOS 13 lacks the array methods that the format library uses (toSorted).
+MINIMUM_MACOS = "13.0"
+ARCHS = ["arm64", "x86_64"]
+
+# The types of the files that the extension previews. Markdown has two types on macOS 27: the
+# system's own, and the one that other editors declare and Redlines imports (document-types.plist).
+# R Markdown and Quarto have none: macOS gives their files a dynamic type, made from the extension.
+MARKDOWN_TYPES = ["net.daringfireball.markdown", "public.markdown"]
+EXTENSIONS_WITH_NO_TYPE = ["qmd", "rmd"]
+
+
+def fail(message: str) -> NoReturn:
+    sys.exit(f"build-quicklook: {message}")
+
+
+def run(*command: object, cwd: Optional[Path] = None) -> None:
+    words = [str(word) for word in command]
+    try:
+        subprocess.run(words, cwd=cwd, check=True)
+    except FileNotFoundError:
+        fail(f"{words[0]} isn't on the PATH.")
+    except subprocess.CalledProcessError as error:
+        fail(f"{' '.join(words[:2])} failed, with the exit code {error.returncode}.")
+
+
+def output(*command: object, check: bool = True) -> str:
+    """What a command prints, standard error too (codesign writes there)."""
+    words = [str(word) for word in command]
+    try:
+        done = subprocess.run(words, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        fail(f"{words[0]} isn't on the PATH.")
+    if check and done.returncode != 0:
+        fail(f"{' '.join(words[:2])} failed, with the exit code {done.returncode}:\n{done.stdout}{done.stderr}")
+    return done.stdout + done.stderr
+
+
+# ---- The types the extension previews -------------------------------------------------------------
+
+_ALPHABET = "abcdefghkmnpqrstuvwxyz0123456789"
+# The first 61 bits of the dynamic type of every filename extension. macOS makes the type of a file
+# whose extension no one declares from the extension alone: "dyn." and then the base 32 (this
+# alphabet) of 61 fixed bits, the extension's letters in lower case, one byte each, and zeros to fill
+# the last digit. Quick Look matches an extension's QLSupportedContentTypes against that exact type,
+# so a type that no one has declared can be listed by the extension, which is how R Markdown and
+# Quarto are previewed without declaring a type that would compete with another app's for them.
+_DYNAMIC_HEAD = "0000000111111001100000011110100110110001110100011000100111101"
+# Made by macOS 27.0.1 for extensions that nothing declares (`preview-render --dynamic-type`).
+_DYNAMIC_KNOWN = {
+    "zq": "dyn.ah62d4rv4ge81y6k",
+    "zqa": "dyn.ah62d4rv4ge81y6pb",
+    "zqmd": "dyn.ah62d4rv4ge81y6prqu",
+    "zzqmd2": "dyn.ah62d4rv4ge81y8xvrzwde",
+}
+
+
+def dynamic_type(extension: str) -> str:
+    """The type macOS gives a file with this extension when nothing declares it."""
+    bits = _DYNAMIC_HEAD + "".join(format(byte, "08b") for byte in extension.lower().encode("ascii"))
+    bits += "0" * (-len(bits) % 5)
+    return "dyn." + "".join(_ALPHABET[int(bits[i : i + 5], 2)] for i in range(0, len(bits), 5))
+
+
+for _extension, _type in _DYNAMIC_KNOWN.items():
+    assert dynamic_type(_extension) == _type, f"the dynamic type of .{_extension} isn't {_type}"
+
+
+# ---- Building ------------------------------------------------------------------------------------
+
+
+def app_version() -> str:
+    """The app's version, which is written in src-tauri/Cargo.toml alone."""
+    text = CARGO_TOML.read_text(encoding="utf-8")
+    package = re.search(r"^\[package\]\s*$(.*?)(?=^\[|\Z)", text, re.S | re.M)
+    found = re.search(r'^version\s*=\s*"([^"]+)"', package.group(1) if package else "", re.M)
+    if not found:
+        fail(f"{CARGO_TOML} has no version.")
+    return found.group(1)
+
+
+def sdk_path() -> str:
+    return output("xcrun", "--sdk", "macosx", "--show-sdk-path").strip()
+
+
+def bundle_renderer() -> Path:
+    """The renderer as one script for JavaScriptCore: the `bundle` script of quicklook, without pnpm."""
+    if not ROLLDOWN.exists():
+        fail(f"{ROLLDOWN} isn't there. Run pnpm install at the root of the repository.")
+    run(ROLLDOWN, "-c", "rolldown.config.mjs", cwd=QUICKLOOK)
+    script = BUILD / "preview.js"
+    if not script.exists():
+        fail(f"{script} wasn't written.")
+    return script
+
+
+def swiftc(arch: str, sources: List[Path], out: Path, *flags: str) -> None:
+    run(
+        "swiftc",
+        "-target", f"{arch}-apple-macos{MINIMUM_MACOS}",
+        "-sdk", sdk_path(),
+        "-swift-version", "5",
+        "-O",
+        *flags,
+        *sources,
+        "-o", out,
+    )  # fmt: skip
+
+
+def info_plist() -> dict:
+    version = app_version()
+    return {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleDisplayName": "Redlines Quick Look",
+        "CFBundleExecutable": NAME,
+        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "Redlines Quick Look",
+        "CFBundlePackageType": "XPC!",
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": version,
+        "LSMinimumSystemVersion": MINIMUM_MACOS,
+        "NSExtension": {
+            "NSExtensionAttributes": {
+                # A data-based preview: the extension answers with a page of HTML.
+                "QLIsDataBasedPreview": True,
+                "QLSupportedContentTypes": MARKDOWN_TYPES
+                + [dynamic_type(extension) for extension in EXTENSIONS_WITH_NO_TYPE],
+                "QLSupportsSearchableItems": False,
+            },
+            "NSExtensionPointIdentifier": "com.apple.quicklook.preview",
+            "NSExtensionPrincipalClass": "RedlinesPreviewProvider",
+        },
+    }
+
+
+def sign(identity: Optional[str]) -> None:
+    """Signs the extension, with the sandbox entitlement and the hardened runtime. With a Developer
+    ID it also asks for a secure timestamp, which notarization requires; ad hoc has none."""
+    identity = identity or "-"
+    command = ["codesign", "--force", "--sign", identity, "--options", "runtime"]
+    command += ["--entitlements", str(ENTITLEMENTS)]
+    if identity != "-":
+        command.append("--timestamp")
+    run(*command, APPEX)
+    print(f"build-quicklook: signed {APPEX.name} ({'ad hoc' if identity == '-' else 'with the identity'})", flush=True)
+
+
+def build(identity: Optional[str]) -> None:
+    script = bundle_renderer()
+    if APPEX.exists():
+        shutil.rmtree(APPEX)
+    contents = APPEX / "Contents"
+    (contents / "MacOS").mkdir(parents=True)
+    (contents / "Resources").mkdir()
+    parts = []
+    for arch in ARCHS:
+        part = BUILD / f"{NAME}-{arch}"
+        swiftc(
+            arch,
+            [SWIFT / "PreviewRenderer.swift", SWIFT / "extension" / "PreviewProvider.swift"],
+            part,
+            "-module-name", NAME,
+            "-application-extension",
+            "-parse-as-library",
+            "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
+            "-framework", "QuickLookUI",
+            "-framework", "JavaScriptCore",
+        )  # fmt: skip
+        parts.append(part)
+    run("lipo", "-create", "-output", contents / "MacOS" / NAME, *parts)
+    for part in parts:
+        part.unlink()
+    shutil.copy(script, contents / "Resources" / "preview.js")
+    with open(contents / "Info.plist", "wb") as plist:
+        plistlib.dump(info_plist(), plist)
+    sign(identity)
+    print(f"build-quicklook: {APPEX}", flush=True)
+
+
+def build_harness() -> None:
+    """`preview-render`, which runs the renderer as the extension does, for this machine's processor."""
+    arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+    swiftc(
+        arch,
+        [SWIFT / "PreviewRenderer.swift", SWIFT / "harness" / "main.swift"],
+        HARNESS,
+        "-framework", "JavaScriptCore",
+        "-framework", "UniformTypeIdentifiers",
+    )  # fmt: skip
+    # With the hardened runtime and the compiler, as the extension has them: without the entitlement
+    # the renderer takes three times as long, and the harness would time something else.
+    run("codesign", "--force", "--sign", "-", "--options", "runtime", "--entitlements", HARNESS_ENTITLEMENTS, HARNESS)
+
+
+# ---- Checks --------------------------------------------------------------------------------------
+
+
+class Checks:
+    def __init__(self) -> None:
+        self.failed = 0
+
+    def ok(self, condition: bool, what: str, detail: str = "") -> None:
+        if condition:
+            print(f"  ok   {what}", flush=True)
+        else:
+            self.failed += 1
+            print(f"  FAIL {what}{': ' + detail if detail else ''}", flush=True)
+
+    def done(self) -> None:
+        if self.failed:
+            fail(f"{self.failed} check{'s' if self.failed != 1 else ''} failed.")
+        print("build-quicklook: all checks passed.", flush=True)
+
+
+def architectures(binary: Path) -> List[str]:
+    return output("lipo", "-archs", binary).split()
+
+
+def check_layout(appex: Path, checks: Checks, signed: bool) -> None:
+    """The extension's files, its Info.plist, its architectures, its entitlements and its signature."""
+    name = appex.name
+    binary = appex / "Contents" / "MacOS" / NAME
+    checks.ok(binary.is_file(), f"{name} has its program")
+    checks.ok((appex / "Contents" / "Resources" / "preview.js").is_file(), f"{name} has the renderer")
+    if not binary.is_file():
+        return
+    both = sorted(architectures(binary)) == sorted(ARCHS)
+    checks.ok(both, f"{name} runs on Apple silicon and Intel", " ".join(architectures(binary)))
+    with open(appex / "Contents" / "Info.plist", "rb") as handle:
+        info = plistlib.load(handle)
+    extension = info.get("NSExtension", {})
+    attributes = extension.get("NSExtensionAttributes", {})
+    checks.ok(
+        extension.get("NSExtensionPointIdentifier") == "com.apple.quicklook.preview",
+        f"{name} is a Quick Look preview",
+    )
+    checks.ok(attributes.get("QLIsDataBasedPreview") is True, f"{name} answers with data")
+    wanted = MARKDOWN_TYPES + [dynamic_type(e) for e in EXTENSIONS_WITH_NO_TYPE]
+    checks.ok(attributes.get("QLSupportedContentTypes") == wanted, f"{name} lists its types", str(attributes.get("QLSupportedContentTypes")))
+    checks.ok(info.get("CFBundleIdentifier") == BUNDLE_ID, f"{name} has its identifier")
+    checks.ok(info.get("LSMinimumSystemVersion") == MINIMUM_MACOS, f"{name} asks for macOS {MINIMUM_MACOS}")
+    for arch in ARCHS:
+        said = output("vtool", "-arch", arch, "-show-build", binary, check=False)
+        found = re.search(r"minos (\S+)", said)
+        checks.ok(found is not None and found.group(1) == MINIMUM_MACOS, f"{name} is built for macOS {MINIMUM_MACOS} ({arch})", said.strip().splitlines()[-1] if said.strip() else "")
+    verified = subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", appex], capture_output=True, text=True)
+    checks.ok(verified.returncode == 0, f"{name}'s signature holds", verified.stderr.strip())
+    shown = output("codesign", "--display", "--verbose=2", "--entitlements", ":-", appex, check=False)
+    checks.ok("<key>com.apple.security.app-sandbox</key>" in shown, f"{name} is sandboxed")
+    checks.ok("com.apple.security.network" not in shown, f"{name} has no network")
+    # JavaScriptCore's compiler is all it asks for besides the sandbox (swift/RedlinesPreview.entitlements).
+    granted = re.findall(r"<key>(com\.apple\.[^<]+)</key>", shown)
+    checks.ok(sorted(granted) == ["com.apple.security.app-sandbox", "com.apple.security.cs.allow-jit"], f"{name} has the sandbox and the compiler, and no other entitlement", str(granted))
+    checks.ok(re.search(r"flags=0x[0-9a-f]+\([^)]*\bruntime\b", shown) is not None, f"{name} has the hardened runtime")
+    if signed:
+        checks.ok("Authority=Developer ID Application" in shown, f"{name} is signed with a Developer ID")
+        checks.ok("Timestamp=" in shown, f"{name} has a secure timestamp")
+
+
+def fixture_checks(checks: Checks) -> None:
+    """Renders each fixture in JavaScriptCore, as the extension does, and reads the page."""
+    script = BUILD / "preview.js"
+
+    def render(path: Path, *flags: str) -> str:
+        done = subprocess.run([HARNESS, script, path, *flags], capture_output=True, text=True)
+        if done.returncode != 0:
+            checks.ok(False, f"{path.name} renders", done.stderr.strip())
+            return ""
+        print(f"       {done.stderr.strip()}", flush=True)
+        return done.stdout
+
+    def has(html: str, label: str, *wanted: str) -> None:
+        for text in wanted:
+            checks.ok(text in html, f"{label} has {text[:60]!r}")
+
+    def lacks(html: str, label: str, *unwanted: str) -> None:
+        for text in unwanted:
+            checks.ok(text not in html, f"{label} has no {text[:60]!r}")
+
+    page = render(FIXTURES / "plain.md")
+    has(page, "plain.md", "<h1>Field notes</h1>", "<em>plain</em>", "<del>struck</del>", '<input type="checkbox" disabled="" checked="" />', 'class="rl-image">A red caret on warm paper<', "&lt;script&gt;alert", "<hr />")
+    lacks(page, "plain.md", "<script", "<img", "only the author sees", 'class="rl-notice"', "<!--")
+
+    page = render(FIXTURES / "redlines.md")
+    has(page, "redlines.md", "3 changes and 1 comment by Ada Lovelace, Claude and Bo Chen. Open in Redlines to review them.", "We will ship the new importer in April, after the security review.")
+    lacks(page, "redlines.md", "March", "The old exporter", "k3x9", "Who signs off", "<!--")
+
+    page = render(FIXTURES / "frontmatter.qmd")
+    has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills")
+    page = render(FIXTURES / "analysis.Rmd")
+    has(page, "analysis.Rmd", 'data-chunk="r, echo=FALSE, message=FALSE"', "<h1>Summary</h1>")
+
+    page = render(FIXTURES / "table.md")
+    has(page, "table.md", '<div class="rl-tbl-scroll"><table>', '<th align="right">Runs</th>', '<th align="center">Mean (ms)</th>', "<strong>Faster</strong>")
+
+    # What the extension shows when the renderer fails: the file's text, as text.
+    plain = FIXTURES / "plain.md"
+    done = subprocess.run([HARNESS, "--fallback", plain], capture_output=True, text=True)
+    has(done.stdout, "the fallback page", "&lt;script&gt;alert('no')&lt;/script&gt;", "# Field notes", "default-src 'none'")
+    lacks(done.stdout, "the fallback page", "<script", "<img", "<h1>")
+
+    # A large file: about 2 MB, with a change at the top and the ledger at the end.
+    BUILD.mkdir(exist_ok=True)
+    large = BUILD / "large.md"
+    section = (
+        "## A section\n\n"
+        "Paragraph with *emphasis*, **strong** text, `code` and a [link](https://example.com/page). "
+        "It goes on for a while so that the file is long, as a book's chapters are. " * 2
+        + "\n\n- one\n- two\n- three\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n"
+    )
+    ledger = (
+        "\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\n"
+        "marks:\n  k3x9: {by: ada, at: 2026-10-13T22:30Z}\ncomments: []\n-->\n"
+    )
+    body = "# A long document\n\nIt starts with a <!--ins k3x9-->new <!--/k3x9-->word.\n\n" + section * 4000
+    large.write_text(body + ledger, encoding="utf-8")
+    started = time.monotonic()
+    page = render(large)
+    seconds = time.monotonic() - started
+    has(page, "large.md", "<h1>A long document</h1>", "first part of a long document")
+    # With JavaScriptCore's compiler this takes a second or two. Without it (a runner that denies it,
+    # or Lockdown Mode) it takes ten times that, which this lets by: what it is after is a render
+    # that never ends, since Quick Look gives an extension no more than a little while.
+    checks.ok(seconds < 30, f"large.md ({large.stat().st_size // 1024} KB) renders in under 30 s", f"{seconds:.1f} s")
+    large.unlink()
+
+
+def check() -> None:
+    checks = Checks()
+    print("build-quicklook: the extension", flush=True)
+    check_layout(APPEX, checks, signed=False)
+    build_harness()
+    # The dynamic types: the formula above gives what this Mac gives, for an extension nobody declares.
+    asked = subprocess.run([HARNESS, "--dynamic-type", "zzqmdx"], capture_output=True, text=True).stdout.strip()
+    checks.ok(asked == dynamic_type("zzqmdx"), "the dynamic types are the Mac's", f"{asked} vs {dynamic_type('zzqmdx')}")
+    print("build-quicklook: the renderer in JavaScriptCore", flush=True)
+    fixture_checks(checks)
+    checks.done()
+
+
+def check_app(app: Path, signed: bool) -> None:
+    checks = Checks()
+    print(f"build-quicklook: {app}", flush=True)
+    appex = app / "Contents" / IN_APP
+    checks.ok(appex.is_dir(), f"the app has {IN_APP}")
+    if appex.is_dir():
+        check_layout(appex, checks, signed=signed)
+    if appex.is_dir() and signed:
+        # The app's own seal covers the extension: a change inside it breaks the app's signature.
+        verified = subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", app], capture_output=True, text=True)
+        checks.ok(verified.returncode == 0, "the app's signature holds with the extension inside", verified.stderr.strip())
+
+        # Both are signed by the same team: an extension of another team's, or none, isn't loaded.
+        def team(path: Path) -> str:
+            found = re.search(r"TeamIdentifier=([A-Z0-9]{10})\b", output("codesign", "--display", "--verbose=2", path, check=False))
+            return found.group(1) if found else ""
+
+        checks.ok(team(appex) != "" and team(appex) == team(app), "the extension and the app are of one team", f"{team(appex)!r} and {team(app)!r}")
+    checks.done()
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print(__doc__)
+        return
+    if sys.platform != "darwin":
+        print("build-quicklook: skipped; the Quick Look extension is for the Mac app.", flush=True)
+        return
+    identity = None
+    if "--check-app" in args:
+        i = args.index("--check-app")
+        if i + 1 >= len(args):
+            fail("--check-app needs the app's path.")
+        check_app(Path(args[i + 1]), signed="--signed" in args)
+        return
+    import os
+
+    identity = os.environ.get("APPLE_SIGNING_IDENTITY") or None
+    if "--sign-only" in args:
+        if not APPEX.exists():
+            fail(f"{APPEX} isn't there. Run scripts/build-quicklook first.")
+        if identity is None:
+            fail("--sign-only needs APPLE_SIGNING_IDENTITY.")
+        sign(identity)
+        return
+    if "--check-only" in args:
+        if not APPEX.exists():
+            fail(f"{APPEX} isn't there. Run scripts/build-quicklook first.")
+        check()
+        return
+    build(identity)
+    if "--check" in args:
+        check()
+
+
+if __name__ == "__main__":
+    main()
