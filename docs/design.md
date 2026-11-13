@@ -248,7 +248,12 @@ The window, on the desktop:
   mark that says where text goes. While it runs, its Dock icon shows another mark of the same
   family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
   insertion above it), a different one at each launch. Turning off Redlines › Preferences › General
-  › Rotate the Dock Icon keeps the caret.
+  › Rotate the Dock Icon keeps the caret. About Redlines is a small window of the app's own, as
+  Preferences is, on every system: the icon, the name, the version and build, and the copyright,
+  as the system's panel has them. It opens once, and Esc and ⌘W close it. A click on its icon
+  changes it to the next mark of the family, drawn as a tracked change, the old mark struck through
+  with a red line and the new one underlined, in about half a second (a plain crossfade under
+  Reduce Motion); nothing says so, and the Dock icon follows the mark until the next launch.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
   nothing and tries again later. The app holds the download, not a window, so closing a window loses
@@ -295,6 +300,16 @@ Redlines covers everything in the Markdown Guide's
   `.Rmd` file are kept byte for byte and shown as written.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
+
+**Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
+address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
+address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
+link is a pointer. Only `http`, `https` and `mailto` addresses open, and `www.` ones, which GitHub's
+autolinks read as the web's: the limit of a copy, which turns `javascript:` and its kin into plain
+text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
+the address again before it runs the system's opener, and the website's demos open a new tab. A
+link that doesn't open is left to the editor like any text, with no hint. A relative link to
+another document doesn't open yet.
 
 ### 5.3 Views: Clean, Simple, Redlines, Raw
 
@@ -767,7 +782,7 @@ a new email under the same name becomes an alias in the ledger
 
 - the command palette (§5.9);
 - a folder sidebar (written), Quick Open and folder search, which folder chat also needs;
-- links from pasting a URL onto a selection (§5.10);
+- links from pasting a URL onto a selection (§5.10), and ⌘-click to open one (§5.2);
 - R Markdown and Quarto chunk options kept byte for byte.
 
 **Should (v1 if time allows):**

@@ -19,6 +19,7 @@ const WINDOWS = [
   { capability: 'default', entry: 'main.ts', windows: ['main', 'doc-*'] },
   { capability: 'preferences', entry: 'preferences/main.ts', windows: ['preferences'] },
   { capability: 'install', entry: 'install/main.ts', windows: ['install'] },
+  { capability: 'about', entry: 'about/main.ts', windows: ['about'] },
 ];
 
 const snake = (kebab: string) => kebab.replaceAll('-', '_');
