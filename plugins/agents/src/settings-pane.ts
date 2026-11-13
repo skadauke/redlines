@@ -9,6 +9,7 @@
 
 import type { AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
+import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
 
 /** The part of the app's settings this pane reads and changes. */
 export interface AgentsPaneSettings {
@@ -151,33 +152,6 @@ const HOME_NOTE =
   'your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through ' +
   'Redlines: say yes there to let them.';
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-let nextId = 0;
-
-function row(label: string, control: HTMLElement, note?: HTMLElement): HTMLElement {
-  const id = `rl-agents-${nextId++}`;
-  const root = el('div', 'rl-pref-row');
-  root.dataset['row'] = label;
-  const text = el('div', 'rl-pref-label', label);
-  text.id = id;
-  const field = el('div', 'rl-pref-control');
-  field.append(control);
-  if (note) field.append(note);
-  control.setAttribute('aria-labelledby', id);
-  root.append(text, field);
-  return root;
-}
-
 /**
  * Draws the pane in `container`, after what it holds. Returns a function that stops late answers
  * from being drawn once the pane is gone.
@@ -228,7 +202,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   // The risk is said where the choice is made, and a screen reader says it with the choice and
   // again when the choice changes it.
   const scopeNote = el('div', 'rl-pref-note');
-  scopeNote.id = `rl-agents-${nextId++}`;
+  scopeNote.id = uniqueId();
   scopeNote.setAttribute('role', 'status');
   scope.setAttribute('aria-describedby', scopeNote.id);
   const showScopeNote = () => {
@@ -707,27 +681,6 @@ function agentRow(
       else check(false);
     },
   };
-}
-
-function button(text: string, label?: string): HTMLButtonElement {
-  const node = el('button', 'rl-pref-button', text);
-  node.type = 'button';
-  if (label) node.setAttribute('aria-label', label);
-  return node;
-}
-
-function textField(label: string, placeholder: string): HTMLInputElement {
-  const input = el('input', 'rl-pref-text');
-  input.type = 'text';
-  input.placeholder = placeholder;
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.setAttribute('aria-label', label);
-  return input;
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

@@ -8,6 +8,14 @@
 //! in it that doesn't show as itself (line breaks, bidi controls, zero-width and other invisible
 //! characters) is refused, both are short enough to read whole, and a program that is a link is
 //! shown with the file it leads to. What the window may then say to the agent is `acp_gate.rs`'s.
+//!
+//! One agent is known by its command: OpenClaw's bridge, `openclaw acp --url <Gateway>
+//! --token-file <file>` (`bridge_of`), which forwards each prompt to an OpenClaw Gateway that may
+//! run on another machine, and takes no MCP server of the client's. It has no toolbox: its session
+//! has none (`acp_gate.rs`), and the window sends it the document and the thread in its prompt
+//! instead. The command is held to exactly that shape, so that no token or password is ever kept
+//! in the list or in a command line, and the token file, which Redlines never reads, is named by
+//! its path alone.
 
 use std::fs;
 use std::io::{self, Write};
@@ -29,6 +37,159 @@ pub struct AcpAgent {
     /// The path the command's program resolved to when the person allowed it.
     pub program: String,
     pub args: Vec<String>,
+    /// Set for OpenClaw's bridge, and only where the command is exactly that (`bridge_of`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<Bridge>,
+}
+
+/// What is known of an agent that is OpenClaw's bridge: the agent at the Gateway it was asked for.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bridge {
+    /// The OpenClaw agent the person named (`--session agent:<id>:main`). Without one, the
+    /// Gateway's default agent answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+/// The longest Gateway address that is kept, and the shortest token-file name that can be one.
+const MAX_URL: usize = 200;
+/// A token file holds a token and nothing else: OpenClaw reads at most this much of one.
+const MAX_TOKEN_FILE: u64 = 16 * 1024;
+
+/// What a person is told of how OpenClaw is run, when it isn't that.
+const OPENCLAW_USAGE: &str = "Run OpenClaw as openclaw acp --url <ws:// or wss:// address> \
+     --token-file <file>, with --session agent:<id>:main to name its agent.";
+
+/// Whether a command is OpenClaw's bridge, and, if it is, that it is exactly `openclaw acp --url
+/// <address> --token-file <file>`, with `--session agent:<id>:main` after them if the person names
+/// an agent: `Ok(None)` for any other program. A token or a password on the command line, any other
+/// flag, an address with a user name, a password, a query or a fragment in it (a token could ride
+/// there), and a token file that isn't a plain path are refused, so that nothing secret is ever kept
+/// in the list or shown in a process list.
+pub fn bridge_of(program: &str, args: &[String]) -> Result<Option<Bridge>, String> {
+    let is_openclaw = Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "openclaw");
+    if !is_openclaw {
+        return Ok(None);
+    }
+    let mut words = args.iter().map(String::as_str);
+    if words.next() != Some("acp") {
+        return Err(OPENCLAW_USAGE.to_owned());
+    }
+    let (mut url, mut file, mut session) = (None, None, None);
+    while let Some(flag) = words.next() {
+        let slot = match flag {
+            "--url" => &mut url,
+            "--token-file" => &mut file,
+            "--session" => &mut session,
+            "--token" | "--password" | "--password-file" => {
+                return Err(
+                    "Redlines keeps no token or password: give the token file's path with \
+                     --token-file, and OpenClaw reads it."
+                        .to_owned(),
+                );
+            }
+            _ => return Err(OPENCLAW_USAGE.to_owned()),
+        };
+        let value = words.next().ok_or_else(|| OPENCLAW_USAGE.to_owned())?;
+        if slot.replace(value).is_some() {
+            return Err(OPENCLAW_USAGE.to_owned());
+        }
+    }
+    let (Some(url), Some(file)) = (url, file) else {
+        return Err(OPENCLAW_USAGE.to_owned());
+    };
+    gateway_url_problem(url).map_or(Ok(()), Err)?;
+    token_file_path_problem(file).map_or(Ok(()), Err)?;
+    let agent = session.map(agent_of_session).transpose()?;
+    Ok(Some(Bridge { agent }))
+}
+
+/// Why a Gateway address can't be used, if it can't: `ws://` or `wss://`, a host with an optional
+/// port, and an optional plain path, and nothing that could carry a secret.
+fn gateway_url_problem(url: &str) -> Option<String> {
+    let bad = || {
+        Some(
+            "Give the Gateway's address as ws:// or wss:// and a host, such as \
+             wss://gateway.example.org, with no user name, password, query or fragment."
+                .to_owned(),
+        )
+    };
+    let Some(rest) = url
+        .strip_prefix("wss://")
+        .or_else(|| url.strip_prefix("ws://"))
+    else {
+        return bad();
+    };
+    if url.chars().count() > MAX_URL || !shows_as_itself(url) {
+        return bad();
+    }
+    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let host_chars = |c: char| c.is_ascii_alphanumeric() || ".-:[]".contains(c);
+    let path_chars = |c: char| c.is_ascii_alphanumeric() || "._~/%+-".contains(c);
+    if authority.is_empty() || !authority.chars().all(host_chars) || !path.chars().all(path_chars) {
+        return bad();
+    }
+    None
+}
+
+/// Why a token file's name can't be used, if it can't: a whole, plain path.
+fn token_file_path_problem(path: &str) -> Option<String> {
+    let plain = is_clean_path(path) && shows_as_itself(path) && path.chars().count() <= MAX_COMMAND;
+    (!plain).then(|| {
+        "Give the token file's whole path, with no ., .. or empty parts, such as \
+         /Users/ada/.openclaw/gateway-token."
+            .to_owned()
+    })
+}
+
+/// The agent a session key names: `agent:<id>:main`, with an id that is a plain lowercase name.
+fn agent_of_session(key: &str) -> Result<String, String> {
+    let id = key
+        .strip_prefix("agent:")
+        .and_then(|rest| rest.strip_suffix(":main"))
+        .filter(|id| {
+            !id.is_empty()
+                && id.len() <= 32
+                && id.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        });
+    id.map(str::to_owned).ok_or_else(|| {
+        "Name the agent as --session agent:<id>:main, in lowercase letters, digits, - and _."
+            .to_owned()
+    })
+}
+
+/// Why a token file can't be used as it is, if it can't: it has to be there, and be a file of its
+/// own and not a link (OpenClaw refuses a link), with something in it and no more than a token
+/// holds. Only what the file system says of it is looked at: nothing in it is read.
+fn token_file_problem(path: &str) -> Option<String> {
+    let looked = fs::symlink_metadata(path);
+    match looked {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Some(format!("There is no token file at {path}."))
+        }
+        Err(error) => Some(format!("Redlines can't look at the token file: {error}.")),
+        Ok(found) if found.file_type().is_symlink() => Some(
+            "The token file is a link, which OpenClaw won't read: give the file itself.".to_owned(),
+        ),
+        Ok(found) if !found.is_file() => Some(format!("{path} isn't a file.")),
+        Ok(found) if found.len() == 0 => Some("The token file is empty.".to_owned()),
+        Ok(found) if found.len() > MAX_TOKEN_FILE => Some(
+            "The token file is larger than a token file can be (16 KiB): is it the right file?"
+                .to_owned(),
+        ),
+        Ok(_) => None,
+    }
+}
+
+/// Whether other people on this Mac can read a file, from its mode alone.
+fn others_can_read(path: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).is_ok_and(|found| found.permissions().mode() & 0o044 != 0)
 }
 
 /// What the native question says, and its two answers. The first answer is the yes.
@@ -108,6 +269,10 @@ impl AcpAgents {
                     && shows_as_itself(&agent.program)
                     && agent.args.len() < MAX_WORDS
                     && agent.args.iter().all(|arg| shows_as_itself(arg))
+                    // The flag that gives an agent no toolbox is what its command says, nothing a
+                    // file could add or take away.
+                    && bridge_of(&agent.program, &agent.args)
+                        .is_ok_and(|bridge| bridge == agent.bridge)
                     && !seen.contains(&agent.id);
                 seen.push(agent.id.clone());
                 fine
@@ -146,12 +311,25 @@ impl AcpAgents {
         if !paths.into_iter().all(|path| shows_as_itself(path)) {
             return Err("Redlines won't run a program whose path doesn't show plainly.".to_owned());
         }
+        let args: Vec<String> = words.collect();
+        let bridge = bridge_of(&found.path, &args)?;
         let agent = AcpAgent {
             id,
             name: name.to_owned(),
             program: found.path.clone(),
-            args: words.collect(),
+            args,
+            bridge,
         };
+        if agent.bridge.is_some()
+            && let Some(file) = agent
+                .args
+                .iter()
+                .skip_while(|arg| *arg != "--token-file")
+                .nth(1)
+            && let Some(problem) = token_file_problem(file)
+        {
+            return Err(problem);
+        }
 
         let _changing = self.one_at_a_time()?;
         let mut agents = self.list();
@@ -163,19 +341,23 @@ impl AcpAgents {
             .map_or_else(String::new, |real| format!("{} → {real}\n\n", found.path));
         let question = Question {
             title: format!("Let Redlines run {} as an agent?", shown(&agent)),
-            message: match replaced {
-                Some(at) => format!(
-                    "{link}It takes the place of {}, which runs {}. An agent may also act on its \
-                     own, outside what it asks Redlines, as its own settings allow.",
-                    agents[at].name,
-                    shown(&agents[at])
-                ),
-                None => format!(
-                    "{link}It will be listed as {}. An agent may also act on its own, outside what \
-                     it asks Redlines, as its own settings allow.",
-                    agent.name
-                ),
-            },
+            message: format!(
+                "{}{}",
+                match replaced {
+                    Some(at) => format!(
+                        "{link}It takes the place of {}, which runs {}. An agent may also act on \
+                         its own, outside what it asks Redlines, as its own settings allow.",
+                        agents[at].name,
+                        shown(&agents[at])
+                    ),
+                    None => format!(
+                        "{link}It will be listed as {}. An agent may also act on its own, outside \
+                         what it asks Redlines, as its own settings allow.",
+                        agent.name
+                    ),
+                },
+                bridge_message(&agent)
+            ),
             yes: "Allow",
             no: "Don't Allow",
         };
@@ -332,6 +514,40 @@ pub fn words_of(command: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
+/// What the question adds for OpenClaw's bridge, which is not like the other agents: where the
+/// document and the thread go, that its token file is never read, and what is worth a warning.
+fn bridge_message(agent: &AcpAgent) -> String {
+    if agent.bridge.is_none() {
+        return String::new();
+    }
+    let after = |flag: &str| {
+        agent
+            .args
+            .iter()
+            .skip_while(|arg| *arg != flag)
+            .nth(1)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let (url, file) = (after("--url"), after("--token-file"));
+    let mut message = format!(
+        "\n\n{} is OpenClaw's bridge to the Gateway at {url}. When you mention @{} in a comment, the \
+         document and its comments are sent there, wherever it runs, and its last message is posted \
+         as a reply. It can't change the document. Redlines passes the token file's path ({file}) \
+         to openclaw and never reads the file.",
+        agent.name, agent.id
+    );
+    if url.starts_with("ws://") {
+        message.push_str(
+            "\n\nThis address isn't encrypted (ws://), so what goes to it can be read on the way.",
+        );
+    }
+    if others_can_read(&file) {
+        message.push_str("\n\nOther people on this Mac can read the token file.");
+    }
+    message
+}
+
 /// An agent's line as the question shows it: each word that a shell would split, quoted.
 pub fn shown(agent: &AcpAgent) -> String {
     std::iter::once(&agent.program)
@@ -400,6 +616,7 @@ mod tests {
             name: "Gemini".to_owned(),
             program: "/opt/homebrew/bin/gemini".to_owned(),
             args: vec!["--experimental-acp".to_owned()],
+            bridge: None,
         };
         assert_eq!(list, std::slice::from_ref(&expected));
         assert_eq!(agents.list(), std::slice::from_ref(&expected));
@@ -427,12 +644,12 @@ mod tests {
         let found = Cell::new(String::new());
         agents
             .add(
-                "OpenClaw",
-                "openclaw acp 'two words'",
+                "Goose",
+                "goose acp 'two words'",
                 |word| {
                     found.set(word.to_owned());
                     Some(Found {
-                        path: "/Users/ada/.local/bin/openclaw".to_owned(),
+                        path: "/Users/ada/.local/bin/goose".to_owned(),
                         real: None,
                     })
                 },
@@ -442,12 +659,12 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(found.take(), "openclaw");
+        assert_eq!(found.take(), "goose");
         assert_eq!(
             title,
-            "Let Redlines run /Users/ada/.local/bin/openclaw acp 'two words' as an agent?"
+            "Let Redlines run /Users/ada/.local/bin/goose acp 'two words' as an agent?"
         );
-        assert_eq!(agents.get("openclaw").unwrap().args, ["acp", "two words"]);
+        assert_eq!(agents.get("goose").unwrap().args, ["acp", "two words"]);
     }
 
     #[test]
@@ -773,5 +990,301 @@ mod tests {
         assert_eq!(words("a ''"), ["a", ""]);
         assert_eq!(words("$(rm) `x` ;|&"), ["$(rm)", "`x`", ";|&"]);
         assert!(words_of("''").is_err());
+    }
+
+    /// A token file of a test's own, with something in it that is never read.
+    fn token_in(temp: &TempFolder) -> String {
+        let file = temp.path().join("moby-token");
+        fs::write(&file, "not-a-real-token\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        file.to_str().unwrap().to_owned()
+    }
+
+    fn openclaw(_: &str) -> Option<Found> {
+        Some(Found {
+            path: "/opt/homebrew/bin/openclaw".to_owned(),
+            real: None,
+        })
+    }
+
+    fn words(command: &str) -> Vec<String> {
+        words_of(command).unwrap()
+    }
+
+    #[test]
+    fn openclaws_bridge_is_known_by_its_exact_command() {
+        let bridge = |command: &str| bridge_of("/opt/homebrew/bin/openclaw", &words(command));
+        assert_eq!(
+            bridge("acp --url wss://gateway.example.org --token-file /Users/ada/.moby-token"),
+            Ok(Some(Bridge { agent: None }))
+        );
+        assert_eq!(
+            bridge(
+                "acp --url ws://127.0.0.1:18789 --token-file /Users/ada/.moby-token \
+                 --session agent:moby:main"
+            ),
+            Ok(Some(Bridge {
+                agent: Some("moby".to_owned())
+            }))
+        );
+        // Any other program is no bridge, whatever its arguments.
+        assert_eq!(
+            bridge_of("/opt/homebrew/bin/gemini", &words("acp --url wss://x")),
+            Ok(None)
+        );
+        assert_eq!(
+            bridge_of("/opt/homebrew/bin/openclaw-acp", &words("--url x")),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn openclaws_command_is_held_to_that_shape() {
+        let bridge = |command: &str| bridge_of("/opt/homebrew/bin/openclaw", &words(command));
+        let good = "--url wss://gateway.example.org --token-file /Users/ada/.moby-token";
+        for refused in [
+            // Not `acp`, or nothing after it.
+            "gateway run".to_owned(),
+            "acp".to_owned(),
+            // A secret on the command line.
+            format!("acp {good} --token not-a-real-token"),
+            format!("acp {good} --password hunter2"),
+            format!("acp {good} --password-file /Users/ada/.pw"),
+            // Another flag, one given twice, and one with no value.
+            format!("acp {good} --provenance meta"),
+            format!("acp {good} --url wss://other.example.org"),
+            "acp --url wss://gateway.example.org --token-file".to_owned(),
+            // Either one missing.
+            "acp --url wss://gateway.example.org".to_owned(),
+            "acp --token-file /Users/ada/.moby-token".to_owned(),
+            // An agent that isn't `agent:<id>:main`.
+            format!("acp {good} --session agent:Moby:main"),
+            format!("acp {good} --session main"),
+            format!("acp {good} --session agent::main"),
+            format!("acp {good} --session agent:moby:other"),
+        ] {
+            assert!(bridge(&refused).is_err(), "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_gateway_address_carries_no_secret() {
+        for fine in [
+            "wss://gateway.example.org",
+            "wss://gateway.example.org:18789",
+            "wss://gateway.example.org/gateway",
+            "ws://127.0.0.1:18789",
+            "ws://localhost:18789",
+            "ws://[::1]:18789",
+            "ws://192.168.1.20:18789",
+            "wss://mini.tailnet.ts.net",
+        ] {
+            assert_eq!(gateway_url_problem(fine), None, "{fine}");
+        }
+        for refused in [
+            "",
+            "wss://",
+            "https://gateway.example.org",
+            "gateway.example.org",
+            "wss://user:secret@gateway.example.org",
+            "wss://secret@gateway.example.org",
+            "wss://gateway.example.org?token=abc",
+            "wss://gateway.example.org/path?token=abc",
+            "wss://gateway.example.org/path#abc",
+            "wss://gateway.example.org/a b",
+            "wss://gateway.example.org/\u{202e}x",
+            "wss://gate way.example.org",
+            "wss://gateway.example.org;rm",
+            &format!("wss://{}.example.org", "a".repeat(220)),
+        ] {
+            assert!(gateway_url_problem(refused).is_some(), "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_token_file_is_named_by_a_whole_plain_path() {
+        assert_eq!(
+            token_file_path_problem("/Users/ada/.openclaw/gateway-token"),
+            None
+        );
+        for refused in [
+            "",
+            "token",
+            "~/token",
+            "/Users/../token",
+            "/Users//token",
+            "/a/./b",
+            "/tok\nen",
+        ] {
+            assert!(token_file_path_problem(refused).is_some(), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn adding_openclaw_checks_the_token_file_without_reading_it_and_says_where_things_go() {
+        let temp = TempFolder::new("acp-openclaw");
+        let agents = store(&temp);
+        let token = token_in(&temp);
+        let command = format!("openclaw acp --url wss://gateway.example.org --token-file {token}");
+        let mut question = None;
+        let list = agents
+            .add("Moby", &command, openclaw, |asked| {
+                question = Some(format!("{}\n{}", asked.title, asked.message));
+                true
+            })
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].bridge, Some(Bridge { agent: None }));
+        let question = question.unwrap();
+        // What goes where, and that the file is never read.
+        assert!(
+            question.contains("OpenClaw's bridge to the Gateway at wss://gateway.example.org"),
+            "{question}"
+        );
+        assert!(
+            question.contains("document and its comments are sent there"),
+            "{question}"
+        );
+        assert!(question.contains("never reads the file"), "{question}");
+        assert!(question.contains(&token), "{question}");
+        assert!(
+            !question.contains("not-a-real-token"),
+            "the file's contents never get here"
+        );
+        assert!(!question.contains("isn't encrypted"), "{question}");
+        assert!(!question.contains("Other people on this Mac"), "{question}");
+        // It is listed with the flag, and the flag is what the file says.
+        assert_eq!(
+            agents.get("moby").unwrap().bridge,
+            Some(Bridge { agent: None })
+        );
+        let saved = fs::read_to_string(&agents.file).unwrap();
+        assert!(saved.contains("\"bridge\""), "{saved}");
+        assert!(!saved.contains("not-a-real-token"));
+    }
+
+    #[test]
+    fn the_question_warns_of_a_plain_address_and_of_a_token_others_can_read() {
+        let temp = TempFolder::new("acp-openclaw-warn");
+        let agents = store(&temp);
+        let token = token_in(&temp);
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+        let mut message = String::new();
+        agents
+            .add(
+                "Moby",
+                &format!(
+                    "openclaw acp --url ws://192.168.1.20:18789 --token-file {token} --session agent:moby:main"
+                ),
+                openclaw,
+                |asked| {
+                    message = asked.message.clone();
+                    true
+                },
+            )
+            .unwrap();
+        assert!(
+            message.contains("This address isn't encrypted (ws://)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Other people on this Mac can read the token file."),
+            "{message}"
+        );
+        assert_eq!(
+            agents.get("moby").unwrap().bridge,
+            Some(Bridge {
+                agent: Some("moby".to_owned())
+            })
+        );
+    }
+
+    #[test]
+    fn a_token_file_that_cant_be_used_is_refused_before_anyone_is_asked() {
+        let temp = TempFolder::new("acp-openclaw-token");
+        let agents = store(&temp);
+        let add = |file: &str| {
+            agents.add(
+                "Moby",
+                &format!("openclaw acp --url wss://gateway.example.org --token-file {file}"),
+                openclaw,
+                |_| panic!("asked"),
+            )
+        };
+        let missing = temp.path().join("gone");
+        assert!(
+            add(missing.to_str().unwrap())
+                .unwrap_err()
+                .starts_with("There is no token file at")
+        );
+        let empty = temp.path().join("empty");
+        fs::write(&empty, "").unwrap();
+        assert_eq!(
+            add(empty.to_str().unwrap()),
+            Err("The token file is empty.".to_owned())
+        );
+        let big = temp.path().join("big");
+        fs::write(&big, vec![b'x'; 17 * 1024]).unwrap();
+        assert!(
+            add(big.to_str().unwrap())
+                .unwrap_err()
+                .contains("larger than a token file")
+        );
+        let folder = temp.path().join("folder");
+        fs::create_dir_all(&folder).unwrap();
+        assert!(
+            add(folder.to_str().unwrap())
+                .unwrap_err()
+                .ends_with("isn't a file.")
+        );
+        // A link, which OpenClaw refuses, though what it leads to is fine.
+        let link = temp.path().join("link");
+        std::os::unix::fs::symlink(token_in(&temp), &link).unwrap();
+        assert!(
+            add(link.to_str().unwrap())
+                .unwrap_err()
+                .contains("is a link")
+        );
+        assert_eq!(agents.list(), []);
+    }
+
+    #[test]
+    fn a_list_that_says_a_bridge_is_none_or_is_one_is_believed_only_where_the_command_agrees() {
+        let temp = TempFolder::new("acp-openclaw-list");
+        let agents = store(&temp);
+        let token = token_in(&temp);
+        let good = |bridge: &str| {
+            format!(
+                r#"{{"id":"moby","name":"Moby","program":"/opt/homebrew/bin/openclaw","args":["acp","--url","wss://gateway.example.org","--token-file","{token}"]{bridge}}}"#
+            )
+        };
+        let write = |entries: &[String]| {
+            fs::create_dir_all(agents.file.parent().unwrap()).unwrap();
+            fs::write(&agents.file, format!("[{}]", entries.join(","))).unwrap();
+        };
+        write(&[good(r#","bridge":{}"#)]);
+        assert_eq!(agents.list().len(), 1);
+        assert_eq!(agents.list()[0].bridge, Some(Bridge { agent: None }));
+        // A file that leaves the flag out of OpenClaw's bridge, or gives it to another agent, or
+        // carries a token in the arguments, is not an entry this wrote.
+        write(&[good("")]);
+        assert_eq!(agents.list(), []);
+        write(&[r#"{"id":"gemini","name":"Gemini","program":"/opt/homebrew/bin/gemini","args":["--experimental-acp"],"bridge":{}}"#.to_owned()]);
+        assert_eq!(agents.list(), []);
+        write(&[format!(
+            r#"{{"id":"moby","name":"Moby","program":"/opt/homebrew/bin/openclaw","args":["acp","--url","wss://gateway.example.org","--token","secret"],"bridge":{{}}}}"#
+        )]);
+        assert_eq!(agents.list(), []);
+        // An agent that isn't a bridge has no `bridge` in what it saves.
+        let other = AcpAgent {
+            id: "gemini".to_owned(),
+            name: "Gemini".to_owned(),
+            program: "/opt/homebrew/bin/gemini".to_owned(),
+            args: vec!["--experimental-acp".to_owned()],
+            bridge: None,
+        };
+        assert!(!serde_json::to_string(&other).unwrap().contains("bridge"));
     }
 }

@@ -7,7 +7,14 @@ import type {
   HostProcesses,
   McpEndpoint,
 } from '@redlines/plugin-api';
-import { answerPermission, createAcpProvider, plugin } from './index.ts';
+import {
+  answerPermission,
+  bridgePromptMessage,
+  bridgeSessionMessage,
+  createAcpProvider,
+  plugin,
+  sessionOf,
+} from './index.ts';
 
 const tools: McpEndpoint = {
   command: '/Applications/Redlines.app/Contents/MacOS/redlines',
@@ -534,5 +541,182 @@ describe('the Agent Client Protocol provider', () => {
     }
     expect(events.at(-1)?.type).toBe('error');
     expect(plugin.manifest.id).toBe('redlines.agent-acp');
+  });
+});
+
+describe('OpenClaw’s bridge', () => {
+  const bridgeConfig = {
+    id: 'moby',
+    name: 'Moby',
+    command: '/opt/homebrew/bin/openclaw',
+    args: ['acp', '--url', 'wss://gateway.example.org', '--token-file', '/Users/ada/.moby-token'],
+    bridge: { agent: 'moby' },
+  };
+  const asked: AgentRequest = {
+    ...request,
+    prompt: 'The request.',
+    systemPrompt: 'You have no tools.',
+    author: { handle: 'moby-bo', name: 'Moby', for: 'bo' },
+  };
+
+  /**
+   * A bridge as OpenClaw's: it rejects a session that names an MCP server, with the words only in
+   * `data.details`, as the SDK sends them, and otherwise opens a session and answers the prompt in
+   * pieces.
+   */
+  function bridgeThat(
+    onPrompt: (message: Message, agent: Agent) => void,
+    seen: { meta?: unknown; prompt?: Message } = {},
+  ) {
+    return (message: Message, agent: Agent) => {
+      if (message.method === 'initialize') {
+        agent.say(answer(message.id, { protocolVersion: 1, agentInfo: { name: 'openclaw-acp' } }));
+      } else if (message.method === 'session/new') {
+        const servers = message.params?.['mcpServers'];
+        if (Array.isArray(servers) && servers.length > 0) {
+          agent.say({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32603,
+              message: 'Internal error',
+              data: {
+                details:
+                  'ACP bridge mode does not support per-session MCP servers. Configure MCP on the OpenClaw gateway or agent instead.',
+              },
+            },
+          });
+          return;
+        }
+        seen.meta = message.params?.['_meta'];
+        agent.say(answer(message.id, { sessionId: 's1' }));
+      } else if (message.method === 'session/prompt') {
+        seen.prompt = message;
+        onPrompt(message, agent);
+      }
+    };
+  }
+
+  async function run(
+    host: ReturnType<typeof fakeHost>,
+    options: { request?: AgentRequest; config?: typeof bridgeConfig } = {},
+  ) {
+    const provider = createAcpProvider(host.processes, options.config ?? bridgeConfig, {
+      emptyFolder: () => Promise.resolve('/var/folders/T/redlines-run.x'),
+      removeFolder: () => Promise.resolve(),
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of provider.run(
+      options.request ?? asked,
+      tools,
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  it('has no toolbox, which an agent of any other kind has', () => {
+    const processes = fakeHost(() => {}).processes;
+    expect(createAcpProvider(processes, bridgeConfig)).toMatchObject({ toolbox: false });
+    expect(createAcpProvider(processes, config)).not.toHaveProperty('toolbox');
+    expect(createAcpProvider(processes, bridgeConfig).readLimit).toBe('machine');
+  });
+
+  it('opens a session of its own for the document, with no MCP server, and no folder put in the prompt', async () => {
+    const seen: { meta?: unknown; prompt?: Message } = {};
+    const host = fakeHost(
+      bridgeThat(
+        (message, agent) => agent.say(answer(message.id, { stopReason: 'end_turn' })),
+        seen,
+      ),
+    );
+    await run(host);
+    const { key, label } = sessionOf({ agent: 'moby' }, asked);
+    expect(host.sent[1]?.params).toEqual({
+      cwd: '/p',
+      mcpServers: [],
+      _meta: { sessionKey: key, sessionLabel: label },
+    });
+    expect(key).toMatch(/^agent:moby:redlines-[0-9a-f]{8}$/);
+    expect(label).toBe('Redlines: doc.md');
+    expect(host.sent[2]?.params).toEqual({
+      sessionId: 's1',
+      prompt: [
+        { type: 'text', text: 'You have no tools.' },
+        { type: 'text', text: 'The request.' },
+      ],
+      _meta: { prefixCwd: false },
+    });
+    // The messages are the functions that the host's rule is held to.
+    expect(host.sent[1]).toEqual(bridgeSessionMessage('/p', sessionOf({ agent: 'moby' }, asked)));
+    expect(host.sent[2]).toEqual(bridgePromptMessage('s1', asked));
+  });
+
+  it('answers with what the agent said last, which the run posts as the reply', async () => {
+    const host = fakeHost(
+      bridgeThat((message, agent) => {
+        agent.say(update('agent_message_chunk', { content: { type: 'text', text: 'Cut it ' } }));
+        agent.say(
+          update('agent_message_chunk', { content: { type: 'text', text: 'by 12 words.' } }),
+        );
+        agent.say(answer(message.id, { stopReason: 'end_turn' }));
+      }),
+    );
+    const events = await run(host);
+    expect(events.at(-1)).toEqual({ type: 'done', finalText: 'Cut it by 12 words.' });
+    // Nothing of a toolbox is in what went to the agent.
+    expect(JSON.stringify(host.sent)).not.toContain('--relay');
+    expect(JSON.stringify(host.sent)).not.toContain('"redlines"');
+  });
+
+  it('says why the bridge failed, from the words it keeps in `data`', async () => {
+    // A session that names the toolbox, as the provider of any other agent would write it.
+    const host = fakeHost(bridgeThat(() => {}));
+    const provider = createAcpProvider(host.processes, { ...bridgeConfig, bridge: undefined });
+    const events: AgentEvent[] = [];
+    for await (const event of provider.run(asked, tools, new AbortController().signal)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      message:
+        'Moby couldn’t open a session: ACP bridge mode does not support per-session MCP servers. Configure MCP on the OpenClaw gateway or agent instead.',
+    });
+  });
+
+  it('keeps one session for a document and gives another its own', () => {
+    const bridge = { agent: 'moby' };
+    const one = sessionOf(bridge, { documentPath: '/Users/ada/notes/plan.md', thread: 'c1' });
+    // Another thread in the same document is the same session: the agent keeps the document.
+    expect(sessionOf(bridge, { documentPath: '/Users/ada/notes/plan.md', thread: 'c9' })).toEqual(
+      one,
+    );
+    const other = sessionOf(bridge, { documentPath: '/Users/ada/notes/plan-b.md', thread: 'c1' });
+    expect(other.key).not.toBe(one.key);
+    // A document that was never saved has no path: its thread is what the session is named for.
+    const untitled = sessionOf(bridge, { thread: 'c1' });
+    expect(untitled.label).toBe('Redlines: Untitled');
+    expect(sessionOf(bridge, { thread: 'c1' })).toEqual(untitled);
+    expect(sessionOf(bridge, { thread: 'c2' }).key).not.toBe(untitled.key);
+  });
+
+  it('never puts a path, or a character that isn’t plain, in the session’s key or label', () => {
+    const path = '/Users/ada/Secret Plans/Quarterly “plan” 🙂 – final.md';
+    const { key, label } = sessionOf({}, { documentPath: path, thread: 'c1' });
+    expect(key).toMatch(/^redlines-[0-9a-f]{8}$/);
+    expect(label).toMatch(/^Redlines: [A-Za-z0-9 ._()-]+$/);
+    expect(label).not.toContain('Users');
+    expect(label).not.toContain('Secret');
+    expect(sessionOf({}, { documentPath: '/x/🙂.md', thread: 'c1' }).label).toMatch(
+      /^Redlines: -\.md$/,
+    );
+  });
+
+  it('names the agent in the key only when the person gave one', () => {
+    const named = sessionOf({ agent: 'main' }, request);
+    const unnamed = sessionOf({}, request);
+    expect(named.key).toBe(`agent:main:${unnamed.key}`);
+    expect(unnamed.key).toMatch(/^redlines-[0-9a-f]{8}$/);
   });
 });

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::acp::{AcpAgent, AcpAgents};
+use super::acp::{AcpAgent, AcpAgents, Bridge};
 use super::acp_gate::Conversation;
 use super::log::RunInfo;
 use super::process::{Input, RunMessage, Runs, Spec, Started};
@@ -53,6 +53,8 @@ pub struct Launch {
     /// The line, with no folder: the run makes its own to start in.
     pub spec: Spec,
     pub folder: String,
+    /// Set for OpenClaw's bridge, whose session has no toolbox (`acp_gate.rs`).
+    pub bridge: Option<Bridge>,
 }
 
 /// What to start for the agent with this id, for a session in `folder`.
@@ -62,7 +64,12 @@ pub fn spec_for(
     folder: &str,
     log: RunInfo,
 ) -> Result<Launch, String> {
-    let AcpAgent { program, args, .. } = agents
+    let AcpAgent {
+        program,
+        args,
+        bridge,
+        ..
+    } = agents
         .get(id)
         .ok_or_else(|| "That agent isn't in Preferences any more.".to_owned())?;
     if !is_clean_path(folder) {
@@ -76,6 +83,7 @@ pub fn spec_for(
             log,
         },
         folder: folder.to_owned(),
+        bridge,
     })
 }
 
@@ -121,13 +129,17 @@ impl AcpRuns {
     ) -> Result<Started, String> {
         let made = make_empty_folder(temp)
             .map_err(|error| format!("Couldn't make a folder to run the agent in: {error}"))?;
-        let Launch { spec, folder } = launch;
+        let Launch {
+            spec,
+            folder,
+            bridge,
+        } = launch;
         let spec = Spec {
             cwd: Some(made.to_string_lossy().into_owned()),
             ..spec
         };
         let shared = Arc::new(Shared {
-            conversation: Mutex::new(Conversation::new(bundled, &folder)),
+            conversation: Mutex::new(Conversation::new(bundled, &folder).for_bridge(bridge)),
             id: OnceLock::new(),
             ended: AtomicBool::new(false),
         });

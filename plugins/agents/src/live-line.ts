@@ -375,7 +375,9 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
 }
 
 /** The question's title: what is asked, and of whom. */
-function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): string {
+function askTitle({ agentName, readLimit, toolbox }: LiveLine & { kind: 'asking' }): string {
+  // An agent with no toolbox is sent what it needs, in its prompt, and reads nothing itself here.
+  if (toolbox === false) return `Send this document and its comments to ${agentName}?`;
   return readLimit === 'machine'
     ? `Allow ${agentName} to read files on this Mac?`
     : `Allow ${agentName} to read this folder?`;
@@ -419,9 +421,11 @@ function asking(
   }
   const note = block(
     'rl-ask-note',
-    machine
-      ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
-      : `${agentName} reads files here to answer, and changes only this document.`,
+    line.toolbox === false
+      ? `${agentName} answers from this document and its comments, which go to its OpenClaw Gateway, wherever that runs. It can’t change the document: what it says is posted as a reply. What else it can read is up to its own settings.`
+      : machine
+        ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
+        : `${agentName} reads files here to answer, and changes only this document.`,
   );
   note.id = `${id}-note`;
   described.push(note.id);
