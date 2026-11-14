@@ -136,7 +136,12 @@ export interface Note {
  * rail never owns the element: the host makes it, fills it and takes it out of the page.
  */
 export interface PinnedElement {
-  /** Its height changed, or its anchor moved: the rail lays the notes out again. */
+  /**
+   * Its height changed: the rail measures it again and lays the notes out around it, and does
+   * nothing more. It doesn't read the anchor again: the rail reads that when it syncs its notes,
+   * which is when the document or the selection changes, among other things, so an anchor that
+   * moved without either is seen at the next of those.
+   */
   resized(): void;
   /** Scrolls it into view once the rail has placed it, which is a moment from now. */
   reveal(): void;
@@ -150,7 +155,11 @@ export interface PinnedElement {
 /** An element a host has the rail lay out (`Rail.pinElement`). */
 interface Hosted {
   el: HTMLElement;
-  /** The position of the text it is level with, which the host keeps up with edits. */
+  /**
+   * The position of the text it is level with, which the host keeps up with edits. Read when the
+   * rail syncs its notes, and not at each layout. An anchor that throws is a pin the rail can't
+   * hold: it lets the element go, as it does when it stops showing its notes in full.
+   */
   anchor: () => number;
   /** Told once, after the update that did it, that the rail no longer lays the element out. */
   lost: () => void;
@@ -1326,15 +1335,28 @@ class Rail {
    * draws it nor moves it in the page: the host makes it as wide as a note, fills it and tells the
    * rail when its height changes (`resized`).
    *
+   * The rail reads `anchor` when it syncs its notes, which is when the document or the selection
+   * changes, among other things, and not at each layout: `resized` measures the element's height
+   * again and nothing more.
+   *
    * The rail lays out only what it shows in full. In a narrow editor, where the notes are dots, and
    * while it has no note of its own, as in Clean and Raw, or in a document with no comment (the
    * column makes room for notes only), it takes nothing, and returns null: the host places the
    * element as it would without a rail. One it holds is let go when it stops showing them, and
    * `lost` is called once, after the update that did it (a host that places the element reads the
-   * layout, which an update doesn't allow), for the host to place the element then.
+   * layout, which an update doesn't allow), for the host to place the element then. An `anchor`
+   * that throws is a pin the rail can't hold either: null where it throws as the element is
+   * pinned, and a loss, like any other, where it throws later.
    */
   pinElement(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null {
     if (this.destroyed || this.compact || !this.notes.some((note) => !note.host)) return null;
+    // Refused here, and not taken and then lost in the sync below: a host that pins again as soon as
+    // it is told of a loss (Ask does) would be told of another, and so on.
+    try {
+      anchor();
+    } catch {
+      return null;
+    }
     const id = `${HOSTED} ${++this.hostedCount}`;
     const hosted: Hosted = { el, anchor, lost };
     this.hosted.set(id, hosted);
@@ -1366,13 +1388,26 @@ class Rail {
     this.hosted.clear();
   }
 
-  /** `notes` and the host's elements among them, in the order of their anchors. */
+  /**
+   * `notes` and the host's elements among them, in the order of their anchors. The anchors are
+   * read here, and an anchor is the host's code, run in an update: one that threw would have the
+   * editor switch the whole rail off. The element it belongs to is let go instead.
+   */
   private withHosted(notes: readonly Note[], state: EditorState): Note[] {
     const by = this.ctx.author.handle;
-    const hosted = [...this.hosted].map(([id, { anchor }]): Note => {
-      const pos = Math.min(Math.max(Math.trunc(anchor()) || 0, 0), state.doc.length);
-      return { id, pos, ranges: [], by, host: true };
-    });
+    const hosted: Note[] = [];
+    for (const [id, held] of [...this.hosted]) {
+      let at: number;
+      try {
+        at = held.anchor();
+      } catch {
+        this.hosted.delete(id);
+        queueMicrotask(held.lost);
+        continue;
+      }
+      const pos = Math.min(Math.max(Math.trunc(at) || 0, 0), state.doc.length);
+      hosted.push({ id, pos, ranges: [], by, host: true });
+    }
     // A stable sort, as in `notesIn`: at one place, the notes come first.
     return [...notes, ...hosted].sort((a, b) => a.pos - b.pos);
   }

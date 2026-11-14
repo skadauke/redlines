@@ -335,6 +335,98 @@ describe('pinToRail', () => {
     expect(top(el)).not.toBeNaN();
   });
 
+  it('keeps the anchor it read at the last sync: `resized` measures the height again, and nothing more', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const { el, box } = hostElement(editor, 100);
+    const spot = { word: 'target' };
+    const pin = loaded.review.pinToRail(
+      el,
+      () => at(editor, spot.word),
+      () => {},
+    );
+    await frame();
+    expect(top(el)).toBe(295);
+    // Delta goes below the element, and epsilon, on its own line further down, is clear of it.
+    expect(tops(editor)).toEqual([95, 195, 295 + 100 + GAP, 495]);
+    // The anchor moved to epsilon's line, and the element grew: the notes below it make room for
+    // its new height, and the element is where it was, since nothing has read the anchor again.
+    spot.word = 'epsilon';
+    box.height = 300;
+    pin?.resized();
+    await frame();
+    expect(top(el)).toBe(295);
+    expect(tops(editor).slice(2)).toEqual([295 + 300 + GAP, 295 + 300 + GAP + NOTE + GAP]);
+    // The next sync, here a move of the selection, reads it: the element is level with epsilon.
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    expect(top(el)).toBe(495);
+    // Epsilon's own note, on the same text, goes above it, and delta's above that.
+    expect(tops(editor)).toEqual([95, 195, 495 - GAP - NOTE - GAP - NOTE, 495 - GAP - NOTE]);
+  });
+
+  it('lets go of an element whose anchor throws, says so once, and the rail goes on working', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el } = hostElement(editor, 200);
+    const broken = { value: false };
+    const lost = vi.fn();
+    const pin = review.pinToRail(
+      el,
+      () => {
+        if (broken.value) throw new Error('The host’s anchor broke');
+        return at(editor, 'target');
+      },
+      lost,
+    );
+    expect(pin).not.toBeNull();
+    await frame();
+    expect(tops(editor).slice(2)).toEqual([503, 571]);
+    // The next sync reads the anchor, and it throws: that is no reason for the editor to switch
+    // the rail off, which it does for an update that throws.
+    broken.value = true;
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    await tick();
+    expect(errors).not.toHaveBeenCalled();
+    expect(lost).toHaveBeenCalledOnce();
+    expect(notes(editor)).toHaveLength(4);
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    // The rail is still there to answer: the first note resolves, and the rest are laid out again.
+    button(notes(editor)[0]!, 'Resolve').click();
+    await frame();
+    expect(errors).not.toHaveBeenCalled();
+    expect(notes(editor)).toHaveLength(3);
+    expect(tops(editor)).toEqual([195, 395, 495]);
+    // What it held does nothing now, and it was told once.
+    pin?.resized();
+    pin?.release();
+    await tick();
+    expect(lost).toHaveBeenCalledOnce();
+  });
+
+  it('takes no element whose anchor throws as it is pinned, and does not say it lost it', async () => {
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el } = hostElement(editor, 200);
+    const lost = vi.fn();
+    const pin = review.pinToRail(
+      el,
+      () => {
+        throw new Error('The host’s anchor broke');
+      },
+      lost,
+    );
+    expect(pin).toBeNull();
+    await frame();
+    await tick();
+    // Nothing was written to the element, and the notes are where they were.
+    expect(lost).not.toHaveBeenCalled();
+    expect(el.style.top).toBe('');
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+  });
+
   describe('where the rail does not show its notes in full', () => {
     it('takes nothing in a narrow editor, where the notes are dots', async () => {
       const loaded = await load();
