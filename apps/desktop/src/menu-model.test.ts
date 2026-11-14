@@ -274,7 +274,8 @@ describe('the menu model', () => {
     expect(c.print).toHaveBeenCalledOnce();
     click('View', 'Raw');
     expect(c.setView).toHaveBeenLastCalledWith('raw');
-    // Redlines, which the editor shows in the look last chosen with a click on a change bar.
+    // Redlines, which the editor shows in the look last chosen with a click on a change bar or the
+    // Simple Look switch.
     click('View', 'Redlines');
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
     expect(c.setView).toHaveBeenCalledTimes(2);

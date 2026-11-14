@@ -10,8 +10,8 @@ import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
  * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
  * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
- * change bar switches the two looks, and nothing else does, so a View menu lists three views
- * (`MenuView`).
+ * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
+ * (`MenuView`) and a switch for the look.
  */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
@@ -22,7 +22,7 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
 /**
- * The look of Redlines that a click on a change bar chose last, the full markup (`'redlines'`) or
+ * The look of Redlines that a click on a change bar or `switchLook` chose last, the full markup (`'redlines'`) or
  * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
@@ -39,7 +39,7 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
-  /** The look of Redlines chosen last, with a click on a change bar, which an automatic switch shows. */
+  /** The look of Redlines chosen last, with a click on a change bar or `switchLook`, which an automatic switch shows. */
   markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
@@ -319,7 +319,7 @@ export interface Editor {
   setViewMode(mode: ViewMode): void;
   /**
    * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
-   * shown in the look that was shown last: the one a click on a change bar chose
+   * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
    * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
    * on a change bar, or `switchLook`, chooses a look.

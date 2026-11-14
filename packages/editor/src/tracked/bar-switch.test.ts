@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { EditorSelection } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { barMeasure, type BarMeasure, hotBar } from './bar-layer.ts';
@@ -8,7 +8,7 @@ import {
   type BarGeometry,
   barClickHandlers,
   barSwitch,
-  lookedAtLine,
+  lookedAt,
   switchLookAt,
 } from './bar-switch.ts';
 import { viewModeField } from './field.ts';
@@ -129,33 +129,80 @@ describe('the click on a change bar', () => {
     expect(scrollDOM.scrollTop).toBe(7);
   });
 
-  it('looks at the line with the caret when it is on the screen, else the first line on the screen', () => {
-    const editor = load({ view: 'simple' });
-    const { view } = editor;
-    const second = view.state.doc.line(2).from;
-    view.dispatch({ selection: { anchor: second + 1 } });
-    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({
-      top: 0,
-      bottom: 100,
+  describe('what a switch with no pointer keeps in place (#330)', () => {
+    const rect = (top: number, bottom: number) => ({
+      top,
+      bottom,
       left: 0,
       right: 600,
       width: 600,
-      height: 100,
+      height: bottom - top,
       x: 0,
-      y: 0,
+      y: top,
       toJSON: () => ({}),
     });
-    const caretAt = (top: number) =>
-      vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 0, right: 5, top, bottom: top + 20 });
-    caretAt(40);
-    expect(lookedAtLine(view)).toBe(second);
-    // The caret below or above the screen: the line at the top of it, which the view says.
-    const first = vi.spyOn(view, 'lineBlockAtHeight').mockReturnValue({ from: 7 } as never);
-    caretAt(300);
-    expect(lookedAtLine(view)).toBe(7);
-    caretAt(-50);
-    expect(lookedAtLine(view)).toBe(7);
-    expect(first).toHaveBeenCalledTimes(2);
+    /** An editor whose scroller shows 0 to 100 px, under `inset` px of title bar, and a caret in its second line. */
+    function looking(inset = 0) {
+      const editor = load({
+        view: 'simple',
+        extensions: [
+          barSwitch({ geometry: layout }),
+          EditorView.scrollMargins.of(() => ({ top: inset })),
+        ],
+      });
+      const { view } = editor;
+      const second = view.state.doc.line(2).from;
+      view.dispatch({ selection: { anchor: second + 3 } });
+      vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue(rect(0, 100));
+      const caretAt = (top: number | null) =>
+        vi
+          .spyOn(view, 'coordsAtPos')
+          .mockReturnValue(top === null ? null : { left: 0, right: 5, top, bottom: top + 20 });
+      const topLine = vi.spyOn(view, 'lineBlockAtHeight').mockReturnValue({ from: 7 } as never);
+      return { editor, view, second, caretAt, topLine };
+    }
+
+    it('is the caret’s own row, not its line, while the caret is wholly on the screen', () => {
+      const { view, second, caretAt } = looking();
+      caretAt(40);
+      expect(lookedAt(view)).toEqual({ pos: second + 3, row: true });
+    });
+
+    it('is the line at the top of the screen when the caret is below, above or partly off it, or has no place', () => {
+      const { view, caretAt, topLine } = looking();
+      for (const top of [300, -50, 90, null]) {
+        caretAt(top);
+        expect(lookedAt(view), String(top)).toEqual({ pos: 7, row: false });
+      }
+      expect(topLine).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not count a caret under the title bar, nor the part of the screen it covers', () => {
+      // The bar floats over the top 52 px of the scroller: a caret at 30 is under it, and the top
+      // of what is shown is the first line below it.
+      const { view, caretAt, topLine } = looking(52);
+      caretAt(30);
+      expect(lookedAt(view)).toEqual({ pos: 7, row: false });
+      expect(topLine).toHaveBeenLastCalledWith(52);
+      caretAt(60);
+      expect(lookedAt(view).row).toBe(true);
+    });
+
+    it('keeps the caret’s row where it was, not the top of its line', async () => {
+      // The caret's row is 100 px down in Simple and 160 in Redlines, the lines above it having
+      // grown: the page scrolls 60 px, as the row's own coordinates say.
+      const { editor, view, second } = looking();
+      view.scrollDOM.scrollTop = 7;
+      vi.spyOn(view, 'coordsAtPos').mockImplementation(() => {
+        // Where the row is on the screen: its place in the page, less how far the page is scrolled.
+        const top = (viewOf(editor) === 'simple' ? 100 : 160) - (view.scrollDOM.scrollTop - 7);
+        return { left: 0, right: 5, top, bottom: top + 20 };
+      });
+      switchLookAt(view, second + 3, layout, undefined, true);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(viewOf(editor)).toBe('redlines');
+      expect(view.scrollDOM.scrollTop).toBe(67);
+    });
   });
 
   it('switches nothing in Clean or Raw', () => {

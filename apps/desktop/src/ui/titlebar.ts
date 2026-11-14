@@ -92,9 +92,8 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
-/** The key of the Simple Look switch (menu-model.ts, which a test compares), and for assistive technology. */
+/** The key of the Simple Look switch (menu-model.ts, which a test compares). */
 export const LOOK_KEY = '⌥⌘4';
-export const LOOK_ARIA_KEY = 'Alt+Meta+4';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEditor,
   type Editor,
@@ -92,7 +92,7 @@ describe('the markup view', () => {
 });
 
 // Simple is Redlines' simple look, not a view of its own (#303): a View menu lists Clean, Redlines
-// and Raw, and only a click on a change bar switches the two looks.
+// and Raw, and a click on a change bar or the Simple Look switch switches the two looks.
 describe('the views a View menu lists', () => {
   it('names Simple as Redlines, since it is a look of Redlines', () => {
     expect((['clean', 'simple', 'redlines', 'raw'] as const).map(menuViewOf)).toEqual([
@@ -208,11 +208,14 @@ describe('the views a View menu lists', () => {
 
   it('does nothing in Clean and Raw, which have no look to switch', () => {
     const editor = load(marked, { markupView: 'redlines' });
+    const measured = vi.spyOn(editor.view, 'coordsAtPos');
     for (const view of ['clean', 'raw'] as const) {
       editor.showView(view);
       editor.switchLook();
       expect(editor.getUiState()).toMatchObject({ view, markupView: 'redlines' });
     }
+    // Nothing to keep in place, so nothing is measured.
+    expect(measured).not.toHaveBeenCalled();
   });
 
   it('shows Clean and Raw as they are, and never changes the look', () => {

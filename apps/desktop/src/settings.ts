@@ -30,7 +30,8 @@ export interface Settings {
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
-   * The look of Redlines chosen last with a click on a change bar, the full markup or Simple (the
+   * The look of Redlines chosen last with a click on a change bar or the Simple Look switch, the
+   * full markup or Simple (the
    * simple look), which a window shows wherever it picks Redlines for the person, and when the
    * View menu shows Redlines (design: Which look, when). A document that records no view in its
    * ledger, and has redlines, opens in Redlines' simple look when this is `'simple'`. Every window

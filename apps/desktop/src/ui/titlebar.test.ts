@@ -9,7 +9,6 @@ import {
   TOOLTIP_MS,
   TRACKING_ARIA_KEY,
   TRACKING_KEY,
-  LOOK_ARIA_KEY,
   LOOK_KEY,
   VIEW_ARIA_KEYS,
   VIEW_KEYS,
@@ -587,7 +586,7 @@ describe('title bar', () => {
     const { actions, menu, button } = setup({ view: 'clean' });
     hover(button('View'));
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
-    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
+    // Simple is Redlines' simple look, which has a switch of its own below the three views.
     expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Raw⌥⌘3']);
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     // Each has an icon of its own.
@@ -758,6 +757,25 @@ describe('title bar', () => {
     press(view, 'Escape');
     expect(shown(view)).toBe(false);
     expect(document.activeElement).toBe(button('View'));
+  });
+
+  it('the keys reach Simple Look when it can be chosen, and skip it in Clean and Raw', () => {
+    const redlines = setup({ view: 'redlines' });
+    press(redlines.button('View'), 'ArrowDown');
+    const open = redlines.menu('View');
+    press(open, 'End');
+    expect(document.activeElement).toBe(item(open, 'Simple Look'));
+    press(open, 'ArrowDown');
+    expect(document.activeElement).toBe(item(open, 'Clean'));
+    press(open, 'ArrowUp');
+    expect(document.activeElement).toBe(item(open, 'Simple Look'));
+    redlines.bar.destroy();
+    document.body.replaceChildren();
+    const clean = setup({ view: 'clean' });
+    press(clean.button('View'), 'ArrowDown');
+    const view = clean.menu('View');
+    press(view, 'End');
+    expect(document.activeElement).toBe(item(view, 'Raw'));
   });
 
   it('shows the file name, and Edited when there are unsaved edits', () => {
@@ -1006,7 +1024,6 @@ describe('the keys the icons name', () => {
       expect(VIEW_ARIA_KEYS[view], view).toBe(aria(accelerator(text)));
     }
     expect(LOOK_KEY).toBe(mac(accelerator('Simple Look')));
-    expect(LOOK_ARIA_KEY).toBe(aria(accelerator('Simple Look')));
     expect(TRACKING_KEY).toBe(mac(accelerator('Track Changes')));
     expect(TRACKING_ARIA_KEY).toBe(aria(accelerator('Track Changes')));
   });

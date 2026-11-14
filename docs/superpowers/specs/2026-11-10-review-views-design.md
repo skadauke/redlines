@@ -60,7 +60,7 @@ These would make it a failure even if it technically works:
 - **A keystroke costs what it does on main.** The tracked layer's `analyze` runs on every change of the text; Simple and Part 3 add a condition or two per mark to it, and nothing per keystroke elsewhere. The joining rule runs only on an agent's edit.
 - **The platform.** Tauri v2 on macOS, WKWebView, CodeMirror 6. The views are the core's (`@redlines/editor`, design §6.4), and so are the change bars and their click; the rail, cards and review bar are `@redlines/review`'s; menus, icons and settings are `apps/desktop`'s.
 - **Color means a person** (design §6.6). Bars keep their author's color, gray for several people.
-- **Accessibility.** The bar's target is 24 px wide. Until #303 a view switch was a menu item and a key, so nobody needed the bar to switch; the simple look is now the exception (A click in the margin). Struck text keeps the author colors' 4.5:1 contrast: it isn't faded. VoiceOver reads the View menu's check marks.
+- **Accessibility.** The bar's target is 24 px wide. A view switch is a menu item and a key, so nobody needs the bar to switch: the simple look has its switch since #330 (A click in the margin). Struck text keeps the author colors' 4.5:1 contrast: it isn't faded. VoiceOver reads the View menu's check marks.
 - **Per-person state stays out of the file** (format §5.6): the view, and the markup view remembered, live in the app's settings.
 
 ## Decided by Stephan
@@ -465,7 +465,7 @@ Each stage is one PR, ships on its own and is worth having without the others.
 1. **An agent's rewrite is recorded as one change:** changes close together joined, and a block that keeps fewer than half of its words replaced whole, so a rewrite can no longer be accepted word by word (design §8.3's promise goes).
 2. **People's edits are never joined:** they are recorded as typed, as in Word, Google Docs and Pages.
 3. **No deletion balloons in the margin,** newer Word for Mac's default: #183 is answered by one change for a rewrite, struck blocks, and Simple.
-4. **Simple is Redlines' simple look, no fourth view (#303), and the view keys follow the menu's order** (Redlines ⌥⌘2, Raw ⌥⌘3); a click on a bar switches the looks both ways, and nothing else does.
+4. **Simple is Redlines' simple look, no fourth view (#303), and the view keys follow the menu's order** (Redlines ⌥⌘2, Raw ⌥⌘3); a click on a bar switches the looks both ways, as the Simple Look switch (⌥⌘4, #330) does.
 5. **The look you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in the simple look; and the simple look keeps the rail, shows no hover cards and hands the review bar to Redlines; a note's Accept and Reject there decide in place and say what they decide (#326, which overruled "decides nothing").
 
 ## Left to the builder

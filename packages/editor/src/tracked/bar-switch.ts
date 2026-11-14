@@ -1,7 +1,8 @@
-// A click on a change bar switches Redlines' two looks, the simple look and the full markup, and is
-// the only thing that does (design: A click in the margin). The core owns the click, and it never
-// moves the text under the pointer, the caret, the selection or the focus: the press is taken
-// whole, the release switches, and the line that was under the pointer is put back where it was.
+// A click on a change bar switches Redlines' two looks, the simple look and the full markup, as the
+// View menu's Simple Look switch does (`switchLookAt`, shared; design: A click in the margin). The
+// core owns the click, and it never moves the text under the pointer, the caret, the selection or
+// the focus: the press is taken whole, the release switches, and the line that was under the
+// pointer is put back where it was.
 
 import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
@@ -180,19 +181,25 @@ function targetAt(
  * Switches Redlines' two looks, the simple look to the full markup and back, with the line at `pos`
  * where it was: its distance from the top of the screen is noted now and put back once the new view
  * is measured. A line the new view doesn't draw has the top of the one after it, which `lineTop`
- * gives for its position. `before` is the line's top when it isn't a line's (a struck block's own).
- * Nothing in Clean or Raw, which have no look. It chooses the look, as the click on a bar does.
+ * gives for its position. `before` is the line's top when it isn't a line's (a struck block's own),
+ * and `row` keeps the row that holds `pos` (its coordinates) in place instead of its line's top:
+ * the caret's row, in a paragraph that wraps. Nothing in Clean or Raw, which have no look. It
+ * chooses the look, as the click on a bar does.
  */
 export function switchLookAt(
   view: EditorView,
   pos: number,
   geometry: BarGeometry = pageGeometry,
   before?: number,
+  row = false,
 ): void {
   const mode = view.state.field(viewModeField);
   if (mode !== 'simple' && mode !== 'redlines') return;
-  const start = before ?? geometry.lineTop(view, pos);
-  const top = () => geometry.lineTop(view, Math.min(pos, view.state.doc.length));
+  const top = () => {
+    const at = Math.min(pos, view.state.doc.length);
+    return (row ? view.coordsAtPos(at)?.top : undefined) ?? geometry.lineTop(view, at);
+  };
+  const start = before ?? top();
   const keep = (after: number) => {
     // Chosen now, after the switch: a document that fits the window in Simple has no scrolling
     // ancestor until Redlines makes the page taller.
@@ -206,17 +213,23 @@ export function switchLookAt(
 }
 
 /**
- * The line a person is looking at, for a switch that has no pointer to say: the one with the caret
- * when it is on the screen, else the first on it. Its position is where the line starts.
+ * What a switch that has no pointer to say keeps in place, as the app keeps the reading place
+ * across a zoom (`readingPlace`): the caret's own row while the caret is wholly on the screen, else
+ * the line at the top of what the screen shows. The screen's top is the scroller's, less the room
+ * the host keeps clear above it (`EditorView.scrollMargins`): the title bar floats over it, and
+ * what is under the bar is not in sight.
  */
-export function lookedAtLine(view: EditorView): number {
-  const scroller = scrollerOf(view).getBoundingClientRect();
+export function lookedAt(view: EditorView): { pos: number; row: boolean } {
+  const rect = scrollerOf(view).getBoundingClientRect();
+  let inset = 0;
+  for (const margins of view.state.facet(EditorView.scrollMargins)) {
+    inset = Math.max(inset, margins(view)?.top ?? 0);
+  }
+  const top = rect.top + inset;
   const head = view.state.selection.main.head;
   const caret = view.coordsAtPos(head);
-  if (caret && caret.bottom > scroller.top && caret.top < scroller.bottom) {
-    return view.lineBlockAt(head).from;
-  }
-  return view.lineBlockAtHeight(Math.max(0, scroller.top - view.documentTop)).from;
+  if (caret && caret.top >= top && caret.bottom <= rect.bottom) return { pos: head, row: true };
+  return { pos: view.lineBlockAtHeight(Math.max(0, top - view.documentTop)).from, row: false };
 }
 
 const setHover = StateEffect.define<number | null>();
