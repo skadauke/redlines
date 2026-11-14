@@ -1,6 +1,7 @@
 // The empty list item that Markdown can't hold (design: block editing, "The empty paragraph"): right
 // under a line of text in a tight list, an empty bullet item is a setext underline and an empty
-// numbered one is more of the text, so `- one⏎- two⏎  - ` is `<li><h2>two</h2></li>`. An empty item
+// numbered one is more of the text, so `- one⏎- two⏎  - ` is `<li><h2>two</h2></li>`. The same for
+// the first item of a list right under a paragraph (`Para.⏎- ` is `<h2>Para.</h2>`). An empty item
 // is fine after a blank line, or after an item of its own list. Pure functions of the text.
 
 import type { Text } from '@codemirror/state';
@@ -15,7 +16,8 @@ const kindOf = (marker: string) => (/^\d/.test(marker) ? marker.slice(-1) : mark
  * Whether an empty item with `marker`, indented by `indent` columns after the quote markers
  * `quote`, as line `n` of `doc`, would be no item in Markdown: nothing but text and deeper lines
  * above it before an item of its list or a blank line, a line less indented, or text at its own
- * indentation. Never for a top-level item, whose text above is its own list's.
+ * indentation. A top-level item is so only right under a line of text (`underText`): above it is
+ * otherwise its own list's, or another block.
  */
 export function unsoundEmptyItem(
   doc: Text,
@@ -24,7 +26,7 @@ export function unsoundEmptyItem(
   indent: number,
   marker: string,
 ): boolean {
-  if (indent === 0) return false;
+  if (indent === 0) return underText(doc, n, quote);
   const same = quote.replaceAll(/[ \t]/g, '');
   for (let m = n - 1; m >= 1; m--) {
     const text = doc.line(m).text;
@@ -43,6 +45,47 @@ export function unsoundEmptyItem(
     return !item || kindOf(item[1]!) !== kindOf(marker);
   }
   return true;
+}
+
+/** A list item's line: its marker, and what follows it or the end of the line. */
+const ITEM_LINE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+
+/**
+ * Whether a line is text that a paragraph is made of, which an underline or a lazy line follows:
+ * not a heading, a quote, a block of HTML, a table row, a fence, a link reference, a rule or an
+ * underline.
+ */
+const textLike = (line: string): boolean =>
+  line.trim() !== '' &&
+  !/^(?:#{1,6}(?:[ \t]|$)|[>|<]|`{3}|~{3}|\[[^\]]*\]:)/.test(line) &&
+  !/^(?:[-*_][ \t]*){3,}$/.test(line) &&
+  !/^[=-]+[ \t]*$/.test(line);
+
+/**
+ * Whether an empty item that starts its line (in the quote `quote`) as line `n` stands right under
+ * text that is no item's: the empty bullet is then the underline of that text, and the empty
+ * numbered item more of it (`Para.⏎- ` is `<h2>Para.</h2>`, `Para.⏎1. ` is `<p>Para.1.</p>` to
+ * CommonMark). The lines above it up to a blank line are read: an item among them (up to three
+ * columns in) owns the lines below it, indented or lazy, and the empty item is an item of that
+ * list or of the next; a heading, a rule, a fence or another block right above it is fine. Only a
+ * paragraph that starts at the margin is read as one: what is indented may be an item's
+ * paragraph (`- a⏎⏎  b⏎- `) or code, which only the item above it tells.
+ */
+function underText(doc: Text, n: number, quote: string): boolean {
+  const same = quote.replaceAll(/[ \t]/g, '');
+  // The topmost line of the run of lines above that is text, once there is one.
+  let first: number | null = null;
+  for (let m = n - 1; m >= 1; m--) {
+    const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(doc.line(m).text)!;
+    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) break;
+    const text = above[3]!;
+    if (text.trim() === '') break;
+    const deep = above[2]!.length;
+    if (deep <= 3 && ITEM_LINE.test(text)) return false;
+    if (deep === 0 && !textLike(text)) break;
+    first = deep;
+  }
+  return first === 0;
 }
 
 /** Whether line `n` of `doc` is an empty item that Markdown can't hold. */

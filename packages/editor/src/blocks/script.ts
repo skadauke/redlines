@@ -421,7 +421,7 @@ function play(editor: Editor, step: Step): boolean {
 }
 
 /** Whether a step is Undo or Redo: it is no step of its own to take back. */
-const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z';
+const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z' || step === 'Mod-y';
 
 /** The body with the caret or the selection in it, in the notation. */
 function caretText(editor: Editor): string {
