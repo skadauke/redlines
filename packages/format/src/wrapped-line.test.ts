@@ -6,7 +6,6 @@
 // ("A marker here would start a line."), and with Track Changes off it left an empty line, which
 // is a paragraph break.
 
-import { appendFileSync } from 'node:fs';
 import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { bodyStart, lineStartKind, prefixLength } from './blocks.ts';
@@ -516,10 +515,6 @@ describe('deleting the text of each wrapped line of random documents', () => {
         }
       }
     }
-    appendFileSync(
-      '/private/tmp/claude-501/-Users-skadauke-code-redlines--claude-worktrees-epic-j-blocks-cb9834/434d7622-5066-4efe-8109-aed0041ddbeb/scratchpad/probe/stats.txt',
-      `${JSON.stringify(counts)} ${JSON.stringify([...reasons])}\n`,
-    );
     expect(counts.taken, 'lines taken with their breaks').toBeGreaterThan(50);
     expect(counts.taken).toBeGreaterThan(counts.refused);
   }, 120_000);
