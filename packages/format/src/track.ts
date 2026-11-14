@@ -95,7 +95,7 @@ import {
 } from './list-run.ts';
 import { sameEmphasis, sameReading } from './format-reader.ts';
 import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
-import { codeSpanAt, inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { codeSpanAt, inspectPlace, stepLeft, stepRight, underliningBullet } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -4153,6 +4153,13 @@ const IN_CODE =
 const EMPTY_ITEM_IN_CODE =
   "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.";
 
+/** Why a change under a bullet that a pending line break turned into an underline is refused when
+ * it would make code of it: the newest view reads the bullet as the underline of the text above it
+ * (an empty item can't interrupt a paragraph), and the lines under it are indented four columns
+ * past that text, which is code there (#143). */
+const UNDERLINED_BULLET_IN_CODE =
+  'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
+
 /** The line of an empty list item, in a view. */
 const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 
@@ -4316,6 +4323,41 @@ function differingBlocks(a: string, b: string): [string, string] {
 function onEmptyItem(view: DocView, position: number): boolean {
   const at = view.map.fromSource(position);
   return EMPTY_ITEM.test(view.text.slice(lineStart(view.text, at), lineEnd(view.text, at)));
+}
+
+/**
+ * Whether the line of `view` that `position` (of the source) is on comes under a bullet that a
+ * split's marker stands on and that the view reads as the underline of the text above it: with, in
+ * between, the lines of its break, blank or indented four columns, which are code there (#143).
+ */
+function underUnderliningBullet(text: string, view: DocView, position: number): boolean {
+  const shown = view.text;
+  const row = (start: number) => shown.slice(start, lineEnd(shown, start));
+  const above = (start: number) => (start === 0 ? -1 : lineStart(shown, start - 1));
+  const bare = (line: string) => /^[ \t>]*-[ \t]*$/.test(line);
+  /** Whether a line is blank, or indented four columns past its quote markers. */
+  const apart = (line: string) =>
+    /^[ \t>]*$/.test(line) || /^(?:[ \t]{0,3}>[ \t]?)*(?: {4}|\t)/.test(line);
+  let bullet = above(lineStart(shown, view.map.fromSource(position)));
+  while (bullet >= 0 && !bare(row(bullet)) && apart(row(bullet))) bullet = above(bullet);
+  if (bullet < 0 || !bare(row(bullet))) return false;
+  const over = above(bullet);
+  if (over < 0 || !underliningBullet(row(over), row(bullet))) return false;
+  // The line of the file that the bullet is from holds the marker of the split.
+  const source = view.map.toSource(bullet, 1);
+  return text.slice(lineStart(text, source), lineEnd(text, source)).includes('<!--split ');
+}
+
+/** The words for a change whose markers would stand in indented code (format §2.1). */
+function inCodeWords(text: string, edits: readonly TextChange[], views: Views): string {
+  const view = views.newest(text);
+  if (edits.some((edit) => onEmptyItem(view, edit.from))) return EMPTY_ITEM_IN_CODE;
+  // Typed text with a line of four columns in it is code of its own, whatever stands above it.
+  const plain = edits.filter((edit) => !/(?:^|\n)(?: {4}|\t)/.test(edit.insert));
+  if (plain.some((edit) => underUnderliningBullet(text, view, edit.from))) {
+    return UNDERLINED_BULLET_IN_CODE;
+  }
+  return IN_CODE;
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
@@ -5153,9 +5195,7 @@ function editsOnce(
         );
       }
     },
-    inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))
-      ? EMPTY_ITEM_IN_CODE
-      : IN_CODE,
+    inCode: inCodeWords(text, edits, views),
     views,
   });
   selfCheck(plan, edits, changes, views);
