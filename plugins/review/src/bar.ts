@@ -190,12 +190,8 @@ function decide(
   const current = currentGroup(view.state, changesOf(ctx), groups);
   const change = groups[current]?.[0];
   if (!change) return;
-  let decided = false;
-  const ran = attempt(line, () => {
-    decided = decideSuggestion(ctx, how, change.id);
-  });
-  // Nothing was decided where the view hides the old text; it shows the change instead.
-  if (!ran || !decided) return;
+  const ran = attempt(line, () => decideSuggestion(ctx, how, change.id));
+  if (!ran) return;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
   const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
   const next = after

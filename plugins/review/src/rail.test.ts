@@ -301,7 +301,41 @@ describe('margin notes', () => {
       editor.setViewMode('simple');
       expect(editor.view.dom.classList).toContain('rl-has-rail');
       expect(notes(editor)).toHaveLength(1);
-      expect(notes(editor)[0]!.querySelector('.rl-note-change')?.textContent).toBe('stays → goes');
+    });
+
+    it('says what a click would decide in the card’s words, where the page shows no old text', () => {
+      const { editor } = mount(reasons);
+      editor.setViewMode('simple');
+      const change = () => notes(editor)[0]!.querySelector('.rl-note-change');
+      expect(change()?.textContent).toBe('Replaced “stays” with “goes”');
+      // The words of the card, which says the same of the same change.
+      const parsed = parse(editor.getDoc());
+      const mark = parsed.marks.find((each) => each.id === 'p7qd')!;
+      expect(change()?.textContent).toBe(describeChange(parsed, mark));
+      // In Redlines the page strikes the old text, and the note keeps its arrow.
+      editor.setViewMode('redlines');
+      expect(change()?.textContent).toBe('stays → goes');
+      editor.setViewMode('simple');
+      expect(change()?.textContent).toBe('Replaced “stays” with “goes”');
+    });
+
+    it('says a deletion and an insertion in the card’s words, shortened when long', () => {
+      const long = 'The old exporter stays as it is, and so does everything that depends on it.';
+      const doc = file(`A <!--del d3d3 ${long}-->new <!--ins q3q3-->plan<!--/q3q3-->.`, [
+        ...PEOPLE,
+        'marks:',
+        '  d3d3: {by: claude-ada, at: 2026-10-31T09:31Z, note: Out of date}',
+        '  q3q3: {by: claude-ada, at: 2026-10-31T09:31Z, note: Reads better}',
+      ]);
+      const { editor } = mount(doc);
+      editor.setViewMode('simple');
+      const sentences = notes(editor).map(
+        (note) => note.querySelector('.rl-note-change')?.textContent,
+      );
+      expect(sentences).toEqual([
+        'Deleted “The old exporter stays as it is, and so…”',
+        'Inserted “plan”',
+      ]);
     });
 
     it('shows dots when narrow', async () => {
@@ -326,34 +360,44 @@ describe('margin notes', () => {
     });
 
     it.each(['Accept', 'Reject'])(
-      'does not decide on %s: it shows the change in Redlines, selected and in view',
+      'decides on %s where the person is: the view, the selection and the scroll stay',
       (name) => {
         const { editor, decided } = mount(reasons);
         editor.setViewMode('simple');
-        const text = editor.getDoc();
+        const selection = editor.view.state.selection;
         const dispatched = vi.spyOn(editor.view, 'dispatch');
         button(notes(editor)[0]!, name).click();
-        expect(decided).toEqual([]);
-        expect(editor.getDoc()).toBe(text);
-        expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
-        const { from, to } = editor.view.state.selection.main;
-        expect(editor.view.state.sliceDoc(from, to)).toBe(
-          text.slice(
-            text.indexOf('<!--sub p7qd'),
-            text.indexOf('<!--/p7qd-->') + '<!--/p7qd-->'.length,
-          ),
-        );
-        // The scroll puts it in view, in the middle.
-        const scrolled = dispatched.mock.calls.some(([spec]) => {
-          const { effects } = spec as { effects?: unknown };
-          return JSON.stringify(effects ?? null).includes('"y":"center"');
-        });
-        expect(scrolled).toBe(true);
-        // Then the note decides, in Redlines.
-        button(notes(editor)[0]!, name).click();
         expect(decided).toEqual([{ id: 'p7qd', how: name.toLowerCase() }]);
+        // Still the simple look, with the selection where it was and nothing scrolled into view.
+        expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+        expect(editor.view.state.selection.eq(selection)).toBe(true);
+        const scrolled = dispatched.mock.calls.some(([spec]) =>
+          JSON.stringify((spec as { effects?: unknown }).effects ?? null).includes('"y":"center"'),
+        );
+        expect(scrolled).toBe(false);
       },
     );
+
+    it('decides in one step to undo, as in Redlines', () => {
+      const { editor } = mount(reasons, { real: true });
+      editor.setViewMode('simple');
+      const before = editor.getDoc();
+      const dispatched = vi.spyOn(editor.view, 'dispatch');
+      button(notes(editor)[0]!, 'Accept').click();
+      // The decision's own transaction, with no selection and no effect: nothing to scroll to.
+      expect(dispatched).toHaveBeenCalled();
+      for (const [spec] of dispatched.mock.calls) {
+        expect(spec).not.toHaveProperty('selection');
+        expect(spec).not.toHaveProperty('effects');
+        expect(spec).not.toHaveProperty('scrollIntoView');
+      }
+      expect(editor.getDoc()).toContain('The exporter goes');
+      expect(editor.getDoc()).not.toContain('p7qd');
+      expect(editor.getUiState().view).toBe('simple');
+      undo(editor.view);
+      expect(editor.getDoc()).toBe(before);
+      expect(editor.getUiState().view).toBe('simple');
+    });
   });
 
   it('a note names a format change, with its author', () => {
@@ -450,6 +494,19 @@ describe('margin notes', () => {
     const [note] = notes(editor);
     button(note!, 'Accept').click();
     expect(editor.getDoc()).toBe(before);
+    const error = note!.querySelector<HTMLElement>('.rl-note-error');
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toBe(REFUSAL);
+  });
+
+  it('a refused decision in the simple look says why in the note too, and changes nothing', () => {
+    const { editor } = mount(reasons, { refuse: true });
+    editor.setViewMode('simple');
+    const before = editor.getDoc();
+    const [note] = notes(editor);
+    button(note!, 'Accept').click();
+    expect(editor.getDoc()).toBe(before);
+    expect(editor.getUiState().view).toBe('simple');
     const error = note!.querySelector<HTMLElement>('.rl-note-error');
     expect(error?.hidden).toBe(false);
     expect(error?.textContent).toBe(REFUSAL);
