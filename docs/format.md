@@ -1219,6 +1219,21 @@ editor that wants the line's place left empty writes its own line breaks in fron
 they are, and the file never holds them (Return in the empty first item of a list at the start of a
 file).
 
+**A change inside a blank line of a break,** with no line break in its range, is written the same
+way: the `>` of the blank line between two paragraphs of a quote replaced by `> `, as a space typed
+after it is, or taken out. A marker can't stand on that line either, so the change is a
+substitution of the whole break and the prefix of the block after it, and the new text is that
+break as it now is, line breaks and all, so that none of them is lost
+(`> One<!--sub k3x9 \n>\n> Two-->⏎> ⏎> Two<!--/k3x9-->`, the closer after the first word as above,
+however the changes next to the break stand, a pending deletion at the end of the first paragraph
+or an insertion at the start of the second). Accepting gives the text that was typed, and
+rejecting gives every byte back. It was written as the typed text alone before (#358), or as the
+join of the two blocks where text was taken out, which lost the line breaks. Where the closer or
+another change next to the break has no place, the edit is refused, as any edit is. A change that
+takes a line break away takes all of the break (above). Taking the quote markers or the white
+space out of a blank line is first the rule for a quote's blank lines (below); this is what that
+rule leaves.
+
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block
 stays on the line (taking the first block of a longer list or quote out of it), is the prefix's

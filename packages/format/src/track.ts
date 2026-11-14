@@ -1115,10 +1115,22 @@ function typingOf(tokens: readonly Token[]): Typing {
  * does not touch the line break in front of it; the marker can't stand in the prefix, so the change
  * is widened to the start of the break and to the end of the prefix, and the text that comes into it
  * is typed again on either side: `lead` before what is typed, `kept` after.
+ *
+ * So is a change that replaces or takes out text inside a blank line of the break, as the `>` of the
+ * blank line between two paragraphs of a quote does when a space is typed after it (#358): it takes
+ * no line break away, and the marker can't stand on that line, so it is widened to the whole break
+ * and the prefix of the block after it, and what stays of the break is typed again on either side,
+ * as text: `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which
+ * holds them, is not typed as breaks; `kept`, the rest of a prefix, never holds one.
  */
-function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: string; lead: string } {
+function coverBreaks(
+  plan: Plan,
+  from: number,
+  to: number,
+): Range & { kept: string; lead: string; tail: string } {
   let kept = '';
   let lead = '';
+  let tail = '';
   // The first line of the file has no break in front of it.
   const first = from < to ? prefixEnd(plan, from) : undefined;
   if (first !== undefined && to > first) from = first;
@@ -1137,15 +1149,27 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
       const insidePrefix = from >= prefix && prefix < found.end;
       // Not when the break is the author's own split's: the split branch below cancels it, and
       // the break must not go with it.
-      if (
-        insidePrefix &&
-        to <= found.end &&
-        from > found.start &&
-        !splitUnits(plan).some((u) => u.own && u.marker.to === found.start)
-      ) {
+      const own = () => splitUnits(plan).some((u) => u.own && u.marker.to === found.start);
+      if (insidePrefix && to <= found.end && from > found.start && !own()) {
         // Inside the prefix: the line break stays, and so do the rest of the prefix on either side.
         lead = visibleText(plan.text, plan.markers, found.start, from);
         kept = visibleText(plan.text, plan.markers, to, found.end);
+        from = found.start;
+        to = found.end;
+        continue;
+      }
+      // Text taken out or replaced inside one line of the break between its first line break and the
+      // line of the next block, with no line break in the range: the break stays, all of it, with
+      // what is typed in it, if anything is. (A deletion of the quote markers of a blank line is
+      // `blankLineCut`'s first; what it leaves is this.)
+      if (
+        from > found.start &&
+        lineStart(plan.text, from) < prefix &&
+        to <= lineEnd(plan.text, from) &&
+        !own()
+      ) {
+        lead = visibleText(plan.text, plan.markers, found.start, from);
+        tail = visibleText(plan.text, plan.markers, to, found.end);
         from = found.start;
         to = found.end;
         continue;
@@ -1159,7 +1183,7 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
       to = Math.max(to, found.end);
     }
   }
-  return { from, to, kept, lead };
+  return { from, to, kept, lead, tail };
 }
 
 /**
@@ -3888,14 +3912,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
     !ownTextOnly(plan, from, to)
       ? (coverBlocks(plan, from, to) ?? firstPrefix(plan, from, to))
       : undefined;
-  // The text of a prefix that a change inside it is widened by, in front of what is typed.
+  // The text of a prefix that a change inside it is widened by, in front of what is typed, and the
+  // text of a break that a change inside a blank line of it is widened by, behind it.
   let lead = '';
+  let tail = '';
   if (blocks) ({ from, to } = blocks);
   else if (!past) {
     const covered = coverBreaks(plan, from, to);
     ({ from, to } = covered);
     typed += covered.kept;
     lead = covered.lead;
+    tail = covered.tail;
   }
   const covers = { from, to };
   if (from === to && typed === '') return;
@@ -3989,6 +4016,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
+    // What stays of a break after a change inside a blank line of it is typed again as text too,
+    // its line breaks and the prefix of the next block with them.
+    if (tail !== '' && from === covers.from && to === covers.to) tokens.push({ text: tail });
     const settled = settleTrail(plan, { from, to }, tokens);
     ({ from, to } = settled.range);
     typing = { ...typingOf(settled.tokens), ...(plain ? { plain: true } : {}) };
