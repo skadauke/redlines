@@ -4641,6 +4641,72 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expect(parse(applyChanges(both, rejectAll(both))).marks).toEqual([]);
     });
   });
+  describe('a column that comes back with a backtick the mark would then stand inside', () => {
+    // Bo deletes the second column, whose header cell ends in a backtick and whose pair is in a row below: with the
+    // column gone the backtick is alone, and Ada's mark ends the header's one cell. Rejecting the deletion brings the
+    // column back and the mark, carried to the end of the new last cell, would stand between the two backticks, in
+    // code, where it is not read: its entry would be lost with it, and nothing said. The decision is refused, in
+    // the words of every decision that would hide a change, and is possible once the alignment change is accepted.
+    const HIDES =
+      'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.';
+    const base = file('| a | b` |\n| - | - |\n| c | d |\n| e` | f |');
+    const deleted = applyChanges(
+      base,
+      tableEdit(
+        base,
+        { kind: 'deleteCols', table: 0, cols: [1] },
+        context(bo, ['c2dd', 'f3gg', 'h4jj']),
+      ).changes,
+    );
+    const merged = entry(deleted.replace('| a |', `| a${markFor('| - | - |')} |`), 'k3x9', 'ada');
+
+    it('refuses to reject the deletion, and the mark is not lost', () => {
+      expect(
+        parse(merged)
+          .marks.map((mark) => mark.id)
+          .sort(),
+      ).toEqual(['c2dd', 'k3x9']);
+      expect(said(() => reject(merged, 'c2dd'))).toBe(HIDES);
+      // Accepting the deletion leaves the mark where it is, read.
+      const accepted = decide(merged, accept, 'c2dd');
+      expect(parse(accepted).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      expect(Object.keys(parse(accepted).ledger.marks)).toEqual(['k3x9']);
+    });
+
+    it('is possible once the alignment change is decided, and reads alike in every order', () => {
+      const first = decide(merged, accept, 'k3x9');
+      const done = decide(first, reject, 'c2dd');
+      expect(trim(done)).toContain('| a | b` |');
+      expectEveryOrderAlike('the merge', merged, exactly);
+      // Every decision is possible but the one that would hide the mark, and the rejection of the mark (in the file
+      // and in the file with the deletion accepted), which the table's one column and its two-cell old row can't take.
+      const refused: string[] = [];
+      const seen = new Set<string>();
+      const walk = (state: string, path: string) => {
+        if (seen.has(state)) return;
+        seen.add(state);
+        for (const { id, kind } of parse(state).marks) {
+          if (kind === 'cmt' || kind === 'hl') continue;
+          for (const [how, decideIt] of [
+            ['accept', accept],
+            ['reject', reject],
+          ] as const) {
+            try {
+              walk(decide(state, decideIt, id), `${path} ${how[0]}${id}`);
+            } catch (error) {
+              if (!(error instanceof EditError)) throw error;
+              refused.push(`${path} ${how[0]}${id}: ${error.message}`);
+            }
+          }
+        }
+      };
+      walk(merged, '');
+      expect(refused.map((line) => line.replace(/^.*?: /, '')).toSorted()).toEqual(
+        [HIDES, LOST, LOST].toSorted(),
+      );
+    });
+  });
+
   describe('joined by hand into random changes', () => {
     const POOL = ['c2dd', 'f3gg', 'h4jj', 'm5nn', 'b7cd', 'd8fg', 'g9hj', 'j2kl'];
     /** Ids for more changes: each operation draws the ones that are not in the file yet. */

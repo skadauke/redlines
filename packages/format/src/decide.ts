@@ -9,6 +9,7 @@ import { applyChanges } from './changes.ts';
 import {
   commitEdit,
   eolOf,
+  hiddenError,
   inEol,
   markerRanges,
   paragraphBreaks,
@@ -28,7 +29,7 @@ import {
 import { parse } from './parse.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
-import { isAlignMark } from './table-align.ts';
+import { isAlignMark, isAlignPoint } from './table-align.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
@@ -455,8 +456,27 @@ function decideNow(
   for (const id of decidedIds) delete ledger.marks[id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
+  // The alignment changes that this decision leaves pending are read after it: a column that comes back carries the
+  // mark of the change to the end of the cell that is the header's last, where a backtick or the half of a comment
+  // in the column that returns and another in the table could pair across the cells and hide it. The mark is written
+  // again by the decision, which `commitEdit` takes for a removal and does not look at, and its entry would be lost
+  // with it, and nothing said.
+  const pointed = parsed.marks.filter((mark) => isAlignPoint(mark) && !decidedIds.has(mark.id));
   try {
-    const done = commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+    const done = commitEdit(text, changes, ledger, {
+      parsed,
+      removes: true,
+      keeps,
+      ...(pointed.length > 0
+        ? {
+            verify: (_after: string, read: Parsed) => {
+              if (pointed.some((mark) => !read.marks.some((other) => other.id === mark.id))) {
+                throw hiddenError(true);
+              }
+            },
+          }
+        : {}),
+    });
     if (keeps !== 'both' && !marks.some((mark) => isRowMove(mark) || isColMark(mark))) {
       assertMovesKept(text, parsed, done, keeps);
     }
