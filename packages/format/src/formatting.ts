@@ -2437,6 +2437,75 @@ function beforeMarkers(text: string, at: number): number {
   return position;
 }
 
+/**
+ * The block around the lines `lines`, with the block before it and the one after it, each with the
+ * marks that reach into it: the lines that what a decision of a mark in the block is read against,
+ * so that the decisions can be tried on them alone, at a cost that does not grow with the file.
+ * `limit` is where the body ends.
+ */
+function regionAround(
+  reader: FormatReader,
+  spans: readonly Range[],
+  lines: Range,
+  limit: number,
+): Range {
+  const { text, hidden } = reader;
+  const inked = (at: number) =>
+    !/^[ \t>]*\r?$/.test(visible(text, hidden, lineStart(text, at), lineEnd(text, at)).text);
+  const blockOf = (at: number) =>
+    blockRegion(reader, spans, { from: lineStart(text, at), to: lineEnd(text, at) }, limit, true);
+  let { from, to } = blockRegion(reader, spans, lines, limit, true);
+  for (let at = from; at > 0;) {
+    at = lineStart(text, at - 1);
+    if (inked(at)) {
+      from = Math.min(from, blockOf(at).from);
+      break;
+    }
+  }
+  for (let next = text.indexOf('\n', to); next !== -1 && next + 1 < limit;) {
+    const at = next + 1;
+    if (inked(at)) {
+      to = Math.max(to, blockOf(at).to);
+      break;
+    }
+    next = text.indexOf('\n', at);
+  }
+  return closed({ from, to }, spans, (range) => range);
+}
+
+/**
+ * Whether the block that a view has at `at` is of the type `to` already, as its first line says: a
+ * heading's `#`s, a quote's `>`, an item's bullet or number and box, and none of them for body text.
+ * A line in a table, which has a delimiter row among the lines around it, is no body text.
+ */
+function hasType(view: string, at: number, to: BlockType): boolean {
+  const lineAt = (start: number) => view.slice(start, view.indexOf('\n', start) + 1 || undefined);
+  const first = view.lastIndexOf('\n', at - 1) + 1;
+  const line = lineAt(first).replace(/\r?\n$/, '');
+  // The lines around it that are not blank, for a delimiter row.
+  let top = first;
+  while (top > 0 && lineAt(view.lastIndexOf('\n', top - 2) + 1).trim() !== '') {
+    top = view.lastIndexOf('\n', top - 2) + 1;
+  }
+  for (let start = top; start < view.length; start += lineAt(start).length) {
+    const text = lineAt(start);
+    if (text.trim() === '') break;
+    if (text.includes('|') && DELIMITER_ROW.test(text.trim())) return false;
+  }
+  const type: string = /^#{1,6}(?:[ \t]|$)/.test(line)
+    ? `h${/^#+/.exec(line)?.[0].length ?? 0}`
+    : /^[ \t]{0,3}>/.test(line)
+      ? 'quote'
+      : /^[ \t]*[-*+][ \t]+\[[ xX]\](?:[ \t]|$)/.test(line)
+        ? 'task'
+        : /^[ \t]*[-*+][ \t]/.test(line)
+          ? 'ul'
+          : /^[ \t]*\d{1,9}[.)][ \t]/.test(line)
+            ? 'ol'
+            : 'p';
+  return type === to;
+}
+
 /** A line that starts a block that interrupts a paragraph, at the left edge, and is no setext
  * underline: a bullet or a `1.` with text, a heading, a fence, a quote. */
 const INTERRUPTS = /^(?:[-*+][ \t]+\S|1[.)][ \t]+\S|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|>)/;
@@ -2448,15 +2517,15 @@ const INTERRUPTS = /^(?:[-*+][ \t]+\S|1[.)][ \t]+\S|#{1,6}(?:[ \t]|$)|`{3,}|~{3,
  * they read alike when the first line is the only one of its block, or the next starts a block that
  * interrupts a paragraph (not a quote, after a quote: that line would go on the quote). A heading
  * turned into another level has no such lines to read. Marks in those two lines are no part of it.
- * `at` is where the text after the block starts in the file, `shown` where the block's range starts
+ * `at` is where the text after the block starts in the file, `last` where the block's last line ends
  * in the view `view`, `to` the type the block is changed to.
  */
-function joinsAlike(text: string, at: number, to: BlockType, shown: number, view: string): boolean {
+function joinsAlike(text: string, at: number, to: BlockType, last: number, view: string): boolean {
   const [first, next] = text.slice(at).split('\n', 2);
   if (first === undefined || first.includes('<!--') || next?.includes('<!--')) return false;
   const line = view.slice(
-    view.lastIndexOf('\n', shown - 1) + 1,
-    view.indexOf('\n', shown) + 1 || undefined,
+    view.lastIndexOf('\n', last - 1) + 1,
+    view.indexOf('\n', last) + 1 || undefined,
   );
   if (/^#{1,6}[ \t]/.test(line) && /^h[1-6]$/.test(to)) return true;
   if (next === undefined || next.trim() === '') return true;
@@ -2517,8 +2586,12 @@ function ownBlockEdit(
     return undefined;
   }
   if (plain.length === 0) {
-    // The block has the type asked already: nothing to change, as for any block.
-    return allOwn([shown]) ? { changes: [], markIds: [], extendedIds: [] } : undefined;
+    // The block has the type asked already: nothing to change, as for any block, and no refusal
+    // about its marks. Any other reason that nothing is written is the block's own, and is told as
+    // the mark path tells it.
+    return op.kind === 'block' && allOwn([shown]) && hasType(view, shown.from, op.to)
+      ? { changes: [], markIds: [], extendedIds: [] }
+      : undefined;
   }
   // Every character of the lines the change is asked on and writes in is your own new text.
   const lines = [shown, ...plain].map(linesOf);
@@ -2562,7 +2635,7 @@ function ownBlockEdit(
       ) {
         return true;
       }
-      if (!joinsAlike(text, after.to, op.to, shown.from, view)) {
+      if (!joinsAlike(text, after.to, op.to, last, view)) {
         unjoined = true;
         return false;
       }
@@ -2584,16 +2657,50 @@ function ownBlockEdit(
     newestView(after).text === applyChanges(view, plain) &&
     originalView(after).text === originalView(text).text &&
     lineStartMarkers(parse(after)) <= lineStartMarkers(parsed);
+  // What deciding the marks that the change stands in comes to is tried on the block and the
+  // blocks next to it, as for any block change: at a cost that does not grow with the file.
+  const alsoDecided = [...neighbors];
+  let region: Range | undefined;
+  const alike = (changes: readonly TextChange[]): boolean => {
+    try {
+      const reader = formatReader(text, parsed);
+      region ??= regionAround(
+        reader,
+        spansOf(reader, parsed),
+        {
+          from: lineStart(text, map.toSource(first, 1)),
+          to: lineEnd(text, map.toSource(last, -1)),
+        },
+        parsed.ledgerRange?.from ?? text.length,
+      );
+      const { from, to } = region;
+      const body = bodyChanges(parsed, changes);
+      if (body.some((change) => change.from < from || change.to > to)) return false;
+      const shifted = body.map((change) => ({
+        ...change,
+        from: change.from - from,
+        to: change.to - from,
+      }));
+      return decidedAlike(
+        regionFile(text, parsed.ledger, region, []),
+        regionFile(text, parsed.ledger, region, body),
+        owned
+          .filter((content) => content.from >= from && content.to <= to)
+          .map((content) => ({ from: content.from - from, to: content.to - from })),
+        shifted,
+        alsoDecided,
+      );
+    } catch (error) {
+      if (error instanceof EditError) return false;
+      throw error;
+    }
+  };
   // Typed as typing is, where that makes no mark: the insertion grows, and every order of deciding
   // the marks it stands in reads the same.
-  const alsoDecided = [...neighbors];
   try {
     const typed = trackedEdits(text, edits, ctx);
     if (typed.markIds.length === 0) {
-      const written = applyChanges(text, typed.changes);
-      if (reads(written) && decidedAlike(text, written, owned, typed.changes, alsoDecided)) {
-        return typed;
-      }
+      if (reads(applyChanges(text, typed.changes)) && alike(typed.changes)) return typed;
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
@@ -2602,10 +2709,7 @@ function ownBlockEdit(
   // in it, which typing would move past the bullet: kept only where every order of deciding the
   // marks it is in reads the same, and rejecting the insertion gives back what it did before.
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
-  const written = applyChanges(text, sorted);
-  if (!reads(written) || !decidedAlike(text, written, owned, sorted, alsoDecided)) {
-    return undefined;
-  }
+  if (!reads(applyChanges(text, sorted)) || !alike(sorted)) return undefined;
   const extended = parsed.marks
     .filter(
       (mark) =>

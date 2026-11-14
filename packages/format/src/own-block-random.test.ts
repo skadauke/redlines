@@ -191,7 +191,9 @@ describe('random block changes of a paragraph you just typed', () => {
       // The start of the paragraph's text, after the syntax of its block (`> `, `- `, `## `).
       const lineAt = view.text.lastIndexOf('\n', spot - 1) + 1;
       const lineStart = lineAt + (LINE_PREFIX.exec(view.text.slice(lineAt, spot))?.[0].length ?? 0);
-      const positions = { start: lineStart, middle: spot, end: spot + token.length };
+      // The middle is inside the token, in the text: the caret never rests in front of the hidden marker
+      // that starts a paragraph, where a block change finds no paragraph (#420).
+      const positions = { start: lineStart, middle: spot + 2, end: spot + token.length };
       const where = pick(['start', 'middle', 'end', 'end', 'selected'] as const);
       // A caret stands where the text is: at its start after the hidden markers in front of it (the
       // editor never puts one in front of a marker that starts a paragraph), and at its end on

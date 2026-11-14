@@ -158,6 +158,35 @@ describe('a block change of a block that is all your own new text (format §2.6,
     });
   }
 
+  it('changes every paragraph of a selection that is all your own new text', () => {
+    // Typed in one go: two paragraphs, your split between them, a selection over both.
+    const text = file(
+      'Intro.<!--ins k3x9--><!--split d3x9-->\n\nFirst words<!--split m2bd-->\n\nSecond words<!--/k3x9-->\n\nNext.',
+      { k3x9: 'ada', d3x9: 'ada', m2bd: 'ada' },
+    );
+    const from = text.indexOf('First');
+    const to = text.indexOf('Second words') + 'Second words'.length;
+    for (const type of ['h2', 'quote', 'ul'] as const) {
+      const op = block(type);
+      const { changes, markIds } = trackedFormat(text, { from, to }, op, ctx());
+      const after = applyChanges(text, changes);
+      expect(markIds, type).toEqual([]);
+      const syntax = SYNTAX[type] ?? '';
+      expect(bodyOf(after), type).toBe(
+        bodyOf(text)
+          .replace('First words', `${syntax}First words`)
+          .replace('Second words', `${syntax}Second words`),
+      );
+      expectEveryOrderAlike(type, after, exactly);
+      expectEveryDecision(type, text, after, [], {
+        inPlace: true,
+        structure: op,
+        alsoChanged: 2,
+        limit: 6,
+      });
+    }
+  });
+
   it('takes a typed heading back to body text, and changes its level', () => {
     const text = file(
       `Intro.\n\n<!--ins k3x9-->\n\n## ${WORDS}<!--/k3x9--><!--split d3x9-->\n\nNext.`,
