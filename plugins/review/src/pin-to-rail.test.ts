@@ -176,6 +176,7 @@ describe('pinToRail', () => {
   it('returns the notes to their places on release, and leaves the element as it is', async () => {
     const loaded = await load();
     const { editor } = loaded;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
     const { el, pin, lost } = pinAt(loaded, 'target', 200);
     await frame();
     expect(tops(editor).slice(2)).toEqual([503, 571]);
@@ -190,7 +191,7 @@ describe('pinToRail', () => {
     // A release is the host's own doing: the rail doesn't say that it let go.
     await tick();
     expect(lost).not.toHaveBeenCalled();
-    // Once released, the handle does nothing more.
+    // Once released, the handle does nothing more: it scrolls to nothing.
     expect(() => {
       pin?.resized();
       pin?.reveal();
@@ -198,6 +199,64 @@ describe('pinToRail', () => {
     }).not.toThrow();
     await frame();
     expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('gives the notes back to the view on release: they follow the first anchor in view again', async () => {
+    const loaded = await load(SAME_LINE);
+    const { editor, scrollTo } = loaded;
+    // Before the element: the notes at the top of the page, alpha level with its anchor, and the two
+    // on the selection's line stacked down from beside it.
+    const alone = [95, 195, 263, 331];
+    expect(tops(editor)).toEqual(alone);
+    const { pin } = pinAt(loaded, 'target', 200);
+    await frame();
+    await scrollTo(250);
+    // Held, it stays level with its anchor, wherever the page is scrolled to.
+    const held = tops(editor);
+    expect(held).not.toEqual(alone);
+    pin?.release();
+    await frame();
+    // With only epsilon's anchor in view (on the line at 300), epsilon's note is the one level with
+    // it, and the three before it stack up from it. (A rail that kept the element's note, with no
+    // height, after the release would leave delta's note at 203, and the notes where they are as the
+    // page scrolls.)
+    const follows = [59, 127, 195, 295];
+    expect(tops(editor)).toEqual(follows);
+    // It goes on following the view, up and down.
+    await scrollTo(0);
+    expect(tops(editor)).toEqual(alone);
+    await scrollTo(250);
+    expect(tops(editor)).toEqual(follows);
+  });
+
+  it('does nothing for a handle the rail no longer holds: after release, and after it let go', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const measure = vi.spyOn(editor.view, 'requestMeasure');
+    const released = pinAt(loaded, 'target', 200);
+    await frame();
+    released.pin?.release();
+    await frame();
+    const dropped = pinAt(loaded, 'target', 200);
+    await frame();
+    // Clean shows no note: the rail lets go of the element, and says so.
+    editor.setViewMode('clean');
+    await tick();
+    expect(dropped.lost).toHaveBeenCalledOnce();
+    await frame();
+    scroll.mockClear();
+    measure.mockClear();
+    for (const { pin } of [released, dropped]) {
+      pin?.resized();
+      pin?.reveal();
+      pin?.release();
+    }
+    // Nothing is asked of the editor, and nothing scrolls to an element the rail doesn't lay out.
+    expect(measure).not.toHaveBeenCalled();
+    await frame();
+    expect(scroll).not.toHaveBeenCalled();
   });
 
   it('keeps two notes level with the selection, and covers none', async () => {
