@@ -37,7 +37,7 @@ export {
   rejectMarks,
 } from './decide.ts';
 export { suggestionOf, suggestions } from './suggestion.ts';
-export { formatChange } from './format-blocks.ts';
+export { formatChange, NUMBERED_CHILD as OUTDENT_NUMBERED_CHILD } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
 export type {
   AlignedColumn,

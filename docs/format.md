@@ -1182,7 +1182,14 @@ file, the newest and the original view read it alike. A pending deletion that em
 an item with text in the file and as an empty item in the view, and is refused, as is any mark on
 those lines in front of such an item. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
-list in its list while a line below it would read as text of it, and says so.
+list in its list while a line below it would read as text of it, and says so. The editor's Backspace
+at a first item does not rely on that rule alone: wherever the item is in the file, with Track
+Changes on or off, and for the first item of a nested list going up a level as for one at the top
+level going out of its list, it waits when the line right below the item holds a marker and reads
+otherwise without it (an item whose only text is a deletion, which the file reads as an item and the
+newest view as an underline of the item's text): taking the marker out then writes a file that reads
+as a heading once the change is accepted, in every order, which no reading of the file shows. The
+words ask for the change below to be decided first (#292).
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
