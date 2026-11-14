@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import config from '../rolldown.config.mjs';
 import { renderPreview } from './render.ts';
+import { thumbnailBlocks } from './thumbnail.ts';
 
 const FIXTURES = new URL('../fixtures/', import.meta.url);
 
@@ -59,4 +60,35 @@ describe('the bundle', () => {
     const text = 'A <!--ins k3x9-->new <!--/k3x9-->word.\n';
     expect(render(text, 'x.md', true)).toBe(renderPreview(text, 'x.md', true));
   });
+});
+
+describe('the thumbnail bundle', () => {
+  let blocks: (text: string) => string;
+  let defined: string[];
+
+  beforeAll(async () => {
+    const bundle = await rolldown({
+      input: 'src/thumbnail-entry.ts',
+      platform: 'neutral',
+      cwd: new URL('..', import.meta.url).pathname,
+    });
+    const { output } = await bundle.generate({ format: 'iife', minify: true });
+    const context = vm.createContext({});
+    vm.runInContext(output[0].code, context);
+    defined = Object.keys(context);
+    blocks = vm.runInContext('redlinesThumbnail', context) as typeof blocks;
+  }, 60_000);
+
+  it('defines the one function that the extension calls, and nothing else on the global object', () => {
+    expect(typeof blocks).toBe('function');
+    expect(defined).toEqual(['redlinesThumbnail']);
+  });
+
+  it.each(readdirSync(FIXTURES).filter((name) => /\.(md|qmd|Rmd)$/.test(name)))(
+    'gives the blocks of %s as the sources do, as JSON',
+    (name) => {
+      const text = readFileSync(new URL(name, FIXTURES), 'utf8');
+      expect(JSON.parse(blocks(text))).toEqual(thumbnailBlocks(text));
+    },
+  );
 });

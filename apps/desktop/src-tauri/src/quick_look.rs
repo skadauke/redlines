@@ -131,6 +131,22 @@ mod tests {
     }
 
     #[test]
+    fn the_bundle_carries_both_extensions_that_the_build_script_makes() {
+        // The preview, and the Finder thumbnails (#345): each is copied into the app by
+        // tauri.conf.json and built by scripts/build-quicklook, under the one name.
+        for name in ["RedlinesPreview", "RedlinesThumbnail"] {
+            assert!(
+                TAURI_CONF.contains(&format!("\"PlugIns/{name}.appex\"")),
+                "tauri.conf.json puts no {name} in the bundle"
+            );
+            assert!(
+                BUILD_SCRIPT.contains(&format!("name=\"{name}\"")),
+                "scripts/build-quicklook builds no {name}"
+            );
+        }
+    }
+
+    #[test]
     fn asks_of_macos_what_the_extension_asks() {
         let (major, minor) = MINIMUM_MACOS;
         assert!(
