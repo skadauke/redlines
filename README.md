@@ -78,7 +78,8 @@ and when, and the comment threads, are in a block at the end of the file.
   declares those extensions as its own type, in which case macOS asks that app. It comes with the
   app and needs nothing installed (macOS 13.3 or later; System Settings turns it off, with the
   other Quick Look extensions, and Preferences › General has a button that opens System Settings
-  there); it draws no script, loads nothing and shows an image as its alt text.
+  there); it draws no script and loads nothing from a server. An image that is a file in the
+  document's project is drawn, and any other is its alt text.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
   Terminal window. macOS asks for an administrator's password if that folder needs one; without

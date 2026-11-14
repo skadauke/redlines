@@ -1853,7 +1853,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   has one line over the text that says so and points to the app ("4 changes and 2 comments by
   Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
-  line over its code. Raw HTML in the document is text, never live, and an image is its alt text.
+  line over its code. Raw HTML in the document is text, never live. An image that is a file in the
+  document's project is drawn; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
     It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
@@ -1878,8 +1879,20 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is
     read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
     end, isn't read.
-  - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
-    thumbnails in Finder, which are a separate extension.
+  - **Images.** An image is drawn when it is a file inside the document's project, its repository
+    or else its own folder (the rule that the app's own preview loads images by, §6.5; a project
+    that is too broad, the home folder, a folder above it or the disk's root, is its document's own
+    folder alone, with no subfolder): no hidden file's or folder's, with no link leading out of the
+    project to it, and whose name and first bytes both say it is an image the preview shows (PNG,
+    JPEG, GIF, WebP, AVIF, HEIC, JPEG XL, BMP, ICO, TIFF or SVG). It loads at most 40 images, 16 MB
+    each and 48 MB in all; any other image, and any
+    that isn't there, is its alt text. An image from a server, or in a `data:` address, is never
+    loaded, so that a preview never tells a server that a file was opened. A sandboxed extension
+    can't read the files beside its document, so the extension has the sandbox's read-only
+    exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
+    Quick Look as the attachments of its answer, which the page names by `cid:` and which its
+    Content-Security-Policy allows and nothing else (`img-src cid:`).
+  - **Not yet:** thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1893,11 +1906,15 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
-- **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
-  entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
-  so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
-  JavaScriptCore's compiler, without which the renderer is 5 to 8 times as slow, which a long
-  document turns from a moment into a wait
+- **The Quick Look preview reads the file it is asked to preview, and the images that file links
+  to,** in a sandbox with no network entitlement, and draws a page with no script that loads
+  nothing but the images it was given (its Content-Security-Policy says so): a preview never tells
+  a server that a file was opened. Its two exceptions to the sandbox are JavaScriptCore's
+  compiler, without which the renderer is 5 to 8 times as slow, which a long document turns from a
+  moment into a wait, and a read-only exception for files, which the images need and nothing else
+  uses: it loads a file only inside the document's project, that is no hidden file's or folder's
+  and that no link leads out of it to, whose name and first bytes both say it is an image. What it
+  reads goes nowhere but into the page that Quick Look draws, since it has no network
   ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
