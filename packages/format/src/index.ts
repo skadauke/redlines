@@ -41,6 +41,7 @@ export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
 export { ALERT_LINE, GITHUB_TYPES, calloutWord, typeOfWord } from './callout.ts';
+export { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 export type {
   AlignedColumn,
   BlockType,

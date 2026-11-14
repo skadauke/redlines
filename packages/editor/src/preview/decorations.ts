@@ -21,6 +21,7 @@ import { parsedField, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
+import { emojiDecoration, emojiLookup } from './emoji.ts';
 import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -530,6 +531,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
           ? null
           : entityDecoration(state, node.from, node.to);
         if (decoration) b.push(decoration.range(node.from, node.to));
+      } else if (name === 'Emoji') {
+        const decoration = touches(state, node.from, node.to)
+          ? null
+          : emojiDecoration(state, node.from, node.to);
+        if (decoration) b.push(decoration.range(node.from, node.to));
       } else if (name === 'TableDelimiter') b.syntax(node.from, node.to, true);
       else if (name === 'FencedCode' || name === 'CodeBlock') {
         codeBlock(b, node);
@@ -556,7 +562,9 @@ const previewField = StateField.define<DecorationSet>({
       tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       openBlock(tr.state) !== openBlock(tr.startState) ||
-      tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
+      tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
+      // The names of emoji that a host gave, or took away, after the text was drawn.
+      tr.state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
     return changed ? previewDecorations(tr.state) : decorations;
   },
   // From a state field rather than a view plugin, because it draws block decorations.
