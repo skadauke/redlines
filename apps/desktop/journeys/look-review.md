@@ -11,33 +11,40 @@ JOURNEYS_PROJECTS=dark,light-200 pnpm journeys   # the same in the other looks, 
 pnpm journeys:look             # → apps/desktop/journeys/look-review/INDEX.md and the pictures
 ```
 
-`INDEX.md` lists every journey and its pictures in the order the journey took them, with the failed
-comparisons first (the picture the run got, the approved one and the diff). In CI the whole folder is
-the `look-review` artifact of the journeys job.
+`INDEX.md` lists every journey and its pictures in the order the journey took them. Failed journeys
+come first, then the known bugs, each failed comparison with the picture the run got, the approved
+one and the diff. `--only-changed` leaves out journeys that passed with nothing to see in them.
+(Needs Node 22.6 or later.)
 
 ## The checklist
 
 <!-- checklist -->
 For each picture, in light and dark, and again at 200% where the change is about size:
 
-1. **Readable.** Text has a contrast of at least 4.5:1 against what is behind it (3:1 for large
-   text and icons), and nothing is clipped or cut at the window's edge.
+1. **Readable.** Text has a contrast of at least 4.5:1 against what is behind it (3:1 for text of
+   24 px or more, or 19 px bold, and for icons), and nothing is clipped or cut at the window's
+   edge. An eye can't judge a ratio: where a color looks doubtful, sample the two colors in the
+   picture, or have the journey read them (`contrastOf()` in `src/contrast.ts`) and fail below 4.5.
 2. **Opaque.** Menus, popups, hints and cards are solid: no text, line or selection shows through
    them. Nothing overlaps another thing's text.
 3. **Aligned.** Edges and indents line up: bullets and numbers indent to the same place, a table's
    columns and its header, a menu's items and its icons, a caret and the text's baseline.
-4. **Still.** Compare each picture with the one before it in the journey: nothing that should stay
-   put moves (a line that jumps a few pixels when you start typing, a list that reflows, a margin
+4. **Still.** Compare each picture with the one before it in the journey (if they differ in size or
+   are clipped, compare the area they share): nothing that should stay put moves (a line that jumps a few pixels when you start typing, a list that reflows, a margin
    that shifts), and anything that appears or goes has a reason.
 5. **The caret.** It is where the next letter will go, as tall as the line, in the same place as the
    text it follows, and visible against the text and the selection.
 6. **Hints say what a click does.** A hover hint names the action (and its key), is readable, and
-   sits next to what it is about without covering it.
+   sits next to what it is about without covering it. A hint shows in a picture only if the journey
+   hovered before `j.shot()`: a control with no hint in any picture is a gap in the journey, not a
+   pass.
+7. **The states.** Disabled things look disabled (and say why in a hint), the focused thing shows
+   it, and a selection is visible against the text it covers.
 <!-- /checklist -->
 
 ## Reviewing
 
-1. Read `INDEX.md` top to bottom; open each picture. Judge it against the six points; do not
+1. Read `INDEX.md` top to bottom; open each picture. Judge it against the seven points; do not
    judge the app's design taste, only what is wrong.
 2. A picture of a **known bug** (`known(issue, …)` in the journey) shows the bug on purpose: confirm
    it shows what the issue says, and don't file it again.
