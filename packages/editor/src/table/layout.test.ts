@@ -259,9 +259,10 @@ describe('an empty cell’s filler', () => {
   }
 
   it('is where the page puts the caret, for an empty cell whose stop is inside it', () => {
-    // (A stop at the cell's end, with one space of padding or none, is where the next cell begins, which
-    // `cellAt` gives to the next cell: the caret has never stood in such a cell, and no place of the
-    // page is looked for here. The filler is in its cell all the same: the tests above.)
+    // (A stop at the cell's end, with one space of padding or none, is where the next cell begins: the
+    // caret there leans to its own cell, which `domAtPos`'s default side does not, so the page's place
+    // for it is looked for in `empty-cell.test.ts`, from the selection. The filler is in its cell all the
+    // same: the tests above.)
     for (const [name, form] of Object.entries(FORMS)) {
       const editor = load(`Intro.\n\n${form}\n\nAfter.`);
       const [table] = tablesOf(editor.view.state);

@@ -397,8 +397,9 @@ export function tablesOf(state: EditorState): readonly Table[] {
 
 /**
  * The cell that holds `pos`, or the nearest to it in a table: a position in a pipe or in padding is
- * in the cell it belongs to (cells run from the pipe in front of them), and one in the delimiter row
- * is in the header's last cell. Null outside every table.
+ * in the cell it belongs to (cells run from the pipe in front of them), except the end of a cell's text
+ * where the next pipe is, which is that cell's own stop (`holds`); and one in the delimiter row is in
+ * the header's last cell. Null outside every table.
  */
 export function cellAt(
   state: EditorState,
@@ -418,13 +419,36 @@ export function cellAt(
   return null;
 }
 
+/**
+ * Whether the text of `cell` ends where its mark does, at the next pipe, with no padding after it. Its last
+ * stop is that place: an empty cell with one space of padding or none (`| |`, `||`), which has only that
+ * one, or text with none after it (`| y|`, `|a|b|`, what typing a letter into `| |` writes).
+ */
+export const endsAtPipe = (cell: Cell): boolean => cell.textTo === cell.to;
+
+/**
+ * Whether `cell` holds the position `pos`. A cell holds the positions from the pipe in front of it up to
+ * the next pipe, as a position in a pipe or in padding is in the cell it belongs to, and the last cell of a
+ * row (`last`) holds all that follows it in the row. That makes the position in front of a pipe, where one
+ * cell's mark ends and the next begins, the next cell's, except where the cell before it ends its text
+ * there (`endsAtPipe`): that place is the cell's own last stop. The next cell's first stop is after its own
+ * pipe, so the place is a stop of one cell only, and the cell that has a stop at a position is the cell that
+ * holds it: the rule of the stops (`stops.ts`), and of the keys, the presses and the edits that find a cell
+ * from a position.
+ */
+function holds(cell: Cell, pos: number, last: boolean): boolean {
+  if (pos < cell.from) return false;
+  return last || pos < cell.to || (pos === cell.to && endsAtPipe(cell));
+}
+
 function within(table: Table, pos: number): { table: Table; row: Row; cell: Cell } | null {
   // The row that holds `pos`, or the header when `pos` is in the delimiter row, which the header's
   // last cell holds.
   let row = table.rows.find((r) => r.from <= pos && pos <= r.to);
   row ??= table.rows[0];
   if (!row || row.cells.length === 0) return null;
-  let cell = row.cells.find((c, i) => c.from <= pos && (pos < c.to || i === row.cells.length - 1));
+  const end = row.cells.length - 1;
+  let cell = row.cells.find((c, i) => holds(c, pos, i === end));
   cell ??= row.cells.at(-1);
   if (!cell) return null;
   return { table, row, cell };

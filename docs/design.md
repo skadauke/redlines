@@ -748,7 +748,9 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   adds a row; ⌘↩ and ⌥⌘↓ are Insert Row Below, in the Table menu. To leave the table by keyboard, press
   Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
   (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
-  in a cell lands in that cell, also in an empty one.
+  in a cell lands in that cell, also in an empty one, whatever its padding: `| |` and `||` have a
+  place for the caret as `|  |` has, and so does the end of text with no padding after it (`| y|`,
+  which is what typing a letter into `| |` writes).
 - **A selection that reaches into a table** from outside it clears the cells of the rows it reaches
   and deletes the text outside the table as a selection is deleted, never joining across the
   table; one that covers a whole table deletes it as a block. Delete, Backspace, Return and typing

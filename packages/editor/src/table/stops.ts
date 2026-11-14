@@ -5,6 +5,12 @@
 // start and end; an empty cell has the one. The first atom reaches back over the line break before the
 // table, and the last over the one after it, joining the atoms of the blank lines around.
 //
+// A cell whose text ends where the next pipe is (an empty cell with one space of padding or none, `| |`
+// and `||`; text with none after it, `| y|` and `|a|b|`) has its last stop at the start of the next cell's
+// mark. No position is a stop of two cells, for the next cell's first stop is after its own pipe: that
+// position is the first cell's (`holds`, `model.ts`), and the caret there leans to it, so that the page
+// draws it in that cell and not in the next (`onStops`).
+//
 // The one other stop is the end of a row that has fewer cells than the header, past its last cell's text:
 // the cells it lacks are drawn as cells, and stand there (`missing.ts`), for a caret only; a selection
 // never ends in one, which has no text to select.
@@ -31,7 +37,7 @@ import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { cellEscapes } from './escape.ts';
 import { type Dirty, type DirtyTable, dirtyOf, type Span } from './dirty.ts';
-import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
+import { type Cell, type Row, type Table, cellAt, endsAtPipe, tablesField } from './model.ts';
 import { isMissingStop, missingField } from './missing.ts';
 
 export const TEXT_IN_CELLS = "A table's text goes in its cells.";
@@ -216,17 +222,30 @@ export function isStop(state: EditorState, pos: number): boolean {
   return !breaksIn(state, shown.cell).some((br) => br.from < pos && pos < br.to);
 }
 
-/** `pos` if it is a stop, or the nearest stop of the nearest cell. The end of a row that lacks cells is
- * one for a caret (`caret`, the default), and for a selection's end the end of the last cell's text. */
-export function nearestStop(state: EditorState, pos: number, caret = true): number {
+/**
+ * The nearest stop to `pos`, and whether it is the end of its cell's own mark with a cell after it in the
+ * row: the stop of an empty cell with one space of padding or none, or the end of text with none after it
+ * (`holds` in `model.ts`). That place is also where the next cell's mark starts, and the page draws a caret
+ * on the side after its position by default, which there is in the next cell.
+ */
+function stopNear(state: EditorState, pos: number, caret: boolean): { pos: number; ends: boolean } {
   const looked = cellAt(state, pos);
   const found = looked && shownIn(looked);
-  if (!looked || !found) return pos;
-  if (caret && isMissingStop(looked.table, looked.row, pos)) return pos;
+  if (!looked || !found) return { pos, ends: false };
+  if (caret && isMissingStop(looked.table, looked.row, pos)) return { pos, ends: false };
   const inCell = Math.min(Math.max(pos, found.cell.textFrom), found.cell.textTo);
   // Inside a line break, the nearer end of it (the start, when they are as near).
   const br = breaksIn(state, found.cell).find((b) => b.from < inCell && inCell < b.to);
-  return br ? (inCell - br.from <= br.to - inCell ? br.from : br.to) : inCell;
+  const stop = br ? (inCell - br.from <= br.to - inCell ? br.from : br.to) : inCell;
+  const ends =
+    stop === found.cell.to && endsAtPipe(found.cell) && looked.row.cells.at(-1) !== found.cell;
+  return { pos: stop, ends };
+}
+
+/** `pos` if it is a stop, or the nearest stop of the nearest cell. The end of a row that lacks cells is
+ * one for a caret (`caret`, the default), and for a selection's end the end of the last cell's text. */
+export function nearestStop(state: EditorState, pos: number, caret = true): number {
+  return stopNear(state, pos, caret).pos;
 }
 
 /**
@@ -244,11 +263,18 @@ export function onStops(state: EditorState, selection: EditorSelection): EditorS
       tables.some((t) => (pos === t.from || pos === t.to) && lo <= t.from && hi >= t.to);
     // A caret may be in a cell its row lacks; a selection never ends in one.
     const caret = range.empty;
-    const anchor = edge(range.anchor) ? range.anchor : nearestStop(state, range.anchor, caret);
-    const head = edge(range.head) ? range.head : nearestStop(state, range.head, caret);
-    if (anchor === range.anchor && head === range.head) return range;
+    const none = (pos: number) => ({ pos, ends: false });
+    const from = edge(range.anchor) ? none(range.anchor) : stopNear(state, range.anchor, caret);
+    const to = edge(range.head) ? none(range.head) : stopNear(state, range.head, caret);
+    // A caret at the end of a cell's own mark leans to that cell (the side before the position), so that
+    // the page draws it there and not in the next cell, whose mark starts at the same place.
+    const leans = caret && to.ends && range.assoc !== -1;
+    if (from.pos === range.anchor && to.pos === range.head && !leans) return range;
     changed = true;
-    return EditorSelection.range(anchor, head, range.goalColumn);
+    if (caret && to.ends) {
+      return EditorSelection.cursor(to.pos, -1, range.bidiLevel ?? undefined, range.goalColumn);
+    }
+    return EditorSelection.range(from.pos, to.pos, range.goalColumn);
   });
   return changed ? EditorSelection.create(ranges, selection.mainIndex) : selection;
 }

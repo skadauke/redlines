@@ -441,3 +441,23 @@ describe('a paste that needs more of a table while it has changes pending', () =
     }
   });
 });
+
+describe('pasting at the caret in an empty cell with one space of padding', () => {
+  // The cell's stop is where the next cell's mark begins; the caret is in the empty cell, so the range
+  // starts there: its first value goes in that cell and the next goes in the cell after it.
+  const doc = '| a | b | c |\n| - | - | - |\n| 1 | | x |\n| 2 | y | z |\n';
+  for (const tracking of [false, true]) {
+    it(`starts in that cell, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = load(doc, tracking);
+      editor.view.dispatch({ selection: { anchor: doc.indexOf('| |') + 2 } });
+      expect(paste(editor, 'P\tQ')).toBe(true);
+      const done = reads(editor);
+      expect(done.newest).toBe('| a | b | c |\n| - | - | - |\n| 1 | P| Q |\n| 2 | y | z |\n');
+      expect(notices).toEqual([]);
+      if (tracking) {
+        expect(done.rejected).toBe(doc);
+        expect(done.accepted).toBe(done.newest);
+      }
+    });
+  }
+});

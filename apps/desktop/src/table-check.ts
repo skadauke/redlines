@@ -12,8 +12,9 @@
 // rows past eight folded into one line, not editable, carded), a row with fewer cells than the header is
 // drawn with empty cells after its last and typing in one writes its pipes first, a row with more draws
 // none beyond the header's and no key puts the caret in one, an empty cell holds a filler of its own
-// whatever its padding and its row is as tall as a row of text, Delete Table and a second ⌫ delete the
-// emptied rows, columns and table, and a keystroke in a 300-row
+// whatever its padding and its row is as tall as a row of text, the caret can stand in an empty cell
+// with one space of padding or none (Tab, the arrows, a press and typing reach it), Delete Table and a
+// second ⌫ delete the emptied rows, columns and table, and a keystroke in a 300-row
 // table stays within the budget. Serve the page with `VITE_TABLE_CHECK=1 pnpm dev` (or
 // `pnpm tauri dev`, for WKWebView) and open it in WebKit: it reads nothing in a release build.
 //
@@ -2847,13 +2848,12 @@ const CHECKS: Check[] = [
             problems[`${form}-r${r}-height-above`] = { empty: was?.height, above };
         });
         // A press in the middle of each empty cell puts the caret in it, and the DOM place the editor gives
-        // the caret at its stop (`domAtPos`) is in that cell. (Not for a cell whose stop is at its end,
-        // with one space of padding or none: that is where the next cell begins, which the model gives to
-        // the next cell, and every press, arrow, Tab and selection put there ends in the next cell's text,
-        // as they did before the filler moved: an open issue, not asserted here.)
+        // the caret at its stop (`domAtPos`, on the side its selection says) is in that cell, whatever its
+        // padding: with one space or none the stop is where the next cell begins, and the caret leans to the
+        // cell it is the end of.
         await load(editor, source);
         for (const { r, empty } of withEmpty) {
-          for (const cell of empty.filter((c) => c.textFrom < c.to)) {
+          for (const cell of empty) {
             editor.view.dispatch({ selection: EditorSelection.cursor(0) });
             await frames();
             const own = cellElements(editor)[r]?.[cell.col];
@@ -2866,13 +2866,154 @@ const CHECKS: Check[] = [
             await frames();
             if (head(editor) !== cell.textFrom)
               problems[`${form}-r${r}c${cell.col}-press`] = [head(editor), cell.textFrom];
-            const { node } = editor.view.domAtPos(cell.textFrom);
+            const { node } = editor.view.domAtPos(
+              cell.textFrom,
+              editor.view.state.selection.main.assoc || 1,
+            );
             const holder = (node instanceof Element ? node : node.parentElement)?.closest('.rl-tc');
             if (holder !== own)
               problems[`${form}-r${r}c${cell.col}-caret-place`] = {
                 in: holder?.getAttribute('data-col') ?? holder?.className ?? 'no cell',
                 want: String(cell.col),
               };
+          }
+        }
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The caret can stand in an empty cell with one space of padding or none (`| |`, `||`), where the
+    // cell's one stop is the end of its own mark and the start of the next cell's: Tab and ⇧Tab visit it, →
+    // and ← step into it and out of it, a press on its box puts the caret in it, the page draws the caret
+    // there (the DOM selection is inside the cell's own mark, at its left edge: a caret leans to the cell it
+    // is the end of), and the browser's own typing writes into it, a letter and a second, and into no
+    // other cell. (The caret could not stand there: Tab, → and a press put it at the start of the next
+    // cell's text, ← from there did not move, and the browser's typing went into the next cell.) Two
+    // spaces of padding are here as a control. Chromium-measured: the hit test, `coordsAtPos` and the editing; WebKit's are
+    // the sweep's.
+    name: 'the-caret-stands-in-an-empty-cell-with-one-space-or-none',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const [form, source] of EMPTY_FORMS) {
+        await load(editor, source);
+        const wanted = table(editor).rows.flatMap((row) =>
+          row.cells
+            .filter((cell) => cell.textFrom === cell.textTo)
+            .map((cell) => [row.index, cell.col]),
+        );
+        if (wanted.length === 0) {
+          problems[`${form}-fixture`] = 'no empty cell';
+          continue;
+        }
+        for (const [r, c] of wanted) {
+          // Each on the document as it was given: what is typed into one is not in the next.
+          await load(editor, source);
+          const order = table(editor).rows.flatMap((row) =>
+            row.cells.map((cell) => ({ row, cell })),
+          );
+          const found = order.find(({ row, cell }) => row.index === r && cell.col === c);
+          if (!found) {
+            problems[`${form}-r${r}c${c}-fixture`] = 'no such cell';
+            continue;
+          }
+          const { row, cell } = found;
+          const label = `${form}-r${row.index}c${cell.col}`;
+          const at = order.findIndex((one) => one.cell === cell);
+          const before = order[at - 1];
+          const after = order[at + 1];
+          const element = () => cellElements(editor)[row.index]?.[cell.col];
+          // The caret is in the cell, as the model has it and as the page draws it: the DOM selection is
+          // collapsed inside the cell's own mark, and the caret's place is at the cell's left edge.
+          const drawn = (step: string) => {
+            const picked = window.getSelection();
+            const node = picked?.anchorNode;
+            const holder = (node instanceof Element ? node : node?.parentElement)?.closest(
+              '.rl-tc',
+            );
+            const own = element();
+            if (head(editor) !== cell.textFrom && step !== 'typed')
+              problems[`${label}-${step}-head`] = [head(editor), cell.textFrom];
+            if (!own || !picked?.isCollapsed || holder !== own)
+              problems[`${label}-${step}-dom`] = {
+                collapsed: picked?.isCollapsed,
+                in: holder?.getAttribute('data-col') ?? holder?.className ?? 'no cell',
+                want: String(cell.col),
+              };
+            const { assoc } = editor.view.state.selection.main;
+            const coords = editor.view.coordsAtPos(head(editor), assoc || 1);
+            const box = own?.getBoundingClientRect();
+            // At the cell's left edge; after what was typed, a little way along its text.
+            const along = step === 'typed' ? box?.right : box?.left;
+            if (!coords || !box || coords.left < box.left - 2 || coords.left > (along ?? 0) + 2)
+              problems[`${label}-${step}-x`] = {
+                caret: coords?.left,
+                cell: [box?.left, box?.right],
+              };
+          };
+          // Tab from the cell before it, and ⇧Tab from the cell after it.
+          if (before) {
+            await place(editor, before.cell.textFrom);
+            press(editor, 'Tab');
+            await frames();
+            drawn('tab');
+          }
+          if (after) {
+            await place(editor, after.cell.textFrom);
+            press(editor, 'Shift-Tab');
+            await frames();
+            drawn('shift-tab');
+          }
+          // → from the end of the text before it, and then on into the next cell; ← the other way.
+          if (before && before.row === row) {
+            await place(editor, before.cell.textTo);
+            press(editor, 'ArrowRight');
+            await frames();
+            drawn('right');
+            if (after && after.row === row) {
+              press(editor, 'ArrowRight');
+              await frames();
+              if (head(editor) !== after.cell.textFrom)
+                problems[`${label}-right-on`] = [head(editor), after.cell.textFrom];
+            }
+          }
+          if (after && after.row === row) {
+            await place(editor, after.cell.textFrom);
+            press(editor, 'ArrowLeft');
+            await frames();
+            drawn('left');
+            if (before && before.row === row) {
+              press(editor, 'ArrowLeft');
+              await frames();
+              if (head(editor) !== before.cell.textTo)
+                problems[`${label}-left-on`] = [head(editor), before.cell.textTo];
+            }
+          }
+          // A press in the middle of its box.
+          await place(editor, 0);
+          const own = element();
+          if (!own) {
+            problems[`${label}-cell`] = 'not drawn';
+            continue;
+          }
+          const box = await reveal(own);
+          pressAt(editor, box.left + box.width / 2, box.top + box.height / 2);
+          await frames();
+          drawn('press');
+          // (A frame between reading the caret's coordinates and the browser's typing: typed in the same
+          // turn as `coordsAtPos` was asked, the first letter is lost, in any cell.)
+          await frames();
+          // The browser's own typing at that caret: a letter, and a second, in the cell and no other.
+          document.execCommand('insertText', false, 'Y');
+          await frames();
+          document.execCommand('insertText', false, 'Z');
+          await frames();
+          const want = `${source.slice(0, cell.textFrom)}YZ${source.slice(cell.textFrom)}`;
+          if (doc(editor) !== want) problems[`${label}-typed`] = doc(editor).replaceAll('\n', '⏎');
+          else {
+            if (head(editor) !== cell.textFrom + 2)
+              problems[`${label}-typed-head`] = [head(editor), cell.textFrom + 2];
+            drawn('typed');
           }
         }
       }
