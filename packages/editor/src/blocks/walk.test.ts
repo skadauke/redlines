@@ -103,6 +103,7 @@ const WALKED: Invariant[] = [
   'undo',
   'open-caret',
   'history',
+  'file-text',
 ];
 
 /**

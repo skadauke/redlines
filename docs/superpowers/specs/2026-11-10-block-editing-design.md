@@ -255,6 +255,12 @@ block, each of which renders. So:
 - **The file never gets it.** Saving, and everything else that reads the document for the file,
   get the text as if it had been taken back; so does the host's edited state, which a Return alone
   doesn't set. A save at the wrong moment can't leave stray blank lines, or a list read as loose.
+  The take-back is one set of changes of the document as it stands, the ledger's entries with it:
+  the file text is that document, read again where the take-back reaches the ledger (an item's
+  split rejected, or the first tracked edit's ledger gone), so that no line comes out twice. An
+  open item under text that Markdown can't hold it under (`- one⏎  - ⏎⏎Para.`, a nested bullet is
+  the text's underline) leaves its level first, and then its split is rejected, so that the
+  rejection can't carry the next paragraph into the text above.
 - **Return in an empty paragraph does nothing** at the top level. **Call:** Markdown can keep a second empty paragraph only as a paragraph of a no-break space or
   `&nbsp;`, content the file would keep and every renderer would draw as a paragraph; Redlines
   writes none, and Word's habit of Return Return for space has no form that stays empty. In a
@@ -1078,7 +1084,8 @@ views, and refusal. Run on every script:
 - No refusal unless the script expects one, and then the expected words.
 - The tracked text passes the format's checks (every order of decisions reads as the views), and no
   marker starts a line.
-- `getDoc` never holds an empty paragraph or an empty line's no-break space.
+- `getDoc` never holds an empty paragraph or an empty line's no-break space, and after each key it
+  is the document with the open line taken back as it stands (the walks check it, `file-text`).
 - Return never leaves a delimiter showing in either half, or a literal backslash at a paragraph's end.
 - Backspace at a list item's start takes two presses (bullet, then join) and the second gives the
   text of the item above and this one joined; Backspace right after Return takes one.

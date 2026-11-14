@@ -294,3 +294,136 @@ describe('walk seed 1141 (#292): Delete over the only character of a paragraph�
   ];
   scriptRows([...rows(false), ...rows(true)]);
 });
+
+describe('#439: getDoc() is the document with the open item taken back, as it stands', () => {
+  // Return then Tab at the end of an item makes the empty item `- ` an empty nested item under the
+  // item's text, which the file can't hold (it is open: out of the file). With Track Changes on the
+  // take-back is the rejection of the Return's split with its ledger entry (`itemRemoval`), and
+  // there were two faults in it. `getDoc()` moved the live ledger's range through the take-back,
+  // which left it in the body, and gave the text twice (`- onePara.- onePara.`), which ⌘S would have
+  // saved; and the format read the nested bullet as the underline of the text above it, so that the
+  // rejection joined the next paragraph into it (`- onePara.`). Opening an item and leaving it is
+  // no edit: each of the rows ends in the file it started from.
+  scriptRows([
+    {
+      name: 'Return, Tab at the end of an item before a paragraph (the issue)',
+      doc: '- one‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- one⏎⏎Para.' },
+    },
+    {
+      name: 'the same, Track Changes off',
+      doc: '- one‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: false,
+      expect: { file: '- one⏎⏎Para.' },
+    },
+    {
+      name: 'at the end of the file',
+      doc: '- one‸',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- one' },
+    },
+    {
+      name: 'an item after it, tight',
+      doc: '- one‸⏎- two',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- one⏎- two' },
+    },
+    {
+      name: 'a numbered step, a quote after it',
+      doc: '1. one‸⏎⏎> quote',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '1. one⏎⏎> quote' },
+    },
+    {
+      name: 'a nested item, a paragraph after the list',
+      doc: '- a⏎  - b‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- a⏎  - b⏎⏎Para.' },
+    },
+    {
+      name: 'three levels down',
+      doc: '- a⏎  - b⏎    - c‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- a⏎  - b⏎    - c⏎⏎Para.' },
+    },
+    {
+      name: 'a numbered parent of two digits',
+      doc: '10. a⏎    1. b‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '10. a⏎    1. b⏎⏎Para.' },
+    },
+    {
+      name: 'a bullet under a numbered step',
+      doc: '1. a⏎   - b‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '1. a⏎   - b⏎⏎Para.' },
+    },
+    {
+      name: 'in a quote',
+      doc: '> - one‸⏎>⏎> Para.',
+      keys: ['Enter', 'Tab'],
+      tc: false,
+      expect: { file: '> - one⏎>⏎> Para.' },
+    },
+    {
+      name: 'after front matter',
+      doc: '---⏎a: b⏎---⏎⏎- one‸⏎⏎Para.',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '---⏎a: b⏎---⏎⏎- one⏎⏎Para.' },
+    },
+    {
+      name: 'a ledger already there: a pending change of another person elsewhere',
+      doc: '- one‸⏎⏎Para <del x>',
+      others: 'bo',
+      keys: ['Enter', 'Tab'],
+      tc: true,
+      expect: { file: '- one⏎⏎Para <del x>' },
+    },
+    {
+      name: 'Return, Tab, a letter, ⌘Z twice',
+      doc: '- one‸⏎⏎Para.',
+      keys: ['Enter', 'Tab', { type: 'x' }, 'Mod-z', 'Mod-z'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+
+  // The ledger the take-back reads again: a file that had none when Track Changes was off, and got
+  // one with the first Return. The take-back from the record gives back the file as it was, with
+  // no ledger, and the live ledger's range, moved through it, lay in the body: the text came out
+  // twice, for the open item and for the open empty line alike.
+  scriptRows([
+    {
+      name: 'text typed with Track Changes off, then Return and Tab with it on',
+      doc: '- one‸⏎⏎Para.',
+      keys: [{ type: 'x' }, { tracking: true }, 'Enter', 'Tab'],
+      tc: false,
+      expect: { file: '- onex⏎⏎Para.' },
+    },
+    {
+      name: 'the open empty line of Shift-Return, at the end of the file',
+      doc: 'Para‸',
+      keys: [{ type: 'x' }, { tracking: true }, 'Shift-Enter'],
+      tc: false,
+      expect: { file: 'Parax' },
+    },
+    {
+      name: 'the open empty line of Shift-Return, a paragraph after it',
+      doc: 'Para‸⏎⏎Next.',
+      keys: [{ type: 'x' }, { tracking: true }, 'Shift-Enter'],
+      tc: false,
+      expect: { file: 'Parax⏎⏎Next.' },
+    },
+  ]);
+});
