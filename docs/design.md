@@ -188,8 +188,10 @@ The window, on the desktop:
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
-  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
-  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
+  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
+  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
+  source code. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
   for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
