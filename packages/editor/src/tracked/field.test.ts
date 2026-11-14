@@ -168,6 +168,19 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState().view).toBe('simple');
   });
 
+  it('brings back the simple look a document was saved in, though the app remembers the full markup', () => {
+    const saved = marked.replace('version: 1\n', 'version: 1\nview: simple\n');
+    const editor = load(saved, { markupView: 'redlines' });
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'redlines' });
+    editor.showView('clean');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'redlines' });
+    editor.setDoc(saved);
+    editor.showView('raw');
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('starts another document from the look chosen, whatever was shown in the one before', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });

@@ -2565,7 +2565,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
-| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
+| `view`        | `clean`, `redlines` or `simple`: the view the file opens in, as last saved (§5.6)                  |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2666,12 +2666,13 @@ same values.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
-- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
-  it was last saved. Redlines opens the file in it, in place of the markup view that the person
-  has remembered, which opens the files that have none.
-  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
-    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
-    markup views, is written as `redlines`.
+- **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
+  it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
+  text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
+  Redlines opens the file in it, in place of the markup view that the person has remembered, which
+  opens the files that record none.
+  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
+    source, and a save made in Raw leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
@@ -2680,8 +2681,9 @@ same values.
     whatever tool or version wrote it.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
-    file with no changes or comments, Clean and Redlines look the same anyway.
-  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+    file with no changes or comments, Clean, Redlines and Simple look the same anyway, except that
+    only the full markup draws ordinary HTML comments (design §5.3).
+  - A value other than these three is dropped with a warning, as an unknown `tracking` is.
   - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
     of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
     `w:view` is the page layout (Print, Web, Draft), not how markup is shown.

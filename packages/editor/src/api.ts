@@ -168,14 +168,17 @@ export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
   author: Author;
-  /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
+  /**
+   * Default: the view the ledger says (`view`, format §5.6), else the markup view when the
+   * document has redlines, else 'clean' (design §5.3).
+   */
   view?: ViewMode;
   /**
    * The look of Redlines the editor shows where it picks Redlines for you: when a document with
-   * redlines opens, and when a tracked change or a comment is made in Clean. Default: 'redlines',
-   * the full markup; a document whose saved look is 'simple' opens in Redlines' simple look. The
-   * host is told when the person chooses another, with a click on a change bar
-   * (`EditorUiState.markupView`).
+   * redlines opens (and records no view in its ledger), and when a tracked change or a comment is
+   * made in Clean. Default: 'redlines', the full markup; with 'simple', such a document opens in
+   * Redlines' simple look. The host is told when the person chooses another, with a click on a
+   * change bar (`EditorUiState.markupView`).
    */
   markupView?: MarkupView;
   /**
@@ -311,9 +314,9 @@ export interface Editor {
   /**
    * Replaces the whole document and clears the undo history, as when a file is opened. The
    * file's line ending is taken from the new string, and the view and Track Changes start over
-   * from their defaults: the view the ledger says (`view: clean` or `view: redlines`, format
-   * §5.6) or else the markup view when the document has redlines and Clean when it has none, and
-   * tracking on when the file asks for it (`tracking: everyone`).
+   * from their defaults: the view the ledger says (`view: clean`, `view: redlines` or
+   * `view: simple`, format §5.6), or else the markup view when the document has redlines and Clean
+   * when it has none, and tracking on when the file asks for it (`tracking: everyone`).
    */
   setDoc(doc: string): void;
   /**
@@ -385,10 +388,10 @@ export interface Editor {
    */
   setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
   /**
-   * Writes the view the document is in to its ledger, as `view: clean` or `view: redlines` (format
-   * §5.6): for the host to call when it saves the file, so that the document opens in it. Simple
-   * is written as Redlines, and Raw leaves the view the file had. A view alone is no reason for a
-   * ledger, so a file with none gets none, and a ledger that can't be read is left as it is. It is
+   * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
+   * `view: simple` (format §5.6): for the host to call when it saves the file, so that the document
+   * opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * file with none gets none, and a ledger that can't be read is left as it is. It is
    * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
    * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
    * for the next save. It is made in no empty paragraph's place, so a save never loses a blank line.

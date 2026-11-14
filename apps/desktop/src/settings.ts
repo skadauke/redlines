@@ -66,9 +66,10 @@ export interface Settings {
   /**
    * The look of Redlines chosen last with a click on a change bar, the full markup or Simple (the
    * simple look), which a window shows wherever it picks Redlines for the person, and when the
-   * View menu shows Redlines (design: Which look, when). A document opens in Redlines' simple look
-   * when this is `'simple'`. Every window follows it for the documents it opens next and for its
-   * own switches, and none changes the view it shows for it.
+   * View menu shows Redlines (design: Which look, when). A document that records no view in its
+   * ledger, and has redlines, opens in Redlines' simple look when this is `'simple'`. Every window
+   * follows it for the documents it opens next and for its own switches, and none changes the view
+   * it shows for it.
    */
   markupView: MarkupView;
   /**
