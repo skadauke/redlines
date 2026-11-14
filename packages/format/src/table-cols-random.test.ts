@@ -822,9 +822,12 @@ describe('rows and columns, random', () => {
     expect(withAlign).toBeGreaterThan(used / 10);
     expect(withHalves).toBeGreaterThan(0);
     expect(merges).toBeGreaterThan(0);
-    expect(mergesWithHalves).toBeGreaterThan(0);
-    // (an alignment change pending in a table with halves is drawn about one table in thirty)
-    if (fuzzCount(120) >= 300) expect(halvesWithAlign).toBeGreaterThan(0);
+    // (a merge in a table with halves is drawn about one table in fifty, and an alignment change pending in one about
+    // one table in thirty: a run of the default size can draw none of either)
+    if (fuzzCount(120) >= 300) {
+      expect(mergesWithHalves).toBeGreaterThan(0);
+      expect(halvesWithAlign).toBeGreaterThan(0);
+    }
     // What is left out as older is a part of the tables that hold halves, which are one in five of them all.
     expect(older).toBeLessThan(used / 4);
   }, 3_600_000);
