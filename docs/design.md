@@ -188,8 +188,10 @@ The window, on the desktop:
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
-  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
-  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
+  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
+  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
+  source code. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
   for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
@@ -205,7 +207,10 @@ The window, on the desktop:
   image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
-  to save them. Cancel stops there and keeps every window open. Closing the last window quits.
+  to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
+  window opened for text (Ask's Open in New Window) can't be asked in its first moment, before its
+  page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
+  notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
   Print. Printing holds the whole document in light ink and prints the view as it shows, without
@@ -267,8 +272,11 @@ The window, on the desktop:
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
   available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste reads the clipboard through the app and goes in the way ⇧⌘V does, so with Track
-  Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
+  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
+  and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
+  nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
+  when there is none. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left
@@ -405,7 +413,7 @@ A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
 in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment there, switches to
+in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
@@ -449,8 +457,13 @@ mode has no counterpart in the desktop app.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
-  notice makes that a deliberate choice. There is no "Just Mine" for now: a person's own tracking,
-  apart from the file's, is left for later.
+  notice makes that a deliberate choice. A file that comes to ask while it is open, when the window
+  reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
+  Track Changes turns on, under the same notice, and nothing is written, since the file asks
+  already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
+  tracking is switched off under them; the next switch they make writes the file's setting again.
+  A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
+  Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
@@ -817,6 +830,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
+| Highlight                      | ⇧⌘H                                                                                           | Ctrl+Shift+H              |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
@@ -1511,8 +1525,13 @@ Agent edits are animated, like a streaming chat answer.
     first question is the person's comment, its answer the agent's reply in the agent's name, and
     each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
     reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
-    goes once the window is open: if it can't be, a notice says so and the bubble stays. Copy puts
-    the answer's text on the clipboard. Nothing is kept unless asked.
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. The text
+    is unsaved there as in any new document, and in the window's first moment, before its page has
+    said what it holds and can be asked about it, a quit, a restart or a logout, and the window's
+    own close, are refused, as a Cancel would be: the app says the window is still opening, and the
+    person tries again. The hold lasts ten seconds at most, so that a page that never loads can't
+    keep the app from quitting. Copy puts the answer's text on the clipboard. Nothing is kept
+    unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and

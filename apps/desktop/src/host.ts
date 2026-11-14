@@ -180,6 +180,13 @@ export interface Host {
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
   readClipboardText(): Promise<string>;
   /**
+   * Pastes the clipboard into the document as the Mac's own Paste does (`paste:` to the window's
+   * first responder), so that the page gets a paste event with the clipboard's HTML as well as its
+   * text, which the editor converts to Markdown as ⌘V does. Resolves to whether something took it.
+   * A browser tab has none: it reads text alone (`readClipboardText`).
+   */
+  pasteInDocument?(): Promise<boolean>;
+  /**
    * Calls `onOpen` with each file the app gives this window, of those it was asked to open on its
    * command line or by the system (`open -a Redlines plan.md`): those given before it was called,
    * and those given later. It waits for each to open before the next. A file that the app was asked
@@ -515,6 +522,7 @@ function createTauriHost(): Host {
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
     // access would need.
     readClipboardText: () => readText(),
+    pasteInDocument: () => invoke<boolean>('paste_in_field'),
     async listenForFiles(onOpen, onRefused) {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.

@@ -57,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "open_quick_look_settings",
     "open_window",
     "opened_files",
+    "paste_in_field",
     "pick_images",
     "print_window",
     "project_root",

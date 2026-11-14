@@ -400,6 +400,7 @@ pub fn run() {
             spelling::spelling_suggestions,
             spelling::spelling_learn,
             edit_menu::undo_in_field,
+            edit_menu::paste_in_field,
             open_preferences,
             open_about,
             dock_icon::app_icon_mark,
@@ -490,6 +491,10 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // A window opened for text can't be asked about it in its first moments: its close waits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                windows::close_requested(window.app_handle(), window.label(), api);
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());

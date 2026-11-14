@@ -44,6 +44,7 @@
     "allow-open-preferences",
     "allow-open-window",
     "allow-opened-files",
+    "allow-paste-in-field",
     "allow-pick-images",
     "allow-print-window",
     "allow-project-root",

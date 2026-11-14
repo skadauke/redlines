@@ -329,7 +329,9 @@ export interface Editor {
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
    * from the new string. It is for changes on disk; an agent's edit is `applyAgentEdit`. The view
    * stays, even when the document loses its last redline, except that a document that gains
-   * redlines while shown Clean switches to Redlines.
+   * redlines while shown Clean switches to Redlines. Track Changes stays too, except that a file
+   * that newly asks everyone to track (`tracking: everyone`, format §5.6) turns it on, as opening
+   * such a file does, which writes nothing; a file that stops asking leaves it as it is.
    */
   reloadDoc(doc: string): void;
   /**
