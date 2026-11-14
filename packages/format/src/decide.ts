@@ -409,6 +409,7 @@ function decideNow(
         decidedIds.add(id);
       }
       for (const id of done.anchored) decidedIds.add(id);
+      for (const id of done.travelling) travelling.add(id);
     }
     if (rowMarks.some((mark) => !found.has(mark.id))) {
       throw new EditError(NOT_SUPPORTED, 'not-supported');

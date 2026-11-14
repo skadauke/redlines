@@ -68,6 +68,31 @@ function longestRun(values: readonly (number | undefined)[]): Set<number> {
   return kept;
 }
 
+/** The rows of `final` that keep their place, as indexes into `final` and as rows of the table. */
+function keptRows(final: readonly RowItem[]): { keptAt: Set<number>; keepsSrc: Set<number> } {
+  const srcs = final.map((item) => ('src' in item ? item.src : undefined));
+  const keptAt = longestRun(srcs);
+  const keepsSrc = new Set<number>();
+  for (const i of keptAt) {
+    const src = srcs[i];
+    if (src !== undefined) keepsSrc.add(src);
+  }
+  return { keptAt, keepsSrc };
+}
+
+/**
+ * The rows of the table, as indexes, that `arrangeRows` takes out of the text and writes again to give
+ * `final`: the rows that move, and the rows it moves instead of leaving in place (of two rows that
+ * change places it is the same to the text which is written again). What such a row holds is written
+ * again with it.
+ */
+export function rewrittenRows(final: readonly RowItem[]): Set<number> {
+  const { keepsSrc } = keptRows(final);
+  const rewritten = new Set<number>();
+  for (const item of final) if ('src' in item && !keepsSrc.has(item.src)) rewritten.add(item.src);
+  return rewritten;
+}
+
 /**
  * The changes that give a table the rows `final`, in order, the first one the header. Rows that keep
  * their relative order stay where they are; the others are taken out and written again where they
@@ -79,13 +104,7 @@ export function arrangeRows(
   final: readonly RowItem[],
   eol: string,
 ): TextChange[] {
-  const srcs = final.map((item) => ('src' in item ? item.src : undefined));
-  const keptAt = longestRun(srcs);
-  const keepsSrc = new Set<number>();
-  for (const i of keptAt) {
-    const src = srcs[i];
-    if (src !== undefined) keepsSrc.add(src);
-  }
+  const { keptAt, keepsSrc } = keptRows(final);
   // The delimiter row stays when the first row of the table stays the first.
   const first = final[0];
   const delimiterStays = first !== undefined && 'src' in first && first.src === 0 && keptAt.has(0);

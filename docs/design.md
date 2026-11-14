@@ -811,21 +811,21 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   writes the old one back. A tracked edit right under its table is refused while it is pending ("Bo
   Chen's alignment change to the table above is pending. Decide it first, or turn off Track Changes."),
   and every column command is refused until it is decided; rows are never in the way.
-- **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
-  take the author's tint and its text is underlined in the author's color, with a change bar on the
-  row; Clean shows the plain row. A **deleted row** is kept below the table in the file and drawn in
-  Redlines as a ghost row at its place, a row of cells in the table's columns: its text struck in the
-  author's color on the author's tint, with a bar, not editable; the caret and ↑ ↓ skip it, a press
-  on it opens its card and puts no caret there. A **moved row** has a double underline and the tint at
-  its new place, and a ghost with a double strikethrough at the old; its card is the moved row's, and
-  accepting or rejecting either half decides both (rejecting moves the row itself back, with what
-  was typed in it since). The cards say "Inserted row", "Deleted row" and "Moved row" (and
-  "Deleted 3 rows" for rows deleted together). Simple draws the bars of the same rows and no ghost,
-  tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
-  Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
-  but not deleted until those are decided; an agent that replaces a table with the table it wants
-  changes rows and columns as these commands do (format §3.7, "Agents"). The rest of the list above
-  arrives in the later stages.
+- **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its
+  cells take the author's tint and its text is underlined in the author's color, with a change bar
+  on the row; Clean shows the plain row. A **deleted row** is kept below the table in the file and
+  drawn in Redlines as a ghost row at its place, a row of cells in the table's columns: its text
+  struck in the author's color on the author's tint, with a bar, not editable; the caret and ↑ ↓
+  skip it, a press on it opens its card and puts no caret there. A **moved row** has a double
+  underline and the tint at its new place, and a ghost with a double strikethrough at the old; its
+  card is the moved row's, and accepting or rejecting either half decides both (rejecting moves the
+  row itself back, with what was typed in it since and its comments). The cards say "Inserted row",
+  "Deleted row" and "Moved row" (and "Deleted 3 rows" for rows deleted together). Simple draws the
+  bars of the same rows and no ghost, tint, underline or struck text (a deleted row has no row there
+  to carry its bar), and shows what Clean shows. Rows that another person's changes are in can be
+  moved (their changes travel with them) but not deleted until those are decided; an agent that
+  replaces a table with the table it wants changes rows and columns as these commands do (format
+  §3.7, "Agents"). The rest of the list above arrives in the later stages.
 
 ### 5.9 Command palette and shortcuts
 
