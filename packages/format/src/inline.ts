@@ -489,6 +489,24 @@ function lazyUnder(above: string, line: string): boolean {
 }
 
 /**
+ * Whether `line` is a bullet with nothing after it that reads as the setext underline of the text
+ * in `above`, the line over it: an empty item can't interrupt a paragraph, and an underline is no
+ * lazy line (#143).
+ */
+export function underliningBullet(above: string, line: string): boolean {
+  return /^[ \t>]*-[ \t]*$/.test(line) && !BLANK.test(above) && !lazyUnder(above, line);
+}
+
+/** Whether a split's marker starts on the line of `text` that `position` is on. */
+function splitOnLine(text: string, hidden: readonly Range[], position: number): boolean {
+  const from = lineStart(text, position);
+  const to = lineEnd(text, position);
+  return hidden.some(
+    (range) => range.from >= from && range.from <= to && text.startsWith('<!--split ', range.from),
+  );
+}
+
+/**
  * What the rules of format §3.1 to §3.3 say about a marker at `position` of `text`. `hidden` are the
  * ranges of the markers that are in the text: they are not looked at, and a line made of nothing
  * else is a blank line. `around` gives the characters next to the marker when they are not those
@@ -525,9 +543,14 @@ export function inspectPlace(
   // can be, such as the bullet of the next item (#143).
   const lineAbove = start > 0 ? v.slice(v.lastIndexOf('\n', start - 2) + 1, start - 1) : above;
   const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
+  // A bullet that a split's marker stands on is an item in the file, whose first line is the marker,
+  // wherever the view reads the bullet as the underline of the text above it: an empty item can't
+  // interrupt a paragraph. A marker beside the split's changes neither reading (#143).
+  const ofSplit = /^[ \t>]*-[ \t]*$/.test(lineText) && splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
   if (
     !around.joined &&
+    !ofSplit &&
     isSyntaxLine(lineText, underlines && !(first && start === 0)) &&
     !isTableRowAt(text, position)
   ) {

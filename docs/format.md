@@ -1019,7 +1019,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
    underline only in the container of the line of text above it: under a list item's line and to
    the left of its text, or with fewer quote markers, it would be a lazy line, which no underline
-   can be, and `- ` there is the bullet of the next item;
+   can be, and `- ` there is the bullet of the next item. A bullet that a split's marker stands on
+   is not such a line: the file reads it as an item whose first line is the marker, and another
+   marker beside the split's changes neither that reading nor the newest view's (§3.4, *Typing
+   under a bullet that the view reads as an underline*);
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
@@ -1433,6 +1436,26 @@ marker goes, or moves behind it with the rest of its break, as Enter makes them.
 line together with a line break of it leaves the other line break, as in plain text: a deletion of
 nothing but your own pending text and splits writes no marker, wherever it starts. Where the marker
 of a comment stands in it, which stays, the deletion is placed as any change is.
+
+**Typing under a bullet that the view reads as an underline.** A line break typed at the start of
+the text of a bullet item that stands under a line of text, or under the line of the item it is in,
+writes its split on the bullet's line (`- one⏎  - <!--split w8nn-->⏎    café 42`). The file reads
+that line as an item; the newest view reads it as the underline of the text above it, a heading,
+since an empty item can't interrupt a paragraph (§3.1, rule 7). Words that the author of the breaks
+types on a blank line of them are written as at any other item: one insertion that starts on the
+bullet's line, in front of the split's marker, which is typed again in it
+(`- one⏎  - <!--ins k3x9--><!--split p7qd-->⏎    new words<!--/k3x9--><!--split d3x9-->⏎    ⏎    café 42`,
+#143). Every order of deciding the changes reads alike; accepting all gives the newest view and
+rejecting all the original. Where the bullet is indented by two or three columns past the text
+above it (or past the text of the item it stands in), the lines of the break are four columns or
+more past that text, which the newest view reads as indented code under the underline, where no
+marker is read, and the words are refused: "The line break typed after this bullet makes it read as the
+underline of the text above it, so what is typed under it would be indented code, where its markers
+would not be read. Reject that line break first, or turn Track Changes off." (Four columns of
+white space that are typed make code of their own, and are refused as any change in code is.) The
+editor's Return does not write this break: it writes the empty item above the list with a blank
+line in front of it (*A blank line and an item in an item's text*), so it comes from a paste or an
+agent.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
