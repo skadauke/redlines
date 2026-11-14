@@ -10,6 +10,7 @@ import { appendFileSync } from 'node:fs';
 import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { bodyStart, lineStartKind, prefixLength } from './blocks.ts';
+import { suggestReplace } from './agent.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -19,6 +20,7 @@ import {
   REFUSALS,
   ada,
   blockLeaves,
+  claudeAda,
   bodyOf,
   expectEveryOrderAlike,
   file,
@@ -223,6 +225,28 @@ describe('deleting all the text of a wrapped line (#427)', () => {
     expect(bodyText(plain(text, 0, 'line one'.length))).toBe('\nline two\nline three');
   });
 
+  it('takes the break with a line that an agent deletes, as with one that a person deletes', () => {
+    const body = 'line one\nline two\nline three';
+    const text = file(body);
+    for (const [old, now] of [
+      ['line two', ''],
+      ['one\nline two', 'one'],
+    ] as const) {
+      const edits = suggestReplace(text, old, now, {
+        author: claudeAda,
+        time: TIME,
+        random: constant,
+      });
+      const after = applyChanges(text, edits.changes);
+      expect(bodyText(after), JSON.stringify([old, now])).toBe(
+        'line one<!--del ffff \\nline two-->\nline three',
+      );
+      expect(viewText(after)).toBe('line one\nline three');
+      expect(readsAsNewest(after)).toBe(true);
+      expectEveryOrderAlike(JSON.stringify([old, now]), after);
+    }
+  });
+
   it('leaves what is not all the text of a line as it was', () => {
     const body = 'line one\nline two\nline three';
     const text = file(body);
@@ -390,7 +414,18 @@ describe('deleting the text of each wrapped line of random documents', () => {
     // `bare`: the text goes and the line stays (as it did, and still does for lines of code and of
     // the shapes that `listDocument` makes of indentation, which the format keeps apart by their
     // columns); `refused`; the lines are those that `lineStartKind` sees as wrapped.
-    const counts = { lines: 0, taken: 0, refused: 0, bare: 0, plainTaken: 0, plainBare: 0 };
+    const counts = {
+      lines: 0,
+      taken: 0,
+      refused: 0,
+      bare: 0,
+      plainTaken: 0,
+      plainBare: 0,
+      realLines: 0,
+      realTaken: 0,
+      realRefused: 0,
+      realPlainTaken: 0,
+    };
     const reasons = new Map<string, number>();
     for (let seed = 1; seed <= fuzzCount(150); seed++) {
       // Documents of paragraphs, quotes, items and alerts (`realistic`: every wrapped line is a
@@ -403,6 +438,7 @@ describe('deleting the text of each wrapped line of random documents', () => {
       const view = newestView(text);
       for (const line of wrappedLines(view.text)) {
         counts.lines++;
+        if (realistic) counts.realLines++;
         const shown = JSON.stringify(view.text.slice(line.from, line.to));
         const label = `seed ${seed}, ${shown} of ${JSON.stringify(view.text).slice(0, 400)}`;
         const bare = trimmed(view.text.slice(0, line.from) + view.text.slice(line.to));
@@ -426,12 +462,14 @@ describe('deleting the text of each wrapped line of random documents', () => {
             throw new Error(`${label}: ${String(error)}`, { cause: error });
           }
           counts.refused++;
+          if (realistic) counts.realRefused++;
           if (realistic) reasons.set(error.message, (reasons.get(error.message) ?? 0) + 1);
         }
         if (after !== undefined) {
           const now = trimmed(newestView(after).text);
           if (now === taken) {
             counts.taken++;
+            if (realistic) counts.realTaken++;
             // Taking a line of code, which leaves the structure as it is, would show here (in the
             // documents of paragraphs, quotes and items, where each line that is wrapped is a
             // paragraph's: the shapes of `listDocument`, and the code that a blank line of a quote
@@ -459,6 +497,7 @@ describe('deleting the text of each wrapped line of random documents', () => {
           const now = trimmed(newestView(applyChanges(text, untrackedEdit(text, edit))).text);
           if (now === taken) {
             counts.plainTaken++;
+            if (realistic) counts.realPlainTaken++;
             if (keeps && realistic) {
               expect(
                 onlyParagraphChanged(view.text, now),
