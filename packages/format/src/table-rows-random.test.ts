@@ -35,6 +35,8 @@ import { newestView, originalView } from './views.ts';
 
 const WORDS = ['alpha', 'b', 'café', 'x y', '11', ''];
 const PEOPLE = [ada, bo, claudeAda];
+/** Who deletes the table at the end of each table's story, in turn; `plain` is no one, Track Changes off. */
+const ENDERS = ['ada', 'bo', 'claude-ada', 'plain'] as const;
 
 function tablesOf(text: string) {
   return blockLeaves(text).filter((leaf) => leaf.kind === 'table');
@@ -143,7 +145,8 @@ function expectWholeTableDeleted(
 describe('rows, random', () => {
   it('stay one table, read alike in every order, and decide to the newest and the original', () => {
     // (`REDLINES_SEED` draws other tables, for a longer hunt)
-    const random = seeded(Number(process.env['REDLINES_SEED'] ?? 2026));
+    const seed = Number(process.env['REDLINES_SEED'] ?? 2026);
+    const random = seeded(seed);
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
     let used = 0;
     for (let n = 0; n < fuzzCount(120); n++) {
@@ -281,12 +284,15 @@ describe('rows, random', () => {
         }
       }
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
-      // The table deleted whole, which ends every table's story.
-      const ender = pick(['ada', 'bo', 'claude-ada', 'plain'] as const);
+      // The table deleted whole, which ends every table's story: by each of the people in turn, with the
+      // ids shuffled by a stream of its own. Nothing here draws from the stream that makes the tables, so
+      // the tables after this one are the ones they were (a `REDLINES_SEED` that found one still does).
+      const aside = seeded(seed * 1000 + n);
+      const ender = ENDERS[n % ENDERS.length];
       expectWholeTableDeleted(
         text,
         PEOPLE.find((p) => p.handle === ender),
-        ids,
+        () => [...pool].sort(() => aside() - 0.5),
         label,
       );
       const marks = parse(text).marks.length;
@@ -317,7 +323,6 @@ describe('rows, random', () => {
       const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
       const accepted = applyChanges(text, acceptAll(text));
       expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
-      const tidy = (view: string) => view.replace(/\s+$/, '');
       expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(
         tidy(newestView(text).text),
       );

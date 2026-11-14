@@ -7,9 +7,11 @@
 // reads it (`missing.ts`): a widget for each, at the end of the row. Raw draws none of it.
 //
 // What the prototype found, and the layout keeps to: nothing but a cell is a direct child of a row
-// (the change bar is drawn by the first cell, not the row); a wrapper ends at the table's last line,
-// so the blank line after the table, a struck block widget or the ledger are in none; a table in a
-// quote or a list item is no table here (`model.ts`), and stays source.
+// (the change bar is drawn by the first cell, not the row; the exception is the buffers and the
+// line-end break that CodeMirror puts beside the widgets of the cells a row lacks, which the theme
+// hides); a wrapper ends at the table's last line, so the blank line after the table, a struck block
+// widget or the ledger are in none; a table in a quote or a list item is no table here (`model.ts`),
+// and stays source.
 
 import {
   type EditorState,
@@ -184,12 +186,20 @@ function markerIn(state: EditorState, cell: Cell): { from: number; to: number } 
 /** The rows built, for tests: the layout builds only the rows a change touches. */
 export const layoutStats = { rows: 0 };
 
+/** The caret's cell, when it is one its row lacks: asked at most once for a build, and only when a row
+ * lacks cells. */
+function caretOnce(state: EditorState): () => MissingCaret | null {
+  let found: MissingCaret | null | undefined;
+  return () => (found === undefined ? (found = missingCaret(state)) : found);
+}
+
 function rowDecorations(
   state: EditorState,
   table: Table,
   row: Row,
   out: Range<Decoration>[],
   cells: Range<Decoration>[],
+  caretOf: () => MissingCaret | null,
 ): void {
   layoutStats.rows++;
   // The deleted columns drawn in the table, each in the place of the pipe in front of the cell it comes
@@ -318,7 +328,7 @@ function rowDecorations(
   // The cells the row lacks, after the last, in the order of their columns; the one the caret is in
   // draws it.
   if (lacking > 0) {
-    const caret = missingCaret(state);
+    const caret = caretOf();
     const here = caret?.row.from === row.from ? caret.cell.col : -1;
     for (let col = row.cells.length; col < table.columns; col++) {
       const widget = new MissingCellWidget(
@@ -370,9 +380,10 @@ export function layoutOf(state: EditorState): Layout {
   const wrappers: Range<BlockWrapper>[] = [];
   const out: Range<Decoration>[] = [];
   const cells: Range<Decoration>[] = [];
+  const caretOf = caretOnce(state);
   for (const table of tables) {
     wrappers.push(...wrappersOf(table));
-    for (const row of table.rows) rowDecorations(state, table, row, out, cells);
+    for (const row of table.rows) rowDecorations(state, table, row, out, cells, caretOf);
   }
   return {
     wrappers: BlockWrapper.set(wrappers, true),
@@ -423,11 +434,12 @@ function rebuild(layout: Layout, state: EditorState, dirty: Dirty): Layout {
     if (rows === null) dropRows(clear);
     else for (const { clear: span } of rows) dropRows(span);
   }
+  const caretOf = caretOnce(state);
   for (const { table, rows } of dirty.tables) {
     const built = rows ? rows.map((r) => r.row) : table.rows;
     const out: Range<Decoration>[] = [];
     const inCells: Range<Decoration>[] = [];
-    for (const row of built) rowDecorations(state, table, row, out, inCells);
+    for (const row of built) rowDecorations(state, table, row, out, inCells, caretOf);
     wrappers = wrappers.update({ add: wrappersOf(table), sort: true });
     decorations = decorations.update({ add: out, sort: true });
     cells = cells.update({ add: inCells, sort: true });

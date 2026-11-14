@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor, touchedCols, touchedRows } from '@redlines/editor';
+import { createEditor, type Editor, rectOf, touchedCols, touchedRows } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTables } from './index.ts';
 
@@ -326,18 +326,70 @@ describe('column grips', () => {
     expect(editor.getDoc()).toContain('21');
   });
 
-  it('deletes the table from the column menu, as the command does', () => {
-    const editor = mount();
-    move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
-    const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
-      (el) => el.textContent === 'Delete Table',
-    );
-    mouse(item!, 'mousedown');
-    expect(menuItems(editor)).toEqual([]);
-    expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
-  });
+  for (const tracking of [false, true]) {
+    it(`clears the cell of a column that is one cell, with Clear Contents, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      // A table of a header alone: the column is the header's cell, and one cell is no rectangle.
+      const doc = 'Intro.\n\n| a | b |\n| - | - |\n\nAfter.\n';
+      const editor = mount(doc, tracking);
+      move(editor, colX(1), TOP - 10);
+      mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
+      mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+      expect(rectOf(editor.view.state)).toBeNull();
+      const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+        (el) => el.textContent === 'Clear Contents',
+      );
+      mouse(item!, 'mousedown');
+      // The cell of the column goes, and the other is as it was.
+      if (tracking) {
+        expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['del']);
+        expect(editor.getDoc()).toContain('| a | <!--del ');
+        expect(editor.getDoc()).toContain('| a |');
+      } else {
+        expect(editor.getDoc()).toBe('Intro.\n\n| a |  |\n| - | - |\n\nAfter.\n');
+      }
+      expect(editor.getDoc()).toContain('| - | - |');
+    });
+
+    it(`clears the cell of a row that is one cell, with Clear Contents, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      // A table of one column and a header alone: the row is that one cell.
+      const doc = 'Intro.\n\n| a |\n| - |\n\nAfter.\n';
+      const editor = mount(doc, tracking);
+      move(editor, LEFT + 30, rowY(0));
+      mouse(grip(editor)!, 'mousedown', { clientX: LEFT - 20, clientY: rowY(0) });
+      mouse(window, 'mouseup', { clientX: LEFT - 20, clientY: rowY(0) });
+      expect(rectOf(editor.view.state)).toBeNull();
+      const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+        (el) => el.textContent === 'Clear Contents',
+      );
+      mouse(item!, 'mousedown');
+      if (tracking) {
+        expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['del']);
+      } else {
+        expect(editor.getDoc()).toBe('Intro.\n\n|  |\n| - |\n\nAfter.\n');
+      }
+    });
+
+    it(`deletes the table from the column menu, as the command does, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = mount(DOC, tracking);
+      move(editor, colX(1), TOP - 10);
+      mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
+      mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+      const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+        (el) => el.textContent === 'Delete Table',
+      );
+      mouse(item!, 'mousedown');
+      expect(menuItems(editor)).toEqual([]);
+      if (tracking) {
+        // One deletion of the table, kept in the file where it was, and nothing else written.
+        expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['del']);
+        expect(editor.getDoc().startsWith('Intro.\n\n<!--del ')).toBe(true);
+        expect(editor.getDoc()).toContain('-->\n\nAfter.\n');
+        expect(editor.getDoc()).not.toContain('\n| a | b |');
+      } else {
+        expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
+      }
+    });
+  }
 
   it('shows a + within 8 px of a column boundary in the top strip, and not at 9', () => {
     const editor = mount();

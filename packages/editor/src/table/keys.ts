@@ -510,7 +510,7 @@ const lineBreak: Command = (view) => {
  * and the notice says what refuses it. Text is only ever cleared by the key: a row that has some is
  * never deleted by one keystroke. Only a rectangle is asked, and only its own cells are read.
  */
-function clearSelectedCells(view: EditorView): boolean {
+function clearOrDeleteCells(view: EditorView): boolean {
   const { state } = view;
   const rect = rectOf(state);
   if (!rect) return false;
@@ -526,7 +526,7 @@ function clearSelectedCells(view: EditorView): boolean {
 /** ⌫: nothing at a cell's start, a `<br>` whole after it; a selection or a character is the
  * editor's. */
 const backspace: Command = (view) => {
-  if (clearSelectedCells(view)) return true;
+  if (clearOrDeleteCells(view)) return true;
   if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
@@ -538,7 +538,7 @@ const backspace: Command = (view) => {
 
 /** ⌦: nothing at a cell's end, a `<br>` whole in front of the caret. */
 const forwardDelete: Command = (view) => {
-  if (clearSelectedCells(view)) return true;
+  if (clearOrDeleteCells(view)) return true;
   if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;

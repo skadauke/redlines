@@ -11,7 +11,7 @@ import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor, redo, undo } from '../index.ts';
-import { rectOf, whole } from './cells.ts';
+import { emptyStats, rectOf, whole } from './cells.ts';
 import { tablesOf } from './model.ts';
 
 interface Row {
@@ -145,6 +145,21 @@ describe('⌫ and ⌦ on whole rows', () => {
         off: { file: WITHOUT(R1, R3) },
         on: { newest: WITHOUT(R1, R3), original: G(R1, '| 21 | 22 |') },
       },
+      {
+        // A line break is drawn, so it is text: the key that clears it does not take the row too.
+        name: 'a cell with only a line break has text: the first ⌫ clears it, and the row stays',
+        doc: G(R1, '| ‸<br> |  |  |'),
+        keys: ['Ctrl-l', 'Backspace'],
+        off: { file: G(R1, BLANK) },
+        on: { newest: G(R1, BLANK), original: G(R1, '| <br> |  |  |') },
+      },
+      {
+        name: 'and the second ⌫ deletes it, the line break kept in the row as it was',
+        doc: G(R1, '| ‸<br> |  |  |'),
+        keys: ['Ctrl-l', 'Backspace', 'Backspace'],
+        off: { file: WITHOUT(R1, R3) },
+        on: { newest: WITHOUT(R1, R3), original: G(R1, '| <br> |  |  |') },
+      },
     ]),
   );
 });
@@ -184,6 +199,19 @@ describe('⌫ and ⌦ on whole columns', () => {
         keys: ['Backspace', 'Backspace'],
         off: { file: '| c |⏎| - |⏎| 13 |⏎| 23 |⏎| 33 |' },
         on: { newest: '| c |⏎| - |⏎| 13 |⏎| 23 |⏎| 33 |', original: ORIGINAL },
+      },
+      {
+        // The column's cells are the cells the rows have: the row that lacks one has no cell there to
+        // clear. Track Changes cannot write the column's deletion while a row lacks it, and says so.
+        name: 'a column that one row lacks: deleted from the rows that have it, refused in words when tracked',
+        doc: '| a | b | [c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 |⏎| 31 | 32 | 33] |',
+        keys: ['Backspace', 'Backspace'],
+        off: { file: '| a | b |⏎| - | - |⏎| 11 | 12 |⏎| 21 | 22 |⏎| 31 | 32 |' },
+        on: {
+          refusal: 'A row of this table has fewer cells than its header. Fill it in first.',
+          // The refused key wrote nothing: the column is as the first ⌫ left it.
+          file: '| a | b | <del c> |⏎| - | - | - |⏎| 11 | 12 | <del 13> |⏎| 21 | 22 |⏎| 31 | 32 | <del 33> |',
+        },
       },
       {
         name: 'the last columns go: the caret is in the one before',
@@ -254,6 +282,20 @@ describe('⌫ and ⌦ on the whole table', () => {
         off: { file: 'Intro.⏎⏎After.⏎' },
         on: { newest: 'Intro.⏎⏎After.⏎' },
       },
+      {
+        name: 'a table of a header alone is cleared by ⌫, and stays',
+        doc: AROUND('| [a | b] |⏎| - | - |'),
+        keys: ['Backspace'],
+        off: { file: AROUND('|  |  |⏎| - | - |') },
+        on: { newest: AROUND('|  |  |⏎| - | - |'), original: AROUND('| a | b |⏎| - | - |') },
+      },
+      {
+        name: 'a table of a header alone is deleted by the second ⌫, the caret where it was',
+        doc: AROUND('| [a | b] |⏎| - | - |'),
+        keys: ['Backspace', 'Backspace'],
+        off: { file: 'Intro.⏎⏎After.⏎', caret: 'Intro.⏎⏎‸After.⏎' },
+        on: { newest: 'Intro.⏎⏎After.⏎', original: AROUND('| a | b |⏎| - | - |') },
+      },
     ]),
   );
 });
@@ -276,6 +318,13 @@ describe('what the second ⌫ is not', () => {
         keys: ['Backspace', 'Backspace', 'Backspace'],
         off: { file: G(R1, BLANK) },
         on: { newest: G(R1, BLANK), original: G(R1, '|  | 22 |  |') },
+      },
+      {
+        name: 'text selected inside one cell is the editor’s own ⌫ too: no row goes with it',
+        doc: G(R1, '| [21] |  |  |'),
+        keys: ['Backspace', 'Backspace'],
+        off: { file: G(R1, BLANK) },
+        on: { newest: G(R1, BLANK), original: G(R1, '| 21 |  |  |') },
       },
     ]),
   );
@@ -317,7 +366,23 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         keys: ['Ctrl-l', 'Backspace'],
         others: 'bo',
         off: { newest: WITHOUT(R1, R3) },
-        on: { refusal: "bo's pending change is in this row. Decide it first." },
+        // The refused key wrote nothing: the file is the one it started from.
+        on: {
+          refusal: "bo's pending change is in this row. Decide it first.",
+          file: G(R1, '| <del 21> | <del 22> | <del 23> |'),
+        },
+      },
+      {
+        name: 'a row, with an insertion of theirs in a cell: the first ⌫ strikes it, the second is refused',
+        doc: G(R1, '| ‸<ins>x</ins> |  |  |'),
+        keys: ['Ctrl-l', 'Backspace', 'Backspace'],
+        others: 'bo',
+        off: { newest: WITHOUT(R1, R3) },
+        // Your deletion inside their insertion is all the first key wrote.
+        on: {
+          refusal: "bo's pending change is in this row. Decide it first.",
+          file: G(R1, '| <ins><del x></ins> |  |  |'),
+        },
       },
       {
         name: 'a column, after the first ⌫',
@@ -325,7 +390,11 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         keys: ['Backspace', 'Backspace'],
         others: 'bo',
         off: { newest: '| a | c |⏎| - | - |⏎| 11 | 13 |⏎| 21 | 23 |⏎| 31 | 33 |' },
-        on: { refusal: "bo's pending change is in this column. Decide it first." },
+        // Only the first key wrote: the column is struck, and the second left it as it was.
+        on: {
+          refusal: "bo's pending change is in this column. Decide it first.",
+          file: '| a | <del b> | c |⏎| - | - | - |⏎| 11 | <del 12> | 13 |⏎| 21 | <del 22> | 23 |⏎| 31 | <del 32> | 33 |',
+        },
       },
       {
         name: 'a table',
@@ -333,7 +402,10 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         keys: ['Mod-a', 'Backspace'],
         others: 'bo',
         off: { newest: 'Intro.⏎⏎After.⏎' },
-        on: { refusal: "bo's pending change is in this table. Decide it first." },
+        on: {
+          refusal: "bo's pending change is in this table. Decide it first.",
+          file: 'Intro.⏎⏎|  |  |⏎| - | - |⏎|  | <del 12> |⏎|  |  |⏎⏎After.',
+        },
       },
     ]),
   );
@@ -473,7 +545,7 @@ describe('in an editor', () => {
     }
   });
 
-  it('decides what is empty by what the newest text shows: a comment’s anchor is no text', () => {
+  it('decides what is empty by what the page shows: a comment’s anchor is no text', () => {
     const ledger =
       '\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\ncomments:\n  c8d2:\n    by: bo\n    at: 2026-11-01T10:00Z\n    text: |-\n      Why?\n-->\n';
     const doc = `| a | b |\n| - | - |\n| 11 | 12 |\n|  | <!--cmt c8d2--> |\n${ledger}`;
@@ -566,10 +638,16 @@ describe('in an editor', () => {
       });
       const rect = rectOf(editor.view.state);
       expect(rect && whole(rect)).toBe('column');
+      // The first key reads one cell, the first, which has text: nothing more is asked of the rest.
+      emptyStats.cells = 0;
       press(editor, 'Backspace');
+      expect(emptyStats.cells).toBe(1);
       expect(tablesOf(editor.view.state)).toHaveLength(1);
       expect(rectOf(editor.view.state)).not.toBeNull();
+      // The second reads the 301 cells of the column, each once, and no cell of the two others.
+      emptyStats.cells = 0;
       press(editor, 'Backspace');
+      expect(emptyStats.cells).toBe(301);
       const lines = newestView(editor.getDoc()).text.split('\n');
       expect(lines[0]).toBe('| a | c |');
       expect(lines[301]).toBe('| r299 | t299 |');

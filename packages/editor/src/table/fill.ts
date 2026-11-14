@@ -52,14 +52,18 @@ const fillOnTyping = Prec.lowest(
     if (!lacking) return tr;
     // One insertion at the caret: what typing, pasting and dropping make.
     const { head } = start.selection.main;
-    let only: { from: number; to: number; text: string } | null = null;
-    let count = 0;
+    const edits: { from: number; to: number; text: string }[] = [];
     tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
-      count++;
-      only = { from, to, text: inserted.toString() };
+      edits.push({ from, to, text: inserted.toString() });
     });
-    const change = only as { from: number; to: number; text: string } | null;
-    if (count !== 1 || !change || change.from !== head || change.to !== head || !change.text) {
+    const [change] = edits;
+    if (
+      edits.length !== 1 ||
+      !change ||
+      change.from !== head ||
+      change.to !== head ||
+      !change.text
+    ) {
       return tr;
     }
     // The text as a cell holds it: a pipe escaped, a line break a `<br>`, a tab a space.

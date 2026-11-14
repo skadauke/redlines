@@ -2177,7 +2177,9 @@ it, one per line:
     Track Changes off the typing is a plain edit, written in both halves of the move as any plain
     edit there is (Moving columns, above). With Track Changes on it is refused, and so are the
     pipes alone, with it on or off. The refusal names the person who made the move ("Bo Chen's
-    move of this row is pending. Decide it first."), and says "Your move" to that person.
+    move of this row is pending. Decide it first, or turn off Track Changes." for typed text, and
+    the same without the last words for the pipes alone, which turning it off would not write),
+    and says "Your move" to that person.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.

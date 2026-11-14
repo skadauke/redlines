@@ -97,8 +97,11 @@ export function fillCells(
       by === (ctx?.author.handle ?? plain.author?.handle)
         ? 'Your'
         : `${parsed.ledger.people.find((person) => person.handle === by)?.name ?? by}'s`;
+    // Typed text is written with Track Changes off, in both halves of the move; the pipes alone are
+    // refused either way, and turning it off would not help.
+    const way = ctx && typed !== '' ? ', or turn off Track Changes' : '';
     throw new EditError(
-      `${who} move of this row is pending. Decide it first.`,
+      `${who} move of this row is pending. Decide it first${way}.`,
       'no-legal-placement',
     );
   }

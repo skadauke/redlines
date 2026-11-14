@@ -8,6 +8,8 @@ import { runScopeHandlers } from '@codemirror/view';
 import {
   applyChanges,
   encodePayload,
+  newestView,
+  originalView,
   parse,
   readTables,
   tableEdit,
@@ -528,5 +530,152 @@ describe('a deleted table that is no table of its own', () => {
     const editor = load(doc);
     expect(ghostTables(editor)).toHaveLength(0);
     expect(dom(editor).querySelector('.rl-struck')?.textContent).toBe('| a | b | | c | d |');
+  });
+});
+
+describe('a ghost table of one column, of a header alone, and above a table of the document', () => {
+  /** A table of one column and `rows` rows, the header's and the body's. */
+  const column = (rows: number) =>
+    ['| H |', '| - |', ...Array.from({ length: rows - 1 }, (_, i) => `| r${i + 1} |`)].join('\n');
+
+  it('draws a table of one column as one, with a fold line one cell wide', () => {
+    const editor = load(byBo(`One.\n\n${deleted(column(12))}\n\nAfter.`));
+    const [ghost] = ghostTables(editor);
+    expect(ghost!.getAttribute('aria-colcount')).toBe('1');
+    expect(ghost!.dataset['columns']).toBe('1');
+    expect(ghost!.dataset['more']).toBe('4');
+    expect(rowsOf(ghost!)).toHaveLength(8);
+    expect(rowsOf(ghost!).map((row) => cellsOf(row).length)).toEqual(Array(8).fill(1));
+    expect(textsOf(ghost!)[0]).toEqual(['H']);
+    const fold = ghost!.querySelector('.rl-ghost-fold');
+    expect(fold?.textContent).toBe('and 4 more rows');
+    expect(fold?.querySelector('[role="cell"]')?.getAttribute('aria-colspan')).toBe('1');
+    // Short of eight rows there is no fold, and the one cell of each row is the whole row.
+    const few = ghostTables(load(byBo(`One.\n\n${deleted(column(3))}\n\nAfter.`)))[0]!;
+    expect(few.getAttribute('aria-colcount')).toBe('1');
+    expect(few.querySelector('.rl-ghost-fold')).toBeNull();
+    expect(textsOf(few)).toEqual([['H'], ['r1'], ['r2']]);
+  });
+
+  it('draws a table of a header alone as a row: the header, and no fold', () => {
+    const editor = load(byBo(`One.\n\n${deleted('| H1 | H2 |\n| -- | -- |')}\n\nAfter.`));
+    const [ghost] = ghostTables(editor);
+    expect(ghostTables(editor)).toHaveLength(1);
+    expect(ghost!.getAttribute('aria-rowcount')).toBe('1');
+    expect(ghost!.getAttribute('aria-colcount')).toBe('2');
+    expect(ghost!.dataset['rows']).toBe('1');
+    expect(ghost!.dataset['more']).toBe('0');
+    expect(rowsOf(ghost!).map((row) => row.classList.contains('rl-th'))).toEqual([true]);
+    expect(textsOf(ghost!)).toEqual([['H1', 'H2']]);
+    expect(ghost!.querySelector('.rl-ghost-fold')).toBeNull();
+    // Of one column, too.
+    const one = ghostTables(load(byBo(`One.\n\n${deleted('| H |\n| - |')}\n\nAfter.`)))[0]!;
+    expect(textsOf(one)).toEqual([['H']]);
+    expect(one.getAttribute('aria-colcount')).toBe('1');
+  });
+
+  it('is its own table above a table of the document of more columns: each with its own', () => {
+    // Nothing between them but the blank line that ends the deletion's marker.
+    const real = '| Plain | Table |\n| ----- | ----- |\n| One | 1 |\n| Two | 2 |';
+    const editor = load(byBo(`${deleted(column(3))}\n\n${real}\n\nAfter.`));
+    const [ghost] = ghostTables(editor);
+    const wrappers = [...dom(editor).querySelectorAll<HTMLElement>('.rl-tbl')];
+    expect(ghostTables(editor)).toHaveLength(1);
+    expect(wrappers).toHaveLength(1);
+    // The ghost is before the table, and in none of its boxes.
+    expect(
+      ghost!.compareDocumentPosition(wrappers[0]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(wrappers[0]!.contains(ghost!)).toBe(false);
+    expect(wrappers[0]!.closest('.rl-ghost-table')).toBeNull();
+    expect(ghost!.querySelector('.rl-tbl')).toBeNull();
+    // Each is the size of its own: one column and three rows, two columns and three rows.
+    expect(ghost!.getAttribute('aria-colcount')).toBe('1');
+    expect(wrappers[0]!.getAttribute('aria-colcount')).toBe('2');
+    expect(wrappers[0]!.getAttribute('aria-rowcount')).toBe('3');
+    expect(textsOf(ghost!)).toEqual([['H'], ['r1'], ['r2']]);
+    expect(wrappers[0]!.querySelectorAll(':scope > .cm-line')).toHaveLength(3);
+    expect(editor.view.state.doc.toString()).toContain('| One | 1 |');
+  });
+});
+
+describe('a file that is one table deleted whole', () => {
+  const only = byBo(`<!--del b2b2 ${encodePayload(SMALL)}-->`);
+  const keys = (editor: Editor, names: string[]) => {
+    const { view } = editor;
+    for (const name of names) {
+      expect(() =>
+        runScopeHandlers(
+          view,
+          new KeyboardEvent('keydown', { key: name, bubbles: true }),
+          'editor',
+        ),
+      ).not.toThrow();
+      const head = view.state.selection.main.head;
+      expect(head, name).toBeGreaterThanOrEqual(0);
+      expect(head, name).toBeLessThanOrEqual(view.state.doc.length);
+    }
+  };
+
+  it('has a caret, though the page has no line to put it on, and no key throws', () => {
+    const editor = load(only);
+    const { view } = editor;
+    // Nothing but the ghost table is drawn: the document has no line.
+    expect(ghostTables(editor)).toHaveLength(1);
+    expect(dom(editor).querySelector('.cm-line')).toBeNull();
+    // The caret is in the text all the same, and the page has a place for it: the editor's own box,
+    // between the blocks it holds.
+    const head = view.state.selection.main.head;
+    expect(head).toBeGreaterThanOrEqual(0);
+    expect(head).toBeLessThanOrEqual(view.state.doc.length);
+    expect(view.domAtPos(head).node).toBe(view.contentDOM);
+    keys(editor, ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Tab']);
+    expect(ghostTables(editor)).toHaveLength(1);
+    expect(editor.getDoc()).toBe(only);
+  });
+
+  it('takes text typed at the start before the deletion, plain with Track Changes off', () => {
+    const editor = load(only, { tracking: false });
+    const { view } = editor;
+    view.dispatch({ selection: { anchor: 0 } });
+    expect(() =>
+      view.dispatch({
+        changes: { from: 0, insert: 'x' },
+        selection: { anchor: 1 },
+        userEvent: 'input.type',
+      }),
+    ).not.toThrow();
+    const written = editor.getDoc();
+    expect(written.startsWith('x<!--del b2b2 ')).toBe(true);
+    // The deletion is still one deletion, and the newest text is what was typed.
+    expect(parse(written).marks.map((mark) => mark.kind)).toEqual(['del']);
+    expect(newestView(written).text).toBe('x\n');
+    // The text is no longer the only block, so the table is no longer drawn as a ghost table: its
+    // deleted text is struck in the line of what was typed.
+    expect(ghostTables(editor)).toHaveLength(0);
+    expect(view.state.selection.main.head).toBe(1);
+    keys(editor, ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
+  });
+
+  it('takes it as an insertion with Track Changes on, which rejecting takes out, the table back', () => {
+    const editor = load(only, { tracking: true });
+    const { view } = editor;
+    view.dispatch({ selection: { anchor: 0 } });
+    expect(() =>
+      view.dispatch({
+        changes: { from: 0, insert: 'x' },
+        selection: { anchor: 1 },
+        userEvent: 'input.type',
+      }),
+    ).not.toThrow();
+    const written = editor.getDoc();
+    expect(parse(written).marks.map((mark) => mark.kind)).toEqual(['ins', 'del']);
+    expect(newestView(written).text).toBe('x\n');
+    // Every change rejected: the typed text gone and the table as it was, whole.
+    expect(originalView(written).text).toBe(`${SMALL}\n`);
+    expect(ghostTables(editor)).toHaveLength(0);
+    // The caret stands after what was typed.
+    expect(written.slice(0, view.state.selection.main.head)).toMatch(/x$/);
+    keys(editor, ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
   });
 });

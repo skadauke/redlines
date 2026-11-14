@@ -45,6 +45,8 @@ describe('a table laid out as a table', () => {
     plain: PLAIN,
     'with a line break': '| a | b |\n| - | - |\n| x<br>y | d |',
     'with an empty cell': '| a | b |\n| - | - |\n|  | d |\n| e |  |',
+    'with an empty cell of one space': '| a | b |\n| - | - |\n| | d |\n| e | |',
+    'with an empty cell of no space': '| a | b | c |\n| - | - | - |\n| 1 || x |\n|||',
     ragged: '| a | b |\n| - | - |\n| c |\n| d | e | f |',
     'in a CRLF file': PLAIN.replaceAll('\n', '\r\n'),
     'a header alone': '| a | b |\n| - | - |',
@@ -68,12 +70,13 @@ describe('a table laid out as a table', () => {
       // The text outside the table is outside the wrapper.
       expect(wrapper?.textContent).not.toContain('Intro.');
       expect(wrapper?.textContent).not.toContain('After.');
-      // Nothing but a cell is a child of a row (CodeMirror's own buffers beside a widget, and its line-end
-      // break, aside: the theme hides them in a row with cells of its own), and the cells hold the
-      // row's whole text.
+      // Nothing but a cell is a child of a row, and the cells hold the row's whole text. (CodeMirror's own
+      // buffers beside a widget and its line-end break are children of a row only where the row lacks
+      // cells, whose widgets they stand beside; the theme hides them there.)
       for (const row of rows(wrapper!)) {
+        const lacking = row.querySelector(':scope > .rl-tc-missing') !== null;
         const children = [...row.children].filter(
-          (c) => !c.classList.contains('cm-widgetBuffer') && c.tagName !== 'BR',
+          (c) => !(lacking && (c.classList.contains('cm-widgetBuffer') || c.tagName === 'BR')),
         );
         expect(children.every((child) => child.classList.contains('rl-tc'))).toBe(true);
         expect(row.textContent).toBe(children.map((c) => c.textContent).join(''));

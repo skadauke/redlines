@@ -765,12 +765,106 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       }
     });
 
+    it('refuses a table next to a heading with closing #s or attributes in the words of any edit there', () => {
+      // (format §3.7, rule 6: such a heading takes no change at its end, so no marker can be written
+      // after it. The words are the ordinary ones, which say less than the others do.)
+      const WORDS = "A heading's closing #s and attributes take no change.";
+      for (const head of ['## Head ##', '## Head {#intro}']) {
+        for (const [shape, body] of [
+          ['right under it, with text after', `${head}\n${FRUIT}\n\nAfter.`],
+          ['right under it, ending the text', `${head}\n${FRUIT}`],
+          ['ending the text, a blank line between', `${head}\n\n${FRUIT}`],
+          [
+            'ending the text, a blank line before and after the heading',
+            `Intro.\n\n${head}\n\n${FRUIT}`,
+          ],
+        ] as const) {
+          const label = `${head}: ${shape}`;
+          const text = file(body);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(WORDS);
+          for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
+            expect(error.message, label).not.toBe(words);
+          }
+          // Track Changes off takes the table as text, as it does anywhere.
+          expect(shown(remove(text, null).after), label).toHaveLength(0);
+        }
+        // The two ways out: a blank line between them gives a table that has text after it its place,
+        // and a paragraph between them gives one that ends the text its place.
+        for (const fixed of [`${head}\n\n${FRUIT}\n\nAfter.`, `${head}\n\nText.\n\n${FRUIT}`]) {
+          const done = remove(file(fixed));
+          expect(shown(done.after), fixed).toHaveLength(0);
+          expectEveryOrderAlike(fixed, done.after, exactly);
+        }
+      }
+    });
+
     it('leaves the other refusals as they are', () => {
       // Another person's change is named before the shape of the neighbors is looked at.
       const text = file(`Intro.\n${FRUIT.replace('Pears', 'Pe<!--ins m2bd-->x<!--/m2bd-->ars')}`, {
         m2bd: 'bo',
       });
       expect(refusal(() => remove(text)).message).toBe(pending('Bo Chen'));
+    });
+
+    // What the words above are chosen by is the shape next to the table: a fence that opens the block
+    // after it, a table that ends the text after code or a rule, a table right under a line of text.
+    // A shape that looks like one and is none is refused as the ordinary deletion of a block is, in
+    // its words, unchanged.
+    it('gives the ordinary words, unchanged, for a shape that only looks like those', () => {
+      const ordinary = (text: string) => {
+        const table = readTables(text, parse(text))[0] as { from: number; to: number };
+        return refusal(() =>
+          trackedEdit(text, { from: table.from, to: table.to, insert: '' }, context(ada, IDS)),
+        );
+      };
+      const shapes: [string, string, string][] = [
+        // Code indented on both sides: the table is not at the end of the text, and no fence follows.
+        ['indented code on both sides', `    code\n\n${FRUIT}\n\n    more code`, 'inside-code'],
+        [
+          'indented code on both sides, under text',
+          `Intro.\n\n    code\n\n${FRUIT}\n\n    more code`,
+          'inside-code',
+        ],
+        // A fence that opens a list item is no block of its own after the table.
+        [
+          'a bulleted item that opens with a fence',
+          `Intro.\n\n${FRUIT}\n\n- \`\`\`\n  code\n  \`\`\``,
+          'unclosed-end',
+        ],
+        [
+          'a numbered item that opens with a fence',
+          `${FRUIT}\n\n1. \`\`\`\n   code\n   \`\`\``,
+          'unclosed-end',
+        ],
+      ];
+      for (const [name, body, code] of shapes) {
+        const text = file(body);
+        expect(readTables(text, parse(text)), name).toHaveLength(1);
+        const error = refusal(() => remove(text));
+        const generic = ordinary(text);
+        expect(error.message, name).toBe(generic.message);
+        expect(error.code, name).toBe(generic.code);
+        expect(error.code, name).toBe(code);
+        for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
+          expect(error.message, name).not.toBe(words);
+        }
+        // Track Changes off takes the table as text, as it does anywhere.
+        expect(shown(remove(text, null).after), name).toHaveLength(0);
+      }
+    });
+
+    it('deletes a table that has only code that is none of those next to it, in every order', () => {
+      for (const body of [
+        // Indented code after the table is no fence, and a quoted fence is a quote's.
+        `Intro.\n\n${FRUIT}\n\n    code`,
+        `Intro.\n\n${FRUIT}\n\n> \`\`\`\n> code\n> \`\`\``,
+      ]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
+        expectEveryOrderAlike(body, done.after, exactly);
+      }
     });
   });
 

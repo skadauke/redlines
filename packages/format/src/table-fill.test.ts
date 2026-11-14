@@ -282,19 +282,23 @@ describe('typing into a cell the row lacks', () => {
     });
 
     it('is refused with Track Changes on, and for the pipes alone, naming the mover', () => {
-      const words = "Bo Chen's move of this row is pending. Decide it first.";
+      // Typed text can be written with Track Changes off, and the words say so; the pipes alone are
+      // refused either way, and turning it off would not help.
+      const typing =
+        "Bo Chen's move of this row is pending. Decide it first, or turn off Track Changes.";
+      const pipes = "Bo Chen's move of this row is pending. Decide it first.";
       expect(() =>
         tableEdit(
           moved,
           { kind: 'fillCells', table, row: 2, col: 1, text: 'x' },
           context(ada, ['p5qm']),
         ),
-      ).toThrow(words);
+      ).toThrow(typing);
       expect(() =>
         tableEdit(moved, { kind: 'fillCells', table, row: 2, col: 1 }, context(ada)),
-      ).toThrow(words);
+      ).toThrow(pipes);
       expect(() => untrackedTableEdit(moved, { kind: 'fillCells', table, row: 2, col: 1 })).toThrow(
-        words,
+        pipes,
       );
       expect(() =>
         tableEdit(
@@ -302,6 +306,9 @@ describe('typing into a cell the row lacks', () => {
           { kind: 'fillCells', table, row: 2, col: 1, text: 'x' },
           context(bo, ['p5qm']),
         ),
+      ).toThrow('Your move of this row is pending. Decide it first, or turn off Track Changes.');
+      expect(() =>
+        tableEdit(moved, { kind: 'fillCells', table, row: 2, col: 1 }, context(bo)),
       ).toThrow('Your move of this row is pending. Decide it first.');
     });
 

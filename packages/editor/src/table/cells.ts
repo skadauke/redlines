@@ -122,14 +122,19 @@ export function selectedCells(state: EditorState): Cell[] {
   return rect ? cellsOfRect(rect) : [];
 }
 
+/** How many cells `cellIsEmpty` has read, for tests: the second ⌫ reads the cells it selects, once. */
+export const emptyStats = { cells: 0 };
+
 /**
- * Whether a cell has no text in the version being edited: it holds nothing, or only what the newest
- * text leaves out (a deletion, the markers round an insertion, a comment's anchor). It is what the
- * page shows of the cell, read from the stretches the caret steps over (`pastHidden`), so that it
- * costs the cell's own markers and never the table or the document. A cell that holds a line break
- * shows one, and has text in this sense.
+ * Whether a cell shows no text: it holds nothing, or only what the page leaves out of it (a deletion,
+ * the markers round an insertion, a comment's anchor; an author's own HTML comment too, in Clean and
+ * Simple, where it is hidden, and not in Redlines, which draws it as a note). It is what the page shows
+ * of the cell, read from the stretches the caret steps over (`pastHidden`), so that it costs the cell's
+ * own markers and never the table or the document. A cell that holds a line break shows one, and has
+ * text in this sense.
  */
 export function cellIsEmpty(state: EditorState, cell: Cell): boolean {
+  emptyStats.cells++;
   return pastHidden(state, cell.textFrom, true) >= cell.textTo;
 }
 
@@ -322,9 +327,9 @@ export function rectSpec(
 
 /**
  * Clears the text of `cells`, one change and one step to undo, and leaves the rectangle they are
- * of selected (a second ⌫ then has the cells to act on: when they are whole rows or columns, and
- * empty now, it deletes them, `keys.ts`). True also when there was nothing to clear: the key is
- * taken and writes nothing.
+ * of selected (a second ⌫ then has the cells to act on: when they are whole rows, whole columns or
+ * the whole table, and empty now, it deletes them, `keys.ts`). True also when there was nothing to
+ * clear: the key is taken and writes nothing.
  */
 export function clearCells(view: EditorView, cells: readonly Cell[]): boolean {
   const { state } = view;
