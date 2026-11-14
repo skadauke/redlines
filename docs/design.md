@@ -198,6 +198,11 @@ The window, on the desktop:
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
   did. Finder's Get Info changes the choice again.
+  Preferences › General › Quick Look previews of Markdown files opens System Settings at the list
+  of Quick Look extensions, where the app's preview (§10) is listed and can be turned off; a macOS
+  that doesn't take the link there opens the page nearest to it. The line is drawn only where
+  there is a preview to turn off: in the installed app (not run from the sources, nor from a disk
+  image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -231,10 +236,11 @@ The window, on the desktop:
   neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
-  default app for Markdown, and installing the `redlines` command line), Appearance (Match
-  System, Light or Dark, the theme, zoom and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, whether Track Changes starts on, whether line breaks show their
-  marks, §5.5, and whether the word count shows) and Agents (§8.6). Changes apply at once.
+  default app for Markdown, the Quick Look preview of Markdown files, and installing the
+  `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  starts on, whether line breaks show their marks, §5.5, and whether the word count shows) and
+  Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -1697,8 +1703,9 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - **Nothing to install.** macOS registers the extension the first time the app runs from
     Applications and removing the app removes it. It needs macOS 13.3, the first whose
     JavaScriptCore has the regular-expression lookbehind that the format library's patterns use
-    (its array methods came with 13.0). System Settings › General › Login Items & Extensions ›
-    Quick Look turns it off.
+    (its array methods came with 13.0). System Settings lists it with the other Quick Look
+    extensions, on, and turns it off; Preferences › General › Quick Look previews of Markdown
+    files has a button that opens that list (§5.1).
   - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
     no type for R Markdown and Quarto: a file of either gets a type made from its extension
     (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the

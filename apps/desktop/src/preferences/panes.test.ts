@@ -350,6 +350,100 @@ describe('the panes', () => {
     expect(update).toHaveBeenCalled();
   });
 
+  describe('the Quick Look row', () => {
+    const LABEL = 'Quick Look previews of Markdown files';
+
+    it('is drawn after the default app, where the app can open the settings', () => {
+      const labels = rowLabels(
+        draw('general', { openQuickLookSettings: () => Promise.resolve() }).container,
+      );
+      expect(labels.indexOf(LABEL)).toBe(labels.indexOf('Default app for Markdown') + 1);
+      expect(labels.indexOf('Command line')).toBe(labels.indexOf(LABEL) + 1);
+    });
+
+    it('is not drawn where there is no Quick Look to turn off', () => {
+      expect(rowLabels(draw('general').container)).not.toContain(LABEL);
+    });
+
+    /** What the line says of where the preview is turned off, which names no menu of System Settings. */
+    const HINT =
+      'Redlines’ preview is one of the Quick Look extensions in System Settings, where it can be turned off.';
+
+    it('opens System Settings from its button, and says where to turn the preview off', () => {
+      const open = vi.fn(() => Promise.resolve());
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const row = container.querySelector<HTMLElement>(`[data-row="${LABEL}"]`);
+      const status = row?.querySelector('[role="status"]');
+      expect(status?.textContent).toBe(HINT);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      expect(button.textContent).toBe('Open System Settings');
+      button.click();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+      expect(status?.textContent).toBe(HINT);
+    });
+
+    it('says why when it could not, with the hint still, and the next press starts again', async () => {
+      const open = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error('System Settings didn’t open.'))
+        .mockResolvedValue(undefined);
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      button.click();
+      await vi.waitFor(() =>
+        expect(status?.textContent).toBe(`System Settings didn’t open. ${HINT}`),
+      );
+      expect(status?.classList.contains('rl-pref-failure')).toBe(true);
+      button.click();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+      expect(status?.textContent).toBe(HINT);
+    });
+
+    it('shows a refusal that is not an Error, as the app’s commands give it', async () => {
+      // A command that fails rejects with the string that its Rust function returned.
+      const open = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue('Quick Look previews are the Mac’s.');
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      control<HTMLButtonElement>(container, LABEL, 'button').click();
+      await vi.waitFor(() =>
+        expect(status?.textContent).toBe(`Quick Look previews are the Mac’s. ${HINT}`),
+      );
+    });
+
+    it('takes one press at a time, so that a late answer never lands on another press', async () => {
+      let answer: (outcome: { failed: boolean }) => void = () => {};
+      const open = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            answer = ({ failed }) => (failed ? reject(new Error('Too late.')) : resolve());
+          }),
+      );
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      button.click();
+      button.click();
+      button.click();
+      expect(open).toHaveBeenCalledTimes(1);
+      answer({ failed: true });
+      await vi.waitFor(() => expect(status?.textContent).toBe(`Too late. ${HINT}`));
+      // Once it has answered, the next press goes through.
+      button.click();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(status?.textContent).toBe(HINT);
+      answer({ failed: false });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      button.click();
+      expect(open).toHaveBeenCalledTimes(3);
+      expect(status?.textContent).toBe(HINT);
+    });
+  });
+
   describe('the Command line row', () => {
     /** The row's line under its buttons, and its buttons, by their words. */
     const commandLine = (container: HTMLElement) => {
