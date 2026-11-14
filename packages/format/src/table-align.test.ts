@@ -4807,6 +4807,21 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expect(Object.keys(parse(accepted).ledger.marks)).toEqual(['k3x9']);
     });
 
+    it('accepts all, and rejects all only once the alignment change is accepted', () => {
+      // Accept all writes the newest table, the mark gone with its entry.
+      const accepted = applyChanges(merged, acceptAll(merged));
+      expect(trim(accepted)).toBe('| a |\n| - |\n| c |\n| e` |');
+      expect(parse(accepted).marks).toEqual([]);
+      expect(Object.keys(parse(accepted).ledger.marks)).toEqual([]);
+      // Reject all rejects the deletion, which would carry the mark between the two backticks: refused in the words of
+      // every decision that would hide a change, which say to decide the changes next to it first. Nothing is written.
+      expect(said(() => rejectAll(merged))).toBe(HIDES);
+      // With the alignment change accepted first, both are possible, and rejecting all gives back the table as it was.
+      const first = decide(merged, accept, 'k3x9');
+      expect(trim(applyChanges(first, acceptAll(first)))).toBe('| a |\n| - |\n| c |\n| e` |');
+      expect(trim(applyChanges(first, rejectAll(first)))).toBe(trim(base));
+    });
+
     it('is possible once the alignment change is decided, and reads alike in every order', () => {
       const first = decide(merged, accept, 'k3x9');
       const done = decide(first, reject, 'c2dd');
