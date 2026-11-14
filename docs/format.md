@@ -3251,6 +3251,11 @@ same values.
   text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
   Redlines opens the file in it, in place of the markup view that the person has remembered, which
   opens the files that record none.
+  - **Only a document that has redlines opens in it:** pending changes, highlights or comments.
+    A new document, a plain Markdown file and a file whose ledger holds nothing to show, such as one
+    that only records how it was left, open in Clean, whatever view was used last and whatever the
+    ledger says, since there is nothing for another view to show. A file that gains redlines is
+    saved with its view, and opens in it.
   - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
     source, and a save made in Raw leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
@@ -3262,7 +3267,7 @@ same values.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
     file with no changes or comments, Clean, Redlines and Simple look the same anyway, except that
-    only the full markup draws ordinary HTML comments (design §5.3).
+    only the full markup draws ordinary HTML comments (design §5.3), and it opens in Clean.
   - A value other than these three is dropped with a warning, as an unknown `tracking` is.
   - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
     of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its

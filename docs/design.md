@@ -415,11 +415,12 @@ Raw shows them.
 
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
-A document opens in the view it was saved in, which its ledger records
-([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
-full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
-in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
+A document that has redlines (pending changes, highlights or comment threads) opens in the view it
+was saved in, which its ledger records ([format §5.6](format.md#56-settings)): `view: clean` opens it
+in Clean, `view: redlines` in the full markup and `view: simple` in the simple look. One that
+records none opens in Redlines, in the look remembered. A document that has none, a new document or
+a plain Markdown file, always opens in Clean, whatever view was used last and whatever its ledger
+says: there is nothing for Redlines to show. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
