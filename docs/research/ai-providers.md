@@ -246,7 +246,7 @@ Redlines, with its own agent loop, is for later. See
    - **GitHub Copilot SDK** for several models on one subscription.
    - **Keys and local models:** API keys (including Max and Team API credits), AWS Bedrock,
      Google Vertex, Azure, OpenRouter, Ollama, LM Studio, llama.cpp.
-2. Edits always go through Redlines' MCP tools, so they follow the agent's level (Ask, Suggest or
+2. Edits always go through Redlines' MCP tools, so they follow the agent's level (Propose, Suggest or
    Auto, as defined in the design spec). Agents' own file-editing tools are turned off, and
    Redlines compares the folder before and after each turn as a safety net.
 3. **Animation:** live where tool input streams (Claude Code, the direct APIs, llama.cpp);

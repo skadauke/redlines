@@ -31,8 +31,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export interface McpOptions {
+  /**
+   * The only tools offered, by name. `tools/list` names these and no others, and a call of any
+   * other is an error result that says it isn't there, for the agent to recover from: a
+   * question's toolbox is the tools that read (`ASK_TOOLS`). Default: all of them.
+   */
+  only?: readonly string[];
+}
+
 /** Answers lines of MCP for the tools that act on `ctx`. */
-export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | null> {
+export function answerMcp(
+  ctx: ToolContext,
+  options: McpOptions = {},
+): (line: string) => Promise<string | null> {
+  const offered = options.only
+    ? TOOL_DEFINITIONS.filter(({ name }) => options.only?.includes(name))
+    : TOOL_DEFINITIONS;
   return async (line) => {
     try {
       return await answer(line);
@@ -74,12 +89,20 @@ export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | 
       case 'ping':
         return result(id, {});
       case 'tools/list':
-        return result(id, { tools: TOOL_DEFINITIONS });
+        return result(id, { tools: offered });
       case 'tools/call': {
         if (!isRecord(params) || typeof params['name'] !== 'string') {
           return failure(id, INVALID_PARAMS, 'tools/call needs the name of a tool');
         }
-        const done = await callTool(ctx, params['name'], params['arguments']);
+        const name = params['name'];
+        // The agent's own program may know a tool it was never offered, from its flags.
+        if (!offered.some((tool) => tool.name === name)) {
+          return result(id, {
+            content: [{ type: 'text', text: `The tool ${name} isn't available here.` }],
+            isError: true,
+          });
+        }
+        const done = await callTool(ctx, name, params['arguments']);
         return result(id, { content: [{ type: 'text', text: done.text }], isError: done.isError });
       }
       default:

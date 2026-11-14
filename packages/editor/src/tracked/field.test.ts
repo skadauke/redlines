@@ -148,6 +148,26 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
   });
 
+  it('brings back the look a document opened in, which its ledger may have chosen over the look remembered', () => {
+    // `view: redlines` opens the full markup, and the app remembers the simple look: the menu goes
+    // to Clean and back to what was shown, with nothing in between to have told the editor of it.
+    const saved = marked.replace('version: 1\n', 'version: 1\nview: redlines\n');
+    const editor = load(saved, { markupView: 'simple' });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+    editor.showView('clean');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+    // The same for the next document opened, and a document with no view of its own starts over.
+    editor.setDoc(saved);
+    editor.showView('raw');
+    editor.showView('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+    editor.setDoc(marked);
+    editor.showView('clean');
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('starts another document from the look chosen, whatever was shown in the one before', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });

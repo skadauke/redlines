@@ -3,7 +3,8 @@ import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
-import { type BarGeometry, barClickHandlers, barSwitch, type ViewKeys } from './bar-switch.ts';
+import { barMeasure, type BarMeasure, hotBar } from './bar-layer.ts';
+import { type BarGeometry, barClickHandlers, barSwitch } from './bar-switch.ts';
 import { viewModeField } from './field.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -33,23 +34,19 @@ const layout: BarGeometry = {
     const element = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
     if (!element) return null;
     const top = (n - 1) * h - view.scrollDOM.scrollTop;
-    return { element, pos: line.from, rect: { left: LEFT, top, bottom: top + h } };
+    return { element, pos: line.from, from: line.from, rect: { left: LEFT, top, bottom: top + h } };
   },
   lineTop: (view, pos) =>
     (view.state.doc.lineAt(pos).number - 1) * heightIn(view) - view.scrollDOM.scrollTop,
 };
 
-function load(
-  options: Partial<EditorOptions> = {},
-  hintDelay = 400,
-  keys: ViewKeys = { simple: '⌃S', redlines: '⌃R' },
-) {
+function load(options: Partial<EditorOptions> = {}) {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, {
     doc,
     author: ada,
-    extensions: [barSwitch({ geometry: layout, hintDelay, keys })],
+    extensions: [barSwitch({ geometry: layout })],
     ...options,
   });
   open.push(editor);
@@ -178,36 +175,32 @@ describe('the click on a change bar', () => {
     expect(viewOf(editor)).toBe('redlines');
   });
 
-  it('puts rl-bar-hot and the hint on the hovered bar and takes them away on leave', async () => {
-    const editor = load({ view: 'simple' }, 5);
+  it('makes the bar under the pointer wider, with a hand, and takes both away on leave', () => {
+    const editor = load({ view: 'simple' });
     const { scrollDOM } = editor.view;
-    const hot = () => editor.view.contentDOM.querySelectorAll('.rl-bar-hot').length;
-    const hint = () => editor.view.dom.ownerDocument.querySelector('.rl-bar-hint')?.textContent;
+    const hot = () => editor.view.state.field(hotBar)?.from ?? null;
+    const line2 = editor.view.state.doc.line(2).from;
     scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
-    expect(hot()).toBe(1);
+    expect(hot()).toBe(line2);
     expect(scrollDOM.style.cursor).toBe('pointer');
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(hint()).toBe('Show full markup⌃R');
     scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
-    expect(hot()).toBe(0);
-    expect(hint()).toBeUndefined();
+    expect(hot()).toBeNull();
     expect(scrollDOM.style.cursor).toBe('');
 
     editor.setViewMode('redlines');
     scrollDOM.dispatchEvent(mouse('mousemove', { x: ON_BAR.x, y: 35 }));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(hint()).toBe('Show simple look⌃S');
+    expect(hot()).toBe(line2);
     // A move off the target.
     scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
-    expect(hot()).toBe(0);
+    expect(hot()).toBeNull();
   });
 
-  it('names no keys in the hint when the host gives none', async () => {
-    const editor = load({ view: 'simple' }, 5, {});
+  it('shows no hint, however long the pointer rests on a bar', async () => {
+    const editor = load({ view: 'simple' });
     editor.view.scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(document.querySelector('.rl-bar-hint')?.textContent).toBe('Show full markup');
-    expect(document.querySelector('.rl-bar-hint-keys')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(document.querySelector('.rl-bar-hint')).toBeNull();
+    expect(document.querySelector('.cm-tooltip')).toBeNull();
   });
 
   it('keeps the line when only the switch makes an ancestor scroll', () => {
@@ -241,6 +234,135 @@ describe('the click on a change bar', () => {
     expect(around.scrollTop).toBe(10);
     expect(editor.view.scrollDOM.scrollTop).toBe(0);
   });
+  describe('the bar of a paragraph that wraps over three screen lines, the second holding a change', () => {
+    const para = 'One two three four five six seven eight nine ten eleven twelve ';
+    const wrapped = `${para}<!--ins b2b2-->thirteen<!--/b2b2--> fourteen fifteen sixteen.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n`;
+    const idx = wrapped.indexOf('thirteen');
+    const end = wrapped.indexOf('\n\n');
+    const breaks = [idx - 10, idx + 20];
+    /** Screen lines 24 px high from the top, the paragraph's left edge at 100. */
+    const measure: BarMeasure = {
+      screenLines: (_view, line) => ({
+        left: LEFT,
+        lines: [
+          { from: line.from, to: breaks[0]!, top: 0, bottom: 24 },
+          { from: breaks[0]!, to: breaks[1]!, top: 24, bottom: 48 },
+          { from: breaks[1]!, to: end, top: 48, bottom: 72 },
+        ],
+      }),
+    };
+
+    /** The editor with its own real geometry, the layout stood in for by the measure and three stubs. */
+    function loadWrapped(view: 'simple' | 'redlines' = 'simple', page: BarMeasure = measure) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: wrapped,
+        author: ada,
+        view,
+        extensions: [barMeasure.of(page)],
+      });
+      open.push(editor);
+      Object.assign(editor.view.contentDOM, {
+        getBoundingClientRect: () => ({ left: LEFT, right: LEFT + 600, top: 0, bottom: 72 }),
+      });
+      Object.assign(editor.view, {
+        posAtCoords: ({ y }: { y: number }) => (y < 24 ? 0 : y < 48 ? idx : idx + 25),
+      });
+      return editor;
+    }
+    const press = (editor: Editor, y: number) => click(editor, { x: LEFT - 23, y });
+
+    it('is a target only beside the screen line that holds the change', () => {
+      for (const [y, switches] of [
+        [10, false],
+        [30, true],
+        [47, true],
+        [60, false],
+      ] as const) {
+        const editor = loadWrapped();
+        expect(press(editor, y), `a press at ${y}`).toBe(switches);
+        expect(viewOf(editor), `a press at ${y}`).toBe(switches ? 'redlines' : 'simple');
+      }
+    });
+
+    it('widens only that bar when the pointer is on it', () => {
+      const editor = loadWrapped();
+      const { scrollDOM } = editor.view;
+      scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 10 }));
+      expect(editor.view.state.field(hotBar)).toBeNull();
+      scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 30 }));
+      expect(editor.view.state.field(hotBar)).toEqual({ from: breaks[0] });
+      scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 60 }));
+      expect(editor.view.state.field(hotBar)).toBeNull();
+    });
+
+    it('measures nothing for a pointer beside a line that holds no change', () => {
+      // A plain line above the paragraph: it is measured only where it holds a change, since a long
+      // paragraph is costly to measure and the pointer crosses many lines.
+      const plain = 'Plain line.\n\n';
+      const measured: number[] = [];
+      const counting: BarMeasure = {
+        screenLines: (view, line) => {
+          measured.push(line.from);
+          return measure.screenLines(view, line);
+        },
+      };
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: plain + wrapped,
+        author: ada,
+        view: 'simple',
+        extensions: [barMeasure.of(counting)],
+      });
+      open.push(editor);
+      Object.assign(editor.view.contentDOM, {
+        getBoundingClientRect: () => ({ left: LEFT, right: LEFT + 600, top: 0, bottom: 72 }),
+      });
+      Object.assign(editor.view, { posAtCoords: () => 3 });
+      editor.view.scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 10 }));
+      expect(measured).toEqual([]);
+      // Beside a line that holds one it measures, to know which screen lines the bar is beside.
+      Object.assign(editor.view, { posAtCoords: () => plain.length + idx });
+      editor.view.scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT - 23, y: 30 }));
+      expect(measured).toEqual([plain.length]);
+    });
+
+    it('tells the handlers which piece of the bar was clicked, so the one beside those screen lines', () => {
+      const asked: [number, string | undefined, { from: number; to: number } | undefined][] = [];
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: wrapped,
+        author: ada,
+        view: 'simple',
+        extensions: [
+          barMeasure.of(measure),
+          barClickHandlers.of((_view, pos, mark, span) => {
+            asked.push([pos, mark, span]);
+            return true;
+          }),
+        ],
+      });
+      open.push(editor);
+      Object.assign(editor.view.contentDOM, {
+        getBoundingClientRect: () => ({ left: LEFT, right: LEFT + 600, top: 0, bottom: 72 }),
+      });
+      Object.assign(editor.view, { posAtCoords: () => idx });
+      click(editor, { x: LEFT - 23, y: 30 });
+      // The start of the line, and the part of it that the bar's piece stands beside.
+      expect(asked).toEqual([[0, undefined, { from: breaks[0], to: breaks[1] }]]);
+    });
+
+    it('works the same in Redlines, where the bar is just as short', () => {
+      const editor = loadWrapped('redlines');
+      expect(press(editor, 10)).toBe(false);
+      expect(press(editor, 30)).toBe(true);
+      expect(viewOf(editor)).toBe('simple');
+    });
+  });
+
   describe('a struck block’s bar (a block deleted whole, drawn as a block)', () => {
     const BLOCK_TOP = 30;
     const struckDoc =

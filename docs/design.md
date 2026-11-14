@@ -355,11 +355,11 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
   off, so the View menu always offers the same three views. A document without redlines looks
   nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
   the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
-  short), the same text as Clean with a change bar beside each line that has a pending change, in
-  its author's color, and the comments with their notes: deletions are hidden, and inserted and
-  reformatted text is plain (Word's Simple Markup). The click switches from the one to the other,
-  with the line where it was. The simple look is no view of its own: the View menu has no entry for
-  it and no key shows it, so the menu says "Redlines" in both looks.
+  short), the same text as Clean with a change bar beside each screen line that has a pending
+  change (§5.5), in its author's color, and the comments with their notes: deletions are hidden,
+  and inserted and reformatted text is plain (Word's Simple Markup). The click switches from the
+  one to the other, with the line where it was. The simple look is no view of its own: the View
+  menu has no entry for it and no key shows it, so the menu says "Redlines" in both looks.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
@@ -436,11 +436,17 @@ mode has no counterpart in the desktop app.
   the machine), the later-met takes the next free color in that document only. Agents get colors of
   their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
   colors repeat.
-- **Change bars** in the left margin mark each line with a pending change, in its author's color,
-  or gray when several people changed the line. In Redlines a click on a bar switches between its
-  two looks, the full markup and the simple look, and is the only way to choose one: the bar is a
-  target 24 px wide, it widens under the pointer, and its hint names the look a click gives. Printing draws the
-  bars as a left border, which prints.
+- **Change bars** in the left margin mark the screen lines that hold a pending change, in its
+  author's color, or gray when several people changed the same screen line: a paragraph that wraps
+  over many lines gets a bar only beside those that hold part of a change, one word on one line
+  marks that line alone, and the bars are drawn again when the text wraps differently (a resize, a
+  zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
+  the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
+  their own. In Redlines a click on a bar switches between its two looks, the full markup and the
+  simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
+  lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
+  the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");
@@ -485,10 +491,11 @@ mode has no counterpart in the desktop app.
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
   next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
   Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
-  the simple look closes it, because a person who chooses to read has stopped deciding, and while
-  it is open a click on a change bar opens that change's card in place of switching the look. It
-  floats at the bottom of the window and closes with Esc or its close button; without it, a
-  change's card still accepts or rejects that change. It holds:
+  the simple look closes it, because a person who chooses to read has stopped stepping through
+  changes, and while it is open a click on a change bar opens that change's card in place of
+  switching the look. It floats at the bottom of the window and closes with Esc or its close
+  button; without it, a change's card, or its note in the rail (§5.7, in the simple look too),
+  still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
@@ -530,8 +537,29 @@ mode has no counterpart in the desktop app.
     Adding a comment in Clean switches to Redlines, as a tracked change does. In the simple look
     a change's card doesn't open on hover or on a click in the text, because the text reads as
     accepted; the bar, the note and the review bar are the ways in. Accept and Reject on a note
-    in the simple look show the change in the full markup; nothing is decided where its old text
-    is hidden.
+    decide it in place, in the simple look as in Redlines, in one step to undo, and the view and
+    the scroll stay as they were; so that the decision isn't blind, the note says what it decides
+    in the card's words ("Replaced 'March' with 'April'") where the page shows no old text.
+  - **The notes follow the view.** One note is level with its anchor and the others stack around
+    it: the ones after it go down past it, and the ones before it go up, past the top of the
+    screen if need be, never past the top of the page, where they stack from the top. So where
+    many comments crowd a section, the note level with the top of the screen is the one the text
+    there is about, and not one stacked down from far above. The one level with its anchor is the
+    selected note (clicked, or with the caret in its anchor) while its anchor is in view, else the
+    first note whose anchor is; with no anchor in view, the first note below the view, else the
+    last. A comment being written is always the one, and stays where it is while the person types
+    and scrolls. As the page scrolls, the note that is level with its anchor changes with the first
+    anchor in view, and the notes slide into place in a moment, as in Google Docs; they slide only
+    then, and not while a keystroke or a resize moves the text, and not at all under Reduce Motion.
+    Selecting a note brings it level with its anchor and moves the others out of its way. The dots
+    of a narrow window follow the same rule. A scroll places the notes again from what was last
+    measured, only when another note is the one, and writes the notes within a screen of the page,
+    and the rest as the page comes near them, so that it stays cheap in a long document. A
+    resolved note gives way as before: it is never the one that keeps its anchor's height. The
+    page is as long as the notes need when the first is level with its anchor, where they reach
+    their lowest, as it was before the notes followed the view, so that a crowded end of a document
+    leaves room under its text; it doesn't shrink as the page scrolls, which would move the page
+    under the person at its end, and grows only where a resolved note, shown, goes lower.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
@@ -769,6 +797,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
@@ -876,9 +905,9 @@ a new email under the same name becomes an alias in the ledger
 
 **Should (v1 if time allows):**
 
-- a selection toolbar: Comment, Suggest, Ask agent, and formatting. Written as the formatting
-  palette (§5.1), which opens from a handle and on right-click rather than floating over a
-  selection by itself; Suggest and the agent's fix, shorten and rephrase are not in it yet;
+- a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
+  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
@@ -1083,7 +1112,7 @@ written.
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
-| `ai`         | The chat panel, Ask agent, agents in comment threads, agent levels (§8)      | Agents                     |
+| `ai`         | The chat panel, Ask, agents in comment threads, agent levels (§8)            | Agents                     |
 | `agents`     | The @ picker and the runs a posted mention starts (§8.6)                     | Agents                     |
 | `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
@@ -1321,11 +1350,11 @@ Redlines works the same with or without git. Its git support has two parts.
   injection hides.
 - **AI is off in a folder until someone turns it on.**
 
-### 8.2 Agent levels: Ask, Suggest, Auto
+### 8.2 Agent levels: Propose, Suggest, Auto
 
 | Level       | What the agent's edits become                                                                                                                        | Suits                          |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **Ask**     | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
+| **Propose** | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
 | **Suggest** | Tracked suggestions in the agent's name, for anyone to accept or reject                                                                              | Shared documents and review    |
 | **Auto**    | Direct edits, as when you type with tracking off. They appear as they are written, and the run ends with "Claude changed 3 paragraphs · Review · Undo" | Your own drafts                |
 
@@ -1373,7 +1402,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
   changes by the agent (§7.3), flagging any damaged markers.
 
 **Surfaces:** the MCP server and the `redlines` command line; @mentions in comment threads; the
-chat panel; and Ask agent on a selection.
+chat panel; and Ask, a question about a selection (§8.5).
 
 **Agent runs.** Each request, a chat turn or a mention, is one run. Each edit in it (one `str_replace`) that makes several marks gives them a `group` of their own, so the marks of one edit are one suggestion and two edits of a run never are.
 
@@ -1408,9 +1437,46 @@ Agent edits are animated, like a streaming chat answer.
 - **A chat panel** next to the comment rail. Its scope is the selection, the document, or the
   folder (a project or repository).
 - **Answers cite the text,** with links to ranges in the document. Chat never shows raw markers.
-- **Edits follow the agent's level** (§8.2). In Ask, the panel shows each proposal as a diff with
-  Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
-- **Ask agent** on a selection (fix, shorten, rephrase) works without opening the panel.
+- **Edits follow the agent's level** (§8.2). In Propose, the panel shows each proposal as a diff
+  with Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
+- **Ask** is a question about a selection, answered beside it without opening the panel:
+  - **Starting it.** Select text and choose Ask: ⌥⌘A, Format › Ask…, or the Ask item of the
+    formatting palette (§5.1) beside Add Comment. A small box opens at the selection for the
+    question, and an empty first question means "Explain this in the context of the document." (A
+    Return in an empty follow-up field asks nothing.) The default agent answers, and @ picks
+    another, as in a comment. Not in Raw, where a selection
+    holds markers that no answer could be about. (Fix, shorten and rephrase are not part of it.)
+  - **The same access and guardrails as a comment's run:** the agent reads what the Agents pane
+    allows (the document, or its folder), the first time it is asked in a folder the same question
+    is put in the bubble, and what the document holds is untrusted, as for every run.
+  - **Read-only.** The agent is given the tools that read (`view` and `status`) and nothing that
+    writes, the document it reads refuses a write, and its answer is its last message: nothing is
+    written to the file or its ledger. Each run still writes its log. That guarantee is the
+    Redlines tools'. For the agents Redlines can hold to their reading (Claude Code and Codex) the
+    agent itself is read-only too, while an agent the person added may act on its own, as its own
+    settings allow, which Redlines can't stop: its first-run question says so, and does not say
+    that it changes nothing.
+  - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
+    live line while it works (what it is doing, with Stop), then the answer. The selection stays
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going. A
+    failure stays on the line with its log, and with a button that opens Preferences where they
+    can put it right (the agent is signed out or too old), as a comment's run does.
+  - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
+    "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
+    an agent's `comment` finds its quote, and makes the marker a link that selects the passage. A
+    quote links only where its words stand as words ("lien" is not in "alien", and a quote of one
+    character is no link), and where they are in several places the link goes to the one nearest
+    the selection. A quote that is not in the document is plain text with no link, which tells a
+    made-up citation from a real one, and says "not found in the document" to a screen reader.
+  - **A follow-up** has a field of its own, and is answered with the exchange so far as context. It
+    may name another agent: each answer is the reply of the agent that gave it, in the bubble and
+    in Make Comment. The earlier answers go to the agent as quoted data, never as instructions.
+  - **Keeping an answer.** Make Comment makes a thread on the selection, as one step to undo: the
+    first question is the person's comment, its answer the agent's reply in the agent's name, and
+    each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
+    reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. Copy puts
+    the answer's text on the clipboard. Nothing is kept unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
@@ -1739,8 +1805,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 
 ## 14. Open questions
 
-1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Ask, Suggest
-   or Auto for agents, following their person by default.
+1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Propose,
+   Suggest or Auto for agents, following their person by default.
 2. **AI engines** (§8.6), to confirm with the vendors before release:
    - whether an open-source publisher must accept Anthropic's Commercial Terms, and whether its
      legal page supersedes the Agent SDK's note against third-party claude.ai sign-in;
