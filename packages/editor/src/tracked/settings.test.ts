@@ -324,18 +324,35 @@ describe('Track Changes, recorded when the file is saved (format §5.6)', () => 
     expect(editor.getDoc()).toBe(reviewed());
   });
 
-  it('forgets a choice when the file is loaded or reloaded: the file says what it says', () => {
+  it('forgets a choice when another file is loaded, which says what it says', () => {
     const editor = load(reviewed(), { saveTracking: true });
-    editor.setTracking(true);
-    editor.reloadDoc(reviewed('history: full'));
-    caretBefore(editor, 'word');
-    type(editor, 'x');
-    editor.recordTracking();
-    expect(editor.getParsed().ledger.tracking).toBeUndefined();
     editor.setTracking(true);
     editor.setDoc(reviewed());
     editor.recordTracking();
     expect(editor.getDoc()).toBe(reviewed());
+  });
+
+  it('keeps a choice when the file is reloaded without asking for it, for the next save', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(true);
+    editor.reloadDoc(reviewed('history: full'));
+    expect(editor.getUiState().tracking).toBe(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBe('everyone');
+  });
+
+  it('gives up a choice that a reloaded file answers by asking for Track Changes itself', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(false);
+    editor.reloadDoc(reviewed('tracking: everyone', 'history: full'));
+    // The file newly asks, so the window follows it, and nothing is left to record.
+    expect(editor.getUiState().tracking).toBe(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBe('everyone');
   });
 
   it('is on when the file says so, whoever turned it on', () => {

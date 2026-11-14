@@ -274,6 +274,32 @@ describe('recordTracking (format §5.6)', () => {
     expect(applyChanges(twice, recordTracking(twice, false))).toBe(withLines('history: full'));
   });
 
+  it('leaves a value that reads as it should as it is, and writes the line where there is none to change', () => {
+    const quoted = withLines('tracking: "everyone"');
+    expect(recordTracking(quoted, true)).toEqual([]);
+    expect(applyChanges(quoted, recordTracking(quoted, false))).toBe('Body.\n');
+    // A ledger of another tool's, with no version line, takes the line after the one that opens it.
+    const bare =
+      'Body.\n\n<!-- redlines\nmarks:\n  k3x9: {by: ada, at: 2026-10-13T22:30Z}\npeople:\n  ada: {name: Ada}\n-->\n';
+    const on = applyChanges(bare, recordTracking(bare, true));
+    expect(on).toBe(bare.replace('<!-- redlines\n', '<!-- redlines\ntracking: everyone\n'));
+    expect(applyChanges(on, recordTracking(on, false))).toBe(bare);
+    // A ledger whose lines end in a CR alone can't be read (§5.1), and is left as it is.
+    const cr = fixture.replaceAll('\n', '\r');
+    expect(recordTracking(cr, true)).toEqual([]);
+    expect(recordTracking(cr, false)).toEqual([]);
+  });
+
+  it('does not read a line separator inside a value as a line of the ledger', () => {
+    const text = withLines('history: full').replace(
+      'history: full',
+      'history: full\nnote: "a\u2028tracking: x"',
+    );
+    const on = applyChanges(text, recordTracking(text, true));
+    expect(on).toContain('note: "a\u2028tracking: x"');
+    expect(on).toContain('\ntracking: everyone\n');
+  });
+
   it('leaves a ledger it cannot read as it is, and says nothing', () => {
     const unreadable = 'Body.\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
     expect(recordTracking(unreadable, true)).toEqual([]);

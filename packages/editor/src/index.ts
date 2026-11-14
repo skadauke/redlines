@@ -414,7 +414,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const { state } = view;
     const joins = undoDepth(state) > 0;
     // With every step taken back there is none to join, and a change outside the history would
-    // put the ledger out of step with the steps to redo: the next save records it.
+    // put the ledger out of step with the steps to redo: a save made while they remain leaves the
+    // file as the history has it, and the first save after a new edit records it.
     if (!joins && redoDepth(state) > 0) return;
     view.dispatch({
       changes,
@@ -441,9 +442,6 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tellNewPeople();
     },
     reloadDoc: (doc) => {
-      // The file is as another tool wrote it: no choice of a person's is still to be recorded in it,
-      // and a window's Track Changes that it no longer asks for stays as it is (format §5.6).
-      trackingChosen = null;
       const next = loadFile(doc);
       const { state } = view;
       const asked = state.field(parsedField).ledger.tracking === 'everyone';
@@ -461,14 +459,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         userEvent: 'reload',
       });
       // A file that newly asks everyone to track changes is read as one that is opened: Track
-      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364). One
-      // that stops asking leaves it as it is, so that nobody's tracking is switched off under them.
+      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364), and
+      // no choice is left to record. One that stops asking leaves it as it is, so that nobody's
+      // tracking is switched off under them, and a choice of the person's is kept, for the next save
+      // to record (format §5.6).
       if (
         !asked &&
         view.state.field(parsedField).ledger.tracking === 'everyone' &&
         !view.state.field(trackingField)
       ) {
         view.dispatch({ effects: setTrackingEffect.of(true) });
+        trackingChosen = null;
       }
     },
     applyAgentEdit: (doc, step) => {

@@ -1069,7 +1069,7 @@ Syrus and GitHub notify); paragraph locking.
 ### 5.13 Undo
 
 Undo goes back in time through what this window did: your edits, decisions, comments and replies,
-turning Track Changes on or off, and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+and the runs of your agents (§8). Turning Track Changes on or off is no step: it changes nothing in the file (§5.4). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
 between its edits, each stretch is a step, in time order. Your agent's changes from outside, made

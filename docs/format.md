@@ -3249,8 +3249,9 @@ same values.
     removes the ledger (§5.1), so the file is as it was.
   - A choice is recorded only if a person made it in the window, and not a window's Track Changes
     that came from Preferences' start for new documents, or from a file that asked for it: a file
-    that is opened or reloaded is as it says, and a window that has it on while the file no
-    longer asks keeps it on, until a switch is made.
+    that is opened is as it says, a file that is reloaded and asks for it drops any choice (the
+    window follows the file), and a choice that a reloaded file doesn't contradict is kept for the
+    next save: a window that has it on while the file no longer asks keeps it on, and records it.
   - A file whose ledger can't be read (§5.1) or whose end is inside a code block or a comment that
     is never closed can have Track Changes turned on, since turning it on writes nothing. No tracked
     change can be written there, so each edit is refused as it is with Track Changes on in any

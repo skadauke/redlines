@@ -33,7 +33,7 @@ export function recordTracking(text: string, on: boolean): TextChange[] {
     // The ledger goes with its last setting, whole.
     if (!keepsLedger(rest)) return setLedger(text, rest);
     // Each line of the setting, which a merge may have left twice, goes with its line break.
-    return [...written.matchAll(/^tracking:[^\r\n]*(?:\r\n|\r|\n)/gm)].map((line) => ({
+    return [...written.matchAll(/(?<![^\r\n])tracking:[^\r\n]*(?:\r\n|\r|\n)/g)].map((line) => ({
       from: start + line.index,
       to: start + line.index + line[0].length,
       insert: '',
@@ -41,21 +41,22 @@ export function recordTracking(text: string, on: boolean): TextChange[] {
   }
   if (!keepsLedger(ledger)) return [];
   const wanted = 'tracking: everyone';
+  // What the ledger says already, in any spelling a reader reads as it, stays as it is.
+  if (ledger.tracking === 'everyone') return [];
   const changes: TextChange[] = [];
-  for (const line of written.matchAll(/^tracking:[^\r\n]*/gm)) {
-    if (line[0] !== wanted) {
-      changes.push({
-        from: start + line.index,
-        to: start + line.index + line[0].length,
-        insert: wanted,
-      });
-    }
+  for (const line of written.matchAll(/(?<![^\r\n])tracking:[^\r\n]*/g)) {
+    changes.push({
+      from: start + line.index,
+      to: start + line.index + line[0].length,
+      insert: wanted,
+    });
   }
-  if (changes.length > 0 || /^tracking:/m.test(written)) return changes;
-  // A new line, after the version's in the layout of §5.2. A ledger with no such line is written
-  // again whole.
-  const after = /^version:[^\r\n]*/m.exec(written);
-  if (!after) return setLedger(text, { ...ledger, tracking: 'everyone' });
+  if (changes.length > 0) return changes;
+  // A new line, after the version's in the layout of §5.2, or after the line that opens the ledger
+  // of one with no version line: the rest of it stays byte for byte.
+  const after =
+    /(?<![^\r\n])version:[^\r\n]*/.exec(written) ?? /^<!-- redlines[^\r\n]*/.exec(written);
+  if (!after) return [];
   const at = start + after.index + after[0].length;
   return [{ from: at, to: at, insert: `${eol}${wanted}` }];
 }
@@ -78,7 +79,7 @@ export function setView(text: string, view: LedgerView): TextChange[] {
   const written = text.slice(start, span.range.to);
   // Each line of the setting, which a merge may have left twice, gets the value.
   const changes: TextChange[] = [];
-  for (const line of written.matchAll(/^view:[^\r\n]*/gm)) {
+  for (const line of written.matchAll(/(?<![^\r\n])view:[^\r\n]*/g)) {
     const wanted = `view: ${view}`;
     if (line[0] !== wanted) {
       changes.push({
@@ -88,9 +89,10 @@ export function setView(text: string, view: LedgerView): TextChange[] {
       });
     }
   }
-  if (changes.length > 0 || /^view:/m.test(written)) return changes;
+  if (changes.length > 0 || /(?<![^\r\n])view:/.test(written)) return changes;
   // A new line, after the setting before it in the layout of §5.2.
-  const after = /^tracking:[^\r\n]*/m.exec(written) ?? /^version:[^\r\n]*/m.exec(written);
+  const after =
+    /(?<![^\r\n])tracking:[^\r\n]*/.exec(written) ?? /(?<![^\r\n])version:[^\r\n]*/.exec(written);
   if (!after) return [];
   const at = start + after.index + after[0].length;
   return [{ from: at, to: at, insert: `${eolOf(text, span.range)}view: ${view}` }];
