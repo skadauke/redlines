@@ -150,7 +150,16 @@ class BreakWidget extends WidgetType {
 }
 
 const HIDDEN = Decoration.replace({});
+/** An empty cell's filler, at its stop, between the padding that is hidden before it and after it. */
 const FILLER = Decoration.widget({ widget: new FillerWidget(), side: 1 });
+/**
+ * The filler of an empty cell whose stop is the end of its own mark. A cell with one space of padding or
+ * none (`| |`, `||`) has its only stop where the next cell begins, and a widget on the far side of that
+ * position (`FILLER`, side 1) is drawn in the next cell's mark: that cell holds a filler that is not its
+ * own, and the empty cell none. On the near side (-1) it is the last thing in the cell it is the filler
+ * of.
+ */
+const FILLER_AT_END = Decoration.widget({ widget: new FillerWidget(), side: -1 });
 const BREAK = Decoration.replace({ widget: new BreakWidget() });
 
 /** The data-align attribute of a cell, the delimiter row's alignment of its column. */
@@ -293,8 +302,12 @@ function rowDecorations(
     if (appended === 'pipe' && i === shownCount - 1) {
       if (end > cell.textTo) out.push(HIDDEN.range(cell.textTo, end));
     } else if (cell.to > cell.textTo) out.push(HIDDEN.range(cell.textTo, cell.to));
-    if (cell.textFrom === cell.textTo) out.push(FILLER.range(cell.textFrom));
-    else {
+    if (cell.textFrom === cell.textTo) {
+      // (A cell that has no mark, because a deleted column's ghost took its only character, has no cell
+      // to stand at the end of: it is drawn as it was.)
+      const atEnd = cell.textFrom >= end && end > start;
+      out.push((atEnd ? FILLER_AT_END : FILLER).range(cell.textFrom));
+    } else {
       const text = state.sliceDoc(cell.textFrom, cell.textTo);
       for (const found of text.matchAll(BR)) {
         const at = cell.textFrom + found.index;

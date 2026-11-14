@@ -11,15 +11,16 @@
 // made from the menu and the grip, a table deleted whole is a ghost table (its columns lined up, the
 // rows past eight folded into one line, not editable, carded), a row with fewer cells than the header is
 // drawn with empty cells after its last and typing in one writes its pipes first, a row with more draws
-// none beyond the header's and no key puts the caret in one, Delete Table and a second ⌫ delete the
+// none beyond the header's and no key puts the caret in one, an empty cell holds a filler of its own
+// whatever its padding and its row is as tall as a row of text, Delete Table and a second ⌫ delete the
 // emptied rows, columns and table, and a keystroke in a 300-row
 // table stays within the budget. Serve the page with `VITE_TABLE_CHECK=1 pnpm dev` (or
 // `pnpm tauri dev`, for WKWebView) and open it in WebKit: it reads nothing in a release build.
 //
-// The checks of Stage 4 (the ghost table, the cells a row lacks, the second ⌫) were first run in
-// Chromium, the built-in browser's engine, which is not WKWebView: what they measure there (the hit
-// test, the layout of the cells, `user-select`, typing by `execCommand`) is Chromium's until the
-// sweep runs the file in WKWebView, and each says where the engine could differ.
+// The checks of Stage 4 (the ghost table, the cells a row lacks, the empty cell's filler, the second
+// ⌫) were first run in Chromium, the built-in browser's engine, which is not WKWebView: what they
+// measure there (the hit test, the layout of the cells, `user-select`, typing by `execCommand`) is
+// Chromium's until the sweep runs the file in WKWebView, and each says where the engine could differ.
 //
 // Each check loads its document and does what a person does, and reports one console line,
 // `TABLE-CHECK <name> pass` or `TABLE-CHECK <name> FAIL <json>`, then
@@ -545,6 +546,40 @@ const FEWER = around(
 
 /** A table whose first body row has a cell more than the header, which has two. */
 const MORE = around(['| a | b |', '| - | - |', '| c | d | EXTRA |', '| f | g |'].join('\n'));
+
+/** A table of three columns whose last body row is `row`, below a row of text to compare it with. */
+const withRow = (row: string): string =>
+  around(['| a | b | c |', '| - | - | - |', '| 1 | 2 | 3 |', row].join('\n'));
+
+/**
+ * Rows with an empty cell, by the padding that decides where its one caret stop is: with two spaces it
+ * is between them, inside the cell; with one space or none it is the cell's end, where the next cell
+ * begins. (The cell's filler once stood in the next cell then.)
+ */
+const EMPTY_FORMS: [string, string][] = [
+  ['one space in the middle', withRow('| 1 | | x |')],
+  ['one space in the first cell', withRow('| | 1 | x |')],
+  ['no space in the middle', withRow('| 1 || x |')],
+  ['two spaces in the middle', withRow('| 1 |  | x |')],
+  ['two spaces in the first cell', withRow('|  | 1 | x |')],
+  ['one space in the last cell', withRow('| 1 | x | |')],
+  ['no space in the last cell', withRow('| 1 | x ||')],
+  ['two empty cells side by side', withRow('| | | x |')],
+  ['in the header', around(['| | | x |', '| - | - | - |', '| 1 | 2 | 3 |'].join('\n'))],
+];
+
+/** The top of the first text a cell shows, as the page draws it (the filler's zero-width space is no
+ * text), or null for a cell with none. */
+function textTop(cell: HTMLElement): number | null {
+  const walk = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    if ((node.textContent ?? '').replace(/\u200b/g, '') === '') continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getBoundingClientRect().top;
+  }
+  return null;
+}
 
 const CHECKS: Check[] = [
   {
@@ -2715,6 +2750,119 @@ const CHECKS: Check[] = [
         if (head(editor) !== table(editor).rows[row]?.to)
           problems[`r${row}c${col}-head`] = head(editor);
         if (doc(editor) !== FEWER) problems[`r${row}c${col}-wrote`] = doc(editor);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // An empty cell holds a filler of its own, whatever its padding (`| |` and `||` as well as `|  |`), and
+    // no cell with text holds one; a row with an empty cell is as tall as a row of text (the same row with
+    // text in those cells, and the row above it), and the text beside an empty cell stands as high as it
+    // does then; where the cell's stop is inside it (two spaces of padding), a press on it puts the caret in
+    // it, and the DOM place the editor gives the caret at its stop (`domAtPos`) is in it. (The filler of a
+    // cell with one space of padding or none once stood in the next cell, which held that cell's text
+    // 6.85 px low and its row 6.85 px tall; and any filler, a baseline-aligned box with `overflow:
+    // hidden`, rested its bottom edge on the baseline and made its row 6.85 px taller.) Chromium-measured,
+    // in px: the heights and tops and the hit test; WebKit's line layout and hit test are the sweep's.
+    name: 'an-empty-cell-holds-its-own-filler-and-its-row-is-as-tall-as-a-row-of-text',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const [form, source] of EMPTY_FORMS) {
+        await load(editor, source);
+        const found = table(editor);
+        const withEmpty = found.rows.flatMap((row, r) => {
+          const empty = row.cells.filter((cell) => cell.textFrom === cell.textTo);
+          return empty.length ? [{ r, row, empty }] : [];
+        });
+        if (withEmpty.length === 0) {
+          problems[`${form}-fixture`] = 'no empty cell';
+          continue;
+        }
+        const grid = cellElements(editor);
+        const lines = lineElements(editor);
+        const wanted = withEmpty.flatMap(({ row }) =>
+          row.cells.filter((cell) => cell.textFrom === cell.textTo),
+        ).length;
+        const total = editor.view.contentDOM.querySelectorAll('.rl-tc-fill').length;
+        if (total !== wanted) problems[`${form}-fillers-in-all`] = { total, wanted };
+        const before = withEmpty.map(({ r }) => ({
+          height: lines[r]?.getBoundingClientRect().height ?? NaN,
+          tops: (grid[r] ?? []).map(textTop),
+        }));
+        withEmpty.forEach(({ r, row, empty }) => {
+          const cells = grid[r] ?? [];
+          // One filler in each empty cell, none in a cell with text, each at its own cell's left edge.
+          const fills = cells.map((cell) => cell.querySelectorAll('.rl-tc-fill').length);
+          const want = row.cells.map((cell) => (cell.textFrom === cell.textTo ? 1 : 0));
+          if (!same(fills, want)) problems[`${form}-r${r}-fillers`] = { fills, want };
+          for (const cell of empty) {
+            const own = cells[cell.col];
+            const box = own?.getBoundingClientRect();
+            const fill = own?.querySelector('.rl-tc-fill')?.getBoundingClientRect();
+            if (!box || !fill || fill.left < box.left - 0.5 || fill.left > box.right - 0.5)
+              problems[`${form}-r${r}c${cell.col}-filler-box`] = [
+                fill?.left,
+                box?.left,
+                box?.right,
+              ];
+          }
+          // The text of a cell beside an empty one stands as high as the text of the others.
+          const tops = (grid[r] ?? []).map(textTop).filter((top): top is number => top !== null);
+          if (Math.max(...tops) - Math.min(...tops) > 0.5) problems[`${form}-r${r}-tops`] = tops;
+        });
+        // The same rows with text in the empty cells: the heights and the tops must not move.
+        editor.view.dispatch({
+          changes: withEmpty.flatMap(({ empty }) =>
+            empty.map((cell) => ({ from: cell.textFrom, insert: 'y' })),
+          ),
+        });
+        await frames();
+        withEmpty.forEach(({ r }, i) => {
+          const height = lineElements(editor)[r]?.getBoundingClientRect().height ?? NaN;
+          const was = before[i];
+          if (!was || !(Math.abs(was.height - height) <= 0.5))
+            problems[`${form}-r${r}-height`] = { empty: was?.height, text: height };
+          const tops = (cellElements(editor)[r] ?? []).map(textTop);
+          tops.forEach((top, c) => {
+            const earlier = was?.tops[c];
+            if (typeof earlier === 'number' && !(top !== null && Math.abs(earlier - top) <= 0.5))
+              problems[`${form}-r${r}c${c}-top`] = { empty: earlier, text: top };
+          });
+          // And the row above the last one is a row of text as well: the same height as a row with an
+          // empty cell, in the body.
+          const above = lineElements(editor)[1]?.getBoundingClientRect().height;
+          if (r >= 2 && !(was && above !== undefined && Math.abs(was.height - above) <= 0.5))
+            problems[`${form}-r${r}-height-above`] = { empty: was?.height, above };
+        });
+        // A press in the middle of each empty cell puts the caret in it, and the DOM place the editor gives
+        // the caret at its stop (`domAtPos`) is in that cell. (Not for a cell whose stop is at its end,
+        // with one space of padding or none: that is where the next cell begins, which the model gives to
+        // the next cell, and every press, arrow, Tab and selection put there ends in the next cell's text,
+        // as they did before the filler moved: an open issue, not asserted here.)
+        await load(editor, source);
+        for (const { r, empty } of withEmpty) {
+          for (const cell of empty.filter((c) => c.textFrom < c.to)) {
+            editor.view.dispatch({ selection: EditorSelection.cursor(0) });
+            await frames();
+            const own = cellElements(editor)[r]?.[cell.col];
+            if (!own) {
+              problems[`${form}-r${r}c${cell.col}-cell`] = 'not drawn';
+              continue;
+            }
+            const box = await reveal(own);
+            pressAt(editor, box.left + box.width / 2, box.top + box.height / 2);
+            await frames();
+            if (head(editor) !== cell.textFrom)
+              problems[`${form}-r${r}c${cell.col}-press`] = [head(editor), cell.textFrom];
+            const { node } = editor.view.domAtPos(cell.textFrom);
+            const holder = (node instanceof Element ? node : node.parentElement)?.closest('.rl-tc');
+            if (holder !== own)
+              problems[`${form}-r${r}c${cell.col}-caret-place`] = {
+                in: holder?.getAttribute('data-col') ?? holder?.className ?? 'no cell',
+                want: String(cell.col),
+              };
+          }
+        }
       }
       return Object.keys(problems).length ? problems : null;
     },

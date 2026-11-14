@@ -186,3 +186,108 @@ describe('a table laid out as a table', () => {
     ]);
   });
 });
+
+describe('an empty cell’s filler', () => {
+  const HEAD = '| a | b | c |\n| - | - | - |';
+  // The empty cell's padding decides where its caret stop is: with two spaces the stop is between them,
+  // inside the cell; with one or none it is the cell's end, which is also the start of the next cell.
+  const FORMS: Record<string, string> = {
+    'one space in the middle': `${HEAD}\n| 1 | | x |`,
+    'one space in the first cell': `${HEAD}\n| | 1 | x |`,
+    'no space in the middle': `${HEAD}\n| 1 || x |`,
+    'two spaces in the middle': `${HEAD}\n| 1 |  | x |`,
+    'two spaces in the first cell': `${HEAD}\n|  | 1 | x |`,
+    'one space in the last cell': `${HEAD}\n| 1 | x | |`,
+    'no space in the last cell': `${HEAD}\n| 1 | x ||`,
+    'two empty cells side by side, one space each': `${HEAD}\n| | | x |`,
+    'two empty cells side by side, no space': `${HEAD}\n|||x|`,
+    'three empty cells': `${HEAD}\n| | | |`,
+    'two empty cells in the header': '| | | x |\n| - | - | - |\n| 1 | 2 | 3 |',
+    'a lone pipe': `${HEAD}\n|`,
+  };
+
+  /** What each cell of each row holds of fillers, as drawn, and as the text says it should: one in an
+   * empty cell, none in a cell with text. */
+  function fillers(editor: Editor) {
+    const [table] = tablesOf(editor.view.state);
+    const lines = rows(content(editor));
+    return {
+      drawn: lines.map((line) =>
+        [...line.querySelectorAll(':scope > .rl-tc')].map(
+          (cell) => cell.querySelectorAll('.rl-tc-fill').length,
+        ),
+      ),
+      // (a body row that has fewer cells than the header is drawn with a cell for each it lacks, each
+      // with a filler of its own: `missing.ts`)
+      wanted: (table?.rows ?? []).map((row) => [
+        ...row.cells.map((cell) => (cell.textFrom === cell.textTo ? 1 : 0)),
+        ...Array.from(
+          { length: row.header ? 0 : Math.max(0, (table?.columns ?? 0) - row.cells.length) },
+          () => 1,
+        ),
+      ]),
+      // A filler that is a child of a row, not of a cell, is a cell of its own to the table.
+      loose: content(editor).querySelectorAll('.rl-trow > .rl-tc-fill').length,
+      total: content(editor).querySelectorAll('.rl-tc-fill').length,
+    };
+  }
+
+  for (const [name, form] of Object.entries(FORMS)) {
+    it(`stands in its own cell, and no cell with text holds one: ${name}`, () => {
+      const editor = load(`Intro.\n\n${form}\n\nAfter.`);
+      const { drawn, wanted, loose, total } = fillers(editor);
+      expect(drawn).toEqual(wanted);
+      expect(loose).toBe(0);
+      // None outside a cell, and none twice.
+      expect(total).toBe(wanted.flat().reduce((sum, n) => sum + n, 0));
+    });
+
+    it(`stays in its own cell as the row is edited: ${name}`, () => {
+      const editor = load(`Intro.\n\n${form}\n\nAfter.`);
+      const [table] = tablesOf(editor.view.state);
+      const row = table?.rows.at(-1);
+      // An edit in a cell with text takes the patched path, which builds the row again.
+      const text = row?.cells.find((cell) => cell.textFrom < cell.textTo);
+      if (text) editor.view.dispatch({ changes: { from: text.textTo, insert: 'z' } });
+      const { drawn, wanted, loose } = fillers(editor);
+      expect(drawn).toEqual(wanted);
+      expect(loose).toBe(0);
+    });
+  }
+
+  it('is where the page puts the caret, for an empty cell whose stop is inside it', () => {
+    // (A stop at the cell's end, with one space of padding or none, is where the next cell begins, which
+    // `cellAt` gives to the next cell: the caret has never stood in such a cell, and no place of the
+    // page is looked for here. The filler is in its cell all the same: the tests above.)
+    for (const [name, form] of Object.entries(FORMS)) {
+      const editor = load(`Intro.\n\n${form}\n\nAfter.`);
+      const [table] = tablesOf(editor.view.state);
+      for (const [r, line] of rows(content(editor)).entries()) {
+        for (const [c, cell] of (table?.rows[r]?.cells ?? []).entries()) {
+          if (cell.textFrom !== cell.textTo || cell.textFrom >= cell.to) continue;
+          const { node } = editor.view.domAtPos(cell.textFrom);
+          const element = node instanceof Element ? node : node.parentElement;
+          expect(element?.closest('.rl-tc'), `${name}, row ${r}, cell ${c}`).toBe(
+            line.querySelectorAll(':scope > .rl-tc')[c],
+          );
+        }
+      }
+    }
+  });
+
+  it('stands in the cell of an inserted row that holds only its marker', () => {
+    // The cell is empty, its stop after the one space that follows the marker: the cell's end.
+    const doc = withLedger('| a | b |\n| - | - |\n| <!--ins k3x9 row--> | 7 |\n| Pears | 5 |', {
+      k3x9: 'ada',
+    });
+    const editor = load(doc);
+    const { drawn, wanted, loose } = fillers(editor);
+    expect(wanted).toEqual([
+      [0, 0],
+      [1, 0],
+      [0, 0],
+    ]);
+    expect(drawn).toEqual(wanted);
+    expect(loose).toBe(0);
+  });
+});

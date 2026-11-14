@@ -335,8 +335,16 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc[data-align="left"]': { textAlign: 'left' },
   '.rl-tc[data-align="center"]': { textAlign: 'center' },
   '.rl-tc[data-align="right"]': { textAlign: 'right' },
-  // A cell that is empty has a filler for the caret to stand on, which takes no room.
-  '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
+  // A cell that is empty has a filler for the caret to stand on, which takes no room. An inline-block
+  // with `overflow: hidden` rests its bottom edge on the baseline, so a box as high as a line made the
+  // line, and the row, 6.85 px taller than a line of text (measured in Chromium); aligned to the top
+  // of the line it is no taller than the line.
+  '.rl-tc-fill': {
+    display: 'inline-block',
+    width: '0',
+    overflow: 'hidden',
+    verticalAlign: 'top',
+  },
   // The cells a row lacks (`table/missing.ts`) stand at the end of the row, where the page's own caret
   // can't say which of them it is in: the one the caret is in draws it, and the line's own is hidden.
   // (The last cell of a row has no padding on its right, and the break CodeMirror ends a line with, hidden
