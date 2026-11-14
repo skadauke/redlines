@@ -201,6 +201,8 @@ the app reloads a file that changed on disk, and keeps your unsaved edits if you
 - **[Design](docs/design.md):** what Redlines does and how it is built.
 - **[Format](docs/format.md):** how tracked changes, comments and history are stored in a Markdown
   file.
+- **[Hardening](docs/hardening.md):** what the format is built to hold, what holds it, what is known
+  not to hold, and how to add a rule without loosening one.
 - **[Releasing](docs/releasing.md):** how a release is built, signed and published, and how the app
   updates itself.
 
