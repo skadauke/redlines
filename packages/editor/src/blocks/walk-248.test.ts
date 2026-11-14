@@ -8,7 +8,13 @@
 // more walks, `WALK_SEED` for one.
 import { expect, it } from 'vitest';
 import { fuzzCount, seeded } from '../../../format/src/random-docs.ts';
-import { type Invariant, invariantProblems, runScript, type Step } from './script.ts';
+import {
+  type Invariant,
+  invariantProblems,
+  runScript,
+  type Step,
+  type StepResult,
+} from './script.ts';
 
 const WORDS = ['alpha', 'beta', 'gamma', 'delta', 'plan', 'ship', 'café', 'note'];
 
@@ -38,6 +44,7 @@ const WALKED: Invariant[] = [
   'undo',
   'open-caret',
   'history',
+  'file-text',
   'list-reads',
 ];
 
@@ -114,6 +121,22 @@ function edges(doc: string): number[] {
  */
 const TWO_BREAKS = /<!--split [a-z0-9]+-->\n(?:[ \t>]*\n){2}/;
 
+/**
+ * Whether a step took a character out of a list marker with the caret inside it (`3.‸ ship`,
+ * Backspace): with Track Changes off that is the person editing the syntax, and the item and the
+ * ones after it read as Markdown reads them (the next numbered item is a line of the text), in the
+ * file and in the editor alike. No key wrote it: the tracked key is refused (format rule 5), and
+ * 'list-reads' is for what keys write (#292, seed 1140). A key that takes a marker away from the
+ * caret at an item's text (Backspace at its start) or moves it (an outdent, which writes the
+ * indentation) is not that, and is held to it.
+ */
+function editedMarker(step: StepResult): boolean {
+  if (step.after.length >= step.before.length) return false;
+  const { text, col } = step.caretLine;
+  const marker = /^([ \t>]*)(\d{1,9}[.)]|[-+*])(?=[ \t]|$)/.exec(text);
+  return !!marker && col >= marker[1]!.length && col <= marker[1]!.length + marker[2]!.length;
+}
+
 const WALKS = fuzzCount(40);
 const STEPS = 3;
 
@@ -138,6 +161,9 @@ it(`holds every invariant over ${WALKS} walks of #248's shapes`, () => {
       for (const invariant of WALKED) {
         if (before[invariant].length || !after[invariant].length) continue;
         if (invariant === 'stray-blank-line' && tc && TWO_BREAKS.test(result.file)) continue;
+        if (invariant === 'list-reads' && !tc && result.steps.some(editedMarker)) {
+          continue;
+        }
         failures.push(`${name}: ${invariant}: ${after[invariant].join('; ').slice(0, 300)}`);
       }
     } catch (error) {

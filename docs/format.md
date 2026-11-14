@@ -346,27 +346,92 @@ message "Accept or reject the changes in this paragraph first." (`no-legal-place
 paragraph goes on into the paragraphs that a pending mark in it reaches into, as rejecting a split or
 an insertion with a break in it joins two paragraphs. Comments and highlights don't count, and nor
 do changes in other paragraphs, though those in the same list, table or block quote are tried with
-the change (below).
+the change (below). The change of a block that is all your own new text is the exception
+(below).
 
 Your own pending changes don't count:
 
 - Text that is all inside your own insertion, or the new text of your own substitution, takes the
   syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
   rejecting it takes the syntax with it.
-- A block change of a block that is all your own pending insertion, such as a paragraph you typed
+- **A block change of a block that is all your own pending insertion**, such as a paragraph you typed
   (`One.\n\n<!--ins k3x9-->\n\n## Title<!--/k3x9-->`) or an item your pending split made and you typed
   in, is an edit of that insertion: the block's new syntax is written in it as Track Changes off
-  would write it in the newest view, as typed text, and the change makes no mark of its own. In the
+  would write it in the newest view, as typed text, and the change makes no mark of its own.
+  Accepting or rejecting the insertion then reads right, because the syntax is part of it. In the
   break of your own split inside the insertion, the syntax stays where it is written, so that an
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
-  It is so only where every line the change reads or writes is all your own new text; where no
-  marker but those of that insertion and of the marks inside it stands between the block and the
-  text around it (another mark there could, once decided, bring the block into the text next to it,
-  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
-  and makes no marker start a line; and, where it is not written as typing is, where every order of
-  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
-  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
-  change, below.
+  The rule and its limits (#173):
+  - *Which changes.* Every block change: the type (Body, Heading 1 to 6, Quote, Bulleted, Numbered
+    and Task List, of which the palette's Quote is the same command, and the type of an alert,
+    #311), an indent or an outdent, and a box checked. A block that has the type asked already is
+    left as it is, with no refusal. Code Block, Table and Horizontal Rule are no block changes: the
+    editor writes their syntax as typing, which in your own insertion is typed text too.
+  - *Where the caret stands.* Anywhere in the block, on either side of the hidden markers at its
+    ends: the End key and a click past the end of the line leave the caret after the closer of your
+    insertion, and a selection may end there. The block is read by its text, not by the side of a
+    marker.
+  - *What is all your own.* Every character of the line or lines the change reads or writes is inside
+    insertions of yours, the syntax of the block included. A paragraph you typed qualifies, and so
+    does any paragraph of a document you typed in one go, which is one insertion with your split
+    between its paragraphs: the title, the first of them, as the last. A block that is only partly
+    yours, such as words typed in front of or behind older text, or into a heading, an item or a quote
+    that was there (its `#`s, bullet or `> ` are older), is a block change with a mark, below; and
+    where your insertion starts it, its opener would have to move, so it is refused: "Your new text
+    starts this block, and would have to move. Accept or reject your new text and its line breaks
+    first." Where the block can't change for its own sake, whatever its marks (a heading is one line;
+    a line of it would start a block of its own; it is in a list item or a quote), the refusal says
+    that, as it does for any block.
+  - *Marks near the block.* The marks that stand in its lines, and in the lines between it and the
+    text around it, are what decides how the syntax at its start reads. A mark further off, as the
+    splits between the other paragraphs of a document typed in one go, decides nothing of it, so
+    the number of paragraphs makes no difference. Your own splits stand next to it as typing has
+    always had them, and so do comments and highlights inside your insertion, at its start too. A
+    change of another person's inside the text, where every order of deciding it reads alike (below),
+    doesn't stop it; but not one that holds a line break (words with one deleted or replaced, a
+    split of theirs), which could make the block read as a table or a setext heading, or end it, in
+    a state that no reading of its lines sees: it is decided first. Nor one that starts the block:
+    their deletion of the first word, once rejected, would bring that word back in front of the
+    syntax, which would then stand in the middle of a line as text. Those are refused as any block
+    with another person's change is: "Accept or reject the changes in this paragraph first." A
+    comment or a highlight around your insertion, its opener alone on the line in front of yours,
+    starts the block from outside it, and is decided first: "Your new text starts this block, and
+    would have to move. Accept or reject your new text and its line breaks first."
+  - *Between the block and the text around it* stand only the markers of the insertion it is in and
+    of marks inside it: another mark there could, once decided, bring the block into the text next to
+    it, where its syntax would be text. For a change of type, your own split after the block, which
+    parts it from the text after it (a paragraph typed in front of one, then Return:
+    `<!--ins k3x9-->\n\n## Title<!--/k3x9--><!--split d3x9-->\n\nText`), is no such mark, and may
+    stand there: rejecting it takes the break and the prefix of the next line away and joins that
+    line to the block's. The lines that follow must read after the block's line as they read after a
+    paragraph's. So the joined line is the only line of its block, and the block under the blank
+    line after it starts at the left edge (an indented line there would go on a new item, where it
+    was code); or the line right under it starts, at the left edge, a block that interrupts a
+    paragraph whatever comes before it: a heading, a fence (a backtick fence whose info string holds
+    a backtick is no fence), or a bullet, a `1.` or a quote that holds text, a letter or a bracket,
+    and no other marker (which starts a list or a quote of its own after a heading and is text in a
+    paragraph), and a quote not after a quote, whose lines would go on it. A line of a wrapped
+    paragraph, a setext underline, a table's delimiter row and a number other than 1 are none of
+    these. A heading changed to another level has no such lines to read. Elsewhere it is refused:
+    "Rejecting the line break after your new paragraph would join the text below to it, which this
+    change would read otherwise. Accept your new paragraph and its line break first.", and where a
+    pending change stands in those lines, "A pending change stands in the lines just below your new
+    paragraph, which its line break parts it from. Accept or reject it, your new paragraph and its
+    line break first." Any other mark there, anyone's, makes the change a block change, below.
+  - *Every order of deciding.* Where only your own splits and comments and highlights stand near the
+    block, nothing is tried that typing has not always stood next to. Where another person's change
+    or your split after the block does, every order of deciding those marks and the insertion (four
+    at most) reads the same as without the change. It is tried on the block and the blocks next to
+    it, as any block change is, so the cost does not grow with the file. In each state, every
+    decision of the walk, the file reads as the same words, on both readings of CommonMark, in as
+    many blocks; so a deletion of another person's that is rejected can't leave the syntax in the
+    middle of a line, and a split that is rejected can't join a line to the block's that would read
+    otherwise. A decision works with the change exactly where it works without it, rejecting the
+    insertion gives back what it did before, the edit makes no mark and leaves the original view as
+    it was, and no marker starts a line. The tests judge every state by micromark 4.0.2 with GFM:
+    the block changed as asked, every other block as it was, the words the same; for a document
+    with more marks than every order can be tried for, in random orders.
+  Otherwise the change is a block change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
@@ -746,7 +811,8 @@ away.
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
   included, adds or takes away a line break in it or between it and the block before or after it.
-  What the block is, and where it ends, would depend on that change. Decide it first. A change holds
+  What the block is, and where it ends, would depend on that change. Decide it first (a block that is
+  all your own new text is no such block: §2.6, "Your own pending changes don't count"). A change holds
   a line break when its text as a view reads it has one: an insertion's or a substitution's new text
   in the newest view, a deletion's or a substitution's old text in the original view, and a split's
   break. A line break that only carries a marker is in no view, and is not one: typing at the start
@@ -1019,7 +1085,13 @@ at the outer edge of a whole inline construct. A marker never goes:
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
    underline only in the container of the line of text above it: under a list item's line and to
    the left of its text, or with fewer quote markers, it would be a lazy line, which no underline
-   can be, and `- ` there is the bullet of the next item;
+   can be, and `- ` there is the bullet of the next item. For the opener of typed text, a bullet
+   that a split's marker stands on after a space (`- <!--split k3x9-->`) is not such a line: the
+   file reads it as an item whose first line is the marker, the newest view reads it as the
+   underline, and an opener beside the split's marker changes neither reading (§3.4, *Typing under
+   a bullet that the view reads as an underline*). A comment or a highlight, which has no text to
+   write there, is refused there as on any such line, and so is a marker that follows the dash
+   with no space (`-<!--split k3x9-->` is text of the paragraph, not an item);
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
@@ -1201,6 +1273,24 @@ The merged block keeps the first block's type, as in Word. Rejecting puts the ex
 a prefix (`- `, `> `, `## `) and goes on past it changes the text after the prefix, and the prefix
 stays: the block keeps its type.
 
+**A deletion of a setext underline** takes the underline whole, with the line break in front of it,
+and the blank lines after it stay: `Title<!--del k3x9 \n===-->\n\nNext.` reads as `Title` and
+`Next.`, two paragraphs, in the newest view, and rejecting puts the underline back. The break that
+holds an underline holds the blank lines after it too, and a change that touches a break takes all
+of it; a range that starts after the text above, on its line (at the end of it, or inside it), and
+ends where the underline does is the exception, since what follows is the break between the two
+blocks that are left. The line above has to be words, not another block's (a comment, a fence, a
+definition, a rule, front matter: there the break goes with it, as before), and the range does not
+start a line (a heading's second line and its underline are written as before, the marker standing
+after the first line's break). A range that goes on into the break after the underline (a selection
+of the line with its own line break), or takes the block below, takes all of it as before, and one
+that starts inside the underline and doesn't take all of it is refused (it would leave a paragraph
+where a heading was). The empty bullet that CommonMark reads as the underline of the text above it
+(`- one⏎  - ⏎⏎After.`) is such an underline: the editor's Backspace and Delete in it write
+`- one<!--del k3x9 \n  - -->\n\nAfter.` and not the join `- oneAfter.` (#441). Where the break in
+front of the item is another person's pending split, deleting it takes the whole break, the blank
+lines too (the join stays until they decide the split).
+
 **A change inside a prefix** does not touch the line break in front of the block: the digit of a
 list item's number replaced by the next (the editor does that to the items below the one Enter is
 pressed in), a bullet replaced by another, the `#`s of a heading. A marker can't stand in a
@@ -1226,6 +1316,29 @@ editor that wants the line's place left empty writes its own line breaks in fron
 they are, and the file never holds them (Return in the empty first item of a list at the start of a
 file).
 
+**A change inside a blank line of a break** that replaces its text and takes no line break away is
+written the same way: the `>` of the blank line between two paragraphs of a quote replaced by `> `,
+as a space typed after it is. A marker can't stand on that line either, so the change is a
+substitution of the whole break and the prefix of the block after it, and the new text is that
+break as it now is, line breaks and all, so that none of them is lost
+(`> One<!--sub k3x9 \n>\n> Two-->⏎> ⏎> Two<!--/k3x9-->`, the closer after the first word as above,
+with the changes next to the break as they are, a pending deletion at the end of the first
+paragraph, an insertion at the start of the second). Accepting gives the text that was typed, and
+rejecting gives every byte back. It was written as the typed text alone before (#358), which lost
+both line breaks. Two spaces or more at the end of the line above, which what is typed makes a
+hard break (the paragraph goes on), go into the change, in front of the opener, so that they still
+end their line for a reader that does not know the markers; where another change stands between
+them and the line end, the edit is refused. The underline of a setext heading is a line of the
+break: replacing all of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading),
+and a change of a part of it is refused (below, under a setext heading). Where the closer or
+another change next to the break has no place, the edit is refused, as any edit is. The break of
+the author's own pending split is left as it was (#419). A deletion there is not this: a change
+that takes a line break away takes all of the break (above), taking the quote markers or the white
+space out of a blank line is the rule for a quote's blank lines (below), and a deletion that
+takes no line break and that rule does not know (the `>` of a blank line indented in a list item,
+in the break of a pending split) is written as the join of the two blocks, which the last check
+sees only where letters differ (#447).
+
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block
 stays on the line (taking the first block of a longer list or quote out of it), is the prefix's
@@ -1249,7 +1362,25 @@ file, the newest and the original view read it alike. A pending deletion that em
 an item with text in the file and as an empty item in the view, and is refused, as is any mark on
 those lines in front of such an item. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
-list in its list while a line below it would read as text of it, and says so.
+list in its list while a line below it would read as text of it, and says so. The editor's Backspace
+at a first item does not rely on that rule alone. Wherever the item is in the file, with Track Changes
+on or off, taking its marker away (the first item of a list at the top level going out of its list,
+the first item of a nested list going up a level, and Delete at the end of the paragraph above a
+list, which takes the first item's marker into it) waits when the line right below the item holds a
+marker of a change and is text of the paragraph above it (an item with no text, a number other than
+1, an underline) in some of the ways the file reads and not in all: as it is, as the newest view
+reads it and as the original view reads it (an item whose only text is a deletion, which the file
+reads as an item and the newest view as an underline of the item's text; an item whose only text is
+an insertion, which the original view reads so). Taking the marker out then writes a file that reads
+as a heading in some order of deciding, which no reading of the file shows. The words ask for the
+change below to be decided first (#292). A nested first item going up a level is also kept where the
+line after it and its nested items, which stays where it is, would come to stand under the text of
+the last paragraph of them: it is indented far enough to continue the item that holds that paragraph
+once the item has moved, and was not where it stood, and it is a number other than 1, an empty item
+or an underline (a numbered item, the first of another list in the parent item, one column less
+indented than the item, or as deep as the text of its child). The format's own refusal reads the next
+item at the item's indentation only, and is not made where it refuses first (tabs, a pending break):
+the key says so in the format's words for a numbered item, and in its own for the others.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
@@ -1433,6 +1564,33 @@ marker goes, or moves behind it with the rest of its break, as Enter makes them.
 line together with a line break of it leaves the other line break, as in plain text: a deletion of
 nothing but your own pending text and splits writes no marker, wherever it starts. Where the marker
 of a comment stands in it, which stays, the deletion is placed as any change is.
+
+**Typing under a bullet that the view reads as an underline.** A line break typed at the start of
+the text of a bullet item that stands under a line of text, or under the line of the item it is in,
+writes its split on the bullet's line (`- one⏎  - <!--split w8nn-->⏎    café 42`). The file reads
+that line as an item; the newest view reads it as the underline of the text above it, a heading,
+since an empty item can't interrupt a paragraph (§3.1, rule 7). The two readings differ before
+anything is typed (the file and the newest view of the first raw break are not read alike: #443), and
+every order of deciding the changes still reads alike. Words that the author of the breaks types on a
+blank line of them are written as at any other item: one insertion that starts on the bullet's line,
+in front of the split's marker, which is typed again in it
+(`- one⏎  - <!--ins k3x9--><!--split p7qd-->⏎    new words<!--/k3x9--><!--split d3x9-->⏎    ⏎    café 42`,
+#143). Every order of deciding the changes reads alike; accepting all gives the newest view and
+rejecting all the original. A comment or a highlight there is refused, with the words of every
+syntax-only line. Where the bullet is indented by two or three columns past the text above it (or
+past the text of the item it stands in), the lines of the break are four columns or more past that
+text, which the newest view reads as indented code under the underline, where no marker is read,
+and the words are refused, wherever under the bullet they are typed: "The line breaks typed after
+this bullet make it read as the underline of the text above it, so what is typed under it would be
+indented code, where its markers would not be read. Reject those line breaks first, or turn Track
+Changes off." The words are used only where the bullet does underline text (words above it, not a
+heading, a rule, a fence, HTML, a table, a definition or front matter, where the empty item that
+ends the list is the cause and the generic words for code are told); and not for typed text that has
+a line of four columns in it, which is code of its own. (Four columns of white space that are typed
+make code of their own, and are refused as any change in code is.) The editor's Return does not
+write this break: it writes the empty item above the list, with a blank line in front of it where
+the list stands under text (*A blank line and an item in an item's text*), so it comes from a paste
+or an agent.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose

@@ -6,9 +6,11 @@ import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
+import { addHighlight } from './highlights.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
+import { seeded } from './random-docs.ts';
 import {
   ada,
   bo,
@@ -3413,6 +3415,319 @@ describe("text typed after the list marker of your own pending split's break (#1
         body,
       ).toThrow('A line that is only Markdown syntax takes no change.');
     }
+  });
+});
+
+const UNDERLINED =
+  'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
+const IN_CODE_WORDS = "A tracked change can't go inside code or an HTML comment";
+
+describe('text typed on a blank line of your own pending line breaks, under a bullet (#143)', () => {
+  // The file after Enter three times at the start of an item's text, each line break typed as it
+  // is (`⏎` and the indentation of the item's lines), and the edit that types `new words` on the
+  // first of the blank lines. In the file the bullet is an item, whose first line is the split's
+  // marker; in the newest view it is the underline of the text above it (`- one⏎  -⏎` is a heading
+  // in `one`'s item), since an empty item can't interrupt a paragraph.
+  const typed = (head: string, indent: string) => {
+    const body = `${head}<!--split k3x9-->\n${indent}\n${indent}<!--split n8fx-->\n${indent}café 42`;
+    const before = file(body, { k3x9: 'bo', n8fx: 'bo' });
+    const view = newestView(before);
+    // The start of the first blank line, which Bo's second line break made, in the newest view.
+    const blank = view.text.indexOf(`${head}\n`) + head.length + 1;
+    const at = view.map.toSource(blank, -1);
+    const edit = { from: at, to: at, insert: 'new words' };
+    return { body, before, edit, ids: context(bo, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']) };
+  };
+
+  it('is your insertion with the split, under a bullet that the newest view reads as an underline', () => {
+    for (const [head, indent] of [
+      ['- one\n  - ', '    '],
+      ['text\n- ', '  '],
+      ['* one\n  - ', '    '],
+      ['+ one\n  - ', '    '],
+      ['10. one\n    - ', '      '],
+      ['- one\n  - two\n    - ', '      '],
+      ['- one\n  text\n  - ', '    '],
+      ['text\n - ', '   '],
+    ] as const) {
+      const { body, before, edit, ids } = typed(head, indent);
+      const after = applyChanges(before, trackedEdit(before, edit, ids));
+      // The words stand on the first blank line, in an insertion that starts on the bullet's line,
+      // where the split that was there is typed again with them; the rest of the break follows.
+      expect(bodyText(after), body).toBe(
+        `${head}<!--ins m2bd--><!--split p7qd-->\n${indent}new words<!--/m2bd--><!--split d3x9-->\n${indent}\n${indent}café 42`,
+      );
+      expect(newestView(after).text, body).toBe(
+        `${head}\n${indent}new words\n${indent}\n${indent}café 42\n`,
+      );
+      expect(originalView(after).text, body).toBe(`${head}café 42\n`);
+      expect(parse(after).warnings, body).toEqual([]);
+      // Every order of deciding the three changes reads alike, and accepting or rejecting them
+      // all gives the newest or the original view.
+      expectEveryOrderAlike(body, after, exactly);
+      expect(applyChanges(after, acceptAll(after)), body).toBe(newestView(after).text);
+      expect(applyChanges(after, rejectAll(after)), body).toBe(originalView(after).text);
+    }
+  });
+
+  it('is written the same under a bullet or a number that no view reads as an underline', () => {
+    for (const [head, indent] of [
+      ['- ', '  '],
+      ['1. ', '   '],
+      ['1. one\n   1. ', '      '],
+      ['- one\n  1. ', '     '],
+      ['text\n\n- ', '  '],
+      ['- one\n- ', '  '],
+    ] as const) {
+      const { body, before, edit, ids } = typed(head, indent);
+      const after = applyChanges(before, trackedEdit(before, edit, ids));
+      expect(bodyText(after), body).toBe(
+        `${head}<!--ins m2bd--><!--split p7qd-->\n${indent}new words<!--/m2bd--><!--split d3x9-->\n${indent}\n${indent}café 42`,
+      );
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("goes in front of another person's pending break on the bullet's line, as at any item", () => {
+    for (const [head, indent] of [
+      ['- one\n  - ', '    '],
+      ['text\n- ', '  '],
+      ['- ', '  '],
+    ] as const) {
+      const body = `${head}<!--split k3x9-->\n${indent}café 42`;
+      const before = file(body, { k3x9: 'bo' });
+      const at = before.indexOf('<!--split');
+      const after = applyChanges(
+        before,
+        trackedEdit(before, { from: at, to: at, insert: 'new words' }, context(ada, ['m2bd'])),
+      );
+      expect(bodyText(after), body).toBe(
+        `${head}<!--ins m2bd-->\n${indent}new words<!--/m2bd--><!--split k3x9-->\n${indent}café 42`,
+      );
+      expect(newestView(after).text, body).toBe(`${head}new words\n${indent}café 42\n`);
+      expect(originalView(after).text, body).toBe(`${head}café 42\n`);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused where the newest view reads the lines under the underline as code, in words that say so', () => {
+    // A bullet indented two columns or more past the text above it: the lines of its break are four
+    // columns past that text, which is indented code under the underline, where no marker is read.
+    for (const [head, indent] of [
+      ['text\n  - ', '    '],
+      ['text\n   - ', '     '],
+      ['- one\n    - ', '      '],
+      ['10. one\n      - ', '        '],
+    ] as const) {
+      const { body, before, edit, ids } = typed(head, indent);
+      let error: unknown;
+      try {
+        trackedEdit(before, edit, ids);
+      } catch (e) {
+        error = e;
+      }
+      expect(error, body).toBeInstanceOf(EditError);
+      expect((error as EditError).message, body).toBe(UNDERLINED);
+      expect((error as EditError).code, body).toBe('inside-code');
+    }
+  });
+
+  it('never refuses the words of the author of the breaks, at any place on their lines, and reads alike in every order', () => {
+    // Enter twice, a paragraph break at once, or Enter three times, at the start of an item's text,
+    // on either side of the markers of the breaks before it, and then words at the start or the end
+    // of every line that the breaks made and of the bullet's own line, on either side of the markers.
+    let draws = 0;
+    const draw = () => {
+      const random = seeded(++draws * 7919);
+      return (n: number) => Uint8Array.from({ length: n }, () => Math.floor(random() * 256));
+    };
+    let typedWords = 0;
+    for (const [head, indent] of [
+      ['- one\n  - ', '    '],
+      ['text\n- ', '  '],
+      ['10. one\n    - ', '      '],
+      ['- one\n  text\n  - ', '    '],
+      ['- ', '  '],
+    ] as const) {
+      for (const plan of [[1, 1], [2], [1, 1, 1]] as const) {
+        for (const sides of [
+          [-1, -1, -1],
+          [1, 1, 1],
+          [-1, -1, 1],
+        ] as const) {
+          let text = file(`${head}café 42`);
+          const first = head.length;
+          let caret = first;
+          for (const [i, breaks] of plan.entries()) {
+            const insert = Array.from(
+              { length: breaks },
+              (_, k) => `\n${k < breaks - 1 ? indent.trimEnd() : indent}`,
+            ).join('');
+            const at = newestView(text).map.toSource(caret, sides[i] ?? -1);
+            text = applyChanges(
+              text,
+              trackedEdit(text, { from: at, to: at, insert }, context(bo, [], { random: draw() })),
+            );
+            caret += insert.length;
+          }
+          // The start and the end of every line from the bullet's to the one with the item's text.
+          const now = newestView(text).text;
+          const places = new Set([first]);
+          for (let start = now.indexOf('\n', first) + 1; start > 0 && start <= caret;) {
+            const end = now.indexOf('\n', start);
+            places.add(start).add(end === -1 ? now.length : end);
+            start = end + 1;
+          }
+          for (const place of [...places].filter((offset) => offset <= caret)) {
+            for (const side of [-1, 1] as const) {
+              const label = `${JSON.stringify(head)} ${JSON.stringify(plan)} ${sides.join(',')} at ${place} ${side}: ${JSON.stringify(bodyOf(text))}`;
+              const at = newestView(text).map.toSource(place, side);
+              const after = applyChanges(
+                text,
+                trackedEdit(
+                  text,
+                  { from: at, to: at, insert: 'new words' },
+                  context(bo, [], { random: draw() }),
+                ),
+              );
+              expect(newestView(after).text, label).toContain('new words');
+              expectEveryOrderAlike(label, after, exactly);
+              expect(applyChanges(after, acceptAll(after)), label).toBe(newestView(after).text);
+              expect(applyChanges(after, rejectAll(after)), label).toBe(originalView(after).text);
+              typedWords++;
+            }
+          }
+        }
+      }
+    }
+    // Every place was tried: none was left out by a refusal, which would have thrown.
+    expect(typedWords).toBeGreaterThan(300);
+  }, 60_000);
+
+  it('keeps the words of a refusal in code for code that is typed, and for a bullet no view reads as an underline', () => {
+    // Four columns of white space typed at the start of the text make code of it, whatever stands
+    // above it; and under a bullet that is no underline, the lines of the break are the item's.
+    for (const [head, indent] of [
+      ['- one\n  - ', '    '],
+      ['- ', '  '],
+      ['text\n\n- ', '  '],
+    ] as const) {
+      const body = `${head}<!--split k3x9-->\n${indent}\n${indent}café 42`;
+      const before = file(body, { k3x9: 'bo' });
+      const view = newestView(before);
+      const at = view.map.toSource(view.text.indexOf(`${indent}café`), -1);
+      expect(
+        () =>
+          trackedEdit(
+            before,
+            { from: at, to: at, insert: '    code' },
+            context(bo, ['m2bd', 'n8fx']),
+          ),
+        body,
+      ).toThrow("A tracked change can't go inside code or an HTML comment");
+    }
+  });
+
+  /** The edit that types `insert` at the start of the line `needle` begins, in the newest view. */
+  const typeAtLine = (
+    before: string,
+    needle: string,
+    insert: string,
+    afterIndent = false,
+  ): TextChange => {
+    const view = newestView(before);
+    const indent = afterIndent ? needle.length - needle.trimStart().length : 0;
+    const at = view.map.toSource(view.text.indexOf(needle) + indent, -1);
+    return { from: at, to: at, insert };
+  };
+  const words = (run: () => unknown): string => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof EditError) return error.message;
+      throw error;
+    }
+    return 'no error';
+  };
+
+  it('keeps a comment or a highlight off the bullet that a split stands on (they have no text to write beside it)', () => {
+    // The opener of typed text goes beside the split's marker; a comment's or a highlight's would
+    // stand on a line that the newest view reads as the underline of the text above it, and no
+    // order of deciding the split could be made: they are refused, as they were.
+    for (const [head, indent] of [
+      ['- one\n  - ', '    '],
+      ['text\n- ', '  '],
+    ] as const) {
+      const body = `${head}<!--split k3x9-->\n${indent}\n${indent}<!--split n8fx-->\n${indent}café 42`;
+      const before = file(body, { k3x9: 'bo', n8fx: 'bo' });
+      const view = newestView(before);
+      const first = view.text.indexOf(head) + head.indexOf('-');
+      const from = view.map.toSource(first, 1);
+      const to = view.map.toSource(view.text.indexOf(head) + head.length + 1, -1);
+      const label = JSON.stringify(head);
+      expect(
+        words(() => addComment(before, { from, to }, 'Why?', context(bo, ['m2bd', 'p7qd']))),
+        label,
+      ).toBe('A line that is only Markdown syntax takes no change.');
+      expect(
+        words(() => addHighlight(before, { from, to }, context(bo, ['m2bd', 'p7qd']))),
+        label,
+      ).toMatch(/^A line that is only Markdown syntax takes no change\./);
+    }
+  });
+
+  it('writes no typed text beside a marker that stands right after a dash with no space (it is no item)', () => {
+    // `-<marker>` is text of the paragraph above: not the bullet that the rule is for.
+    const body = 'text\n-<!--split k3x9-->\n  café 42';
+    const before = file(body, { k3x9: 'bo' });
+    const view = newestView(before);
+    const at = view.map.toSource(view.text.indexOf('-') + 1, -1);
+    expect(
+      words(() =>
+        trackedEdit(before, { from: at, to: at, insert: 'new words' }, context(bo, ['m2bd'])),
+      ),
+    ).toBe('A line that is only Markdown syntax takes no change.');
+  });
+
+  it('says why in words only where the bullet is the underline of text: not under a heading, a rule or a fence', () => {
+    // The refusal is the same (the empty item that the breaks leave ends its list, and what follows
+    // is code), but nothing is underlined: the generic words, which are true.
+    for (const above of ['## H', '***', '---', '```\ncode\n```', '<!-- c -->']) {
+      const body = `${above}\n  - <!--split k3x9-->\n    \n    café 42`;
+      const before = file(body, { k3x9: 'bo' });
+      const edit = typeAtLine(before, '    café 42', 'new words');
+      expect(
+        words(() => trackedEdit(before, edit, context(bo, ['m2bd', 'n8fx']))),
+        JSON.stringify(above),
+      ).not.toMatch(/underline/);
+    }
+  });
+
+  it('says why in words wherever text is typed under the bullet, and not for code that is typed', () => {
+    const body = 'text\n  - <!--split k3x9-->\n    \n    café 42\n    \n    more';
+    const before = file(body, { k3x9: 'bo' });
+    // Inside the first line of text under the bullet, and inside a later paragraph of it, which the
+    // newest view reads as code as it reads the first (the words were the generic ones for any but
+    // the first block).
+    const view = newestView(before);
+    for (const word of ['café', 'more']) {
+      const at = view.map.toSource(view.text.indexOf(word) + 1, -1);
+      expect(
+        words(() =>
+          trackedEdit(
+            before,
+            { from: at, to: at, insert: 'x' },
+            context(bo, ['m2bd', 'n8fx', 'p7qd', 'd3x9']),
+          ),
+        ),
+        word,
+      ).toBe(UNDERLINED);
+    }
+    // Typed code anywhere in the text is the cause, and Rejecting the breaks would not help.
+    const code = typeAtLine(before, '    café 42', 'x\n\n        code');
+    expect(
+      words(() => trackedEdit(before, code, context(bo, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']))),
+    ).toContain(IN_CODE_WORDS);
   });
 });
 

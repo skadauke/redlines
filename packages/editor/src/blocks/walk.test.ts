@@ -103,13 +103,15 @@ const WALKED: Invariant[] = [
   'undo',
   'open-caret',
   'history',
+  'file-text',
 ];
 
 /**
  * What the Stage 2 walks hold besides `WALKED`: that the file holds no more item lines than
  * micromark reads items. The walks of Stage 1's keys alone don't: Shift-Return at the start of an
- * item's text writes `1.\\` for its marker (seed 70 of those walks), and Return in the middle of the
- * text of a `2.` item under text adds another `2.` line, which is text (seed 146 here).
+ * item's text writes `1.\\` for its marker (seed 70 of those walks, with the documents as they were
+ * before the random alerts drew a second paragraph, #358), and Return in the middle of the text of
+ * a `2.` item under text adds another `2.` line, which is text (seed 146 here).
  */
 const STAGE_2_WALKED: Invariant[] = [...WALKED, 'list-reads'];
 

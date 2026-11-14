@@ -116,11 +116,17 @@ the harness: `runScript` plays a script on a real editor, through its keymaps, a
 `invariantProblems` reads what no key may break from the result. A walk is held to the invariants
 that its starting document holds: a hidden caret, an empty paragraph in the file, a stray blank
 line, micromark's reading of the file against the newest view, structural warnings, more markers at
-a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, and
-the history. A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
+a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, the
+history, and the file's text (`getDoc()` is the document with the open line taken back, each line
+and the ledger once: #439; a file with a CR is left out of that one, since its line endings come
+back as the file has them). A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
 that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
 and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
-own. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
+own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
+with the caret inside the marker and Track Changes off (`editedMarker`, seed 1140 of #292, `3.‸ ship`
+and Backspace): that is the person editing the syntax, the next numbered item reads as text of the
+line as Markdown reads it, and the tracked key is refused. A key that takes a marker away from the
+caret at an item's text, or an outdent, is held to it. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
 held further: to no refusal that it does not name, and to the rule that a skipped invariant that now
 holds fails; and a script of a single Return must be taken back by Backspace. `REDLINES_FUZZ=200`
 plays 200 walks of each kind; they run in Node's default heap since #286 was fixed (they had run out
@@ -195,11 +201,23 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
-- Numbered lists: Backspace on `1. a⏎   - ‸plan⏎   2. ship`, and with Track Changes off Backspace at
-  a first item above an item that a pending deletion empties; the walks of `walk-248.test.ts` fail
-  four seeds at `REDLINES_FUZZ=2000` (#292).
-- A prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-  changes, is written without its line breaks (#358).
+- A raw line break typed at the start of a bullet item's text under a line of text, or under the line
+  of the item it is in, is written where the file reads the bullet as an item and the newest view as
+  the underline of the text above it; the words typed on its blank lines (#143) are written the same
+  way (#443).
+- The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
+  as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
+  its list leaves that line as text, and the editor sees no change (#446).
+- Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
+  reads as a heading in some order of decisions: the format refuses a numbered sibling that would
+  become the item's first child, not an item with no text (#433; Backspace at a nested first item
+  waits for such a change since #292).
+- A deletion inside a blank line of a break that takes no line break, in a shape that the rule for a
+  quote's blank lines does not know (the `>` of a blank line indented in a list item, in the break of
+  a pending split, a quote that starts at the blank line), is written as the join of the two blocks;
+  the last check sees it only where letters differ (#447, #418). So is a replacement inside the
+  blank line of the break of the author's own pending split, and a line break typed there with
+  letters as well (#419).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
   skips micromark's reading for that shape (#299).
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in

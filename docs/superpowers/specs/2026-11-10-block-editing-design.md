@@ -255,6 +255,12 @@ block, each of which renders. So:
 - **The file never gets it.** Saving, and everything else that reads the document for the file,
   get the text as if it had been taken back; so does the host's edited state, which a Return alone
   doesn't set. A save at the wrong moment can't leave stray blank lines, or a list read as loose.
+  The take-back is one set of changes of the document as it stands, the ledger's entries with it:
+  the file text is that document, read again where the take-back reaches the ledger (an item's
+  split rejected, or the first tracked edit's ledger gone), so that no line comes out twice. An
+  open item under text that Markdown can't hold it under (`- one⏎  - ⏎⏎Para.`, a nested bullet is
+  the text's underline) leaves its level first, and then its split is rejected, so that the
+  rejection can't carry the next paragraph into the text above.
 - **Return in an empty paragraph does nothing** at the top level. **Call:** Markdown can keep a second empty paragraph only as a paragraph of a no-break space or
   `&nbsp;`, content the file would keep and every renderer would draw as a paragraph; Redlines
   writes none, and Word's habit of Return Return for space has no form that stays empty. In a
@@ -296,9 +302,20 @@ block, each of which renders. So:
   Return writes it). **Call:** only an empty item the person's own keys made: a file that already
   holds `- one⏎  -` is read as Markdown reads it, and Tab on an empty item that Return didn't just
   make, where it would make this form, is refused ("An empty item can't be indented under a line
-  of text in Markdown. Type in it first."). Backspace or Delete over the only character of an item
-  that the file holds opens it the same way when the item's line and the end of the line above carry
-  no marker of a change (#204; with Track Changes on the item goes whole instead).
+  of text in Markdown. Type in it first."). Any edit of the person's that takes all the text of an
+  item that Markdown can't hold empty opens it the same way, anywhere but on the first line of the
+  file (nothing is above it there, and it is an item): Backspace or Delete over its one character
+  (#204), a selection, a cluster, Delete, a cut (#442; the first item of a list right under a
+  paragraph is such an item: `Para.⏎- ` is a heading). It is one place, a change that leaves the
+  caret on the item, and not a key at a time: the one character is the plain key too. Two things
+  keep the item from being taken back, and the edit is then refused, in words: a mark of a pending
+  change or a comment on its line, or one that begins at the end of the line above (an insertion
+  that holds the break, another person's split), which taking the item back would decide (a closer,
+  the point of a comment or a plain HTML comment ending the line above is nothing to decide, and a
+  split of the author's own goes with the item); and what follows the item, its own further lines
+  or an item that couldn't start a list under the text above (a number other than 1, an empty
+  one), which would read as text of that line once the item is gone. With Track Changes on the item
+  goes whole instead.
 
 **Call:** the empty paragraph is transient. Showing it after you leave would draw something no
 renderer shows; keeping its blank lines in the file would leave stray lines that pile up.
@@ -503,7 +520,8 @@ items, at every depth; the rows after the first block say what differs.
 | End of the first paragraph of an item that has a second (`- p1‸⏎⏎  p2`; reason below) | A new item | An empty paragraph inside the item, between the two | `- p1⏎⏎  ‸⏎⏎  p2` | Plain ✓ | ✓ |
 | Middle of the text (`- one ‸two`) | Two items | Two items; what follows in the item goes with the second | `- one ⏎- ‸two` | `- one <split>⏎- ‸two` ✓ | ✓ |
 | Start of the text (`- ‸two`) | An empty item above; the caret stays | Same | `- ⏎- ‸two` | `- <split>⏎- ‸two` ✓ | ✓ |
-| An empty nested item (`- one⏎  - ‸`; after a Return, Tab it is open: the file has `- one` without it until text is typed, above, "The empty paragraph") | Up one level (Word; Docs not confirmed) | Up one level | `- one⏎- ‸` | Your own item: the split's break edited ✓; another's: refused until their change is decided (the tracked layer takes no edit of their break) | `- one⏎  - ‸` (the open item again) ✓ |
+| Start of the text, which a pending deletion of its first character starts (`2) ‸<del a>⏎   lpha`, the deletion written alone after the marker, format §3.3) | An empty item above | Same: the item keeps its deletion (the block reading takes that line for an HTML block that holds only a marker, which Return used to open an empty paragraph above, a blank line the file read as a paragraph of the item and the newest view as text after the list; #292, walk seed 1326) | | `2) <split>⏎3) <del a>⏎   lpha` ✓ | ✓ |
+| An empty nested item (`- one⏎  - ‸`; after a Return, Tab it is open: the file has `- one` without it until text is typed, above, "The empty paragraph") | Up one level (Word; Docs not confirmed) | Up one level | `- one⏎- ‸` | Your own item: the split's break edited ✓, the parent's syntax going over the item's line as it is, as Tab's does, whatever its marker (`1. a⏎   - b‸`, Return twice: `1. a⏎   - b<split>⏎2. ‸`; typed over the marker, the format took the break away with it and wrote `2. ` after `b`, #440; in a loose list the split's break holds the blank line, `c<split>⏎⏎2. `); another's: refused until their change is decided ("Another person's pending change made this item. Accept or reject it before moving it out of its list.": the tracked layer takes no edit of their break) | `- one⏎  - ‸` (the open item again) ✓ |
 | An empty item at the top level, the last | Ends the list: an empty Normal paragraph | Leaves the list: an empty paragraph after it | `- two⏎⏎‸⏎⏎After.` | `- two<split>⏎⏎‸⏎⏎After.` ✓ (your split's break changed) | Back to the empty item `- two⏎- ‸` ✓ |
 | An empty item at the top level, in the middle | Ends the list there; the rest is another list | The same: an empty paragraph between two lists (while it's empty the file would read one loose list, which is why saving leaves it out) | `- one⏎⏎‸⏎⏎- two` | A split changed, as above | ✓ |
 | An empty item in a list in a quote (`> - one⏎> - ‸`) | — | Leaves the list, stays in the quote | `> - one⏎>⏎> ‸` | Plain or your split's break | ✓ |
@@ -636,13 +654,15 @@ start of a block's text and Delete at the end of it act on blocks:
 | Backspace at the start of a later paragraph of a list item (`- a⏎⏎  ‸b`, #204) | Joins | Joins it to the paragraph above in the item; the item's indentation goes with the break | `- a‸b` | `- a<del ⏎⏎  >‸b` |
 | Backspace in an empty item at any depth, not after a Return (`- one⏎  - ‸`, #204) | Removes the bullet | The item goes with the break above it and its indentation; the caret at the end of the line above | `- one‸` | A whole-block deletion of the empty item (`- one<del ⏎  - >`; the last item of the file, a substitution of its break by a space, `- one<sub ⏎  - > </sub>`), or plain if your own |
 | Delete in an empty item at any depth, an item after it (`- one⏎  - ‸⏎- two`, #204) | Removes the bullet | The item goes, the next block keeps its kind, the caret at its start | `- one⏎- ‸two` | `- one<del ⏎  - >⏎- ‸two`: the break above goes with the item, as Backspace takes it, since the format has no place for the marker of a deletion of `  - ` alone at the start of its line (it was refused: "A line that is only Markdown syntax takes no change.") |
-| Backspace or Delete over the only character of an item's text, where the empty item is no item in Markdown (a nested bullet under text, a numbered one under text: `- one⏎  - x‸`, #204) | The bullet stays, empty | Track Changes off, on a plain line: the character goes and the empty item is open, as Return and Tab left it: drawn, out of the file, gone with the next Backspace, written when text is typed in it (the file held `  - ` alone, which Markdown reads as the underline of `one` while the editor drew an empty item). With a marker of a change on its line or ending the line above, the plain key (the take-back would decide that change: #442) | `- one` (the item open) | Your own typed text: the item goes whole with the character, `- one‸`; text that isn't yours: the format deletes the whole item, `- one<del ⏎  - x>`, or refuses in its words where it can't (another item right after it, code or a table) |
-| …the first item of a nested list | Removes the bullet | Up one level | `- a⏎- ‸b` | `- <fmt was=indent=2>⏎  ‸b</fmt>` ✓ (your own item: its split edited) |
-| …the first item of a list at the top level | Removes the bullet | Takes it out of the list: a paragraph; in a numbered list whose next item isn't 1, a blank line after it | `Para.⏎⏎‸one⏎- two` | `Para.<sub ⏎⏎- one>⏎⏎one</sub>⏎- two` ✓; a one-item list `<fmt was=ul>` ✓ |
+| Backspace or Delete in an empty item that a blank line separates from the block below (`- one⏎  - ‸⏎⏎After.`, `- one⏎- ‸⏎⏎After.`, #441) | Removes the bullet | The item goes with the break above it, and the blank line stays, so the block below stays apart from the list (Delete's forward edit took the blank line and left the paragraph a lazy line of the item above); Delete puts the caret at the start of the next block | `- one⏎⏎After.` | `- one<del ⏎  - >⏎⏎After.`: a deletion of a setext underline, which an empty bullet under text is, leaves the break after it (format §3.4); it was `- one<del ⏎  - ⏎⏎>After.`, and the paragraph joined the item above in the newest view. Delete's forward edit as before where a blank line is above the item as well (`- one⏎⏎- ‸⏎⏎- two`), front matter is above it or a table below it; a selection that takes the line's own break too (triple-click, Shift-↓), and an item whose break is another person's pending split, still join |
+| Backspace or Delete over the only character of an item's text, or any edit that takes all of it (a selection, a cluster, a cut), where the empty item is no item in Markdown (a nested bullet under text, a numbered one under text, the first item of a list right under a paragraph: `- one⏎  - x‸`, `Para.⏎- x‸`, #204, #442) | The bullet stays, empty | Track Changes off, on a plain line: the character goes and the empty item is open, as Return and Tab left it: drawn, out of the file, gone with the next Backspace, written when text is typed in it (the file held `  - ` alone, which Markdown reads as the underline of `one` while the editor drew an empty item). With a marker of a change on its line or ending the line above, refused in words (the take-back would decide that change), but for a pending split of the author's own, which goes with the item (#442) | `- one` (the item open) | Your own typed text: the item goes whole with the character, `- one‸`; text that isn't yours: the format deletes the whole item, `- one<del ⏎  - x>`, or refuses in its words where it can't (another item right after it, code or a table) |
+| …the first item of a nested list | Removes the bullet | Up one level; refused where the line after it and its nested items would come to stand under the text of the last paragraph of them (it is indented far enough to continue the item that holds that paragraph once the item has moved, and was not where it stood) and is a number other than 1, an empty item or an underline: the next item of its list, the first of another list in its parent, one column less indented, as deep as the text of its child (`2. ship` under `- ‸plan`); in the format's words for a numbered item, and in the key's own for the others. Never written as the plain edit that gets around the format's refusal (tabs and a pending break make the format refuse first, #292). Refused too where a pending change in that line would make it read otherwise in some reading (an item a deletion empties, an insertion that is all of it) | `- a⏎- ‸b` | `- <fmt was=indent=2>⏎  ‸b</fmt>` ✓ (your own item: its split edited) |
+| …the first item of a list at the top level | Removes the bullet | Takes it out of the list: a paragraph; in a numbered list whose next item isn't 1, a blank line after it; refused, with Track Changes on or off, while a pending change in the line below would make it read otherwise in some reading (the item below holds only another person's deletion or insertion: an item with text in the file and an empty one in the newest or the original view, a heading once it is decided; #292), and so is Delete at the end of the paragraph above a list that takes the first item's marker in | `Para.⏎⏎‸one⏎- two` | `Para.<sub ⏎⏎- one>⏎⏎one</sub>⏎- two` ✓; a one-item list `<fmt was=ul>` ✓ |
 | Backspace at the start of a quote's first paragraph | — | Takes it out of the quote (one level) | `Para.⏎⏎‸One two.` | One paragraph: `<fmt was=quote>` ✓; more: each of its lines' `> ` taken out, as substitutions of the break ✓ |
 | Backspace at the start of a later paragraph of a quote | — | Joins it to the paragraph above, in the quote | `> One.‸Two.` | A join ✓ |
 | Backspace in an empty paragraph | The empty paragraph goes | It goes; the caret at the end of the block above | | Plain |
 | Backspace in an empty item, heading or quote | Removes the bullet, or the paragraph | It goes with the break above it; the caret at the end of the line above | | A whole-block deletion, or plain if your own |
+| Backspace or Delete over the only character of the first line of a paragraph that goes on (`‸a⏎two`) | The line break stays: an empty first line | The line goes with its break and the next line's prefix, as the format's deletion of a whole line does; no empty line is left in front of the paragraph's text (walk seed 1141) | `two` | `<del a⏎>⏎⏎two` ✓ |
 | Delete at the end of a block, a block after it | Joins the next; this one's formatting wins | Joins the next block's text into this one; this one keeps its kind | `One.‸Two.` | `One.<del ⏎⏎>Two.` ✓; into a heading's text `One.<del ⏎⏎## >Two` ✓ |
 | …the next block is empty | Removes the empty paragraph | It goes | | |
 | …the next block is code, a table, an HTML block | Nothing | Nothing | | |
@@ -1075,7 +1095,8 @@ views, and refusal. Run on every script:
 - No refusal unless the script expects one, and then the expected words.
 - The tracked text passes the format's checks (every order of decisions reads as the views), and no
   marker starts a line.
-- `getDoc` never holds an empty paragraph or an empty line's no-break space.
+- `getDoc` never holds an empty paragraph or an empty line's no-break space, and after each key it
+  is the document with the open line taken back as it stands (the walks check it, `file-text`).
 - Return never leaves a delimiter showing in either half, or a literal backslash at a paragraph's end.
 - Backspace at a list item's start takes two presses (bullet, then join) and the second gives the
   text of the item above and this one joined; Backspace right after Return takes one.
