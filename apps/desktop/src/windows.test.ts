@@ -448,24 +448,55 @@ describe('a connected window', () => {
       expect(held).toHaveBeenCalledExactlyOnceWith('quit');
     });
 
+    it('tells the window in front too, which the person looks at: a new window has no menu yet', async () => {
+      // The window in front is the new one, whose page is loading; ⌘Q was chosen in the one behind.
+      const { link } = app([starting('doc-1'), clean('main')]);
+      const heldMain = vi.fn();
+      const heldDoc = vi.fn();
+      const main = await connectWindow(link('main'), () => Promise.resolve(true), {
+        held: heldMain,
+      });
+      await connectWindow(link('doc-1'), () => Promise.resolve(true), { held: heldDoc });
+      await main.quit();
+      expect(heldMain).toHaveBeenCalledExactlyOnceWith('quit');
+      expect(heldDoc).toHaveBeenCalledExactlyOnceWith('quit');
+    });
+
     it('holds it though other windows have unsaved edits, which are asked once it has reported', async () => {
-      const { link, finished } = app([dirty('main'), starting('doc-1')]);
+      const all = [dirty('main'), starting('doc-1')];
+      const { link, finished } = app(all);
       const askMain = vi.fn(() => Promise.resolve(true));
       const main = await connectWindow(link('main'), askMain, { held: vi.fn() });
       await main.quit();
       expect(finished).toEqual(['keep running']);
       expect(askMain).not.toHaveBeenCalled();
+      // The page has reported what it holds: nothing is held any more, and each window is asked.
+      all[1] = dirty('doc-1');
+      await connectWindow(link('doc-1'), () => Promise.resolve(true), { held: vi.fn() });
+      await main.quit();
+      expect(finished).toEqual(['keep running', 'quit']);
+      expect(askMain).toHaveBeenCalledOnce();
     });
 
-    it('asks as before once the window has reported', async () => {
-      const { link, finished } = app([dirty('main'), { ...dirty('doc-1'), starting: false }]);
+    it('holds a quit that began before the window opened, at the next question', async () => {
+      // A Save sheet is up in the first window; a text window opens while it is; it is answered.
+      const all: DocumentWindow[] = [dirty('main'), dirty('doc-2')];
+      const asked: string[] = [];
       const held = vi.fn();
-      const main = await connectWindow(link('main'), () => Promise.resolve(true), { held });
-      const doc = await connectWindow(link('doc-1'), () => Promise.resolve(true), { held });
-      expect(doc).toBeDefined();
-      await main.quit();
-      expect(finished).toEqual(['quit']);
-      expect(held).not.toHaveBeenCalled();
+      const goOn = await askEachDirtyWindow(
+        () => Promise.resolve(all),
+        (label) => {
+          asked.push(label);
+          // A window is opened for text while the first is asked.
+          all.unshift(starting('doc-3'));
+          return Promise.resolve(true);
+        },
+        new Set(),
+        held,
+      );
+      expect(goOn).toBe(false);
+      expect(asked).toEqual(['main']);
+      expect(held).toHaveBeenCalledOnce();
     });
 
     it('holds the restart for an update too, before anything is installed', async () => {
@@ -478,6 +509,22 @@ describe('a connected window', () => {
       expect(install).not.toHaveBeenCalled();
       expect(relaunch).not.toHaveBeenCalled();
       expect(held).toHaveBeenCalledWith('quit');
+    });
+
+    it('holds the restart right before it too, for a window opened while it installed', async () => {
+      const all: DocumentWindow[] = [clean('main')];
+      const { link } = app(all);
+      const main = await connectWindow(link('main'), () => Promise.resolve(true), {
+        held: vi.fn(),
+      });
+      const install = vi.fn(() => {
+        all.push(starting('doc-1'));
+        return Promise.resolve();
+      });
+      const relaunch = vi.fn(() => Promise.resolve());
+      expect(await restartAfterAsking(main, install, relaunch)).toBe(false);
+      expect(install).toHaveBeenCalledOnce();
+      expect(relaunch).not.toHaveBeenCalled();
     });
 
     it('says so when the app holds a quit it was asked for, or this window’s close', async () => {
@@ -496,6 +543,18 @@ describe('a connected window', () => {
       const main = await connectWindow(link('main'), () => Promise.resolve(true));
       await main.quit();
       expect(finished).toEqual(['keep running']);
+    });
+
+    it('knows whether this window is the one starting, for its own close', async () => {
+      const all = [clean('main'), starting('doc-1')];
+      const { link } = app(all);
+      const main = await connectWindow(link('main'), () => Promise.resolve(true));
+      const doc = await connectWindow(link('doc-1'), () => Promise.resolve(true));
+      expect(await main.starting()).toBe(false);
+      expect(await doc.starting()).toBe(true);
+      // Once its page has reported, it is not: the close is asked about as any window's is.
+      all[1] = dirty('doc-1');
+      expect(await doc.starting()).toBe(false);
     });
   });
 

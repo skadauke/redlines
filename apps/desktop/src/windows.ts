@@ -15,8 +15,9 @@ export interface DocumentWindow {
   /** Whether its document has unsaved edits. */
   dirty: boolean;
   /**
-   * A window opened for text whose page hasn't yet said what it holds. It can't be asked about its
-   * text, which is the window's alone, so a quit waits until it has (src-tauri/src/windows.rs).
+   * A window opened for text whose page hasn't yet said what it holds, in its first moments (at
+   * most ten seconds, src-tauri/src/windows.rs). It can't be asked about its text, which is the
+   * window's alone, so a quit is refused until it has, and so is its own close.
    */
   starting?: boolean;
 }
@@ -30,14 +31,23 @@ export interface DocumentWindow {
  * it is asked again.
  *
  * `asked` holds the windows asked so far. To ask again after a wait, give the same set.
+ *
+ * A window that is starting (`DocumentWindow.starting`) can't be asked, and its text would go with
+ * the quit: at any look at the list, one that shows it makes this resolve to false, after `held`
+ * has been called with the list. A window opened while another is asked holds the quit too.
  */
 export async function askEachDirtyWindow(
   list: () => Promise<readonly DocumentWindow[]>,
   ask: (label: string) => Promise<boolean>,
   asked: Set<string> = new Set(),
+  held?: (windows: readonly DocumentWindow[]) => void,
 ): Promise<boolean> {
   for (;;) {
     const windows = await list();
+    if (windows.some(({ starting }) => starting === true)) {
+      held?.(windows);
+      return false;
+    }
     for (const { label, dirty } of windows) if (!dirty) asked.delete(label);
     const next = windows.find(({ label, dirty }) => dirty && !asked.has(label));
     if (!next) return true;
@@ -137,8 +147,16 @@ export function tauriWindowLink(): WindowLink {
 
 /** This window, connected to the others. */
 export interface ConnectedWindow {
-  /** Asks each window with unsaved edits in turn (`askEachDirtyWindow`). */
+  /**
+   * Asks each window with unsaved edits in turn (`askEachDirtyWindow`). False, with the person told
+   * (`ConnectOptions.held`), while a window opened for text is starting.
+   */
   askEach(asked?: Set<string>): Promise<boolean>;
+  /**
+   * Whether this window is starting: opened for text, and its page hasn't said what it holds. Its
+   * close is held then (the window's own close handler asks).
+   */
+  starting(): Promise<boolean>;
   /** Quits, once each window with unsaved edits has been asked, or keeps running after a Cancel. */
   quit(): Promise<void>;
   /** The files open in all the windows. */
@@ -226,15 +244,25 @@ export async function connectWindow(
     });
   };
 
-  const askEach = shared(async (asked?: Set<string>) => {
-    // A window opened for text can't be asked until its page has said what it holds, and its text
-    // would go with the quit: nothing is asked, the app keeps running, and the person is told.
-    if ((await link.list()).some(({ starting }) => starting === true)) {
-      options.held?.('quit');
-      return false;
+  /**
+   * A quit, or the restart for an update, is held for a window that is starting: nothing is asked,
+   * the app keeps running, and the person is told here and in the window in front. A new window has
+   * no menu until its page is ready, so the menu in use is its predecessor's, whose page is behind
+   * the new window: the notice must be where the person looks.
+   */
+  const holdQuit = (windows: readonly DocumentWindow[]) => {
+    options.held?.('quit');
+    const front = windows[0]?.label;
+    if (front !== undefined && front !== link.label) {
+      link.emitTo(front, 'quit-held', null).catch((error: unknown) => {
+        console.warn('Could not tell the window in front that a quit was held', error);
+      });
     }
-    return askEachDirtyWindow(() => link.list(), ask, asked);
-  });
+  };
+
+  const askEach = shared((asked?: Set<string>) =>
+    askEachDirtyWindow(() => link.list(), ask, asked, holdQuit),
+  );
 
   const quit = shared(async () => {
     const goOn = await askEach().catch((error: unknown) => {
@@ -273,6 +301,8 @@ export async function connectWindow(
 
   return {
     askEach,
+    starting: async () =>
+      (await link.list()).some(({ label, starting }) => label === link.label && starting === true),
     quit,
     openPaths: async () => (await link.list()).flatMap(({ path }) => (path === null ? [] : [path])),
     reportDocument(path, dirty) {

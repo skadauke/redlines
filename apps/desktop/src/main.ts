@@ -151,7 +151,7 @@ const windows = isTauri
       held: (what) =>
         notice.flash(
           what === 'quit'
-            ? 'A window is still opening. Try quitting again in a moment.'
+            ? 'A window is still opening. Try again in a moment.'
             : 'This window is still opening. Try closing it again in a moment.',
         ),
     })
@@ -972,6 +972,13 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // A window opened for text is held in its first moments: its page can't be asked about the
+    // text yet, and Tauri destroys the window when this handler lets it close, whatever the app
+    // prevented, so this is what holds it (the app tells the person: `close-held`).
+    if (await windows?.starting().catch(() => false)) {
+      event.preventDefault();
+      return;
+    }
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();

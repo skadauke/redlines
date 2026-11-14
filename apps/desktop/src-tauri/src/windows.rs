@@ -14,8 +14,10 @@
 //! below stops that and starts them, and answers once every window has answered.
 //!
 //! A window opened for text holds it unsaved before its page has loaded far enough to be asked about
-//! it, which a quit or its close button would not wait for. For its first moments (`Entry::starting`)
-//! the quit and the close are held, and the person is told to try again.
+//! it, which a quit or its close button would not wait for. For its first moments (`Entry::starting`,
+//! at most ten seconds) a quit is refused, whatever asks (the pages' asking, AppKit's terminate, and
+//! the answer that every window has said yes: `hold_quit`), and so is the window's own close, and
+//! the person is told to try again.
 
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -68,6 +70,13 @@ const CASCADE_STEP: f64 = 26.0;
 /// reports as soon as it has loaded, in a second or two; one that hasn't in this long isn't going to,
 /// and a window that can't be closed, or an app that can't quit, is worse than the text it holds.
 const STARTING_GRACE: Duration = Duration::from_secs(10);
+
+/// What a window is told when a quit was refused for a window that is starting. The pages listen for
+/// it (`src/windows.ts`), and a test holds the two to each other.
+const QUIT_HELD: &str = "quit-held";
+
+/// What a window is told when its own close was refused because it is starting (`QUIT_HELD`).
+const CLOSE_HELD: &str = "close-held";
 
 /// What a window was opened for: a file, and a line in it; or text, for an Untitled document that
 /// holds it; or nothing. The window reads the fields by name.
@@ -280,8 +289,7 @@ impl Registry {
             .collect()
     }
 
-    /// Whether any window is starting (`Entry::starting`) at `now`: a quit waits for it.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// Whether any window is starting (`Entry::starting`) at `now`: a quit is refused for it.
     fn any_starting(&self, now: Instant) -> bool {
         self.entries.iter().any(|entry| entry.starting(now))
     }
@@ -629,10 +637,36 @@ pub fn document_windows(windows: tauri::State<'_, Windows>) -> Vec<DocumentWindo
     windows.lock().list(Instant::now())
 }
 
+/// Refuses a quit while a window is starting (`Entry::starting`), and tells the window in front. Says
+/// whether it was refused. Every way to a quit comes through here at its last step, since a window
+/// can open, with text that exists nowhere else, between the first question and the last answer.
+fn hold_quit(app: &AppHandle) -> bool {
+    let windows = app.state::<Windows>();
+    let front = {
+        let registry = windows.lock();
+        if !registry.any_starting(Instant::now()) {
+            return false;
+        }
+        registry.frontmost()
+    };
+    if let Some(front) = front {
+        let _ = app.emit_to(front.as_str(), QUIT_HELD, ());
+    }
+    true
+}
+
 /// Every window has answered, and none said Cancel: the app quits. When macOS is waiting to hear,
-/// by telling it; the app is then terminated as it would be from the Dock.
+/// by telling it; the app is then terminated as it would be from the Dock. Not while a window is
+/// starting, which opened after the question was asked: that is a Cancel.
 #[tauri::command]
 pub fn quit_all(app: AppHandle) {
+    if hold_quit(&app) {
+        if app.state::<Windows>().lock().finish_asking() {
+            #[cfg(target_os = "macos")]
+            macos::answer(false);
+        }
+        return;
+    }
     if app.state::<Windows>().lock().finish_asking() {
         #[cfg(target_os = "macos")]
         macos::answer(true);
@@ -652,7 +686,12 @@ pub fn keep_running(windows: tauri::State<'_, Windows>) {
 
 /// The close button, ⌘W or File › Close of a window was pressed. A window opened for text that is
 /// still starting can't ask about its text, which would be lost with it: the close is held, and the
-/// window, if its page is listening, tells the person to try again (`close-held`).
+/// window, if its page is listening, tells the person to try again (`CLOSE_HELD`).
+///
+/// This holds a close that no page handler takes. Once the page has registered its own
+/// (`onCloseRequested`, early in its start), Tauri leaves the closing to that handler and destroys
+/// the window when it lets it, whatever is prevented here: the handler asks the app whether the
+/// window is starting (`document_windows`) and prevents the close itself.
 pub fn close_requested(app: &AppHandle, label: &str, api: &CloseRequestApi) {
     let starting = app
         .state::<Windows>()
@@ -660,7 +699,7 @@ pub fn close_requested(app: &AppHandle, label: &str, api: &CloseRequestApi) {
         .is_starting(label, Instant::now());
     if starting {
         api.prevent_close();
-        let _ = app.emit_to(label, "close-held", ());
+        let _ = app.emit_to(label, CLOSE_HELD, ());
     }
 }
 
@@ -707,7 +746,6 @@ pub mod macos {
     //! end the app with no chance to save.
 
     use std::sync::OnceLock;
-    use std::time::Instant;
 
     use dispatch2::DispatchQueue;
     use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -744,17 +782,9 @@ pub mod macos {
     /// Without unsaved edits, the app may go. With them, the answer comes later: AppKit keeps the app
     /// running, and sheets working, until then.
     fn ask_windows(app: &AppHandle) -> NSApplicationTerminateReply {
-        let (starting, front) = {
-            let windows = app.state::<Windows>();
-            let registry = windows.lock();
-            (registry.any_starting(Instant::now()), registry.frontmost())
-        };
-        if starting {
+        if super::hold_quit(app) {
             // A window opened for text can't be asked about it yet, and the text would go with the
             // app: the app keeps running, and the window in front tells the person to try again.
-            if let Some(front) = front {
-                let _ = app.emit_to(front.as_str(), "quit-held", ());
-            }
             return NSApplicationTerminateReply::TerminateCancel;
         }
         let asking = app.state::<Windows>().lock().begin_terminating();
@@ -1229,6 +1259,17 @@ mod tests {
             starting,
             [("doc-1".to_owned(), true), ("main".to_owned(), false)]
         );
+    }
+
+    #[test]
+    fn the_events_the_pages_listen_for_are_the_ones_sent() {
+        let page = include_str!("../../src/windows.ts");
+        for name in [QUIT_HELD, CLOSE_HELD] {
+            assert!(
+                page.contains(&format!("'{name}'")),
+                "{name} is not in windows.ts"
+            );
+        }
     }
 
     #[test]
