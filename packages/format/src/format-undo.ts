@@ -5,7 +5,14 @@
 import { openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { blockUndo } from './format-blocks.ts';
-import { DELIMITER, isAlignOps, isBlockUndo, isInlineFormat, opsOf } from './format-ops.ts';
+import {
+  DELIMITER,
+  closingOf,
+  isAlignOps,
+  isBlockUndo,
+  isInlineFormat,
+  opsOf,
+} from './format-ops.ts';
 import { alignDecision } from './table-align.ts';
 import type { ParsedFormatOp } from './format-ops.ts';
 import {
@@ -147,7 +154,7 @@ function undoOf(
         isWord(charBefore(layout.v, from, new Set())) || isWord(charAfter(layout.v, to, new Set()));
       const written = letters ? syntax.replaceAll('_', '*') : syntax;
       left += written;
-      right = [...written].reverse().join('') + right;
+      right = closingOf(name, written) + right;
     } else if (isInlineFormat(name)) {
       const span = layout.spans.find(
         (s) => s.format === name && s.open.from >= from && s.close.to <= to && leads(s.open.from),

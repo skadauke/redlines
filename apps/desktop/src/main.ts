@@ -9,6 +9,8 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  blockedMessage,
+  createAsk,
   createLiveLines,
   createMacAgents,
   createRuns,
@@ -20,13 +22,13 @@ import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
 import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
-import type { AgentInfo } from '@redlines/plugin-api';
+import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
+import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -61,17 +63,25 @@ import {
 } from './settings.ts';
 import { followScrollbar } from './scrollbar.ts';
 import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
-import { applyTextSize, stepSize } from './text-size.ts';
+import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
+import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from './zoom.ts';
+import {
+  applyZoom,
+  followZoom,
+  initialZoom,
+  nextZoom,
+  tauriZoomLink,
+  type PageZoom,
+} from './zoom.ts';
 import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -248,18 +258,23 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
 // doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
-const agents = createMacAgents(
-  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
-  createRelay(),
-  isTauri
-    ? {
-        more: async () =>
-          (await acpAgents.list()).map(({ id, name, program, args }) =>
-            createAcpProvider(processes, { id, name, command: program, args }),
-          ),
-      }
-    : {},
-);
+const agents =
+  !isTauri && import.meta.env.DEV
+    ? // A plain page has no agent programs: in development a scripted one stands in, which answers
+      // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+    : createMacAgents(
+        isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+        createRelay(),
+        isTauri
+          ? {
+              more: async () =>
+                (await acpAgents.list()).map(({ id, name, program, args }) =>
+                  createAcpProvider(processes, { id, name, command: program, args }),
+                ),
+            }
+          : {},
+      );
 // An agent added or removed by another window, or one that Preferences has updated, signed in or
 // found changed, is looked for again at the next comment box.
 if (isTauri) acpAgents.watch(() => agents.forget());
@@ -284,6 +299,17 @@ const documentData = createDocumentData(
   (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
 );
 
+/** The @ picker for a box that asks an agent: a comment's, and the question of an Ask. */
+const attachAgentPicker = (field: HTMLTextAreaElement) => {
+  void lookForAgents();
+  return attachPicker(field, {
+    getParsed: () => editor.getParsed(),
+    getMet: () => settings.people,
+    me: author.handle,
+    agents: () => knownAgents,
+  });
+};
+
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
@@ -303,15 +329,7 @@ const review = createReview(editor, {
   },
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
-  attachToField: (field) => {
-    void lookForAgents();
-    return attachPicker(field, {
-      getParsed: () => editor.getParsed(),
-      getMet: () => settings.people,
-      me: author.handle,
-      agents: () => knownAgents,
-    });
-  },
+  attachToField: attachAgentPicker,
   extras: {
     renderText: (entry, person) =>
       renderCommentText(entry, person, {
@@ -394,6 +412,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
+  // Save for a document with no file opens its dialog in the folder Preferences name, if any.
+  newDocumentFolder: () => loadSettings().newDocumentFolder,
 });
 
 /** The document the runs were last told of. */
@@ -410,8 +430,10 @@ const focusEditor = () => {
 function showDocument(state: DocumentState): void {
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
-    // Another document took this one's place: the old one's runs have nothing to act on.
+    // Another document took this one's place: the old one's runs have nothing to act on, and its
+    // words are not this one's.
     runs.documentReplaced();
+    wordCount.refresh();
   }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
@@ -506,6 +528,19 @@ async function openHere(path: string): Promise<void> {
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
 
+/** What an agent may read, as Preferences and the person's answers say: a run's and an Ask's. */
+const agentSettings = {
+  defaultScope: () => settings.agentScope,
+  consent: (agent: string, folder: string) => loadSettings().consent[consentKey(agent, folder)],
+  setConsent: (agent: string, folder: string, answer: AgentScope | 'no') =>
+    changeSettings({
+      consent: {
+        ...loadSettings().consent,
+        [consentKey(agent, folder)]: answer,
+      },
+    }),
+};
+
 const runs = createRuns({
   agents,
   author,
@@ -519,17 +554,29 @@ const runs = createRuns({
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
-  settings: {
-    defaultScope: () => settings.agentScope,
-    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
-    setConsent: (agent, folder, answer) =>
-      changeSettings({
-        consent: {
-          ...loadSettings().consent,
-          // Preferences keep no wider answer than the folder yet.
-          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
-        },
-      }),
+  // What an agent may read at This folder and my home folder, and what macOS is holding back of
+  // it; a browser has none.
+  ...(isTauri ? { homeReach, homeAccess } : {}),
+  settings: agentSettings,
+  // An agent that couldn't read a file inside what it may read: which file, why and what to do.
+  onBlocked: (notice) => {
+    const { text, action } = blockedMessage(notice);
+    notifications.show({
+      key: `blocked ${notice.thread} ${notice.cause} ${notice.place ?? ''}`,
+      text,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                if (action.do === 'log') showAgentLogs();
+                else openFilesAndFoldersSettings();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    });
   },
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
@@ -563,6 +610,43 @@ const liveLines = createLiveLines({
             },
           }
         : {}),
+    }),
+});
+
+/** Opens System Settings where the person lets Redlines read a folder macOS protects. */
+function openFilesAndFoldersSettings(): void {
+  if (!isTauri) return notice.flash('System Settings are on the Mac.');
+  invoke('open_files_and_folders_settings').catch((error: unknown) => {
+    console.error('Could not open System Settings', error);
+    notice.flash('Couldn’t open System Settings.');
+  });
+}
+
+// Ask: a question about the selection, answered in a bubble beside it, which writes nothing to the
+// file. It runs the agents as a comment's run does, with the tools that read; registered here, after
+// the review interface, it follows Add Comment and Highlight in the Format menu.
+const ask = createAsk(editor, {
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+  },
+  projectRoot: projectOf,
+  settings: agentSettings,
+  notice: (message) => notice.flash(message),
+  attachToField: attachAgentPicker,
+  showThread: (thread) => review.showThread(thread),
+  showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
+  // A long answer worth keeping or editing: an Untitled document in a new window. Ask keeps the
+  // bubble until the window is open, and says so in a notice when it can't be (a browser tab is
+  // refused text on purpose); this logs why.
+  openInNewWindow: (text) =>
+    host.openWindow(undefined, undefined, text).catch((error: unknown) => {
+      console.error('Could not open a new window', error);
+      throw error;
     }),
 });
 
@@ -619,7 +703,7 @@ const percent = (level: number) => `${Math.round(level * 100)}%`;
 const changeZoom = (change: { by: number } | { to: number }) => {
   if (!zoom) return;
   const from = zoom.level();
-  const level = 'to' in change ? change.to : stepSize(from, change.by);
+  const level = nextZoom(from, change);
   if (level === from) return;
   void zoom.ask(level).catch((error: unknown) => {
     console.error('Could not zoom the windows', error);
@@ -697,6 +781,11 @@ const titleBar = createTitleBar(element('#titlebar'), {
 // classic scrollbar.
 editor.addExtension(topRoom(() => titleBar.room()));
 followScrollbar(scroller, main);
+
+// The word count in the lower right corner, counted on idle after the text or the selection last
+// changed (a document that opens is counted by `showDocument`), and what the editor scrolls to is
+// kept clear of its fade (word-count.ts).
+const wordCount = createEditorWordCount(main, editor, { visible: settings.showWordCount });
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
@@ -876,7 +965,10 @@ if (isTauri) {
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
-    else runs.stopAll();
+    else {
+      runs.stopAll();
+      ask.close();
+    }
   });
   // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
   // to show what it was opened for.
@@ -979,6 +1071,7 @@ watchSettings((changed) => {
   // A text size another window saved takes the reading place before it is applied.
   textZoom.follow(settings.textSize);
   review.setShowResolved(settings.showResolved);
+  wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
@@ -1009,6 +1102,14 @@ if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
 // Debug only (table-check.ts): tables' layout, pointer, keys and typing, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
+}
+
+// Debug only (palette-check.ts): the formatting palette's right-click, handle and hints, and Ask's
+// bubble with the page's scripted agent, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
+  void import('./palette-check.ts').then(({ runPaletteCheck }) =>
+    runPaletteCheck(editor, { ask: !isTauri }),
+  );
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

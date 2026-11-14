@@ -14,6 +14,13 @@ describe('the column', () => {
     });
   });
 
+  it('lets the column be narrower than the widest thing in it, which scrolls in its own box', () => {
+    // At 400% a table's cells can't fit the column, and the table scrolls inside its box; the
+    // column must not grow to its width, or the page would scroll sideways.
+    expect(baseThemeSpec['.cm-content']).toMatchObject({ minWidth: '0' });
+    expect(baseThemeSpec['.rl-tbl-scroll']).toMatchObject({ overflowX: 'auto' });
+  });
+
   it('writes every length inside the column times the text size', () => {
     const spec = baseThemeSpec;
     expect(spec['.rl-quote']).toMatchObject({ paddingLeft: s(18) });
@@ -55,6 +62,10 @@ describe('the column', () => {
       paddingTop: s(40),
       fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     });
-    expect(trackedThemeSpec['.rl-bar::before']).toMatchObject({ left: '-24px', width: '2px' });
+    // A struck block's bar; the bars of the text are the layer's (bar-layer.test.ts).
+    expect(trackedThemeSpec['.rl-bar:not(.cm-line)::before']).toMatchObject({
+      left: '-24px',
+      width: '2px',
+    });
   });
 });

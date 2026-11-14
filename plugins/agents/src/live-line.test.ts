@@ -121,6 +121,57 @@ describe('renderLiveLine', () => {
       ? null
       : (id.split(' ').map((one) => el.querySelector(`#${one}`)?.textContent) ?? []);
 
+  it('says a question changes nothing, where a run says it changes this document', () => {
+    const el = renderLiveLine({ ...ASK, readOnly: true }, actions());
+    expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Claude reads files here to answer, and changes nothing.',
+    );
+  });
+
+  it('does not say it of an agent that reads the whole Mac: it says what is true of it', () => {
+    const GEMINI: LiveLine = {
+      kind: 'asking',
+      agent: 'gemini',
+      agentName: 'Gemini',
+      folder: '/p',
+      readLimit: 'machine',
+    };
+    // A question: Redlines' tools only read, but this agent can't be held to them, and may act on
+    // its own. The words of the panel for a run are kept, and nothing of "changes nothing" is said.
+    const ask = renderLiveLine({ ...GEMINI, readOnly: true }, actions());
+    const note = ask.querySelector('.rl-ask-note')?.textContent ?? '';
+    expect(note).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads. It may also act on its own.',
+    );
+    expect(note).not.toMatch(/changes nothing/);
+    expect(textOf(ask, ask.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Gemini to read files on this Mac?',
+    ]);
+    // The panel is still described by it, for a screen reader.
+    expect(textOf(ask, ask.getAttribute('aria-describedby'))).toEqual([note]);
+    expect(buttons(ask).map(named)).toEqual(['Allow', 'Not Now']);
+    // A run's panel for the same agent is as it was.
+    const run = renderLiveLine(GEMINI, actions());
+    expect(run.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads.',
+    );
+  });
+
+  it('says it of Claude and Codex, which are held to their folder, as of any agent that is', () => {
+    for (const [agent, agentName] of [
+      ['claude', 'Claude'],
+      ['codex', 'Codex'],
+    ] as const) {
+      const el = renderLiveLine(
+        { kind: 'asking', agent, agentName, folder: '/p', readLimit: 'folder', readOnly: true },
+        actions(),
+      );
+      expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+        `${agentName} reads files here to answer, and changes nothing.`,
+      );
+    }
+  });
+
   it('asks as a panel of Redlines’ own: title, folder, what it means, and three buttons in a group', () => {
     const act = actions();
     const el = renderLiveLine(ASK, act);
@@ -150,6 +201,51 @@ describe('renderLiveLine', () => {
     // Two panels never share ids.
     const other = renderLiveLine(ASK, act);
     expect(other.getAttribute('aria-labelledby')).not.toBe(el.getAttribute('aria-labelledby'));
+  });
+
+  it('offers the home folder as an answer where the question says it may, and says what it means', () => {
+    const act = actions();
+    const el = renderLiveLine({ ...ASK, home: true }, act);
+    expect(buttons(el).map(named)).toEqual([
+      'Allow',
+      'Allow Folder and Home Folder',
+      'Just This Document',
+      'Not Now',
+    ]);
+    // Allow stays the one that is bold: the home folder is the wider, deliberate choice.
+    expect(buttons(el).filter((each) => each.classList.contains('rl-ask-allow'))).toHaveLength(1);
+    press(el, 'Allow Folder and Home Folder');
+    press(el, 'Allow');
+    expect(act.calls).toEqual(['answer everything', 'answer folder']);
+    // What it means is shown and said to VoiceOver: what it opens, what it leaves out, the risk.
+    const note = [...el.querySelectorAll('.rl-ask-note')].map((each) => each.textContent);
+    expect(note).toEqual([
+      'Claude reads files here to answer, and changes only this document.',
+      'Allow Folder and Home Folder also lets Claude read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.',
+    ]);
+    const described = (el.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(described).toHaveLength(3);
+    expect(textOf(el, el.getAttribute('aria-describedby'))?.at(-1)).toContain('hidden files');
+    // Not offered, not drawn, where the question doesn't say so.
+    expect(buttons(renderLiveLine(ASK, actions())).map(named)).not.toContain(
+      'Allow Folder and Home Folder',
+    );
+  });
+
+  it('offers no home folder to an agent that can’t be kept to a folder, whatever the line says', () => {
+    const el = renderLiveLine(
+      {
+        kind: 'asking',
+        agent: 'gemini',
+        agentName: 'Gemini',
+        folder: '/p',
+        readLimit: 'machine',
+        home: true,
+      },
+      actions(),
+    );
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
+    expect(el.querySelectorAll('.rl-ask-note')).toHaveLength(1);
   });
 
   it('asks an agent that can’t be kept to a folder about the Mac, with Allow and Not Now', () => {
