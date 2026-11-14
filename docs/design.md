@@ -1,6 +1,7 @@
 # Redlines design
 
-Status: draft for review, October 2026. Nothing is built yet.
+Status: November 2026. The Mac app, the format library and the command line are built and on `main`;
+the sections below say, where it matters, what is not built yet (§4, §5.12, §6.4).
 
 This document describes what Redlines does and how it is built. The file format is specified in
 [format.md](format.md), and this document links to it rather than repeating it. The research
@@ -367,8 +368,7 @@ Redlines covers everything in the Markdown Guide's
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 - **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
   lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
-  are in the Format menu and the command palette (and in the formatting palette, §5.12, when it
-  lists inline formats), and are tracked as format changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
+  are in the Format menu and the formatting palette (§5.1), and are tracked as format changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
   renders as formats; any other tag shows as written. pandoc's `~x~` and `^x^` in a `.qmd` or
   `.Rmd` file are kept byte for byte and shown as written.
 
@@ -901,6 +901,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
@@ -1209,7 +1210,7 @@ the same identity and the sandbox entitlement that an app extension must have
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
 table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
-`agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+`palette`, `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
@@ -1233,6 +1234,7 @@ written.
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
+| `palette`    | The formatting palette: from a handle at the bottom center and on right-click (§5.1) | —                 |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
