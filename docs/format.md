@@ -345,20 +345,65 @@ Your own pending changes don't count:
 - Text that is all inside your own insertion, or the new text of your own substitution, takes the
   syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
   rejecting it takes the syntax with it.
-- A block change of a block that is all your own pending insertion, such as a paragraph you typed
+- **A block change of a block that is all your own pending insertion**, such as a paragraph you typed
   (`One.\n\n<!--ins k3x9-->\n\n## Title<!--/k3x9-->`) or an item your pending split made and you typed
   in, is an edit of that insertion: the block's new syntax is written in it as Track Changes off
-  would write it in the newest view, as typed text, and the change makes no mark of its own. In the
+  would write it in the newest view, as typed text, and the change makes no mark of its own.
+  Accepting or rejecting the insertion then reads right, because the syntax is part of it. In the
   break of your own split inside the insertion, the syntax stays where it is written, so that an
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
-  It is so only where every line the change reads or writes is all your own new text; where no
-  marker but those of that insertion and of the marks inside it stands between the block and the
-  text around it (another mark there could, once decided, bring the block into the text next to it,
-  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
-  and makes no marker start a line; and, where it is not written as typing is, where every order of
-  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
-  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
-  change, below.
+  The rule and its limits (#173):
+  - *Which changes.* Every block change: the type (Body, Heading 1 to 6, Quote, Bulleted, Numbered
+    and Task List; the palette's Quote is the same command), an indent or an outdent, and a box
+    checked. A block that has the type asked already is left as it is, with no refusal. Code Block,
+    Table and Horizontal Rule are no block changes: the editor writes their syntax as typing, which
+    in your own insertion is typed text too.
+  - *Where the caret stands.* Anywhere in the block, on either side of the hidden markers at its
+    ends: the End key and a click past the end of the line leave the caret after the closer of your
+    insertion, and a selection may end there. The block is read by its text, not by the side of a
+    marker.
+  - *What is all your own.* Every character of the line or lines the change reads or writes is inside
+    insertions of yours, the syntax of the block included. A paragraph you typed qualifies. A block
+    that is only partly yours, such as words typed in front of or behind older text, or into a
+    heading, an item or a quote that was there (its `#`s, bullet or `> ` are older), is a block
+    change with a mark, below; and where your insertion starts it, its opener would have to move, so
+    it is refused: "Your new text starts this block, and would have to move. Accept or reject it
+    first." Where the block can't change for its own sake, whatever its marks (a heading is one line;
+    a line of it would start a block of its own; it is in a list item or a quote), the refusal says
+    that, as it does for any block.
+  - *Marks inside your insertion.* A comment or a highlight inside it, at its start too, doesn't stop
+    it, and neither does a change of another person's inside the text where every order of deciding
+    it reads alike (below). One that starts the block does: their deletion of the first word, once
+    rejected, would bring that word back in front of the syntax, which would then stand in the middle
+    of a line as text. It is refused as any block with another person's change is: "Accept or reject
+    the changes in this paragraph first." A comment or a highlight around your insertion, its opener
+    alone on the line in front of yours, starts the block from outside it, and a mark that starts a
+    block is decided first (below): "Your new text starts this block, and would have to move. Accept
+    or reject it first."
+  - *Between the block and the text around it* stand only the markers of the insertion it is in and
+    of marks inside it: another mark there could, once decided, bring the block into the text next to
+    it, where its syntax would be text. For a change of type, your own split after the block, which
+    parts it from the text after it (a paragraph typed in front of one, then Return:
+    `<!--ins k3x9-->\n\n## Title<!--/k3x9--><!--split d3x9-->\n\nText`), is no such mark, and may
+    stand there: rejecting it takes the break and the prefix of the next line away and joins that
+    line to the block's. The lines that follow must read after the block's line as they read after a
+    paragraph's: the joined line is the only line of its block (a blank line or the end of the text
+    follows), or the next line starts, at the left edge, a block that interrupts a paragraph (a
+    bullet or a `1.` with text, a heading, a fence, a quote; a quote not after a quote, whose lines
+    would go on it, and no setext underline). A heading changed to another level has no such lines
+    to read. Elsewhere it is refused: "Rejecting the line break after your new paragraph would join
+    the text below to it, which this change would read otherwise. Accept your new paragraph first."
+    Any other mark there, anyone's, makes the change a block change, below.
+  - *Every order of deciding* the marks it stands in (the insertion, the marks inside it, and your
+    split after it: four at most) reads the same as without the change. In each state, every
+    decision of the walk, the file reads as the same words, on both readings of CommonMark, in as
+    many blocks; so a deletion of another person's that is rejected can't leave the syntax in
+    the middle of a line, and a split that is rejected can't join a line to the block's that would
+    read otherwise. A decision works with the change exactly where it works without it, rejecting
+    the insertion gives back what it did before, the edit makes no mark and leaves the original view
+    as it was, and no marker starts a line. The tests judge every state by micromark 4.0.2 with GFM:
+    the block changed as asked, every other block as it was.
+  Otherwise the change is a block change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
@@ -738,7 +783,8 @@ away.
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
   included, adds or takes away a line break in it or between it and the block before or after it.
-  What the block is, and where it ends, would depend on that change. Decide it first. A change holds
+  What the block is, and where it ends, would depend on that change. Decide it first (a block that is
+  all your own new text is no such block: §2.6, "Your own pending changes don't count"). A change holds
   a line break when its text as a view reads it has one: an insertion's or a substitution's new text
   in the newest view, a deletion's or a substitution's old text in the original view, and a split's
   break. A line break that only carries a marker is in no view, and is not one: typing at the start

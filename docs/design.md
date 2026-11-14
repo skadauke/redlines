@@ -939,6 +939,14 @@ syntax Markdown needs, and never shows them.
   is drawn as body text until the space completes it. The Paragraph menu writes the same syntax on
   an empty paragraph (Body does nothing); an empty heading, item, quote or code block stays when
   the caret leaves it, an empty paragraph goes.
+- **A paragraph you just typed takes a block change as typed text.** With Track Changes on, ⌘1 to
+  ⌘6, Quote and the lists on a paragraph that is all your own new text write their syntax into your
+  insertion, as typing it would, so there is no change of its own to decide, and accepting or
+  rejecting the insertion takes the syntax with it (format §2.6, #173). The caret may stand anywhere
+  in the paragraph, past its end too (the End key), and the paragraph may have your own Return after
+  it, as when you type in front of a paragraph. Where only part of it is yours, or another person's
+  change is in it or starts it, it is a change of the block, which waits for that change to be
+  decided, and the notice says so.
 - **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
   Returns pressed one after the other.
 - **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to
