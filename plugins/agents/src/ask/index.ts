@@ -159,7 +159,17 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     place();
   };
 
-  const place = () => {
+  /**
+   * Whether `place` is running, and whether it was asked to run again meanwhile. Placing the bubble
+   * reads the layout, which makes the editor run the measure that waits, and the editor's update
+   * listeners after it, among them this one: it would find the rail ready, hold the bubble with it,
+   * and the placing that was under way would then write its own place over the rail's.
+   */
+  let placing = false;
+  let placeAgain = false;
+
+  /** Places the bubble: the rail lays it out among its notes, or it hangs by the selection. */
+  const placeOnce = () => {
     const range = targetOf(view.state);
     if (!open || !range) return;
     // The rail lays out what it holds, among its notes, and is told that the bubble changed.
@@ -179,6 +189,26 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     if (!pin) return placeBubble(view, mine.bubble.el, range);
     mine.pin = pin;
     mine.bubble.el.classList.add(RAILED);
+  };
+
+  const place = () => {
+    if (placing) {
+      placeAgain = true;
+      return;
+    }
+    placing = true;
+    try {
+      // Again while a call in the middle of it said so, for what it did may have changed what is
+      // right now: a few times at the most.
+      for (let round = 0; round < 3; round++) {
+        placeAgain = false;
+        placeOnce();
+        if (!placeAgain) break;
+      }
+    } finally {
+      placing = false;
+      placeAgain = false;
+    }
   };
 
   const onKey = (event: KeyboardEvent) => {

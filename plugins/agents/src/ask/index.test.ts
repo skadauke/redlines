@@ -1411,6 +1411,35 @@ describe('in the comment rail', () => {
       expect(heardOf(rail.pins[1]!.held).release).toBe(1);
     });
 
+    it('does not write its own place over the rail’s, when the rail turns ready while Ask reads the layout to place the bubble', () => {
+      const rail = fakeRail();
+      rail.state.holds = false;
+      // A rail writes the bubble's top when it takes it.
+      const take = rail.pinToRail.getMockImplementation();
+      rail.pinToRail.mockImplementation((el, anchor, lost) => {
+        const held = take?.(el, anchor, lost) ?? null;
+        if (held) el.style.top = '123px';
+        return held;
+      });
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      expect(rail.pins).toHaveLength(0);
+      // Reading the layout makes the editor run a measure that was waiting, and its update
+      // listeners, Ask's among them, ask for the bubble to be placed again, with the rail ready.
+      vi.spyOn(editor.view, 'coordsAtPos').mockImplementation(() => {
+        if (!rail.state.holds) {
+          rail.state.holds = true;
+          window.dispatchEvent(new Event('resize'));
+        }
+        return { left: 0, right: 5, top: 300, bottom: 320 };
+      });
+      // The window is resized: Ask places the bubble, and reads the layout.
+      window.dispatchEvent(new Event('resize'));
+      expect(rail.pins).toHaveLength(1);
+      expect(bubble()?.classList).toContain('rl-qa-railed');
+      expect(bubble()?.style.top).toBe('123px');
+    });
+
     it('does nothing for a rail that lets go after the bubble is gone', () => {
       const rail = fakeRail();
       const { editor, ask: asking } = mount({ pinToRail: rail.pinToRail });
