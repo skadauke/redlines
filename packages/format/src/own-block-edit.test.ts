@@ -55,8 +55,9 @@ const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
 const WORDS = 'A typed paragraph';
 
 /** Where the caret can stand in a typed paragraph, as the editor puts it: at the start of its text,
- * in it, at its end (before the hidden closer), after the closer (the End key, a click past the end
- * of the line), after the closer and your split's marker, and a selection of all of it. */
+ * in it, at its end (before the hidden closer, where typing, the End key and a click past the end of
+ * the line leave it, #434), after the closer (where a selection may end), after the closer and your
+ * split's marker, and a selection of all of it. */
 function carets(text: string, words = WORDS): Record<string, Range> {
   const from = text.indexOf(words);
   const to = from + words.length;

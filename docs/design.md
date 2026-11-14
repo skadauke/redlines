@@ -1110,7 +1110,7 @@ syntax Markdown needs, and never shows them.
   insertion, as typing it would, so there is no change of its own to decide, and accepting or
   rejecting the insertion takes the syntax with it (format §2.6, #173). It holds for any paragraph of
   a document you typed in one go, the title first, and wherever the caret stands in it, past its end
-  too (the End key), and with your own Return after it, as when you type in front of a paragraph.
+  too (where a selection may end), and with your own Return after it, as when you type in front of a paragraph.
   Where only part of it is yours it is a change of the block, with a mark of its own; where your new
   text starts it, or another person's change starts it or holds a line break in it, the change waits
   for that to be decided, and the notice says so.

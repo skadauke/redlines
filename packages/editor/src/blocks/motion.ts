@@ -257,7 +257,11 @@ const gapClicks = EditorView.domEventHandlers({
     const rect = target.getBoundingClientRect();
     const padding = Number.parseFloat(getComputedStyle(target).paddingTop) || 0;
     if (gapSide(event.clientY, rect.top, padding) !== 'above') return false;
-    const pos = view.posAtCoords({ x: event.clientX, y: rect.top - 1 }, false);
+    // The end of the block above rests in front of the closers that end its text (#434).
+    const pos = restingPlace(
+      view.state,
+      view.posAtCoords({ x: event.clientX, y: rect.top - 1 }, false),
+    );
     view.dispatch({
       selection: EditorSelection.cursor(pos),
       userEvent: 'select.pointer',
@@ -342,10 +346,56 @@ function beforeInput(run: {
   );
 }
 
+/**
+ * Where a caret that is put at `pos` rests: `pos` itself, or, where it is the end of a block's line
+ * past the hidden closers that end the block's text, in front of them, where typing leaves the
+ * caret and End goes (#434). Past the closers is no place for the caret: they and the hidden break
+ * after them are one range that the caret steps over, so a click or a key that lands there is moved
+ * to the start of the next block, or rests where the DOM can't tell it from there.
+ */
+export function restingPlace(state: EditorState, pos: number): number {
+  const block = blockAt(state, pos);
+  if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule' || pos !== block.text.to) {
+    return pos;
+  }
+  return Math.min(pos, textEnd(state, block));
+}
+
+/**
+ * A click past the end of a block's text, past the hidden closers that end it, puts the caret in
+ * front of them. CodeMirror puts it at the end of the line, inside the range of the closers and the
+ * break after them, and steps it on to the start of the next block, where a command that follows
+ * (⌘2) acts on the next block (#434). Any other click, and a drag that starts anywhere else, are
+ * CodeMirror's.
+ */
+const clicksPastTheEnd = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (event.button !== 0 || event.detail !== 1) return null;
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return null;
+  if (view.state.field(viewModeField, false) === 'raw') return null;
+  const at = (e: MouseEvent) => view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
+  const hit = at(event);
+  const anchor = hit === null ? null : restingPlace(view.state, hit);
+  if (hit === null || anchor === null || anchor === hit) return null;
+  return {
+    get(current, _extend, multiple) {
+      const pos = at(current);
+      const head = pos === null ? anchor : restingPlace(view.state, pos);
+      const range = EditorSelection.range(anchor, head);
+      return multiple
+        ? EditorSelection.create(
+            [...view.state.selection.ranges, range],
+            view.state.selection.ranges.length,
+          )
+        : EditorSelection.create([range]);
+    },
+    update() {},
+  };
+});
+
 /** The motion and input extensions, given the block keys' Return and Shift-Return. */
 export function blockMotion(run: {
   paragraph: (view: EditorView) => boolean;
   line: (view: EditorView) => boolean;
 }): Extension {
-  return [gapClicks, tripleClicks, hiddenBreaks, beforeInput(run)];
+  return [gapClicks, clicksPastTheEnd, tripleClicks, hiddenBreaks, beforeInput(run)];
 }
