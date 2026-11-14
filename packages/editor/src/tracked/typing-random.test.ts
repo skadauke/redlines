@@ -184,8 +184,8 @@ function randomTyping(
   return { checked, excused, misses };
 }
 
-// A walk of a few hundred edits, 1.5 s alone and 5 s or more on a busy machine, where the default
-// timeout is 5 s (#356): it gets the 60 s that CI's runners and a shared Mac need.
+// A walk of a few hundred edits: 1.5 s alone and 5.2 s on a Mac busy with other work, where the
+// default timeout is 5 s (#356). It gets the 60 s that other long walks have.
 it.each([
   ['on', true],
   ['off', false],

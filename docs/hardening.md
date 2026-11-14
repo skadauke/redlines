@@ -140,13 +140,12 @@ take at most eight times what 1,000 take: linear is four, quadratic sixteen), an
 `preview/long-document.test.ts` holds the drawing, and a keystroke, in long documents with deleted
 blocks and tables to bounds that are a multiple of the markdown parse of the document alone.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
-busy machine fails a bound only when it keeps failing. Where a timing and its yardstick are both
-cheap to repeat (a key in code and the document's parse; the hidden lines' pass at two sizes), the
-two take turns and each is held to its fastest run, so that a runner slowed for a few seconds slows
-both alike. And a bound is a multiple of the yardstick with no milliseconds of its own: a fixed
-allowance doesn't follow a runner that is three times slower than a Mac, and a key in code held to
-twice the parse plus two milliseconds stood at 0.86 of that on CI. These run only with
-`REDLINES_COST=check`, which CI's check job sets.
+busy machine fails a bound only when it keeps failing. Where a timing has a yardstick of the same
+kind (the hidden lines' pass at two sizes; a key in code and a key in a paragraph of the same
+document), the two take turns, so that a runner slowed for a few seconds slows both alike. A
+yardstick of another kind tracks the timing less well on CI: a key in code varied by 19 % from run
+to run against the markdown parse and by 11 % against a key in a paragraph. These run only with
+`REDLINES_COST=check` (AGENTS.md says when CI sets it).
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 

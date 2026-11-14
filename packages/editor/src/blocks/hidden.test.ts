@@ -169,8 +169,9 @@ describe('hidden blank lines', () => {
         }
         return fastest[1]! / fastest[0]!;
       };
-      // Four times the lines: linear takes about four times as long (3.8 to 4.5 here), quadratic
-      // sixteen. The limit is eight, as far from the one as from the other.
+      // Four times the lines: linear takes about four times as long (3.8 to 4.5 here, 3.1 to 5.8
+      // on CI's runners), quadratic sixteen. The limit is eight, as far from the one as from the
+      // other: a pass that grows faster than the lines to the power 1.5 fails.
       const LIMIT = 8;
       // As `held` in cost.test.ts does: a ratio over the limit is timed twice more, and the lowest
       // is the one held to it, so that a real slowdown fails and a slow moment doesn't.
