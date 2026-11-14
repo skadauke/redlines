@@ -53,7 +53,7 @@ const ITEM_LINE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 /**
  * Whether a line is text that a paragraph is made of, which an underline or a lazy line follows:
  * not a heading, a quote, a block of HTML, a table row, a fence, a link reference, a rule or an
- * underline.
+ * underline (`===` under a paragraph ends it as a heading; as a lazy line of an item it is rare).
  */
 const textLike = (line: string): boolean =>
   line.trim() !== '' &&
@@ -67,23 +67,32 @@ const textLike = (line: string): boolean =>
  * numbered item more of it (`Para.⏎- ` is `<h2>Para.</h2>`, `Para.⏎1. ` is `<p>Para.1.</p>` to
  * CommonMark). The lines above it up to a blank line are read: an item among them (up to three
  * columns in) owns the lines below it, indented or lazy, and the empty item is an item of that
- * list or of the next; a heading, a rule, a fence or another block right above it is fine. Only a
- * paragraph that starts at the margin is read as one: what is indented may be an item's
- * paragraph (`- a⏎⏎  b⏎- `) or code, which only the item above it tells.
+ * list or of the next; a heading, a rule, a fence or another block right above it is fine. A quote
+ * above it owns the lines below it too, as lazy lines, and the item is read as one then. Only a
+ * paragraph that starts at the margin is read as one: what is indented may be an item's paragraph
+ * (`- a⏎⏎  b⏎- `) or code, which only the item above it tells.
  */
 function underText(doc: Text, n: number, quote: string): boolean {
   const same = quote.replaceAll(/[ \t]/g, '');
-  // The topmost line of the run of lines above that is text, once there is one.
+  // The topmost line of the paragraph that the lines above make, below the nearest underline.
   let first: number | null = null;
+  // An underline of `=` was met: it ends the paragraph above it as a heading, unless an item or a
+  // quote further up owns it as a lazy line, which the lines up there tell.
+  let sealed = false;
   for (let m = n - 1; m >= 1; m--) {
     const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(doc.line(m).text)!;
-    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) break;
+    // Another quote level: the lines below it may be its lazy lines, which no reading here tells.
+    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
     const text = above[3]!;
     if (text.trim() === '') break;
     const deep = above[2]!.length;
     if (deep <= 3 && ITEM_LINE.test(text)) return false;
-    if (deep === 0 && !textLike(text)) break;
-    first = deep;
+    if (deep === 0 && !textLike(text)) {
+      if (!/^=+[ \t]*$/.test(text)) break;
+      sealed = true;
+      continue;
+    }
+    if (!sealed) first = deep;
   }
   return first === 0;
 }
