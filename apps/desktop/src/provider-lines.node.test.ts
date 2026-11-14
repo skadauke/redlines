@@ -9,10 +9,13 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRequest, McpEndpoint } from '@redlines/plugin-api';
 import {
   answerPermission,
+  bridgePromptMessage,
+  bridgeSessionMessage,
   cancelMessage,
   initializeMessage,
   newSessionMessage,
   promptMessage,
+  sessionOf,
 } from '../../../plugins/agent-acp/src/index.ts';
 import { claudeArgs } from '../../../plugins/agent-claude/src/index.ts';
 import { codexArgs } from '../../../plugins/agent-codex/src/index.ts';
@@ -26,7 +29,14 @@ const fixture = read('provider-lines.json') as {
   programFolders: string[];
   lines: Record<string, string[]>;
   home: { home: string; roots: string[] };
-  acp: { folder: string; sessionId: string; messages: Record<string, unknown> };
+  acp: {
+    folder: string;
+    sessionId: string;
+    messages: Record<string, unknown>;
+    /** OpenClaw's bridge: with an agent named, and without. */
+    bridge: { agent: string; messages: Record<string, unknown> };
+    bridgeDefault: { messages: Record<string, unknown> };
+  };
 };
 
 const permissions = read('acp-permissions.json') as {
@@ -86,6 +96,27 @@ describe('the messages the Rust side lets through to an Agent Client Protocol ag
       'session/prompt': promptMessage(sessionId, atFolder),
       'session/cancel': cancelMessage(sessionId),
     });
+  });
+
+  it('are the messages the provider writes for OpenClaw’s bridge, which has no toolbox', () => {
+    const { folder, sessionId } = fixture.acp;
+    const bridged: AgentRequest = {
+      ...atFolder,
+      systemPrompt: 'You have no tools.\n> the dam is dangerously high',
+      author: { handle: 'moby-ada', name: 'Moby', for: 'ada' },
+    };
+    expect(fixture.acp.bridge.messages).toEqual({
+      'session/new': bridgeSessionMessage(folder, sessionOf({ agent: 'moby' }, bridged)),
+      'session/prompt': bridgePromptMessage(sessionId, bridged),
+    });
+    // With no agent named, the key names none, and the Gateway's default agent answers.
+    expect(fixture.acp.bridgeDefault.messages).toEqual({
+      'session/new': bridgeSessionMessage(folder, sessionOf({}, bridged)),
+      'session/prompt': bridgePromptMessage(sessionId, bridged),
+    });
+    expect(JSON.stringify(fixture.acp.bridgeDefault.messages['session/new'])).not.toContain(
+      'agent:',
+    );
   });
 
   it('allow what the provider allows, and nothing else', () => {

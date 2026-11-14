@@ -4,6 +4,7 @@
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
+import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
 import type { Range } from './types.ts';
 
@@ -113,6 +114,9 @@ export interface Hit {
   backslash?: boolean;
   kind?:
     | 'symbol'
+    /** An emoji of several code points, or outside the first plane: no marker goes in it, and it
+     * reads as the character it is. */
+    | 'emoji'
     | 'footnote'
     | 'url'
     | 'autolink'
@@ -121,7 +125,8 @@ export interface Hit {
     | 'link'
     | 'reference'
     | 'image'
-    | 'comment';
+    | 'comment'
+    | 'alert';
   text?: Range;
   dest?: Range;
   /** The alt text of an image. */
@@ -138,9 +143,37 @@ const WWW = /(?<![\w.])www\.[^\s<]+/g;
 const EMAIL = /[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 const FOOTNOTE = /\[\^[^\]\s]+\]/g;
 const MATH = /(?<![\\$])\$(?=\S)[^$\n]*?(?<=[^\s\\$])\$(?![\d$])|(?<![\\$])\$[^\s$\\]\$(?![\d$])/g;
-const SHORTCODE = /(?<![A-Za-z0-9]):[a-z][a-z0-9_+-]*:(?![A-Za-z0-9])/g;
+const SHORTCODE = new RegExp(SHORTCODE_SOURCE, 'g');
+
+/** A skin tone or a variation selector, which a picture takes after it. */
+const TONE = '(?:[\\u{1F3FB}-\\u{1F3FF}]|\\uFE0F)';
+
+/**
+ * An emoji that is more than one code point (#312): a flag, a keycap, a ZWJ sequence such as a family,
+ * a picture with a skin tone or a variation selector, and the flag of a subdivision. Each is one
+ * character to a reader, which no marker may part. A picture of one code point outside the first
+ * plane is two UTF-16 units, which no marker may part either.
+ */
+const EMOJI = new RegExp(
+  [
+    '\\p{Regional_Indicator}{2}',
+    '[#*0-9]\\uFE0F?\\u20E3',
+    '\\p{Extended_Pictographic}[\\u{E0020}-\\u{E007E}]+\\u{E007F}',
+    `\\p{Extended_Pictographic}${TONE}*(?:\\u200D\\p{Extended_Pictographic}${TONE}*)+`,
+    `\\p{Extended_Pictographic}${TONE}+`,
+    '[\\u{10000}-\\u{10FFFF}]',
+  ].join('|'),
+  'gu',
+);
+/** What an emoji has that other text has not: a surrogate, a variation selector, a joiner or the
+ * combining keycap. */
+const MAY_BE_EMOJI = /[\ud800-\udfff]|\u200d|\ufe0f|\u20e3/;
+/** What a change is told that would leave a shortcode at the start of a text with a letter before it. */
+const STUCK_SHORTCODE =
+  'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.';
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
-const ALERT = /^[ \t>]*\[![A-Za-z]+\]/gm;
+/** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
+const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
 /** The end of a URL in running text: GitHub leaves out the punctuation that ends a sentence, and
  * a closing parenthesis that has no opening one. */
@@ -248,8 +281,15 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
     if (!isEscaped(w, m.index)) inside(m.index, m.index + m[0].length, 'tag');
   }
   for (const m of w.matchAll(FOOTNOTE)) inside(m.index, m.index + m[0].length, 'footnote');
-  for (const re of [ENTITY, MATH, SHORTCODE, ATTRIBUTES]) {
+  // A shortcode has a colon, and an emoji has a surrogate, a variation selector, a joiner or a
+  // keycap: the keystroke's cost is the same for the text that has none.
+  const symbols = [ENTITY, MATH, ATTRIBUTES];
+  if (w.includes(':')) symbols.push(SHORTCODE);
+  for (const re of symbols) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
+  }
+  if (MAY_BE_EMOJI.test(w)) {
+    for (const m of w.matchAll(EMOJI)) inside(m.index, m.index + m[0].length, 'emoji');
   }
   for (const m of w.matchAll(BARE_URL)) inside(m.index, m.index + trimUrl(m[0]).length, 'url');
   for (const m of w.matchAll(EMAIL)) {
@@ -275,7 +315,9 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       hi: end - 1,
       from: open,
       to: end,
-      refuse: 'A marker can not go in or before [!TYPE].',
+      kind: 'alert',
+      refuse:
+        "This is an alert's type: a change can't start in it or before it. Choose another type from the alert's menu, or edit the text of the alert.",
     });
   }
   // Escapes: a backslash and the character it escapes. A backslash before a marker escapes it.
@@ -532,6 +574,28 @@ export function inspectPlace(
   if (widest) {
     // The end is just after the construct's last character, not after the markers that follow it.
     return { kind: 'construct', from: offsetAt(widest.from), to: offsetAt(widest.to - 1) + 1 };
+  }
+  // A shortcode that a letter or a digit stands against is no emoji to GitHub, which shows it only
+  // at the start of a text or after a space; a marker between the two would leave it at the start of
+  // a text, where it shows as the emoji (format §3.1, rule 9). What stands on each side of the marker
+  // is what the change leaves there: `around`, or the text of the paragraph.
+  const upcoming =
+    around.after !== undefined ? around.after.slice(0, 80) : v.slice(index, index + 80);
+  if (upcoming.startsWith(':')) {
+    const beforeMarker = around.before !== undefined ? around.before.slice(-1) : v[index - 1];
+    const code = shortcodeAt(upcoming);
+    if (code !== null && isWord(beforeMarker)) {
+      // A closer, which has the text of the change before it (`around.before`), takes the shortcode
+      // into the change, as a closer inside any construct does: the shortcode is then in the old text
+      // and the new, and no marker stands between it and the letter. An opener, or a format's edge,
+      // has no such way, and is refused.
+      if (around.before === undefined) return { kind: 'refuse', reason: STUCK_SHORTCODE };
+      return {
+        kind: 'construct',
+        from: offsetAt(index),
+        to: offsetAt(index + code.length - 1) + 1,
+      };
+    }
   }
 
   // The trailing spaces of a hard break.
