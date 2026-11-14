@@ -31,6 +31,11 @@ export interface MenuCommands {
    * nothing when it is shown already (`Editor.showView`).
    */
   setView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`);
+   * only while Redlines shows.
+   */
+  switchLook(): void;
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
@@ -383,12 +388,22 @@ export function appMenuModel(
     {
       title: 'View',
       rows: withCommands('view', [
-        // ⌥⌘1 to ⌥⌘3, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
-        // the clash proves real (design §14, open question 6). Simple is Redlines' simple look,
-        // switched by a click on a change bar and by nothing here, so it has no row and no key.
+        // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
+        // the clash proves real (design §14, open question 6).
         viewRow('clean', 'Clean', '1'),
         viewRow('redlines', 'Redlines', '2'),
         viewRow('raw', 'Raw', '3'),
+        SEPARATOR,
+        // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
+        // while it shows, off in the full markup, and not there to choose in Clean and Raw, which
+        // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
+        {
+          text: 'Simple Look',
+          accelerator: 'Alt+CmdOrCtrl+4',
+          action: () => commands.switchLook(),
+          checked: (state) => state.view === 'simple',
+          enabled: (state) => menuViewOf(state.view) === 'redlines',
+        },
         SEPARATOR,
         // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
         // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).

@@ -30,6 +30,8 @@ export interface TitleBarState {
 export interface TitleBarActions {
   /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
   setView(view: MenuView): void;
+  /** Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`). */
+  switchLook(): void;
   toggleTracking(): void;
   openReview(): void;
   toggleResolved(): void;
@@ -90,6 +92,8 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
+/** The key of the Simple Look switch (menu-model.ts, which a test compares). */
+export const LOOK_KEY = '⌥⌘4';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 
@@ -342,8 +346,8 @@ export function createTitleBar(
   };
 
   // All three views are there for any document (design §5.3): Redlines too, with or without
-  // redlines, whether Track Changes is on or off. Redlines is checked in both its looks: Simple is
-  // its simple look, switched by a click on a change bar and by nothing in this menu.
+  // redlines, whether Track Changes is on or off. Redlines is checked in both its looks, and the
+  // simple look has a switch of its own below them (#330).
   const viewItem = (view: MenuView, label: string, shortcut: string) => ({
     role: 'menuitemradio' as const,
     label,
@@ -361,6 +365,18 @@ export function createTitleBar(
       viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
       viewItem('redlines', VIEW_NAMES.redlines, VIEW_KEYS.redlines),
       viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
+      'divider',
+      // The simple look is a switch of Redlines', no view: on while it shows, and only there to
+      // choose while Redlines shows. It does what a click on a change bar does.
+      {
+        role: 'menuitemcheckbox',
+        label: 'Simple Look',
+        icon: 'simple',
+        shortcut: LOOK_KEY,
+        checked: state.view === 'simple',
+        disabled: menuViewOf(state.view) !== 'redlines',
+        select: () => actions.switchLook(),
+      },
     ],
     // A click switches Clean and Redlines; Raw is for the menu.
     activate: (event) => {

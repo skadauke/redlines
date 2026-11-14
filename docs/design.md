@@ -395,20 +395,26 @@ last; Raw is for the menu.
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there, with its shortcut, whatever the document holds and whether Track Changes is on or
   off, so the View menu always offers the same three views. A document without redlines looks
-  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
-  the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
-  short), the same text as Clean with a change bar beside each screen line that has a pending
-  change (§5.5), in its author's color, and the comments with their notes: deletions are hidden,
-  and inserted and reformatted text is plain (Word's Simple Markup). The click switches from the
-  one to the other, with the line where it was. The simple look is no view of its own: the View
-  menu has no entry for it and no key shows it, so the menu says "Redlines" in both looks.
+  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
+  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
+  line that has a pending change (§5.5), in its author's color, and the comments with their notes:
+  deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
+  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  click's line is the one under the pointer; the switch's, the one with the caret when it is on the
+  screen, else the first on it), and the look becomes the one remembered. The simple look is no view
+  of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
+  checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
+  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
+  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
 Raw shows them.
 
-Redlines remembers its look, the one a click on a change bar chose last, the full markup at first.
+Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
+the full markup at first.
 A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
@@ -490,8 +496,8 @@ mode has no counterpart in the desktop app.
   zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
   the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
   their own. In Redlines a click on a bar switches between its two looks, the full markup and the
-  simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
-  lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  simple look, as the View menu's Simple Look switch does: the bar is a target 24 px wide, only
+  beside the lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
   prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
   the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -836,6 +842,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
 | Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
+| Simple Look (switch)           | ⌥⌘4                                                                                           | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Subscript, superscript         | ⌥⌘, and ⌥⌘. (Word's ⌘= and ⇧⌘= are Zoom In here)                                              | Ctrl+Alt+, and Ctrl+Alt+. |
@@ -1942,5 +1949,6 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
-6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order. Word for Mac gives ⌥⌘1 to
-   ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real.
+6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order, and ⌥⌘4 for the Simple Look
+   switch below them. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to
+   ⌘6; kept unless the clash proves real.
