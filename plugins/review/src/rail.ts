@@ -133,7 +133,9 @@ export interface Note {
 
 /**
  * What the host holds for an element it has the rail lay out among its notes (`pinToRail`). The
- * rail never owns the element: the host makes it, fills it and takes it out of the page.
+ * rail never owns the element: the host makes it, fills it and takes it out of the page. The rail
+ * holds one element at a time in this way: given two, the first in the text stays level with its
+ * anchor wherever the page is scrolled to, and the other is laid out around it as a note is.
  */
 export interface PinnedElement {
   /**
@@ -147,7 +149,8 @@ export interface PinnedElement {
   reveal(): void;
   /**
    * Takes it out of the layout, and the notes go back to their places. The element is left as it
-   * is, in the page, where the host put it.
+   * is, in the page, where the host put it. A host that released it is not told that the rail let
+   * go of it (`lost`), not even if the rail had, a moment before.
    */
   release(): void;
 }
