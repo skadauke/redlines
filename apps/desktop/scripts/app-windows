@@ -13,7 +13,7 @@ front of it.
     --debug      the debug build's app, src-tauri/target/debug/bundle/macos/Redlines.app
     --out DIR    where the PNG files and index.md go (default: apps/desktop/app-windows/)
     --file DOC   a document to open at launch (default: none: the app's own new document)
-    --panes      also opens Preferences and About with the menu's keys, and takes those (needs the
+    --panes      also opens Preferences (⌘,) and About (the app menu) and takes those (needs the
                  Accessibility permission for the terminal; without it they are skipped, said so)
     --wait N     seconds to let the app draw before each shot (default 4)
 
@@ -68,6 +68,12 @@ def program_of(app: Path) -> Path:
     return app / "Contents" / "MacOS" / name
 
 
+def process_name(app: Path) -> str:
+    with open(app / "Contents" / "Info.plist", "rb") as f:
+        info = plistlib.load(f)
+    return info.get("CFBundleName") or app.stem
+
+
 def windows_of(helper: Path, pids: list[int]) -> list[dict]:
     done = subprocess.run([str(helper), *map(str, pids)], capture_output=True, text=True)
     if done.returncode != 0:
@@ -90,10 +96,10 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "window"
 
 
-def keystroke(keys: str) -> bool:
-    """Types a menu key into the frontmost app, through System Events (needs Accessibility)."""
+def system_events(action: str) -> bool:
+    """Does something in the frontmost app through System Events (needs Accessibility)."""
     done = subprocess.run(
-        ["osascript", "-e", f'tell application "System Events" to {keys}'],
+        ["osascript", "-e", f'tell application "System Events" to {action}'],
         capture_output=True,
         text=True,
     )
@@ -176,10 +182,17 @@ def main() -> None:
         time.sleep(args.wait)
         shoot("main")
         if args.panes:
-            for label, keys in (
-                ("preferences", 'keystroke "," using command down'),
+            # The app is brought to the front by its own process id, so the keys reach it.
+            name = process_name(app)
+            for label, action in (
+                ("preferences", f'tell (first process whose unix id is {started}) to keystroke "," using command down'),
+                (
+                    "about",
+                    f'tell (first process whose unix id is {started}) to click menu item "About {name}" '
+                    f'of menu 1 of menu bar item 2 of menu bar 1',
+                ),
             ):
-                if keystroke(keys):
+                if system_events(action):
                     time.sleep(args.wait)
                     shoot(label)
     finally:

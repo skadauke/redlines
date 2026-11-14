@@ -53,3 +53,23 @@ sent to the editor (it reaches the editor's paste handling, not the browser's ow
 fails if the editor didn't take it. Only setup and reading go through the page's hook
 (`window.__redlines`, `src/journey-hook.ts`, set only in development in a plain tab). A script
 error in the page fails the journey. Not in CI yet: a later PR adds the job.
+
+## The app's own windows
+
+The journeys draw the page. The title bar, Preferences, About, dialogs and the window's shadow are
+the app's: `apps/desktop/scripts/app-windows` runs a built `Redlines.app`, finds its windows by
+process id and takes each with `screencapture -l<window id>`, whatever is in front of it.
+
+```sh
+cd apps/desktop
+pnpm tauri build --bundles app          # or --debug; the app is src-tauri/target/<profile>/bundle/macos/Redlines.app
+scripts/app-windows                      # the main window → apps/desktop/app-windows/*.png and index.md
+scripts/app-windows --panes --file ../../docs/design.md   # also Preferences and About; open a document
+```
+
+The terminal (or the Claude app that runs it) needs **Screen Recording** permission, once: System
+Settings › Privacy & Security › Screen & System Audio Recording; quit and open it again. Without it
+`screencapture` writes the wallpaper, so the script stops first and says so. `--panes` also needs
+**Accessibility** (it presses ⌘, and the About menu item through System Events); without it those
+shots are skipped. It never asks for computer use. It starts a new instance of the app and stops
+only that one.
