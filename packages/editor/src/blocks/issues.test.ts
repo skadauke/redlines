@@ -45,6 +45,14 @@ const TWO_BREAKS =
 const SELECTION =
   'Backspace right after a Return over a selection joins again and leaves the deleted text deleted';
 
+/** The words for an edit that would leave an empty item Markdown can't hold next to a pending change. */
+const EMPTIED =
+  "This would leave an empty item that Markdown can't hold under the text above it, and a pending change or a comment next to it can't be taken out with it. Decide the change (or remove the comment) first, or leave some text in the item.";
+
+/** The words for an edit that would leave an empty item whose next lines would read as text above. */
+const EMPTIED_BELOW =
+  "This would leave an empty item that Markdown can't hold under the text above it, and what follows it would read as part of that text (its own next lines, or a number other than 1). Leave some text in the item.";
+
 describe('the linked issues', () => {
   scriptRows(
     both([
@@ -297,41 +305,33 @@ describe('the linked issues', () => {
       },
       // The review of #426: an item whose line holds a marker, or whose break is another person's
       // split, is not opened (the take-back would decide their change, and the ledger it drops
-      // made the file text twice, #439). Track Changes on, the author's own pending item goes whole.
+      // made the file text twice, #439): with Track Changes off the edit that would leave it empty
+      // is refused, in words that say what to do (#442). Track Changes on, the author's own pending
+      // item goes whole.
       {
         name: '#204: a pending item of the author’s own, reopened from the file, its character deleted',
         doc: '- one<ins><split>⏎  - x‸</ins>',
         keys: ['Backspace'],
+        off: { file: '- one<ins><split>⏎  - x</ins>', refusal: EMPTIED },
         on: { file: '- one' },
-        skipOff: {
-          render:
-            'Track Changes off with the item’s insertion pending on its line: the plain key leaves the marker alone (#442)',
-        },
       },
       {
         name: '#204: the same with an item after it',
         doc: '- one<ins><split>⏎  - x‸</ins>⏎- two',
         keys: ['Backspace'],
+        off: { file: '- one<ins><split>⏎  - x</ins>⏎- two', refusal: EMPTIED },
         on: { file: '- one⏎- two' },
-        skipOff: {
-          render:
-            'Track Changes off with the item’s insertion pending on its line: the plain key leaves the marker alone (#442)',
-        },
       },
       {
         name: '#204: the item’s break is another person’s split: it stays, and is not decided',
         doc: '- one<split>⏎  - x‸',
         others: 'bo',
         keys: ['Backspace'],
-        off: { file: '- one<split>⏎  - ' },
+        off: { file: '- one<split>⏎  - x', refusal: EMPTIED },
         on: {
           file: '- one<split>⏎  - x',
           refusal:
             "A line break that someone inserted can't be deleted together with other text until that change is decided.",
-        },
-        skipOff: {
-          'list-reads':
-            'The plain key leaves the marker of an item with a pending break alone (#442)',
         },
       },
       {
@@ -373,6 +373,203 @@ describe('the linked issues', () => {
         off: { file: '- one⏎- ' },
         on: { caret: '- one‸<del ⏎- x>' },
       },
+      // #442: any edit of the person's that takes all the text of an item Markdown can't hold empty
+      // leaves it open, as the one character that Backspace takes does, not the key alone: a
+      // selection, a cluster, Delete. Track Changes on, the format deletes the whole item.
+      {
+        name: '#442: a selection over the item’s text, Backspace',
+        doc: '- one⏎  - [x]',
+        keys: ['Backspace'],
+        off: { file: '- one', caret: '- one⏎  - ‸' },
+        on: { caret: '- one‸<del ⏎  - x>' },
+      },
+      {
+        name: '#442: a selection over the item’s text, Delete',
+        doc: '- one⏎  - [x]',
+        keys: ['Delete'],
+        off: { file: '- one', caret: '- one⏎  - ‸' },
+        on: { caret: '- one‸<del ⏎  - x>' },
+      },
+      {
+        name: '#442: a selection over more than one word',
+        doc: '- one⏎  - [two words]',
+        keys: ['Backspace'],
+        off: { file: '- one', caret: '- one⏎  - ‸' },
+      },
+      {
+        name: '#442: a numbered step',
+        doc: '1. one⏎   1. [x]',
+        keys: ['Backspace'],
+        off: { file: '1. one', caret: '1. one⏎   1. ‸' },
+      },
+      {
+        name: '#442: in a quote',
+        doc: '> - one⏎>   - [x]',
+        keys: ['Backspace'],
+        off: { file: '> - one', caret: '> - one⏎>   - ‸' },
+      },
+      {
+        name: '#442: a character of more than one code point',
+        doc: '- one⏎  - 👨‍👩‍👧‸',
+        keys: ['Backspace'],
+        off: { file: '- one', caret: '- one⏎  - ‸' },
+        on: { caret: '- one‸<del ⏎  - 👨‍👩‍👧>' },
+      },
+      {
+        name: '#442: …typing in the open item writes it',
+        doc: '- one⏎  - [x]',
+        keys: ['Backspace', { type: 'y' }],
+        off: { file: '- one⏎  - y' },
+      },
+      {
+        name: '#442: …the caret leaving takes it back',
+        doc: '- one⏎  - [x]',
+        keys: ['Backspace', 'ArrowUp'],
+        off: { file: '- one', caret: '‸- one' },
+      },
+      {
+        name: '#442: …the next Backspace takes it away',
+        doc: '- one⏎  - [x]',
+        keys: ['Backspace', 'Backspace'],
+        off: { file: '- one', caret: '- one‸' },
+      },
+      {
+        name: '#442: …⌘Z gives the text back',
+        doc: '- one⏎  - [x]',
+        keys: ['Backspace', 'Mod-z'],
+        off: { file: '- one⏎  - x', caret: '- one⏎  - [x]' },
+        on: { file: '- one⏎  - x', caret: '- one⏎  - [x]' },
+      },
+      {
+        name: '#442: a pending split of the author’s own above it goes with it',
+        doc: '- one<split>⏎  - x‸',
+        keys: ['Backspace'],
+        off: { file: '- one', caret: '- one<split>⏎  - ‸' },
+        on: { file: '- one<del x>' },
+      },
+      {
+        name: '#442: another person’s deletion on its line: refused, in words',
+        doc: '- one⏎  - <del y>x‸',
+        others: 'bo',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  - <del y>x', refusal: EMPTIED },
+      },
+      {
+        name: '#442: the first item of a list right under a paragraph',
+        doc: 'Para.⏎- x‸',
+        keys: ['Backspace'],
+        off: { file: 'Para.', caret: 'Para.⏎- ‸' },
+        on: { caret: 'Para.‸<del ⏎- x>' },
+      },
+      {
+        name: '#442: …a numbered one',
+        doc: 'Para.⏎1. x‸',
+        keys: ['Backspace'],
+        off: { file: 'Para.', caret: 'Para.⏎1. ‸' },
+        on: { caret: 'Para.‸<del ⏎1. x>' },
+      },
+      {
+        name: '#442: …a selection over its text',
+        doc: 'Para.⏎- [two words]',
+        keys: ['Delete'],
+        off: { file: 'Para.', caret: 'Para.⏎- ‸' },
+      },
+      // The review of #462. An item on the first line has no text above it. An item with lines after
+      // its first one, or a numbered item other than 1 after it, would read as text of the line
+      // above once taken back: refused, in words. A closer, a point of a comment or a plain HTML
+      // comment ending the line above is no change to decide.
+      {
+        name: '#442: an item on the first line stays',
+        doc: '> - x‸',
+        keys: ['Backspace'],
+        off: { file: '> - ', caret: '> - ‸' },
+      },
+      {
+        name: '#442: …indented, a selection',
+        doc: '  - [x]',
+        keys: ['Delete'],
+        off: { file: '  - ', caret: '  - ‸' },
+      },
+      {
+        name: '#442: the item has lines after its first: refused, in words',
+        doc: 'Para.⏎- [first line]⏎  second line',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎- first line⏎  second line', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: …nested, and a lazy line',
+        doc: '- one⏎  - [x]⏎lazy',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  - x⏎lazy', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: a number other than 1 follows: refused, in words',
+        doc: 'Para.⏎1. [x]⏎2. b',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎1. x⏎2. b', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: …nested, one character',
+        doc: '- one⏎  1. x‸⏎  2. b',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  1. x⏎  2. b', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: a bullet follows: the item goes, the list goes on',
+        doc: 'Para.⏎- [x]⏎- two',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎- two', caret: 'Para.⏎- ‸⏎- two' },
+      },
+      {
+        name: '#442: the closer of a change ends the line above: no change to decide',
+        doc: '- one<ins>x</ins>⏎  - y‸',
+        keys: ['Backspace'],
+        off: { file: '- one<ins>x</ins>', caret: '- one<ins>x</ins>⏎  - ‸' },
+      },
+      {
+        name: '#442: a plain HTML comment ends the line above',
+        doc: '- one <!-- note -->⏎  - y‸',
+        keys: ['Backspace'],
+        off: { file: '- one <!-- note -->', caret: '- one <!-- note -->⏎  - ‸' },
+      },
+      {
+        name: '#442: a quote holds a heading above the first item: it stays',
+        doc: '> # Head⏎> - x‸',
+        keys: ['Backspace'],
+        off: { file: '> # Head⏎> - ', caret: '> # Head⏎> - ‸' },
+      },
+      // Where the empty item is an item in Markdown it stays, as it did.
+      {
+        name: '#442: an item after a blank line stays',
+        doc: '- one⏎⏎  - x‸',
+        keys: ['Backspace'],
+        off: { file: '- one⏎⏎  - ' },
+      },
+      {
+        name: '#442: an item after a sibling stays',
+        doc: '- one⏎  - a⏎  - [x]',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  - a⏎  - ' },
+      },
+      {
+        name: '#442: the first item of a list under a heading stays',
+        doc: '# Head⏎- [x]',
+        keys: ['Backspace'],
+        off: { file: '# Head⏎- ' },
+      },
+      {
+        name: '#442: the first item of a list after a blank line stays',
+        doc: 'Para.⏎⏎- [x]',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎⏎- ' },
+      },
+      {
+        name: '#442: a line in code is no item',
+        doc: '```⏎- [x]⏎```',
+        keys: ['Backspace'],
+        off: { file: '```⏎- ⏎```' },
+        on: {},
+      },
       ...[false, true].flatMap((marks) => [
         {
           name: `#161: Return then Backspace, line break marks ${marks ? 'shown' : 'hidden'}`,
@@ -389,4 +586,37 @@ describe('the linked issues', () => {
       ]),
     ]),
   );
+  // With Track Changes on Redo of this deletion leaves the caret in the pending deletion's hidden
+  // text (#461), which has nothing to do with the open item: Track Changes off only.
+  scriptRows([
+    {
+      name: '#442: text inside a pending insertion goes with its markers: the item is open',
+      doc: '- one⏎  - <ins>y‸</ins>',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: '- one', caret: '- one⏎  - ‸' },
+    },
+    {
+      name: '#442: …another person’s insertion, a selection',
+      doc: '- one⏎  - <ins>[y]</ins>⏎⏎Para <ins>z</ins>',
+      others: 'bo',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: '- one⏎⏎Para <ins>z</ins>', caret: '- one⏎  - ‸⏎⏎Para <ins>z</ins>' },
+    },
+    {
+      name: '#442: an indented underline ends the paragraph above the first item: it stays',
+      doc: 'Para.⏎  ---⏎- x‸',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: 'Para.⏎  ---⏎- ', caret: 'Para.⏎  ---⏎- ‸' },
+    },
+    {
+      name: '#442: …⌘Z and ⌘Y: the item is open again, the file without it, Track Changes off',
+      doc: '- one⏎  - [x]',
+      keys: ['Backspace', 'Mod-z', 'Mod-y'],
+      tc: false,
+      expect: { file: '- one', caret: '- one⏎  - ‸' },
+    },
+  ]);
 });

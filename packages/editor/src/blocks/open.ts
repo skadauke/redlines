@@ -36,12 +36,14 @@ import { lineChanges } from '../diff.ts';
 import { doneDepth, dropStepsEffect, startsOver } from '../history/index.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import {
+  authorFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
-import { unsoundEmptyLine } from './empty-item.ts';
+import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
+import { EMPTY_ITEM, MARKER, unsoundEmptyItem, unsoundEmptyLine } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { blockAt, isGapLine, loose, type Span } from './structure.ts';
 
@@ -266,9 +268,8 @@ const madeItems = StateField.define<readonly Text[]>({
     // what the file then holds is the file's own, even where it is the same text.
     if (startsOver(tr)) return [];
     const request = tr.annotation(openAnnotation);
-    return (request?.item || request?.line) && tr.docChanged
-      ? [...made.slice(-49), tr.newDoc]
-      : made;
+    const opened = request ? request.item || request.line : emptiedItemAt(tr) !== null;
+    return opened && tr.docChanged ? [...made.slice(-49), tr.newDoc] : made;
   },
 });
 
@@ -286,6 +287,137 @@ function emptyItemAt(tr: Transaction): OpenBlock | null {
   if (!unsoundEmptyLine(state.doc, line.number) || inHolder(state, line.from)) return null;
   return { empty: { from: line.from, to: line.to }, pressedIn: null, item: true };
 }
+
+/**
+ * What stops an unsound empty item from being taken back: a pending change or a comment on its line
+ * or beginning at the end of the line above that isn't the break of a split of the author's own
+ * (`marks`: the take-back would decide it), or what follows the item (`below`: its own lines, or an
+ * item that can't start a list under the text above, which would read as text of that line once the
+ * item is gone).
+ */
+type EmptiedProblem = 'marks' | 'below';
+
+/** How the line `n + 1` of `doc` follows the item on line `n` after it is taken back. */
+function followsOk(doc: Text, n: number, quote: string, indent: number): boolean {
+  if (n >= doc.lines) return true;
+  const below = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(doc.line(n + 1).text)!;
+  const text = below[3]!;
+  if (text.trim() === '') return true;
+  const same = quote.replaceAll(/[ \t]/g, '');
+  if (below[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
+  const deep = below[1]! === '' ? below[2]!.length : Math.max(0, below[2]!.length - 1);
+  // Its own lines, or what it holds, are deeper than its marker.
+  if (deep > indent) return false;
+  // What can start a block right under text: an item with text (a bullet, or a number that starts
+  // a list), a heading, a fence. Not a number other than 1, an empty item, an underline or text.
+  return /^(?:[-*+][ \t]+\S|1[.)][ \t]+\S|#{1,6}(?:[ \t]|$)|`{3}|~{3})/.test(text);
+}
+
+/**
+ * The item Markdown can't hold that an edit of the person's left their caret in after taking all of
+ * its text, as the one character that Backspace takes does: `- one⏎  - ‸` after a selection, a
+ * cluster or a cut took the text. The file must not hold the empty item (it read the text above it
+ * as a heading, or the item as more of that text, while the editor drew an empty item), so it is
+ * taken back with its break, unless `problem` says it can't be (`EmptiedProblem`). Null where the
+ * edit left no such item: it reaches past the item's line (the ledger's own changes aside), or took
+ * no text from it.
+ */
+function emptiedItem(
+  start: EditorState,
+  changes: ChangeDesc,
+  doc: Text,
+  head: number,
+): { line: Line; problem: EmptiedProblem | null } | null {
+  const line = doc.lineAt(head);
+  // The edit first, which costs nothing for typing: it took text away, from this line alone, and
+  // wrote nothing else but the ledger's changes (a pending change that goes with its text).
+  const ledger = start.field(parsedField, false)?.ledgerRange?.from ?? Infinity;
+  let emptied = false;
+  let inside = true;
+  changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (fromA >= ledger) return;
+    // The part of a change that lies in the body, without the breaks that end it: a ledger that
+    // goes with its last mark takes the blank lines in front of it, which join the change.
+    let bodyTo = Math.min(toA, ledger);
+    if (toA >= ledger) {
+      while (bodyTo > fromA && /\s/.test(start.sliceDoc(bodyTo - 1, bodyTo))) bodyTo--;
+    }
+    if (bodyTo === fromA && toA >= ledger) return;
+    if (fromB < line.from || toB > line.to) inside = false;
+    else if (start.doc.lineAt(fromA).number !== start.doc.lineAt(bodyTo).number) inside = false;
+    else if (start.sliceDoc(fromA, bodyTo).trim() !== '') emptied = true;
+  });
+  if (!inside || !emptied || line.number < 2) return null;
+  // Empty as it reads: the markers of pending changes on the line are no text.
+  const found = EMPTY_ITEM.exec(line.text.replaceAll(MARKER, ''));
+  if (!found || !unsoundEmptyItem(doc, line.number, found[1]!, found[2]!.length, found[3]!)) {
+    return null;
+  }
+  const indent = found[1] === '' ? found[2]!.length : Math.max(0, found[2]!.length - 1);
+  if (!followsOk(doc, line.number, found[1]!, indent)) return { line, problem: 'below' };
+  if (new RegExp(MARKER.source).test(line.text)) return { line, problem: 'marks' };
+  // The line above is the same line in the start document: the edit is inside the item's line.
+  const above = doc.line(line.number - 1);
+  if (!/<!--(?:split|ins|del|sub|fmt)\b[^>]*-->$/.test(above.text)) return { line, problem: null };
+  const me = start.facet(authorFacet)?.handle;
+  const own = start
+    .field(parsedField, false)
+    ?.marks.some(
+      (mark) =>
+        mark.kind === 'split' &&
+        mark.entry.by === me &&
+        mark.segments.some((g) => g.open.to === above.to),
+    );
+  return { line, problem: own === true ? null : 'marks' };
+}
+
+/** Whether a transaction is an edit of the person's, as typing and deleting are. */
+const editedByPerson = (tr: Transaction): boolean =>
+  tr.docChanged &&
+  !tr.annotation(Transaction.remote) &&
+  !tr.annotation(takeBackAnnotation) &&
+  (tr.isUserEvent('input') || tr.isUserEvent('delete'));
+
+/**
+ * The open empty item the caret is in after an edit of the person's, Track Changes off, that took
+ * all of the text of an item Markdown can't hold empty (`emptiedItem`): opened here, for every edit
+ * that can do it, not in the keys one at a time, as an empty line between blank lines is opened
+ * when the caret lands on it. With Track Changes on the format deletes the whole item.
+ */
+function emptiedItemAt(tr: Transaction): OpenBlock | null {
+  if (!editedByPerson(tr)) return null;
+  const { state } = tr;
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  if (state.field(trackingField, false)) return null;
+  const found = emptiedItem(tr.startState, tr.changes, tr.newDoc, main.head);
+  if (!found || found.problem !== null || inHolder(state, found.line.from)) return null;
+  return { empty: { from: found.line.from, to: found.line.to }, pressedIn: null, item: true };
+}
+
+const EMPTIED_NEXT_TO_CHANGE =
+  "This would leave an empty item that Markdown can't hold under the text above it, and a pending change or a comment next to it can't be taken out with it. Decide the change (or remove the comment) first, or leave some text in the item.";
+
+const EMPTIED_BELOW =
+  "This would leave an empty item that Markdown can't hold under the text above it, and what follows it would read as part of that text (its own next lines, or a number other than 1). Leave some text in the item.";
+
+/**
+ * An edit of the person's, Track Changes off, that would leave an empty item Markdown can't hold
+ * (`emptiedItem`) that can't be taken back: next to a pending change, which taking it back would
+ * decide, or followed by lines that would read as text of the line above. Refused, in words that say
+ * what to do. Where the format has rewritten the edit this reads the rewritten one.
+ */
+const emptiedRefusal = EditorState.transactionFilter.of((tr) => {
+  if (!editedByPerson(tr) || tr.annotation(openAnnotation)) return tr;
+  const start = tr.startState;
+  const { main } = tr.newSelection;
+  if (!main.empty || start.field(trackingField, false)) return tr;
+  if (start.field(viewModeField, false) === 'raw') return tr;
+  const found = emptiedItem(start, tr.changes, tr.newDoc, main.head);
+  if (!found?.problem || inHolder(tr.state, found.line.from)) return tr;
+  const words = found.problem === 'below' ? EMPTIED_BELOW : EMPTIED_NEXT_TO_CHANGE;
+  return { effects: refusedEditEffect.of(words) };
+});
 
 /** A line of a no-break space alone, after a container's syntax: the empty line of Shift-Return. */
 export const EMPTY_LINE = /^[ \t>]*\u00a0$/;
@@ -378,7 +510,11 @@ export const openBlockField = StateField.define<OpenBlock | null>({
     // in it, of a take-back, deleting all of a paragraph's text.
     if (tr.annotation(Transaction.remote)) return null;
     return (
-      emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr) ?? emptyItemAt(tr) ?? emptyLineAt(tr)
+      emptyParagraphAt(tr.state) ??
+      emptyParagraphAbove(tr) ??
+      emptyItemAt(tr) ??
+      emptyLineAt(tr) ??
+      emptiedItemAt(tr)
     );
   },
 });
@@ -851,6 +987,7 @@ export function openBlocks(): Extension {
     madeItems,
     recordField,
     pointerField,
+    Prec.high(emptiedRefusal),
     Prec.high(leaving),
     Prec.highest(pointer),
     observable,

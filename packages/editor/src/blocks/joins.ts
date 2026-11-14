@@ -36,7 +36,7 @@ import {
   textEnd,
   textStart,
 } from './edits.ts';
-import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
+import { EMPTY_ITEM, MARKER, unsoundEmptyItem } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock } from './open.ts';
 import {
@@ -160,9 +160,6 @@ const BELOW_CHANGES =
 /** Why an item can't go up a level where the line after it would become part of its text. */
 const ABSORBED =
   "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
-
-/** The markers of tracked changes and comments, which the newest view doesn't show. */
-const MARKER = /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
 
 /**
  * A line as the original view reads it, every change on it rejected (an insertion's text goes, a
@@ -1017,18 +1014,14 @@ function inOwnInsertion(state: EditorState, from: number, to: number): boolean {
  * item's marker alone, which read the text above it as a heading, though the editor drew an empty
  * item), so the item does not stay in it:
  *
- * - Track Changes off, nothing of a pending change on the item's line or at the end of the line
- *   above: the character goes and the empty item is open, as it was when Return and Tab made it,
- *   drawn, out of the file, written when text is typed in it, gone with the next Backspace or when
- *   the caret leaves. An item with a marker on it can't be taken back plainly (`itemRemoval`), and
- *   a split of someone else's at the end of the line above would be decided by it: those keep the
- *   plain key.
+ * - Track Changes off: the plain key, and `open.ts` opens the empty item after it, as after any
+ *   edit that takes the text of such an item (#442): drawn, out of the file, written when text is
+ *   typed in it, gone with the next Backspace or when the caret leaves.
  * - Track Changes on, text of the author's own insertion that holds the item's break: the item goes
  *   whole with the character, as the author's own pending text does.
  * - Track Changes on, text that isn't the author's own: the format deletes the whole item itself.
  *
- * Null where the item holds more, where the text is more than one code point (the key then goes
- * the way CodeMirror's does, one cluster at a time, and comes here at the last), and where the empty
+ * Null where the item holds more, where the text is more than one code point, and where the empty
  * item would be sound.
  */
 function onlyCharOfItem(
@@ -1067,18 +1060,12 @@ function onlyCharOfItem(
   }
   const userEvent = forward ? 'delete.forward.block' : 'delete.backward.block';
   const above = doc.line(line.number - 1);
-  if (state.field(trackingField, false)) {
-    // Text that isn't the author's own is deleted whole by the format; the author's own goes with
-    // the break that it made, and the item.
-    if (!inOwnInsertion(state, start, end)) return null;
-    return edit(state, [{ from: above.to, to: end }], above.to, userEvent);
-  }
-  // Nothing of a change on the line, or ending the line above, which the take-back would meet.
-  if (line.text.includes('<!--') || /-->$/.test(above.text)) return null;
-  return {
-    ...edit(state, [{ from: start, to: end }], start, userEvent),
-    open: { at: start, assoc: 1, item: true },
-  };
+  // Track Changes off is the plain key's: `open.ts` opens the item it leaves.
+  if (!state.field(trackingField, false)) return null;
+  // Text that isn't the author's own is deleted whole by the format; the author's own goes with
+  // the break that it made, and the item.
+  if (!inOwnInsertion(state, start, end)) return null;
+  return edit(state, [{ from: above.to, to: end }], above.to, userEvent);
 }
 
 /**
