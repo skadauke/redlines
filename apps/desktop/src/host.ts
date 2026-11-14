@@ -105,17 +105,19 @@ export interface Host {
   watch(path: string, onChange: () => void): Promise<() => void>;
   /**
    * The folder an agent may read for the document at `documentPath`, which the file sidebar shows:
-   * its repository's root, or else its own folder.
+   * its repository's root, or else its own folder. In the app, only for a document the person
+   * opened or saved; any other path rejects with a line that says nothing of whether it is there.
    */
   projectRoot(documentPath: string): Promise<ProjectRoot>;
   /**
    * The entries of `folder`, which must be inside the project folder `root`, with hidden ones and
-   * those that git ignores left out.
+   * those that git ignores left out. In the app, only for a project folder a sidebar shows.
    */
   list(folder: string, root: string): Promise<FileEntry[]>;
   /**
    * Opens an image or a PDF inside the project folder `root` in Preview (in its default app off
-   * the Mac); rejects with a line to show the person.
+   * the Mac); rejects with a line to show the person. In the app, `root` must be a project folder
+   * a sidebar shows, and the file below no hidden name.
    */
   openDefault(path: string, root: string): Promise<void>;
   /**
