@@ -545,6 +545,8 @@ describe('the Agent Client Protocol provider', () => {
 });
 
 describe('OpenClaw’s bridge', () => {
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
   const bridgeConfig = {
     id: 'moby',
     name: 'Moby',
@@ -588,7 +590,23 @@ describe('OpenClaw’s bridge', () => {
           });
           return;
         }
-        seen.meta = message.params?.['_meta'];
+        const meta = message.params?.['_meta'];
+        // As OpenClaw's bridge reads `_meta.sessionLabel`: the name of a session that is there
+        // already (translator.ts, `resolveSessionKeyFromMeta`), looked up before the key is looked
+        // at. No session of this fake has a label, so a label ends the run.
+        if (isObject(meta) && typeof meta['sessionLabel'] === 'string') {
+          agent.say({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32603,
+              message: 'Internal error',
+              data: { details: `No session found with label: ${meta['sessionLabel']}` },
+            },
+          });
+          return;
+        }
+        seen.meta = meta;
         agent.say(answer(message.id, { sessionId: 's1' }));
       } else if (message.method === 'session/prompt') {
         seen.prompt = message;
@@ -631,15 +649,17 @@ describe('OpenClaw’s bridge', () => {
         seen,
       ),
     );
-    await run(host);
-    const { key, label } = sessionOf({ agent: 'moby' }, asked);
+    const events = await run(host);
+    const key = sessionOf({ agent: 'moby' }, asked);
+    // The key only: a label would name a session that has to be there already.
     expect(host.sent[1]?.params).toEqual({
       cwd: '/p',
       mcpServers: [],
-      _meta: { sessionKey: key, sessionLabel: label },
+      _meta: { sessionKey: key },
     });
-    expect(key).toMatch(/^agent:moby:redlines-[0-9a-f]{8}$/);
-    expect(label).toBe('Redlines: doc.md');
+    expect(seen.meta).toEqual({ sessionKey: key });
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(key).toMatch(/^agent:moby:redlines-[0-9a-f]{16}$/);
     expect(host.sent[2]?.params).toEqual({
       sessionId: 's1',
       prompt: [
@@ -670,6 +690,61 @@ describe('OpenClaw’s bridge', () => {
     expect(JSON.stringify(host.sent)).not.toContain('"redlines"');
   });
 
+  it('says a turn the Gateway cut short is a failure, not a reply', async () => {
+    const host = fakeHost(
+      bridgeThat((message, agent) => {
+        agent.say(update('agent_message_chunk', { content: { type: 'text', text: 'Partly ' } }));
+        // How the bridge says it (translator.prompt-stream.ts): a message of the agent's own.
+        agent.say(
+          update('agent_message_chunk', {
+            content: {
+              type: 'text',
+              text: '[OpenClaw interruption] The Gateway disconnected before OpenClaw could confirm whether this message was accepted, so its final outcome is unknown. Check the session before retrying.',
+            },
+          }),
+        );
+        agent.say(answer(message.id, { stopReason: 'end_turn' }));
+      }),
+    );
+    const events = await run(host);
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      message:
+        'Moby stopped: The Gateway disconnected before OpenClaw could confirm whether this message was accepted, so its final outcome is unknown. Check the session before retrying.',
+    });
+    expect(events.some((event) => event.type === 'done')).toBe(false);
+  });
+
+  it('takes the bridge’s interruption notice only from the bridge', async () => {
+    // Any other agent that writes those words is answering; they are its reply.
+    const host = fakeHost((message, agent) => {
+      if (message.method === 'initialize') {
+        agent.say(answer(message.id, { protocolVersion: 1 }));
+      } else if (message.method === 'session/new') {
+        agent.say(answer(message.id, { sessionId: 's1' }));
+      } else if (message.method === 'session/prompt') {
+        agent.say(
+          update('agent_message_chunk', {
+            content: { type: 'text', text: '[OpenClaw interruption] is what the log said.' },
+          }),
+        );
+        agent.say(answer(message.id, { stopReason: 'end_turn' }));
+      }
+    });
+    const provider = createAcpProvider(host.processes, config, {
+      emptyFolder: () => Promise.resolve('/var/folders/T/redlines-run.x'),
+      removeFolder: () => Promise.resolve(),
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of provider.run(asked, tools, new AbortController().signal)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toEqual({
+      type: 'done',
+      finalText: '[OpenClaw interruption] is what the log said.',
+    });
+  });
+
   it('says why the bridge failed, from the words it keeps in `data`', async () => {
     // A session that names the toolbox, as the provider of any other agent would write it.
     const host = fakeHost(bridgeThat(() => {}));
@@ -685,38 +760,38 @@ describe('OpenClaw’s bridge', () => {
     });
   });
 
-  it('keeps one session for a document and gives another its own', () => {
+  it('keeps one session for a thread and gives every other thread its own', () => {
     const bridge = { agent: 'moby' };
-    const one = sessionOf(bridge, { documentPath: '/Users/ada/notes/plan.md', thread: 'c1' });
-    // Another thread in the same document is the same session: the agent keeps the document.
-    expect(sessionOf(bridge, { documentPath: '/Users/ada/notes/plan.md', thread: 'c9' })).toEqual(
-      one,
-    );
-    const other = sessionOf(bridge, { documentPath: '/Users/ada/notes/plan-b.md', thread: 'c1' });
-    expect(other.key).not.toBe(one.key);
-    // A document that was never saved has no path: its thread is what the session is named for.
+    const path = '/Users/ada/notes/plan.md';
+    const one = sessionOf(bridge, { documentPath: path, thread: 'c1' });
+    expect(sessionOf(bridge, { documentPath: path, thread: 'c1' })).toBe(one);
+    // Another thread of the same document is another session: a prompt to a session ends the one
+    // running in it, so two threads at once must not share one.
+    expect(sessionOf(bridge, { documentPath: path, thread: 'c9' })).not.toBe(one);
+    expect(
+      sessionOf(bridge, { documentPath: '/Users/ada/notes/plan-b.md', thread: 'c1' }),
+    ).not.toBe(one);
+    // A document that was never saved has no path: its thread is all there is to tell it by.
     const untitled = sessionOf(bridge, { thread: 'c1' });
-    expect(untitled.label).toBe('Redlines: Untitled');
-    expect(sessionOf(bridge, { thread: 'c1' })).toEqual(untitled);
-    expect(sessionOf(bridge, { thread: 'c2' }).key).not.toBe(untitled.key);
+    expect(sessionOf(bridge, { thread: 'c1' })).toBe(untitled);
+    expect(sessionOf(bridge, { thread: 'c2' })).not.toBe(untitled);
+    expect(untitled).not.toBe(one);
+    // A path and a thread don't run together: 'a' + 'bc' is not 'ab' + 'c'.
+    expect(sessionOf(bridge, { documentPath: '/a', thread: 'bc' })).not.toBe(
+      sessionOf(bridge, { documentPath: '/ab', thread: 'c' }),
+    );
   });
 
-  it('never puts a path, or a character that isn’t plain, in the session’s key or label', () => {
+  it('never puts a path, or a character that isn’t plain, in the session’s key', () => {
     const path = '/Users/ada/Secret Plans/Quarterly “plan” 🙂 – final.md';
-    const { key, label } = sessionOf({}, { documentPath: path, thread: 'c1' });
-    expect(key).toMatch(/^redlines-[0-9a-f]{8}$/);
-    expect(label).toMatch(/^Redlines: [A-Za-z0-9 ._()-]+$/);
-    expect(label).not.toContain('Users');
-    expect(label).not.toContain('Secret');
-    expect(sessionOf({}, { documentPath: '/x/🙂.md', thread: 'c1' }).label).toMatch(
-      /^Redlines: -\.md$/,
-    );
+    const key = sessionOf({}, { documentPath: path, thread: 'c1' });
+    expect(key).toMatch(/^redlines-[0-9a-f]{16}$/);
   });
 
   it('names the agent in the key only when the person gave one', () => {
     const named = sessionOf({ agent: 'main' }, request);
     const unnamed = sessionOf({}, request);
-    expect(named.key).toBe(`agent:main:${unnamed.key}`);
-    expect(unnamed.key).toMatch(/^redlines-[0-9a-f]{8}$/);
+    expect(named).toBe(`agent:main:${unnamed}`);
+    expect(unnamed).toMatch(/^redlines-[0-9a-f]{16}$/);
   });
 });

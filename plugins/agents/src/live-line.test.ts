@@ -212,6 +212,50 @@ describe('renderLiveLine', () => {
     expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
   });
 
+  it('asks for an agent with no toolbox to be sent the document and the thread, and says what Allow keeps', () => {
+    const el = renderLiveLine(
+      {
+        kind: 'asking',
+        agent: 'moby',
+        agentName: 'Moby',
+        folder: '/Users/ada/code/redlines',
+        readLimit: 'machine',
+        toolbox: false,
+      },
+      actions(),
+    );
+    expect(textOf(el, el.getAttribute('aria-labelledby'))).toEqual([
+      'Send this document and this thread to Moby?',
+    ]);
+    // The folder is shown, because the answer is kept for it, though the agent reads none of it.
+    expect(el.querySelector('.rl-ask-folder')?.textContent).toBe('~/code/redlines');
+    const note = el.querySelector('.rl-ask-note')?.textContent ?? '';
+    expect(note).toContain('it is sent the document and that comment thread');
+    expect(note).toContain('its OpenClaw Gateway, wherever that runs');
+    expect(note).toContain('Allow remembers it for documents in this folder.');
+    // What it says is true: no comments of other threads are sent, and nothing is read.
+    expect(note).not.toContain('its comments');
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
+  });
+
+  it('says so when a document with no file has no folder to keep the answer for', () => {
+    const el = renderLiveLine(
+      {
+        kind: 'asking',
+        agent: 'moby',
+        agentName: 'Moby',
+        folder: '',
+        readLimit: 'machine',
+        toolbox: false,
+      },
+      actions(),
+    );
+    expect(el.querySelector('.rl-ask-folder')).toBeNull();
+    expect(el.querySelector('.rl-ask-note')?.textContent).toContain(
+      'Allow remembers it for documents that aren’t in a folder yet.',
+    );
+  });
+
   it('names a deep folder by its start and its end', () => {
     const el = renderLiveLine(
       { ...ASK, folder: '/Volumes/Work/clients/acme/projects/2026/importer-rewrite' },

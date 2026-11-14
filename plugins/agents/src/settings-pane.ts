@@ -117,7 +117,7 @@ const ANSWERS = {
 } as const;
 
 /** What a remembered answer of an agent with no toolbox says: it reads nothing, it is sent. */
-const ANSWER_SENT = 'May be sent the document and its comments';
+const ANSWER_SENT = 'May be sent the document and its comment thread';
 
 /**
  * What the home folder choice means, said plainly, as the choice is made: what it opens and leaves
@@ -171,6 +171,14 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     container.append(
       renderOpenClaw(deps.openclaw, {
         alive: () => alive,
+        // What an agent was allowed isn't what another of its name is: Remove takes the answers.
+        forgetAnswers: (agent) => {
+          const consent = deps.settings().consent;
+          const kept = Object.entries(consent).filter(([key]) => !key.startsWith(`${agent}|`));
+          if (kept.length === Object.keys(consent).length) return;
+          deps.update({ consent: Object.fromEntries(kept) });
+          drawRemembered();
+        },
         ...(deps.showGeneral ? { showGeneral: () => deps.showGeneral?.() } : {}),
       }),
     );
@@ -268,7 +276,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       item.dataset['key'] = key;
       const what = el('div', 'rl-pref-item-text');
       // An agent that isn't Claude or Codex is an OpenClaw agent, which has no toolbox: allowing
-      // it in a folder is allowing it to be sent the document and its comments, not to read.
+      // it in a folder is allowing it to be sent the document and the thread, not to read.
       const sent = !names.has(agent) && answer === 'folder';
       what.append(
         el(

@@ -13,7 +13,7 @@
 // rejects an MCP server in `session/new`, never calls the client's files or terminal, and the
 // Gateway it forwards to may be on another machine. The host recognizes it (`bridge`), and the run
 // then has no toolbox: `session/new` names no MCP server and asks for a session of its own for the
-// document (`_meta.sessionKey`), and the prompt carries the thread and the document
+// thread (`_meta.sessionKey`), and the prompt carries the thread and the document
 // (`replyOnlyRequest` in packages/agent-tools); the agent's last message is the reply.
 //
 // An agent asks before it acts, as its own settings say (`session/request_permission`). Redlines
@@ -94,55 +94,45 @@ export function newSessionMessage(folder: string, tools: McpEndpoint): object {
   };
 }
 
-/** A 32-bit FNV-1a hash as eight hex digits: a name for a document that never shows its path. */
+/** A 64-bit FNV-1a hash as sixteen hex digits: a name that never shows what it is the hash of. */
 function hashOf(text: string): string {
-  let hash = 0x811c9dc5;
+  let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(text)) {
-    hash ^= byte;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
   }
-  return hash.toString(16).padStart(8, '0');
+  return hash.toString(16).padStart(16, '0');
 }
 
 /**
- * The session of a document at OpenClaw's Gateway: one key for each document, from a hash of its
- * path (never the path, which a remote Gateway has no use for), so that the agent keeps the
- * document's thread between prompts and nothing else's. A key names an agent when the person gave
- * one (`agent:moby:redlines-1a2b3c4d`), and else belongs to the Gateway's default agent. The label
- * is what the Gateway's own list of sessions shows, in plain ASCII. The host holds both to this
- * shape (acp_gate.rs).
+ * The session of a thread at OpenClaw's Gateway: one key for each thread, from a hash of the
+ * document's path and the thread's id (never the path, which a remote Gateway has no use for), so
+ * that the agent keeps the thread between prompts and nothing else: a prompt to a session ends the
+ * one running in it, so two threads must not share one. A key names an agent when the person gave
+ * one (`agent:moby:redlines-0123456789abcdef`), and else belongs to the Gateway's default agent.
+ * The host holds it to this shape (acp_gate.rs).
+ *
+ * It sends no label (`_meta.sessionLabel`). The bridge reads a label as the name of a session that
+ * is there already, and looks it up before it looks at the key: a label of a session that doesn't
+ * exist yet fails the run.
  */
 export function sessionOf(
   bridge: Bridge,
   request: Pick<AgentRequest, 'documentPath' | 'thread'>,
-): { key: string; label: string } {
-  const named = request.documentPath ?? `thread:${request.thread}`;
-  const base = `redlines-${hashOf(named)}`;
-  const file = request.documentPath?.split('/').filter(Boolean).at(-1) ?? 'Untitled';
-  const plainName = file.replace(/[^A-Za-z0-9 ._()-]+/g, '-').slice(0, 80);
-  return {
-    key: bridge.agent === undefined ? base : `agent:${bridge.agent}:${base}`,
-    label: `Redlines: ${plainName || 'document'}`,
-  };
+): string {
+  const base = `redlines-${hashOf(`${request.documentPath ?? ''}\u0000${request.thread}`)}`;
+  return bridge.agent === undefined ? base : `agent:${bridge.agent}:${base}`;
 }
 
 /**
- * A session for a bridge: no MCP server, which the bridge rejects, and the key and label of the
- * document's session in `_meta`, which it reads (`sessionKey`, `sessionLabel`).
+ * A session for a bridge: no MCP server, which the bridge rejects, and the key of the thread's
+ * session in `_meta`, which it reads (`sessionKey`).
  */
-export function bridgeSessionMessage(
-  folder: string,
-  session: { key: string; label: string },
-): object {
+export function bridgeSessionMessage(folder: string, key: string): object {
   return {
     jsonrpc: '2.0',
     id: NEW_SESSION,
     method: 'session/new',
-    params: {
-      cwd: folder,
-      mcpServers: [],
-      _meta: { sessionKey: session.key, sessionLabel: session.label },
-    },
+    params: { cwd: folder, mcpServers: [], _meta: { sessionKey: key } },
   };
 }
 
@@ -350,7 +340,16 @@ export interface AcpState {
   message: string;
   /** Why the run is failing, once something has said so. */
   failure?: string;
+  /** For a bridge: why the Gateway cut the turn short, as the bridge said it. */
+  interruption?: string;
 }
+
+/**
+ * How OpenClaw's bridge begins a message of its own that says why a turn was cut short (the Gateway
+ * disconnected, the run failed): it sends it as the agent's words and then ends the turn as it
+ * ends one that was answered.
+ */
+const INTERRUPTION = '[OpenClaw interruption]';
 
 /** The first line of an agent's message, as plain words, and no longer than stderr's are kept. */
 function firstLine(text: unknown): string {
@@ -428,6 +427,15 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
       }
       switch (result['stopReason']) {
         case 'end_turn': {
+          // A turn the Gateway cut short is a failure, not an answer to post as the reply.
+          if (state.interruption !== undefined) {
+            return {
+              type: 'error',
+              message: state.interruption
+                ? `${name} stopped: ${state.interruption}`
+                : `${name} stopped.`,
+            };
+          }
           const finalText = state.message.trim();
           return finalText ? { type: 'done', finalText } : { type: 'done' };
         }
@@ -484,7 +492,12 @@ function fromUpdate(params: unknown, state: AcpState): AgentEvent | null {
     case 'agent_message_chunk': {
       const content = update['content'];
       if (isRecord(content) && content['type'] === 'text' && typeof content['text'] === 'string') {
-        state.message += content['text'];
+        const text = content['text'];
+        if (state.bridge && text.startsWith(INTERRUPTION)) {
+          state.interruption = firstLine(text.slice(INTERRUPTION.length));
+        } else {
+          state.message += text;
+        }
       }
       return null;
     }

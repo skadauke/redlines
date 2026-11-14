@@ -56,9 +56,10 @@ function setup(start: OpenClawAgent[] = [], extra: Partial<OpenClawDeps> = {}) {
   };
   let alive = true;
   const showGeneral = vi.fn();
-  const section = renderOpenClaw(deps, { alive: () => alive, showGeneral });
+  const forgetAnswers = vi.fn<(id: string) => void>();
+  const section = renderOpenClaw(deps, { alive: () => alive, showGeneral, forgetAnswers });
   document.body.append(section);
-  return { section, add, remove, showGeneral, stop: () => (alive = false) };
+  return { section, add, remove, showGeneral, forgetAnswers, stop: () => (alive = false) };
 }
 
 const buttons = (section: HTMLElement) =>
@@ -96,7 +97,9 @@ describe('the OpenClaw section', () => {
     const { section } = setup();
     await settle();
     const text = section.textContent ?? '';
-    expect(text).toContain('the document and its comments go to the Gateway, wherever it runs');
+    expect(text).toContain(
+      'the document and that comment thread go to the Gateway, wherever it runs',
+    );
     expect(text).toContain('posted as a reply');
     expect(text).toContain('It can’t change the document');
     expect(text).toContain('never reads the file');
@@ -185,6 +188,60 @@ describe('the OpenClaw section', () => {
     expect(section.textContent).toContain('Not in the app.');
   });
 
+  it('keeps the focus in the section when the button that had it goes', async () => {
+    const { section } = setup([moby, local]);
+    await settle();
+    const focused = () => document.activeElement?.textContent;
+    const pressed = (text: string, label?: string) => {
+      const found = [...section.querySelectorAll('button')].find(
+        (button) =>
+          button.textContent === text &&
+          (label === undefined || button.getAttribute('aria-label') === label),
+      );
+      found?.focus();
+      found?.click();
+    };
+    // Remove: the next agent's Remove, and the Add button once none is left.
+    pressed('Remove', 'Remove Moby');
+    await settle();
+    expect(section.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Remove Rex');
+    pressed('Remove', 'Remove Rex');
+    await settle();
+    expect(focused()).toBe('Add OpenClaw Agent…');
+    // Cancel, and Add: the button that opens the form.
+    pressed('Add OpenClaw Agent…');
+    pressed('Cancel');
+    expect(focused()).toBe('Add OpenClaw Agent…');
+    pressed('Add OpenClaw Agent…');
+    type(field(section, 'Name'), 'Moby');
+    type(field(section, 'Gateway address'), 'wss://gateway.example.org');
+    type(field(section, 'Token file'), '/Users/ada/.moby-token');
+    pressed('Add');
+    await settle();
+    expect(focused()).toBe('Add OpenClaw Agent…');
+  });
+
+  it('hands the id of a removed agent over, so that what it was allowed goes with it', async () => {
+    const { section, remove, forgetAnswers } = setup([moby, local]);
+    await settle();
+    press(section, 'Remove');
+    await settle();
+    expect(remove).toHaveBeenCalledWith('moby');
+    expect(forgetAnswers).toHaveBeenCalledExactlyOnceWith('moby');
+  });
+
+  it('forgets nothing of an agent that is still there, because the host said no', async () => {
+    const { section, remove, forgetAnswers } = setup([moby]);
+    await settle();
+    remove.mockImplementationOnce(() => Promise.reject(new Error('Not now.')));
+    press(section, 'Remove');
+    await settle();
+    expect(section.textContent).toContain('Not now.');
+    expect(forgetAnswers).not.toHaveBeenCalled();
+    expect(section.querySelector('.rl-pref-item')?.textContent).toContain('Moby');
+  });
+
   it('cancels adding, and removes an agent', async () => {
     const { section, remove } = setup([moby]);
     await settle();
@@ -231,6 +288,9 @@ describe('the OpenClaw skill', () => {
     const { section } = setup([local], { skill });
     await settle();
     expect(section.textContent).toContain('Redlines skill: not installed.');
+    // An address on this Mac may be the end of a tunnel, and the note says what the skill is for.
+    expect(section.textContent).toContain('The skill is for an OpenClaw that runs on this Mac.');
+    expect(section.textContent).toContain('tunnel at 127.0.0.1');
     press(section, 'Install Skill');
     await settle();
     expect(skill.install).toHaveBeenCalledTimes(1);

@@ -107,7 +107,12 @@ export function openClawAgents(
  */
 export function renderOpenClaw(
   deps: OpenClawDeps,
-  options: { alive: () => boolean; showGeneral?: () => void },
+  options: {
+    alive: () => boolean;
+    showGeneral?: () => void;
+    /** Called with an agent's id once it is removed: what the person allowed it goes with it. */
+    forgetAnswers?: (id: string) => void;
+  },
 ): HTMLElement {
   const { alive } = options;
   const control = el('div', 'rl-pref-list');
@@ -119,8 +124,8 @@ export function renderOpenClaw(
     'div',
     'rl-pref-note',
     'Agents of an OpenClaw Gateway, reached with the openclaw command, which has to be installed ' +
-      'on this Mac. Write @ and the name in a comment: the document and its comments go to the ' +
-      'Gateway, wherever it runs, and the agent’s last message is posted as a reply. It can’t ' +
+      'on this Mac. Write @ and the name in a comment: the document and that comment thread go to ' +
+      'the Gateway, wherever it runs, and the agent’s last message is posted as a reply. It can’t ' +
       'change the document. Redlines passes the token file’s path to openclaw and never reads ' +
       'the file.',
   );
@@ -135,6 +140,17 @@ export function renderOpenClaw(
         fallbackFocus: () => items.querySelector('button') ?? adding.querySelector('button'),
       })
     : undefined;
+
+  // What the skill is for, said where it is offered: an address on this Mac may be the end of a
+  // tunnel to a Gateway elsewhere, which this can't tell, and that OpenClaw reads its own folders.
+  const skillNote = el(
+    'div',
+    'rl-pref-note',
+    'The skill is for an OpenClaw that runs on this Mac. One on another machine, even one you ' +
+      'reach through a tunnel at 127.0.0.1, needs the skill copied there: the command is in ' +
+      'Redlines’ README.',
+  );
+  const skillWhere = el('div');
 
   const show = (list: OpenClawAgent[]) => {
     if (!alive()) return;
@@ -152,12 +168,32 @@ export function renderOpenClaw(
             : [el('span', 'rl-pref-note', `OpenClaw agent: ${agent.agent}`)]),
         );
         const remove = button('Remove', `Remove ${agent.name}`);
-        remove.addEventListener('click', () => void change(() => deps.remove(agent.id)));
+        remove.addEventListener('click', () => {
+          void change(() => deps.remove(agent.id)).then((done) => {
+            if (!done) return;
+            options.forgetAnswers?.(agent.id);
+            if (alive()) keepFocus('agents');
+          });
+        });
         item.append(what, remove);
         return item;
       }),
     );
-    skill?.look(list.some((agent) => isLocalGateway(agent.url)));
+    const local = list.some((agent) => isLocalGateway(agent.url));
+    skill?.look(local);
+    skillWhere.replaceChildren(...(skill && local ? [skillNote] : []));
+  };
+
+  /**
+   * A button that has the focus goes when the list or the form is drawn again: the focus goes to
+   * another button of the section, the next agent's Remove or Add, and never falls to the page.
+   */
+  const keepFocus = (prefer: 'agents' | 'add') => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const agents = items.querySelector('button');
+    const add = adding.querySelector('button');
+    (prefer === 'agents' ? (agents ?? add) : (add ?? agents))?.focus();
   };
 
   /** Makes a change through the host, which asks the person, and shows the list it then has. */
@@ -212,13 +248,18 @@ export function renderOpenClaw(
       };
       void change(() => deps.add(input)).then((done) => {
         if (!alive()) return;
-        if (done) adding.replaceChildren(...closed());
-        else ready();
+        if (done) {
+          adding.replaceChildren(...closed());
+          keepFocus('add');
+        } else {
+          ready();
+        }
       });
     });
     cancel.addEventListener('click', () => {
       problem.textContent = '';
       adding.replaceChildren(...closed());
+      keepFocus('add');
     });
     const pairs = el('div', 'rl-pref-list');
     const first = el('div', 'rl-pref-pair');
@@ -233,7 +274,7 @@ export function renderOpenClaw(
   };
 
   adding.append(...closed());
-  control.append(items, adding, problem, note, ...(skill ? skill.nodes : []));
+  control.append(items, adding, problem, note, ...(skill ? [...skill.nodes, skillWhere] : []));
   void deps.list().then(show, (error: unknown) => {
     if (alive()) problem.textContent = `Couldn’t list the OpenClaw agents: ${reasonOf(error)}`;
   });

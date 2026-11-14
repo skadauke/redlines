@@ -377,7 +377,7 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
 /** The question's title: what is asked, and of whom. */
 function askTitle({ agentName, readLimit, toolbox }: LiveLine & { kind: 'asking' }): string {
   // An agent with no toolbox is sent what it needs, in its prompt, and reads nothing itself here.
-  if (toolbox === false) return `Send this document and its comments to ${agentName}?`;
+  if (toolbox === false) return `Send this document and this thread to ${agentName}?`;
   return readLimit === 'machine'
     ? `Allow ${agentName} to read files on this Mac?`
     : `Allow ${agentName} to read this folder?`;
@@ -412,7 +412,9 @@ function asking(
   title.id = `${id}-title`;
   const described: string[] = [];
   const children: Node[] = [title];
-  if (!machine) {
+  // The answer is kept for the folder, and for an agent with no toolbox it is the only thing the
+  // folder is for: say which, though the agent reads none of it.
+  if (!machine || (line.toolbox === false && line.folder !== '')) {
     const folder = block('rl-ask-folder', shortFolder(line.folder));
     folder.id = `${id}-folder`;
     folder.title = line.folder;
@@ -422,7 +424,7 @@ function asking(
   const note = block(
     'rl-ask-note',
     line.toolbox === false
-      ? `${agentName} answers from this document and its comments, which go to its OpenClaw Gateway, wherever that runs. It can’t change the document: what it says is posted as a reply. What else it can read is up to its own settings.`
+      ? `When you write ${agentName}’s name in a comment, it is sent the document and that comment thread, which go to its OpenClaw Gateway, wherever that runs. Allow remembers it for ${line.folder === '' ? 'documents that aren’t in a folder yet' : 'documents in this folder'}. It can’t change the document: what it says is posted as a reply. What else it can read is up to its own settings.`
       : machine
         ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
         : `${agentName} reads files here to answer, and changes only this document.`,

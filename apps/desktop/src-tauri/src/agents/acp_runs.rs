@@ -489,8 +489,9 @@ mod tests {
     }
 
     /// A stand-in for `openclaw acp`, which says what the bridge says: it opens a session only for a
-    /// `session/new` that names no MCP server, rejects one that does as the bridge does, and answers
-    /// a prompt in a piece and an end.
+    /// `session/new` that names no MCP server, rejects one that does as the bridge does, reads a
+    /// `sessionLabel` as the name of a session that is there already (there is none, so it fails, as
+    /// the bridge does, before it looks at the key), and answers a prompt in a piece and an end.
     fn write_stand_in(folder: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let script = folder.join("openclaw");
@@ -503,6 +504,8 @@ while IFS= read -r line; do
       echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}' ;;
     *'"method":"session/new"'*)
       case "$line" in
+        *'"sessionLabel"'*)
+          echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error","data":{"details":"No session found with label: Redlines"}}}' ;;
         *'"mcpServers":[]'*)
           echo '{"jsonrpc":"2.0","id":1,"result":{"sessionId":"sess-1"}}' ;;
         *)

@@ -303,8 +303,7 @@
             "cwd": "/Users/ada/dangerously \"quoted\" project",
             "mcpServers": [],
             "_meta": {
-              "sessionKey": "agent:moby:redlines-057e7272",
-              "sessionLabel": "Redlines: doc.md"
+              "sessionKey": "agent:moby:redlines-0479fd18f76aae95"
             }
           }
         },
@@ -341,8 +340,7 @@
             "cwd": "/Users/ada/dangerously \"quoted\" project",
             "mcpServers": [],
             "_meta": {
-              "sessionKey": "redlines-057e7272",
-              "sessionLabel": "Redlines: doc.md"
+              "sessionKey": "redlines-0479fd18f76aae95"
             }
           }
         },

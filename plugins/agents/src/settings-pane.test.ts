@@ -931,9 +931,48 @@ describe('the Agents pane', () => {
     renderAgentsPane(container, deps);
     const said = (key: string) =>
       row(container, 'Remembered answers').querySelector(`[data-key="${key}"]`)?.textContent;
-    expect(said('moby|/Users/me/a')).toContain('moby · May be sent the document and its comments');
+    expect(said('moby|/Users/me/a')).toContain(
+      'moby · May be sent the document and its comment thread',
+    );
     expect(said('moby|/Users/me/a')).not.toContain('read the folder');
     expect(said('moby|/Users/me/b')).toContain('moby · Not allowed');
+  });
+
+  it('forgets what an OpenClaw agent was allowed when it is removed, and nothing of any other', async () => {
+    const { deps, container } = setup(
+      {},
+      {
+        consent: {
+          'moby|/Users/me/a': 'folder',
+          'moby|/Users/me/b': 'folder',
+          'mobyx|/Users/me/a': 'folder',
+          'claude|/Users/me/a': 'folder',
+        },
+      },
+    );
+    let list = [
+      { id: 'moby', name: 'Moby', url: 'wss://gateway.example.org', tokenFile: '/Users/me/.t' },
+    ];
+    deps.openclaw = {
+      list: () => Promise.resolve(list),
+      add: () => Promise.reject(new Error('Not here.')),
+      remove: (id) => {
+        list = list.filter((agent) => agent.id !== id);
+        return Promise.resolve(list);
+      },
+    };
+    renderAgentsPane(container, deps);
+    await settle();
+    container.querySelector<HTMLButtonElement>('button[aria-label="Remove Moby"]')?.click();
+    await settle();
+    expect(deps.settings().consent).toEqual({
+      'mobyx|/Users/me/a': 'folder',
+      'claude|/Users/me/a': 'folder',
+    });
+    // The pane shows what is left, and nothing of Moby's.
+    const left = row(container, 'Remembered answers');
+    expect(left.querySelector('[data-key="moby|/Users/me/a"]')).toBeNull();
+    expect(left.querySelector('[data-key="mobyx|/Users/me/a"]')).not.toBeNull();
   });
 
   it('has no remembered-answers row when nothing is remembered', () => {

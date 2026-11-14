@@ -126,12 +126,66 @@ fn gateway_url_problem(url: &str) -> Option<String> {
         return bad();
     }
     let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-    let host_chars = |c: char| c.is_ascii_alphanumeric() || ".-:[]".contains(c);
     let path_chars = |c: char| c.is_ascii_alphanumeric() || "._~/%+-".contains(c);
-    if authority.is_empty() || !authority.chars().all(host_chars) || !path.chars().all(path_chars) {
+    if !authority_is_plain(authority) || !path.chars().all(path_chars) {
         return bad();
     }
     None
+}
+
+/// Whether the part of an address between `//` and the first `/` is a host and, if it has one, a
+/// port that is a number: `gateway.example.org`, `127.0.0.1:18789`, `[::1]:18789`. Anything else
+/// there, such as `host:hunter2`, is how a secret could be written into an address.
+fn authority_is_plain(authority: &str) -> bool {
+    let (host, port, bracketed) = match authority.strip_prefix('[') {
+        Some(rest) => match rest.split_once(']') {
+            Some((inside, "")) => (inside, None, true),
+            Some((inside, after)) => match after.strip_prefix(':') {
+                Some(port) => (inside, Some(port), true),
+                None => return false,
+            },
+            None => return false,
+        },
+        None => match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port), false),
+            None => (authority, None, false),
+        },
+    };
+    let host_plain = !host.is_empty()
+        && if bracketed {
+            host.chars()
+                .all(|c| c.is_ascii_hexdigit() || ".:".contains(c))
+        } else {
+            host.chars()
+                .all(|c| c.is_ascii_alphanumeric() || ".-".contains(c))
+        };
+    let port_plain = port.is_none_or(|port| {
+        port.len() <= 5
+            && port.chars().all(|c| c.is_ascii_digit())
+            && port
+                .parse::<u32>()
+                .is_ok_and(|number| (1..=65535).contains(&number))
+    });
+    host_plain && port_plain
+}
+
+/// Whether an address names this Mac itself (`localhost`, `127.0.0.1`, `[::1]`): what goes to it
+/// never crosses a network, and a tunnel to a Gateway elsewhere is written the same way.
+fn is_loopback(url: &str) -> bool {
+    let rest = url
+        .strip_prefix("wss://")
+        .or_else(|| url.strip_prefix("ws://"))
+        .unwrap_or(url);
+    let authority = rest
+        .split_once('/')
+        .map_or(rest, |(authority, _)| authority);
+    let host = match authority.strip_prefix('[') {
+        Some(inside) => inside.split_once(']').map_or(inside, |(host, _)| host),
+        None => authority
+            .split_once(':')
+            .map_or(authority, |(host, _)| host),
+    };
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
 }
 
 /// Why a token file's name can't be used, if it can't: a whole, plain path.
@@ -532,12 +586,13 @@ fn bridge_message(agent: &AcpAgent) -> String {
     let (url, file) = (after("--url"), after("--token-file"));
     let mut message = format!(
         "\n\n{} is OpenClaw's bridge to the Gateway at {url}. When you mention @{} in a comment, the \
-         document and its comments are sent there, wherever it runs, and its last message is posted \
-         as a reply. It can't change the document. Redlines passes the token file's path ({file}) \
+         document and that comment thread are sent there, wherever it runs, and its last message is \
+         posted as a reply. It can't change the document. Redlines passes the token file's path ({file}) \
          to openclaw and never reads the file.",
         agent.name, agent.id
     );
-    if url.starts_with("ws://") {
+    // An address on this Mac stays on it (or goes through the tunnel its owner made).
+    if url.starts_with("ws://") && !is_loopback(&url) {
         message.push_str(
             "\n\nThis address isn't encrypted (ws://), so what goes to it can be read on the way.",
         );
@@ -1077,8 +1132,11 @@ mod tests {
             "ws://127.0.0.1:18789",
             "ws://localhost:18789",
             "ws://[::1]:18789",
+            "ws://[::1]",
             "ws://192.168.1.20:18789",
             "wss://mini.tailnet.ts.net",
+            "wss://gateway.example.org:1",
+            "wss://gateway.example.org:65535",
         ] {
             assert_eq!(gateway_url_problem(fine), None, "{fine}");
         }
@@ -1096,6 +1154,19 @@ mod tests {
             "wss://gateway.example.org/\u{202e}x",
             "wss://gate way.example.org",
             "wss://gateway.example.org;rm",
+            // A port that isn't a number is where a secret could go in the place of one.
+            "wss://gateway.example.org:hunter2",
+            "wss://user:hunter2",
+            "wss://gateway.example.org:",
+            "wss://gateway.example.org:0",
+            "wss://gateway.example.org:99999",
+            "wss://gateway.example.org:123456",
+            "wss://gateway.example.org:18789:1",
+            "ws://[::1]:hunter2",
+            "ws://[::1",
+            "ws://[::1]x",
+            "ws://[]:18789",
+            "ws://[g::1]:18789",
             &format!("wss://{}.example.org", "a".repeat(220)),
         ] {
             assert!(gateway_url_problem(refused).is_some(), "{refused}");
@@ -1143,7 +1214,7 @@ mod tests {
             "{question}"
         );
         assert!(
-            question.contains("document and its comments are sent there"),
+            question.contains("document and that comment thread are sent there"),
             "{question}"
         );
         assert!(question.contains("never reads the file"), "{question}");
@@ -1201,6 +1272,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_address_on_this_mac_draws_no_warning_of_a_plain_address() {
+        // What goes to `ws://127.0.0.1` stays on this Mac, or goes through the tunnel that its
+        // owner made to a Gateway elsewhere, which OpenClaw's documents show written this way.
+        for local in [
+            "ws://127.0.0.1:18789",
+            "ws://localhost:18789",
+            "ws://LOCALHOST",
+            "ws://[::1]:18789",
+            "ws://[::1]",
+            "ws://localhost/gateway",
+        ] {
+            assert!(is_loopback(local), "{local}");
+        }
+        for elsewhere in [
+            "ws://192.168.1.20:18789",
+            "ws://gateway.example.org",
+            "ws://127.0.0.1.example.org:18789",
+            "ws://localhost.example.org",
+            "ws://128.0.0.1",
+            "ws://[::2]",
+            "wss://gateway.example.org",
+        ] {
+            assert!(!is_loopback(elsewhere), "{elsewhere}");
+        }
+        let temp = TempFolder::new("acp-openclaw-loopback");
+        let agents = store(&temp);
+        let token = token_in(&temp);
+        let mut message = String::new();
+        agents
+            .add(
+                "Moby",
+                &format!("openclaw acp --url ws://127.0.0.1:18789 --token-file {token}"),
+                openclaw,
+                |asked| {
+                    message = asked.message.clone();
+                    true
+                },
+            )
+            .unwrap();
+        assert!(!message.contains("isn't encrypted"), "{message}");
+        assert!(message.contains("never reads the file"), "{message}");
+    }
     #[test]
     fn a_token_file_that_cant_be_used_is_refused_before_anyone_is_asked() {
         let temp = TempFolder::new("acp-openclaw-token");

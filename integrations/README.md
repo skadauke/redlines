@@ -129,15 +129,17 @@ installed on this Mac.
    OpenClaw too. The app asks you to allow exactly what it will run, and says where the document
    goes.
 3. Write `@moby` in a comment. The first time in a folder, it asks whether to send the document and
-   its comments to Moby.
+   the thread to Moby; the answer is kept for that folder, and Remove in Preferences forgets it.
 
 The agent is sent the thread and the document with the question, and its last message is posted as
 a reply, the first paragraph in the margin and the rest behind More. It can't change the document
 through this connection, because the bridge takes no tools of Redlines': when you ask for a change,
 it gives the wording. For tracked changes, the agent can work on the file itself with the skill
-above and the `redlines` command, on a Mac that has both. Each document is a session of its own at
-the Gateway (`agent:<id>:redlines-<hash of the path>`), so that the agent keeps the document and
-nothing else's.
+above and the `redlines` command, on a Mac that has both. Each thread is a session of its own at
+the Gateway (`agent:<id>:redlines-<hash of the path and the thread>`), so that the agent keeps the
+thread and nothing else's. If your Gateway has more than one agent, give the agent's id in the form:
+without it the Gateway may ask you to name one. A line in the document or the thread that starts
+with `/` and a command word is sent as `\/…`, so that the Gateway doesn't take it for a directive.
 
 If it fails, the line under the comment says what OpenClaw said: a Gateway that can't be reached or
 refuses the token ends with `Moby stopped: …` and the last line `openclaw` printed; `Moby couldn’t

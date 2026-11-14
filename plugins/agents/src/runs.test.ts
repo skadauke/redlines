@@ -7,6 +7,7 @@ import {
   redo,
   undo,
 } from '@redlines/editor';
+import { foldComment } from '@redlines/agent-tools';
 import { isId, parse } from '@redlines/format';
 import type {
   AgentEvent,
@@ -2099,8 +2100,13 @@ describe('an agent with no toolbox', () => {
     const thread = ask(s, '@Moby rewrite the importer line');
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
     const text = entries(s.editor, thread).at(-1)?.text ?? '';
-    expect(text.startsWith('Shorter: "The importer ships Friday."\n\nMore detail.')).toBe(true);
-    expect(text.length).toBeLessThan(long.length + 2);
+    // The first paragraph shows in the margin, and the rest is what the card folds behind More.
+    const { shown, more } = foldComment(text);
+    expect(shown).toBe('Shorter: "The importer ships Friday."');
+    expect(more?.startsWith('More detail. More detail.')).toBe(true);
+    // Nothing is lost, up to what a reply keeps (`fitReply`): the details are cut at 2000 characters.
+    expect(more?.length).toBeLessThanOrEqual(2000);
+    expect(more?.length).toBeGreaterThan(300);
   });
 
   it('asks first, in words that say what is sent and where, and then goes on', async () => {

@@ -8,8 +8,9 @@
 //! - `session/new`, once: the folder the run was started for, and the toolbox as the only MCP
 //!   server, which is the bundled program on a socket of this window's, as for Claude and Codex
 //!   (`allowed.rs`). No `_meta`. For OpenClaw's bridge, which has no toolbox, no MCP server at
-//!   all, and a `_meta` of exactly a session key (`redlines-<8 hex digits>`, after `agent:<id>:`
-//!   when the person named the agent) and a plain label.
+//!   all, and a `_meta` of exactly a session key (`redlines-<16 hex digits>`, after `agent:<id>:`
+//!   when the person named the agent). Never a label: the bridge reads one as the name of a
+//!   session that is there already, and fails when it isn't.
 //! - `session/prompt`: text, to the session the agent opened, and for OpenClaw's bridge also a
 //!   `_meta` of exactly `{"prefixCwd": false}`. `session/cancel`, to that session.
 //! - Answers, only to what the agent asked and hasn't been answered: an error to anything, and to
@@ -223,8 +224,7 @@ impl Conversation {
     }
 
     /// The folder of a `session/new` that names only the toolbox, on one of `sockets`; for
-    /// OpenClaw's bridge, that names no MCP server, and a key and a label that are the shape this
-    /// writes (`session_of`).
+    /// OpenClaw's bridge, that names no MCP server, and a key that is the shape `sessionOf` writes.
     fn check_new_session(&self, params: &Value, sockets: &[String]) -> Result<PathBuf, String> {
         let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
         if let Some(bridge) = &self.bridge {
@@ -263,7 +263,7 @@ impl Conversation {
     }
 
     /// The folder of a `session/new` to OpenClaw's bridge: the run's folder, no MCP server, which
-    /// the bridge rejects and which has none to name, and the document's session in `_meta`.
+    /// the bridge rejects and which has none to name, and the thread's session key in `_meta`.
     fn check_bridge_session(&self, params: &Value, bridge: &Bridge) -> Result<PathBuf, String> {
         let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
         let params = params
@@ -279,18 +279,17 @@ impl Conversation {
         if params["mcpServers"] != json!([]) {
             return Err(refused("with an MCP server: this agent has no toolbox"));
         }
+        // The key only: a label names a session that has to be there already, and wins over the
+        // key, so a session with one fails to open (and any other `_meta` is the window's to say).
         let meta = params["_meta"]
             .as_object()
-            .filter(|meta| has_exactly(meta, &["sessionKey", "sessionLabel"]))
-            .ok_or_else(|| refused("with more than a key and a label"))?;
+            .filter(|meta| has_exactly(meta, &["sessionKey"]))
+            .ok_or_else(|| refused("with more than a session's key"))?;
         let key = meta["sessionKey"].as_str().unwrap_or_default();
         if !session_key_is_ours(key, bridge) {
             return Err(refused(
                 "with a key that isn't one of Redlines' for this agent",
             ));
-        }
-        if !session_label_is_ours(meta["sessionLabel"].as_str().unwrap_or_default()) {
-            return Err(refused("with a label that isn't plain"));
         }
         Ok(folder)
     }
@@ -346,7 +345,7 @@ impl Conversation {
 }
 
 /// Whether a session key is the shape `sessionOf` in `plugins/agent-acp` writes: `redlines-` and
-/// eight lowercase hex digits, after `agent:<id>:` when the person named the agent, and with no
+/// sixteen lowercase hex digits, after `agent:<id>:` when the person named the agent, and with no
 /// agent in front of it when they didn't (a key could otherwise say any agent's name).
 fn session_key_is_ours(key: &str, bridge: &Bridge) -> bool {
     let rest = match &bridge.agent {
@@ -355,22 +354,11 @@ fn session_key_is_ours(key: &str, bridge: &Bridge) -> bool {
     };
     rest.and_then(|rest| rest.strip_prefix("redlines-"))
         .is_some_and(|hash| {
-            hash.len() == 8
+            hash.len() == 16
                 && hash
                     .chars()
                     .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
         })
-}
-
-/// Whether a session label is `Redlines: ` and up to eighty plain ASCII characters.
-fn session_label_is_ours(label: &str) -> bool {
-    label.strip_prefix("Redlines: ").is_some_and(|name| {
-        !name.is_empty()
-            && name.len() <= 80
-            && name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || " ._()-".contains(c))
-    })
 }
 
 /// A JSON-RPC id as a key, as the agent wrote it: `1` and `"1"` are two ids. Only whole numbers
@@ -985,7 +973,7 @@ mod tests {
     }
 
     fn bridge_new_session(key: &str) -> Value {
-        bridge_new_session_with(json!({ "sessionKey": key, "sessionLabel": "Redlines: plan.md" }))
+        bridge_new_session_with(json!({ "sessionKey": key }))
     }
 
     fn bridge_prompt_with(meta: Value) -> Value {
@@ -1059,28 +1047,27 @@ mod tests {
     }
 
     #[test]
-    fn a_bridges_session_has_no_mcp_server_and_a_key_and_a_label_of_redlines() {
-        let key = "agent:moby:redlines-0a1b2c3d";
+    fn a_bridges_session_has_no_mcp_server_and_a_key_of_redlines_and_nothing_else() {
+        let key = "agent:moby:redlines-0a1b2c3d4e5f6071";
         let said = |agent: Option<&str>, message: &Value| {
             let mut talk = for_openclaw(agent);
             talk.check(&line(&initialize()), &sockets()).unwrap();
             talk.check(&line(message), &sockets())
         };
         assert!(said(Some("moby"), &bridge_new_session(key)).is_ok());
-        assert!(said(None, &bridge_new_session("redlines-0a1b2c3d")).is_ok());
+        assert!(said(None, &bridge_new_session("redlines-0a1b2c3d4e5f6071")).is_ok());
         // The toolbox, which the bridge rejects, and which an agent with none has no use for.
         assert!(
             said(
                 Some("moby"),
                 &new_session_with(
                     json!({ "cwd": FOLDER, "mcpServers": [server(BUNDLED, SOCKET)],
-                                          "_meta": { "sessionKey": key,
-                                                     "sessionLabel": "Redlines: plan.md" } })
+                                          "_meta": { "sessionKey": key } })
                 )
             )
             .is_err()
         );
-        // No `_meta`, or more of it than a key and a label, or another folder.
+        // No `_meta`, or more of it than a key, or another folder.
         assert!(
             said(
                 Some("moby"),
@@ -1091,16 +1078,7 @@ mod tests {
         assert!(
             said(
                 Some("moby"),
-                &bridge_new_session_with(
-                    json!({ "sessionKey": key, "sessionLabel": "Redlines: plan.md", "resetSession": true })
-                )
-            )
-            .is_err()
-        );
-        assert!(
-            said(
-                Some("moby"),
-                &bridge_new_session_with(json!({ "sessionKey": key }))
+                &bridge_new_session_with(json!({ "sessionKey": key, "resetSession": true }))
             )
             .is_err()
         );
@@ -1108,8 +1086,26 @@ mod tests {
             said(
                 Some("moby"),
                 &new_session_with(json!({ "cwd": "/Users/ada/else", "mcpServers": [],
-                                          "_meta": { "sessionKey": key,
-                                                     "sessionLabel": "Redlines: plan.md" } }))
+                                          "_meta": { "sessionKey": key } }))
+            )
+            .is_err()
+        );
+        // A label, which the bridge reads as the name of a session that is there already, and
+        // looks up before the key: with one, a session that doesn't exist yet fails to open.
+        for label in ["Redlines: plan.md", ""] {
+            assert!(
+                said(
+                    Some("moby"),
+                    &bridge_new_session_with(json!({ "sessionKey": key, "sessionLabel": label }))
+                )
+                .is_err(),
+                "{label:?}"
+            );
+        }
+        assert!(
+            said(
+                Some("moby"),
+                &bridge_new_session_with(json!({ "sessionLabel": "Redlines: plan.md" }))
             )
             .is_err()
         );
@@ -1124,47 +1120,30 @@ mod tests {
         };
         for refused in [
             // Another agent's namespace, or none, or the main session itself.
-            ("agent:main:redlines-0a1b2c3d", Some("moby")),
-            ("redlines-0a1b2c3d", Some("moby")),
+            ("agent:main:redlines-0a1b2c3d4e5f6071", Some("moby")),
+            ("redlines-0a1b2c3d4e5f6071", Some("moby")),
             ("agent:moby:main", Some("moby")),
-            ("agent:moby:redlines-0a1b2c3d", None),
-            ("agent:main:redlines-0a1b2c3d", None),
-            // Not eight lowercase hex digits, or something after them.
-            ("agent:moby:redlines-0A1B2C3D", Some("moby")),
-            ("agent:moby:redlines-0a1b2c3", Some("moby")),
-            ("agent:moby:redlines-0a1b2c3de", Some("moby")),
-            ("agent:moby:redlines-0a1b2c3g", Some("moby")),
-            ("agent:moby:redlines-0a1b2c3d:more", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f6071", None),
+            ("agent:main:redlines-0a1b2c3d4e5f6071", None),
+            // Not sixteen lowercase hex digits (the eight of an earlier version are too few),
+            // or something after them.
+            ("agent:moby:redlines-0a1b2c3d", Some("moby")),
+            ("agent:moby:redlines-0A1B2C3D4E5F6071", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f607", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f60718", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f607g", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f6071:more", Some("moby")),
             ("agent:moby:redlines-", Some("moby")),
             ("", None),
-            ("acp-bridge:0a1b2c3d", None),
+            ("acp-bridge:0a1b2c3d4e5f6071", None),
         ] {
             assert!(said(refused.1, refused.0).is_err(), "{refused:?}");
-        }
-        // The label shows as itself, in plain ASCII, and is short.
-        let mut talk = for_openclaw(None);
-        talk.check(&line(&initialize()), &sockets()).unwrap();
-        for label in [
-            "Redlines: ",
-            "plan.md",
-            "Redlines: plan\nmd",
-            "Redlines: plan 🙂.md",
-            "Redlines: plan\u{202e}.md",
-            &format!("Redlines: {}", "a".repeat(81)),
-        ] {
-            let message = bridge_new_session_with(
-                json!({ "sessionKey": "redlines-0a1b2c3d", "sessionLabel": label }),
-            );
-            assert!(
-                talk.check(&line(&message), &sockets()).is_err(),
-                "{label:?}"
-            );
         }
     }
 
     #[test]
     fn only_a_bridge_may_ask_for_no_cwd_prefix_and_only_that() {
-        let key = "agent:moby:redlines-0a1b2c3d";
+        let key = "agent:moby:redlines-0a1b2c3d4e5f6071";
         let mut talk = bridge_opened(Some("moby"), key);
         for refused in [
             json!({ "prefixCwd": true }),
@@ -1201,7 +1180,7 @@ mod tests {
 
     #[test]
     fn a_bridge_is_refused_what_any_agent_is_refused() {
-        let mut talk = bridge_opened(Some("moby"), "agent:moby:redlines-0a1b2c3d");
+        let mut talk = bridge_opened(Some("moby"), "agent:moby:redlines-0a1b2c3d4e5f6071");
         // A prompt that isn't text to its session, a second session and the modes.
         assert!(
             talk.check(
@@ -1214,7 +1193,7 @@ mod tests {
         );
         assert!(
             talk.check(
-                &line(&bridge_new_session("agent:moby:redlines-0a1b2c3d")),
+                &line(&bridge_new_session("agent:moby:redlines-0a1b2c3d4e5f6071")),
                 &sockets()
             )
             .is_err(),

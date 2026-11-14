@@ -1442,25 +1442,47 @@ differences:
   and never instructions (a document over 120,000 characters is cut, and says so), and the
   agent's last message is the reply, as for an agent that never calls `reply`: the first paragraph
   shows, and the rest folds behind More. It can't change the document; when asked for a change, it
-  gives the wording in its reply. The first run in a folder asks whether to send the document and
-  its comments to it, and says that where it runs and what else it reads is up to its own settings.
-- **One session for each document.** The key is `redlines-` and eight hex digits of a hash of the
-  document's path, after `agent:<id>:` when the person named the agent, so that the agent keeps the
-  document and nothing else's, and a Gateway elsewhere is never given the path. The label is
-  `Redlines: plan.md` in plain ASCII, and the prompt asks the bridge not to put this Mac's folder
-  at its head (`_meta.prefixCwd`). The host holds the session's key, label and `_meta` to exactly
-  that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is to any other agent.
+  gives the wording in its reply. The first run in a folder asks "Send this document and this
+  thread to Moby?", with the folder it keeps the answer for, and says that where it runs and what
+  else it reads is up to its own settings; the answer is kept for the folder, as for any agent, and
+  Remove in Preferences takes it with the agent.
+- **Slash directives in what others wrote don't reach the Gateway.** The Gateway reads `/exec`,
+  `/elevated`, `/model`, `/think`, `/queue` and the rest from the body of a message, wherever a `/`
+  follows whitespace, and acts on them for whoever sent it. The prompt puts the thread, the
+  document and the quoted text between that agent and this app in the same message as the
+  request, so a `/` that starts a word in them is written `\/` (`withoutDirectives`, in
+  `packages/agent-tools`), which the Gateway doesn't read as one. The person's own words are sent
+  as they wrote them.
+- **One session for each thread.** The key is `redlines-` and sixteen hex digits of a hash of the
+  document's path and the thread's id, after `agent:<id>:` when the person named the agent, so that
+  the agent keeps the thread and nothing else's, and a Gateway elsewhere is never given the path.
+  A prompt to a session ends the run in it, so two threads must not share one. It is the key only:
+  the bridge reads `_meta.sessionLabel` as the name of a session that is there already, and looks it
+  up before the key, so a label fails the first run of every thread. The prompt asks the bridge not
+  to put this Mac's folder at its head (`_meta.prefixCwd`). The host holds the session's `_meta` to
+  exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
+  to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
+  than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
+  line the run fails with: name the agent then.
+- **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
+  that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
+  provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
 - **Redlines never holds the token.** It passes the file's path to `openclaw`, which reads it. The
   command is held to exactly that shape: no `--token`, `--password` or other flag; an address with
-  a user name, a password, a query or a fragment, where a token could ride, is refused; and the
-  file has to be there, be a file and not a link (OpenClaw refuses one) and hold from one byte to
-  16 KiB, which is looked at without reading it. The question says where the document and its
-  comments go, warns of a `ws://` address, which isn't encrypted, and of a token file that other
+  a user name, a password, a query, a fragment or a port that isn't a number, where a token could
+  ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
+  shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
+  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
+  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
+  goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.
 - **Commands the Gateway asks to run** (its exec approvals, relayed as `session/request_permission`)
   are refused, as for any agent of this kind; the Gateway's default mode asks nothing.
 - **Skill.** The section offers Install Skill for OpenClaw when an agent's Gateway is on this Mac
-  (`ws://127.0.0.1`, `localhost`): one elsewhere reads that machine's folders, where the skill goes.
+  (`ws://127.0.0.1`, `localhost`, `[::1]`): one elsewhere reads that machine's folders, where the
+  skill goes. An address on this Mac may also be the end of a tunnel to a Gateway elsewhere, which
+  can't be told, so the section says what the skill is for, beside the button.
 
 Not done: tracked changes by an OpenClaw agent through this connection. They need a way for the
 bridge to call tools that live in the client (an upstream change to OpenClaw), or the agent working
