@@ -28,40 +28,46 @@ export function isAlignPoint(mark: MarkRange): boolean {
 
 /** Whether a marker at `position` of `body` (the markers in `hidden` are not text) would be read
  * otherwise (format §3.1): after an odd run of backslashes, which would escape it, or where
- * `inspectPlace` finds a construct, a refusal, or a delimiter whose flanking the marker would change
- * (an underscore at the end of the text, as in `_b_`). */
-export function readsOtherwise(body: string, hidden: readonly Range[], position: number): boolean {
+ * `inspectPlace` finds a construct or a refusal. With `flank`, also where it finds a delimiter whose
+ * flanking the marker would change by the rule that keeps a marker off an underscore: the writer's
+ * (an underscore at the end of the text, as in `_b_`, is refused: Call 9). An edit written beside a
+ * mark that is there already is held to the exact checks only: a marker after `Price_` reads as the
+ * view does, and a key is not refused for a rule that is stricter than Markdown. */
+export function readsOtherwise(
+  body: string,
+  hidden: readonly Range[],
+  position: number,
+  flank = true,
+): boolean {
   let slashes = 0;
   while (body[position - 1 - slashes] === '\\') slashes++;
   if (slashes % 2 === 1) return true;
   const place = inspectPlace(body, hidden, position);
-  return place.kind === 'refuse' || place.kind === 'construct' || place.kind === 'flank';
+  return place.kind === 'refuse' || place.kind === 'construct' || (flank && place.kind === 'flank');
 }
 
 /**
  * Whether a mark written right after `before`, the text of a cell as it stands in the file with its
- * markers, changes how the run of `*`, `_` or `~` that ends `before` reads. The mark starts with `<`,
- * which Markdown counts as punctuation: a run that closes an emphasis, with punctuation in front of it (a
- * full stop, or the `>` that ends a marker), can open one as well once `<` follows it, and the rule of
- * three then keeps it from closing an earlier run of the same character whose size and its own add up to a
+ * markers, changes how the run of `*` or `_` that ends `before` reads. The mark starts with `<`, which
+ * Markdown counts as punctuation: a run that closes an emphasis, with punctuation in front of it (a full
+ * stop, or the `>` that ends a marker), can open one as well once `<` follows it, and the rule of three
+ * then keeps it from closing an earlier run of the same character whose size and its own add up to a
  * multiple of three (`**a .*`), unless both are multiples of three. A run after a letter, a digit or white
- * space reads as it did, and so does a run with no such earlier one. The text is the file's, markers
- * included, because that is what other Markdown readers read, and the views leave out the markers that
- * make the difference.
+ * space reads as it did, and so does a run with no such earlier one. A `~` has no such rule: GFM's
+ * strikethrough closes the earlier run whether the run can open too or not. The text is the file's,
+ * markers included, because that is what other Markdown readers read, and the views leave out the
+ * markers that make the difference.
  */
 export function changesRun(before: string): boolean {
   const char = before.at(-1);
-  if (char !== '*' && char !== '_' && char !== '~') return false;
+  if (char !== '*' && char !== '_') return false;
   const runs = runsOf(before, char);
   const closer = runs.at(-1);
   // The last character is escaped by a backslash: it is text, and no delimiter.
   if (!closer || closer.from + closer.size !== before.length) return false;
   const beside = before[closer.from - 1];
   if (beside === undefined || isSpace(beside) || isWord(beside)) return false;
-  const earlier = runs.slice(0, -1);
-  // GFM's strikethrough has no rule of three: any run before it can be the one it closes.
-  if (char === '~') return earlier.length > 0;
-  return earlier.some(({ size }) => {
+  return runs.slice(0, -1).some(({ size }) => {
     const sum = size + closer.size;
     return sum % 3 === 0 && !(size % 3 === 0 && closer.size % 3 === 0);
   });
@@ -85,9 +91,17 @@ function runsOf(text: string, char: string): { from: number; size: number }[] {
 
 /** Whether the mark that stands at `at`, the end of the text of a header's last cell that starts at
  * `from`, is read where it stands in `text` (`parsed` is its reading): not after a backslash, not in a
- * construct, and without changing a delimiter run that it follows. */
-export function placeReads(text: string, parsed: Parsed, from: number, at: number): boolean {
-  return !readsOtherwise(text, markerRanges(parsed), at) && !changesRun(text.slice(from, at));
+ * construct, and without changing a delimiter run that it follows. `flank` is `readsOtherwise`'s. */
+export function placeReads(
+  text: string,
+  parsed: Parsed,
+  from: number,
+  at: number,
+  flank = true,
+): boolean {
+  return (
+    !readsOtherwise(text, markerRanges(parsed), at, flank) && !changesRun(text.slice(from, at))
+  );
 }
 
 /** Whether a point alignment change is not read where it stands in `text`, in the cell that its line
@@ -99,7 +113,8 @@ function misread(text: string, parsed: Parsed, mark: MarkRange): boolean {
   const { cells } = readRowCells(text, lineStart(text, open.from), lineEnd(text, open.to));
   const cell = cells.find((candidate) => candidate.from <= open.from && open.from <= candidate.to);
   if (!cell || open.from < cell.textFrom) return false;
-  return !placeReads(text, parsed, cell.textFrom, open.from);
+  // The edits' own reading: the writer's rule about an underscore is for where the mark is written.
+  return !placeReads(text, parsed, cell.textFrom, open.from, false);
 }
 
 /**

@@ -13,7 +13,7 @@
 
 import { lineEnd, lineStart, openerRange } from './blocks.ts';
 import { changesRun, isAlignPoint, placeReads, readsOtherwise } from './align-point.ts';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
@@ -21,12 +21,15 @@ import { encodeValue, isAlignOps, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { idsIn, newId } from './ids.ts';
+import { paragraphRange, visible } from './inline.ts';
+import { serializeLedger } from './ledger-write.ts';
+import { markerRanges } from './markers.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readDelimiterRow, readRowCells, tablesOfText } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
 import { deletedColCells } from './table-cols.ts';
-import { originalView } from './views.ts';
+import { newestView, originalView } from './views.ts';
 import type {
   EditContext,
   MarkEntry,
@@ -321,8 +324,12 @@ function markPlace(text: string, parsed: Parsed, table: TableRead): number {
 }
 
 /** How many changes in the header's last cell are decided in every order before the mark is written. More
- * than that are too many to try, and the mark is refused, in the words of any other place it can't go. */
-const CELL_CHANGES = 3;
+ * than that are too many to try, and the mark is refused. */
+const CELL_CHANGES = 2;
+
+/** The words of a refusal to write the mark where more than `CELL_CHANGES` changes are pending in the
+ * header's last cell. */
+const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
 
 /** Where the lines above a table that hold only markers start. A marker can't start the header of a table
  * that has no leading pipe, so the opener of a change that begins in its first cell stands on a line of its
@@ -358,6 +365,83 @@ function changesIn(text: string, parsed: Parsed, table: TableRead, id: string): 
   );
 }
 
+/** Whether the text of a header slice reads as it does in its file whatever stands below it: nothing in it
+ * can go on past its last line, in the newest view or in the original one (a deletion's text is in the
+ * original view alone, and a backtick it brings back could be paired with one of the rows). A code span, a
+ * link or a comment that is begun and not finished in it could be finished by a row of the table, which
+ * the file has and the slice does not. */
+function closedSlice(slice: string): boolean {
+  return [newestView(slice), originalView(slice)].every((view) => !/[`[]|<!--|-->/.test(view.text));
+}
+
+/**
+ * The header of the table that starts at `tableFrom`, as a small file of its own: the lines of its paragraph
+ * above it (none when a blank line is), the lines above that hold only markers, the header and its
+ * delimiter row, and a ledger with the entries of the marks in them. A decision of a change in the header's
+ * last cell reads and writes those lines and the ledger, and `placeHolds` walks the orders of decisions in
+ * this, where a decision of a whole file costs what the file costs: parsing it, and reading its views, for
+ * each of the decisions of every order.
+ *
+ * It is the header as the whole file reads it, or it is nothing: undefined where a mark stands partly in
+ * the lines and partly outside them, where a code span, a link or a comment is left open in them (what the
+ * rows below hold could finish it), and where the slice reads any differently than the file does, in its
+ * marks and in its table.
+ */
+export function headerSlice(text: string, tableFrom: number): string | undefined {
+  const parsed = parse(text);
+  const table = tablesOfText(text, parsed).find((candidate) => candidate.from === tableFrom);
+  const header = table?.rows[0];
+  if (!table || !header) return undefined;
+  const hidden = markerRanges(parsed);
+  const to = lineEnd(text, table.delimiter.to);
+  const first = lineStart(text, table.from);
+  // The lines of the header's paragraph above it: none when a blank line is. The line above the paragraph
+  // says nothing of a header, whose line is no underline.
+  let start = first;
+  if (first > 0) {
+    const end = text[first - 2] === '\r' ? first - 2 : first - 1;
+    if (!/^[ \t>]*$/.test(visible(text, hidden, lineStart(text, end), end).text)) {
+      start = paragraphRange(text.slice(0, to), hidden, table.from).from;
+    }
+  }
+  const from = Math.min(start, carriersFrom(text, table.from));
+  const ids = new Set<string>();
+  for (const mark of parsed.marks) {
+    let inside = 0;
+    let outside = 0;
+    for (const segment of mark.segments) {
+      const lo = segment.open.from;
+      const hi = (segment.close ?? segment.content).to;
+      if (hi <= from || lo >= to) outside++;
+      else if (from <= lo && hi <= to) inside++;
+      else return undefined;
+    }
+    if (inside > 0 && outside > 0) return undefined;
+    if (inside > 0) ids.add(mark.id);
+  }
+  const { ledger } = parsed;
+  const kept = {
+    ...ledger,
+    marks: Object.fromEntries(Object.entries(ledger.marks).filter(([id]) => ids.has(id))),
+    comments: ledger.comments.filter((thread) => ids.has(thread.id) || ids.has(thread.about ?? '')),
+  };
+  delete kept.extra;
+  const eol = eolOf(text, parsed.ledgerRange);
+  const slice = `${text.slice(from, to)}${eol}${eol}${serializeLedger(kept).replaceAll('\n', eol)}${eol}`;
+  const read = parse(slice);
+  const again = tablesOfText(slice, read).find((candidate) => candidate.from === table.from - from);
+  const same =
+    read.marks.length === ids.size &&
+    read.marks.every((mark) => ids.has(mark.id)) &&
+    again?.rows[0]?.cells.length === header.cells.length &&
+    slice.slice(again.delimiter.from, again.delimiter.to) ===
+      text.slice(table.delimiter.from, table.delimiter.to);
+  return same && closedSlice(slice) ? slice : undefined;
+}
+
+/** A state of the walk that the header slice does not stand for: the walk is done on the whole file. */
+class LeftSlice extends Error {}
+
 /**
  * Throws unless the mark `id` of `after` is read where it stands in every state that deciding the
  * changes in its cell, one at a time in any order, leaves (`before` is the file without the mark and its
@@ -369,10 +453,40 @@ function changesIn(text: string, parsed: Parsed, table: TableRead, id: string): 
  * mark could only be accepted. A decision of another change that the file with the mark refuses and the file
  * without it allows is the mark's doing, and refuses it as well: no decision may be refused (format §3.9).
  *
+ * The walk is done on the header slice of each file (`headerSlice`), where a decision costs what a header
+ * does and not what a file does, and on the whole files where a slice is not what they read as. `whole`
+ * walks the whole files, for a test. The decisions of `before` are made when they are looked at, which is
+ * when the file with the mark refuses one.
+ *
+ * @returns where the walk was done: on the `header` slices, or on the whole `file` (a state of the walk
+ * that a slice does not stand for sends it there).
  * @throws EditError when the mark would be read otherwise in some state, or a decision would be refused
  * for it or for the mark, or the cell holds more than `CELL_CHANGES` changes.
  */
-function placeHolds(before: string, after: string, id: string): void {
+export function placeHolds(
+  before: string,
+  after: string,
+  id: string,
+  tableFrom: number,
+  whole = false,
+): 'header' | 'file' {
+  const slices = whole
+    ? undefined
+    : { before: headerSlice(before, tableFrom), after: headerSlice(after, tableFrom) };
+  if (slices?.before !== undefined && slices.after !== undefined) {
+    try {
+      walkDecisions(slices.before, slices.after, id, true);
+      return 'header';
+    } catch (error) {
+      if (!(error instanceof LeftSlice)) throw error;
+    }
+  }
+  walkDecisions(before, after, id, false);
+  return 'file';
+}
+
+/** The walk of `placeHolds` over `before` and `after`, which are slices when `sliced`. */
+function walkDecisions(before: string, after: string, id: string, sliced: boolean): void {
   const seen = new Set<string>();
   const decided = (text: string | undefined, other: string, how: typeof accept) => {
     if (text === undefined) return undefined;
@@ -383,10 +497,12 @@ function placeHolds(before: string, after: string, id: string): void {
       throw error;
     }
   };
-  const walk = (base: string | undefined, current: string): void => {
+  /** The file without the mark in the state that `walk` is in, made when it is looked at. */
+  const walk = (base: () => string | undefined, current: string): void => {
     if (seen.has(current)) return;
     seen.add(current);
     const parsed = parse(current);
+    if (sliced && !closedSlice(current)) throw new LeftSlice();
     const open = parsed.marks.find((mark) => mark.id === id)?.segments[0]?.open;
     if (!open) return;
     const table = tablesOfText(current, parsed).find(
@@ -401,18 +517,27 @@ function placeHolds(before: string, after: string, id: string): void {
     for (const how of [accept, reject])
       if (decided(current, id, how) === null) throw refused(MARK_PLACE);
     const others = changesIn(current, parsed, table, id);
-    if (seen.size === 1 && others.length > CELL_CHANGES) throw refused(MARK_PLACE);
+    if (seen.size === 1 && others.length > CELL_CHANGES) throw refused(TOO_MANY);
     for (const other of others) {
       for (const how of [accept, reject]) {
         const next = decided(current, other.id, how);
-        const without = decided(base, other.id, how);
         // Allowed without the mark, refused with it: the mark makes the decision impossible.
-        if (next === null && typeof without === 'string') throw refused(MARK_PLACE);
-        if (typeof next === 'string') walk(typeof without === 'string' ? without : undefined, next);
+        if (next === null && typeof decided(base(), other.id, how) === 'string') {
+          throw refused(MARK_PLACE);
+        }
+        if (typeof next !== 'string') continue;
+        let without: string | undefined | null = null;
+        walk(() => {
+          if (without === null) {
+            const done = decided(base(), other.id, how);
+            without = typeof done === 'string' ? done : undefined;
+          }
+          return without;
+        }, next);
       }
     }
   };
-  walk(before, after);
+  walk(() => before, after);
 }
 
 /**
@@ -518,7 +643,7 @@ export function alignEdit(
       if (!written.marks.some((mark) => mark.id === id)) throw refused(MARK_PLACE);
     },
   });
-  placeHolds(text, applyChanges(text, edit.changes), id);
+  placeHolds(text, applyChanges(text, edit.changes), id, table.from);
   return edit;
 }
 

@@ -14,7 +14,16 @@ import type { FormatOp } from './formatting.ts';
 import { encodeValue } from './format-ops.ts';
 import * as format from './index.ts';
 import { parse } from './parse.ts';
-import { alignLabel, alignMarkOf, closerRange, isAlignPoint } from './table-align.ts';
+import { encodePayload } from './payload.ts';
+import { fuzzCount, seeded } from './random-docs.ts';
+import {
+  alignLabel,
+  alignMarkOf,
+  closerRange,
+  headerSlice,
+  isAlignPoint,
+  placeHolds,
+} from './table-align.ts';
 import { ALIGN_FIRST, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import { outerPipeWrites } from './table-rules.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
@@ -70,6 +79,8 @@ const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.'
 const ROWS_FIRST = 'Accept or reject the row changes in this table first.';
 const PLACE =
   "A marker can't go at the end of this table's header, where Markdown would read it otherwise. Change the end of its last cell first, then align.";
+/** The words of a refusal to align while more changes than are looked at in every order are pending in the header's last cell. */
+const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
 const LOST =
   "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Raw with Track Changes off.";
 
@@ -1623,7 +1634,7 @@ describe('a point alignment change beside other marks and edits', () => {
       // No edit is refused for the alignment change, and many were written and decided in every order.
       expect(refusedEdits).toBe(0);
       expect(built).toBeGreaterThan(100);
-    }, 120_000);
+    }, 60_000);
   });
 
   describe('an edit that covers the mark', () => {
@@ -1689,6 +1700,33 @@ describe('a point alignment change beside other marks and edits', () => {
         agent(text, 'Count | Price |', 'Count | Cost of it |');
         agent(text, table, table.replace('Price', 'Cost'));
         agent(text, table, table.replace('Price', 'Unit price'));
+      }
+    });
+
+    it('writes an agent’s replacement of the text of the cell in front of the mark, and every order reads alike', () => {
+      // `Price` to `Cost`: the substitution covers the text that the mark follows and no more, so it stands in
+      // front of the mark, which stays pending and at the end of the cell.
+      for (const text of [POINT, BY_ADA]) {
+        const label = text === POINT ? 'by Bo' : 'by Ada';
+        const after = applyChanges(
+          text,
+          suggestReplace(text, 'Price', 'Cost', context(claudeAda, ['c2dd', 'f3gg', 'h4jj']))
+            .changes,
+        );
+        expect(headerLine(after), label).toMatch(
+          /<!--sub c2dd Price-->Cost<!--\/c2dd--><!--fmt k3x9 [^\n]*?--> \|$/,
+        );
+        expect(problemsOf(parse(after)), label).toEqual([]);
+        expectEveryOrderAlike(label, after, exactly);
+        expectEveryOrderRead(label, after);
+        expect(expectNoDecisionRefused(label, after), label).toBeGreaterThan(2);
+        // Rejecting everything gives the old text and the old row back, and accepting everything the new text.
+        expect(trim(applyChanges(after, rejectAll(after))), label).toBe(
+          trim(originalView(after).text),
+        );
+        expect(trim(newestView(applyChanges(after, acceptAll(after))).text), label).toBe(
+          trim(newestView(after).text),
+        );
       }
     });
 
@@ -1921,20 +1959,24 @@ describe('a point alignment change beside other marks and edits', () => {
       expect(expectNoDecisionRefused('bold, then the alignment', done)).toBeGreaterThan(2);
     });
 
-    it('is written after up to three changes in the cell, and refused after more', () => {
+    it('is written after up to two changes in the cell, and refused after more in words that say what to do', () => {
+      const ids = ['c2dd', 'f3gg', 'h4jj'];
       const typing = (n: number) =>
-        ['b', 'c', 'd', 'e']
+        ['b', 'c', 'd']
           .slice(0, n)
-          .map(
-            (c, i) =>
-              `<!--ins ${['c2dd', 'f3gg', 'h4jj', 'm5nn'][i]}-->${c}<!--/${['c2dd', 'f3gg', 'h4jj', 'm5nn'][i]}-->`,
-          )
+          .map((c, i) => `<!--ins ${ids[i]}-->${c}<!--/${ids[i]}-->`)
           .join('');
-      const marks = { c2dd: 'bo', f3gg: 'bo', h4jj: 'bo', m5nn: 'bo' };
-      const three = aligned(`| h | a${typing(3)} |\n| - | - |\n| c | d |`, marks);
-      expectEveryOrderAlike('three changes', three, exactly);
-      expect(expectNoDecisionRefused('three changes', three)).toBeGreaterThan(10);
-      expect(said(() => aligned(`| h | a${typing(4)} |\n| - | - |\n| c | d |`, marks))).toBe(PLACE);
+      const marks = { c2dd: 'bo', f3gg: 'bo', h4jj: 'bo' };
+      const two = aligned(`| h | a${typing(2)} |\n| - | - |\n| c | d |`, marks);
+      expectEveryOrderAlike('two changes', two, exactly);
+      expect(expectNoDecisionRefused('two changes', two)).toBeGreaterThan(6);
+      // Three are too many to look at in every order. Deciding one of them leaves two, and then it is written.
+      const three = file(`| h | a${typing(3)} |\n| - | - |\n| c | d |`, marks);
+      expect(said(() => align(three, [0], 'right', ada, ['k3x9']))).toBe(TOO_MANY);
+      const decided = applyChanges(three, accept(three, 'c2dd'));
+      const done = align(decided, [0], 'right', ada, ['k3x9']).after;
+      expectEveryOrderAlike('after one is decided', done, exactly);
+      expect(expectNoDecisionRefused('after one is decided', done)).toBeGreaterThan(6);
     });
   });
 
@@ -1988,6 +2030,181 @@ describe('a point alignment change beside other marks and edits', () => {
       }
     });
 
+    it('takes an underscore or a tilde after a letter at the end of the cell, plain and tracked, and a backspace that leaves one', () => {
+      // `Price_` reads as the view does with the mark after it (the underscore closes, as it did): the rule that
+      // keeps the mark off an underscore is for where it is written, not for what is typed after it is there.
+      const start = file('| Fruit | Price |\n| ----- | ----- |\n| a | b |');
+      const pointed = align(start, [0], 'right', bo, ['k3x9']).after;
+      const end = lastCell(pointed).to;
+      for (const key of ['_', '~', '*', 'x']) {
+        for (const who of [null, ada] as const) {
+          const after = applyChanges(pointed, typed(pointed, end, key, who));
+          const label = `${who?.handle ?? 'plain'} types ${key} after Price`;
+          expect(after, label).toMatch(/<!--fmt k3x9 /);
+          expectDecided(label, after, [2, 2]);
+        }
+      }
+      // A cell that ends in `unit_x` with the first `x` backspaced leaves the underscore at its end.
+      const unit = align(
+        file('| Fruit | unit_x |\n| ----- | ----- |\n| a | b |'),
+        [0],
+        'right',
+        bo,
+        ['k3x9'],
+      ).after;
+      const x = lastCell(unit).to;
+      for (const who of [null, ada] as const) {
+        const after = applyChanges(unit, typed(unit, x - 1, '', who, x));
+        expectDecided(`${who?.handle ?? 'plain'} backspaces unit_x`, after, [2, 2]);
+      }
+      // The closing underscore of `_a`, tracked.
+      const open = align(file('| Fruit | _a |\n| ----- | ----- |\n| a | b |'), [0], 'right', bo, [
+        'k3x9',
+      ]).after;
+      const closing = applyChanges(open, typed(open, lastCell(open).to, '_', ada));
+      expectDecided('ada closes _a', closing, [2, 2]);
+    });
+
+    it('refuses only what the mark makes unsound: a key or a backspace that leaves the text in front of it read otherwise', () => {
+      // The same cell with the mark and with nothing at its end, under every key (`x _ ~ * \`) and a backspace, plain
+      // and tracked. What the file with the mark refuses and the other writes is each of the shapes below, each
+      // with its reason, and nothing else: not an `_`, a `~` or a `*` after a word, which reads as it did.
+      type Key = 'x' | '_' | '~' | '*' | '\\' | 'BACKSPACE';
+      const KEYS: Key[] = ['x', '_', '~', '*', '\\', 'BACKSPACE'];
+      const alphabet = ['b', ' ', '.', '*', '_', '~', '\\', ')'];
+      const ends = new Set([
+        ...['**a .', '*a .', '_a', '_a_', 'a b', 'x y', 'unit', 'unit_x', 'Price', '*b*', '**b**'],
+        ...[
+          'a\\\\',
+          '`b`',
+          '[b](c)',
+          '[b](c',
+          '<b',
+          'https://example.org/a',
+          '&amp',
+          '~~a ',
+          '~a ',
+        ],
+      ]);
+      const grow = (end: string) => {
+        if (end !== '' && end === end.trim()) ends.add(end);
+        if (end.length < 2) for (const c of alphabet) grow(end + c);
+      };
+      grow('');
+      const rows = '\n| - | - |\n| c | d |';
+      const withMark = (end: string) =>
+        file(`| h | ${end}${markFor('| - | - |')} |${rows}`, { k3x9: 'bo' });
+      const withComment = (end: string) =>
+        file(`| h | ${end}<!--cmt c9qf--> |${rows}`, {}, thread('c9qf', 'bo'));
+      const withNothing = (end: string) => file(`| h | ${end} |${rows}`);
+      const widthOf = (text: string) => readTables(text, parse(text))[0]?.rows[0]?.cells.length;
+      const keyEdit = (text: string, key: Key, comment = false): TextChange => {
+        const where = comment ? text.indexOf('<!--cmt c9qf-->') : lastCell(text).to;
+        return key === 'BACKSPACE'
+          ? { from: where - 1, to: where, insert: '' }
+          : { from: where, to: where, insert: key };
+      };
+      /** The words a key is refused with, or null where it is written. */
+      const refusal = (text: string, key: Key, tracked: boolean, comment = false) => {
+        const change = keyEdit(text, key, comment);
+        try {
+          if (tracked) trackedEdit(text, change, context(ada, ['c2dd', 'f3gg', 'h4jj']));
+          else untrackedEdit(text, change);
+          return null;
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          return error.message;
+        }
+      };
+      interface Case {
+        end: string;
+        key: Key;
+        tracked: boolean;
+        /** The text of the cell after the key. */
+        cell: string;
+        label: string;
+      }
+      const shapes: {
+        why: string;
+        holds: (found: Case) => boolean;
+        /** Whether micromark reads the file as typed otherwise than its view (it knows no URLs). */
+        oracle: boolean;
+        /** Whether the same key, in front of a comment, is refused too (a plain backslash, whatever the marker). */
+        comment: boolean;
+        seen: number;
+      }[] = [
+        {
+          why: 'a plain backslash right in front of the mark escapes its `<`, and Markdown shows the mark as text',
+          holds: ({ tracked, cell }) => !tracked && /(?:^|[^\\])(?:\\\\)*\\$/.test(cell),
+          oracle: true,
+          comment: true,
+          seen: 0,
+        },
+        {
+          why: 'a plain `*` that closes a `**` after punctuation opens as well once `<` follows it, and the rule of three keeps it from closing',
+          holds: ({ tracked, cell }) => !tracked && /^\*\*[^*]*[^\w\s*]\*$/.test(cell),
+          oracle: true,
+          comment: false,
+          seen: 0,
+        },
+        {
+          why: 'a tracked backslash can not stand in front of the mark, so it is written after it, where it goes on with a bare URL that the mark would then stand inside (§3.1)',
+          holds: ({ tracked, key, end }) => tracked && key === '\\' && /^https?:\/\/\S+$/.test(end),
+          oracle: false,
+          comment: false,
+          seen: 0,
+        },
+      ];
+      let total = 0;
+      const listed: Case[] = [];
+      for (const end of ends) {
+        const marked = withMark(end);
+        const nothing = withNothing(end);
+        if (widthOf(marked) !== 2 || widthOf(nothing) !== 2) continue;
+        for (const key of KEYS) {
+          for (const tracked of [false, true]) {
+            total++;
+            if (refusal(marked, key, tracked) === null || refusal(nothing, key, tracked) !== null) {
+              continue;
+            }
+            const cell = key === 'BACKSPACE' ? end.slice(0, -1) : end + key;
+            const label = `${tracked ? 'tracked' : 'plain'} ${JSON.stringify(end)} + ${key}`;
+            listed.push({ end, key, tracked, cell, label });
+          }
+        }
+      }
+      for (const found of listed) {
+        const matching = shapes.filter((shape) => shape.holds(found));
+        expect(
+          matching.map((shape) => shape.why),
+          `${found.label}: refused for the mark, and in the list once`,
+        ).toHaveLength(1);
+        const [shape] = matching;
+        if (!shape) continue;
+        shape.seen++;
+        const marked = withMark(found.end);
+        if (shape.oracle) {
+          // The file as typed, plain: Markdown reads it otherwise than the view does.
+          const typedFile = applyChanges(marked, [keyEdit(marked, found.key)]);
+          expect(readAs(bodyOf(typedFile)), `${found.label}: as typed`).not.toBe(
+            readAs(newestView(typedFile).text),
+          );
+        }
+        if (shape.comment) {
+          const commented = withComment(found.end);
+          expect(refusal(commented, found.key, found.tracked, true), found.label).toMatch(
+            /^A backslash can't stand right in front of the marker of Bo Chen's comment/,
+          );
+        }
+      }
+      for (const shape of shapes) expect(shape.seen, shape.why).toBeGreaterThan(0);
+      // After a word, only a plain backslash is refused: not an `_`, a `~` or a `*`, an `x` or a backspace.
+      const words = listed.filter(({ end }) => /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/.test(end));
+      expect(words.filter(({ key }) => key !== '\\')).toEqual([]);
+      expect(words.length).toBeGreaterThan(0);
+      expect(total).toBeGreaterThan(800);
+    });
+
     it('refuses a comment that would put its closer in front of a run that the mark follows', () => {
       // `*b**` is written, the run `**` after a letter. A comment over `*b` ends between the `b` and the
       // run, and the run is then after the `>` of a marker: the mark would keep it from closing the `*`.
@@ -2033,5 +2250,238 @@ describe('a point alignment change beside other marks and edits', () => {
       const x = at(run, 'x<!--fmt');
       expect(said(() => typed(run, x, '', null, x + 1))).toMatch(WORDS('Bo Chen'));
     });
+  });
+});
+
+// The walk that writes the mark decides the changes in the header's last cell in every order (`placeHolds`). It
+// is done on the header as a small file of its own, where that reads as the file does (`headerSlice`), and on the
+// whole file where it can't. A decision of a whole file costs what the file costs, and the walk is up to 42
+// decisions: on the header they cost what a header does. The two must give the same answer, for any table.
+describe('the walk that writes the mark, on the header alone and on the whole file', () => {
+  /** A table as the writer would find it, and the same with the mark and the new delimiter row. */
+  interface Pair {
+    before: string;
+    after: string;
+    tableFrom: number;
+  }
+  const LAYOUTS = ['full', 'no trailing pipe', 'bare', 'one cell'] as const;
+  /** What the cells and the changes in them are made of: words, syntax, and the start or the end of a
+   * construct that a row below or a line above could finish. */
+  const TEXTS = ['a', 'b', 'x y', '*', '**', '_', '~', '\\', '.', ')', '(', '[', '[b]', '](c)'];
+  const MORE = ['`', '`b`', '<b', '&amp', 'é', ' ', 'https://e.org/a', '<!--', '<!', '--'];
+  const INTROS = [
+    '',
+    'Intro words.\n\n',
+    'Intro with `code` and [a link](x).\n\n',
+    'Unclosed `tick above.\n\n',
+    'Text right above the table\n',
+    'Text with a `tick right above\n',
+    'An [open bracket right above\n',
+  ];
+  const OUTROS = ['', '\n\nOutro.', '\n\nOutro with `x` and [y](z).', '\n\n`Unclosed outro'];
+
+  function randomPair(seed: number): Pair | undefined {
+    const random = seeded(seed);
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+    const text = () => pick(random() < 0.8 ? TEXTS : MORE);
+    const layout = pick(LAYOUTS);
+    const ledger: Record<string, string> = {};
+    const ids = ['c2dd', 'f3gg', 'h4jj', 'm5nn'];
+    let changes = 0;
+    const pieces: string[] = [];
+    for (let i = 1 + Math.floor(random() * 5); i > 0; i--) {
+      const id = ids[changes];
+      const kind = Math.floor(random() * 4);
+      if (kind === 0 || id === undefined || changes >= 3) {
+        pieces.push(text());
+        continue;
+      }
+      changes++;
+      ledger[id] = pick(['ada', 'bo']);
+      if (kind === 1) pieces.push(`<!--ins ${id}-->${text()}<!--/${id}-->`);
+      else if (kind === 2) pieces.push(`<!--del ${id} ${encodePayload(text())}-->`);
+      else pieces.push(`<!--sub ${id} ${encodePayload(text())}-->${text()}<!--/${id}-->`);
+    }
+    const commented = random() < 0.2;
+    let cell = pieces.join('');
+    if (commented) cell = `<!--cmt c9qf-->${cell}<!--/c9qf-->`;
+    // A marker can't start a line, and the text of a header with no leading pipe starts its line.
+    if (layout === 'one cell' && cell.startsWith('<!--')) cell = `x${cell}`;
+    const threads = commented ? thread('c9qf', pick(['ada', 'bo'])) : [];
+    const header = (mark: string) =>
+      layout === 'full'
+        ? `| h | ${cell}${mark} |`
+        : layout === 'no trailing pipe'
+          ? `| h | ${cell}${mark}`
+          : layout === 'bare'
+            ? `h | ${cell}${mark}`
+            : ` ${cell}${mark} |`;
+    const old =
+      layout === 'full'
+        ? '| --- | --- |'
+        : layout === 'no trailing pipe'
+          ? '| --- | ---'
+          : layout === 'bare'
+            ? '--- | ---'
+            : ' --- |';
+    const rows = Array.from({ length: Math.floor(random() * 3) }, () =>
+      layout === 'full'
+        ? `\n| ${text()} | ${text()} |`
+        : layout === 'no trailing pipe'
+          ? `\n| ${text()} | ${text()}`
+          : layout === 'bare'
+            ? `\n${text()} | ${text()}`
+            : `\n ${text()} |`,
+    ).join('');
+    const elsewhere = random() < 0.3;
+    if (elsewhere) ledger['z8bb'] = 'ada';
+    const prose = elsewhere ? 'Elsewhere <!--ins z8bb-->new<!--/z8bb--> words.\n\n' : '';
+    const intro = pick(INTROS);
+    const outro = pick(OUTROS);
+    const crlf = random() < 0.1;
+    const build = (mark: string, delimiter: string, entries: Record<string, string>) => {
+      const made = file(
+        `${prose}${intro}${header(mark)}\n${delimiter}${rows}${outro}`,
+        entries,
+        threads,
+      );
+      return crlf ? made.replaceAll('\n', '\r\n') : made;
+    };
+    const before = build('', old, ledger);
+    const table = readTables(before, parse(before))[0];
+    if (!table || problemsOf(parse(before)).length > 0) return undefined;
+    const spec = before.slice(table.delimiter.from, table.delimiter.to);
+    const after = build(markFor(spec), spec.replace('---', ':--'), { ...ledger, k3x9: 'ada' });
+    const placed = readTables(after, parse(after))[0];
+    if (placed?.from !== table.from || problemsOf(parse(after)).length > 0) return undefined;
+    if (!parse(after).marks.some((mark) => mark.id === 'k3x9')) return undefined;
+    return { before, after, tableFrom: table.from };
+  }
+
+  const answer = (pair: Pair, whole: boolean): { said: string; where?: 'header' | 'file' } => {
+    try {
+      const where = placeHolds(pair.before, pair.after, 'k3x9', pair.tableFrom, whole);
+      return { said: 'written', where };
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return { said: error.message };
+    }
+  };
+
+  it(
+    'gives the same answer for random tables, whatever the cell, the rows and the lines around hold',
+    { timeout: 60_000 },
+    () => {
+      const wanted = fuzzCount(500);
+      const seen = { header: 0, whole: 0, written: 0, refused: 0 };
+      const words = new Set<string>();
+      let cases = 0;
+      for (let seed = 1; cases < wanted && seed <= 40 * wanted; seed++) {
+        const pair = randomPair(seed);
+        if (!pair) continue;
+        cases++;
+        const onHeader =
+          headerSlice(pair.before, pair.tableFrom) !== undefined &&
+          headerSlice(pair.after, pair.tableFrom) !== undefined;
+        const { said, where } = answer(pair, false);
+        expect(said, `seed ${seed}: ${JSON.stringify(bodyOf(pair.after))}`).toBe(
+          answer(pair, true).said,
+        );
+        // A walk that was done on the header started there.
+        if (where === 'header') expect(onHeader).toBe(true);
+        seen[onHeader ? 'header' : 'whole']++;
+        seen[said === 'written' ? 'written' : 'refused']++;
+        words.add(said);
+      }
+      // Both ways to walk are used, and both answers are given, or the check would be empty.
+      expect(cases).toBe(wanted);
+      expect(seen.header).toBeGreaterThan(wanted / 5);
+      expect(seen.whole).toBeGreaterThan(wanted / 20);
+      expect(seen.written).toBeGreaterThan(wanted / 5);
+      expect(seen.refused).toBeGreaterThan(wanted / 20);
+      expect([...words].toSorted()).toEqual(
+        expect.arrayContaining(['written', PLACE, TOO_MANY].toSorted()),
+      );
+    },
+  );
+
+  it('walks the whole file where a state is not what the header says it is', () => {
+    // Accepting the typing of `--` and rejecting the deletion of `>` leaves `-->` in the cell: neither view of the
+    // header has it, and it could finish a comment that is begun in a row below.
+    const marks = { c2dd: 'bo', f3gg: 'bo' };
+    const pair = (cell: string) => {
+      const before = file(`| h | ${cell} |\n| --- | --- |\n| a | b |`, marks);
+      const after = file(`| h | ${cell}${markFor('| --- | --- |')} |\n| :-- | --- |\n| a | b |`, {
+        ...marks,
+        k3x9: 'ada',
+      });
+      return { before, after, tableFrom: readTables(before, parse(before))[0]?.from ?? -1 };
+    };
+    const brought = pair('a<!--ins c2dd-->--<!--/c2dd--><!--del f3gg >-->');
+    expect(headerSlice(brought.before, brought.tableFrom)).toBeDefined();
+    expect(headerSlice(brought.after, brought.tableFrom)).toBeDefined();
+    expect(answer(brought, false)).toEqual({ said: 'written', where: 'file' });
+    // The same header with other words is walked on the header, and on the file, with the same answer.
+    const words = pair('a<!--ins c2dd-->b<!--/c2dd--><!--del f3gg c-->');
+    expect(answer(words, false)).toEqual({ said: 'written', where: 'header' });
+    expect(answer(words, true)).toEqual({ said: 'written', where: 'file' });
+  });
+
+  it('is the header, its delimiter row and the ledger of its marks, where the file reads like it', () => {
+    const body = (cell: string, above = '') =>
+      `Intro with \`code\` and [a link](x) <!--ins z8bb-->new<!--/z8bb-->.\n\n${above}| Fruit | ${cell} |\n| ----- | ----- |\n| a | b |\n| c | d |\n\nOutro with \`x\`.`;
+    const marks = { z8bb: 'ada', c2dd: 'bo' };
+    const text = file(body('Price<!--ins c2dd-->s<!--/c2dd-->'), marks);
+    const slice = headerSlice(text, readTables(text, parse(text))[0]?.from ?? -1);
+    expect(slice).toBeDefined();
+    expect(slice).toContain('| Fruit | Price<!--ins c2dd-->s<!--/c2dd--> |\n| ----- | ----- |');
+    for (const left of ['| a | b |', 'Intro', 'Outro', 'z8bb']) expect(slice).not.toContain(left);
+    // Read as a file of its own: one table of two columns and the one change that it holds.
+    const read = parse(slice ?? '');
+    expect(problemsOf(read)).toEqual([]);
+    expect(Object.keys(read.ledger.marks)).toEqual(['c2dd']);
+    expect(readTables(slice ?? '', read).map((table) => table.rows[0]?.cells.length)).toEqual([2]);
+    // A decision in it is the decision in the file, in the header.
+    const accepted = applyChanges(slice ?? '', accept(slice ?? '', 'c2dd'));
+    expect(accepted).toContain('| Fruit | Prices |');
+    expect(applyChanges(slice ?? '', reject(slice ?? '', 'c2dd'))).toContain('| Fruit | Price |');
+  });
+
+  it('is nothing where something that is open in the header could be finished by the rest of the table', () => {
+    const body = (cell: string, above = '') =>
+      `${above}| Fruit | ${cell} |\n| ----- | ----- |\n| a | b |\n| c | d |`;
+    const unreadable: [string, string][] = [
+      ['a code span', body('`Price`')],
+      ['a code span begun', body('Price`')],
+      ['a link', body('[Price](x)')],
+      ['an open bracket', body('[Price')],
+      ['a backtick that a deletion would bring back', body('Price<!--del c2dd \\x60-->')],
+      [
+        'a backtick that a replacement would bring back',
+        body('<!--sub c2dd \\x60-->Price<!--/c2dd-->'),
+      ],
+    ];
+    for (const [what, text] of unreadable) {
+      const file_ = file(text, { c2dd: 'bo' });
+      expect(
+        headerSlice(file_, readTables(file_, parse(file_))[0]?.from ?? -1),
+        what,
+      ).toBeUndefined();
+    }
+    // The text above a table, with a blank line or without, is the paragraph of another block: a table starts its own.
+    for (const above of ['Text with a `tick.\n\n', 'Text with a `tick\n']) {
+      const plain = file(body('Price', above));
+      const slice = headerSlice(plain, readTables(plain, parse(plain))[0]?.from ?? -1);
+      expect(slice, above).toBeDefined();
+      expect(slice, above).not.toContain('tick');
+    }
+    const plain = file(body('Price'));
+    // A change of another tool that has its opener above the table and its closer below it is not in the header.
+    const spanned = file(`${MARK}\n\n${CENTERED}\n\n<!--/k3x9-->`, { k3x9: 'ada' });
+    expect(
+      headerSlice(spanned, readTables(spanned, parse(spanned))[0]?.from ?? -1),
+    ).toBeUndefined();
+    // No table starts there.
+    expect(headerSlice(plain, 3)).toBeUndefined();
   });
 });
