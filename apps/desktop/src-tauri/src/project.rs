@@ -1366,7 +1366,8 @@ mod tests {
         assert!(opens("docs/figure.png"));
         // A project that is hidden by its own name opens what is in it.
         let notes = disk.join(".notes");
-        assert!(openable_in(&[notes.clone()], &notes, &notes.join("plan.png")).is_ok());
+        let shown = std::slice::from_ref(&notes);
+        assert!(openable_in(shown, &notes, &notes.join("plan.png")).is_ok());
         fs::remove_dir_all(&disk).unwrap();
     }
 
