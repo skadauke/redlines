@@ -71,6 +71,7 @@ import {
 import type { PipeWrite } from './table-rules.ts';
 import { checkAlignGap } from './table-align.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
+import { assertWholeCharacters } from './characters.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
@@ -4782,6 +4783,7 @@ export function trackedEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
+  for (const edit of edits) assertWholeCharacters(text, edit);
   const random = ctx.random;
   // The next try draws the ids that the first one did.
   const drawn: Uint8Array[] = [];

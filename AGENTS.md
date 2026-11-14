@@ -28,13 +28,14 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
 | `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
-| `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |
+| `plugins/agent-acp`     | `@redlines/agent-acp`: Agent Client Protocol agents, and OpenClaw's bridge |
 | `plugins/code`          | `@redlines/code`: syntax colors in code blocks                            |
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
 | `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |

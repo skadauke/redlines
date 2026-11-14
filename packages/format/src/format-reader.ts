@@ -420,7 +420,7 @@ export function readLayout(
     else if (hit.text && hit.dest) {
       const { from, to, text: inner, dest } = hit;
       links.push({ from, to, text: inner, dest, inline: hit.kind === 'link' });
-    } else blank(hit.from + 1, hit.to - 1, 'x');
+    } else if (hit.kind !== 'emoji') blank(hit.from + 1, hit.to - 1, 'x');
   }
 
   const roles = new Uint8Array(v.length);
@@ -523,6 +523,8 @@ function plainOf(layout: Layout): string {
     else if (kind === 'autolink') dropped.add(from).add(to - 1);
     else if (kind === 'symbol' || kind === 'footnote' || kind === 'reference') symbols.add(from);
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
+    // The type of an alert is syntax, as bold's stars are: changing it changes no words (#311).
+    else if (kind === 'alert') drop(from + 2, to - 1);
     else if (alt) {
       drop(from, alt.from);
       drop(alt.to, to);

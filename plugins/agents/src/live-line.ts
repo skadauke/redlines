@@ -375,7 +375,9 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
 }
 
 /** The question's title: what is asked, and of whom. */
-function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): string {
+function askTitle({ agentName, readLimit, toolbox }: LiveLine & { kind: 'asking' }): string {
+  // An agent with no toolbox is sent what it needs, in its prompt, and reads nothing itself here.
+  if (toolbox === false) return `Send this document and this thread to ${agentName}?`;
   return readLimit === 'machine'
     ? `Allow ${agentName} to read files on this Mac?`
     : `Allow ${agentName} to read this folder?`;
@@ -387,7 +389,18 @@ function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): stri
  * (`readLimit` is 'machine': an agent the person added) is told as it is: its own settings decide
  * what it reads, and for a question it may also act on its own, which Redlines can't stop.
  */
-function askNote({ agentName, readLimit, readOnly }: LiveLine & { kind: 'asking' }): string {
+function askNote({
+  agentName,
+  folder,
+  readLimit,
+  readOnly,
+  toolbox,
+}: LiveLine & { kind: 'asking' }): string {
+  // An agent with no toolbox is sent the document and the thread, and answers in a reply. What
+  // Allow keeps is the folder, which it reads none of.
+  if (toolbox === false) {
+    return `When you write ${agentName}’s name in a comment, it is sent the document and that comment thread, which go to its OpenClaw Gateway, wherever that runs. Allow remembers it for ${folder === '' ? 'documents that aren’t in a folder yet' : 'documents in this folder'}. It can’t change the document: what it says is posted as a reply. What else it can read is up to its own settings.`;
+  }
   if (readLimit === 'machine') {
     const reads = `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`;
     return readOnly === true ? `${reads} It may also act on its own.` : reads;
@@ -426,7 +439,9 @@ function asking(
   title.id = `${id}-title`;
   const described: string[] = [];
   const children: Node[] = [title];
-  if (!machine) {
+  // The answer is kept for the folder, and for an agent with no toolbox it is the only thing the
+  // folder is for: say which, though the agent reads none of it.
+  if (!machine || (line.toolbox === false && line.folder !== '')) {
     const folder = block('rl-ask-folder', shortFolder(line.folder));
     folder.id = `${id}-folder`;
     folder.title = line.folder;

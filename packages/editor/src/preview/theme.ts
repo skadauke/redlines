@@ -140,6 +140,73 @@ export const baseThemeSpec: ThemeSpec = {
     color: 'var(--rl-quote-color)',
   },
 
+  // Alerts (#311): the lines of the quote are a box, tinted like code and not like a quote, with a
+  // title row on its first line: an icon, the type's name and a menu that shows for the pointer or
+  // the caret and is gone otherwise. Gray: color is for people, and a pending change of the type is
+  // in its author's.
+  '.rl-callout': {
+    backgroundColor: 'var(--rl-tint)',
+    padding: `0 ${s(16)}`,
+  },
+  '.rl-callout-first': {
+    borderTopLeftRadius: '8px',
+    borderTopRightRadius: '8px',
+    paddingTop: s(10),
+  },
+  '.rl-callout-last': {
+    borderBottomLeftRadius: '8px',
+    borderBottomRightRadius: '8px',
+    paddingBottom: s(10),
+  },
+  '.rl-callout-head': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.45em',
+    fontWeight: '600',
+    color: 'var(--rl-ink)',
+    cursor: 'text',
+  },
+  '.rl-callout-text': { fontWeight: '600' },
+  '.rl-callout-icon': {
+    width: '1em',
+    height: '1em',
+    flex: 'none',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.3',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    color: 'var(--rl-ink-2)',
+  },
+  '.rl-callout-menu': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    margin: '0 0 0 0.1em',
+    padding: '0.1em 0.2em',
+    border: 'none',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: 'var(--rl-ink-3)',
+    opacity: '0',
+    cursor: 'pointer',
+    font: 'inherit',
+  },
+  '.rl-callout-menu svg': {
+    width: '0.8em',
+    height: '0.8em',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.5',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.rl-callout-title:hover .rl-callout-menu, .rl-callout-active .rl-callout-menu, .rl-callout-menu:focus-visible':
+    { opacity: '1' },
+  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
+  '.rl-callout-menu:focus': { outline: 'none' },
+  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
+
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
   // inline, it sits in the text. A missing one is its alt text, quietly.
   '.rl-image img': { maxWidth: '100%', height: 'auto', verticalAlign: 'middle' },

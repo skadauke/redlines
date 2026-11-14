@@ -291,6 +291,81 @@
           "sessionId": "sess-1"
         }
       }
+    },
+    "bridge": {
+      "agent": "moby",
+      "messages": {
+        "session/new": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "session/new",
+          "params": {
+            "cwd": "/Users/ada/dangerously \"quoted\" project",
+            "mcpServers": [],
+            "_meta": {
+              "sessionKey": "agent:moby:redlines-0479fd18f76aae95"
+            }
+          }
+        },
+        "session/prompt": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "sess-1",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "You have no tools.\n> the dam is dangerously high"
+              },
+              {
+                "type": "text",
+                "text": "- a comment that starts like --a-flag"
+              }
+            ],
+            "_meta": {
+              "prefixCwd": false
+            }
+          }
+        }
+      }
+    },
+    "bridgeDefault": {
+      "messages": {
+        "session/new": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "session/new",
+          "params": {
+            "cwd": "/Users/ada/dangerously \"quoted\" project",
+            "mcpServers": [],
+            "_meta": {
+              "sessionKey": "redlines-0479fd18f76aae95"
+            }
+          }
+        },
+        "session/prompt": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "sess-1",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "You have no tools.\n> the dam is dangerously high"
+              },
+              {
+                "type": "text",
+                "text": "- a comment that starts like --a-flag"
+              }
+            ],
+            "_meta": {
+              "prefixCwd": false
+            }
+          }
+        }
+      }
     }
   },
   "home": {

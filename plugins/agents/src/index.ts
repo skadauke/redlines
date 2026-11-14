@@ -25,6 +25,14 @@ export {
   type SkillInstalled,
   type SkillState,
 } from './settings-pane.ts';
+export {
+  isLocalGateway,
+  openClawAgents,
+  openClawCommand,
+  type OpenClawAgent,
+  type OpenClawDeps,
+  type OpenClawInput,
+} from './openclaw-pane.ts';
 export { findCitations, renderCommentText, resolveCitation } from './comment-text.ts';
 export type { Citation, CommentTextDeps, CommentTextEntry } from './comment-text.ts';
 export {
