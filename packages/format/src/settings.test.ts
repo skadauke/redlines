@@ -21,8 +21,8 @@ const withLines = (...lines: string[]) =>
   `Body.\n\n<!-- redlines\n${LEDGER_NOTE}\nversion: 1\n${lines.map((line) => `${line}\n`).join('')}-->\n`;
 
 describe('reading the view (format §5.6)', () => {
-  it('reads clean and redlines', () => {
-    for (const view of ['clean', 'redlines'] as const) {
+  it('reads clean, redlines and simple', () => {
+    for (const view of ['clean', 'redlines', 'simple'] as const) {
       const parsed = parse(withLines(`view: ${view}`));
       expect(parsed.ledger.view).toBe(view);
       expect(parsed.warnings).toEqual([]);
@@ -36,7 +36,7 @@ describe('reading the view (format §5.6)', () => {
 
   it('warns about a view it does not know, such as raw, and drops it', () => {
     // Raw is never saved: nobody wants a document to open as source (format §5.6).
-    for (const value of ['raw', 'simple', 'Clean', 'on', '']) {
+    for (const value of ['raw', 'Simple', 'Clean', 'on', '']) {
       const parsed = parse(withLines(`view: ${value}`));
       expect(parsed.ledger.view, value).toBeUndefined();
       expect(
@@ -108,6 +108,16 @@ describe('recording the view changes that line alone (format §5.6)', () => {
     expect(applyChanges(recorded, setView(recorded, 'redlines'))).toBe(
       odd.replace('version: 2\n', 'version: 2\nview: redlines\n'),
     );
+  });
+
+  it('records the simple look as simple, and the next save changes only its value', () => {
+    const simple = applyChanges(odd, setView(odd, 'simple'));
+    expect(simple).toBe(odd.replace('version: 2\n', 'version: 2\nview: simple\n'));
+    expect(parse(simple).ledger.view).toBe('simple');
+    expect(applyChanges(simple, setView(simple, 'redlines'))).toBe(
+      odd.replace('version: 2\n', 'version: 2\nview: redlines\n'),
+    );
+    expect(applyChanges(simple, setView(simple, 'simple'))).toBe(simple);
   });
 
   it('puts it after tracking when the ledger has it', () => {

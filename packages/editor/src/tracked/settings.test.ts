@@ -72,11 +72,12 @@ function caretBefore(editor: Editor, word: string): void {
 }
 
 describe('the view a document opens in (format §5.6)', () => {
-  it('is the ledger’s, Clean or Redlines, whatever the document holds', () => {
+  it('is the ledger’s, Clean, Redlines or the simple look, whatever the document holds', () => {
     const clean = load(reviewed('view: clean'));
     expect(clean.getUiState().view).toBe('clean');
     expect(clean.getUiState().hasRedlines).toBe(true);
     expect(load(reviewed('view: redlines')).getUiState().view).toBe('redlines');
+    expect(load(reviewed('view: simple')).getUiState().view).toBe('simple');
     // With nothing to show, as well: a file that only says how it was left.
     const plain = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: redlines\n-->\n`;
     expect(load(plain).getUiState().view).toBe('redlines');
@@ -87,6 +88,11 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(editor.getUiState().view).toBe('redlines');
     // The choice of the app is still the app's: it reaches the next file, and nothing is saved.
     expect(editor.getUiState().markupView).toBe('simple');
+    // And the other way: a file that was left in the simple look opens there, whatever look the
+    // app remembered.
+    const left = load(reviewed('view: simple'), { markupView: 'redlines' });
+    expect(left.getUiState().view).toBe('simple');
+    expect(left.getUiState().markupView).toBe('redlines');
     expect(load(reviewed(), { markupView: 'simple' }).getUiState().view).toBe('simple');
     expect(load(reviewed()).getUiState().view).toBe('redlines');
     expect(load(PLAIN).getUiState().view).toBe('clean');
@@ -350,14 +356,14 @@ describe('Track Changes, written to the document (format §5.6)', () => {
 });
 
 describe('recording the view in the document (format §5.6)', () => {
-  it('writes Clean as clean, and the markup views as redlines', () => {
+  it('writes Clean as clean, Redlines as redlines and the simple look as simple', () => {
     const editor = load(reviewed());
     editor.setViewMode('clean');
     editor.recordView();
     expect(editor.getDoc()).toBe(reviewed('view: clean'));
     editor.setViewMode('simple');
     editor.recordView();
-    expect(editor.getDoc()).toBe(reviewed('view: redlines'));
+    expect(editor.getDoc()).toBe(reviewed('view: simple'));
     editor.setViewMode('clean');
     editor.recordView();
     expect(editor.getDoc()).toBe(reviewed('view: clean'));
@@ -367,10 +373,23 @@ describe('recording the view in the document (format §5.6)', () => {
   });
 
   it('leaves the view the file had when the document is in Raw', () => {
-    const editor = load(reviewed('view: clean'));
-    editor.setViewMode('raw');
+    for (const had of ['view: clean', 'view: redlines', 'view: simple']) {
+      const editor = load(reviewed(had));
+      editor.setViewMode('raw');
+      editor.recordView();
+      expect(editor.getDoc(), had).toBe(reviewed(had));
+    }
+  });
+
+  it('opens a file again in the look it was saved in, from either look', () => {
+    // A save in the simple look, and then in the full markup, and a document opened from each.
+    const editor = load(reviewed(), { markupView: 'redlines' });
+    editor.setViewMode('simple');
     editor.recordView();
-    expect(editor.getDoc()).toBe(reviewed('view: clean'));
+    expect(load(editor.getDoc(), { markupView: 'redlines' }).getUiState().view).toBe('simple');
+    editor.setViewMode('redlines');
+    editor.recordView();
+    expect(load(editor.getDoc(), { markupView: 'simple' }).getUiState().view).toBe('redlines');
   });
 
   it('never adds a ledger for the view', () => {
