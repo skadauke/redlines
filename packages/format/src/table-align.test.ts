@@ -2900,6 +2900,29 @@ describe('a point alignment change beside other marks and edits', () => {
       }
     });
 
+    it('writes the closing pipe when a deletion empties the only cell of a header that has a leading pipe alone, and every order reads alike', () => {
+      // `| x<mark> `: a table of one column with a pipe at its start alone. The text goes, and what is left is a lone pipe
+      // and the mark, which accepting the change would leave as a pipe and nothing else: no header, no table. The
+      // closing pipe is written plain, as for a header of two cells or more, after the mark, where the cell ends.
+      const text = align(file('| x \n| --: \n| z \n| z '), [0], 'left', ada, ['k3x9']).after;
+      expect(headerLine(text)).toMatch(/^\| x<!--fmt k3x9 [^\n]*?--> ?$/);
+      const cell = lastCell(text);
+      for (const tracked of [false, true]) {
+        const after = applyChanges(
+          text,
+          tracked
+            ? trackedEdit(text, { ...cell, insert: '' }, context(bo, ['c2dd', 'f3gg']))
+            : untrackedEdit(text, { ...cell, insert: '' }),
+        );
+        const label = tracked ? 'tracked' : 'plain';
+        expect(headerLine(after), label).toMatch(
+          /^\| (?:<!--del \w{4} x-->)?<!--fmt k3x9 [^\n]*?--> +\|$/,
+        );
+        expect(tableLeaves(after), label).toHaveLength(1);
+        expectDecided(label, after, [1, 1, 1]);
+      }
+    });
+
     it('is in front of a comment over the text of the cell, whose closer stands before it', () => {
       for (const [who, text] of FILES) {
         const commented = applyChanges(

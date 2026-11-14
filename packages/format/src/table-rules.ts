@@ -974,12 +974,12 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   const line = readLine(text, start, end);
   if (line.lone) return [];
   // A row of one cell keeps it with a pipe at one end, and needs none besides, but for the mark of an alignment change
-  // that ends the cell of a header with no leading pipe: with the text gone it would start the line, where no marker
-  // may stand (format §3.3), and would be put on a line of its own above the table, outside it.
+  // that ends the cell of a header. With the text gone the mark alone holds the cell: with no leading pipe it would start
+  // the line, where no marker may stand (format §3.3), and would be put on a line of its own above the table, outside
+  // it; with no closing pipe the header is a lone pipe once the change is accepted, and no table.
   const only = line.cells.length === 1 ? line.cells[0] : undefined;
   if (line.cells.length < 2) {
-    const marked = only && alignPointIn(text, only.contentFrom, only.contentTo) !== null;
-    if (!marked || line.leadingPipe) return [];
+    if (!only || alignPointIn(text, only.contentFrom, only.contentTo) === null) return [];
   }
   // The cell's text is all in the edit, and none of it is a mark. The mark of an alignment change that
   // ends the cell stays, and is not text.
