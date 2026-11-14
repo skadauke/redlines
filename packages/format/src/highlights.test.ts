@@ -1173,6 +1173,8 @@ describe('on random documents', { timeout: 60_000 }, () => {
     let textless = 0;
     let wholeBlocks = 0;
     let wholeRefused = 0;
+    // A whole alert, whose first line holds its type, which a marker can't come into (format §3).
+    let alertsRefused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 6007);
       const below = (n: number) => Math.floor(random() * n);
@@ -1212,7 +1214,8 @@ describe('on random documents', { timeout: 60_000 }, () => {
             }
             refused++;
             // A body that ends in a closing `_` has no place for a closer at its end (format §4).
-            if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
+            if (whole && /alert's type/.test(error.message)) alertsRefused++;
+            else if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
             continue;
           }
           throw new Error(`${label}: ${String(error)}`, { cause: error });
@@ -1247,6 +1250,9 @@ describe('on random documents', { timeout: 60_000 }, () => {
     expect(made + refused + textless).toBe(documents * 3);
     expect(made).toBeGreaterThan(refused);
     // A highlight on whole blocks goes through, but where a construct has no place for its marker.
-    expect(wholeRefused).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));
+    expect(
+      wholeRefused,
+      `${alertsRefused} highlights on a whole alert were refused apart`,
+    ).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));
   });
 });
