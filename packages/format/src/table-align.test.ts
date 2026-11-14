@@ -2874,6 +2874,32 @@ describe('a point alignment change beside other marks and edits', () => {
       }
     });
 
+    it('writes a leading pipe when a plain deletion empties the only cell of a header that has none, and the mark stays in its table', () => {
+      // A table of one column with a pipe at its end alone: `11<mark> |`. The text goes, and the mark alone would start
+      // the line, where a marker can't stand (§3.3): the placement would put it on a line of its own above the table,
+      // outside it, and the change could only be accepted. The pipe at the start is written plain, as rule 7 writes the
+      // pipes that an emptied cell needs, in both versions, and the mark stands in the cell it ends.
+      const text = align(file('11 |\n--: |\nz |\nz |'), [0], 'left', ada, ['k3x9']).after;
+      expect(headerLine(text)).toMatch(/^11<!--fmt k3x9 [^\n]*?--> \|$/);
+      const cell = lastCell(text);
+      for (const tracked of [false, true]) {
+        const after = applyChanges(
+          text,
+          tracked
+            ? trackedEdit(text, { ...cell, insert: '' }, context(bo, ['c2dd', 'f3gg']))
+            : untrackedEdit(text, { ...cell, insert: '' }),
+        );
+        const label = tracked ? 'tracked' : 'plain';
+        expect(headerLine(after), label).toMatch(
+          /^\| (?:<!--del \w{4} 11-->)?<!--fmt k3x9 [^\n]*?--> \|$/,
+        );
+        const table = readTables(after, parse(after))[0];
+        expect(table ? alignMarkOf(parse(after), table)?.id : undefined, label).toBe('k3x9');
+        expect(tableLeaves(after), label).toHaveLength(1);
+        expectDecided(label, after, [1, 1, 1]);
+      }
+    });
+
     it('is in front of a comment over the text of the cell, whose closer stands before it', () => {
       for (const [who, text] of FILES) {
         const commented = applyChanges(
