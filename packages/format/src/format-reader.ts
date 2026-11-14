@@ -420,7 +420,7 @@ export function readLayout(
     else if (hit.text && hit.dest) {
       const { from, to, text: inner, dest } = hit;
       links.push({ from, to, text: inner, dest, inline: hit.kind === 'link' });
-    } else blank(hit.from + 1, hit.to - 1, 'x');
+    } else if (hit.kind !== 'emoji') blank(hit.from + 1, hit.to - 1, 'x');
   }
 
   const roles = new Uint8Array(v.length);

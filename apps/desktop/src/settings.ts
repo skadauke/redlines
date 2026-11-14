@@ -65,6 +65,9 @@ export interface Settings {
   smartPunctuation: boolean;
   /** Closing brackets and Markdown pairs as you type. */
   closePairs: boolean;
+  /** A list of matching emoji after a colon and two letters (`:te`), which a choice writes as the
+   * character itself. The shortcodes already in a file are drawn as their emoji either way. */
+  emojiSuggestions: boolean;
   /** Whether a new document starts with Track Changes on. */
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
@@ -107,6 +110,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   spellCheck: true,
   smartPunctuation: true,
   closePairs: true,
+  emojiSuggestions: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
   showWordCount: true,
@@ -136,8 +140,10 @@ export function loadSettings(): Settings {
       | 'showLineBreakMarks'
       | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
-  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
-    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
+  const typing = (
+    key:
+      'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions' | 'trackNewDocuments',
+  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   return {
     theme: themeOf(value),
     appearance: isAppearanceChoice(value['appearance'])
@@ -160,6 +166,7 @@ export function loadSettings(): Settings {
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
+    emojiSuggestions: typing('emojiSuggestions'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),

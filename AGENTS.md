@@ -35,6 +35,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
 | `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |

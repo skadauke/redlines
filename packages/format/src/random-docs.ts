@@ -83,7 +83,23 @@ const NEWER_CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => strin
   () => '</sup>',
   (pick) => `\\<sup>${pick(WORDS)}</sup>`,
   (pick) => `${pick(WORDS)}\\\\`,
+  // Emoji (#312, format §3.1): shortcodes with a space, a letter or a digit against them (no marker
+  // goes between a letter and one), two together, in emphasis, and the times and words with colons
+  // that are none; and emoji of several code points, which no marker parts.
+  () => ':tent:',
+  (pick) => `${pick(WORDS)} :+1: ${pick(WORDS)}`,
+  (pick) => `${pick(WORDS)}:smile:`,
+  (pick) => `:t-rex:${pick(WORDS)}`,
+  () => ':smile::tent:',
+  (pick) => `**${pick(WORDS)} :tent:**`,
+  () => 'at 10:30:45 and :30: and a :x y: b',
+  (pick) => pick(EMOJI_SEQUENCES),
+  (pick) => `${pick(WORDS)} ${pick(EMOJI_SEQUENCES)}${pick(WORDS)}`,
 ];
+
+/** Emoji of several code points: a family, a flag, a skin tone, a keycap, a heart with its variation
+ * selector, a person with a tone and a ZWJ, and the flag of a subdivision. */
+const EMOJI_SEQUENCES = ['👨‍👩‍👧', '🇩🇪', '👍🏽', '1️⃣', '❤️', '🧑🏽‍💻', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'];
 
 /** The first lines of an alert (#311, format §3.1, §3.3): GitHub's types in capitals and in lowercase,
  * a type that GitHub doesn't have, and a title and a fold mark after the type, which are text to

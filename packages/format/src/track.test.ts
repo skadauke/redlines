@@ -1616,7 +1616,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // decisions.
     const documents = fuzzCount(150);
     const BREAKS = [['\n', '\n'], ['\n\n'], ['\n', '\n', '\n']] as const;
-    const WORDS = ['x', 'new words', 'é', '😀'];
+    const WORDS = ['x', 'new words', 'é', '😀', '👨‍👩‍👧', ':tent:', '🇩🇪'];
     const TEXT = [...WORDS, ' ', 'new\n', 'one\ntwo', '- x', 'a--b'];
     let typed = 0;
     let refused = 0;

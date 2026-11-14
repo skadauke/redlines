@@ -344,6 +344,18 @@ Redlines covers everything in the Markdown Guide's
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
+- **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
+  Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
+  list) start with them under the caret; Return or Tab writes the character, ↑ and ↓ move and Esc
+  puts the list away. It stays out of the way of `10:30` and `Note:` (it opens only for a colon that
+  has no letter, digit or colon before it, and two characters of a name after it, one of them a
+  letter), of code, front matter and Raw, and Redlines ›
+  Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
+  not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
+  emoji in every view but Raw, as an entity is drawn as its character, and shows as written while
+  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  it. An emoji and a shortcode are one character for a change: no marker parts either
+  ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 - **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
   lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
@@ -1084,7 +1096,7 @@ the same identity and the sandbox entitlement that an app extension must have
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu),
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu), `emoji`,
 `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
@@ -1108,6 +1120,7 @@ written.
 | `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
+| `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 

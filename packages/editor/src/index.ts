@@ -73,6 +73,7 @@ import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
+import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
@@ -120,6 +121,7 @@ export {
   type CalloutMenuRequest,
 } from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
+export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -236,7 +238,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, frontMatter, scriptTags],
+      extensions: [GFM, frontMatter, scriptTags, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
