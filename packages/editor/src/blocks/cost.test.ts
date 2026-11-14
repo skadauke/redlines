@@ -741,10 +741,11 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
 // against 5.99: there a key costs 2.6 times the parse (the median of 41 runs), so the best of its
 // up to three attempts stood at 0.86 of that bound on a median run. A parse is not the same work
 // as a key: over those runs the key in code varied by 19 % against the parse, and by 11 % against a
-// key in a paragraph of the same document (0.91 times it). So with Track Changes on the pair is
-// held to what the first key below is held to: twice a pair of keys in a paragraph of the same
-// document, plus a millisecond, the two timed in turns so that a runner slowed for a few seconds
-// slows both. Timing tests: they run with REDLINES_COST set, and a run over the bound is timed
+// key in a paragraph. So with Track Changes on the pair is held to a pair of keys in a paragraph of
+// the same document, plus a millisecond, the two timed in turns so that a runner slowed for a few
+// seconds slows both: the code key costs 0.58 of a paragraph key (0.54 to 0.73 in 20 attempts in
+// CI's own load, 0.60 alone on a runner, 0.53 on a development Mac), so the bound is about twice
+// what it costs. Timing tests: they run with REDLINES_COST set, and a run over the bound is timed
 // twice more, each time with its yardstick, before it fails.
 const bound = (parse: number) => 2 * parse + 2;
 
@@ -818,7 +819,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
     return editor;
   }
 
-  it('is at most twice a key in a paragraph of the same document, plus 1 ms: Track Changes on, with the substitution made', () => {
+  it('is at most a key in a paragraph of the same document, plus 1 ms: Track Changes on, with the substitution made', () => {
     const editor = codeEditor(true);
     // The case with the substitution made starts with the first key made.
     codeTime(editor, true);
@@ -833,11 +834,11 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
         code.push(codeTime(editor, false));
         paragraph.push(paragraphTime(editor));
       }
-      return { ours: median(code), limit: 2 * median(paragraph) + 1 };
+      return { ours: median(code), limit: median(paragraph) + 1 };
     };
     const result = held(attempt(), attempt);
     console.log(
-      `cost: code, Track Changes on, with the substitution made: bound ${result.limit.toFixed(2)} ms (twice a paragraph key plus 1), now ${result.ours.toFixed(2)} ms`,
+      `cost: code, Track Changes on, with the substitution made: bound ${result.limit.toFixed(2)} ms (a paragraph key plus 1), now ${result.ours.toFixed(2)} ms`,
     );
     const marks = (editor.view.state.doc.toString().match(/<!--sub /g) ?? []).length;
     expect(marks, 'one substitution for the block').toBe(1);
