@@ -3,7 +3,8 @@
 // holds the heading's underline (`breakLength`), which is the heading's own: no marker may stand
 // behind it (§3.1), and a payload that held it would leave the heading's text a paragraph once the
 // deletion was accepted, and in the file as other readers read it. The block goes without that
-// break, as the only block of a text does.
+// break, as the only block of a text does. A range that starts behind the underline starts at the
+// block, and a setext heading that is deleted takes its own underline with it.
 
 import { describe, expect, it } from 'vitest';
 import { underlineOfBreak } from './blocks.ts';
@@ -135,6 +136,10 @@ describe('a deletion of the last block, under a setext heading (#372)', () => {
         'Title\r\n---\r\n\r\n<!--del m2bd Last paragraph-->',
         'Title\r\n---',
       ],
+      // The line above is no heading's text, a rule or an ATX heading: CommonMark makes a rule of
+      // the line, but the break reads it as the underline it looks like, and the block goes alone.
+      ['# Head\n---\n\nLast', 'Last', '# Head\n---\n\n<!--del m2bd Last-->', '# Head\n---'],
+      ['***\n---\n\nLast', 'Last', '***\n---\n\n<!--del m2bd Last-->', '***\n---'],
     ];
     for (const [body, target, written, kept] of cases) {
       const label = JSON.stringify(body);
@@ -192,6 +197,135 @@ describe('a deletion of the last block, under a setext heading (#372)', () => {
     expectBlocksKept(body, body, 'A\n===\n\nLast', heading.after);
   });
 
+  it('takes its own underline with a deleted setext heading, and leaves the block in front a paragraph', () => {
+    // The underline is in the break after the heading: a deletion that took the break in front of
+    // the heading instead would end in front of it, and leave it under the block above (#372).
+    // [the text, what is deleted, the file with the deletion pending, what stays]
+    for (const [body, target, written, kept] of [
+      [
+        'Intro\n\nTitle\n---\n\nAfter',
+        'Title',
+        'Intro\n\n<!--del m2bd Title\\n-\\-\\-\\n\\n-->\n\nAfter',
+        'Intro\n\nAfter',
+      ],
+      [
+        'Intro\n\nTitle\n---\n\nAfter',
+        'Title\n---',
+        'Intro\n\n<!--del m2bd Title\\n-\\-\\-\\n\\n-->\n\nAfter',
+        'Intro\n\nAfter',
+      ],
+      // The last block of the text, with the ledger after it.
+      ['Intro\n\nTitle\n---', 'Title', 'Intro\n\n<!--del m2bd Title\\n-\\-\\x2d-->', 'Intro'],
+      ['Intro\n\nTitle\n---', 'Title\n---', 'Intro\n\n<!--del m2bd Title\\n-\\-\\x2d-->', 'Intro'],
+      // After a list, where an underline under the item would make a rule of it.
+      [
+        '- a\n- b\n\nTitle\n===\n\nAfter',
+        'Title\n===',
+        '- a\n- b\n\n<!--del m2bd Title\\n===\\n\\n-->\n\nAfter',
+        '- a\n- b\n\nAfter',
+      ],
+      // In a quote, and with Windows line breaks.
+      [
+        '> Intro\n>\n> Title\n> ---\n>\n> After',
+        'Title\n> ---',
+        '> Intro\n>\n> <!--del m2bd Title\\n> -\\-\\-\\n>\\n> -->\n>\n> After',
+        '> Intro\n>\n> After',
+      ],
+      [
+        'Intro\r\n\r\nTitle\r\n---\r\n\r\nAfter',
+        'Title',
+        'Intro\r\n\r\n<!--del m2bd Title\\n-\\-\\-\\n\\n-->\r\n\r\nAfter',
+        'Intro\r\n\r\nAfter',
+      ],
+    ] as const) {
+      const at = body.indexOf(target);
+      const { after } = deleteRange(body, at, at + target.length);
+      expect(bodyText(after), JSON.stringify(body)).toBe(written);
+      expectBlocksKept(JSON.stringify(body), body, kept, after);
+    }
+  });
+
+  it('starts a range that starts behind the underline at the block, and keeps the blank lines', () => {
+    // From the end of the underline's line, or the blank line under it, to the end of the text.
+    // [the text, where the range starts, where it ends (the end of the text when absent), the
+    // file with the deletion pending, what stays]
+    for (const [body, start, end, written, kept] of [
+      [
+        'Title\n---\n\nLast',
+        '\n\nLast',
+        undefined,
+        'Title\n---\n\n<!--del m2bd Last-->',
+        'Title\n---',
+      ],
+      [
+        'Title\n---\n\nLast',
+        '\nLast',
+        undefined,
+        'Title\n---\n\n<!--del m2bd Last-->',
+        'Title\n---',
+      ],
+      [
+        'Title\n---\n\nMid\n\nLast',
+        '\n\nMid',
+        '\n\nMid',
+        'Title\n---\n\n<!--del m2bd Mid\\n\\n-->\n\nLast',
+        'Title\n---\n\nLast',
+      ],
+      [
+        'Title\r\n---\r\n\r\nLast',
+        '\r\n\r\nLast',
+        undefined,
+        'Title\r\n---\r\n\r\n<!--del m2bd Last-->',
+        'Title\r\n---',
+      ],
+      [
+        '> Title\n> ---\n>\n> Last',
+        '\n>\n> Last',
+        undefined,
+        '> Title\n> ---\n>\n<!--del m2bd > Last-->',
+        '> Title\n> ---',
+      ],
+      [
+        '- Title\n  ---\n\n  Last',
+        '\n\n  Last',
+        undefined,
+        '- Title\n  ---\n\n<!--del m2bd   Last-->',
+        '- Title\n  ---',
+      ],
+    ] as const) {
+      const from = body.indexOf(start);
+      const to = end === undefined ? body.length : from + end.length;
+      const { after } = deleteRange(body, from, to);
+      expect(bodyText(after), JSON.stringify(body)).toBe(written);
+      expectBlocksKept(JSON.stringify(body), body, kept, after);
+    }
+  });
+
+  it('refuses a range that takes part of the underline, or only the blank lines under it', () => {
+    // The join of the block below onto the heading, a part of the underline, and a range that ends
+    // inside the block: the line of the underline takes no change, and nothing is written.
+    const words = 'A line that is only Markdown syntax takes no change.';
+    const body = 'Title\n---\n\nLast';
+    for (const [from, to] of [
+      [body.indexOf('\n\n'), body.indexOf('Last')],
+      [body.indexOf('\n\n'), body.indexOf('Last') + 2],
+      [body.indexOf('--\n'), body.length],
+      [body.indexOf('-\n'), body.length],
+    ]) {
+      expect(() => deleteRange(body, from as number, to as number), `${from}-${to}`).toThrow(words);
+    }
+  });
+
+  it('takes the underline when the range starts at it or in front of it, as it was asked', () => {
+    // The person selected the underline too: it goes, and the heading with it.
+    const body = 'Title\n---\n\nLast';
+    for (const from of [body.indexOf('\n---'), body.indexOf('---')]) {
+      const { after } = deleteRange(body, from, body.length);
+      expect(bodyText(after), String(from)).toBe('Title<!--del m2bd \\n-\\-\\-\\n\\nLast-->');
+      expectBlocksKept(String(from), body, 'Title', after);
+    }
+  });
+
   it('leaves the other breaks as they were: after an ATX heading, a paragraph, a list', () => {
     for (const [body, target, written, kept] of [
       ['# Head\n\nLast', 'Last', '# Head<!--del m2bd \\n\\nLast-->', '# Head'],
@@ -213,13 +347,14 @@ describe('a deletion of the last block, under a setext heading (#372)', () => {
 
   it('still refuses right under the underline, with no blank line: the line takes no marker', () => {
     // As under a rule or a fence: the line above the block takes no change, and nothing is written.
-    for (const [body, text] of [
-      ['Title\n---\nLast', 'Last'],
-      ['Title\n===\nLast', 'Last'],
-      ['Title\n---\n- item', 'item'],
+    const syntax = 'A line that is only Markdown syntax takes no change.';
+    for (const [body, text, words] of [
+      ['Title\n---\nLast', 'Last', syntax],
+      ['Title\n===\nLast', 'Last', 'A marker here would start a line.'],
+      ['Title\n---\n- item', 'item', syntax],
     ] as const) {
       const at = body.lastIndexOf(text);
-      expect(() => deleteRange(body, at, body.length), body).toThrow(EditError);
+      expect(() => deleteRange(body, at, body.length), body).toThrow(words);
     }
   });
 
@@ -323,22 +458,31 @@ describe('a deletion of the last blocks under a setext heading, in random texts'
         });
         return lines;
       };
-      // How many of the blocks under the heading go, from the last one back.
-      const gone = 1 + below(blocks.length - 1);
+      // Where the range starts: at the first column of the first block that goes, or after its
+      // prefix; or behind the heading's underline, at the end of its line or at the start of the
+      // blank line under it, which takes all the blocks under the heading.
+      const mode = below(4);
+      const gone = mode < 2 ? 1 + below(blocks.length - 1) : blocks.length - 1;
       const kept = render(blocks.length - gone);
-      const body = render(blocks.length).join('\n');
-      // The first block that goes starts on the line after the blank one that follows what stays,
-      // at its first column or after its prefix.
-      const line = kept.length + 1;
-      const lineAt = render(blocks.length)
-        .slice(0, line)
-        .reduce((at, text) => at + text.length + 1, 0);
-      const from = lineAt + (below(2) === 0 ? 0 : other.length);
+      const eol = below(4) === 0 ? '\r\n' : '\n';
+      const whole = render(blocks.length);
+      const body = whole.join(eol);
+      /** Where line `n` of the text starts. */
+      const lineAt = (n: number) =>
+        whole.slice(0, n).reduce((at, text) => at + text.length + eol.length, 0);
+      // The first block that goes starts on the line after the blank one that follows what stays.
+      const underline = top.flatMap((block) => [...block.split('\n'), '']).length + 1;
+      const from =
+        mode < 2
+          ? lineAt(kept.length + 1) + (mode === 0 ? 0 : other.length)
+          : mode === 2
+            ? lineAt(underline + 1) - eol.length
+            : lineAt(underline + 1);
       const label = `seed ${seed}: ${JSON.stringify(body)} from ${from}`;
       try {
         const { after } = deleteRange(body, from, body.length);
         written++;
-        const wanted = leaves(file(kept.join('\n')));
+        const wanted = leaves(file(kept.join(eol)));
         expect(leaves(after), `${label}: the file`).toBe(wanted);
         expect(leaves(newestView(after).text), `${label}: the newest view`).toBe(wanted);
         const accepted = applyChanges(after, accept(after, 'm2bd'));
