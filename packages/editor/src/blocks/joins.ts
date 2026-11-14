@@ -457,6 +457,10 @@ function numberedKept(state: EditorState, above: Block, joined: Block): string |
   return blankOf(number[1]!);
 }
 
+/** The lines between the last line of `above` and the first line of `below`. */
+const blankLines = (state: EditorState, above: Block, below: Block): number =>
+  state.doc.lineAt(below.lines.from).number - state.doc.lineAt(above.lines.to).number - 1;
+
 /** The empty block goes, with the break above it (or below, for the first), the caret above. */
 function removeEmpty(
   state: EditorState,
@@ -465,6 +469,28 @@ function removeEmpty(
 ): KeyEdit {
   const { prev, next } = neighbours(state, block);
   if (userEvent === 'delete.forward.block' && next) {
+    // No blank line above the block and one below it: the forward edit takes the one below and
+    // keeps the line break above, which leaves the next block right under the text above, as a
+    // line of it (`- one⏎- ‸⏎⏎After.`: the paragraph is a lazy line of the item; `- one⏎  - ‸⏎⏎After.`:
+    // the same, and an empty bullet is the underline of `one`). The block goes with the break
+    // above it, as Backspace takes it, and the blank line stays (#441). With a blank line above,
+    // the forward edit keeps one and is sound; front matter above has no break to take, and the
+    // caret in a table's hidden pipes is no place for the key to leave it.
+    if (
+      prev &&
+      prev.kind !== 'front-matter' &&
+      next.kind !== 'table' &&
+      blankLines(state, prev, block) === 0 &&
+      blankLines(state, block, next) > 0
+    ) {
+      return edit(
+        state,
+        [{ from: prev.lines.to, to: block.lines.to }],
+        prev.lines.to,
+        userEvent,
+        next.text.from,
+      );
+    }
     // Delete: the next block keeps its kind, the caret at its start.
     const forward = edit(
       state,
