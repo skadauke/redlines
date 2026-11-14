@@ -182,4 +182,36 @@ describe('hidden blank lines', () => {
     },
     60_000,
   );
+
+  // DIAG (never merged): 20 single attempts of the same, in this file's own load.
+  it.skipIf(!process.env['REDLINES_COST'])(
+    'DIAG: the hidden lines, 20 single attempts',
+    () => {
+      const make = (n: number) =>
+        Array.from({ length: n }, (_, i) => `Para ${i}.\n\n<!--del k3x9 old-->\n\n`).join('');
+      const editors = [load(make(1000)), load(make(4000))];
+      const pass = (editor: Editor) => {
+        const start = performance.now();
+        trackedDecorations(editor.view.state);
+        return performance.now() - start;
+      };
+      for (let warm = 0; warm < 3; warm++) editors.forEach((editor) => pass(editor));
+      const ratios: number[] = [];
+      for (let n = 0; n < 20; n++) {
+        const fastest = [Infinity, Infinity];
+        for (let round = 0; round < 9; round++) {
+          editors.forEach((editor, i) => {
+            fastest[i] = Math.min(fastest[i]!, pass(editor));
+          });
+        }
+        ratios.push(fastest[1]! / fastest[0]!);
+      }
+      const sorted = [...ratios].sort((a, b) => a - b);
+      console.log(
+        `DIAG2 hidden lines, 20 single attempts in the file's own load: p50 ${sorted[10]!.toFixed(2)} p90 ${sorted[18]!.toFixed(2)} max ${sorted[19]!.toFixed(2)} min ${sorted[0]!.toFixed(2)}\n` +
+          `  ${ratios.map((r) => r.toFixed(2)).join(' ')}`,
+      );
+    },
+    120_000,
+  );
 });

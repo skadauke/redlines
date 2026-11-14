@@ -844,6 +844,47 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
     expect(result.ours, 'Track Changes on, with the substitution made').toBeLessThan(result.limit);
   }, 120_000);
 
+  // DIAG (never merged): 20 single attempts of the design above, in this file's own load.
+  it('DIAG: the code key against a paragraph key, 20 single attempts', () => {
+    const editor = codeEditor(true);
+    codeTime(editor, true);
+    codeTime(editor, false);
+    paragraphTime(editor);
+    parseTime(doc);
+    const quant = (xs: number[], q: number) =>
+      [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * q))]!;
+    const summary = (xs: number[]) =>
+      `p50 ${quant(xs, 0.5).toFixed(2)} p90 ${quant(xs, 0.9).toFixed(2)} max ${Math.max(...xs).toFixed(2)} min ${Math.min(...xs).toFixed(2)}`;
+    const real: number[] = [];
+    const minmin: number[] = [];
+    const codeOverParagraph: number[] = [];
+    const parseOld: number[] = [];
+    for (let n = 0; n < 20; n++) {
+      const code: number[] = [];
+      const paragraph: number[] = [];
+      for (let turn = 0; turn < 7; turn++) {
+        code.push(codeTime(editor, false));
+        paragraph.push(paragraphTime(editor));
+      }
+      real.push(median(code) / (2 * median(paragraph) + 1));
+      minmin.push(Math.min(...code) / (2 * Math.min(...paragraph) + 1));
+      codeOverParagraph.push(median(code) / median(paragraph));
+      // The old design, for the same moment: the parse first, then the median of seven runs.
+      const limit = bound(parseTime(doc));
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) runs.push(codeTime(editor, false));
+      parseOld.push(median(runs) / limit);
+    }
+    console.log(
+      `DIAG2 code key, Track Changes on, ours / bound, 20 single attempts in the file's own load:\n` +
+        `  the design (median of 7 turns, twice a paragraph key plus 1): ${summary(real)}\n` +
+        `  fastest of each instead: ${summary(minmin)}\n` +
+        `  code key over paragraph key: ${summary(codeOverParagraph)}\n` +
+        `  the old design (twice the parse plus 2), same moments: ${summary(parseOld)}\n` +
+        `  design: ${real.map((r) => r.toFixed(2)).join(' ')}\n  old: ${parseOld.map((r) => r.toFixed(2)).join(' ')}`,
+    );
+  }, 300_000);
+
   it('is at most twice the document’s parse plus 2 ms: Track Changes off', () => {
     const editor = codeEditor(false);
     codeTime(editor, false);
