@@ -600,10 +600,13 @@ mode has no counterpart in the desktop app.
     there is about, and not one stacked down from far above. The one level with its anchor is the
     selected note (clicked, or with the caret in its anchor) while its anchor is in view, else the
     first note whose anchor is; with no anchor in view, the first note below the view, else the
-    last. A comment being written is always the one, and stays where it is while the person types
-    and scrolls. As the page scrolls, the note that is level with its anchor changes with the first
-    anchor in view, and the notes slide into place in a moment, as in Google Docs; they slide only
-    then, and not while a keystroke or a resize moves the text, and not at all under Reduce Motion.
+    last. An Ask bubble the rail lays out (§8.5) is always the one, and stays where it is while the
+    person scrolls; with none, a comment being written is, and stays where it is while the person
+    types and scrolls. With both open, the bubble stays level and the comment's box is placed
+    around it, as a note is, which may leave it lower than its text. As the page scrolls, the note
+    that is level with its anchor changes with the first anchor in view, and the notes slide into
+    place in a moment, as in Google Docs; they slide only then, and not while a keystroke or a
+    resize moves the text, and not at all under Reduce Motion.
     Selecting a note brings it level with its anchor and moves the others out of its way. The dots
     of a narrow window follow the same rule. A scroll places the notes again from what was last
     measured, only when another note is the one, and writes the notes within a screen of the page,
@@ -1522,9 +1525,17 @@ Agent edits are animated, like a streaming chat answer.
     that it changes nothing.
   - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
     live line while it works (what it is doing, with Stop), then the answer. The selection stays
-    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going. A
-    failure stays on the line with its log, and with a button that opens Preferences where they
-    can put it right (the agent is signed out or too old), as a comment's run does.
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going; a
+    press on one of the rail's notes, which the bubble made room around, closes it once that click
+    is over, and not at the press, so that the notes don't move from under the pointer and the
+    click lands. A failure stays on the line with its log, and with a button that opens
+    Preferences where they can put it right (the agent is signed out or too old), as a comment's
+    run does. Where the rail shows its notes, the rail lays the bubble out among them, level with
+    the start of the selection, as it does a new comment's box (§5.7): the notes around it go up
+    or down to clear it, so that none is hidden, and they go back when it closes. A comment's box
+    open at the same time is placed around the bubble, as a note is. Where the rail shows none (a
+    narrow window, where the notes are dots; Clean; a document with no comment) the bubble hangs
+    over the page, in the margin beside the column or, with no room there, under the selection.
   - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
     "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
     an agent's `comment` finds its quote, and makes the marker a link that selects the passage. A

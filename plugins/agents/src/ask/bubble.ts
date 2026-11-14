@@ -59,7 +59,7 @@ export interface Bubble {
   readonly el: HTMLElement;
   render(view: BubbleView): void;
   /** Puts the keyboard in the field, if it is showing. */
-  focusField(): void;
+  focusField(options?: FocusOptions): void;
   /** Whether the field has text the person typed. */
   readonly written: boolean;
   destroy(): void;
@@ -302,8 +302,8 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
         field.focus({ preventScroll: true });
       }
     },
-    focusField() {
-      if (!composer.hidden) field.focus();
+    focusField(options) {
+      if (!composer.hidden) field.focus(options);
     },
     destroy() {
       detachField?.();
