@@ -12,6 +12,7 @@
 // range and the same text stays.
 
 import {
+  CONTAINER_PREFIX,
   bodyStart,
   breaksBetween,
   lineEnd,
@@ -78,9 +79,12 @@ export function wrappedLineStart(
   from: number,
   to: number,
 ): number | undefined {
+  // Most deletions are inside a line: text in front of the range on its line is no prefix.
+  if (from >= to || !CONTAINER_PREFIX.test(text.slice(lineStart(text, from), from)))
+    return undefined;
   const floor = bodyStart(text);
   const end = bodyEnd(text, parsed);
-  if (from >= to || from <= floor || to > end) return undefined;
+  if (from <= floor || to > end) return undefined;
   const breaks = breaksBetween(text, from, to, markers, floor).filter((found) => found.start < end);
   // A range that starts in front of the prefix of its line, or in it (the quote markers, the
   // indentation), starts at the text of the line, as a tracked change's does (`coverBreaks`): the
