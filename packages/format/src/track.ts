@@ -1116,17 +1116,19 @@ function typingOf(tokens: readonly Token[]): Typing {
  * is widened to the start of the break and to the end of the prefix, and the text that comes into it
  * is typed again on either side: `lead` before what is typed, `kept` after.
  *
- * So is a change that replaces or takes out text inside a blank line of the break, as the `>` of the
- * blank line between two paragraphs of a quote does when a space is typed after it (#358): it takes
- * no line break away, and the marker can't stand on that line, so it is widened to the whole break
- * and the prefix of the block after it, and what stays of the break is typed again on either side,
- * as text: `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which
- * holds them, is not typed as breaks; `kept`, the rest of a prefix, never holds one.
+ * So is a change that replaces text inside a blank line of the break, as the `>` of the blank line
+ * between two paragraphs of a quote does when a space is typed after it (#358): it takes no line
+ * break away, and the marker can't stand on that line, so it is widened to the whole break and the
+ * prefix of the block after it, and what stays of the break is typed again on either side, as text:
+ * `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which holds
+ * them, is not typed as breaks; `kept`, the rest of a prefix, never holds one. A deletion there is
+ * not this: it takes the break, or is `blankLineCut`'s.
  */
 function coverBreaks(
   plan: Plan,
   from: number,
   to: number,
+  replaces = false,
 ): Range & { kept: string; lead: string; tail: string } {
   let kept = '';
   let lead = '';
@@ -1158,11 +1160,11 @@ function coverBreaks(
         to = found.end;
         continue;
       }
-      // Text taken out or replaced inside one line of the break between its first line break and the
-      // line of the next block, with no line break in the range: the break stays, all of it, with
-      // what is typed in it, if anything is. (A deletion of the quote markers of a blank line is
-      // `blankLineCut`'s first; what it leaves is this.)
+      // Replaced text inside one line of the break between its first line break and the line of the
+      // next block, with no line break in the range: the break stays, all of it, with what is typed
+      // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
       if (
+        replaces &&
         from > found.start &&
         lineStart(plan.text, from) < prefix &&
         to <= lineEnd(plan.text, from) &&
@@ -3918,7 +3920,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   let tail = '';
   if (blocks) ({ from, to } = blocks);
   else if (!past) {
-    const covered = coverBreaks(plan, from, to);
+    const covered = coverBreaks(plan, from, to, typed !== '');
     ({ from, to } = covered);
     typed += covered.kept;
     lead = covered.lead;

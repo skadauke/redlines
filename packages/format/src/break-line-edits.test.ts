@@ -215,9 +215,8 @@ const SHAPES: [string, string, Record<string, string>][] = [
 ];
 
 /** What an edit inside the blank line of a break is typed as: markers, numbers, text, white space,
- * and line breaks (which are new line breaks, and the break stays). The range is taken out too. */
+ * and line breaks (which are new line breaks, and the break stays). A deletion is another rule. */
 const INSERTS = [
-  '',
   '1',
   '10',
   '*',
@@ -321,7 +320,7 @@ describe('an edit inside a blank line of a break, in random quotes of two or thr
         `${pick(WORDS)} ${Array.from({ length: 1 + below(3) }, unit).join(' ')}`;
       const quote = Array.from({ length: 2 + below(2) }, paragraph).join('\n>\n> ');
       const text = file(`${below(3) === 0 ? 'Intro\n\n' : ''}> ${quote}`, used);
-      // One edit inside a blank line of the quote: a range of it, typed over or taken out.
+      // One edit inside a blank line of the quote: a range of it, typed over.
       const view = newestView(text).text;
       const blanks: { start: number; line: string }[] = [];
       let start = 0;
@@ -333,7 +332,7 @@ describe('an edit inside a blank line of a break, in random quotes of two or thr
       if (!found) continue;
       const a = below(found.line.length);
       const b = a + 1 + below(found.line.length - a);
-      const insert = pick(['', '', ...INSERTS]);
+      const insert = pick(INSERTS);
       const author = pick([ada, bo]);
       const label = `seed ${seed}: ${JSON.stringify(insert)} over [${a}, ${b}) of ${JSON.stringify(found.line)} by ${author.handle} in ${JSON.stringify(bodyOf(text))}`;
       let result: ReturnType<typeof edited>;

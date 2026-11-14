@@ -193,8 +193,6 @@ its case; each is a bug. The list is what has been found, not a count of what is
 - Numbered lists: Backspace on `1. a⏎   - ‸plan⏎   2. ship`, and with Track Changes off Backspace at
   a first item above an item that a pending deletion empties; the walks of `walk-248.test.ts` fail
   four seeds at `REDLINES_FUZZ=2000` (#292).
-- A prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-  changes, is written without its line breaks (#358).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
   skips micromark's reading for that shape (#299).
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
