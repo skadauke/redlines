@@ -1,6 +1,6 @@
-// Debug only: checks Simple in WebKit, where happy-dom can't: the click on a change bar through
-// real layout (the target found by `posAtCoords`, the line kept where it was, the hand, the wider
-// bar and the hint), and the drawing as the page has it. Serve the page with
+// Debug only: checks Redlines' simple look in WebKit, where happy-dom can't: the click on a change
+// bar through real layout (the target found by `posAtCoords` and the layer's bars, the line kept
+// where it was, the hand and the wider bar), and the drawing as the page has it. Serve the page with
 // `VITE_SIMPLE_CHECK=1 pnpm dev` (or `pnpm tauri dev`, for WKWebView) and open it in WebKit: it
 // reads nothing in a release build. Each check reports one console line, `SIMPLE-CHECK <name> pass`
 // or `SIMPLE-CHECK <name> FAIL <json>`, then `SIMPLE-CHECK done <passed> passed, <failed> failed`.
@@ -21,8 +21,10 @@ export interface Drawing {
   editorClass: string;
   /** How many elements of each kind of redline the content holds. */
   drawn: Record<'ins' | 'del' | 'fmt' | 'split' | 'comment' | 'cmt' | 'cmtPoint', number>;
-  /** The change bars: the line's number in the document and the bar's classes. */
+  /** The lines that hold a change: the line's number in the document and the line's classes. */
   bars: { line: number; className: string }[];
+  /** The bars the layer draws beside them, one for each run of screen lines that holds a change. */
+  segments: { className: string; top: number; height: number }[];
   /** The text the lines show, one string per line, without the markers. */
   text: string[];
   /** The page's rail: whether it shows, and how many notes. */
@@ -57,6 +59,14 @@ export function drawing(editor: Editor): Drawing {
       cmtPoint: count(editor, '.rl-cmt-point'),
     },
     bars,
+    segments: [...view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].map((seg) => {
+      const rect = seg.getBoundingClientRect();
+      return {
+        className: [...seg.classList].filter((c) => c !== 'rl-bar-seg').join(' '),
+        top: Math.round(rect.top),
+        height: Math.round(rect.height),
+      };
+    }),
     text: [...view.contentDOM.querySelectorAll('.cm-line')].map((line) => line.textContent ?? ''),
     rail: {
       shown: view.dom.classList.contains('rl-has-rail'),
@@ -68,13 +78,27 @@ export function drawing(editor: Editor): Drawing {
   };
 }
 
+/** The editor being checked, whose measuring `frames` takes on by hand (see there). */
+let measuring: Editor | null = null;
+
+/**
+ * CodeMirror's own measuring, which waits for a frame, done now: the layer's bars are drawn by it,
+ * and a page in a hidden pane or tab gets no frames. `measure` isn't in CodeMirror's types, and
+ * it is what its own tests call; this is debug code.
+ */
+const measureNow = (editor: Editor) => (editor.view as unknown as { measure(): void }).measure();
+
 const frames = async () => {
-  // A page in a hidden pane or tab gets no frames: the timer is the way on.
+  // A page in a hidden pane or tab gets no frames: the timer is the way on, and the editor's own
+  // measuring, which waits for a frame (the layer's bars are drawn by it), is asked for by hand.
+  if (measuring) measureNow(measuring);
   await new Promise((resolve) => {
     requestAnimationFrame(resolve);
     setTimeout(resolve, 100);
   });
+  if (measuring) measureNow(measuring);
   await new Promise((resolve) => setTimeout(resolve, 60));
+  if (measuring) measureNow(measuring);
 };
 
 /** Paragraphs enough to scroll. */
@@ -144,14 +168,26 @@ const barLine = (editor: Editor) =>
     /word,/.test(line.textContent ?? ''),
   ) ?? null;
 
-/** The first line with a bar, its rectangle and the point on its bar's target. */
+/**
+ * The first line with a bar, its rectangle and the point on its bar's target: the middle of the
+ * first piece of the bar that the layer draws beside it, which is the screen lines that hold a
+ * change and not the whole line.
+ */
 function barTarget(
   editor: Editor,
-): { line: HTMLElement; x: number; y: number; top: number } | null {
+): { line: HTMLElement; x: number; y: number; top: number; bar: HTMLElement } | null {
   const line = barLine(editor);
   if (!line) return null;
   const rect = line.getBoundingClientRect();
-  return { line, x: rect.left - 23, y: rect.top + Math.min(8, rect.height / 2), top: rect.top };
+  const bar = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].find(
+    (seg) => {
+      const box = seg.getBoundingClientRect();
+      return box.bottom > rect.top && box.top < rect.bottom;
+    },
+  );
+  if (!bar) return null;
+  const box = bar.getBoundingClientRect();
+  return { line, bar, x: box.left + 1, y: (box.top + box.bottom) / 2, top: rect.top };
 }
 
 /** A press and release at a point, as a mouse sends them. */
@@ -205,11 +241,16 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       editor.setViewMode('redlines');
       await frames();
       const redlines = drawing(editor);
+      // Redlines draws a block deleted whole as a block with a bar of its own, where Simple marks
+      // the line after it: those are the bars Redlines' lines lack, and it has no others.
+      const struck = editor.view.contentDOM.querySelectorAll('.rl-struck').length;
       editor.setViewMode('clean');
       await frames();
       const clean = drawing(editor);
-      if (!same(simple.bars, redlines.bars)) {
-        return { simple: simple.bars, redlines: redlines.bars };
+      const missing = simple.bars.filter((bar) => !redlines.bars.some((each) => same(each, bar)));
+      const extra = redlines.bars.filter((bar) => !simple.bars.some((each) => same(each, bar)));
+      if (extra.length || missing.length !== struck) {
+        return { simple: simple.bars, redlines: redlines.bars, struck };
       }
       return same(simple.text, clean.text) ? null : { simple: simple.text, clean: clean.text };
     },
@@ -298,32 +339,123 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
-    name: 'hover-gives-the-hot-bar-the-hand-and-the-hint',
+    name: 'hover-gives-the-hot-bar-the-hand-and-no-hint',
     async run(editor) {
       await open(editor, 'simple');
       const target = barTarget(editor)!;
       editor.view.scrollDOM.dispatchEvent(mouse('mousemove', target.x, target.y));
       await new Promise((resolve) => setTimeout(resolve, 700));
-      const hot = editor.view.contentDOM.querySelectorAll('.rl-bar-hot').length;
+      measureNow(editor);
+      const hot = editor.view.scrollDOM.querySelectorAll('.rl-bar-seg.rl-bar-hot');
       const cursor = editor.view.scrollDOM.style.cursor;
-      const hint = document.querySelector('.rl-bar-hint')?.textContent ?? null;
-      const width = getComputedStyle(target.line, '::before').width;
+      const width = hot[0]?.getBoundingClientRect().width;
+      // No hint, however long the pointer rests.
+      const hint = document.querySelector('.rl-bar-hint') ?? document.querySelector('.cm-tooltip');
       editor.view.scrollDOM.dispatchEvent(mouse('mouseleave', target.x, target.y));
-      const left = {
-        hot: editor.view.contentDOM.querySelectorAll('.rl-bar-hot').length,
-        hint: document.querySelector('.rl-bar-hint'),
-      };
-      return hot === 1 &&
-        cursor === 'pointer' &&
-        hint === 'Show full markup' &&
-        left.hot === 0 &&
-        !left.hint
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      measureNow(editor);
+      const left = editor.view.scrollDOM.querySelectorAll('.rl-bar-seg.rl-bar-hot').length;
+      return hot.length === 1 && width === 3 && cursor === 'pointer' && !hint && left === 0
         ? null
-        : { hot, cursor, hint, width, left: { hot: left.hot, hint: !!left.hint } };
+        : { hot: hot.length, width, cursor, hint: !!hint, left };
     },
   },
   {
-    name: 'accept-on-a-note-in-simple-decides-nothing',
+    name: 'a-bar-marks-only-the-screen-lines-a-change-is-on',
+    async run(editor) {
+      await open(editor, 'redlines');
+      // A paragraph that wraps over many screen lines, with one word changed on one of them.
+      const filler = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod. ';
+      const doc = [
+        `${filler.repeat(14)}<!--ins k3x9-->three changed words<!--/k3x9--> ${filler.repeat(10)}`,
+        '',
+        'Plain.',
+        '',
+        '<!-- redlines',
+        'version: 1',
+        'people:',
+        '  ada: {name: Ada Lovelace}',
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '-->',
+        '',
+      ].join('\n');
+      editor.reloadDoc(doc);
+      editor.setViewMode('redlines');
+      await frames();
+      const line = editor.view.contentDOM.querySelector<HTMLElement>('.cm-line.rl-bar');
+      const ins = editor.view.contentDOM.querySelector<HTMLElement>('.rl-ins');
+      const seg = editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg');
+      if (!line || !ins || seg.length !== 1)
+        return { line: !!line, ins: !!ins, segments: seg.length };
+      const lineBox = line.getBoundingClientRect();
+      const insBox = ins.getBoundingClientRect();
+      const bar = seg[0]!.getBoundingClientRect();
+      // Far shorter than the paragraph, and level with the changed words.
+      const covers = bar.top <= insBox.top + 2 && bar.bottom >= insBox.bottom - 2;
+      const short = bar.height < lineBox.height / 3;
+      const left = Math.abs(bar.left - (lineBox.left - 24)) < 1;
+      return covers && short && left
+        ? null
+        : {
+            covers,
+            short,
+            left,
+            bar: [bar.top, bar.bottom],
+            ins: [insBox.top, insBox.bottom],
+            line: [lineBox.top, lineBox.bottom],
+          };
+    },
+  },
+  {
+    name: 'a-change-at-the-edge-of-a-paragraph-has-a-bar-as-tall-as-its-lines',
+    async run(editor) {
+      await open(editor, 'redlines');
+      // The markers the page hides stand at the ends of these paragraphs: one ends in a closer, one
+      // starts with an opener, and one wraps over screen lines with its change at the very end.
+      const filler = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod. ';
+      const doc = [
+        'Ends with <!--ins k3x9-->a change<!--/k3x9-->',
+        '',
+        '<!--ins q3q3-->Begins<!--/q3q3--> with one',
+        '',
+        `${filler.repeat(12)}<!--ins r2r2-->the last words<!--/r2r2-->`,
+        '',
+        '<!-- redlines',
+        'version: 1',
+        'people:',
+        '  ada: {name: Ada Lovelace}',
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  q3q3: {by: ada, at: 2026-10-31T09:31Z}',
+        '  r2r2: {by: ada, at: 2026-10-31T09:32Z}',
+        '-->',
+        '',
+      ].join('\n');
+      editor.reloadDoc(doc);
+      editor.setViewMode('redlines');
+      await frames();
+      const lines = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-bar')];
+      const segs = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')];
+      if (lines.length !== 3 || segs.length !== 3) {
+        return { lines: lines.length, segments: segs.length };
+      }
+      const problems: Problem = {};
+      const [ends, begins, long] = lines.map((el) => el.getBoundingClientRect());
+      const [endsBar, beginsBar, longBar] = segs.map((el) => el.getBoundingClientRect());
+      // A paragraph of one screen line: its bar is as tall as the line, not half of it.
+      if (Math.abs(endsBar!.height - ends!.height) > 3)
+        problems['ends'] = [endsBar!.height, ends!.height];
+      if (Math.abs(beginsBar!.height - begins!.height) > 3)
+        problems['begins'] = [beginsBar!.height, begins!.height];
+      // The long one: only its last screen lines, down to the bottom of the paragraph.
+      if (longBar!.bottom < long!.bottom - 3 || longBar!.height > long!.height / 2)
+        problems['long'] = [longBar!.top, longBar!.bottom, long!.top, long!.bottom];
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    name: 'accept-on-a-note-in-simple-decides-in-place',
     async run(editor) {
       await open(editor, 'simple');
       const before = editor.getDoc();
@@ -336,21 +468,34 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
           /Accept/.test(b.textContent + (b.getAttribute('aria-label') ?? '')),
         );
       if (!accept) return { note: 'no note with an Accept button was drawn' };
+      // What the note says it decides, before the click: in words, as a card does.
+      const says = note.querySelector('.rl-note-change')?.textContent ?? null;
+      // Whatever scrolls, and where it is: a decision leaves every one of them there.
+      const scrollers = [...document.querySelectorAll<HTMLElement>('*')].filter(
+        (el) =>
+          el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY),
+      );
+      const scrolled = scrollers.map((el) => el.scrollTop);
       accept.click();
       await frames();
-      const range = editor.view.state.selection.main;
       const problems: Problem = {};
-      if (editor.getDoc() !== before) problems['decided'] = true;
-      if (editor.getUiState().view !== 'redlines') problems['view'] = editor.getUiState().view;
+      if (!says || !/^(Replaced|Inserted|Deleted)/.test(says)) problems['says'] = says;
+      if (editor.getDoc() === before || editor.getDoc().includes('<!--sub p7qd')) {
+        problems['decided'] = false;
+      }
+      if (editor.getUiState().view !== 'simple') problems['view'] = editor.getUiState().view;
       if (editor.getUiState().markupView !== 'simple')
         problems['markupView'] = editor.getUiState().markupView;
-      if (range.empty) problems['selection'] = 'empty';
+      const moved = scrollers.map((el, i) => el.scrollTop - (scrolled[i] ?? 0));
+      if (moved.some((by) => Math.abs(by) > 1)) problems['scroll'] = moved;
+      if (!scrollers.length) problems['scrollers'] = 'nothing scrolls, so the page was not tried';
       return Object.keys(problems).length ? problems : null;
     },
   },
 ];
 
 export async function runSimpleCheck(editor: Editor): Promise<void> {
+  measuring = editor;
   await new Promise((resolve) => setTimeout(resolve, 800));
   const run = async () => {
     let passed = 0;

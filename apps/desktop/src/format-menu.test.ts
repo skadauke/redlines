@@ -132,6 +132,7 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
     'Separator',
     ['Code Block', 'CmdOrCtrl+Alt+C'],
     ['Table', 'CmdOrCtrl+Alt+T'],
+    ['Alert', undefined],
     ['Horizontal Rule', undefined],
     'Separator',
     ['Indent', 'CmdOrCtrl+]'],

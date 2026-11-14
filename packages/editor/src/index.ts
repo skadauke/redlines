@@ -75,6 +75,7 @@ import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
+import { barLayer } from './tracked/bar-layer.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
@@ -112,6 +113,12 @@ export { followText } from './anchor.ts';
 export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
+export {
+  calloutMenuEffect,
+  calloutName,
+  calloutOf,
+  type CalloutMenuRequest,
+} from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
@@ -210,10 +217,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let markupView: MarkupView = options.markupView ?? 'redlines';
   /**
    * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
-   * the markup view, unless the review bar showed the full markup without choosing it, and starts
-   * over from it with each document.
+   * the markup view, unless the review bar showed the full markup without choosing it, or the
+   * document opened in the full markup by its ledger (format §5.6); it starts over with each
+   * document, from the look the document opened in (`lookOf`).
    */
   let shownLook: MarkupView = markupView;
+  /** The look of Redlines that `state` shows, or the markup view when it shows another view. */
+  const lookOf = (state: EditorState): MarkupView => {
+    const shown = state.field(viewModeField);
+    return shown === 'simple' || shown === 'redlines' ? shown : markupView;
+  };
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
   let told: string | null = null;
@@ -227,7 +240,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
-    barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
+    barLayer(),
+    barSwitch(),
     trackedTyping(),
     openBlocks(),
     emptyLineTyping,
@@ -344,6 +358,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
+  shownLook = lookOf(view.state);
   /** Asks the host to record the people of the document that its record lacks. */
   function tellNewPeople(): void {
     if (destroyed || !people || !options.onNewPeople) return;
@@ -376,8 +391,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     commands,
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
-      shownLook = markupView;
       view.setState(stateFor(loadFile(doc)));
+      shownLook = lookOf(view.state);
       told = fileText(view.state);
       report();
       tellNewPeople();

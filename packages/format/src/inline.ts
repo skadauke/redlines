@@ -121,7 +121,8 @@ export interface Hit {
     | 'link'
     | 'reference'
     | 'image'
-    | 'comment';
+    | 'comment'
+    | 'alert';
   text?: Range;
   dest?: Range;
   /** The alt text of an image. */
@@ -140,7 +141,8 @@ const FOOTNOTE = /\[\^[^\]\s]+\]/g;
 const MATH = /(?<![\\$])\$(?=\S)[^$\n]*?(?<=[^\s\\$])\$(?![\d$])|(?<![\\$])\$[^\s$\\]\$(?![\d$])/g;
 const SHORTCODE = /(?<![A-Za-z0-9]):[a-z][a-z0-9_+-]*:(?![A-Za-z0-9])/g;
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
-const ALERT = /^[ \t>]*\[![A-Za-z]+\]/gm;
+/** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
+const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
 /** The end of a URL in running text: GitHub leaves out the punctuation that ends a sentence, and
  * a closing parenthesis that has no opening one. */
@@ -275,7 +277,9 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       hi: end - 1,
       from: open,
       to: end,
-      refuse: 'A marker can not go in or before [!TYPE].',
+      kind: 'alert',
+      refuse:
+        "This is an alert's type: a change can't start in it or before it. Choose another type from the alert's menu, or edit the text of the alert.",
     });
   }
   // Escapes: a backslash and the character it escapes. A backslash before a marker escapes it.

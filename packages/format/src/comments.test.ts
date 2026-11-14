@@ -844,6 +844,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
     let refused = 0;
     let wholeBlocks = 0;
     let wholeRefused = 0;
+    // A comment on a whole alert has no place for its opener: nothing may go before the type.
+    let alertsRefused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 6007);
       const below = (n: number) => Math.floor(random() * n);
@@ -885,7 +887,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
             if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
               refused++;
               // A body that ends in a closing `_` has no place for a closer at its end (format §4).
-              if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
+              if (whole && /alert's type/.test(error.message)) alertsRefused++;
+              else if (whole && !endsInClosingUnderscore(text, to)) wholeRefused++;
               continue;
             }
             throw new Error(`${label}: ${String(error)}`, { cause: error });
@@ -933,6 +936,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
     expect(operations + refused).toBe(documents * 4);
     expect(operations).toBeGreaterThan(refused);
     // A comment on whole blocks goes through, but where a construct has no place for its marker.
-    expect(wholeRefused).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));
+    expect(
+      wholeRefused,
+      `${alertsRefused} comments on a whole alert were refused apart`,
+    ).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));
   });
 });

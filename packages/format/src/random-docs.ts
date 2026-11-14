@@ -85,9 +85,25 @@ const NEWER_CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => strin
   (pick) => `${pick(WORDS)}\\\\`,
 ];
 
+/** The first lines of an alert (#311, format §3.1, §3.3): GitHub's types in capitals and in lowercase,
+ * a type that GitHub doesn't have, and a title and a fold mark after the type, which are text to
+ * GitHub. */
+const ALERT_LINES = [
+  '[!NOTE]',
+  '[!TIP]',
+  '[!IMPORTANT]',
+  '[!WARNING]',
+  '[!CAUTION]',
+  '[!note]',
+  '[!tip]',
+  '[!info]',
+  '[!NOTE]- Folded',
+  '[!info] A title',
+];
+
 /** What a random document holds besides the blocks every one may have. */
 export interface RandomDocumentOptions {
-  /** Draw only what the generator drew before the forms of #310 and after, so that a test that pins
+  /** Draw only what the generator drew before the forms of #310 and #311, so that a test that pins
    * a seed it found by a long run makes the document it was found with. The other documents of
    * every suite hold the newer forms (`NEWER_CONSTRUCTS`). */
   legacy?: boolean;
@@ -229,6 +245,12 @@ export function randomDocument(random: () => number, options: RandomDocumentOpti
       // Lines indented four columns past the text of the paragraph or item they go on.
       if (where === 3) return line('    ');
       return `- ${line('      ')}`;
+    }
+    // An alert: a quote that starts with a type in brackets, then a paragraph's lines (not two
+    // paragraphs: a prefix edit of the blank quote line between them is written wrong, #358). Not
+    // in the documents of a pinned seed (`legacy`), which draw nothing here.
+    if (options.legacy !== true && below(7) === 0) {
+      return `> ${pick(ALERT_LINES)}\n> ${line('> ')}`;
     }
     const kind = below(10);
     if (kind < 5) return line('');
