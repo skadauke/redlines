@@ -1181,10 +1181,11 @@ whose name and first bytes both say it is an image the preview shows, sent with 
 nothing in it run. The app tells a window of paths by the same two limits: the names in a folder,
 only for a project folder a sidebar shows and for the folders below it that the sidebar lists (none
 hidden, none that git ignores), and the real path of a file, links followed, only for a file the
-person opened or saved and for what is inside a project folder a sidebar shows, so that a window
-can't find out which files are on the disk, or where a link leads. Asking for a document's project
-is what shows it, once the person has opened or saved the document. Anything else gets the same
-refusal, whether it is there or not. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+person opened or saved and for what is inside a project folder a sidebar shows, with no hidden name
+below the folder. A link in a project that leads out of it is no more known than the file it leads
+to, and anything else asked of gets one refusal, which says nothing of whether the path is there.
+Asking for a document's project is what shows it, once the person has opened or saved the document,
+by a path with no `..` in it, as a dialog gives it. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
 dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and

@@ -290,8 +290,9 @@ fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
 type FolderShown = Box<dyn Fn(&Path, bool) + Send + Sync>;
 
 /// The folders the sidebars show: that of each document a window showed that the person opened or
-/// saved (`file_scope::held`). The sidebar opens documents in them, though the window names none:
-/// what it may use is decided by what the person was shown. Kept until the app quits.
+/// saved (`file_scope::held`, and the project a window asks for, `project_of`). The sidebar opens
+/// documents in them, though the window names none: what it may use is decided by what the person
+/// was shown. Kept until the app quits.
 #[derive(Default)]
 pub struct Projects {
     folders: Mutex<Vec<PathBuf>>,
@@ -314,6 +315,16 @@ impl Projects {
     }
 
     fn show_with(&self, file: &Path, home: Option<&Path>) {
+        // A path as a dialog gives it: absolute, and with no `..` in it. The search for a `.git`
+        // follows the names a path holds, so one that leaves a repository on the way
+        // (`repo/../elsewhere/x.md`) would show a repository the file is not in.
+        if !file.is_absolute()
+            || file
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+        {
+            return;
+        }
         let folder = sidebar_folder(file, home);
         // A document's own folder, where the project is too broad, shows its files alone.
         let whole = !root_of(file, home).too_broad;
@@ -451,8 +462,24 @@ fn document_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Path
 /// no other call has to come first.
 #[tauri::command(async)]
 pub fn project_root(app: AppHandle, path: String) -> ProjectRoot {
-    file_scope::show_project(&app, &path);
-    root_of(Path::new(&path), std::env::home_dir().as_deref())
+    project_of(
+        &app.fs_scope(),
+        &app.state::<Projects>(),
+        &path,
+        std::env::home_dir().as_deref(),
+    )
+}
+
+/// `project_root`, with the app's parts: the project of the document at `path`, shown if the scope
+/// allows the document.
+fn project_of(
+    scope: &tauri::fs::Scope,
+    projects: &Projects,
+    path: &str,
+    home: Option<&Path>,
+) -> ProjectRoot {
+    file_scope::show(scope, projects, path);
+    root_of(Path::new(path), home)
 }
 
 /// The entries of a folder that a sidebar shows, inside the project folder `root` that it shows
@@ -527,6 +554,80 @@ mod tests {
                 fs::write(&path, "").unwrap();
             }
         }
+    }
+
+    /// The file system plugin's scope, as the app starts with it: empty.
+    fn scope() -> tauri::fs::Scope {
+        let app = tauri::test::mock_app();
+        tauri::fs::Scope::new(
+            &app,
+            &tauri::utils::config::FsScope::AllowedPaths(Vec::new()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_path_with_a_way_out_in_it_shows_no_project() {
+        let disk = folder("show-way-out");
+        make(
+            &disk,
+            &[
+                "other-repo/.git/",
+                "other-repo/payroll/salaries.csv",
+                "desktop/x.md",
+            ],
+        );
+        let projects = Projects::default();
+        // The file is on the desktop, but the folders the path names on the way to it include a
+        // repository that the person never opened, and the search for a `.git` follows the names.
+        projects.show(&disk.join("other-repo/../desktop/x.md"));
+        assert!(projects.folders().is_empty());
+        // As the person's own dialogs give it, the same file shows the project it is in.
+        projects.show(&disk.join("desktop/x.md"));
+        assert_eq!(projects.folders(), [disk.join("desktop")]);
+        // A path that leads from wherever the app was started shows nothing either.
+        let other = Projects::default();
+        other.show(Path::new("x.md"));
+        other.show(Path::new("desktop/x.md"));
+        assert!(other.folders().is_empty());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn asking_for_the_project_of_a_document_the_person_opened_shows_it_and_no_other() {
+        let disk = folder("project-of");
+        make(
+            &disk,
+            &[
+                "notes/.git/",
+                "notes/plan.md",
+                "other/.git/",
+                "other/secret.md",
+            ],
+        );
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(disk.join("notes/plan.md")).unwrap();
+        let ask = |path: PathBuf| project_of(&scope, &projects, &path.to_string_lossy(), None);
+
+        // A document the window wasn't given: the same answer as ever, and nothing is shown.
+        let answer = ask(disk.join("other/secret.md"));
+        assert_eq!(answer, root(&disk.join("other"), true, false));
+        assert!(projects.folders().is_empty());
+        // A document it was given, by a path that names another repository on the way and
+        // leaves it: not the project of that repository.
+        ask(disk.join("other/../notes/plan.md"));
+        assert!(projects.folders().is_empty());
+        // As the dialog gave it: the project is shown, which the sidebar, with the folder from this
+        // answer, then lists, and no folder it doesn't show.
+        let answer = ask(disk.join("notes/plan.md"));
+        assert_eq!(answer, root(&disk.join("notes"), true, false));
+        let shown = projects.folders();
+        assert_eq!(shown, [disk.join("notes")]);
+        let notes = disk.join("notes");
+        assert!(list_shown_with(&shown, &notes, &notes, false).is_ok());
+        let other = disk.join("other");
+        assert!(list_shown_with(&shown, &other, &other, false).is_err());
+        fs::remove_dir_all(&disk).unwrap();
     }
 
     #[test]
@@ -778,6 +879,11 @@ mod tests {
         // The project's root doesn't reach the folders around it either.
         assert!(shown_names(&shown, &repo, &elsewhere).is_err());
         assert!(shown_names(&shown, &repo, &repo.join("../elsewhere")).is_err());
+        // Nor is a folder of the project, or the folder above it, a root of its own.
+        let docs = repo.join("docs");
+        assert!(shown_names(&shown, &docs, &docs).is_err());
+        assert!(shown_names(&shown, &disk, &repo).is_err());
+        assert!(shown_names(&shown, &disk, &disk).is_err());
         // Where no sidebar shows anything, nothing is listed.
         assert!(shown_names(&[], &repo, &repo).is_err());
         fs::remove_dir_all(&disk).unwrap();
@@ -819,17 +925,30 @@ mod tests {
         let disk = folder("shown-link");
         make(
             &disk,
-            &["repo/.git/", "repo/docs/plan.md", "elsewhere/secret.md"],
+            &[
+                "repo/.git/",
+                "repo/docs/plan.md",
+                "repo/.hidden/docs/note.md",
+                "elsewhere/secret.md",
+            ],
         );
         let repo = disk.join("repo");
         symlink(disk.join("elsewhere"), repo.join("out")).unwrap();
         symlink(repo.join("docs"), repo.join("in")).unwrap();
+        symlink(repo.join(".hidden/docs"), repo.join("hidden-in")).unwrap();
         let shown = [repo.clone()];
         assert!(shown_names(&shown, &repo, &repo.join("out")).is_err());
         assert_eq!(
             shown_names(&shown, &repo, &repo.join("in")).unwrap(),
             ["plan.md"]
         );
+        // The sidebar lists a link, by the name it has, and what it leads to inside the project,
+        // though not that folder by its own name.
+        assert_eq!(
+            shown_names(&shown, &repo, &repo.join("hidden-in")).unwrap(),
+            ["note.md"]
+        );
+        assert!(shown_names(&shown, &repo, &repo.join(".hidden/docs")).is_err());
         fs::remove_dir_all(&disk).unwrap();
     }
 
@@ -842,7 +961,12 @@ mod tests {
         symlink(&real, &link).unwrap();
         // The sidebar shows the folder by the path the window holds, which goes through the link.
         let shown = [link.clone()];
-        for (root, below) in [(&link, link.join("docs")), (&real, real.join("docs"))] {
+        for (root, below) in [
+            (&link, link.join("docs")),
+            (&real, real.join("docs")),
+            // A root as the window holds it, and the folder as it really is.
+            (&link, real.join("docs")),
+        ] {
             assert_eq!(shown_names(&shown, root, &below).unwrap(), ["plan.md"]);
             assert!(shown_names(&shown, root, &disk).is_err());
         }
