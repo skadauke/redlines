@@ -8,7 +8,14 @@
 // The tools act on the live editor. Each run is bound to the document it was posted in: a tool call
 // that arrives after another document took its place is refused, and stops the run.
 
-import { agentPrompt, answerMcp, callTool, fitReply } from '@redlines/agent-tools';
+import {
+  agentPrompt,
+  answerMcp,
+  callTool,
+  fitReply,
+  replyOnlyPrompt,
+  replyOnlyRequest,
+} from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
 import type { AgentStep, Author } from '@redlines/editor';
 import { parse } from '@redlines/format';
@@ -34,6 +41,8 @@ export type LiveLine =
       agentName: string;
       folder: string;
       readLimit: 'folder' | 'machine';
+      /** `false` for an agent with no toolbox: it is sent the document and the thread. */
+      toolbox?: false;
       /**
        * For a question, which asks only for an answer: the panel says it changes nothing, not that
        * it changes this document. That is so for an agent held to reading its folder; one that reads
@@ -524,6 +533,7 @@ export function createRuns(deps: RunDeps): RunController {
           ...who(run),
           folder,
           readLimit: run.job.agent.readLimit,
+          ...(run.job.agent.toolbox === false ? { toolbox: false as const } : {}),
           ...(home ? { home: true as const } : {}),
         },
         run.job.generation,
@@ -587,7 +597,7 @@ export function createRuns(deps: RunDeps): RunController {
     }
     const me = deps.author.handle;
     const text = deps.document.read();
-    const thread = parse(text).ledger.comments.find(({ id }) => id === job.thread);
+    const threadOf = parse(text).ledger.comments.find(({ id }) => id === job.thread);
     const author: Person = {
       handle: agentHandle(agent.id, me),
       name: agent.name,
@@ -605,16 +615,34 @@ export function createRuns(deps: RunDeps): RunController {
         run.replied = true;
       },
     };
-    const request: AgentRequest = {
-      prompt: job.text,
-      systemPrompt: agentPrompt({
-        documentName: path === null ? 'Untitled' : basename(path),
-        quote: thread?.quote,
+    const documentName = path === null ? 'Untitled' : basename(path);
+    // An agent with no toolbox can't ask for the thread or the document, so they are in its prompt,
+    // read as its tools would show them, and it answers in text (`ended` posts the last message).
+    let prompt = job.text;
+    let systemPrompt: string;
+    if (agent.toolbox === false) {
+      const [thread, view] = await Promise.all([
+        callTool(ctx, 'read_thread', {}),
+        callTool(ctx, 'view', {}),
+      ]);
+      if (run.over || stopIfGone(run)) return;
+      const unread = [thread, view].find((read) => read.isError);
+      if (unread) return finish(run, failed(run, `${agent.name} didn't start: ${unread.text}`));
+      prompt = replyOnlyRequest({ thread: thread.text, document: view.text, request: job.text });
+      systemPrompt = replyOnlyPrompt({ documentName, quote: threadOf?.quote });
+    } else {
+      systemPrompt = agentPrompt({
+        documentName,
+        quote: threadOf?.quote,
         scope: reach.scope,
         folder: reach.folder,
         ...(refused.length > 0 ? { outOfReach: refused.map(({ folder }) => folder) } : {}),
         ...(home === undefined ? {} : { home: { folder: home.home, roots: home.roots } }),
-      }),
+      });
+    }
+    const request: AgentRequest = {
+      prompt,
+      systemPrompt,
       thread: job.thread,
       ...(path === null ? {} : { documentPath: path }),
       ...(reach.folder === undefined ? {} : { folder: reach.folder }),
