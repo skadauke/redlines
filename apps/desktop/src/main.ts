@@ -62,7 +62,7 @@ import {
 } from './settings.ts';
 import { followScrollbar } from './scrollbar.ts';
 import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
-import { applyTextSize, stepSize } from './text-size.ts';
+import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
@@ -72,7 +72,14 @@ import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from './zoom.ts';
+import {
+  applyZoom,
+  followZoom,
+  initialZoom,
+  nextZoom,
+  tauriZoomLink,
+  type PageZoom,
+} from './zoom.ts';
 import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -228,7 +235,6 @@ const editor = createEditor(element('#editor'), {
     : undefined,
   showLineBreakMarks: settings.showLineBreakMarks,
   markupView: settings.markupView,
-  viewKeys: { simple: '⌥⌘2', redlines: '⌥⌘3' },
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -654,7 +660,7 @@ const percent = (level: number) => `${Math.round(level * 100)}%`;
 const changeZoom = (change: { by: number } | { to: number }) => {
   if (!zoom) return;
   const from = zoom.level();
-  const level = 'to' in change ? change.to : stepSize(from, change.by);
+  const level = nextZoom(from, change);
   if (level === from) return;
   void zoom.ask(level).catch((error: unknown) => {
     console.error('Could not zoom the windows', error);
@@ -702,7 +708,7 @@ function renameDocument(): void {
 }
 
 const titleBar = createTitleBar(element('#titlebar'), {
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
   toggleTracking,
   openReview,
   toggleResolved,
@@ -783,7 +789,7 @@ const commands: MenuCommands = {
       notice.flash('Couldn’t print.');
     }),
   quit: () => void windows?.quit(),
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
   toggleSidebar,
   toggleTracking,
   openReview,

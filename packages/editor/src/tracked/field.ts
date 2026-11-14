@@ -4,7 +4,7 @@
 
 import { Annotation, Compartment, Facet, StateEffect, StateField } from '@codemirror/state';
 import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
-import type { Author, MarkupView, MetPerson, ViewMode } from '../api.ts';
+import type { Author, MarkupView, MenuView, MetPerson, ViewMode } from '../api.ts';
 
 /**
  * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
@@ -35,8 +35,8 @@ export const lineBreakMarksFacet = Facet.define<boolean, boolean>({
 });
 
 /**
- * The markup view chosen last, Simple or Redlines, which the editor shows where it picks one for
- * you (design: Which markup view, when).
+ * The look of Redlines chosen last, the full markup or the simple look, which the editor shows
+ * where it picks Redlines for you (design: Which look, when).
  */
 export const markupViewFacet = Facet.define<MarkupView, MarkupView>({
   combine: (values) => values[0] ?? 'redlines',
@@ -48,9 +48,17 @@ export const markupViewFacet = Facet.define<MarkupView, MarkupView>({
 export const markupViewCompartment = new Compartment();
 
 /**
- * What choosing a view does, as effects for one transaction: shows it, and when it is Simple or
- * Redlines makes it the markup view too. The review bar and the automatic switches dispatch
- * `setViewModeEffect` alone, because they don't choose.
+ * The view a View menu lists for a mode (design §5.3): Redlines for both of its looks, so Simple,
+ * which is a look and no view of its own, is Redlines to a menu.
+ */
+export function menuViewOf(mode: ViewMode): MenuView {
+  return mode === 'simple' ? 'redlines' : mode;
+}
+
+/**
+ * What choosing a look or a view does, as effects for one transaction: shows it, and when it is
+ * Simple or Redlines makes it the markup view (the look chosen last) too. The review bar and the
+ * automatic switches dispatch `setViewModeEffect` alone, because they don't choose.
  */
 export function chooseViewEffects(mode: ViewMode): StateEffect<unknown>[] {
   const effects: StateEffect<unknown>[] = [setViewModeEffect.of(mode)];
@@ -158,12 +166,11 @@ export const holdViewAnnotation = Annotation.define<boolean>();
 
 /**
  * How the document is shown. It starts in the view its ledger says it was saved in (`view`, format
- * §5.6), or else in the markup view (Simple or Redlines, whichever was chosen last) when the
- * document has redlines and in Clean when it doesn't (design §5.3), and after that it stays as
- * chosen: Redlines is available whatever the document holds, so one whose last redline goes stays
- * in it. The one exception is a document that gains redlines while it is shown Clean, as when an
- * agent's suggestions arrive, which switches to the markup view, so suggestions are never
- * invisible.
+ * §5.6), or else in Redlines, in the look chosen last (the markup view), when the document has
+ * redlines and in Clean when it doesn't (design §5.3), and after that it stays as chosen: Redlines
+ * is available whatever the document holds, so one whose last redline goes stays in it. The one
+ * exception is a document that gains redlines while it is shown Clean, as when an agent's
+ * suggestions arrive, which switches to Redlines in that look, so suggestions are never invisible.
  */
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => {

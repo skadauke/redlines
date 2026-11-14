@@ -198,6 +198,34 @@ describe('column grips', () => {
     expect(layer(editor)?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('measures the columns again when the table has been scrolled sideways in its box', () => {
+    const editor = mount();
+    move(editor, colX(0), TOP - 10);
+    expect(colGrip(editor)?.dataset['col']).toBe('0');
+    // The box scrolls the table 200 px left: what was column 1 is where column 0 was. The page, the
+    // text and the table's top are as they were; only its left edge has moved.
+    tableLeft = LEFT - 200;
+    move(editor, colX(0), TOP - 10);
+    expect(colGrip(editor)?.dataset['col']).toBe('1');
+  });
+
+  it('puts the grips away when the table scrolls in its box, which no event of the editor tells', () => {
+    const editor = mount();
+    move(editor, colX(0), TOP - 10);
+    expect(colGrip(editor)).not.toBeNull();
+    // A scroll event does not bubble: it is heard by its capture, from whatever scrolls in the page.
+    editor.view.dom
+      .querySelector('.rl-tbl-scroll')!
+      .dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(colGrip(editor)).toBeNull();
+    move(editor, LEFT + 50, rowY(2));
+    expect(grip(editor)).not.toBeNull();
+    editor.view.dom
+      .querySelector('.rl-tbl-scroll')!
+      .dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(grip(editor)).toBeNull();
+  });
+
   it('selects the column on a press and opens its menu, with counted titles', () => {
     const editor = mount();
     move(editor, colX(0), TOP - 10);

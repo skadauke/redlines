@@ -42,7 +42,7 @@ const layout: BarGeometry = {
 function load(
   options: Partial<EditorOptions> = {},
   hintDelay = 400,
-  keys: ViewKeys = { simple: '⌥⌘2', redlines: '⌥⌘3' },
+  keys: ViewKeys = { simple: '⌃S', redlines: '⌃R' },
 ) {
   const parent = document.createElement('div');
   document.body.append(parent);
@@ -187,7 +187,7 @@ describe('the click on a change bar', () => {
     expect(hot()).toBe(1);
     expect(scrollDOM.style.cursor).toBe('pointer');
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(hint()).toBe('Show Redlines⌥⌘3');
+    expect(hint()).toBe('Show full markup⌃R');
     scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
     expect(hot()).toBe(0);
     expect(hint()).toBeUndefined();
@@ -196,7 +196,7 @@ describe('the click on a change bar', () => {
     editor.setViewMode('redlines');
     scrollDOM.dispatchEvent(mouse('mousemove', { x: ON_BAR.x, y: 35 }));
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(hint()).toBe('Show Simple⌥⌘2');
+    expect(hint()).toBe('Show simple look⌃S');
     // A move off the target.
     scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
     expect(hot()).toBe(0);
@@ -206,7 +206,7 @@ describe('the click on a change bar', () => {
     const editor = load({ view: 'simple' }, 5, {});
     editor.view.scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(document.querySelector('.rl-bar-hint')?.textContent).toBe('Show Redlines');
+    expect(document.querySelector('.rl-bar-hint')?.textContent).toBe('Show full markup');
     expect(document.querySelector('.rl-bar-hint-keys')).toBeNull();
   });
 
