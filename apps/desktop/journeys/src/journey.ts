@@ -329,7 +329,9 @@ export class Journey {
    * look in the name: `-dark`, `-200`), and fails when it differs by more than a little (see the
    * config's `toHaveScreenshot`). A failed run writes the image it got and a diff beside the
    * expected one in the run's output folder. A baseline that doesn't exist fails the journey; the
-   * ones to approve are written by `pnpm journeys:accept`, on purpose, and reviewed in the PR.
+   * ones to approve are written by `pnpm journeys:accept`, on purpose, and reviewed in the PR. The
+   * caret is hidden in it (assert where it is with `caret()`). A name must not be another's with
+   * a look added: `a-dark` in the light look is `a` in the dark one.
    * Keep baselines few: the ones that guard a look, not every moment.
    */
   async baseline(
@@ -337,6 +339,8 @@ export class Journey {
     options: { clip?: { x: number; y: number; width: number; height: number } } = {},
   ): Promise<void> {
     await this.settle();
+    // CodeMirror draws its caret as an element, which Playwright's own caret hiding doesn't know.
+    await this.page.addStyleTag({ content: '.cm-cursorLayer { visibility: hidden !important; }' });
     await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, options);
   }
 }

@@ -6,9 +6,11 @@ import type { JourneyOptions } from './src/journey.ts';
 // engine the app draws with. The server is started for the run, on JOURNEYS_PORT (1482 unless a
 // lane has its own port), and one that is already running there is reused when not in CI.
 // A server already running on that port is driven as it is, whatever code it serves: in your own
-// worktree, use your own port. `JOURNEYS_BASE_URL` points the run at a server you started yourself, and then none is started.
+// worktree, use your own port. `JOURNEYS_BASE_URL` points the run at a server you started yourself,
+// and then none is started.
 const port = Number(process.env['JOURNEYS_PORT'] ?? 1482);
-if (!Number.isInteger(port) || port < 1) throw new Error('JOURNEYS_PORT is not a port number');
+if (!Number.isInteger(port) || port < 1 || port > 65535)
+  throw new Error('JOURNEYS_PORT is not a port number');
 const baseURL = process.env['JOURNEYS_BASE_URL'] ?? `http://localhost:${port}`;
 
 // The looks a journey runs in. A baseline's file name carries its look (`name-dark-200.png`), so
@@ -22,7 +24,17 @@ const looks: Record<string, JourneyOptions> = {
   'dark-200': { scheme: 'dark', textSize: 2 },
 };
 const asked = process.env['JOURNEYS_PROJECTS'] ?? 'light';
-const chosen = asked === 'all' ? Object.keys(looks) : asked.split(',').map((name) => name.trim());
+const chosen =
+  asked === 'all'
+    ? Object.keys(looks)
+    : [
+        ...new Set(
+          asked
+            .split(',')
+            .map((name) => name.trim())
+            .filter(Boolean),
+        ),
+      ];
 for (const name of chosen) {
   if (!(name in looks)) throw new Error(`JOURNEYS_PROJECTS: no look called "${name}"`);
 }
@@ -33,15 +45,19 @@ export default defineConfig<JourneyOptions>({
   // The approved screenshots, in the repository: one folder per spec file, one image per baseline.
   // `pnpm journeys:accept` writes them, on purpose (see the README).
   snapshotPathTemplate: '{testDir}/../baselines/{testFilePath}/{arg}{ext}',
+  // A run never writes a baseline: a missing one fails, and `pnpm journeys:accept` is what writes
+  // (`--update-snapshots=changed`), on purpose.
+  updateSnapshots: 'none',
   expect: {
     toHaveScreenshot: {
-      // At most 30 pixels differ (a caret is about 20), each by more than a small colour distance:
-      // antialiasing doesn't fail a run, a letter that changed, a moved line or a menu does. A
-      // whole-window share would let a word through: the window is a million pixels.
-      maxDiffPixels: 30,
+      // At most 15 pixels differ, each by more than a small colour distance: antialiasing doesn't
+      // fail a run, a letter that changed, a moved line or a menu does (one letter is some 40
+      // pixels). A share of the window would let a word through: the window is a million pixels.
+      // The caret is hidden in a baseline (`baseline()`), since where it is a journey asserts.
+      maxDiffPixels: 15,
       threshold: 0.2,
       animations: 'disabled',
-      caret: 'initial',
+      caret: 'hide',
     },
   },
   // Journeys share one dev server and each starts its own page: they don't touch each other.
