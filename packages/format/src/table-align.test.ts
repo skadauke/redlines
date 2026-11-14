@@ -663,6 +663,39 @@ describe('aligning a column, tracked (format §3.7)', () => {
     expectNoDecisionRefused('an agent’s row', below);
   });
 
+  it('refuses an agent’s replacement that renames every cell of the header, and writes one that keeps a cell', () => {
+    // No cell of the header is left to match its old row, so the table is compared as the header deleted and
+    // another row put in: refused, as the row above the header and the header taken out are. A header that
+    // keeps a cell is the same header with some cells changed, which are written as substitutions in front of
+    // the mark, and the mark ends the last cell.
+    const text = file(`Intro.\n\n${FRUIT}\n\nAfter.`);
+    const one = align(text, [1], 'center').after;
+    const rows = CENTERED.split('\n');
+    const agent = (header: string) =>
+      suggestReplace(
+        one,
+        CENTERED,
+        [header, rows[1] ?? '', rows[2] ?? '', rows[3] ?? ''].join('\n'),
+        context(claudeAda, ['c2dd', 'f3gg', 'h4jj']),
+      );
+    expect(said(() => agent('| Food   | Number | Cost |'))).toBe(ALIGN_FIRST);
+    // The header's line: the table has paragraphs around it.
+    const headerOf = (t: string) =>
+      trim(t)
+        .split('\n')
+        .find((line) => line.includes('Count')) ?? '';
+    for (const [name, header, renamed] of [
+      ['two cells renamed, one kept', '| Food   | Count | Cost |', 2],
+      ['the last cell renamed', '| Fruit  | Count | Cost |', 1],
+    ] as const) {
+      const after = applyChanges(one, agent(header).changes);
+      expect(headerOf(after), name).toMatch(/<!--fmt k3x9 [^\n]*?--> \|$/);
+      expect(headerOf(after).split('<!--sub ').length - 1, name).toBe(renamed);
+      expectEveryOrderAlike(name, after, exactly);
+      expect(expectNoDecisionRefused(name, after), name).toBeGreaterThan(2);
+    }
+  });
+
   // A tracked column operation would leave the old row a cell short or long in some order of decisions
   // (rule 5, and Call 6). With Track Changes off the old row is kept in step: see the plain operations below.
   it('still refuses every tracked column operation while it is pending, by Bo and by Ada', () => {
