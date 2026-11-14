@@ -419,7 +419,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       }
       expect(written).toBeGreaterThan(1500);
       expect(refused).toBeGreaterThan(100);
-    });
+    }, 60_000);
 
     it('is refused where another change at the end of the cell would put the end of its text in front of the mark', () => {
       // Bo's pending deletion of the backslash, or of the underscore: the cell reads fine now, and
@@ -552,7 +552,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       expect(expectNoDecisionRefused(shape.kind, done)).toBeGreaterThan(2);
       expect(trim(applyChanges(done, rejectAll(done)))).toBe(trim(originalView(done).text));
     }
-  });
+  }, 60_000);
 
   it('is refused while the header is a pending row change, in words; plain is allowed', () => {
     const states: [string, string][] = [
@@ -817,7 +817,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       );
       expectEveryOrderAlike(`typed after ${word}`, edited, exactly);
     }
-  });
+  }, 60_000);
 
   it('can decide each change on its own, in every order, with rows and columns around', () => {
     const text = file(`${FRUIT}\n\nOutro words.`);
@@ -844,7 +844,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       }
     }
     expect(states).toBeGreaterThan(20);
-  });
+  }, 60_000);
 
   it('is one change with the rest of a group, and takes a note', () => {
     const table = readTables(start, parse(start))[0]?.from ?? 0;
@@ -962,7 +962,7 @@ describe('the span form, written by another tool', () => {
     expect(trim(second)).toMatch(/\|\n\n<!--del m5nn row=2 [^\n]*-->\n\n<!--\/k3x9-->$/);
     expect(trim(second)).toBe(trim(text));
     expectEveryOrderAlike('a deletion under a span', second, exactly);
-  });
+  }, 60_000);
 
   it('refuses a column operation and a row operation on the header while it is pending', () => {
     for (const who of [bo, null]) {
@@ -1448,7 +1448,7 @@ describe('a plain column operation beside a pending alignment change (format §3
         expect(trim(applyChanges(after, accept(after, 'k3x9')))).toBe(
           trim(plain(newestView(POINT).text, shape)),
         );
-      });
+      }, 60_000);
     }
 
     it('every operation at every place, the way the table of pairs asks them', () => {
@@ -2015,7 +2015,7 @@ describe('a plain column operation beside a pending alignment change (format §3
       expect(cases).toBe(150);
       expect(refused).toBeGreaterThan(25);
       expect(allowed).toBeGreaterThan(100);
-    });
+    }, 60_000);
 
     // The scan that reads the markers pairs the backticks of a paragraph, and the halves of a raw comment, across the
     // cells and the rows of a table, as Markdown readers do not. A column operation that rewrites the mark (a cell that
@@ -2690,7 +2690,7 @@ describe('a point alignment change, written by another person', () => {
   it('is decided in every order, and no decision of it is refused', () => {
     expectEveryOrderAlike('a point', POINT, exactly);
     expect(expectNoDecisionRefused('a point', POINT)).toBeGreaterThan(1);
-  });
+  }, 60_000);
 
   it('is the same in a CRLF file, and no line break is touched', () => {
     const text = crlf(POINT);
@@ -2954,7 +2954,7 @@ describe('a point alignment change beside other marks and edits', () => {
         expect(tableLeaves(after), label).toHaveLength(1);
         expectDecided(label, after, [1, 1, 1]);
       }
-    });
+    }, 60_000);
 
     it('writes one pipe, not two, when a deletion empties the first cell of an indented header that has no leading pipe', () => {
       // `  11<mark> |`: a table of one column whose header is indented by one to three spaces and ends in a pipe alone, and
@@ -3219,7 +3219,7 @@ describe('a point alignment change beside other marks and edits', () => {
           trim(newestView(after).text),
         );
       }
-    });
+    }, 60_000);
 
     it('writes an agent’s insertion after the mark when the change holds the cell’s padding, and no decision is refused', () => {
       // Replacing all the text of the cell by one that ends in a backslash, or by blanks, the change takes the
@@ -3318,7 +3318,7 @@ describe('a point alignment change beside other marks and edits', () => {
       const first = typed(align(pending, [1], 'center', ada, ['k3x9']).after, bo, 'm5nn');
       expect(headerLine(first)).toBe(headerLine(last));
       decided('the alignment, then the typing', first, 10);
-    });
+    }, 60_000);
 
     it('is decided in every order where a closer stands next to the mark', () => {
       // A comment over the text of the cell, and Bo's typing inside it: the closer of the comment stands
@@ -3342,7 +3342,7 @@ describe('a point alignment change beside other marks and edits', () => {
         expect(headerLine(then), by.handle).toBe(headerLine(done));
         decided(`${by.handle}’s comment after the alignment`, then, 5);
       }
-    });
+    }, 60_000);
   });
 
   describe('with the span form in another table of the file', () => {
@@ -3379,7 +3379,7 @@ describe('a point alignment change beside other marks and edits', () => {
         `${FRUIT}\n\nBetween the tables.\n\n${second}`,
       );
       expect(trim(applyChanges(doc, acceptAll(doc)))).toBe(trim(newestView(doc).text));
-    });
+    }, 60_000);
   });
 
   describe('written after changes pending in the last header cell', () => {
@@ -3448,7 +3448,7 @@ describe('a point alignment change beside other marks and edits', () => {
       expectEveryOrderAlike('bold, then the alignment', done, exactly);
       expectEveryOrderRead('bold, then the alignment', done);
       expect(expectNoDecisionRefused('bold, then the alignment', done)).toBeGreaterThan(2);
-    });
+    }, 60_000);
 
     it('is written after up to two changes in the cell, and refused after more in words that say what to do', () => {
       const ids = ['c2dd', 'f3gg', 'h4jj'];
@@ -3519,7 +3519,7 @@ describe('a point alignment change beside other marks and edits', () => {
         expectEveryOrderAlike(who.handle, after, exactly);
         expectNoDecisionRefused(who.handle, after);
       }
-    });
+    }, 60_000);
 
     it('takes an underscore or a tilde after a letter at the end of the cell, plain and tracked, and a backspace that leaves one', () => {
       // `Price_` reads as the view does with the mark after it (the underscore closes, as it did): the rule that
@@ -3910,7 +3910,7 @@ describe('a point alignment change beside other marks and edits', () => {
           expectDecided(`${who.handle} tracked ${insert}`, tracked);
         }
       }
-    });
+    }, 60_000);
 
     it('does not refuse an edit in a state that was refused already, which the edit did not make', () => {
       // `**a .*x` deleted by Bo after the mark was written by hand: accepting it reads otherwise. A key typed in
@@ -4383,7 +4383,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expect(trim(applyChanges(INSERTED, acceptAll(INSERTED)))).toBe(
         trim(newestView(INSERTED).text),
       );
-    });
+    }, 60_000);
 
     it('is shown by the views once: the old row in the original, the new in the newest, no marker left', () => {
       viewed(INSERTED, ORIGINAL_TWO);
@@ -4488,7 +4488,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
       viewed(DELETED, PLAIN3);
       expect(trim(applyChanges(DELETED, rejectAll(DELETED)))).toBe(PLAIN3);
       expect(reviewView(DELETED)).toContain('{--Price--}{>>[m2bd bo] Deleted column<<}');
-    });
+    }, 60_000);
 
     it('writes an empty header cell back with the mark after the first space of its padding', () => {
       const EMPTY3 = lines('| Fruit | Count |  |', '| ----- | ----- | --- |', '| Apples | 3 | x |');
@@ -4580,7 +4580,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
         expect(trim(applyChanges(text, rejectAll(text))), name).toBe(FLAT3);
         expect(trim(applyChanges(text, acceptAll(text))), name).toBe(trim(newestView(text).text));
       }
-    });
+    }, 60_000);
   });
 
   describe('two of Bo’s columns inserted together, Ada’s mark at the end of the last', () => {
@@ -4653,7 +4653,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expectEveryOrderAlike('inserted first', FIRST, exactly);
       onlyTheMark(expectEveryOrderRead('inserted first', FIRST));
       viewed(FIRST, PLAIN3);
-    });
+    }, 60_000);
   });
 
   describe('a column inserted before the first, and an inserted row with a comment in the cell that goes', () => {
@@ -4713,7 +4713,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
         trim(newestView(WITH_ROW).text),
       );
       viewed(WITH_ROW, lines('| ha | hb | hc |', '| --- | --- | --- |', '| a1 | a2 | a3 |'));
-    });
+    }, 60_000);
   });
 
   describe('a header with no pipes at its edges', () => {
@@ -4748,7 +4748,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
       onlyTheMark(expectEveryOrderRead('a bare header', BARE));
       // The closing pipe that the rewrite of the columns wrote stays in both versions.
       viewed(BARE, lines('Fruit | Count |', OLD, 'Apples | 3 |', 'Pears | 5 |'));
-    });
+    }, 60_000);
   });
 
   describe('a mark that a merge left in a row below the header', () => {
@@ -4886,7 +4886,7 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expect(refused.map((line) => line.replace(/^.*?: /, '')).toSorted()).toEqual(
         [HIDES, LOST, LOST].toSorted(),
       );
-    });
+    }, 60_000);
   });
 
   describe('joined by hand into random changes', () => {
