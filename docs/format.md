@@ -1157,7 +1157,8 @@ middle of a paragraph it splits the paragraph.
   is (`no-legal-placement`): the words give the way out, which is to start the selection at the
   end of the line above, so that the line break goes with the text, or to leave the first word of
   the line out of it.
-- A table row that holds a marker is written with a leading `|`.
+- A table row that holds a marker is written with a leading `|` (an alignment change's mark
+  excepted: it ends a cell and never starts a line).
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
   break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
@@ -2321,11 +2322,12 @@ it, one per line:
 
 **Other table rules:**
 
-- **Rule 7, a row's outer pipes.** Rows that hold markers have a leading `|`. When a marker has to
-  stand at the start of a row that has none, because a change begins in its first cell, the editor
-  writes a plain `| ` in front of it first, in both versions, so that nothing reads differently.
-  This holds for a row with no pipe at all too (the first under the delimiter row, say). A format
-  change in a row without one is still refused.
+- **Rule 7, a row's outer pipes.** Rows that hold markers have a leading `|` (an alignment change's
+  mark excepted: it ends a cell and never starts a line). When a marker has to stand at the start
+  of a row that has none, because a change begins in its first cell, the editor writes a plain `| `
+  in front of it first, in both versions, so that nothing reads differently. This holds for a row
+  with no pipe at all too (the first under the delimiter row, say). A format change in a row
+  without one is still refused.
   The same is written when an edit takes all the text of the first cell of a row that has no leading
   pipe, or of the last cell of one that has no trailing pipe (a deletion, tracked or not): the pipe
   beside the cell would become the row's outer pipe, the row would have a cell less, a header one
@@ -2333,12 +2335,13 @@ it, one per line:
   first cell or ` |` after the last, plain, in both versions, and the table reads as it did with the
   cell empty, in every order of decisions. An edit that takes only part of the text, or replaces it,
   writes nothing.
-  The mark of an alignment change that ends the last cell of a header is no text of that cell: a
-  deletion of all the text writes the closing pipe too, after the mark, at the line's end. A header
-  of one cell that holds the mark is looked at as well: a deletion of all the text of its cell writes
-  the pipe the header lacks, plain, in both versions, a leading pipe in front of the cell and a
-  closing pipe after the mark, so that the mark never starts a line and the header is a header
-  once the change is accepted.
+  The mark of an alignment change that ends the last cell of a header is no text of that cell: in a
+  header with no closing pipe, a deletion of all the text writes that pipe, after the mark, at the
+  line's end. A header of one cell that holds the mark is looked at as well: a deletion of all the
+  text of its cell writes the outer pipe it lacks, plain, in both versions: `| ` in front of the
+  cell if it has no leading pipe, ` |` after the mark if it has no closing pipe (an indented header
+  gets one leading pipe, not two). So the mark never starts a line, and the header is a header once
+  the change is accepted.
 - **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
@@ -2356,7 +2359,9 @@ it, one per line:
   the row a cell too many or too few, and the key is refused: "This key can't be written here with
   Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending
   change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the
-  change next to it first, or turn off Track Changes." A cell with room after its text takes the key.
+  change next to it first, or turn off Track Changes." A cell with a space after its text and a
+  closing pipe after that takes the key. A row with no closing pipe may refuse it, in these words
+  or in those of §3.1 (rules 4 and 5).
 - **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
   after its last. The file has no text for them, so there is no place in it to type. Typing into one
   writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
@@ -2400,7 +2405,9 @@ it, one per line:
 - **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
   A tracked change of it is one `fmt` mark with no closer, `align=SPEC`, at the end of the text of
   the header row's last cell. `SPEC` is the old delimiter row as written, as a value (§2.6: a space
-  is `\x20`, a pipe `\|`), and the delimiter row holds the new alignment. The mark is the table's,
+  is `\x20`, a pipe `\|`), and the delimiter row holds the new alignment. An agent's replacement
+  that changes only the delimiter row is not an alignment change: it is refused, with a change
+  pending or not ("A line that is only Markdown syntax takes no change."). The mark is the table's,
   not its last column's: here Count is centered, and the mark ends the cell of Price, the last
   column.
 
@@ -2419,7 +2426,7 @@ it, one per line:
     dashes with a colon at either end, parted by pipes) and no other marker of its id is in the
     file. With a closer it is the range form (below); any other `align=` opener with no closer
     (opened twice, or with a value that is no delimiter row) is an unclosed mark, with a warning,
-    and its comment stays text. The text of the mark's cell stops in front of it, as the text of a
+    and its marker stays text. The text of the mark's cell stops in front of it, as the text of a
     row's first cell starts after the marker of an inserted row, so typing, comments and selections
     stand in front of it. A mark with anything but white space after it in its cell (text, another
     marker) is part of the text, and so is a space between the text and the mark. A reader finds
@@ -2430,18 +2437,20 @@ it, one per line:
     as it was (a cell of one dash grows by the colons), left `:--`, center `:-:`, right `--:`, none
     all dashes. The cells of columns not changed are not touched.
   - **Deciding it.** Accepting removes the mark. Rejecting writes `SPEC` back as the delimiter row
-    and removes the mark. Neither decision changes a byte outside the table's first two lines, and
-    none touches a line break. It is decided after the table's other marks, its columns and the
-    moves of its rows, each on the text the ones before leave, so that every order of decisions
-    writes the same bytes. A mark whose table has other columns than `SPEC` has, and a mark that
-    no table holds, can be accepted and not rejected: "This alignment change can't be rejected,
-    because its table no longer has the columns it had. Accept it, or change the text in Raw with
-    Track Changes off."
+    and removes the mark. Neither decision changes a byte outside the table's first two lines (a
+    mark that a merge left in a body row is cut out of that row), and none touches a line break.
+    It is decided after the table's other marks, its columns and the moves of its rows, each on the
+    text the ones before leave, so that every order of decisions writes the same bytes. A mark
+    whose table has other columns than `SPEC` has, and a mark that no table holds, can be accepted
+    and not rejected: "This alignment change can't be rejected, because its table no longer has
+    the columns it had. Accept it, or change the text in Raw with Track Changes off."
   - **One change per table.** The author's own pending alignment change is changed in place, the
     mark staying where it is, and is taken away, with its old row written back as it was, when the
     new alignments are the old ones. Another person's pending alignment change refuses yours: "Bo
     Chen's alignment change is pending. Decide it first." A request that changes nothing is
-    refused: "The columns are already aligned that way."
+    refused: "The columns are already aligned that way." A merge can leave two alignment changes in
+    one table. Each is read and decided as a change of its own: accepting it takes its mark away,
+    and rejecting it writes its `SPEC` as the delimiter row.
   - **The header keeps its place while the change is pending,** as it does while a column is,
     because its row holds the mark. A tracked alignment change is refused while the header is
     itself a pending row change (a row inserted above it or moved to the top, or the header deleted
@@ -2526,7 +2535,9 @@ it, one per line:
     `\` typed at the end of the cell, which is written after the mark, with the cell's padding taken
     out and written again with it, in changes of their own, and for an agent's replacement of all
     the text of the cell by text that ends in a backslash or in blanks, whose insertion is written
-    after the mark the same way. The mark is read and decided there all the same.
+    after the mark the same way. That is so where the cell has a space after its text and a closing
+    pipe after that; a row with no closing pipe may refuse the key (see "A cell is one line"). The
+    mark is read and decided there all the same.
 
     An edit is refused, in words that name the change, where it would leave the mark, or the text
     in front of it, read otherwise than it was: a plain backslash typed, or left by a deletion,
@@ -2547,9 +2558,9 @@ it, one per line:
     which a merge can leave, and a state that was unsound before the edit are not refused for what
     was there.
 
-    Nothing is written below the table, so no tracked edit under it, or anywhere beside it, is
-    refused for the point, and every single decision is possible in every order, which the pair
-    model and the random suites hold the format to.
+    Nothing is written below the table, so no tracked edit under it, or anywhere outside the mark's
+    cell, is refused for the point, and every single decision is possible in every order, which the
+    pair model and the random suites hold the format to.
   - **A text merge can leave an alignment change and a column change pending together,** which no
     operation writes. Deciding the columns keeps the mark at the end of the header's last cell,
     whichever column that is afterwards. Rejecting a column so that another cell becomes the last
@@ -2685,8 +2696,9 @@ it, one per line:
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
   cells.
 - Pandoc's `markdown` reader gives a pipe table relative column widths once a line is longer than
-  its column limit (72 by default). A marker adds about 20 characters to its row, so marked rows
-  can trigger it. Only the widths change.
+  its column limit (72 by default). A marker adds about 20 characters to its row (an alignment
+  change's mark holds the old delimiter row: about 20 for each column of its table), so marked
+  rows can trigger it. Only the widths change.
 
 The design comes from simulation. An earlier form put an insertion in every cell of a new row.
 It lost rows in 9.2% of simulated live table sessions, because its marks broke as soon as someone
@@ -2754,7 +2766,7 @@ The serializer always writes the same bytes for the same state:
   has no mark of its own (§3.7);
 - an alignment change is written as the point of §3.7, one mark with no closer at the end of the
   header row's last cell, and never as the range around the table. Other tools write that range,
-  and it is read as it is.
+  and it is read as it is, with no warning.
 
 The parser accepts the other valid forms, and warns.
 

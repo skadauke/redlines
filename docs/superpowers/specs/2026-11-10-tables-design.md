@@ -622,7 +622,9 @@ writes the old delimiter row; the review view, which agents read, writes them in
 ```
 
 A column's cells are wrapped the same way, with its note after the header row; a move's notes say
-where from and to; an alignment change's note follows the table.
+where from and to; an alignment change's note stands where its mark does, at the end of the header
+row's last cell (format §8; the range form that other tools write has it on a line of its own
+after the table).
 
 ## Agents
 
