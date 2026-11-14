@@ -23,7 +23,7 @@ import {
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, hiddenError, workingLedger } from './edit-support.ts';
+import { addPerson, commitEdit, hiddenError, visibleText, workingLedger } from './edit-support.ts';
 import { encodeValue, isAlignOps, isAlignPayload, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
@@ -32,6 +32,7 @@ import { paragraphRange, visible } from './inline.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { serializeLedger, setLedger } from './ledger-write.ts';
 import { markerRanges } from './markers.ts';
+import type { MarkerRange } from './markers.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readDelimiterRow, readLine, readRowCells, tablesOfText } from './table.ts';
@@ -213,7 +214,12 @@ export function alignDecision(
   );
 }
 
-/** What an alignment change did to each column: where the delimiter row now differs from the old. */
+/**
+ * What an alignment change did to each column: where the delimiter row now differs from the old, with the
+ * column's name, which is the text of its header cell as the page shows it (the newest view of the cell):
+ * the markers of other changes in it are gone, and with them the text of a deletion, which its marker
+ * holds, while the text of an insertion stays. A card and the review view name the column so.
+ */
 export function alignChange(parsed: Parsed, mark: MarkRange): AlignedColumn[] {
   const segment = mark.segments[0];
   const kept = segment ? specOf(mark, segment) : undefined;
@@ -222,12 +228,15 @@ export function alignChange(parsed: Parsed, mark: MarkRange): AlignedColumn[] {
   const was = alignsOf(kept.spec, table.aligns.length);
   if (!was) return [];
   const header = table.rows[0];
+  // The markers of the file, found when a column has changed, and once.
+  let markers: MarkerRange[] | undefined;
   const columns: AlignedColumn[] = [];
   table.aligns.forEach((now, col) => {
     const before = was[col] ?? '';
     if (now === before) return;
     const cell = header?.cells[col];
-    const name = cell ? parsed.text.slice(cell.textFrom, cell.textTo).trim() : '';
+    markers ??= markerRanges(parsed);
+    const name = cell ? visibleText(parsed.text, markers, cell.textFrom, cell.textTo).trim() : '';
     columns.push({ col, name, now, was: before });
   });
   return columns;

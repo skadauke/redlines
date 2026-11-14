@@ -872,6 +872,30 @@ describe('an alignment change of a table', () => {
       );
     });
 
+    it('names the column by the text the page shows, with Bo’s insertion typed in its cell', async () => {
+      // The insertion's markers are not part of the name: they show nowhere on the page.
+      const typed = file(
+        `| Fruit | Count<!--ins m2bd-->x<!--/m2bd--><!--fmt k3x9 align=${SPEC}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+        [
+          ...PEOPLE,
+          'marks:',
+          '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+          '  m2bd: {by: bo, at: 2026-10-31T09:31Z}',
+        ],
+      );
+      const parsed = parse(typed);
+      expect(
+        describeChange(
+          parsed,
+          parsed.marks.find((found) => found.id === 'k3x9')!,
+        ),
+      ).toBe('Formatted: column Countx centered (was default)');
+      const { editor } = mount(typed);
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      expect(what(editor)).toBe('Formatted: column Countx centered (was default)');
+    });
+
     it('opens its card on the header row, with Accept and Reject', async () => {
       const { editor } = mount(POINT);
       editor.setViewMode('redlines');
