@@ -457,8 +457,13 @@ mode has no counterpart in the desktop app.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
-  notice makes that a deliberate choice. There is no "Just Mine" for now: a person's own tracking,
-  apart from the file's, is left for later.
+  notice makes that a deliberate choice. A file that comes to ask while it is open, when the window
+  reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
+  Track Changes turns on, under the same notice, and nothing is written, since the file asks
+  already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
+  tracking is switched off under them; the next switch they make writes the file's setting again.
+  A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
+  Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
