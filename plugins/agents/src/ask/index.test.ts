@@ -15,6 +15,7 @@ const REPO: ProjectRoot = { folder: '/repo', isRepo: true, tooBroad: false };
 const mounted: { editor: Editor; ask: Ask }[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const { editor, ask } of mounted.splice(0)) {
     ask.destroy();
     editor.destroy();
@@ -1384,6 +1385,184 @@ describe('in the comment rail', () => {
       // The rail lays the notes out again, with the bubble still there; and the bubble is gone after.
       expect(inPage).toBe(true);
       expect(el?.isConnected).toBe(false);
+    });
+  });
+
+  describe('a press in one of the rail’s notes', () => {
+    /** A note as the rail draws it, beside the bubble in the editor's scroller, with a Reply. */
+    function noteInRail(editor: Editor) {
+      const rail = document.createElement('div');
+      rail.className = 'rl-rail';
+      const note = document.createElement('div');
+      note.className = 'rl-note';
+      const reply = document.createElement('button');
+      reply.setAttribute('aria-label', 'Reply');
+      note.append(reply);
+      rail.append(note);
+      editor.view.scrollDOM.append(rail);
+      return { note, reply };
+    }
+    const pressOn = (target: Element) =>
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    const clickOn = (target: Element) =>
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    it('leaves the bubble open and held at the press, and closes it once the click is delivered', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      const held = rail.pins[0]!.held;
+      // What the note's own handler finds when the click reaches it.
+      const found: { open: boolean; released: number }[] = [];
+      reply.addEventListener('click', () =>
+        found.push({ open: bubble() !== null, released: heardOf(held).release }),
+      );
+      pressOn(reply);
+      // The notes stay where the bubble made them move to until the click is over.
+      expect(bubble()).not.toBeNull();
+      expect(heardOf(held).release).toBe(0);
+      vi.advanceTimersByTime(100);
+      expect(bubble()).not.toBeNull();
+      clickOn(reply);
+      // The note heard its click with the bubble still open and held: it goes a task after.
+      expect(found).toEqual([{ open: true, released: 0 }]);
+      expect(bubble()).not.toBeNull();
+      vi.advanceTimersByTime(0);
+      expect(bubble()).toBeNull();
+      expect(heardOf(held).release).toBe(1);
+      expect(editor.view.dom.querySelector('.rl-qa-target')).toBeNull();
+    });
+
+    it('hears the click before the note does, so that a note that stops it does not keep the bubble', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      reply.addEventListener('click', (event) => event.stopPropagation());
+      pressOn(reply);
+      clickOn(reply);
+      vi.advanceTimersByTime(0);
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('closes it after a moment when the press makes no click: a drag, or a scroll', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      vi.advanceTimersByTime(1499);
+      expect(bubble()).not.toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(0);
+      vi.advanceTimersByTime(1);
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      // What waited is gone: a click now, or a long time, finds nothing to do.
+      clickOn(document.body);
+      vi.advanceTimersByTime(5000);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('closes at once for a press anywhere else, which ends the wait', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      expect(bubble()).not.toBeNull();
+      pressOn(document.body);
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      // The click that follows the press, and the timer, find nothing waiting.
+      clickOn(document.body);
+      vi.advanceTimersByTime(5000);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not close the next bubble, when the one that waited was closed some other way', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      key('Escape');
+      expect(bubble()).toBeNull();
+      // Another question opens, and the click of the old press comes, and its time runs out.
+      start(editor, 'Borrower');
+      expect(rail.pins).toHaveLength(2);
+      clickOn(reply);
+      vi.advanceTimersByTime(5000);
+      expect(bubble()).not.toBeNull();
+      expect(heardOf(rail.pins[1]!.held).release).toBe(0);
+    });
+
+    it('leaves it open for a press in the bubble that follows, and a click that follows that', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      // The person went back to the bubble before the first press ever clicked.
+      pressOn(field()!);
+      clickOn(field()!);
+      vi.advanceTimersByTime(5000);
+      expect(bubble()).not.toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(0);
+    });
+
+    it('leaves nothing waiting when Ask is taken out', () => {
+      const rail = fakeRail();
+      const { editor, ask: asking } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const before = vi.getTimerCount();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      expect(vi.getTimerCount()).toBe(before + 1);
+      asking.destroy();
+      expect(vi.getTimerCount()).toBe(before);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      clickOn(reply);
+      vi.advanceTimersByTime(5000);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('waits again from a second press in a note, and leaves one wait', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      vi.useFakeTimers();
+      const before = vi.getTimerCount();
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      vi.advanceTimersByTime(1000);
+      pressOn(reply);
+      expect(vi.getTimerCount()).toBe(before + 1);
+      // The time runs from the second press.
+      vi.advanceTimersByTime(1000);
+      expect(bubble()).not.toBeNull();
+      vi.advanceTimersByTime(500);
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('is as before for a bubble the rail does not hold: it moves no note, and goes at once', () => {
+      const rail = fakeRail();
+      rail.state.holds = false;
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      const { reply } = noteInRail(editor);
+      pressOn(reply);
+      expect(bubble()).toBeNull();
     });
   });
 

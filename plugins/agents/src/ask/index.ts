@@ -88,6 +88,16 @@ export interface Ask {
 const RAW = 'Ask works on the text as it reads. Show Clean or Redlines first.';
 const NOTHING = 'Select some text to ask about.';
 
+/** A note in the comment rail: the review interface's own classes (`rl-rail` holds the notes). */
+const RAIL_NOTE = '.rl-rail .rl-note';
+
+/**
+ * How long the bubble waits, after a press in one of the rail's notes, for the click that press
+ * makes, before it closes anyway: a press that is dragged, or that the page takes for a scroll,
+ * may never click. A press held longer than this closes it too.
+ */
+const CLICK_WAIT_MS = 1500;
+
 /** The most characters of the selected text the agent is told; it can read the document for the rest. */
 const QUOTE_LIMIT = 2000;
 
@@ -127,6 +137,8 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
   const doc = view.dom.ownerDocument;
   const win = doc.defaultView ?? window;
   let open: Open | null = null;
+  /** Takes away what waits for a click to close the bubble (`closeAfterClick`), if anything does. */
+  let stopWaiting: (() => void) | null = null;
 
   /** The finder of the passages in the document as it is now, made once for each text. */
   let finder: { doc: typeof view.state.doc; find: ReturnType<typeof quoteFinder> } | null = null;
@@ -217,14 +229,52 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     event.preventDefault();
     close(true);
   };
+  /**
+   * Closes the bubble once the click that a press has made is delivered, and not at the press. A
+   * bubble the rail lays out has the notes around it make room, and when it goes they slide back to
+   * their places within a moment (180 ms): closed at the press, it would leave the press, on Reply,
+   * Resolve, Accept or Reject of a note that had been pushed aside, ending over another element,
+   * and the click would go nowhere. The click is heard here first (the listener is the document's,
+   * in the capture phase, so that a note that stops the click doesn't keep it from the bubble),
+   * and the bubble goes in a task of its own after it, when the note has heard it. A press that
+   * makes no click closes it after a while.
+   */
+  const closeAfterClick = (mine: Open) => {
+    stopWaiting?.();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const closeNow = () => {
+      stopWaiting?.();
+      if (open === mine) close();
+    };
+    const clicked = () => {
+      clearTimeout(timer);
+      timer = setTimeout(closeNow, 0);
+    };
+    doc.addEventListener('click', clicked, { capture: true, once: true });
+    timer = setTimeout(closeNow, CLICK_WAIT_MS);
+    stopWaiting = () => {
+      clearTimeout(timer);
+      doc.removeEventListener('click', clicked, true);
+      stopWaiting = null;
+    };
+  };
+
   const onPress = (event: PointerEvent) => {
-    if (open && event.target instanceof Node && !open.bubble.el.contains(event.target)) close();
+    const { target } = event;
+    if (!open || !(target instanceof Node)) return;
+    // The person went back to the bubble: whatever waited for a click leaves it open.
+    if (open.bubble.el.contains(target)) return stopWaiting?.();
+    // In one of the rail's notes the bubble waits for the click, if the rail holds it: it is the
+    // bubble's going that moves the notes. Not held, it moves none, and goes at once.
+    if (open.pin && target instanceof Element && target.closest(RAIL_NOTE)) closeAfterClick(open);
+    else close();
   };
 
   function close(refocus = false): void {
     if (!open) return;
     const closing = open;
     open = null;
+    stopWaiting?.();
     closing.unsubscribe();
     closing.session.close();
     // The rail lays out the notes again as they were, before the bubble is gone from the page.
