@@ -61,6 +61,7 @@ import {
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
 import {
+  assertRowsStay,
   checkTableEdits,
   inOwnInsertedCol,
   inOwnInsertedRow,
@@ -78,6 +79,8 @@ import {
   assertNoMarkup,
   commitEdit,
   eolOf,
+  escapedMarkerAt,
+  escapedMarkers,
   inEol,
   markerRanges,
   nameOf,
@@ -2101,13 +2104,6 @@ function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): 
   return true;
 }
 
-/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
- * (format §3.1). */
-function escapedMarkers(text: string, parsed: Parsed): number {
-  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
-  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
-}
-
 const AFTER_BRING =
   "A line break can't be typed here while Track Changes is on: the change would leave a marker at the start of a line after a backslash, in a list, where other Markdown readers would read the list otherwise. Type something after the backslash first, or turn off Track Changes.";
 
@@ -2149,14 +2145,6 @@ function bringsBroken(text: string, parsed: Parsed): number {
     if (bullet || ((!alone || more) && item(above))) count++;
   }
   return count;
-}
-
-/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
-function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
-  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
-  let at: number | undefined;
-  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
-  return at;
 }
 
 /**
@@ -5199,12 +5187,16 @@ function editsOnce(
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
-  // plain one first, and make the edit after it.
+  // plain one first, and make the edit after it. A row has one leading pipe: where `leadingPipeAt`
+  // writes it (at the start of the text, after the row's indent), the one that an emptied first cell
+  // needs (`outerPipeWrites`, at the start of the line) is the same pipe, and an indented row would
+  // be given a second, two cells where its delimiter row has one.
   const pipes: PipeWrite[] = edits.flatMap((edit) => {
     const at = leadingPipeAt(text, edit, plan.parsed);
+    const outer = outerPipeWrites(text, edit, plan.parsed);
     return [
       ...(at === null ? [] : [{ at, insert: '| ', leading: true }]),
-      ...outerPipeWrites(text, edit, plan.parsed),
+      ...(at === null ? outer : outer.filter((write) => !write.leading)),
     ];
   });
   const unique = pipes.filter(
@@ -5257,6 +5249,8 @@ function editsOnce(
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
+      // No key is written with a pipe of a row in a change of its own (format §3.7, rule 7).
+      assertRowsStay(text, edits, changes, plan.parsed);
       // A change that stands against another mark reads as typed in every order of decisions, or
       // is written again by a character, or is refused (format §3.1, rule 5).
       if (plan.emphasis.touched) {

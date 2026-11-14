@@ -50,6 +50,7 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { assertCalloutType, isBlockOp, planBlock } from './format-blocks.ts';
+import { isAlignPoint } from './align-point.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
 import {
   DELIMITER,
@@ -1305,12 +1306,18 @@ function othersIn(planning: Planning, range: Range): boolean {
   return othersMark(planning, range) !== undefined;
 }
 
-/** The first pending change of another person that is in `range`, if any. */
+/**
+ * The first pending change of another person that is in `range`, if any. A point alignment change of a
+ * table (format §3.7, #281) is none: it stands at the end of its header's last cell and its decisions only
+ * take the mark away and write the delimiter row, so they can't change how the cell's syntax reads. The
+ * walk that tries every order of the decisions still holds it, and judges what is written beside it.
+ */
 function othersMark(planning: Planning, range: Range): MarkRange | undefined {
   return planning.parsed.marks.find(
     (mark) =>
       CHANGE_KINDS.has(mark.kind) &&
       mark.entry.by !== planning.owner &&
+      !isAlignPoint(mark) &&
       mark.segments.some((segment) => {
         const span = segmentSpan(mark, segment, planning);
         return span.from <= range.to && range.from <= span.to;

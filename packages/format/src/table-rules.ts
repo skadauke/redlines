@@ -21,7 +21,7 @@ import {
 } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { indentOf, readLine, readTables } from './table.ts';
+import { alignPointIn, indentOf, readLine, readTables } from './table.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
 import { closersBelow, deletionLine } from './table-rows.ts';
 import type { MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
@@ -99,6 +99,50 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
       if (was.length !== now.length || was.some((count, i) => count !== now[i])) {
         throw new EditError(ONE_LINE_CELL, 'no-legal-placement');
       }
+    }
+  }
+}
+
+const PENDING_PIPE =
+  "This key can't be written here with Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the change next to it first, or turn off Track Changes.";
+
+/**
+ * Refuses an edit that was written, next to a marker, with a pipe or a line break of a table in the new text of
+ * a change that the edit did not type: `changes` are what `edits` became in tracked form. A key next to a
+ * marker is written again by a character when it would read otherwise, and where the next character is the
+ * row's pipe, or its line break, that put the pipe in a pending insertion with a deletion of its own: rejecting
+ * the one and not the other left a pipe too many or none (or, after a backslash, an escaped pipe in place of the
+ * row's edge), and a cell too many or too few. Text in a row never holds a pipe or a line break that nobody typed
+ * (format §3.7, "A cell is one line"), so no key is written so. A change over the whole table is the block's, as
+ * in `checkTableEdits`.
+ *
+ * @throws EditError
+ */
+export function assertRowsStay(
+  text: string,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+  parsed?: Parsed,
+): void {
+  if (!text.includes('|')) return;
+  // What a change brings: its new text without the markers, whose payloads write a pipe as `\|`.
+  const brings = (insert: string) => insert.replace(/<!--[\s\S]*?-->/g, '');
+  const count = (s: string, pattern: RegExp) => s.match(pattern)?.length ?? 0;
+  const inRows = (change: TextChange, tables: readonly TableRead[]) =>
+    tables.some(
+      (table) =>
+        inTable(table, change) &&
+        !(change.from <= table.from && change.to >= table.to && change.to > change.from),
+    );
+  for (const pattern of [/\|/g, /\n/g]) {
+    const typed = edits.reduce((sum, edit) => sum + count(edit.insert, pattern), 0);
+    const written = changes.reduce((sum, change) => sum + count(brings(change.insert), pattern), 0);
+    if (written <= typed) continue;
+    const tables = tablesIn(text, parsed);
+    if (
+      changes.some((change) => count(brings(change.insert), pattern) > 0 && inRows(change, tables))
+    ) {
+      throw new EditError(PENDING_PIPE, 'no-legal-placement');
     }
   }
 }
@@ -918,7 +962,9 @@ export interface PipeWrite {
  * less, a header one too few for the delimiter row, and the table is none. A pipe is written plain, in
  * both versions, in its place: `| ` in front of the first cell, ` |` after the last. Empty when the edit
  * takes some other text, replaces, or is in no such row. Looks at the edited line first, and at the
- * tables only when that line could be one.
+ * tables only when that line could be one. The mark of an alignment change that ends a cell is no part of
+ * the cell's text (`alignPointIn`), so a deletion of all that text empties the cell, and the pipe goes
+ * after the mark, at the line's end, where the cell ends in both versions.
  */
 export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed): PipeWrite[] {
   if (edit.from === edit.to || edit.insert.trim() !== '' || !text.includes('|')) return [];
@@ -926,15 +972,25 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   const end = lineEnd(text, edit.from);
   if (edit.to > end) return [];
   const line = readLine(text, start, end);
-  if (line.lone || line.cells.length < 2) return [];
-  // The cell's text is all in the edit, and none of it is a mark.
+  if (line.lone) return [];
+  // A row of one cell keeps it with a pipe at one end, and needs none besides, but for the mark of an alignment change
+  // that ends the cell of a header. With the text gone the mark alone holds the cell: with no leading pipe it would start
+  // the line, where no marker may stand (format §3.3), and would be put on a line of its own above the table, outside
+  // it; with no closing pipe the header is a lone pipe once the change is accepted, and no table.
+  const only = line.cells.length === 1 ? line.cells[0] : undefined;
+  if (line.cells.length < 2) {
+    if (!only || alignPointIn(text, only.contentFrom, only.contentTo) === null) return [];
+  }
+  // The cell's text is all in the edit, and none of it is a mark. The mark of an alignment change that
+  // ends the cell stays, and is not text.
   const emptied = (index: number): boolean => {
     const cell = line.cells[index];
     if (!cell) return false;
-    const content = text.slice(cell.contentFrom, cell.contentTo);
+    const to = alignPointIn(text, cell.contentFrom, cell.contentTo)?.from ?? cell.contentTo;
+    const content = text.slice(cell.contentFrom, to);
     if (content.trim() === '' || content.includes('<!--')) return false;
     const first = cell.contentFrom + (content.length - content.trimStart().length);
-    const last = cell.contentTo - (content.length - content.trimEnd().length);
+    const last = to - (content.length - content.trimEnd().length);
     return edit.from <= first && last <= edit.to;
   };
   const writes: PipeWrite[] = [];

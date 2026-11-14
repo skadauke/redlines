@@ -2,18 +2,26 @@
 // tracked as Word tracks them, or plain with Track Changes off (§3.10). An operation gives the
 // changes of the file and where the caret goes. This file has inserting rows; the others join it.
 
+import { assertPointsRead } from './align-point.ts';
 import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { addPerson, changesBetween, commitEdit, workingLedger } from './edit-support.ts';
+import type { CommitOptions } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { SYNTAX_ONLY } from './inline.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import type { TableAlign, TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import { alignEdit, alignMarkOf } from './table-align.ts';
+import {
+  alignEdit,
+  alignMarkOf,
+  assertMarkHolds,
+  assertMarkRead,
+  keepAlignInStep,
+} from './table-align.ts';
 import {
   columnChanges,
   deletedColPayload,
@@ -22,6 +30,7 @@ import {
   newColumnShape,
   originalOrder,
   withColMarker,
+  withCommentPoints,
 } from './table-cols.ts';
 import type { ColItem, Grid } from './table-cols.ts';
 import {
@@ -110,13 +119,20 @@ export interface TablePending {
   colsChanged: boolean;
   /** An alignment change. */
   align: boolean;
+  /** The header is itself a pending row change: `rows[0].insertion` is set (a row inserted above it,
+   * or moved to the top), or a deleted row has position 0 (the header deleted, or moved away). */
+  headerChanged: boolean;
 }
+
+/** The words of a refusal while an alignment change is pending: a column operation, or a row operation
+ * that touches the header, where the mark of the change stands (format §3.7, rule 5). */
+export const ALIGN_FIRST = 'Accept or reject the alignment change in this table first.';
 
 /** Whether a mark is a half of a move. */
 const isMove = (mark: MarkRange) => mark.entry.move !== undefined;
 
 /** What is pending in `table`: marks in its rows, the deletions below it, and a format change of
- * its alignment around it. */
+ * its alignment: a point in its header row, or a range around it that another tool wrote. */
 export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
   const header = table.rows[0];
   const inHeader = (mark: MarkRange) => {
@@ -129,6 +145,7 @@ export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
     colsInserted: false,
     colsChanged: false,
     align: false,
+    headerChanged: false,
   };
   for (const row of table.rows) {
     if (!row.insertion) continue;
@@ -143,11 +160,23 @@ export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
   }
   if (alignMarkOf(parsed, table)) pending.align = true;
   for (const deletion of table.deletions) {
-    if (deletion.axis === 'row') pending.rowsChanged = true;
-    else pending.colsChanged = true;
+    if (deletion.axis === 'row') {
+      pending.rowsChanged = true;
+      // A deleted row that comes back at position 0 comes back above the header.
+      if (deletion.position === 0) pending.headerChanged = true;
+    } else pending.colsChanged = true;
   }
+  if (header?.insertion) pending.headerChanged = true;
   return pending;
 }
+
+const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
+const ROWS_FIRST = 'Accept or reject the row changes in this table first.';
+
+/** Whether a pending alignment change keeps a column operation from being made (format §3.7, rule 5): any
+ * tracked one, and one with Track Changes off while a column is pending too. */
+const alignHolds = (pending: TablePending, tracked: boolean): boolean =>
+  pending.align && (tracked || pending.colsInserted || pending.colsChanged);
 
 /** The refusal of an operation that would leave a deletion or a move the wrong number of cells,
  * or null (format §3.7, rule 2). A column deleted or moved is kept as its cells top to bottom, so a
@@ -159,35 +188,39 @@ export function ruleTwo(
   pending: TablePending,
   tracked: boolean,
 ): string | null {
-  const columns = 'Accept or reject the column changes in this table first.';
-  const rows = 'Accept or reject the row changes in this table first.';
-  const align = 'Accept or reject the alignment change in this table first.';
   switch (op) {
     // A column put in a table while a row is deleted or moved would be missing from the kept row; one
-    // put in while rows are inserted is in them too. Rule 5: nothing while an alignment change keeps
-    // the old delimiter row, which would be a cell short or long.
+    // put in while rows are inserted is in them too. Rule 5: while an alignment change keeps the old
+    // delimiter row, a tracked change of the columns would leave it a cell short or long in some order
+    // of decisions. With Track Changes off the operation does the same to the old row as to the table's
+    // own (`keepAlignInStep`), unless a column is pending too, which it can't be kept in step with.
     case 'insertCols':
-      return pending.align ? align : pending.rowsChanged ? rows : null;
+      return alignHolds(pending, tracked) ? ALIGN_FIRST : pending.rowsChanged ? ROWS_FIRST : null;
     case 'deleteCols':
     case 'moveCols':
-      return pending.align
-        ? align
+      return alignHolds(pending, tracked)
+        ? ALIGN_FIRST
         : pending.rowsChanged || (tracked && pending.rowsInserted)
-          ? rows
+          ? ROWS_FIRST
           : null;
     case 'insertRows':
-      return pending.colsChanged ? columns : null;
+      return pending.colsChanged ? COLUMNS_FIRST : null;
     // Rule 5: `align=` keeps the whole old delimiter row, so a pending column would leave it a cell
-    // short or long. Rows don't touch the delimiter row. With Track Changes off the row is changed as
-    // it says, in the kept one too.
+    // short or long. Its mark stands in the header row, so a header that is itself a pending row change
+    // (a row inserted above it, the header deleted or moved) would leave it where rejecting the row
+    // could take it along or leave it in a body row. Rows below the header don't touch the delimiter
+    // row or the mark. With Track Changes off no mark is written: the row is changed as it says, in the
+    // kept one too.
     case 'align':
-      return tracked && (pending.colsInserted || pending.colsChanged) ? columns : null;
+      if (!tracked) return null;
+      if (pending.colsInserted || pending.colsChanged) return COLUMNS_FIRST;
+      return pending.headerChanged ? ROWS_FIRST : null;
     // A deleted or moved row keeps its cells as written, so a column inserted while it is pending
     // would be missing from it when the insertion is rejected. With Track Changes off the row is
     // taken out of the table, and only a column deleted or moved is left the wrong number of cells.
     case 'deleteRows':
     case 'moveRows':
-      return pending.colsChanged || (tracked && pending.colsInserted) ? columns : null;
+      return pending.colsChanged || (tracked && pending.colsInserted) ? COLUMNS_FIRST : null;
     // The table goes whole: your own pending changes in it are folded into the deletion, whatever
     // axis they are on, and another person's are refused (rule 6), not asked to be decided by axis.
     case 'deleteTable':
@@ -262,14 +295,14 @@ function rowText(
   return `${line}|`;
 }
 
-const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
-
-/** A row put above the header would take the header's place, and the marker of an inserted column
- * stands in the header: it is refused while a column is pending insertion (format §3.7). */
+/** A row put above the header would take the header's place, and the marker of an inserted column and
+ * the mark of an alignment change stand in the header: it is refused while a column is pending
+ * insertion or an alignment change is pending (format §3.7). */
 function headerCheck(op: TableOp & { kind: 'insertRows' }, table: TableRead, parsed: Parsed): void {
-  if (op.after < 0 && pendingOf(table, parsed).colsInserted) {
-    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
-  }
+  if (op.after >= 0) return;
+  const pending = pendingOf(table, parsed);
+  if (pending.colsInserted) throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  if (pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
 }
 
 /** Where the new rows go: the end of the line of the row they go below. */
@@ -400,10 +433,13 @@ function deleteRows(
 ): TableEdit {
   const remaining = table.rows.length - rows.length;
   if (remaining < 1) throw new EditError('Delete the table instead.', 'no-legal-placement');
-  const refusal = ruleTwo('deleteRows', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('deleteRows', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
-  if (rows.includes(0) && pendingOf(table, parsed).colsInserted)
+  if (rows.includes(0) && pending.colsInserted)
     throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  // The header carries the mark of an alignment change: it is neither deleted nor moved while it is pending.
+  if (rows.includes(0) && pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'delete');
     if (three) throw new EditError(three, 'no-legal-placement');
@@ -541,12 +577,14 @@ function moveRows(
   if (!Number.isInteger(to) || to < 0 || to > table.rows.length) {
     throw new EditError('There is no such place in this table.');
   }
-  const refusal = ruleTwo('moveRows', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('moveRows', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
-  // The header carries the markers of inserted columns: it keeps its place while they are pending.
-  if ((rows.includes(0) || to === 0) && pendingOf(table, parsed).colsInserted) {
-    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
-  }
+  // The header carries the markers of inserted columns and the mark of an alignment change: it keeps its
+  // place while they are pending.
+  const header = rows.includes(0) || to === 0;
+  if (header && pending.colsInserted) throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  if (header && pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'move');
     if (three) throw new EditError(three, 'no-legal-placement');
@@ -1060,6 +1098,76 @@ function entryFor(ctx: EditContext, group: string | undefined): MarkEntry {
   return entry;
 }
 
+/** The alignment change that a plain operation on columns keeps in step: its id, whether it is gone (its old and
+ * new alignments are then the same), and whether its mark is written at the end of another cell than the one it
+ * stood in. */
+interface KeptChange {
+  id: string;
+  gone: boolean;
+  placed: boolean;
+}
+
+/**
+ * A plain operation on columns beside an alignment change keeps it in step (format §3.7, §3.10): the grid of its
+ * table with the text that the change's mark is written with once the columns `final` are made (`keepAlignInStep`),
+ * and the change: `gone` where the old and the new alignments are then the same, `placed` where the mark is written
+ * at the end of another cell than the one it stands in, which the caller looks at once the file is made
+ * (`assertMarkHolds`): the changes pending in that cell can leave it read otherwise in some order of decisions. A
+ * change that stays is looked at as soon as the file is read (`stillRead`). `ctx` is null for plain, and is the only
+ * one that gets here with a change pending (`ruleTwo`). A grid with no change pending is returned as it is.
+ *
+ * @throws EditError when it can't be kept in step: the old row has not the table's columns, the table has another
+ * alignment change, or the change is the span form that another tool wrote.
+ */
+function keptInStep(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  final: readonly ColItem[],
+  grid: Grid,
+  pending: TablePending,
+  ctx: EditContext | null,
+): { grid: Grid; change?: KeptChange } {
+  if (ctx !== null || !pending.align) return { grid };
+  const kept = keepAlignInStep(text, parsed, table, final);
+  const mark = alignMarkOf(parsed, table);
+  if (!kept || !mark || !grid.alignMark) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
+  const aligned = { ...grid, alignMark: { ...grid.alignMark, text: kept.opener ?? '' } };
+  if (kept.opener === null)
+    return { grid: aligned, change: { id: mark.id, gone: true, placed: false } };
+  // The mark stands where it did when its cell stays and is the last; a mark that a merge left below the header is
+  // in a row that the walk of the header does not look at.
+  const { range } = grid.alignMark;
+  const home = grid.lines[0]?.cells.findIndex(
+    (cell) => cell.contentFrom <= range.from && range.to <= cell.contentTo,
+  );
+  const last = final.at(-1);
+  const stays =
+    home === undefined ||
+    home === -1 ||
+    (last !== undefined && 'src' in last && !last.moving && last.src === home);
+  return { grid: aligned, change: { id: mark.id, gone: false, placed: !stays } };
+}
+
+/**
+ * The check that a plain operation makes of the change it keeps, as `commitEdit` reads the file it makes: its mark
+ * and its entry must be read there (`assertMarkRead`). The operation writes the mark again (its old row in step, or at
+ * the end of another cell), which the edit's own check of the marks that stay takes for a removal, so that the scan's
+ * pairing of backticks or comment halves across the cells could take it into code or a comment without a word.
+ * `removing` is the operation's own, in the words of the refusal. `more` is another check of the same file.
+ */
+function stillRead(
+  change: KeptChange | undefined,
+  removing: boolean,
+  more?: CommitOptions['verify'],
+): CommitOptions['verify'] {
+  if (!change || change.gone) return undefined;
+  return (after, parsedAfter, written) => {
+    assertMarkRead(parsedAfter, change.id, removing);
+    more?.(after, parsedAfter, written);
+  };
+}
+
 /** Inserting columns (format §3.7): a cell in every row, the marker in the header's. */
 function insertCols(
   text: string,
@@ -1068,7 +1176,8 @@ function insertCols(
   op: TableOp & { kind: 'insertCols' },
   ctx: EditContext | null,
 ): TableEdit {
-  const refusal = ruleTwo('insertCols', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('insertCols', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   // The marker of an inserted column stands in the header: it can't stand in a header that is itself
   // pending (rejecting the row would take the marker, and not the column, away).
@@ -1082,7 +1191,7 @@ function insertCols(
   if (!Number.isInteger(op.after) || op.after < 0 || op.after > columns) {
     throw new EditError('There is no such place in this table.');
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   const shape = newColumnShape(text, grid);
   const ledger = workingLedger(parsed.ledger);
   const taken = idsIn(text);
@@ -1111,15 +1220,26 @@ function insertCols(
   const positions = indexesOf(table).map((p, i) =>
     table.deletions[i]?.axis === 'col' && p > op.after ? p + op.count : p,
   );
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const body = joinPoints([
-    ...columnChanges(text, grid, final, true),
+    ...columnChanges(text, aligned, final, true),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
+  // A change that is gone leaves the ledger, and the edit takes its mark away.
+  if (change?.gone) delete ledger.marks[change.id];
   const changes = ctx
     ? commitEdit(text, body, ledger, { parsed, created: ids })
-    : commitEdit(text, body, parsed.ledger, { parsed, keepLedger: true });
+    : change?.gone
+      ? commitEdit(text, body, ledger, { parsed, removes: true })
+      : commitEdit(text, body, parsed.ledger, {
+          parsed,
+          keepLedger: true,
+          verify: stillRead(change, false),
+        });
   const cols = Array.from({ length: op.count }, (_, i) => op.after + i);
-  return { changes, caret: colCaret(applyChanges(text, changes), table, op.after), cols };
+  const after = applyChanges(text, changes);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from);
+  return { changes, caret: colCaret(after, table, op.after), cols };
 }
 
 /** Deleting columns (format §3.7, rules 2 to 4). `ctx` is null for plain. */
@@ -1133,7 +1253,8 @@ function deleteCols(
   const columns = table.aligns.length;
   if (columns - cols.length < 1)
     throw new EditError('Delete the table instead.', 'no-legal-placement');
-  const refusal = ruleTwo('deleteCols', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('deleteCols', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   if (ctx) {
     const three = ruleThreeCols(table, parsed, cols, ctx.author, 'delete');
@@ -1152,17 +1273,19 @@ function deleteCols(
       throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
     }
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   if (ctx && grid.lines.some((line) => cols.some((col) => !line.cells[col] || line.lone))) {
     throw new EditError(SHORT_ROW, 'no-legal-placement');
   }
   const leaving = new Set(cols);
   const final = staying(0, columns).filter((item) => 'src' in item && !leaving.has(item.src));
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const before = indexesOf(table);
   const positions = before.map((p) =>
     [...cols].reverse().reduce((position, index) => afterRemoval(position, index), p),
   );
   const ledger = workingLedger(parsed.ledger);
+  if (change?.gone) delete ledger.marks[change.id];
   const taken = idsIn(text);
   const added: { order: number; line: string }[] = [];
   const created: string[] = [];
@@ -1199,9 +1322,14 @@ function deleteCols(
     added.push({ order: col, line: `<!--del ${id} ${encodePayload(payload)}-->` });
   }
   const eol = eolOf(text, parsed.ledgerRange);
+  // The comment points of the columns that leave stand between the marker of an inserted row and the mark of an
+  // alignment change, where they are written at one place (`withCommentPoints`, which finds the mark by its text).
   const body = joinPoints([
-    ...columnChanges(text, grid, final),
-    ...commentsOfCols(parsed, table, leaving).writes,
+    ...withCommentPoints(
+      columnChanges(text, aligned, final),
+      commentsOfCols(parsed, table, leaving).writes,
+      aligned,
+    ),
     ...addDeletionLines(text, table, before, added, eol),
     ...setPositions(
       text,
@@ -1220,9 +1348,25 @@ function deleteCols(
     text,
     body,
     ledger,
-    plainLedger ? { parsed, keepLedger: true } : { parsed, created, removes: true },
+    plainLedger
+      ? { parsed, keepLedger: true }
+      : {
+          parsed,
+          created,
+          removes: true,
+          // Deleting columns passes `removes`, as a decision does, which skips the checks that hold the mark of an
+          // alignment change in `commitEdit`: a plain deletion is an edit, and makes them here. The mark and its entry
+          // must still be read (the scan can pair backticks or comment halves across the cells so that the mark is left
+          // in code or a comment, and the check of the marks that stay takes a mark that is written again for one that
+          // goes), and as written it must read as it did, as beside any other edit. The second is the gate every other
+          // edit passes; no case is known where it refuses what the first and the walk of a mark that moves let through.
+          verify: stillRead(change, true, (after, parsedAfter, written) =>
+            assertPointsRead(text, parsed, after, parsedAfter, written),
+          ),
+        },
   );
   const after = applyChanges(text, changes);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from, true);
   const read = tableAfter(after, table);
   const target = Math.min(cols[0] ?? 0, (read?.aligns.length ?? 1) - 1);
   return { changes, caret: colCaret(after, table, target), cols: [target] };
@@ -1241,7 +1385,8 @@ function moveCols(
   if (!Number.isInteger(to) || to < 0 || to > columns) {
     throw new EditError('There is no such place in this table.');
   }
-  const refusal = ruleTwo('moveCols', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('moveCols', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   if (ctx) {
     const three = ruleThreeCols(table, parsed, cols, ctx.author, 'move');
@@ -1260,7 +1405,7 @@ function moveCols(
   if (order.every((index, i) => index === i)) {
     throw new EditError('The columns are already there.', 'no-legal-placement');
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   if (isShort(grid)) throw new EditError(SHORT_ROW, 'no-legal-placement');
   const ledger = workingLedger(parsed.ledger);
   const taken = idsIn(text);
@@ -1325,19 +1470,27 @@ function moveCols(
     added.push({ order: col, line: `<!--del ${id} ${encodePayload(payload)}-->` });
   }
   const eol = eolOf(text, parsed.ledgerRange);
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const body = joinPoints([
-    ...columnChanges(text, grid, final),
+    ...columnChanges(text, aligned, final),
     ...addDeletionLines(text, table, before, added, eol),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
+  // A change that is gone leaves the ledger, and the edit takes its mark away.
+  if (change?.gone) delete ledger.marks[change.id];
   const changes = commitEdit(
     text,
     body,
     ledger,
-    ctx ? { parsed, created } : { parsed, keepLedger: true },
+    ctx
+      ? { parsed, created }
+      : change?.gone
+        ? { parsed, removes: true }
+        : { parsed, keepLedger: true, verify: stillRead(change, false) },
   );
   const moved = cols.map((index) => order.indexOf(index));
   const after = applyChanges(text, changes);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from);
   return { changes, caret: colCaret(after, table, moved[0] ?? 0), cols: moved };
 }
 

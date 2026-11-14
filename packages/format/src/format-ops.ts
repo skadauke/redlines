@@ -178,6 +178,13 @@ export function isAlignOps(ops: readonly ParsedFormatOp[]): boolean {
   );
 }
 
+/** Whether a `fmt` payload, as it is written in a marker, is that of an alignment change of a table:
+ * one `align=` whose value is a delimiter row (`isAlignOps`). The point form of the change is read only
+ * for such a payload, by the parse and by the readers of a table's cells (format §3.7). */
+export function isAlignPayload(payload: string): boolean {
+  return payload.startsWith('align=') && isAlignOps(parseFormatOps(payload));
+}
+
 /** Whether the operations are those of a block format change that rejecting can undo: one `was=`
  * (of a type, or `indent=N` with the number it had) or one box. */
 export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {

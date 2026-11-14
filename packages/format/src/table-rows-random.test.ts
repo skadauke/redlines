@@ -3,16 +3,21 @@
 // same, all accepted is the newest view and all rejected the original's bytes. Each table ends by
 // being deleted whole, by one of the three or plain, alone in the file and among paragraphs: refused
 // exactly when another person's change is in it, and otherwise the same in every order. A comment
-// inside a row that moves, in every pipe layout, travels with the row both ways (#371).
-// `REDLINES_FUZZ` sets how many tables (6000 before a stage merges).
+// inside a row that moves, in every pipe layout, travels with the row both ways (#371). Alignment
+// changes (tracked and plain, one column) meet the layouts without outer pipes, where the mark stands at
+// the line's end: a row operation on the header drawn while one is pending is refused with the alignment
+// words, tracked or plain, and every other row operation is written (format §3.7, rule 5).
+// `REDLINES_FUZZ` sets how many tables (6000 before a stage merges), `REDLINES_SEED` the seed, and
+// `REDLINES_FUZZ_STATS` prints the counts.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
+import { isAlignPoint } from './table-align.ts';
 import { expectCommentsTravel } from './table-move-oracle.ts';
-import { tableEdit, untrackedTableEdit } from './table-ops.ts';
+import { ALIGN_FIRST, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
@@ -27,6 +32,7 @@ import {
   expectEveryOrderAlike,
   expectNoDecisionRefused,
   expectInOrder,
+  expectPointHolds,
   file,
 } from './test-helpers.ts';
 import { addComment } from './comments.ts';
@@ -273,6 +279,14 @@ describe('rows, random', () => {
     const random = seeded(seed);
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
     let used = 0;
+    // The alignment changes made (tracked and plain), the tables that end with one pending, the row operations
+    // on the header drawn while one is pending (all refused, with the alignment words), the same by a layout
+    // with no outer pipe, and the row operations that touch no header, drawn beside one, that were written.
+    let aligned = 0;
+    let withAlign = 0;
+    let headerRefused = 0;
+    let headerRefusedBare = 0;
+    let beside = 0;
     // The pipe layouts that a comment in a moved row has been tried in, and how often.
     const noted = new Map<string, number>();
     for (let n = 0; n < fuzzCount(120); n++) {
@@ -306,7 +320,17 @@ describe('rows, random', () => {
         if (!table) break;
         const who = pick(['ada', 'bo', 'claude-ada', 'plain'] as const);
         const rows = table.rows.length;
-        const kind = pick(['insert', 'delete', 'move', 'cell', 'cell', 'bold', 'comment'] as const);
+        const kind = pick([
+          'insert',
+          'delete',
+          'move',
+          'cell',
+          'cell',
+          'bold',
+          'comment',
+          'align',
+          'align',
+        ] as const);
         let op: TableOp | null = null;
         let edit: { from: number; to: number; insert: string } | null = null;
         let over: { from: number; to: number; kind: 'bold' | 'comment' } | null = null;
@@ -326,6 +350,14 @@ describe('rows, random', () => {
             rows: [Math.floor(random() * rows)],
             to: Math.floor(random() * (rows + 1)),
           };
+        } else if (kind === 'align') {
+          // One column aligned, tracked (a mark at the end of the header's last cell) or plain (no mark).
+          op = {
+            kind: 'align',
+            table: table.from,
+            cols: [Math.floor(random() * columns)],
+            align: pick(['left', 'center', 'right', ''] as const),
+          };
         } else if (kind === 'bold' || kind === 'comment') {
           // A format change or a comment on the text of a cell, or on a stretch of it.
           const target = pick(table.rows);
@@ -344,6 +376,13 @@ describe('rows, random', () => {
         }
         steps.push(`${who} ${JSON.stringify(op ?? edit ?? over)}`);
         const person = PEOPLE.find((p) => p.handle === who);
+        // A row operation on the header, drawn while an alignment change is pending: its mark stands in the header.
+        const onHeader =
+          op !== null &&
+          ((op.kind === 'insertRows' && op.after < 0) ||
+            (op.kind === 'deleteRows' && op.rows.includes(0)) ||
+            (op.kind === 'moveRows' && (op.rows.includes(0) || op.to === 0)));
+        const markPending = parse(text).marks.some(isAlignPoint);
         try {
           let changes;
           if (op) {
@@ -352,6 +391,13 @@ describe('rows, random', () => {
                 ? untrackedTableEdit(text, op)
                 : tableEdit(text, op, context(person ?? ada, ids()))
             ).changes;
+            if (onHeader && markPending) {
+              throw new Error(
+                `${op.kind} on the header was written beside a pending alignment change: ${steps.join(' / ')}\n${text}`,
+              );
+            }
+            if (op.kind === 'align') aligned++;
+            else if (markPending && !onHeader) beside++;
           } else if (over) {
             const ctxFor = context(person ?? ada, ids());
             if (over.kind === 'bold') {
@@ -371,7 +417,18 @@ describe('rows, random', () => {
           }
           text = applyChanges(text, changes ?? []);
         } catch (error) {
-          if (error instanceof EditError) continue;
+          if (error instanceof EditError) {
+            // The words of the alignment change are the header's: no other row operation is refused with them.
+            expect(
+              error.message === ALIGN_FIRST,
+              `${error.message}: ${steps.join(' / ')}\n${text}`,
+            ).toBe(onHeader && markPending);
+            if (onHeader && markPending) {
+              headerRefused++;
+              if (!(lead && trail)) headerRefusedBare++;
+            }
+            continue;
+          }
           throw error;
         }
         const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
@@ -391,6 +448,9 @@ describe('rows, random', () => {
             label,
           ).toBe(true);
         }
+        // While an alignment change is pending its mark ends the header's last cell, and the original view has its
+        // old delimiter row, whatever was done to the rows and the cells.
+        expectPointHolds(label, text);
       }
       // A comment inside a row that moves, drawn apart from the steps above so that every layout has
       // it (#371): the row's own comments, and its move, decided in every order.
@@ -414,6 +474,12 @@ describe('rows, random', () => {
       const marks = parse(text).marks.length;
       if (marks === 0 || marks > 5) continue;
       used++;
+      const alignIds = new Set(
+        parse(text)
+          .marks.filter(isAlignPoint)
+          .map((mark) => mark.id),
+      );
+      if (alignIds.size > 0) withAlign++;
       try {
         expectEveryOrderAlike(label, text, exactly);
       } catch (error) {
@@ -428,6 +494,12 @@ describe('rows, random', () => {
       const pending = Object.values(parse(text).ledger.marks);
       const movesOnly = pending.length > 0 && pending.every((m) => m.move !== undefined);
       if (!(lead && trail) && movesOnly) expectNoDecisionRefused(label, text);
+      // Moves and an alignment change are all that is pending: every decision is possible in every order, the
+      // alignment change's own included, in every pipe layout. No option: no refusal is allowed.
+      const alone = Object.entries(parse(text).ledger.marks).every(
+        ([id, entry]) => entry.move !== undefined || alignIds.has(id),
+      );
+      if (alignIds.size > 0 && alone) expectNoDecisionRefused(label, text);
       // The comments in the rows that move stay with them, whatever order the moves are decided in.
       if (movesOnly) expectCommentsTravel(label, text, columns);
       try {
@@ -455,7 +527,17 @@ describe('rows, random', () => {
         );
       }
     }
+    if (process.env['REDLINES_FUZZ_STATS']) {
+      console.log(
+        `tables ${used}, alignment changes made ${aligned}, tables that end with one pending ${withAlign}, row operations on the header refused for it ${headerRefused} (${headerRefusedBare} without an outer pipe), row operations written beside it ${beside}`,
+      );
+    }
     expect(used).toBeGreaterThan(10);
+    // Alignment changes are drawn, some are pending at the end, and a row operation on the header drawn while one
+    // is pending is refused for it (a run of the default size draws too few to count on a layout without a pipe).
+    expect(aligned).toBeGreaterThan(used / 8);
+    expect(withAlign).toBeGreaterThan(0);
+    expect(headerRefused).toBeGreaterThan(0);
     // Every pipe layout has had comments in a moved row, with the usual number of tables or more.
     if (fuzzCount(120) >= 120) {
       expect([...noted.keys()].sort()).toEqual([

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { readTables, tableAt } from './table.ts';
+import { alignMarkOf } from './table-align.ts';
+import { alignPointIn, readRowCells, readTables, tableAt } from './table.ts';
 import type { TableRead } from './table.ts';
-import { blockLeaves, file } from './test-helpers.ts';
+import { blockLeaves, file, thread } from './test-helpers.ts';
 
 const tablesOf = (text: string): TableRead[] => readTables(text, parse(text));
 
@@ -234,6 +235,502 @@ describe('readTables', () => {
     expect(tableAt(text, parsed, text.indexOf('b'))?.from).toBe(3);
     expect(tableAt(text, parsed, 0)).toBeNull();
     expect(tableAt(text, parsed, text.indexOf('y'))).toBeNull();
+  });
+});
+
+// An alignment change is one mark with no closer at the end of the header's last cell
+// (`<!--fmt k3x9 align=SPEC-->`, format §3.7, #281): the text of that cell stops in front of it, as the
+// text of a row's first cell starts after the marker of an inserted row.
+describe('the alignment mark at the end of a header row', () => {
+  const SPEC = '\\|\\x20:-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-:\\x20\\|';
+  const mark = (id = 'k3x9') => `<!--fmt ${id} align=${SPEC}-->`;
+  const MARK = mark();
+  const THREE = '| :---- | :---: | ----: |';
+  const ROW = '| Apples | 3 | 1.20 |';
+
+  /** A file of a table: its header row, delimiter row and rows, with the given ledger entries. */
+  const tableOf = (
+    header: string,
+    delimiter = THREE,
+    rows: string[] = [ROW],
+    marks: Record<string, string> = { k3x9: 'bo' },
+    threads: string[] = [],
+    eol = '\n',
+  ) => {
+    const text = file([header, delimiter, ...rows].join(eol), marks, threads);
+    const table = tablesOf(text)[0];
+    if (!table) throw new Error(`No table in ${JSON.stringify(text)}`);
+    return { text, table };
+  };
+
+  /** The header rows to read: with the mark after the text of the last cell, in each place it can be. */
+  const BY_BO_AND_ADA = { w8nn: 'ada', k3x9: 'bo' };
+  const HEADERS: {
+    name: string;
+    header: string;
+    delimiter?: string;
+    texts: string[];
+    threads?: string[];
+    marks?: Record<string, string>;
+    row?: string;
+    rowTexts?: string[];
+    /** The line breaks of the table, when they are not LF. */
+    eol?: string;
+  }[] = [
+    {
+      name: 'outer pipes',
+      header: `| Fruit | Count | Price${MARK} |`,
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'padding after the mark',
+      header: `| Fruit | Count | Price${MARK}    |`,
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'no trailing pipe, spaces after the mark',
+      header: `| Fruit | Count | Price${MARK}  `,
+      delimiter: '| :---- | :---: | ----:',
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'no trailing pipe, nothing after the mark',
+      header: `| Fruit | Count | Price${MARK}`,
+      delimiter: '| :---- | :---: | ----:',
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'CRLF line breaks, no trailing pipe: the mark is the end of the line',
+      header: `| Fruit | Count | Price${MARK}`,
+      delimiter: '| :---- | :---: | ----:',
+      texts: ['Fruit', 'Count', 'Price'],
+      eol: '\r\n',
+    },
+    {
+      name: 'no leading pipe',
+      header: `Fruit | Count | Price${MARK} |`,
+      delimiter: ':---- | :---: | ----: |',
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'no pipe at the edges',
+      header: `Fruit | Count | Price${MARK}  `,
+      delimiter: ':---- | :---: | ----:',
+      texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'a point comment in front of it, which stays in the text',
+      header: `| Fruit | Count | Price<!--cmt c9qf-->${MARK} |`,
+      texts: ['Fruit', 'Count', 'Price<!--cmt c9qf-->'],
+      threads: thread('c9qf'),
+    },
+    {
+      name: 'an escaped pipe in front of it',
+      header: `| Fruit | Count | Pr\\|ice\\|${MARK} |`,
+      texts: ['Fruit', 'Count', 'Pr\\|ice\\|'],
+    },
+    {
+      name: 'a pipe in a code span, which GFM reads as two cells',
+      header: `| Fruit | Count | \`x|y\`${MARK} |`,
+      delimiter: '| :---- | :---: | ----: | --- |',
+      texts: ['Fruit', 'Count', '`x', 'y`'],
+    },
+    {
+      name: 'an insertion that ends the text',
+      header: `| Fruit | Count | Price<!--ins w8nn-->s<!--/w8nn-->${MARK} |`,
+      texts: ['Fruit', 'Count', 'Price<!--ins w8nn-->s<!--/w8nn-->'],
+      marks: BY_BO_AND_ADA,
+    },
+    {
+      name: 'a deletion that ends the text',
+      header: `| Fruit | Count | Price<!--del w8nn s-->${MARK} |`,
+      texts: ['Fruit', 'Count', 'Price<!--del w8nn s-->'],
+      marks: BY_BO_AND_ADA,
+    },
+    {
+      name: 'a deletion of all the text, and the mark after it',
+      header: `| Fruit | Count | <!--del w8nn Price-->${MARK} |`,
+      texts: ['Fruit', 'Count', '<!--del w8nn Price-->'],
+      marks: BY_BO_AND_ADA,
+    },
+    {
+      name: 'a substitution of all the text',
+      header: `| Fruit | Count | <!--sub w8nn Price-->Cost<!--/w8nn-->${MARK} |`,
+      texts: ['Fruit', 'Count', '<!--sub w8nn Price-->Cost<!--/w8nn-->'],
+      marks: BY_BO_AND_ADA,
+    },
+    {
+      name: 'a range comment that ends the text',
+      header: `| Fruit | Count | <!--cmt c9qf-->Price<!--/c9qf-->${MARK} |`,
+      texts: ['Fruit', 'Count', '<!--cmt c9qf-->Price<!--/c9qf-->'],
+      threads: thread('c9qf'),
+    },
+    {
+      name: 'an empty last cell that holds only the mark',
+      header: `| Fruit | Count | ${MARK} |`,
+      texts: ['Fruit', 'Count', ''],
+    },
+    {
+      name: 'an empty last cell with no padding around the mark',
+      header: `| Fruit | Count |${MARK}|`,
+      texts: ['Fruit', 'Count', ''],
+    },
+    {
+      name: 'a one-cell header',
+      header: `| Price${MARK} |`,
+      delimiter: '| --- |',
+      texts: ['Price'],
+      row: '| 1.20 |',
+      rowTexts: ['1.20'],
+    },
+    {
+      name: 'a one-cell header with no trailing pipe',
+      header: `| Price${MARK}`,
+      delimiter: '| ---',
+      texts: ['Price'],
+      row: '| 1.20 |',
+      rowTexts: ['1.20'],
+    },
+    {
+      name: 'a one-cell header with no leading pipe',
+      header: `Price${MARK} |`,
+      delimiter: '--- |',
+      texts: ['Price'],
+      row: '1.20 |',
+      rowTexts: ['1.20'],
+    },
+  ];
+
+  /** The table of a header case. */
+  const read = (one: (typeof HEADERS)[number]) =>
+    tableOf(one.header, one.delimiter, [one.row ?? ROW], one.marks, one.threads, one.eol);
+
+  it("stops the text of the header's last cell in front of the alignment mark", () => {
+    for (const one of HEADERS) {
+      const { name, texts, rowTexts } = one;
+      const { text, table } = read(one);
+      expect(table && cellsOf(text, table)[0], name).toEqual(texts);
+      // The mark's own pipes are escaped, so they part no cell.
+      expect(table.rows[0]?.cells, name).toHaveLength(texts.length);
+      expect(table.aligns, name).toHaveLength(texts.length);
+      // The text ends where the mark starts, whatever stands between its end and the pipe.
+      const last = table.rows[0]?.cells.at(-1);
+      expect(last?.textTo, name).toBe(text.indexOf(MARK));
+      // The cell itself still holds the mark: it runs to the pipe or the line's end.
+      expect(last?.to, name).toBeGreaterThanOrEqual(text.indexOf(MARK) + MARK.length);
+      // The other rows are read as they were.
+      expect(cellsOf(text, table)[1], name).toEqual(rowTexts ?? ['Apples', '3', '1.20']);
+    }
+  });
+
+  it('reads the cells of each header as micromark does', () => {
+    for (const one of HEADERS) {
+      const { text, table } = read(one);
+      const oracle = blockLeaves(text).filter((leaf) => leaf.kind === 'table');
+      expect(oracle, one.name).toHaveLength(1);
+      // The text of a cell as a renderer shows it: no comments, one space for white space, `\|` as `|`.
+      const shown = (cell: string) =>
+        cell
+          .replaceAll('\\|', '|')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      const columns = table.aligns.length;
+      const mine = cellsOf(text, table).map((row) => {
+        const cells = row.slice(0, columns).map(shown);
+        while (cells.length < columns) cells.push('');
+        return cells;
+      });
+      expect(mine, one.name).toEqual(oracle[0]?.rows);
+    }
+  });
+
+  it('keeps a space between the text and the mark in the text, which the writer never adds', () => {
+    for (const [header, delimiter] of [
+      [`| Fruit | Count | Price ${MARK} |`, THREE],
+      [`| Fruit | Count | Price  ${MARK}`, '| :---- | :---: | ----:'],
+      [`Fruit | Count | Price\t${MARK}  `, ':---- | :---: | ----:'],
+    ] as const) {
+      const { text, table } = tableOf(header, delimiter);
+      const last = table.rows[0]?.cells[2];
+      expect(text.slice(last?.textFrom, last?.textTo), JSON.stringify(header)).toMatch(
+        /^Price\s+$/,
+      );
+      expect(last?.textTo, JSON.stringify(header)).toBe(text.indexOf(MARK));
+      // The mark is still the end of the cell, and the cells are three.
+      expect(table.rows[0]?.cells, JSON.stringify(header)).toHaveLength(3);
+    }
+  });
+
+  it('reads the header of a one-cell table with the marker of an inserted row in its first cell', () => {
+    const header = (cell: string) =>
+      tableOf(`| ${cell} |`, '| --- |', ['| 1.20 |'], {
+        w8nn: 'ada',
+        k3x9: 'bo',
+      });
+    // The text between them: after the marker and its space, and in front of the mark.
+    const both = header(`<!--ins w8nn row--> Price${MARK}`);
+    const cell = both.table.rows[0]?.cells[0];
+    expect(both.table.rows[0]?.insertion?.id).toBe('w8nn');
+    expect(both.text.slice(cell?.textFrom, cell?.textTo)).toBe('Price');
+    expect(cell?.textTo).toBe(both.text.indexOf(MARK));
+    // The same with the marker of an inserted column.
+    const column = header(`<!--ins w8nn col--> Price${MARK}`);
+    const inColumn = column.table.rows[0]?.cells[0];
+    expect(column.text.slice(inColumn?.textFrom, inColumn?.textTo)).toBe('Price');
+    // No text between them: one stop, in front of the mark and never inside it.
+    for (const gap of ['', ' ', '  ']) {
+      const alone = header(`<!--ins w8nn row-->${gap}${MARK}`);
+      const stop = alone.table.rows[0]?.cells[0];
+      expect(stop?.textFrom, JSON.stringify(gap)).toBe(stop?.textTo);
+      const marker = alone.text.indexOf('<!--ins w8nn row-->') + '<!--ins w8nn row-->'.length;
+      expect(stop?.textTo, JSON.stringify(gap)).toBeGreaterThanOrEqual(marker);
+      expect(stop?.textTo, JSON.stringify(gap)).toBeLessThanOrEqual(alone.text.indexOf(MARK));
+    }
+  });
+
+  it('gives an empty last cell that holds only the mark one stop, in front of it', () => {
+    for (const [header, delimiter] of [
+      [`| Fruit | Count | ${MARK} |`, THREE],
+      [`| Fruit | Count |${MARK}|`, THREE],
+      [`| Fruit | Count |   ${MARK}  |`, THREE],
+      [`| Fruit | Count | ${MARK}`, '| :---- | :---: | ----:'],
+      [`Fruit | Count | ${MARK}`, ':---- | :---: | ----:'],
+    ] as const) {
+      const { text, table } = tableOf(header, delimiter);
+      const cell = table.rows[0]?.cells[2];
+      expect(cell?.textFrom, header).toBe(cell?.textTo);
+      expect(cell?.textTo, header).toBe(text.indexOf(MARK));
+      expect(cellsOf(text, table)[0], header).toEqual(['Fruit', 'Count', '']);
+    }
+  });
+
+  it('does not take a mark that has text after it for the end', () => {
+    for (const after of ['x', ' x', '<!--cmt c9qf-->', '<!--ins w8nn row-->']) {
+      const header = `| Fruit | Count | Price${MARK}${after} |`;
+      const { text, table } = tableOf(header, THREE, [ROW], { k3x9: 'bo', w8nn: 'ada' }, [
+        ...thread('c9qf'),
+      ]);
+      const last = table.rows[0]?.cells[2];
+      expect(text.slice(last?.textFrom, last?.textTo), after).toBe(`Price${MARK}${after}`);
+    }
+    // Another format change at the end is no alignment change.
+    const bold = tableOf('| Fruit | Count | Price<!--fmt w8nn +check--> |', THREE, [ROW], {
+      w8nn: 'bo',
+    });
+    const cell = bold.table.rows[0]?.cells[2];
+    expect(bold.text.slice(cell?.textFrom, cell?.textTo)).toBe('Price<!--fmt w8nn +check-->');
+  });
+
+  it('reads the mark at the end of any row, as a merge can leave it there', () => {
+    const { text, table } = tableOf('| Fruit | Count | Price |', THREE, [
+      `| Apples | 3 | 1.20${MARK} |`,
+    ]);
+    expect(cellsOf(text, table)[1]).toEqual(['Apples', '3', '1.20']);
+    expect(table.rows[1]?.cells[2]?.textTo).toBe(text.indexOf(MARK));
+  });
+
+  it('reads a table with the mark in its header as padded', () => {
+    const padded = (header: string, delimiter: string, rows: string[]) =>
+      tableOf(header, delimiter, rows, { k3x9: 'bo', w8nn: 'ada' }).table.padded;
+    const fruit = ['| Apples | 3     | 1.20  |', '| Pears  | 5     | 0.90  |'];
+    // The header with the mark has the same pipes as the delimiter row once the mark is cut out.
+    expect(padded(`| Fruit  | Count | Price${MARK} |`, '| :----- | :---: | ----: |', fruit)).toBe(
+      true,
+    );
+    expect(padded('| Fruit  | Count | Price |', '| :----- | :---: | ----: |', fruit)).toBe(true);
+    // The mark in the header of a table that was not padded before it does not make it padded.
+    expect(padded(`| a | b${MARK} |`, '| - | - |', ['| cc | d |'])).toBe(false);
+    expect(padded(`| a | b${MARK} |`, '| - | - |', ['| c | d |'])).toBe(true);
+    // Both branches: a header that holds the marker of an inserted column as well.
+    expect(padded(`| a | <!--ins w8nn col--> b${MARK} |`, '| - | - |', ['| c | d |'])).toBe(true);
+    expect(padded(`| a | <!--ins w8nn col--> b${MARK} |`, '| - | - |', ['| cc | d |'])).toBe(false);
+    // No pipe at the edges: the mark is after the last pipe, so the pipes are where they were.
+    expect(padded(`a | b${MARK}`, '--|--', ['c | d'])).toBe(true);
+    expect(padded(`a | b${MARK}  `, '--|--', ['c | d'])).toBe(true);
+    expect(padded(`a | b${MARK}`, '--|--', ['cc | d'])).toBe(false);
+  });
+
+  it('reads the same cells through readRowCells, which has no parse', () => {
+    const cases = [
+      ...HEADERS.map(read),
+      tableOf(`| <!--ins w8nn row--> Price${MARK} |`, '| --- |', ['| 1.20 |'], {
+        w8nn: 'ada',
+        k3x9: 'bo',
+      }),
+      tableOf(`| <!--ins w8nn row-->${MARK} |`, '| --- |', ['| 1.20 |'], {
+        w8nn: 'ada',
+        k3x9: 'bo',
+      }),
+      tableOf(`| Fruit | Count | ${MARK} |`),
+      tableOf('| Fruit | Count | Price |', THREE, [`| Apples | 3 | 1.20${MARK} |`]),
+    ];
+    for (const { text, table } of cases) {
+      for (const row of table.rows) {
+        const line = text.slice(row.from, row.to);
+        const read = readRowCells(line, 0, line.length);
+        expect(read.leadingPipe, line).toBe(row.leadingPipe);
+        // Neither reader has the mark in the text of a cell.
+        expect(
+          read.cells.map((cell) => line.slice(cell.textFrom, cell.textTo)).join('|'),
+          line,
+        ).not.toContain('align=');
+        expect(
+          read.cells.map((cell) => [cell.from, cell.to, cell.textFrom, cell.textTo]),
+          line,
+        ).toEqual(
+          row.cells.map((cell) => [
+            cell.from - row.from,
+            cell.to - row.from,
+            cell.textFrom - row.from,
+            cell.textTo - row.from,
+          ]),
+        );
+      }
+    }
+  });
+
+  it('finds the alignment change of the right one of two tables, in either form', () => {
+    const one = (extra = '') => `| a | b${extra} |\n| :-- | --- |\n| c | d |`;
+    const two = (extra = '') => `| e | f${extra} |\n| --- | :-: |\n| g | h |`;
+    const span = (id: string, table: string) => `${mark(id)}\n\n${table}\n\n<!--/${id}-->`;
+    const check = (
+      name: string,
+      body: string,
+      ids: Record<string, string>,
+      found: (string | null)[],
+    ) => {
+      const text = file(body, ids);
+      const parsed = parse(text);
+      const tables = readTables(text, parsed);
+      expect(tables, name).toHaveLength(2);
+      expect(
+        tables.map((table) => alignMarkOf(parsed, table)?.id ?? null),
+        name,
+      ).toEqual(found);
+    };
+    const k = { k3x9: 'bo' };
+    const w = { w8nn: 'bo' };
+    const both = { k3x9: 'bo', w8nn: 'bo' };
+    check('a point in the first', `${one(MARK)}\n\n${two()}`, k, ['k3x9', null]);
+    check('a point in the second', `${one()}\n\n${two(MARK)}`, k, [null, 'k3x9']);
+    check('a point in each', `${one(mark('k3x9'))}\n\n${two(mark('w8nn'))}`, both, [
+      'k3x9',
+      'w8nn',
+    ]);
+    check('a span around the first', `${span('k3x9', one())}\n\n${two()}`, k, ['k3x9', null]);
+    check('a span around the second', `${one()}\n\n${span('w8nn', two())}`, w, [null, 'w8nn']);
+    check('a span, then a point', `${span('k3x9', one())}\n\n${two(mark('w8nn'))}`, both, [
+      'k3x9',
+      'w8nn',
+    ]);
+    check('a point, then a span', `${one(mark('k3x9'))}\n\n${span('w8nn', two())}`, both, [
+      'k3x9',
+      'w8nn',
+    ]);
+    check(
+      'in a row below the header',
+      `${one().replace('| c | d |', `| c | d${MARK} |`)}\n\n${two()}`,
+      k,
+      ['k3x9', null],
+    );
+    check('none', `${one()}\n\n${two()}`, {}, [null, null]);
+  });
+
+  it('leaves the deletions below the table with the table, and the mark in its header', () => {
+    const body = `| Fruit | Count | Price${MARK} |\n${THREE}\n${ROW}\n\n<!--del g5nb row=2 \\| Pears \\| 5 \\| 0.90 \\|-->`;
+    const text = file(body, { k3x9: 'bo', g5nb: 'bo' });
+    const parsed = parse(text);
+    const [table] = readTables(text, parsed);
+    expect(table?.deletions.map((deletion) => deletion.mark.id)).toEqual(['g5nb']);
+    expect(table && alignMarkOf(parsed, table)?.id).toBe('k3x9');
+    expect(table && cellsOf(text, table)).toEqual([
+      ['Fruit', 'Count', 'Price'],
+      ['Apples', '3', '1.20'],
+    ]);
+  });
+
+  it('is found in the table whose rows hold it, and in no table when none does', () => {
+    const lone = file(`${MARK}\n\n| a | b |\n| - | - |\n| c | d |`, { k3x9: 'bo' });
+    const parsed = parse(lone);
+    const [table] = readTables(lone, parsed);
+    expect(table && alignMarkOf(parsed, table)).toBeUndefined();
+  });
+});
+
+describe('alignPointIn', () => {
+  const SPEC = '\\|\\x20:-\\-\\-\\-\\-\\x20\\|';
+  const MARK = `<!--fmt k3x9 align=${SPEC}-->`;
+  const find = (text: string, from = 0, to = text.length) => alignPointIn(text, from, to);
+
+  it('finds the whole mark that ends a range, white space after it aside', () => {
+    const text = `Price${MARK}`;
+    expect(find(text)).toEqual({ from: 5, to: text.length });
+    expect(find(`${text} \t `)).toEqual({ from: 5, to: text.length });
+    expect(find(`${MARK}`)).toEqual({ from: 0, to: MARK.length });
+    // Only what is in the range counts.
+    expect(find(`${text} more`, 0, text.length)).toEqual({ from: 5, to: text.length });
+    // The value is a delimiter row, with the escapes of a payload: `\|`, `\-`, `\x20`.
+    const odd = '<!--fmt b2c3 align=\\|\\x20-\\-\\-\\x20\\|\\x20:-\\x20\\|-->';
+    expect(find(`a${odd}`)).toEqual({ from: 1, to: 1 + odd.length });
+  });
+
+  it('is null when anything but white space follows it in the range', () => {
+    expect(find(`Price${MARK}x`)).toBeNull();
+    expect(find(`Price${MARK} x`)).toBeNull();
+    expect(find(`Price${MARK}<!--cmt c9qf-->`)).toBeNull();
+    expect(find(`Price${MARK}`, 0, `Price${MARK}`.length - 1)).toBeNull();
+  });
+
+  it('is null for what is not a whole alignment mark that starts in the range', () => {
+    for (const text of [
+      'Price',
+      '',
+      '<!--fmt k3x9 +check-->',
+      '<!--fmt k3x9 -->',
+      '<!--fmt k3x9-->',
+      '<!--ins k3x9 row-->',
+      '<!--cmt k3x9 align=x-->',
+      // The id is four characters of the id alphabet: a consonant, then consonants and digits.
+      '<!--fmt k3x align=x-->',
+      '<!--fmt k3x9x align=x-->',
+      '<!--fmt a3x9 align=x-->',
+      '<!--fmt k3e9 align=x-->',
+      '<!--fmt K3X9 align=x-->',
+      // The value is no delimiter row: the mark is kept as the text it was, as the parse reads it.
+      '<!--fmt k3x9 align=nonsense-->',
+      '<!--fmt k3x9 align=-->',
+      `<!--fmt k3x9 align=${SPEC} +bold-->`,
+      '<!--fmt k3x9 align=\\|\\x20x\\x20\\|-->',
+      '<!--fmt k3x9 align=\\|\\x20:\\x20\\|-->',
+      // `align=` is the payload's first word.
+      '<!--fmt k3x9 +bold align=x-->',
+      '<!--fmt k3x9 xalign=x-->',
+      '<!--fmt k3x9  align=x-->',
+      // No end, or an end that is not the first `-->`.
+      '<!--fmt k3x9 align=x',
+      '<!--fmt k3x9 align=x--',
+      '<!--fmt k3x9 align=a--> b -->',
+    ]) {
+      expect(find(text), JSON.stringify(text)).toBeNull();
+    }
+    // A mark that starts before the range is no mark of it.
+    expect(find(`Price${MARK}`, 6)).toBeNull();
+    // A line break is no part of a payload.
+    expect(find('<!--fmt k3x9 align=a\nb-->')).toBeNull();
+    expect(find('<!--fmt k3x9 align=a\r\nb-->')).toBeNull();
+  });
+
+  it('takes the marker that the scan reads: a marker ends at its first -->', () => {
+    const other = '<!--fmt w8nn align=\\|\\x20-\\x20\\|-->';
+    // The second opener is part of the first one's payload, as the scan reads them left to right: the
+    // first is the marker, and its value is no delimiter row, so nothing ends the range.
+    const nested = `a<!--fmt k3x9 align=x${other}`;
+    expect(find(nested)).toBeNull();
+    // Two marks one after the other: the last one ends the range, and the first is text.
+    const first = '<!--fmt k3x9 align=\\|\\x20-\\x20\\|-->';
+    const two = `a${first}${other}`;
+    expect(find(two)).toEqual({ from: 1 + first.length, to: two.length });
   });
 });
 

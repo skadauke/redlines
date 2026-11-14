@@ -174,6 +174,7 @@ describe('rule 2: rows and columns don’t change together', () => {
     colsInserted: false,
     colsChanged: false,
     align: false,
+    headerChanged: false,
   };
   const COLUMNS = 'Accept or reject the column changes in this table first.';
 
@@ -186,6 +187,37 @@ describe('rule 2: rows and columns don’t change together', () => {
       expect(ruleTwo('insertRows', { ...base, rowsInserted: true }, tracked)).toBeNull();
       expect(ruleTwo('insertRows', { ...base, rowsChanged: true }, tracked)).toBeNull();
       expect(ruleTwo('insertRows', { ...base, align: true }, tracked)).toBeNull();
+    }
+  });
+
+  // Rule 5: an alignment change keeps the old delimiter row, so one more change of the columns would leave it a cell
+  // short or long in some order of decisions. With Track Changes off nothing is added to the pending changes: the
+  // operation does the same columns to the old row (`keepAlignInStep`), unless a column is pending as well.
+  it('lets a column operation through beside an alignment change only with Track Changes off and no column pending', () => {
+    const ALIGN = 'Accept or reject the alignment change in this table first.';
+    for (const op of ['insertCols', 'deleteCols', 'moveCols'] as const) {
+      for (const tracked of [true, false]) {
+        for (const colsInserted of [false, true]) {
+          for (const colsChanged of [false, true]) {
+            const pending = { ...base, align: true, colsInserted, colsChanged };
+            const label = `${op} ${tracked ? 'tracked' : 'plain'} ${JSON.stringify({ colsInserted, colsChanged })}`;
+            expect(ruleTwo(op, pending, tracked), label).toBe(
+              tracked || colsInserted || colsChanged ? ALIGN : null,
+            );
+            // Without the alignment change the rule is what it was.
+            expect(ruleTwo(op, { ...pending, align: false }, tracked), label).toBeNull();
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves the row operations as they were beside an alignment change', () => {
+    for (const tracked of [true, false]) {
+      for (const op of ['insertRows', 'deleteRows', 'moveRows'] as const) {
+        expect(ruleTwo(op, { ...base, align: true }, tracked), op).toBeNull();
+        expect(ruleTwo(op, { ...base, align: true, colsChanged: true }, tracked), op).toBe(COLUMNS);
+      }
     }
   });
 
@@ -202,10 +234,45 @@ describe('rule 2: rows and columns don’t change together', () => {
       colsInserted: true,
       colsChanged: true,
       align: false,
+      headerChanged: false,
     });
     const quiet = file(FRUIT);
     const [plain] = readTables(quiet, parse(quiet));
     expect(plain && pendingOf(plain, parse(quiet))).toEqual(base);
+  });
+
+  it('reads the header as a pending row change: a row inserted above it or moved to the top, or a row deleted at 0', () => {
+    const headerChanged = (body: string, marks: Record<string, string>) => {
+      const text = file(body, marks);
+      const parsed = parse(text);
+      const [table] = readTables(text, parsed);
+      return table && pendingOf(table, parsed).headerChanged;
+    };
+    const rows = '| a | b |\n| - | - |\n| c | d |';
+    // The first row has a marker of an inserted row: a new header (a row moved to the top is one too).
+    expect(headerChanged(rows.replace('| a |', '| <!--ins k3x9 row--> a |'), { k3x9: 'bo' })).toBe(
+      true,
+    );
+    // A deleted row that comes back above the first row: the header deleted, or moved away.
+    expect(headerChanged(`${rows}\n\n<!--del g5nb row=0 \\| z \\| w \\|-->`, { g5nb: 'bo' })).toBe(
+      true,
+    );
+    // A row inserted or deleted below the header is no change of it, and nor is a deleted column.
+    expect(headerChanged(rows.replace('| c |', '| <!--ins k3x9 row--> c |'), { k3x9: 'bo' })).toBe(
+      false,
+    );
+    expect(headerChanged(`${rows}\n\n<!--del g5nb row=1 \\| z \\| w \\|-->`, { g5nb: 'bo' })).toBe(
+      false,
+    );
+    expect(
+      headerChanged(`${rows}\n\n<!--del m2bd col=1 \\| a \\\\n \\| - \\\\n \\| c-->`, {
+        m2bd: 'bo',
+      }),
+    ).toBe(false);
+    // A column marker in the header is a column change, not a row one.
+    expect(headerChanged(rows.replace('| b |', '| <!--ins k3x9 col--> b |'), { k3x9: 'bo' })).toBe(
+      false,
+    );
   });
 
   it('refuses the operation, tracked and not, with a column pending deleted', () => {
@@ -1223,6 +1290,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       colsInserted: true,
       colsChanged: true,
       align: true,
+      headerChanged: true,
     };
     for (const tracked of [true, false]) expect(ruleTwo('deleteTable', all, tracked)).toBeNull();
   });

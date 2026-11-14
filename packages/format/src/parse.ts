@@ -2,6 +2,7 @@
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
 import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
+import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { scan } from './scan.ts';
@@ -16,13 +17,20 @@ import type {
   WarningCode,
 } from './types.ts';
 
-/** Whether a marker of this kind has no closing marker (format §2.2). */
-function isPoint(opener: Extract<Marker, { type: 'open' }>): boolean {
+/**
+ * Whether a marker has no closing marker (format §2.2). `alone` is whether it is the only marker its id
+ * has in the file: an `align=` format change whose value is a delimiter row, and which nothing else of
+ * its id goes with, is the point form of an alignment change, which stands at the end of a table's
+ * header row (format §3.7). Any other `align=` opener is read as before: it opens a range, or is
+ * unclosed (a value that is no delimiter row, or an id opened twice with no closer).
+ */
+function isPoint(opener: Extract<Marker, { type: 'open' }>, alone: boolean): boolean {
   return (
     opener.kind === 'del' ||
     opener.kind === 'split' ||
     (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) ||
-    (opener.kind === 'fmt' && BOX.test(opener.payload ?? ''))
+    (opener.kind === 'fmt' && BOX.test(opener.payload ?? '')) ||
+    (opener.kind === 'fmt' && alone && isAlignPayload(opener.payload ?? ''))
   );
 }
 
@@ -38,10 +46,12 @@ const TABLE_DELETION = /^(?:row|col)=/;
 
 /** Whether an opener can stand alone on the line before a block (format §3.3), and so has a
  * carrier. A split is followed by the break it stands for, and the table marks sit in a row or
- * below a table. */
-function startsBlocks(opener: Extract<Marker, { type: 'open' }>): boolean {
+ * below a table; so does the point form of an alignment change (an `align=` opener with no closer),
+ * while its range form stands alone before the table. */
+function startsBlocks(opener: Extract<Marker, { type: 'open' }>, closer?: Marker): boolean {
   if (opener.kind === 'split') return false;
   if (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) return false;
+  if (opener.kind === 'fmt' && !closer && isAlignPayload(opener.payload ?? '')) return false;
   return !(opener.kind === 'del' && TABLE_DELETION.test(opener.payload ?? ''));
 }
 
@@ -55,7 +65,7 @@ function segmentOf(
   opener: Extract<Marker, { type: 'open' }>,
   closer?: Marker,
 ): Segment {
-  const end = startsBlocks(opener) ? carrierEnd(body, opener.from, opener.to) : opener.to;
+  const end = startsBlocks(opener, closer) ? carrierEnd(body, opener.from, opener.to) : opener.to;
   const segment: Segment = {
     open: rangeOf(opener),
     content: { from: opener.to, to: closer ? closer.from : opener.to },
@@ -126,6 +136,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
     const segments: Segment[] = [];
     let pending: Extract<Marker, { type: 'open' }> | null = null;
+    const alone = markers.length === 1;
     for (const marker of markers) {
       if (marker.type === 'close') {
         if (pending) {
@@ -151,7 +162,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
         // A comment opener with no closer before the next one is a point comment.
         segments.push(segmentOf(body, pending));
       }
-      if (isPoint(marker)) {
+      if (isPoint(marker, alone)) {
         segments.push(segmentOf(body, marker));
         pending = null;
       } else pending = marker;
