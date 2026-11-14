@@ -190,7 +190,7 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let name = path
         .file_name()
         .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
-    let cannot = || format!("Couldn’t open “{name}”.");
+    let cannot = || cannot_open(path);
     if !path.is_absolute() {
         return Err(cannot());
     }
@@ -433,10 +433,7 @@ fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf
     // A link the sidebar lists may name a file anywhere: what is read or written is that file.
     let real = std::fs::canonicalize(path).map_err(|_| cannot())?;
     let real_root = std::fs::canonicalize(root).map_err(|_| cannot())?;
-    let inside = real.strip_prefix(&real_root).map_err(|_| {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        format!("“{name}” is outside this folder, so Redlines doesn’t open it.")
-    })?;
+    let inside = real.strip_prefix(&real_root).map_err(|_| cannot())?;
     let hidden = file_scope::is_hidden_below(inside);
     if hidden || !std::fs::metadata(&real).is_ok_and(|metadata| metadata.is_file()) {
         return Err(cannot());
@@ -568,8 +565,7 @@ pub fn open_default(app: AppHandle, root: String, path: String) -> Result<(), St
     if opened {
         Ok(())
     } else {
-        let name = real.file_name().unwrap_or_default().to_string_lossy();
-        Err(format!("Couldn’t open “{name}”."))
+        Err(cannot_open(&real))
     }
 }
 
@@ -771,22 +767,23 @@ mod tests {
             ],
         );
         let (scope, projects) = (scope(), Projects::default());
-        for name in [
+        for path in [
             // A file and a folder in a repository, and what isn't there.
-            "probe/payroll/salaries.csv",
-            "probe/payroll",
-            "probe/payroll/none.csv",
-            "probe",
+            disk.join("probe/payroll/salaries.csv"),
+            disk.join("probe/payroll"),
+            disk.join("probe/payroll/none.csv"),
+            disk.join("probe"),
             // With no repository above, and by a way out through `..`.
-            "plain/draft.md",
-            "plain/none.md",
-            "plain/../probe/payroll/salaries.csv",
-            "plain/../probe/payroll/none.csv",
-            // From nowhere, and no place at all.
-            "",
-            "draft.md",
+            disk.join("plain/draft.md"),
+            disk.join("plain/none.md"),
+            disk.join("plain/../probe/payroll/salaries.csv"),
+            disk.join("plain/../probe/payroll/none.csv"),
+            // From nowhere: no place at all, a name, and the way from where the app was started to
+            // a file that is there.
+            PathBuf::new(),
+            PathBuf::from("draft.md"),
+            from_the_app(&disk.join("plain/draft.md")),
         ] {
-            let path = disk.join(name);
             let line = project_of(&scope, &projects, &path.to_string_lossy(), None).unwrap_err();
             // One line, which has none of the file system's own words and none of what is there.
             assert_eq!(
@@ -795,6 +792,23 @@ mod tests {
             );
         }
         fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_path_from_wherever_the_app_was_started_to_a_document_the_person_opened_is_refused() {
+        // The tests run from the crate's folder, where its manifest is: a file the scope allows,
+        // which a path with no `..` in it reaches from there.
+        let manifest = std::env::current_dir().unwrap().join("Cargo.toml");
+        assert!(manifest.is_file(), "{manifest:?}");
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(&manifest).unwrap();
+        for path in ["Cargo.toml", "./Cargo.toml"] {
+            assert!(project_of(&scope, &projects, path, None).is_err(), "{path}");
+        }
+        assert!(projects.folders().is_empty());
+        // As the person's dialog gives it, the same file has its project.
+        let absolute = manifest.to_string_lossy();
+        assert!(project_of(&scope, &projects, &absolute, None).is_ok());
     }
 
     #[test]
