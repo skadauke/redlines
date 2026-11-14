@@ -316,8 +316,15 @@ Redlines covers everything in the Markdown Guide's
 ([format §9.1](format.md#91-file-types-and-dialects)), and these from its
 [hacks page](https://www.markdownguide.org/hacks/):
 
-- **Admonitions:** GitHub alerts in `.md` and Quarto callouts in `.qmd` and `.Rmd`, shown as boxes
-  with an icon and a menu for the type.
+- **Admonitions:** GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and
+  `[!CAUTION]`), shown as boxes with an icon and the type's name as a title, whose menu changes the
+  type. The box is drawn for a quote at the left edge whose first line is the type; a title and a
+  fold mark after the type (`> [!info]- A title`) are read, kept as written, and shown with it, and
+  a type that GitHub doesn't have is offered in the menu only where the file has it already. The
+  title's menu and Paragraph › Alert, which writes a new alert with its body selected, are the ways
+  to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
+  "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
+  while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
 - **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
   change.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
@@ -879,7 +886,8 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- image resizing, alt text and captions; callouts (§5.2); Mermaid editing with a live preview;
+- image resizing, alt text and captions; callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+  are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
