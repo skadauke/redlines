@@ -37,7 +37,7 @@ That was a deliberate fix, not an oversight. v0.1's final review reproduced ⌘Z
 - Undo after the document closes. The history lives in the window, as in Word, Google Docs and Pages.
 - Undoing someone else's work. Reject is for that.
 - Taking a run out of the middle of the history while keeping what came after it. That is Review › Undo, which comes with the Auto level.
-- The agent levels themselves (Ask and Auto, design §8.2), the run summary in the thread ("6 suggestions · Accept all · Reject all · Show", §8.3) and animated edits (§8.4). This design says how Undo treats them; they are built elsewhere.
+- The agent levels themselves (Propose and Auto, design §8.2), the run summary in the thread ("6 suggestions · Accept all · Reject all · Show", §8.3) and animated edits (§8.4). This design says how Undo treats them; they are built elsewhere.
 - Live sessions (§7.1). Stage 5 builds what they will need for Undo, and nothing else of them.
 - The running and failed live lines, which stay as they are.
 - Undo in comment boxes and the find field, which stays the text field's own.
@@ -95,7 +95,7 @@ The history holds steps, newest last. ⌘Z takes back the newest; nothing else i
 
 - **Suggest (tracked), your agent.** ⌘Z removes the run's suggestions, their markers and their ledger entries, its new threads and its reply: the file is byte for byte what it was before the run. ⇧⌘Z puts them back.
 - **Auto (direct), your agent, when Auto is built.** ⌘Z gives back the text the run replaced, and removes its reply: the same step, the same exactness.
-- **Ask, when built.** Apply and Suggest in the chat are your commands, so each is a step of yours.
+- **Propose, when built.** Apply and Suggest in the chat are your commands, so each is a step of yours.
 - **Another person's agent** (`claude-bo`). It never runs in your window: only your posting starts a run, and a run writes as your agent. Its work reaches you through the file, so it is a change from outside: ⌘Z never takes it back. You reject it, as you reject Bo's own changes.
 - **Your own last step.** ⌘Z never skips your step to get at the agent's, or the agent's to get at yours: it takes back whichever came last. A decision on one of the run's suggestions is a step of yours after the run, so ⌘Z takes the decision back first, then the run.
 

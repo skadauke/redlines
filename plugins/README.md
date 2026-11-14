@@ -14,7 +14,7 @@ ship with the app; each one can be turned off. These are written:
 | `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
 | `tables` ([`@redlines/tables`](tables)) | The Table menu and its commands |
 | `palette` ([`@redlines/palette`](palette)) | The formatting palette: from a handle at the bottom center, and on right-click |
-| `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, and the runs a posted mention starts |
+| `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, the runs a posted mention starts, and Ask: a question about a selection, answered in a bubble |
 | `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
 | `agent-acp` ([`@redlines/agent-acp`](agent-acp)) | The Agent Client Protocol provider: starts an agent the person added; Preferences doesn't offer adding one yet |
@@ -32,5 +32,5 @@ The others are planned:
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |
 | `git`        | Optional git features                                     |
 | `collab`     | Live sessions: presence and invitations                   |
-| `ai`         | The chat panel, Ask agent, and agents in comments         |
+| `ai`         | Chat panel and agents in comments (Ask is in `agents`)    |
 | `onboarding` | The first run; desktop                                    |

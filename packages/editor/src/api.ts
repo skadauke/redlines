@@ -147,12 +147,6 @@ export interface EditorOptions {
   /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
   /**
-   * The keys that show the two looks of Redlines, as the host writes them, which the hint on a
-   * change bar names. Default: none, and the hint names no keys. The desktop app gives none: only
-   * a click on a change bar switches the looks.
-   */
-  viewKeys?: { simple?: string; redlines?: string };
-  /**
    * The look of Redlines the editor shows where it picks Redlines for you: when a document with
    * redlines opens, and when a tracked change or a comment is made in Clean. Default: 'redlines',
    * the full markup; a document whose saved look is 'simple' opens in Redlines' simple look. The

@@ -381,6 +381,22 @@ function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): stri
     : `Allow ${agentName} to read this folder?`;
 }
 
+/**
+ * What the question means, in a sentence. A run changes this document; a question (`readOnly`)
+ * changes nothing, for an agent that is held to reading its folder. One that can't be held to it
+ * (`readLimit` is 'machine': an agent the person added) is told as it is: its own settings decide
+ * what it reads, and for a question it may also act on its own, which Redlines can't stop.
+ */
+function askNote({ agentName, readLimit, readOnly }: LiveLine & { kind: 'asking' }): string {
+  if (readLimit === 'machine') {
+    const reads = `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`;
+    return readOnly === true ? `${reads} It may also act on its own.` : reads;
+  }
+  return readOnly === true
+    ? `${agentName} reads files here to answer, and changes nothing.`
+    : `${agentName} reads files here to answer, and changes only this document.`;
+}
+
 let askCount = 0;
 /** Where the keyboard was before it came to a panel's buttons, for each panel. */
 const cameFrom = new WeakMap<HTMLElement, Element>();
@@ -417,12 +433,7 @@ function asking(
     described.push(folder.id);
     children.push(folder);
   }
-  const note = block(
-    'rl-ask-note',
-    machine
-      ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
-      : `${agentName} reads files here to answer, and changes only this document.`,
-  );
+  const note = block('rl-ask-note', askNote(line));
   note.id = `${id}-note`;
   described.push(note.id);
   children.push(note);
