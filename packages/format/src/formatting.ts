@@ -49,7 +49,7 @@ import {
 import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
-import { isBlockOp, planBlock } from './format-blocks.ts';
+import { assertCalloutType, isBlockOp, planBlock } from './format-blocks.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
 import {
   DELIMITER,
@@ -1327,6 +1327,7 @@ function planFormat(
     );
   }
   if (op.kind === 'link' && op.url !== null) assertWritableUrl(op.url);
+  if (op.kind === 'callout') assertCalloutType(op.type);
   const parsed = shared?.parsed ?? parse(text);
   const planning: Planning = shared ?? {
     ...formatReader(text, parsed),
