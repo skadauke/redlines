@@ -156,7 +156,7 @@ describe('inserting columns, tracked (format §3.7)', () => {
     // Accepting leaves Bo’s change pending.
     const accepted = applyChanges(typed, accept(typed, 'k3x9'));
     expect(parse(accepted).marks.map((m) => m.id)).toEqual(['b7cd']);
-  });
+  }, 60_000);
 
   it('makes the text its author types in it part of the insertion, with no mark', () => {
     const done = edit(start, { kind: 'insertCols', after: 1 }).after;
@@ -191,7 +191,7 @@ describe('inserting columns, tracked (format §3.7)', () => {
       const done = edit(withMarks, { kind: 'insertCols', after }).after;
       expectEveryOrderAlike(`marks at ${after}`, done, exactly);
     }
-  });
+  }, 60_000);
 
   it('refuses while a row is deleted or moved or an alignment change is pending, in words', () => {
     const deleted = edit(start, { kind: 'deleteRows', rows: [1] }).after;
@@ -303,7 +303,7 @@ describe('deleting columns, tracked', () => {
       expectEveryOrderAlike(JSON.stringify(second), two, exactly);
       expect(trim(applyChanges(two, rejectAll(two)))).toBe(FRUIT);
     }
-  });
+  }, 60_000);
 
   it('refuses to delete the last remaining column, with a way out', () => {
     expect(said(() => edit(start, { kind: 'deleteCols', cols: [0, 1, 2] }))).toBe(

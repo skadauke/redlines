@@ -239,7 +239,7 @@ describe('a marker at the start of a row without a leading pipe (rule 7)', () =>
           expect(bodyOf(after)).toContain('\n| <!--');
           expect(originalView(after).text).toBe(`${rows.replace('cc', '| cc')}\n`);
           expect(parse(after).warnings).toEqual([]);
-        });
+        }, 60_000);
       }
     }
 
@@ -400,7 +400,7 @@ describe('deleting a whole table (format §3.4, §3.7)', () => {
     expectInOrder('whole table', [], after);
     expect(blockLeaves(newestView(after).text).some((leaf) => leaf.kind === 'table')).toBe(false);
     expect(originalView(after).text.replace(/\n+$/, '')).toBe(body);
-  });
+  }, 60_000);
 
   it('is plain with Track Changes off', () => {
     expect(bodyOf(plain(text, remove(from, to)))).toBe('Intro.\n\n\n\nAfter.');

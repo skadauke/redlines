@@ -544,7 +544,7 @@ Each refusal says what to decide first, and names the change ("Bo Chen's deleted
    | Rows deleted or moved | Any row change | Any row change |
    | Columns inserted | Any column change; inserting rows | Anything |
    | Columns deleted or moved | Any column change | Any column change |
-   | An alignment change | Any row change | Any row change |
+   | An alignment change | Any row change that leaves the header where it is | Any row change that leaves the header where it is; any column change |
 
    Refused: "Accept or reject the column changes in this table first." (or row, or alignment).
 3. **Another person's pending changes stay theirs.** With Track Changes on, a row or column with
@@ -557,10 +557,17 @@ Each refusal says what to decide first, and names the change ("Bo Chen's deleted
 4. **Comments in a deleted row or column** become point comments where it was: at the start of the
    row below (the end of the row above, for the last row), or of the cell after. Comments in a moved
    row move with it, both ways.
-5. **Alignment and column changes don't mix**, because `align=` keeps the whole old delimiter row:
-   an alignment change is refused while a column is pending insertion, deletion or move in the
-   table, and a column change while an alignment change is pending. Another person's pending
-   alignment change refuses yours; your own is changed in place.
+5. **Alignment and column changes don't mix with Track Changes on**, because `align=` keeps the
+   whole old delimiter row, a cell for each column the table had: a tracked alignment change is
+   refused while a column is pending insertion, deletion or move in the table, and a tracked
+   column change while an alignment change is pending. With Track Changes off a column change is
+   made beside a pending alignment change, and does to its old row what it does to the table's
+   delimiter row, unless a column is pending too (format §3.7). The alignment change is a point
+   mark in the header row, which keeps its place while it is pending: a tracked alignment change
+   is refused while the header is itself a pending row change, and a row change that touches the
+   header (a row inserted above it or moved to the top, the header deleted or moved) is refused
+   while an alignment change is pending, tracked or not. Another person's pending alignment change
+   refuses yours; your own is changed in place.
 6. **Deleting the table** is refused while it holds another person's pending change; yours fold
    into it, and its comments become point comments where it was.
 7. **A row without a leading pipe gets one, plain,** when a marker must stand at its start (§3.2:
@@ -615,7 +622,9 @@ writes the old delimiter row; the review view, which agents read, writes them in
 ```
 
 A column's cells are wrapped the same way, with its note after the header row; a move's notes say
-where from and to; an alignment change's note follows the table.
+where from and to; an alignment change's note stands where its mark does, at the end of the header
+row's last cell (format §8; the range form that other tools write has it on a line of its own
+after the table).
 
 ## Agents
 
