@@ -69,6 +69,67 @@ describe('walk seeds 14 and 170 (lists side by side): the caret ends in no hidde
   ]);
 });
 
+describe('walk seed 23 (lists side by side): Return at the start of a nested first item of a loose list, tracked', () => {
+  // The empty item goes in above the first one, at the end of the parent item's text, with the one
+  // blank line that a split's break holds above it. With Track Changes off a loose list also gets a
+  // blank line below the new item; tracked, that second blank line would follow the first, and two
+  // in a row were written as two splits, the second a marker line in column 0, which ended the
+  // parent item (micromark read the sublist as a list of its own). The list is as loose as it was.
+  scriptRows([
+    {
+      name: 'a nested list with a blank line between its items, Track Changes on (the seed)',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '* plan beta<split>⏎⏎  * ⏎  * note note⏎⏎  * review gamma' },
+    },
+    {
+      name: 'the same list with no blank line between its items writes the same form',
+      doc: '* plan beta⏎  * ‸note note⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '* plan beta<split>⏎⏎  * ⏎  * note note⏎  * review gamma' },
+    },
+    {
+      // The seed's other keys, Backspace, Delete and Shift-Return over the selection, are refused in
+      // words, which the walk allows.
+      name: 'the seed’s own text: a continuation line, and a loose sublist with a numbered list in it',
+      doc: '* note delta⏎* gamma gamma⏎* plan beta⏎  * ‸note note⏎    note delta⏎  * review gamma⏎    2. code plan⏎       delta alpha⏎⏎    2. delta ship⏎       code text⏎',
+      keys: ['Enter', 'Shift-ArrowLeft'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'a numbered nested list, a blank line between its items',
+      doc: '1. plan beta⏎   1. ‸note note⏎⏎   2. review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'in a quote',
+      doc: '> * plan beta⏎>   * ‸note note⏎>⏎>   * review gamma⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'taken back with ⌘Z, and done again',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter', 'Mod-z', 'Mod-Shift-z'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'Track Changes off writes the blank line below the new item as well',
+      doc: '* plan beta⏎  * ‸note note⏎⏎  * review gamma⏎',
+      keys: ['Enter'],
+      tc: false,
+      expect: { file: '* plan beta⏎⏎  * ⏎⏎  * note note⏎⏎  * review gamma⏎' },
+    },
+  ]);
+});
+
 const FM = '---⏎title: Notes⏎---⏎';
 const HEAD = '⏎⏎<!-- redlines⏎version: 1⏎';
 const mark = (by: string) => `marks:⏎  k6hg: {by: ${by}, at: 2026-11-01T10:00Z}⏎-->⏎`;

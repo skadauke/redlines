@@ -37,7 +37,8 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
 | `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
-| `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
+| `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
+| `.claude-plugin/`       | This repository as a Claude Code marketplace (`marketplace.json`)         |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
@@ -86,12 +87,12 @@ repo root.
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
-  over them, their bars and cards, in Redlines and Simple) and `VITE_PALETTE_CHECK=1 pnpm dev` (the
-  formatting palette's handle, right-click and hints, and Ask's bubble, answered by the page's
-  scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its results
-  to the console and ends with a `... done <n> passed, <n> failed` line (`src/block-check.ts`,
-  `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They read nothing in a
-  release build, and are no part of CI
+  over them, their bars and cards, in Redlines and its simple look) and `VITE_PALETTE_CHECK=1 pnpm
+  dev` (the formatting palette's handle, right-click and hints, and Ask's bubble, answered by the
+  page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
+  results to the console and ends with a `... done <n> passed, <n> failed` line
+  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They
+  read nothing in a release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -109,6 +110,14 @@ repo root.
   again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
+- The skill (`integrations/skill/body.md`) is one text, and `scripts/build-skills.ts` makes its copies
+  for Claude Code, Codex and OpenClaw (`integrations/*/skills/redlines/SKILL.md`), the Claude Code
+  plugin's manifest and `integrations/skill/version.json`: after changing the text, or what differs
+  per agent in the script, run `node scripts/build-skills.ts --write` in `apps/desktop` (Node 24)
+  and commit what it wrote. `src/skills.node.test.ts` fails when a copy isn't what the source
+  makes, or shows a command or option that `redlines` doesn't have, and CI runs for these files
+  though they are Markdown. The app embeds the copies (`src-tauri/src/agents/skills.rs`) and
+  installs them from Preferences › Agents
 - The Quick Look extension (macOS only), in `apps/desktop`: `scripts/build-quicklook` bundles the
   renderer (`apps/desktop/quicklook`, with `rolldown`), compiles the Swift extension for both
   architectures with `swiftc` (no Xcode project), and writes
@@ -140,7 +149,8 @@ repo root.
 - `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
   `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
-  changes that touch only `docs/**`, `website/**` or `**/*.md`.
+  changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
+  test checks.
 - The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
   (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
@@ -215,7 +225,9 @@ repo root.
 
 - Keep PRs small and focused on one change.
 - When you change format behavior, update `docs/format.md` (and `docs/design.md` if it describes
-  the behavior) in the same PR.
+  the behavior) in the same PR. Before you change how an edit is written, read
+  [docs/hardening.md](docs/hardening.md): the four properties the format is built to hold, what
+  holds them, what is known not to hold, and how to add a rule without loosening one.
 - Add or update vitest tests for new or changed behavior, next to the code.
 - Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm format:check` before finishing. Run
   `pnpm format` to fix formatting.

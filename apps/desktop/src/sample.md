@@ -11,7 +11,7 @@ Each person’s changes have their own color, and <!--cmt c8d2-->agents such as 
 - [ ] Make a word bold with ⌘B. With Track Changes on, that is a change too.
 - [ ] Hover over a change to accept or reject it, or choose **Review changes** under the pen<!--ins m8dq--> to go through them one by one<!--/m8dq-->.
 - [ ] Select some words and add a comment (⌥⌘M). Mention @Claude in it, and Claude answers in the thread.
-- [ ] Switch between Clean, Simple, Redlines and Raw with the eye, and show the files beside this one (⌃⌘S).
+- [ ] Switch between Clean, Redlines and Raw with the eye, click a change bar in the margin for Redlines' simple look and back, and show the files beside this one (⌃⌘S).
 
 Press Return to start a new paragraph, and <!--hl h6bz-->Shift-Return<!--/h6bz--> for a line break in one.
 

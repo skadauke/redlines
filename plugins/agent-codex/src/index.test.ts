@@ -227,6 +227,8 @@ describe('codexArgs', () => {
       'hooks',
       '-c',
       'web_search="disabled"',
+      '-c',
+      'skills.include_instructions=false',
       '--',
       'Fix the spelling.',
     ]);
@@ -253,6 +255,9 @@ describe('codexArgs', () => {
       'hooks',
     ]);
     expect(settings).toContain('web_search="disabled"');
+    // The person's skills, and Redlines' own installed from Preferences, are for a Codex run by
+    // hand: a run here acts through the toolbox, and can't read a skill's file.
+    expect(settings).toContain('skills.include_instructions=false');
   });
 
   it('passes no --sandbox, which would change the recorded file policy', () => {

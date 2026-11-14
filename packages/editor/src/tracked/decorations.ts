@@ -443,7 +443,7 @@ function analyze(state: EditorState, kept: number | null): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
-  // Simple is Redlines with every change's look off (design: The four views): the same parts and
+  // Simple is Redlines with every change's look off (design: The views and the looks): the same parts and
   // layers, so that the bars land on the same lines, with no text and no class, and no marks of
   // line breaks. Comments, highlights and pins are drawn as in Redlines.
   const markup = mode === 'redlines' || mode === 'simple';
