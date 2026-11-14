@@ -43,6 +43,12 @@ export type LiveLine =
       readLimit: 'folder' | 'machine';
       /** `false` for an agent with no toolbox: it is sent the document and the thread. */
       toolbox?: false;
+      /**
+       * For a question, which asks only for an answer: the panel says it changes nothing, not that
+       * it changes this document. That is so for an agent held to reading its folder; one that reads
+       * the whole machine (`readLimit` 'machine') can't be held to it, and the panel says so.
+       */
+      readOnly?: boolean;
       /** The home folder is among the answers: Preferences allow it, and the agent can be held to it. */
       home?: true;
     }

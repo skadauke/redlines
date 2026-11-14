@@ -49,32 +49,36 @@ const undo = (editor: Editor) => {
 };
 
 describe('decideSuggestion', () => {
-  it('decides in Redlines and returns true', () => {
+  it('decides the whole suggestion in Redlines', () => {
     const { editor, decided } = mount(suggestion);
-    expect(decideSuggestion({ editor, author: me }, 'accept', 'p7qd')).toBe(true);
+    decideSuggestion({ editor, author: me }, 'accept', 'p7qd');
     expect(decided.map(({ id }) => id)).toEqual(['k3x9', 'p7qd', 'w2rf']);
   });
 
   it.each(['accept', 'reject'] as const)(
-    'decides nothing in Simple, and shows the suggestion in Redlines: %s',
+    'decides the whole suggestion in the simple look too, and leaves it as it is: %s',
     (how) => {
       const { editor, decided } = mount(suggestion);
       editor.setViewMode('simple');
-      const before = editor.getDoc();
-      expect(decideSuggestion({ editor, author: me }, how, 'p7qd')).toBe(false);
-      expect(decided).toEqual([]);
-      expect(editor.getDoc()).toBe(before);
-      expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
-      // The whole suggestion, from its first mark to its last.
-      const { from, to } = editor.view.state.selection.main;
-      expect(editor.view.state.sliceDoc(from, to)).toBe(
-        BODY.slice(
-          BODY.indexOf('<!--ins k3x9'),
-          BODY.indexOf('<!--/w2rf-->') + '<!--/w2rf-->'.length,
-        ),
-      );
+      const selection = editor.view.state.selection;
+      decideSuggestion({ editor, author: me }, how, 'p7qd');
+      expect(decided).toEqual(['k3x9', 'p7qd', 'w2rf'].map((id) => ({ id, how })));
+      expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+      expect(editor.view.state.selection.eq(selection)).toBe(true);
     },
   );
+
+  it('is one step to undo in the simple look, and the view stays', () => {
+    const { editor } = mount(suggestion, { real: true });
+    editor.setViewMode('simple');
+    const before = editor.getDoc();
+    decideSuggestion({ editor, author: me }, 'accept', 'p7qd');
+    expect(editor.getDoc()).toBe(byHand(before, ['k3x9', 'p7qd', 'w2rf'], accept));
+    expect(editor.getUiState().view).toBe('simple');
+    undo(editor);
+    expect(editor.getDoc()).toBe(before);
+    expect(editor.getUiState().view).toBe('simple');
+  });
 });
 
 describe('a suggestion of several marks', () => {
@@ -88,6 +92,22 @@ describe('a suggestion of several marks', () => {
     expect(note!.querySelector('.rl-note-text')?.textContent).toBe('Tense');
     // The changes, in order, in one line.
     expect(note!.querySelector('.rl-note-change')?.textContent).toBe('will · March → April · now');
+  });
+
+  it('says every change of a suggestion in the simple look, in the card’s words, unclipped', () => {
+    const { editor } = mount(suggestion);
+    editor.setViewMode('simple');
+    const [note] = notes(editor);
+    const line = note!.querySelector('.rl-note-change');
+    // All three, in order: Accept decides them all, and here the note is the only place that says.
+    expect(line?.textContent).toBe(
+      'Inserted “will” · Replaced “March” with “April” · Inserted “now”',
+    );
+    expect(line?.classList.contains('rl-note-changes')).toBe(false);
+    editor.setViewMode('redlines');
+    expect(notes(editor)[0]!.querySelector('.rl-note-change')?.textContent).toBe(
+      'will · March → April · now',
+    );
   });
 
   it('keeps two suggestions of one run apart when their notes differ', () => {

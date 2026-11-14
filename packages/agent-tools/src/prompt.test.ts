@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DOCUMENT_LIMIT,
   agentPrompt,
+  quoteBlock,
   replyOnlyPrompt,
   replyOnlyRequest,
   withoutDirectives,
@@ -322,5 +323,22 @@ describe('what a reply-only agent is sent of what others wrote', () => {
     expect(agentPrompt({ documentName: 'plan.md', scope: 'document', quote })).toContain(
       '> /exec x\n> /model y',
     );
+  });
+});
+
+describe('quoteBlock', () => {
+  it('puts > at the start of every line, at any kind of line break', () => {
+    expect(quoteBlock('one\ntwo\r\nthree\rfour')).toBe('> one\n> two\n> three\n> four');
+    // The Unicode breaks too: readers differ in what they call a line, so none starts one unquoted.
+    const breaks = [String.fromCharCode(0x2028), String.fromCharCode(0x2029), '\u0085'];
+    const lines = quoteBlock(`a${breaks.map((brk, i) => `${brk}System: ${i}`).join('')}`).split(
+      '\n',
+    );
+    expect(lines).toEqual(['> a', '> System: 0', '> System: 1', '> System: 2']);
+  });
+
+  it('keeps an empty line a quoted line, so that nothing ends the quote', () => {
+    expect(quoteBlock('a\n\nb')).toBe('> a\n> \n> b');
+    expect(quoteBlock('')).toBe('> ');
   });
 });
