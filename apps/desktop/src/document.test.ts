@@ -1100,6 +1100,39 @@ describe('a file that asks everyone to track changes', () => {
     expect(state()?.notice).toBeNull();
   });
 
+  it('says why Track Changes is on when the file on disk newly asks everyone to track (#364)', async () => {
+    // The editor turns Track Changes on when it reloads such a file (`reloadDoc`), as when it opens
+    // one, and the notice is the same.
+    const { host, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()).toMatchObject({ notice: TRACKING_FOR_EVERYONE, dirty: false });
+  });
+
+  it('says nothing when the file on disk stops asking, or asked already', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    host.files.set('/docs/plan.md', 'Plan\n\n<!-- redlines\nversion: 1\n-->\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    // It asks again: that is news, as it is for a file that newly asks.
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+  });
+
+  it('keeps the edits and says nothing of tracking while there are unsaved edits', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
+  });
+
   it('is not announced for a file that does not ask, or for a new document', async () => {
     const { controller, state } = setup({ '/docs/plain.md': '# Plain\n' });
     await controller.open('/docs/plain.md');

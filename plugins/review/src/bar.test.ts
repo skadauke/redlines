@@ -248,6 +248,33 @@ describe('review bar', () => {
     expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
   });
 
+  it('opens the deleted block above, not the paragraph’s own change on a later row, for the piece at the paragraph’s start', () => {
+    // In the simple look the first screen line's bar is the deleted block's, which the page hides
+    // just above; the paragraph's own change is on a later row, with a bar of its own.
+    const body = file(
+      'First.\n\n<!--del w2rf Gone.\\n\\n-->\n\nSecond line of words that wraps, then <!--ins k3x9-->new<!--/k3x9--> ones.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+      ],
+    );
+    const { editor, review } = mount(body, { markupView: 'simple' });
+    review.openBar();
+    const start = body.indexOf('Second');
+    const handle = (span: { from: number; to: number }) =>
+      editor.view.state
+        .facet(barClickHandlers)
+        .some((handler) => handler(editor.view, start, undefined, span));
+    handle({ from: start, to: start + 20 });
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Deleted “Gone.”');
+    // The piece beside the paragraph's own change opens it.
+    const own = body.indexOf('new');
+    handle({ from: own - 5, to: own + 10 });
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+  });
+
   it('opens the card of the change instead of switching, when a bar is clicked with the bar open', () => {
     const { editor, review } = mount(doc);
     const handle = (pos: number) =>
