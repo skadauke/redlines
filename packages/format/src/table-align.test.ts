@@ -5,9 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import { suggestReplace } from './agent.ts';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { formatChange } from './format-blocks.ts';
+import { trackedFormat } from './formatting.ts';
+import type { FormatOp } from './formatting.ts';
 import { encodeValue } from './format-ops.ts';
 import * as format from './index.ts';
 import { parse } from './parse.ts';
@@ -34,15 +37,18 @@ import {
   expectInOrder,
   file,
   problemsOf,
+  thread,
 } from './test-helpers.ts';
 import type { Leaf } from './test-helpers.ts';
-import { expectEveryOrderRead } from './oracle.ts';
+import type { Person, Range, TextChange } from './types.ts';
+import { expectEveryOrderRead, readAs } from './oracle.ts';
 import { newestView, originalView, reviewView } from './views.ts';
 
 const FRUIT =
   '| Fruit  | Count | Price |\n| :----- | ----- | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |';
 const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
 const trim = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
+const BOLD: FormatOp = { kind: 'inline', format: 'bold', on: true };
 /** The same body, byte for byte: a file with no pending change has no ledger. */
 const same = (a: string, b: string) => expect(trim(a)).toBe(trim(b));
 const SPEC = '\\|\\x20:-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-:\\x20\\|';
@@ -51,6 +57,11 @@ const MARK = `<!--fmt k3x9 align=${SPEC}-->`;
 /** `FRUIT` with Count centered, and the same with the mark that a tracked change writes. */
 const CENTERED = FRUIT.replace('| ----- |', '| :---: |');
 const POINTED = CENTERED.replace('Price |', `Price${MARK} |`);
+/** `FRUIT` with Count centered by someone else, as the point form that another person's file has. */
+const POINT_BODY = `| Fruit  | Count | Price${MARK} |\n| :----- | :---: | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |`;
+const POINT = file(POINT_BODY, { k3x9: 'bo' });
+/** The deletion line of the Pears row of `FRUIT` (the old text of the row is as it was). */
+const PEARS = '<!--del m5nn row=2 \\| Pears  \\| 5     \\| 0.90  \\|-->';
 /** The mark of Ada's change of a table whose old delimiter row is `row`. */
 const markFor = (row: string, id = 'k3x9') => `<!--fmt ${id} align=${encodeValue(row)}-->`;
 /** The tables of a file as micromark reads them. */
@@ -331,6 +342,67 @@ describe('aligning a column, tracked (format §3.7)', () => {
         // Every order of decisions reads, as micromark reads it, as the newest view does.
         expectEveryOrderRead(end, done);
       }
+    });
+
+    it('is refused after a delimiter run that the mark would change, and written after one that it would not', () => {
+      // The mark's `<` makes a `*` that closes an emphasis one that can open as well, when what stands before
+      // it is punctuation (a full stop, or the end of a marker): the rule of three then keeps `**a .*` from
+      // closing. A run after a letter, and one with nothing before it that it could close, read as they did.
+      for (const end of ['**a .*', '*a .**', '_a .__', '**a ~*', '**a )*', '**a _*']) {
+        const text = file(`| a | ${end} |\n| - | - |\n| c | d |`);
+        expect(
+          said(() => align(text, [0], 'right')),
+          end,
+        ).toBe(PLACE);
+      }
+      // A marker closes the run before it, as the end of an insertion does: the file reads as its newest view
+      // with the mark after it only where the run is not changed by it.
+      const typed = file(`| a | **b<!--sub k3x9 *b-->**b<!--/k3x9-->* |\n| - | - |\n| c | d |`, {
+        k3x9: 'bo',
+      });
+      expect(said(() => align(typed, [0], 'right', ada, ['c2dd']))).toBe(PLACE);
+      for (const end of ['b*', '*b*', '**b**', 'Price *', '**a b*', 'a *', '**', '*']) {
+        const text = file(`| a | ${end} |\n| - | - |\n| c | d |`);
+        const done = align(text, [0], 'right', ada, ['c2dd']).after;
+        expect(readAs(bodyOf(done)), end).toBe(readAs(newestView(done).text));
+      }
+    });
+
+    it('is written only where Markdown reads the cell as it did, for every short ending', () => {
+      // Every ending of up to three characters over the characters that read as syntax, after each of five
+      // beginnings: the mark is refused in words, or the file reads, as micromark reads it, as its newest view.
+      const alphabet = ['b', ' ', '.', '*', '_', '~', ')', '\\'];
+      const ends = new Set<string>();
+      const grow = (end: string) => {
+        if (end !== '') ends.add(end);
+        if (end.length < 3) for (const c of alphabet) grow(end + c);
+      };
+      grow('');
+      let written = 0;
+      let refused = 0;
+      for (const end of ends) {
+        for (const lead of ['', 'a ', '**a ', '*a ', '_a ']) {
+          const text = file(`| h | ${lead}${end} |\n| - | - |\n| c | d |`);
+          if (readTables(text, parse(text))[0]?.rows[0]?.cells.length !== 2) continue;
+          let done: string;
+          try {
+            done = align(text, [0], 'right', ada, ['k3x9']).after;
+          } catch (error) {
+            expect(
+              error instanceof EditError ? error.message : String(error),
+              `${lead}${end}`,
+            ).toBe(PLACE);
+            refused++;
+            continue;
+          }
+          written++;
+          expect(readAs(bodyOf(done)), JSON.stringify(`${lead}${end}`)).toBe(
+            readAs(newestView(done).text),
+          );
+        }
+      }
+      expect(written).toBeGreaterThan(1500);
+      expect(refused).toBeGreaterThan(100);
     });
 
     it('is refused where another change at the end of the cell would put the end of its text in front of the mark', () => {
@@ -696,17 +768,22 @@ describe('aligning a column, tracked (format §3.7)', () => {
     }
   });
 
-  it('can decide each change on its own, in every order, with rows around', () => {
+  it('can decide each change on its own, in every order, with rows and columns around', () => {
     const text = file(`${FRUIT}\n\nOutro words.`);
     let states = 0;
     for (const first of [
       { kind: 'deleteRows', rows: [1] },
       { kind: 'insertRows', after: 1 },
       { kind: 'moveRows', rows: [1], to: 3 },
+      { kind: 'insertCols', after: 1 },
+      { kind: 'moveCols', cols: [0], to: 3 },
+      { kind: 'deleteCols', cols: [1] },
     ] satisfies Shape[]) {
+      const rowOp = first.kind.endsWith('Rows');
       const base = edit(text, first, bo, ['c2dd', 'f3gg']).after;
-      // Another person's alignment change beside a row change, and a plain edit in the paragraph below.
-      const withAlign = align(base, [1], 'center', ada, ['k3x9']).after;
+      // Another person's alignment change beside a row change (a column change refuses it, in words),
+      // the same person's, and a plain edit in the paragraph below.
+      const withAlign = rowOp ? align(base, [1], 'center', ada, ['k3x9']).after : base;
       const plainBelow = (t: string) => {
         const o = t.indexOf('Outro');
         return applyChanges(t, untrackedEdit(t, { from: o + 5, to: o + 5, insert: 'q' }));
@@ -760,8 +837,6 @@ describe('the span form, written by another tool', () => {
       marks,
     );
   const SPAN = around(CENTERED);
-  /** The deletion line of the Pears row of `CENTERED` (the old text of the row is as it was). */
-  const PEARS = '<!--del m5nn row=2 \\| Pears  \\| 5     \\| 0.90  \\|-->';
   const WITHOUT_PEARS = CENTERED.split('\n').slice(0, 3).join('\n');
 
   it('is read, and accepted and rejected to the byte: its markers and blank lines go', () => {
@@ -824,6 +899,11 @@ describe('the span form, written by another tool', () => {
     }
     expectEveryOrderAlike('a span, a deletion', text, exactly);
     expectNoDecisionRefused('a span, a deletion', text);
+    // Rejected alone, the span writes the old delimiter row back and takes its closer away: the rows are
+    // as they were, byte for byte, and the deletion line stays under them.
+    expect(trim(applyChanges(text, reject(text, 'k3x9')))).toBe(
+      `${FRUIT.split('\n').slice(0, 3).join('\n')}\n\n${PEARS}`,
+    );
     // Both rejected: the deletion line and the closer go, the table is as it was.
     expect(trim(applyChanges(text, rejectAll(text)))).toBe(FRUIT);
     // The other order: a row deleted under a span that is pending already is written in front of its closer.
@@ -1169,10 +1249,6 @@ describe('rule 5 in ruleTwo', () => {
 // viewed and decided like the span form around a table, and touches nothing outside the table's first
 // two lines. (Writing it, and deciding it among other changes, are the next tasks of the same work.)
 describe('a point alignment change, written by another person', () => {
-  const POINT = file(
-    `| Fruit  | Count | Price${MARK} |\n| :----- | :---: | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |`,
-    { k3x9: 'bo' },
-  );
   const NOTE = 'Price{>>[k3x9 bo] Formatted: column Count centered (was default)<<} |';
   const crlf = (text: string) => text.replace(/\n/g, '\r\n');
 
@@ -1351,5 +1427,611 @@ describe('a point alignment change, written by another person', () => {
     const kinds = [span, point, bold, box].map((mark) => mark !== undefined && isAlignPoint(mark));
     expect(kinds).toEqual([false, true, false, false]);
     expect(format.isAlignPoint).toBe(isAlignPoint);
+  });
+});
+
+// A tracked alignment change is one mark at the end of the header's last cell (format §3.7, #281). What
+// other people do beside it stands in front of it or around it: typing, deleting, replacing, commenting and
+// formatting at the end of that cell, edits under the table, an edit that covers the mark, other changes
+// pending in the table, another table with the span form. Every order of decisions reads alike, judged
+// exactly and by micromark 4.0.2 with GFM, and no single decision is refused.
+describe('a point alignment change beside other marks and edits', () => {
+  /** The same table with the mark of Ada, for Bo to edit. */
+  const BY_ADA = file(POINT_BODY, { k3x9: 'ada' });
+  /** The text of the last header cell, which stops in front of the mark. */
+  const lastCell = (text: string) => {
+    const cell = readTables(text, parse(text))[0]?.rows[0]?.cells.at(-1);
+    if (!cell) throw new Error('the table has no header');
+    return { from: cell.textFrom, to: cell.textTo };
+  };
+  /** Both files, and the person who is not the author of the mark in each. */
+  const FILES: [Person, string][] = [
+    [ada, POINT],
+    [bo, BY_ADA],
+  ];
+
+  /** The file reads as one table with rows as wide as `widths` in the newest and the original view, each order of
+   * decisions reads alike and as micromark reads the newest view, no decision is refused, and deciding
+   * all of it gives the newest and the original view. Returns the number of states seen. */
+  function expectDecided(label: string, text: string, widths: number[] = [3, 3, 3]): number {
+    expect(problemsOf(parse(text)), label).toEqual([]);
+    expect(
+      parse(text).marks.map((mark) => mark.id),
+      label,
+    ).toContain('k3x9');
+    for (const view of [newestView(text).text, originalView(text).text]) {
+      const tables = tableLeaves(view);
+      expect(tables, `${label}: a table`).toHaveLength(1);
+      expect(
+        tables[0]?.rows?.map((row) => row.length),
+        label,
+      ).toEqual(widths);
+    }
+    expectEveryOrderAlike(label, text, exactly);
+    expectEveryOrderRead(label, text);
+    const states = expectNoDecisionRefused(label, text);
+    expect(states, label).toBeGreaterThan(2);
+    const accepted = applyChanges(text, acceptAll(text));
+    const rejected = applyChanges(text, rejectAll(text));
+    expect(trim(newestView(accepted).text), `${label}: accept all`).toBe(
+      trim(newestView(text).text),
+    );
+    expect(trim(originalView(rejected).text), `${label}: reject all`).toBe(
+      trim(originalView(text).text),
+    );
+    for (const done of [accepted, rejected]) {
+      expect(
+        parse(done).marks.filter((mark) => mark.kind !== 'cmt'),
+        label,
+      ).toEqual([]);
+    }
+    return states;
+  }
+
+  describe('at the end of the last header cell', () => {
+    // `Price` is the text of the last header cell, and the mark stands after it: what is written there
+    // stands in front of the mark, tracked or plain.
+    const edits: {
+      name: string;
+      edit: (cell: Range) => TextChange;
+      tracked: RegExp;
+      plain?: RegExp;
+    }[] = [
+      {
+        name: 'types x at the end',
+        edit: (cell) => ({ from: cell.to, to: cell.to, insert: 'x' }),
+        tracked: /Price<!--ins \w{4}-->x<!--\/\w{4}--><!--fmt k3x9/,
+        plain: /Pricex<!--fmt k3x9/,
+      },
+      {
+        name: 'deletes ce',
+        edit: (cell) => ({ from: cell.to - 2, to: cell.to, insert: '' }),
+        tracked: /Pri<!--del \w{4} ce--><!--fmt k3x9/,
+        plain: /Pri<!--fmt k3x9/,
+      },
+      {
+        name: 'deletes all of Price',
+        edit: (cell) => ({ from: cell.from, to: cell.to, insert: '' }),
+        tracked: /\| <!--del \w{4} Price--><!--fmt k3x9/,
+        plain: /\| <!--fmt k3x9/,
+      },
+      {
+        name: 'replaces Price',
+        edit: (cell) => ({ from: cell.from, to: cell.to, insert: 'Cost' }),
+        tracked: /<!--sub \w{4} Price-->Cost<!--\/\w{4}--><!--fmt k3x9/,
+        plain: /\| Cost<!--fmt k3x9/,
+      },
+    ];
+
+    it('is in front of what is typed, deleted and replaced there, by the other person or plain', () => {
+      for (const [who, text] of FILES) {
+        for (const { name, edit: at, tracked, plain } of edits) {
+          const change = at(lastCell(text));
+          const by = applyChanges(text, trackedEdit(text, change, context(who, ['c2dd', 'f3gg'])));
+          expect(by, `${who.handle} ${name}`).toMatch(tracked);
+          expectDecided(`${who.handle} ${name}`, by);
+          if (plain) {
+            const alone = applyChanges(text, untrackedEdit(text, change));
+            expect(alone, `${name}, plain`).toMatch(plain);
+            expectDecided(`${name}, plain`, alone);
+          }
+        }
+      }
+    });
+
+    it('is in front of a comment over the text of the cell, whose closer stands before it', () => {
+      for (const [who, text] of FILES) {
+        const commented = applyChanges(
+          text,
+          addComment(text, lastCell(text), 'A note.', context(who, ['c2dd'])).changes,
+        );
+        expect(commented, who.handle).toMatch(/<!--cmt \w{4}-->Price<!--\/\w{4}--><!--fmt k3x9/);
+        expectDecided(`${who.handle} comments Price`, commented);
+      }
+    });
+  });
+
+  describe('under the table', () => {
+    it('holds no tracked edit back, and leaves every decision possible', () => {
+      // Every range from the end of the last row to a little into the paragraph below, typed over or
+      // deleted by Bo or Ada, with a row deleted or not and a comment on the paragraph or not. The
+      // point form has no closer on a line of its own, so no edit is refused for it, and each change
+      // can be decided on its own in every order.
+      const thread = [
+        '  c9qf:',
+        '    by: bo',
+        '    at: 2026-10-13T22:40Z',
+        '    text: |-',
+        '      A note.',
+      ];
+      const OLD = encodeValue('| :----- | ----- | ----: |');
+      const aligned = FRUIT.replace('| :----- |', '| :----: |').replace(
+        'Price |',
+        `Price<!--fmt k3x9 align=${OLD}--> |`,
+      );
+      const withRest = (rest: string, deleted: boolean) =>
+        file(
+          `${deleted ? aligned.split('\n').slice(0, 3).join('\n') : aligned}${
+            deleted ? `\n\n${PEARS}` : ''
+          }\n\n${rest}`,
+          deleted ? { k3x9: 'ada', m5nn: 'ada' } : { k3x9: 'ada' },
+          rest.includes('c9qf') ? thread : [],
+        );
+      let built = 0;
+      let refusedEdits = 0;
+      for (const rest of ['Outro words.\n\nMore.', '<!--cmt c9qf-->Outro<!--/c9qf--> words.']) {
+        for (const deleted of [false, true]) {
+          const one = withRest(rest, deleted);
+          expect(problemsOf(parse(one))).toEqual([]);
+          const shown = newestView(one);
+          // The end of the last row that is not deleted.
+          const first = shown.text.indexOf(deleted ? '1.20' : '0.90') + 4;
+          for (const who of [bo, ada]) {
+            for (let a = first; a <= first + 20; a++) {
+              for (const b of [a, a + 1, a + 2, a + 8]) {
+                for (const insert of ['', 'q']) {
+                  if ((a === b && insert === '') || b > shown.text.length - 1) continue;
+                  const from = shown.map.toSource(a, 1);
+                  const to = Math.max(from, shown.map.toSource(b, -1));
+                  let edited: string;
+                  try {
+                    edited = applyChanges(
+                      one,
+                      trackedEdit(
+                        one,
+                        { from, to, insert },
+                        context(who, ['c2dd', 'f3gg', 'h4jj']),
+                      ),
+                    );
+                  } catch (error) {
+                    if (!(error instanceof EditError)) throw error;
+                    // Refused for something other than the alignment change (a pipe, say) is no matter.
+                    if (/alignment/.test(error.message)) refusedEdits++;
+                    continue;
+                  }
+                  built++;
+                  expectNoDecisionRefused(
+                    `${who.handle} ${a}-${b} ${JSON.stringify(insert)}`,
+                    edited,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+      // No edit is refused for the alignment change, and many were written and decided in every order.
+      expect(refusedEdits).toBe(0);
+      expect(built).toBeGreaterThan(100);
+    }, 120_000);
+  });
+
+  describe('an edit that covers the mark', () => {
+    /** The edit is refused, in words, or the mark is pending still and every decision stays possible. */
+    function refusedOrKept(label: string, run: () => string): 'refused' | 'kept' {
+      let after: string;
+      try {
+        after = run();
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        expect(error.message, label).not.toBe('');
+        return 'refused';
+      }
+      expect(
+        parse(after).marks.map((mark) => mark.id),
+        label,
+      ).toContain('k3x9');
+      expect(problemsOf(parse(after)), label).toEqual([]);
+      expectEveryOrderAlike(label, after, exactly);
+      expectNoDecisionRefused(label, after);
+      return 'kept';
+    }
+
+    it('is refused, or leaves the mark pending with every decision possible, tracked or plain', () => {
+      const outcomes = { refused: 0, kept: 0 };
+      const files: [Person, string][] = [...FILES, [bo, POINT], [ada, BY_ADA]];
+      for (const [who, text] of files) {
+        const from = text.indexOf('ce<!--fmt');
+        const markEnd = text.indexOf('-->', from) + 3;
+        // `ce` and the mark, with the space after it, and with the closing pipe too.
+        for (const to of [markEnd, markEnd + 1, markEnd + 2]) {
+          for (const insert of ['', 'zz']) {
+            const change = { from, to, insert };
+            const name = `${who.handle} over ${JSON.stringify(text.slice(from, to).slice(0, 2))}…${to - markEnd} ${JSON.stringify(insert)}`;
+            outcomes[
+              refusedOrKept(`${name}, tracked`, () =>
+                applyChanges(text, trackedEdit(text, change, context(who, ['c2dd', 'f3gg']))),
+              )
+            ]++;
+            outcomes[
+              refusedOrKept(`${name}, plain`, () => applyChanges(text, untrackedEdit(text, change)))
+            ]++;
+          }
+        }
+      }
+      // The closing pipe is no text of the cell, so an edit that takes it is refused; the others keep the mark.
+      expect(outcomes.refused).toBeGreaterThan(0);
+      expect(outcomes.kept).toBeGreaterThan(0);
+    });
+
+    it('is refused, or leaves the mark pending, when an agent replaces text that includes the cell', () => {
+      const agent = (text: string, old: string, now: string) =>
+        refusedOrKept(`${JSON.stringify(old)} to ${JSON.stringify(now)}`, () =>
+          applyChanges(
+            text,
+            suggestReplace(text, old, now, context(claudeAda, ['c2dd', 'f3gg', 'h4jj'])).changes,
+          ),
+        );
+      for (const text of [POINT, BY_ADA]) {
+        const table = trim(newestView(text).text);
+        agent(text, 'Price |', 'Cost |');
+        agent(text, 'Price |', ' |');
+        agent(text, 'Count | Price |', 'Count | Cost of it |');
+        agent(text, table, table.replace('Price', 'Cost'));
+        agent(text, table, table.replace('Price', 'Unit price'));
+      }
+    });
+
+    it('writes an agent’s insertion after the mark when the change holds the cell’s padding, and no decision is refused', () => {
+      // Replacing all the text of the cell by one that ends in a backslash, or by blanks, the change takes the
+      // space after the text in with it, so that the mark no longer ends the cell: the old text is deleted in front
+      // of the mark and the new text inserted after it. The mark stays pending, and every order reads alike.
+      for (const text of [POINT, BY_ADA]) {
+        const table = trim(newestView(text).text);
+        for (const now of ['x\\', '     ']) {
+          const label = JSON.stringify(now);
+          const after = applyChanges(
+            text,
+            suggestReplace(
+              text,
+              table,
+              table.replace('Price', now),
+              context(claudeAda, ['c2dd', 'f3gg', 'h4jj']),
+            ).changes,
+          );
+          expect(headerLine(after), label).toMatch(
+            /<!--del \w{4} +Price--><!--fmt k3x9 [^\n]*?--><!--del \w{4} {2}--><!--ins \w{4}-->/,
+          );
+          expect(
+            parse(after)
+              .marks.map((mark) => mark.id)
+              .sort(),
+            label,
+          ).toContain('k3x9');
+          expect(problemsOf(parse(after)), label).toEqual([]);
+          expectEveryOrderAlike(label, after, exactly);
+          expect(expectNoDecisionRefused(label, after), label).toBeGreaterThan(2);
+          // Rejecting everything gives the old text and the old row back, and accepting everything the new text.
+          expect(trim(applyChanges(after, rejectAll(after))), label).toBe(
+            trim(originalView(after).text),
+          );
+          expect(trim(newestView(applyChanges(after, acceptAll(after))).text), label).toBe(
+            trim(newestView(after).text),
+          );
+        }
+      }
+    });
+  });
+
+  describe('with other changes pending in the table', () => {
+    /** A header and three rows, with Bo's inserted row, Ada's deleted row and Bo's typing in the header. */
+    const four = file(`${FRUIT}\n| Plums  | 7     | 2.00  |`);
+    const rows = (text: string) =>
+      edit(
+        edit(text, { kind: 'insertRows', after: 1 }, bo, ['c2dd', 'f3gg']).after,
+        {
+          kind: 'deleteRows',
+          rows: [3],
+        },
+        ada,
+        ['h4jj'],
+      ).after;
+    /** `who` types `word` in the last header cell, `back` characters before the end of its text as the
+     * newest view shows it. */
+    const typed = (text: string, who: Person, id: string, word = 'x', back = 0) => {
+      const view = newestView(text);
+      const at = view.map.toSource(view.map.fromSource(lastCell(text).to) - back, -1);
+      return applyChanges(
+        text,
+        trackedEdit(text, { from: at, to: at, insert: word }, context(who, [id])),
+      );
+    };
+    const decided = (label: string, text: string, states: number) => {
+      expect(problemsOf(parse(text)), label).toEqual([]);
+      expectEveryOrderAlike(label, text, exactly);
+      expect(expectNoDecisionRefused(label, text), label).toBeGreaterThan(states);
+      // The mark is decided last, on the text the others leave: all accepted is the newest view, all
+      // rejected the original, and nothing is left pending.
+      const accepted = applyChanges(text, acceptAll(text));
+      const rejected = applyChanges(text, rejectAll(text));
+      expect(trim(newestView(accepted).text), `${label}: accept all`).toBe(
+        trim(newestView(text).text),
+      );
+      expect(trim(originalView(rejected).text), `${label}: reject all`).toBe(
+        trim(originalView(text).text),
+      );
+      // A comment stays; every change is decided.
+      for (const done of [accepted, rejected]) {
+        expect(
+          parse(done).marks.filter((mark) => mark.kind !== 'cmt'),
+          label,
+        ).toEqual([]);
+      }
+    };
+
+    it('is decided in every order beside Bo’s inserted row, Ada’s deleted row and Bo’s typing in the header', () => {
+      const pending = rows(four);
+      // The typing first and the alignment last: the mark is written after the closer of the typing.
+      const last = align(typed(pending, bo, 'm5nn'), [1], 'center', ada, ['k3x9']).after;
+      expect(headerLine(last)).toMatch(/Price<!--ins m5nn-->x<!--\/m5nn--><!--fmt k3x9/);
+      decided('typing, then the alignment', last, 10);
+      // The alignment first, and the typing after it: it is written in front of the mark.
+      const first = typed(align(pending, [1], 'center', ada, ['k3x9']).after, bo, 'm5nn');
+      expect(headerLine(first)).toBe(headerLine(last));
+      decided('the alignment, then the typing', first, 10);
+    });
+
+    it('is decided in every order where a closer stands next to the mark', () => {
+      // A comment over the text of the cell, and Bo's typing inside it: the closer of the comment stands
+      // in front of the mark, with the closer of the typing before it, and deciding the typing leaves the
+      // comment's closer next to the mark.
+      const commented = (text: string, who: Person) =>
+        applyChanges(
+          text,
+          addComment(text, lastCell(text), 'A note.', context(who, ['p5qm'])).changes,
+        );
+      for (const by of [ada, bo]) {
+        const inside = typed(commented(file(FRUIT), by), bo, 'm5nn', 'x', 1);
+        const done = align(inside, [1], 'center', ada, ['k3x9']).after;
+        expect(headerLine(done), by.handle).toMatch(
+          /<!--cmt p5qm-->Pric<!--ins m5nn-->x<!--\/m5nn-->e<!--\/p5qm--><!--fmt k3x9/,
+        );
+        decided(`${by.handle}’s comment, Bo’s typing inside it`, done, 5);
+        // The other order: the alignment first, then the comment over the text and the typing in it.
+        const early = align(file(FRUIT), [1], 'center', ada, ['k3x9']).after;
+        const then = typed(commented(early, by), bo, 'm5nn', 'x', 1);
+        expect(headerLine(then), by.handle).toBe(headerLine(done));
+        decided(`${by.handle}’s comment after the alignment`, then, 5);
+      }
+    });
+  });
+
+  describe('with the span form in another table of the file', () => {
+    it('leaves each table as it was when the other is decided, in every order', () => {
+      const second = FRUIT.replace('Fruit ', 'Veg   ');
+      const spanned = `${MARK}\n\n${CENTERED}\n\n<!--/k3x9-->`;
+      const pointed = POINT_BODY.replace('Fruit ', 'Veg   ').replace('k3x9', 'w8nn');
+      const doc = file(`${spanned}\n\nBetween the tables.\n\n${pointed}`, {
+        k3x9: 'ada',
+        w8nn: 'bo',
+      });
+      const parsed = parse(doc);
+      expect(problemsOf(parsed)).toEqual([]);
+      expect(readTables(doc, parsed).map((table) => alignMarkOf(parsed, table)?.id)).toEqual([
+        'k3x9',
+        'w8nn',
+      ]);
+      // Deciding one leaves the other byte for byte.
+      for (const decide of [accept, reject]) {
+        expect(applyChanges(doc, decide(doc, 'k3x9')), decide.name).toContain(pointed);
+        expect(applyChanges(doc, decide(doc, 'w8nn')), decide.name).toContain(spanned);
+      }
+      same(
+        applyChanges(doc, reject(doc, 'k3x9')),
+        file(`${FRUIT}\n\nBetween the tables.\n\n${pointed}`, { w8nn: 'bo' }),
+      );
+      same(
+        applyChanges(doc, reject(doc, 'w8nn')),
+        file(`${spanned}\n\nBetween the tables.\n\n${second}`, { k3x9: 'ada' }),
+      );
+      expectEveryOrderAlike('a span and a point', doc, exactly);
+      expect(expectNoDecisionRefused('a span and a point', doc)).toBeGreaterThan(2);
+      expect(trim(applyChanges(doc, rejectAll(doc)))).toBe(
+        `${FRUIT}\n\nBetween the tables.\n\n${second}`,
+      );
+      expect(trim(applyChanges(doc, acceptAll(doc)))).toBe(trim(newestView(doc).text));
+    });
+  });
+
+  describe('written after changes pending in the last header cell', () => {
+    // The mark is written last, after other people's changes at the end of the cell. Deciding those in some
+    // order, neither all accepted nor all rejected, can leave a backslash or a delimiter run right in front of
+    // the mark, which Markdown then reads otherwise: the writer tries the orders of the changes in that cell.
+    const aligned = (body: string, marks: Record<string, string>, who = ada) =>
+      align(file(body, marks), [0], 'right', who, ['k3x9']).after;
+
+    it('is refused where deciding some of the changes would leave a delimiter run in front of it', () => {
+      // Bo deletes the `x` after `**a .*` and Ada types `b` after it: with the typing rejected and the
+      // deletion accepted the run ends the cell, and the mark after it makes the rule of three keep it from
+      // closing. All accepted ends in `b`, all rejected in `x`.
+      const body =
+        '| h | **a .*<!--del c2dd x--><!--ins f3gg-->b<!--/f3gg--> |\n| - | - |\n| c | d |';
+      expect(
+        said(() => aligned(body, { c2dd: 'bo', f3gg: 'ada' })),
+        'exposed',
+      ).toBe(PLACE);
+      // Nothing that exposes a run: the same cell with a plain `x` in front of the changes is written.
+      const plain = body.replace('<!--del c2dd x-->', 'x<!--del c2dd y-->');
+      const done = aligned(plain, { c2dd: 'bo', f3gg: 'ada' });
+      expectEveryOrderAlike('plain x', done, exactly);
+      expectEveryOrderRead('plain x', done);
+      expectNoDecisionRefused('plain x', done);
+    });
+
+    it('is refused where a backslash would be brought back in front of it by a decision of two changes', () => {
+      // `a\` with a pending deletion of `b` after it and a typing: the deletion accepted and the typing
+      // rejected leaves the backslash right in front of the mark.
+      const body = '| h | a\\<!--del c2dd b--><!--ins f3gg-->c<!--/f3gg--> |\n| - | - |\n| c | d |';
+      expect(said(() => aligned(body, { c2dd: 'bo', f3gg: 'ada' }))).toBe(PLACE);
+    });
+
+    it('is refused where deciding the changes in the cell would leave no table to decide it in', () => {
+      // A header with no leading pipe, in which Bo commented over a character of `b~~` and replaced another:
+      // accepting his deletions and rejecting his insertion empties the cell, and the header, which then
+      // starts with the closer of the comment, is no table. Rejecting the alignment change would then be
+      // refused (its table no longer has the columns it had), in that order of decisions and in no other:
+      // the writer does not write a change that it can't decide there.
+      const body =
+        ' <!--del q6rs b-->\n\n <!--cmt d8fg-->\n\n <!--del q6rs ~~-->\n\n <!--ins m5nn-->\n\n b~ab<!--/m5nn--><!--/d8fg--> |\n ----: |\n café |\n café |';
+      const text = file(body, { q6rs: 'bo', m5nn: 'bo' }, thread('d8fg', 'bo'));
+      expect(said(() => align(text, [0], 'left', claudeAda, ['v6xz']))).toBe(PLACE);
+      // The same header with its text in front of the changes keeps a cell when they are decided.
+      const kept = file(
+        ' x<!--del q6rs b--><!--cmt d8fg--><!--ins m5nn-->ab<!--/m5nn--><!--/d8fg--> |\n ----: |\n café |\n café |',
+        { q6rs: 'bo', m5nn: 'bo' },
+        thread('d8fg', 'bo'),
+      );
+      const done = align(kept, [0], 'left', claudeAda, ['v6xz']).after;
+      expectEveryOrderAlike('a cell that keeps its text', done, exactly);
+      expectNoDecisionRefused('a cell that keeps its text', done);
+    });
+
+    it('is written after a pending bold over the text of the cell, and every order reads alike', () => {
+      // A bold over the last header cell, as people make the header row bold, leaves the mark's decisions
+      // as before: accepted it leaves `**Price**`, rejected `Price`, and neither ends in front of the mark in a way
+      // that reads otherwise.
+      const text = file(FRUIT);
+      const { changes } = trackedFormat(text, lastCell(text), BOLD, context(bo, ['c2dd']));
+      const bold = applyChanges(text, changes);
+      expect(headerLine(bold)).toMatch(/<!--fmt c2dd \+bold-->\*\*Price\*\*<!--\/c2dd--> \|$/);
+      const done = align(bold, [1], 'center', ada, ['k3x9']).after;
+      expect(headerLine(done)).toMatch(/<!--\/c2dd--><!--fmt k3x9/);
+      expectEveryOrderAlike('bold, then the alignment', done, exactly);
+      expectEveryOrderRead('bold, then the alignment', done);
+      expect(expectNoDecisionRefused('bold, then the alignment', done)).toBeGreaterThan(2);
+    });
+
+    it('is written after up to three changes in the cell, and refused after more', () => {
+      const typing = (n: number) =>
+        ['b', 'c', 'd', 'e']
+          .slice(0, n)
+          .map(
+            (c, i) =>
+              `<!--ins ${['c2dd', 'f3gg', 'h4jj', 'm5nn'][i]}-->${c}<!--/${['c2dd', 'f3gg', 'h4jj', 'm5nn'][i]}-->`,
+          )
+          .join('');
+      const marks = { c2dd: 'bo', f3gg: 'bo', h4jj: 'bo', m5nn: 'bo' };
+      const three = aligned(`| h | a${typing(3)} |\n| - | - |\n| c | d |`, marks);
+      expectEveryOrderAlike('three changes', three, exactly);
+      expect(expectNoDecisionRefused('three changes', three)).toBeGreaterThan(10);
+      expect(said(() => aligned(`| h | a${typing(4)} |\n| - | - |\n| c | d |`, marks))).toBe(PLACE);
+    });
+  });
+
+  describe('an edit that would leave the mark read otherwise', () => {
+    // The mark stands at the end of its cell, so what is typed there lands right in front of it. A backslash
+    // there escapes its `<`, and a delimiter run there changes how the text before it reads: Markdown readers
+    // that don't know the markers would show the mark as text, or read the emphasis otherwise. Such an edit is
+    // refused in words that name the change, with Track Changes on and off, rather than written.
+    const WORDS = (who: string) =>
+      new RegExp(`^${who}'s alignment change is at the end of this cell, where this edit`);
+    const at = (text: string, find: string, plus = 0) => text.indexOf(find) + plus;
+    const typed = (text: string, where: number, insert: string, who: Person | null, to = where) =>
+      who === null
+        ? untrackedEdit(text, { from: where, to, insert })
+        : trackedEdit(text, { from: where, to, insert }, context(who, ['c2dd', 'f3gg']));
+
+    it('refuses a plain backslash typed at the end of the cell, or left there by a deletion', () => {
+      for (const [who, text, name] of [
+        [null, POINT, 'Bo Chen'],
+        [null, BY_ADA, 'Ada Lovelace'],
+      ] as const) {
+        const end = lastCell(text).to;
+        expect(
+          said(() => typed(text, end, '\\', who)),
+          name,
+        ).toMatch(WORDS(name));
+        // Two backslashes escape each other, and a backslash earlier in the cell is no matter.
+        for (const insert of ['\\\\', 'q']) {
+          const after = applyChanges(text, typed(text, end, insert, who));
+          expect(problemsOf(parse(after)), insert).toEqual([]);
+          expectDecided(`plain ${JSON.stringify(insert)}`, after);
+        }
+      }
+      // A deletion that brings a backslash next to the mark: `a\b`, the `b` deleted.
+      const body =
+        '| h | a\\b<!--fmt k3x9 align=\\|\\x20-\\x20\\|\\x20-\\x20\\|--> |\n| - | - |\n| c | d |';
+      const text = file(body, { k3x9: 'bo' });
+      expect(said(() => typed(text, at(text, 'b<!--'), '', null, at(text, 'b<!--', 1)))).toMatch(
+        WORDS('Bo Chen'),
+      );
+    });
+
+    it('writes a tracked backslash at the end of the cell, and every order reads alike', () => {
+      for (const [who, text] of FILES) {
+        const end = lastCell(text).to;
+        const after = applyChanges(text, typed(text, end, '\\', who));
+        expect(after, who.handle).toMatch(/<!--fmt k3x9 /);
+        expect(problemsOf(parse(after)), who.handle).toEqual([]);
+        expectEveryOrderAlike(who.handle, after, exactly);
+        expectNoDecisionRefused(who.handle, after);
+      }
+    });
+
+    it('refuses a comment that would put its closer in front of a run that the mark follows', () => {
+      // `*b**` is written, the run `**` after a letter. A comment over `*b` ends between the `b` and the
+      // run, and the run is then after the `>` of a marker: the mark would keep it from closing the `*`.
+      // Any writer holds to it, not only the keys: a comment over all of the text ends after the run.
+      const start = file('| h | *b** |\n| - | - |\n| c | d |');
+      const text = align(start, [0], 'right', bo, ['k3x9']).after;
+      const cell = lastCell(text);
+      expect(
+        said(() =>
+          addComment(
+            text,
+            { from: cell.from, to: cell.from + 2 },
+            'A note.',
+            context(ada, ['c2dd']),
+          ),
+        ),
+      ).toMatch(WORDS('Bo Chen'));
+      const whole = addComment(text, cell, 'A note.', context(ada, ['c2dd']));
+      const after = applyChanges(text, whole.changes);
+      expect(headerLine(after)).toMatch(/<!--cmt c2dd-->\*b\*\*<!--\/c2dd--><!--fmt k3x9/);
+      expectDecided('a comment over all of it', after, [2, 2]);
+    });
+
+    it('refuses a plain edit that leaves a delimiter run after punctuation in front of the mark', () => {
+      // `**a .` is written; typing the `*` that would close the emphasis puts a run after a full stop right
+      // in front of the mark, and the rule of three then keeps it from closing: refused, and the cell is as it was.
+      const start = file('| h | **a . |\n| - | - |\n| c | d |');
+      const text = align(start, [0], 'right', bo, ['k3x9']).after;
+      const end = lastCell(text).to;
+      expect(
+        said(() => typed(text, end, '*', null)),
+        'plain',
+      ).toMatch(WORDS('Bo Chen'));
+      // Another character, and the same run after a letter, are written.
+      for (const insert of ['x', ' ']) {
+        const after = applyChanges(text, typed(text, end, insert, null));
+        expect(problemsOf(parse(after)), insert).toEqual([]);
+      }
+      // A deletion that leaves the run in front of the mark: `**a .*x`, the `x` deleted.
+      const run = align(file('| h | **a .*x |\n| - | - |\n| c | d |'), [0], 'right', bo, [
+        'k3x9',
+      ]).after;
+      const x = at(run, 'x<!--fmt');
+      expect(said(() => typed(run, x, '', null, x + 1))).toMatch(WORDS('Bo Chen'));
+    });
   });
 });

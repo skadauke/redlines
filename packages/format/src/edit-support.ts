@@ -1,6 +1,7 @@
 // What the editing functions share (format §3.6, §4, §5): where the markers are, moving a position
 // out of one, the file's line breaks, and writing the ledger once the body has changed.
 
+import { assertPointsRead } from './align-point.ts';
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import {
@@ -664,6 +665,8 @@ export function commitEdit(
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
+    // An alignment change at the end of its cell is read where it stands after the edit as it was before it.
+    if (!removing) assertPointsRead(text, before, after, parsedAfter, changes);
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps) assertViewsKept(text, after, options.keeps);
@@ -678,4 +681,19 @@ export function commitEdit(
   if (ledgerChanges === undefined) return changes;
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
   return joinChanges(text, changes, after, ledgerChanges);
+}
+
+/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
+ * (format §3.1). */
+export function escapedMarkers(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
+}
+
+/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
+export function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  let at: number | undefined;
+  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
+  return at;
 }

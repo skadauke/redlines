@@ -92,6 +92,50 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
   }
 }
 
+const PENDING_PIPE =
+  "This key can't be written here with Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the change next to it first, or turn off Track Changes.";
+
+/**
+ * Refuses an edit that was written, next to a marker, with a pipe or a line break of a table in the new text of
+ * a change that the edit did not type: `changes` are what `edits` became in tracked form. A key next to a
+ * marker is written again by a character when it would read otherwise, and where the next character is the
+ * row's pipe, or its line break, that put the pipe in a pending insertion with a deletion of its own: rejecting
+ * the one and not the other left a pipe too many or none (or, after a backslash, an escaped pipe in place of the
+ * row's edge), and a cell too many or too few. Text in a row never holds a pipe or a line break that nobody typed
+ * (format §3.7, "A cell is one line"), so no key is written so. A change over the whole table is the block's, as
+ * in `checkTableEdits`.
+ *
+ * @throws EditError
+ */
+export function assertRowsStay(
+  text: string,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+  parsed?: Parsed,
+): void {
+  if (!text.includes('|')) return;
+  // What a change brings: its new text without the markers, whose payloads write a pipe as `\|`.
+  const brings = (insert: string) => insert.replace(/<!--[\s\S]*?-->/g, '');
+  const count = (s: string, pattern: RegExp) => s.match(pattern)?.length ?? 0;
+  const inRows = (change: TextChange, tables: readonly TableRead[]) =>
+    tables.some(
+      (table) =>
+        inTable(table, change) &&
+        !(change.from <= table.from && change.to >= table.to && change.to > change.from),
+    );
+  for (const pattern of [/\|/g, /\n/g]) {
+    const typed = edits.reduce((sum, edit) => sum + count(edit.insert, pattern), 0);
+    const written = changes.reduce((sum, change) => sum + count(brings(change.insert), pattern), 0);
+    if (written <= typed) continue;
+    const tables = tablesIn(text, parsed);
+    if (
+      changes.some((change) => count(brings(change.insert), pattern) > 0 && inRows(change, tables))
+    ) {
+      throw new EditError(PENDING_PIPE, 'no-legal-placement');
+    }
+  }
+}
+
 /** Whether a line above `position`, in the lines of text that run up to it, holds a pipe: the
  * header, the delimiter row or a row of a table that a line without one can be a row of. */
 function pipeAbove(text: string, position: number): boolean {

@@ -409,3 +409,50 @@ describe('deleting a whole table (format §3.4, §3.7)', () => {
     expect(() => track(text, remove(from, from + 3))).toThrow(EditError);
   });
 });
+
+describe('a key next to a marker at the edge of a cell (format §3.7)', () => {
+  // With no space between the text of a cell and its pipe, a delimiter or a backslash typed in front of a
+  // marker that ends the cell can only be kept apart from the marker by writing again the character after
+  // it, which is the row's pipe. That left the pipe in a change of its own: rejecting the deletion of the
+  // pipe, or accepting the insertion that holds it, left a pipe too many or none, and the table was gone.
+  // The key is refused instead, in words, and a cell with room after its text takes it.
+  const WORDS =
+    "This key can't be written here with Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the change next to it first, or turn off Track Changes.";
+  const compact = file('|b|b<!--cmt k3x9-->|\n|-|-|\n|c|d|', { k3x9: 'bo' }, [
+    '  k3x9:',
+    '    by: bo',
+    '    at: 2026-10-13T22:40Z',
+    '    text: |-',
+    '      A note.',
+  ]);
+
+  it('refuses a backslash, an underscore or a star typed in front of it, where the pipe would be written again', () => {
+    const at = compact.indexOf('<!--cmt');
+    for (const typed of ['\\', '_']) {
+      const refused = (() => {
+        try {
+          track(compact, type(at, typed), ['c2dd', 'f3gg', 'h4jj']);
+          return 'no error';
+        } catch (error) {
+          return error instanceof EditError ? error.message : String(error);
+        }
+      })();
+      expect(refused, JSON.stringify(typed)).toBe(WORDS);
+    }
+    // A star reads alike without it, and a cell with room after its text takes them all.
+    const star = track(compact, type(at, '*'), ['c2dd', 'f3gg', 'h4jj']);
+    expectEveryOrderAlike('a star', star);
+    const padded = file('| b | b<!--cmt k3x9--> |\n| - | - |\n| c | d |', { k3x9: 'bo' }, [
+      '  k3x9:',
+      '    by: bo',
+      '    at: 2026-10-13T22:40Z',
+      '    text: |-',
+      '      A note.',
+    ]);
+    for (const typed of ['\\', '_', '*']) {
+      const after = track(padded, type(padded.indexOf('<!--cmt'), typed), ['c2dd', 'f3gg', 'h4jj']);
+      expectEveryOrderAlike(typed, after);
+      expectInOrder(typed, ['k3x9'], after);
+    }
+  });
+});

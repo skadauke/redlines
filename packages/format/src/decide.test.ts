@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
-import { accept, acceptAll, reject, rejectAll } from './decide.ts';
+import {
+  accept,
+  acceptAll,
+  acceptMarks,
+  canReject,
+  isDecidable,
+  reject,
+  rejectAll,
+  rejectMarks,
+} from './decide.ts';
 import { EditError } from './errors.ts';
+import { encodeValue } from './format-ops.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -1220,5 +1230,66 @@ describe('format changes (format §2.6)', () => {
       expect(applyChanges(text, reject(text, id)), body).toBe(original);
       expectViewsAgree(body, text);
     }
+  });
+});
+
+describe('a point alignment change (format §3.7, #281)', () => {
+  // Ada's change, which centered the second column of a table, as one mark with no closer at the end of the
+  // header's last cell, and Bo's typing in the table: decided by id, alone or together.
+  const OLD = encodeValue('| - | - |');
+  const text = file(
+    `| a | b<!--fmt k3x9 align=${OLD}--> |\n| - | :-: |\n| c | <!--ins w8nn-->d<!--/w8nn--> |`,
+    { k3x9: 'ada', w8nn: 'bo' },
+  );
+  const parsed = parse(text);
+  const mark = parsed.marks.find((candidate) => candidate.id === 'k3x9');
+  const trim = (t: string) => bodyOf(t).replace(/[\r\n]+$/, '');
+
+  it('is decidable by accept and reject, and can be rejected while its table has its columns', () => {
+    expect(mark && isDecidable(mark)).toBe(true);
+    expect(mark && canReject(parsed, mark)).toBe(true);
+    expect(trim(applyChanges(text, accept(text, 'k3x9')))).toBe(
+      '| a | b |\n| - | :-: |\n| c | <!--ins w8nn-->d<!--/w8nn--> |',
+    );
+    expect(trim(applyChanges(text, reject(text, 'k3x9')))).toBe(
+      '| a | b |\n| - | - |\n| c | <!--ins w8nn-->d<!--/w8nn--> |',
+    );
+    // SPEC has two cells, and the table has one column: it can only be accepted.
+    const narrow = file(`| a<!--fmt k3x9 align=${OLD}--> |\n| :-: |\n| c |`, { k3x9: 'ada' });
+    const gone = parse(narrow).marks[0];
+    expect(gone && isDecidable(gone)).toBe(true);
+    expect(gone && canReject(parse(narrow), gone)).toBe(false);
+  });
+
+  it('is rejected, with another change, as one decision that gives what rejecting each does', () => {
+    const ids = ['k3x9', 'w8nn'];
+    const together = applyChanges(text, rejectMarks(text, ids));
+    expect(trim(together)).toBe('| a | b |\n| - | - |\n| c |  |');
+    for (const order of [ids, ids.toReversed()]) {
+      let step = text;
+      for (const id of order) step = applyChanges(step, reject(step, id));
+      expect(together, order.join(' ')).toBe(step);
+    }
+    expect(together).toBe(applyChanges(text, rejectAll(text)));
+    expect(parse(together).marks).toEqual([]);
+    expect(parse(together).ledger.marks).toEqual({});
+    // And accepted: both marks go, the text stays.
+    const kept = applyChanges(text, acceptMarks(text, ids));
+    expect(trim(kept)).toBe('| a | b |\n| - | :-: |\n| c | d |');
+    expect(kept).toBe(applyChanges(text, acceptAll(text)));
+    expect(trim(kept)).toBe(trim(newestView(text).text));
+    expect(trim(together)).toBe(trim(originalView(text).text));
+  });
+
+  it('is refused as a decision of several marks when it can not be rejected, and nothing is written', () => {
+    const narrow = file(
+      `| a<!--fmt k3x9 align=${OLD}--> |\n| :-: |\n| <!--ins w8nn-->c<!--/w8nn--> |`,
+      { k3x9: 'ada', w8nn: 'bo' },
+    );
+    expect(() => rejectMarks(narrow, ['k3x9', 'w8nn'])).toThrow(EditError);
+    // The others are decided on their own.
+    expect(trim(applyChanges(narrow, rejectMarks(narrow, ['w8nn'])))).toBe(
+      '| a<!--fmt k3x9 align=\\|\\x20-\\x20\\|\\x20-\\x20\\|--> |\n| :-: |\n|  |',
+    );
   });
 });
