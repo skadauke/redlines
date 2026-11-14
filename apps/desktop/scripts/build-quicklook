@@ -69,9 +69,10 @@ BUNDLE_ID = "md.redlines.editor.preview"
 MINIMUM_MACOS = "13.3"
 ARCHS = ["arm64", "x86_64"]
 
-# The types of the files that the extension previews. Markdown has two types on macOS 27: the
-# system's own, and the one that other editors declare and Redlines imports (document-types.plist).
-# R Markdown and Quarto have none: macOS gives their files a dynamic type, made from the extension.
+# The types of the files that the extension previews. Markdown has two on macOS 27: the one macOS
+# exports, which `.md` files have and Redlines imports for a macOS that doesn't know it, and the one
+# that other apps declare (document-types.plist claims both). R Markdown and Quarto have none: macOS
+# gives their files a dynamic type, made from the extension.
 MARKDOWN_TYPES = ["net.daringfireball.markdown", "public.markdown"]
 EXTENSIONS_WITH_NO_TYPE = ["qmd", "rmd"]
 
