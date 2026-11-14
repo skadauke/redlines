@@ -1,35 +1,43 @@
-// A click on a change bar switches Simple and Redlines (design: A click in the margin). The core
-// owns the click, and it never moves the text under the pointer, the caret, the selection or the
-// focus: the press is taken whole, the release switches, and the line that was under the pointer
-// is put back where it was.
+// A click on a change bar switches Redlines' two looks, the simple look and the full markup, and is
+// the only thing that does (design: A click in the margin). The core owns the click, and it never
+// moves the text under the pointer, the caret, the selection or the focus: the press is taken
+// whole, the release switches, and the line that was under the pointer is put back where it was.
 
 import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
-import {
-  Decoration,
-  EditorView,
-  showTooltip,
-  type Tooltip,
-  ViewPlugin,
-  type ViewUpdate,
-} from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { BAR_LEFT, barsOnLine, hotBar, setHotBar } from './bar-layer.ts';
 import { chooseViewEffects, viewModeField } from './field.ts';
 
 /**
- * Handlers asked, in order, when a bar is clicked, with the position where its line starts; the
- * first to return true has handled the click and nothing switches. A plugin that knows a mode of
- * its own, such as the review bar's, adds one.
+ * Handlers asked, in order, when a bar is clicked, with the position where its line starts, the id
+ * of the change when the bar is a struck block's, and for a line of text the part of the line that
+ * the piece of the bar stands beside (a line that wraps has several); the first to return true has
+ * handled the click and nothing switches. A plugin that knows a mode of its own, such as the
+ * review bar's, adds one.
  */
 export const barClickHandlers =
-  Facet.define<(view: EditorView, pos: number, mark?: string) => boolean>();
+  Facet.define<
+    (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean
+  >();
 
-/** The bar a pointer is over: its line (or a table row's first cell), and where the line starts. */
+/**
+ * The bar a pointer is over: its line (or a table row's first cell), and where the line starts. The
+ * bar of a line of text is the piece of it beside one run of screen lines (`bar-layer.ts`).
+ */
 export interface LocatedBar {
   element: Element;
   /** The start of the bar's line. */
   pos: number;
+  /**
+   * For a bar of a line of text, where its first screen line starts: which piece of the line's bar
+   * it is. Absent for a table row's bar and for a struck block's, which are the element's own.
+   */
+  from?: number;
+  /** For a bar of a line of text, the part of the line that its piece stands beside. */
+  span?: { from: number; to: number };
   /** The id of the change a struck block is of, when the bar is its own (Part 3). */
   mark?: string;
-  /** Where the element is on the screen, in the viewport's coordinates. */
+  /** Where the bar is on the screen, in the viewport's coordinates. */
   rect: { left: number; top: number; bottom: number };
 }
 
@@ -42,19 +50,15 @@ export interface BarGeometry {
 }
 
 export interface BarSwitchOptions {
-  /** How long the pointer rests on a bar before its hint shows, in ms. Default: 400 (the title bar's). */
-  hintDelay?: number;
   geometry?: BarGeometry;
-  /** The keys the hint names for the view a click shows. Default: none. */
-  keys?: ViewKeys;
 }
 
-/** How far the bar's center is from its line's left edge: 24 px left, 2 px wide (see the theme). */
-const BAR_OFFSET = -23;
+/** How far the bar's center is from its line's left edge: `BAR_LEFT` left, 2 px wide (the theme's). */
+const BAR_OFFSET = 1 - BAR_LEFT;
 /** How far in from the content's edge a bar's target can reach: the margin the column keeps. */
 const MARGIN_REACH = 80;
-/** A quote's own border moves its bar 2 px further. */
-const QUOTE_OFFSET = -25;
+/** A struck quote's own border moves its bar 2 px further. */
+const QUOTE_OFFSET = BAR_OFFSET - 2;
 /** The target's reach on each side of the bar's center: 24 px wide. */
 const REACH = 12;
 /** The farthest the pointer may move between pressing and releasing for the press to be a click. */
@@ -117,13 +121,28 @@ const pageGeometry: BarGeometry = {
       element = hit?.closest('.rl-trow');
     }
     if (!element || !view.contentDOM.contains(element)) return null;
+    const isLine = element.classList.contains('cm-line');
+    if (isLine && !element.classList.contains('rl-trow')) {
+      // A line of text: its bar is the pieces of it beside the screen lines that hold a change, and
+      // the pointer is on one only at the height of one of them, not anywhere down the paragraph.
+      // A line that holds none is not measured: the pointer crosses many, and a paragraph that wraps
+      // is costly to measure.
+      if (!element.classList.contains('rl-bar')) return null;
+      const from = view.lineBlockAt(pos).from;
+      const found = barsOnLine(view, from);
+      const piece = found?.segments.find(({ top, bottom }) => y >= top && y < bottom);
+      if (!found || !piece) return null;
+      return {
+        element,
+        pos: from,
+        from: piece.from,
+        span: { from: piece.from, to: piece.to },
+        rect: { left: found.left, top: piece.top, bottom: piece.bottom },
+      };
+    }
     const rect = element.getBoundingClientRect();
     if (y < rect.top || y > rect.bottom) return null;
-    return {
-      element,
-      pos: element.classList.contains('cm-line') ? view.lineBlockAt(pos).from : pos,
-      rect,
-    };
+    return { element, pos: isLine ? view.lineBlockAt(pos).from : pos, rect };
   },
   lineTop(view, pos) {
     // From the page itself and not from CodeMirror's heights, which a change of view does not
@@ -151,96 +170,50 @@ function targetAt(
   if (mode !== 'simple' && mode !== 'redlines') return null;
   const found = geometry.locate(view, x, y);
   if (!found || !found.element.classList.contains('rl-bar')) return null;
-  const quote = found.element.classList.contains('rl-quote');
+  // A struck quote's own border moves its bar; the layer draws a line of text's bar in one place.
+  const quote = found.from === undefined && found.element.classList.contains('rl-quote');
   const center = found.rect.left + (quote ? QUOTE_OFFSET : BAR_OFFSET);
   return Math.abs(x - center) <= REACH ? found : null;
 }
 
-/** The bar under the pointer, and the view that a click on it would show. */
-interface Hover {
-  /** The start of its line. */
-  pos: number;
-  /** Whether its line is a line of the editor, which is marked; a table row's cell is marked apart. */
-  line: boolean;
-  /** The view a click shows. */
-  shows: 'simple' | 'redlines';
-  /** Whether the hint shows, after the pause. */
-  hint: boolean;
-}
-
-const setHover = StateEffect.define<Hover | null>();
-
-const LABELS = { simple: 'Show Simple', redlines: 'Show Redlines' } as const;
-
-/** The keys that show each view, as the host writes them for the hint (none: the hint names none). */
-export type ViewKeys = Partial<Record<'simple' | 'redlines', string>>;
-
-const hintKeys = Facet.define<ViewKeys, ViewKeys>({
-  combine: (values) => Object.assign({}, ...values) as ViewKeys,
-});
-
-function hintTooltip(hover: Hover, keys: ViewKeys): Tooltip {
-  return {
-    pos: hover.pos,
-    above: true,
-    create() {
-      const dom = document.createElement('div');
-      dom.className = 'rl-bar-hint';
-      dom.setAttribute('aria-hidden', 'true');
-      dom.append(LABELS[hover.shows]);
-      const written = keys[hover.shows];
-      if (written) {
-        const keyed = document.createElement('span');
-        keyed.className = 'rl-bar-hint-keys';
-        keyed.textContent = written;
-        dom.append(keyed);
-      }
-      return { dom };
-    },
-  };
-}
+const setHover = StateEffect.define<number | null>();
 
 const hotLine = Decoration.line({ class: 'rl-bar-hot' });
 
 /**
- * The hovered bar: its line is drawn hot (`rl-bar-hot`) and, after the pause, a hint stands at it,
- * a tooltip in the interface's hint style.
+ * The line of a table's row whose bar is under the pointer, which is drawn hot (`rl-bar-hot`): the
+ * row's first cell draws its bar. The bar of a line of text is drawn hot by the layer
+ * (`bar-layer.ts`), and a struck block's by its own element.
  */
-const hoverField = StateField.define<Hover | null>({
+const hoverField = StateField.define<number | null>({
   create: () => null,
   update(value, tr) {
     const set = tr.effects.findLast((effect) => effect.is(setHover));
     if (set) return set.value;
-    // The text moved, or a switch made the hint wrong.
+    // The text moved, or a switch made it wrong.
     return tr.docChanged || tr.startState.field(viewModeField) !== tr.state.field(viewModeField)
       ? null
       : value;
   },
-  provide: (field) => [
-    EditorView.decorations.from(field, (hover) =>
-      hover?.line ? Decoration.set([hotLine.range(hover.pos)]) : Decoration.none,
+  provide: (field) =>
+    EditorView.decorations.from(field, (pos) =>
+      pos === null ? Decoration.none : Decoration.set([hotLine.range(pos)]),
     ),
-    showTooltip.compute([field, hintKeys], (state) => {
-      const hover = state.field(field);
-      return hover?.hint ? hintTooltip(hover, state.facet(hintKeys)) : null;
-    }),
-  ],
 });
 
 /**
- * The click on a change bar: Simple to Redlines and back, with the line under the pointer where it
- * was, and the hover that says so. Nothing in Clean or Raw.
+ * The click on a change bar: Redlines' simple look to its full markup and back, with the line
+ * under the pointer where it was. The bar under the pointer draws wider, and the pointer is a hand
+ * over it. Nothing in Clean or Raw.
  */
 export function barSwitch(options: BarSwitchOptions = {}): Extension {
   const geometry = options.geometry ?? pageGeometry;
-  const delay = options.hintDelay ?? 400;
   const plugin = ViewPlugin.fromClass(
     class {
       /** The press that landed on a bar's target and may become a click. */
       private press: { x: number; y: number; target: LocatedBar } | null = null;
       private hot: LocatedBar | null = null;
       private cell: Element | null = null;
-      private timer: ReturnType<typeof setTimeout> | undefined;
       private readonly view: EditorView;
 
       constructor(view: EditorView) {
@@ -266,7 +239,6 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         scrollDOM.removeEventListener('mousemove', this.move);
         scrollDOM.removeEventListener('mouseleave', this.leave);
         this.view.dom.ownerDocument.removeEventListener('mouseup', this.up, true);
-        clearTimeout(this.timer);
       }
 
       private readonly down = (event: MouseEvent) => {
@@ -297,7 +269,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         if (this.press) return;
         const target = targetAt(this.view, geometry, event.clientX, event.clientY);
         if (!target) return this.unhover();
-        if (this.hot?.element === target.element) return;
+        if (this.hot?.element === target.element && this.hot.from === target.from) return;
         this.unhover();
         this.hover(target);
       };
@@ -308,25 +280,21 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         const { view } = this;
         this.hot = target;
         view.scrollDOM.style.cursor = 'pointer';
-        const line = target.element.classList.contains('cm-line');
-        if (!line) {
+        if (target.from !== undefined) {
+          // The bar of a line of text, which the layer draws wider.
+          view.dispatch({ effects: setHotBar.of({ from: target.from }) });
+        } else if (target.element.classList.contains('cm-line')) {
+          // A table's row, whose first cell draws its bar: its line is the hot one.
+          view.dispatch({ effects: setHover.of(target.pos) });
+        } else {
+          // A struck block or a ghost row, which draw their own.
           this.cell = target.element;
           this.cell.classList.add('rl-bar-hot');
         }
-        const shows = view.state.field(viewModeField) === 'simple' ? 'redlines' : 'simple';
-        const hover = { pos: target.pos, line, shows, hint: false } as const;
-        view.dispatch({ effects: setHover.of(hover) });
-        // The hint comes after the usual pause.
-        clearTimeout(this.timer);
-        this.timer = setTimeout(() => {
-          if (this.hot === target)
-            view.dispatch({ effects: setHover.of({ ...hover, hint: true }) });
-        }, delay);
       }
 
       /** Lets go of the hover without a transaction: the state has dropped it. */
       private release(): void {
-        clearTimeout(this.timer);
         this.cell?.classList.remove('rl-bar-hot');
         this.cell = null;
         this.hot = null;
@@ -336,7 +304,12 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
       private unhover(): void {
         if (!this.hot) return;
         this.release();
-        if (this.view.state.field(hoverField)) this.view.dispatch({ effects: setHover.of(null) });
+        const { state } = this.view;
+        const effects = [
+          ...(state.field(hotBar, false) ? [setHotBar.of(null)] : []),
+          ...(state.field(hoverField) !== null ? [setHover.of(null)] : []),
+        ];
+        if (effects.length) this.view.dispatch({ effects });
       }
 
       private click(target: LocatedBar): void {
@@ -345,7 +318,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         if (mode !== 'simple' && mode !== 'redlines') return;
         this.unhover();
         for (const handler of view.state.facet(barClickHandlers)) {
-          if (handler(view, target.pos, target.mark)) return;
+          if (handler(view, target.pos, target.mark, target.span)) return;
         }
         // The line under the pointer keeps its place: its distance from the top of the screen is
         // noted now and put back once the new view is measured. A line the new view doesn't draw
@@ -370,24 +343,5 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
       }
     },
   );
-  return [plugin, hoverField, hintKeys.of(options.keys ?? {}), barTheme];
+  return [plugin, hoverField];
 }
-
-const barTheme = EditorView.baseTheme({
-  '.rl-bar-hint': {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '7px 10px',
-    borderRadius: '8px',
-    backgroundColor: 'var(--rl-tip)',
-    color: '#ffffff',
-    fontSize: 'var(--rl-size-ui-small)',
-    lineHeight: '1',
-    whiteSpace: 'nowrap',
-    pointerEvents: 'none',
-  },
-  '.rl-bar-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
-  // A tooltip of CodeMirror's draws no frame of its own here.
-  '.cm-tooltip:has(> .rl-bar-hint)': { border: 'none', backgroundColor: 'transparent' },
-});

@@ -44,8 +44,9 @@ const barOpen = StateField.define<boolean>({
   create: () => false,
   update(open, tr) {
     for (const effect of tr.effects) if (effect.is(setBarOpen)) open = effect.value;
-    // A person who chooses to read has stopped deciding: choosing Simple closes the bar, so that
-    // it never steps through changes the page doesn't show.
+    // A person who chooses to read has stopped deciding: showing the simple look closes the bar, so
+    // that it never steps through changes the page doesn't show. In the app nothing but a click on
+    // a change bar shows it, and while the bar is open that click opens a card instead.
     const simple = (state: EditorState) => state.field(viewModeField) === 'simple';
     return open && simple(tr.state) && !simple(tr.startState) ? false : open;
   },
@@ -189,12 +190,8 @@ function decide(
   const current = currentGroup(view.state, changesOf(ctx), groups);
   const change = groups[current]?.[0];
   if (!change) return;
-  let decided = false;
-  const ran = attempt(line, () => {
-    decided = decideSuggestion(ctx, how, change.id);
-  });
-  // Nothing was decided where the view hides the old text; it shows the change instead.
-  if (!ran || !decided) return;
+  const ran = attempt(line, () => decideSuggestion(ctx, how, change.id));
+  if (!ran) return;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
   const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
   const next = after
@@ -267,7 +264,7 @@ class Bar {
       if (open) this.show();
       else {
         this.hide();
-        // Closed from outside the bar, as when Simple is chosen: the host hears of it too.
+        // Closed from outside the bar, as when the simple look is shown: the host hears of it too.
         this.changed();
       }
     } else if (this.bar) {
@@ -382,15 +379,16 @@ class Bar {
 
 /**
  * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
- * the card of the change on that line opens, in place of the switch between Simple and Redlines,
+ * the card of the change on that line opens, in place of the switch between Redlines' two looks,
  * which the review bar would leave to the person who has stopped deciding. Nothing otherwise.
- * `pos` is where the bar's line starts.
+ * `pos` is where the bar's line starts, and `piece` the part of a line that wraps which the piece
+ * of the bar that was clicked stands beside: the change there is the one.
  */
 export function barClickHandler(
   ctx: ReviewContext,
   pin: (view: EditorView, id: string) => void,
-): (view: EditorView, pos: number, mark?: string) => boolean {
-  return (view, pos, mark) => {
+): (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean {
+  return (view, pos, mark, piece) => {
     if (!isBarOpen(view.state)) return false;
     // The bar of a struck block is its change's own: found by its id, not by its place.
     if (mark !== undefined) {
@@ -401,17 +399,36 @@ export function barClickHandler(
     const changes = changesOf(ctx);
     const onLine = (change: MarkRange) =>
       change.segments.some((segment) => {
-        const span = segmentSpan(segment);
-        return span.from <= line.to && span.to >= line.from;
+        const at = segmentSpan(segment);
+        return at.from <= line.to && at.to >= line.from;
       });
     // The line's own change first. Only when it has none, a change on a hidden line just above it:
     // a deleted block's marker is, and the bar is on the line below.
     const above = (change: MarkRange) =>
       change.segments.some((segment) => {
-        const span = segmentSpan(segment);
-        return span.to < line.from && !view.state.sliceDoc(span.to, line.from).trim();
+        const at = segmentSpan(segment);
+        return at.to < line.from && !view.state.sliceDoc(at.to, line.from).trim();
       });
-    const found = changes.find(onLine) ?? changes.findLast(above);
+    // The piece of the bar beside some screen lines of a paragraph that wraps: the change there.
+    const beside = (change: MarkRange) =>
+      !!piece &&
+      change.segments.some((segment) => {
+        const at = segmentSpan(segment);
+        return at.from < piece.to && at.to > piece.from;
+      });
+    // Or, when the piece is beside plain text (a deletion's struck words wrap onto screen lines
+    // after the one it stands at), the last change before it on the line.
+    const before = (change: MarkRange) =>
+      !!piece &&
+      change.segments.some((segment) => {
+        const at = segmentSpan(segment);
+        return at.to <= piece.from && at.to >= line.from;
+      });
+    const found =
+      changes.find(beside) ??
+      changes.findLast(before) ??
+      changes.find(onLine) ??
+      changes.findLast(above);
     if (found) pin(view, found.id);
     // The bar is open: a click never switches the view.
     return true;
