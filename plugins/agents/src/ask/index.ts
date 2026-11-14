@@ -14,7 +14,7 @@ import { quoteFinder, selectionText } from './answer.ts';
 import { type Bubble, createBubble } from './bubble.ts';
 import { placeBubble } from './place.ts';
 import { type AskDeps, type AskSession, createAskSession } from './session.ts';
-import { askTheme } from './styles.ts';
+import { askTheme, RAILED } from './styles.ts';
 import { askTarget, setTarget, targetOf } from './target.ts';
 
 export { exchangeAsMarkdown, keepAsComment } from './actions.ts';
@@ -22,9 +22,34 @@ export { findQuote, parseAnswer, quoteFinder, selectionText } from './answer.ts'
 export { createAskSession, EXPLAIN, askText } from './session.ts';
 export type { AskDeps, AskSession, AskState, AskTurn } from './session.ts';
 
+/**
+ * What the comment rail gives Ask for the bubble it lays out among its notes
+ * (`AskOptions.pinToRail`): the review interface's `PinnedElement`.
+ */
+export interface RailPin {
+  /** The bubble's height changed: the rail lays its notes out again. */
+  resized(): void;
+  /** Scrolls the bubble into view once the rail has placed it, which is a moment from now. */
+  reveal(): void;
+  /** Takes the bubble out of the rail's layout, and the notes go back to their places. */
+  release(): void;
+}
+
 export interface AskOptions extends AskDeps {
   /** Shows a one-line message that doesn't interrupt, for what can't be done. */
   notice(message: string): void;
+  /**
+   * Has the comment rail lay the bubble out among its notes, level with the start of the text asked
+   * about (`anchor`, a position that follows the text), as it does a new comment's box: the notes
+   * around the bubble go up or down to clear it, so that none is hidden. The bubble stays Ask's own
+   * element, in the editor's scroller, made, filled and removed by Ask; the rail sets only its
+   * `left` and `top`. Returns null where the rail shows no notes in full (a narrow window, Clean,
+   * a document with no comments): Ask places the bubble itself then, beside the column or under the
+   * selection, over the page. `lost` is called, once, when a rail that held the bubble stops (the
+   * window turned narrow): Ask places the bubble itself again, and asks the rail again at its next
+   * layout. Without it, Ask always places the bubble itself.
+   */
+  pinToRail?: (el: HTMLElement, anchor: () => number, lost: () => void) => RailPin | null;
   /** Gives the question's field the @ picker, as a comment's box has. */
   attachToField?: (field: HTMLTextAreaElement) => () => void;
   /** Shows a comment thread's note, once Make Comment has made one. */
@@ -87,6 +112,8 @@ interface Open {
   lastQuestion: { text: string; answers: number };
   /** Whether a new window is being opened for it, so that a second press waits for that. */
   opening: boolean;
+  /** The rail's hold on the bubble, while the rail lays it out among its notes. */
+  pin: RailPin | null;
   unsubscribe: () => void;
 }
 
@@ -134,7 +161,24 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
 
   const place = () => {
     const range = targetOf(view.state);
-    if (open && range) placeBubble(view, open.bubble.el, range);
+    if (!open || !range) return;
+    // The rail lays out what it holds, among its notes, and is told that the bubble changed.
+    if (open.pin) return open.pin.resized();
+    const mine = open;
+    const pin = options.pinToRail?.(
+      mine.bubble.el,
+      () => targetOf(view.state)?.from ?? range.from,
+      () => {
+        // The rail stopped showing its notes in full: the bubble hangs by the selection again.
+        if (open !== mine || !mine.pin) return;
+        mine.pin = null;
+        mine.bubble.el.classList.remove(RAILED);
+        place();
+      },
+    );
+    if (!pin) return placeBubble(view, mine.bubble.el, range);
+    mine.pin = pin;
+    mine.bubble.el.classList.add(RAILED);
   };
 
   const onKey = (event: KeyboardEvent) => {
@@ -153,6 +197,8 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     open = null;
     closing.unsubscribe();
     closing.session.close();
+    // The rail lays out the notes again as they were, before the bubble is gone from the page.
+    closing.pin?.release();
     closing.bubble.destroy();
     doc.removeEventListener('keydown', onKey);
     doc.removeEventListener('pointerdown', onPress, true);
@@ -251,22 +297,27 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     });
     view.scrollDOM.append(bubble.el);
     view.dispatch({ effects: setTarget.of(range) });
-    open = {
+    const opened: Open = {
       session,
       bubble,
       quote,
       generation: options.document.generation(),
       lastQuestion: { text: '', answers: 0 },
       opening: false,
+      pin: null,
       unsubscribe: session.subscribe(render),
     };
+    open = opened;
     doc.addEventListener('keydown', onKey);
     doc.addEventListener('pointerdown', onPress, true);
     win.addEventListener('resize', place);
     render();
-    bubble.focusField();
+    // A bubble the rail lays out is placed a moment from now, and not where it is yet: the keyboard
+    // goes to its field without scrolling there, and the rail scrolls once it has placed it.
+    bubble.focusField(opened.pin ? { preventScroll: true } : undefined);
     // The bubble comes into view with its field, where the text it is about is.
-    bubble.el.scrollIntoView?.({ block: 'nearest' });
+    if (opened.pin) opened.pin.reveal();
+    else bubble.el.scrollIntoView?.({ block: 'nearest' });
     return true;
   };
 

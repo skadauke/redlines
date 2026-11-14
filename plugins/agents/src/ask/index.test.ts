@@ -5,7 +5,7 @@ import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeProvider, fakeRelay, type FakeScript } from '../fake-provider.ts';
 import { createMacAgents } from '../mac-agents.ts';
-import { type Ask, createAsk, type AskOptions } from './index.ts';
+import { type Ask, createAsk, type AskOptions, type RailPin } from './index.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const DOC =
@@ -47,6 +47,8 @@ interface Options {
   copyTo?: (text: string) => void | Promise<void>;
   view?: 'clean' | 'raw' | 'redlines';
   generation?: { value: number };
+  /** The comment rail, which lays the bubble out among its notes where it can. */
+  pinToRail?: AskOptions['pinToRail'];
 }
 
 function mount(options: Options = {}) {
@@ -110,6 +112,7 @@ function mount(options: Options = {}) {
       attached.push(field);
       return () => {};
     },
+    ...(options.pinToRail ? { pinToRail: options.pinToRail } : {}),
     ...(options.window === false
       ? {}
       : {
@@ -1147,5 +1150,292 @@ describe('keeping an answer', () => {
     expect(label('Copy')).toBeNull();
     await answered();
     expect(label('Copy')).not.toBeNull();
+  });
+});
+
+/** The calls Ask makes of the rail it holds the bubble with. */
+type Held = { [Call in keyof RailPin]: ReturnType<typeof vi.fn<RailPin[Call]>> };
+
+/**
+ * A comment rail that takes the bubble while `holds` is true, and hears what Ask tells it. `lost` is
+ * how it says it let go.
+ */
+function fakeRail() {
+  const state = { holds: true };
+  const pins: { el: HTMLElement; anchor: () => number; lost: () => void; held: Held }[] = [];
+  const pinToRail = vi.fn<NonNullable<AskOptions['pinToRail']>>((el, anchor, lost) => {
+    if (!state.holds) return null;
+    const held: Held = { resized: vi.fn(), reveal: vi.fn(), release: vi.fn() };
+    pins.push({ el, anchor, lost, held });
+    return held;
+  });
+  return { state, pins, pinToRail };
+}
+
+const start = (editor: Editor, text = 'first lien') => {
+  select(editor, text);
+  editor.commands.run('ask.start');
+};
+const placedByAsk = () => bubble()?.style.left !== '' && bubble()?.style.top !== '';
+const heardOf = (held: Held) => ({
+  resized: held.resized.mock.calls.length,
+  reveal: held.reveal.mock.calls.length,
+  release: held.release.mock.calls.length,
+});
+
+describe('in the comment rail', () => {
+  it('is laid out by the rail, level with the start of the selection, and not placed by Ask', () => {
+    const rail = fakeRail();
+    const { editor } = mount({ pinToRail: rail.pinToRail });
+    start(editor);
+    expect(rail.pins).toHaveLength(1);
+    const [pin] = rail.pins;
+    expect(pin?.el).toBe(bubble());
+    expect(pin?.anchor()).toBe(editor.getDoc().indexOf('first lien'));
+    // Nothing placed it: its `left` and `top` are the rail's to write.
+    expect(bubble()?.style.left).toBe('');
+    expect(bubble()?.style.top).toBe('');
+    // It is Ask's own element, where Ask put it, and it needs no page color to cover the notes.
+    expect(bubble()?.parentElement).toBe(editor.view.scrollDOM);
+    expect(bubble()?.classList).toContain('rl-qa-railed');
+    expect(heardOf(pin!.held)).toEqual({ resized: expect.any(Number), reveal: 1, release: 0 });
+  });
+
+  it('puts the keyboard in the field without scrolling to where the bubble is not yet, and has the rail scroll to it', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const rail = fakeRail();
+    const { editor } = mount({ pinToRail: rail.pinToRail });
+    start(editor);
+    expect(document.activeElement).toBe(field());
+    expect(focus.mock.contexts).toContain(field());
+    expect(focus.mock.calls.some(([options]) => options?.preventScroll === true)).toBe(true);
+    // The rail scrolls to it, once it has placed it, and Ask does not.
+    expect(rail.pins[0]?.held.reveal).toHaveBeenCalledOnce();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('is placed by Ask, as it was, where no rail is given', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const { editor } = mount();
+    start(editor);
+    expect(placedByAsk()).toBe(true);
+    expect(bubble()?.classList).not.toContain('rl-qa-railed');
+    expect(document.activeElement).toBe(field());
+    expect(focus.mock.calls.some(([options]) => options?.preventScroll === true)).toBe(false);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scroll.mock.contexts[0]).toBe(bubble());
+  });
+
+  it('is placed by Ask where the rail takes nothing: in dots, in Clean, with no comment', () => {
+    const rail = fakeRail();
+    rail.state.holds = false;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const { editor } = mount({ pinToRail: rail.pinToRail });
+    start(editor);
+    expect(rail.pinToRail).toHaveBeenCalled();
+    expect(rail.pins).toHaveLength(0);
+    expect(placedByAsk()).toBe(true);
+    expect(bubble()?.classList).not.toContain('rl-qa-railed');
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+
+  it('is asked of the rail by the start of the text asked about, which follows the text', () => {
+    const rail = fakeRail();
+    const { editor } = mount({ pinToRail: rail.pinToRail });
+    start(editor);
+    const anchor = rail.pins[0]!.anchor;
+    const before = anchor();
+    editor.view.dispatch({ changes: { from: 0, insert: 'Added line.\n\n' } });
+    expect(anchor()).toBe(before + 'Added line.\n\n'.length);
+    expect(anchor()).toBe(editor.getDoc().indexOf('first lien'));
+  });
+
+  it('tells the rail when the bubble changes height: an answer, a line, a follow-up field', async () => {
+    const rail = fakeRail();
+    const { editor } = mount({ pinToRail: rail.pinToRail });
+    start(editor);
+    const held = rail.pins[0]!.held;
+    const before = held.resized.mock.calls.length;
+    ask('What is a lien?');
+    await answered();
+    expect(held.resized.mock.calls.length).toBeGreaterThan(before);
+    const answeredAt = held.resized.mock.calls.length;
+    // The field grows with what is typed in it.
+    const box = field();
+    if (box) box.value = 'Who holds it?\nAnd for how long?';
+    box?.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(held.resized.mock.calls.length).toBeGreaterThan(answeredAt);
+    // It asks the rail again, and never for another hold: the one it has lays it out.
+    expect(rail.pinToRail).toHaveBeenCalledOnce();
+  });
+
+  it('still answers, announces and stops, and returns the keyboard to the follow-up field', async () => {
+    let signal: AbortSignal | undefined;
+    const rail = fakeRail();
+    const { editor } = mount({
+      pinToRail: rail.pinToRail,
+      script: async function* ({ tools, signal: given, request }) {
+        await tools.initialize();
+        if (request.prompt.includes('follow-up')) {
+          signal = given;
+          await new Promise<void>((resolve) => given.addEventListener('abort', () => resolve()));
+          yield { type: 'done', finalText: 'too late' };
+          return;
+        }
+        yield { type: 'done', finalText: 'A lien is a claim.' };
+      },
+    });
+    start(editor);
+    ask('What is a lien?');
+    await answered();
+    expect(answerOf()?.textContent).toBe('A lien is a claim.');
+    expect(document.querySelector('.rl-qa-exchange')?.getAttribute('aria-live')).toBe('polite');
+    expect(document.activeElement).toBe(field());
+    ask('And a follow-up?');
+    await vi.waitFor(() => expect(button('Stop')).toBeDefined());
+    button('Stop')?.click();
+    expect(signal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(field()?.value).toBe('And a follow-up?'));
+    expect(bubble()).not.toBeNull();
+    expect(editor.view.dom.querySelector('.rl-qa-target')?.textContent).toBe('first lien');
+    expect(rail.pins[0]?.held.release).not.toHaveBeenCalled();
+  });
+
+  describe('lets the rail go when the bubble goes', () => {
+    it('on Esc', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      key('Escape');
+      expect(bubble()).toBeNull();
+      expect(editor.view.dom.querySelector('.rl-qa-target')).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('on a press elsewhere', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('on Cancel, and not on a press in the bubble', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      field()?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      expect(heardOf(rail.pins[0]!.held).release).toBe(0);
+      button('Cancel')?.click();
+      expect(bubble()).toBeNull();
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+    });
+
+    it('on Make Comment, and when Ask is taken out', async () => {
+      const rail = fakeRail();
+      const { editor, ask: asking } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      ask('What is a lien?');
+      await answered();
+      label('Make Comment')?.click();
+      expect(asking.isOpen()).toBe(false);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      start(editor, 'Borrower');
+      asking.destroy();
+      expect(heardOf(rail.pins[1]!.held).release).toBe(1);
+    });
+
+    it('when another question takes its place, which has its own hold', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      start(editor, 'Borrower');
+      expect(document.querySelectorAll('.rl-qa')).toHaveLength(1);
+      expect(rail.pins).toHaveLength(2);
+      expect(heardOf(rail.pins[0]!.held).release).toBe(1);
+      expect(heardOf(rail.pins[1]!.held).release).toBe(0);
+      expect(rail.pins[1]?.el).toBe(bubble());
+    });
+
+    it('while the bubble is still in the page: the rail takes nothing out of it, and Ask removes it', () => {
+      const rail = fakeRail();
+      let inPage: boolean | undefined;
+      const { editor } = mount({
+        pinToRail: (el, anchor, lost) => {
+          const held = rail.pinToRail(el, anchor, lost);
+          if (!held) return null;
+          return {
+            ...held,
+            release: () => {
+              inPage = el.isConnected;
+              held.release();
+            },
+          };
+        },
+      });
+      start(editor);
+      const el = bubble();
+      key('Escape');
+      // The rail lays the notes out again, with the bubble still there; and the bubble is gone after.
+      expect(inPage).toBe(true);
+      expect(el?.isConnected).toBe(false);
+    });
+  });
+
+  describe('when the rail lets go of it', () => {
+    it('hangs it by the selection itself, and asks the rail again at its next layout', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      const [first] = rail.pins;
+      expect(bubble()?.style.left).toBe('');
+      // The window turned narrow: the rail shows dots, and says it let go.
+      rail.state.holds = false;
+      first?.lost();
+      expect(placedByAsk()).toBe(true);
+      expect(bubble()?.classList).not.toContain('rl-qa-railed');
+      expect(rail.pins).toHaveLength(1);
+      // It was the rail that let go: there is nothing for Ask to release.
+      editor.view.dispatch({ changes: { from: 0, insert: 'Added line.\n\n' } });
+      expect(heardOf(first!.held).release).toBe(0);
+      // The window is wide again, and the next layout finds the rail taking it.
+      rail.state.holds = true;
+      window.dispatchEvent(new Event('resize'));
+      expect(rail.pins).toHaveLength(2);
+      expect(bubble()?.classList).toContain('rl-qa-railed');
+      key('Escape');
+      expect(heardOf(first!.held).release).toBe(0);
+      expect(heardOf(rail.pins[1]!.held).release).toBe(1);
+    });
+
+    it('does nothing for a rail that lets go after the bubble is gone', () => {
+      const rail = fakeRail();
+      const { editor, ask: asking } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      key('Escape');
+      const calls = rail.pinToRail.mock.calls.length;
+      rail.state.holds = false;
+      rail.pins[0]?.lost();
+      expect(asking.isOpen()).toBe(false);
+      expect(rail.pinToRail.mock.calls.length).toBe(calls);
+      expect(bubble()).toBeNull();
+    });
+
+    it('does nothing for a rail that lets go of a bubble that another has taken the place of', () => {
+      const rail = fakeRail();
+      const { editor } = mount({ pinToRail: rail.pinToRail });
+      start(editor);
+      start(editor, 'Borrower');
+      const calls = rail.pinToRail.mock.calls.length;
+      const heard = heardOf(rail.pins[1]!.held);
+      rail.pins[0]?.lost();
+      // Not a word to the new bubble's hold, nor a new one asked for.
+      expect(rail.pinToRail.mock.calls.length).toBe(calls);
+      expect(heardOf(rail.pins[1]!.held)).toEqual(heard);
+      expect(bubble()?.classList).toContain('rl-qa-railed');
+    });
   });
 });
