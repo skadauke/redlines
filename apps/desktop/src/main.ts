@@ -221,8 +221,8 @@ function dragFile(): void {
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
-  // Track Changes is the document's, as Word's is: turning it on or off is written to its ledger
-  // (format §5.6), and the file is edited until it is saved.
+  // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
+  // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
   people: settings.people,
   // The first time a document shows someone, they are recorded with their color, for every window.
@@ -769,8 +769,8 @@ function showAgentLogs(): void {
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
-  // A file that can't take the setting says why, and Track Changes stays as it was.
-  if (!editor.setTracking(on)) return;
+  // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
+  editor.setTracking(on);
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
   // Every switch says so (design §5.4).

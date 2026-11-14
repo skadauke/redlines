@@ -195,6 +195,8 @@ function fakeEditor() {
     }),
     /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
     recordView: vi.fn(() => {}),
+    /** Records Track Changes in the file's ledger, which a save asks for: nothing, unless a test says. */
+    recordTracking: vi.fn(() => {}),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -1061,6 +1063,24 @@ describe('the view a save records (format §5.6)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await controller.save()).toBe(false);
     expect(state()?.dirty).toBe(true);
+  });
+
+  it('goes in with Track Changes, which a save records too and a switch never does', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    editor.recordTracking.mockImplementation(() => {
+      const text = editor.getDoc();
+      if (!text.includes('tracking: everyone\n')) editor.type(`${text}tracking: everyone\n`);
+    });
+    await controller.open('/docs/plan.md');
+    // Nothing is asked of the editor, and nothing is written, until the file is saved.
+    expect(editor.recordTracking).not.toHaveBeenCalled();
+    expect(state()?.dirty).toBe(false);
+    editor.type('Two\n');
+    await controller.save();
+    expect(editor.recordTracking).toHaveBeenCalledTimes(1);
+    expect(host.writes).toEqual([
+      { path: '/docs/plan.md', text: 'Two\ntracking: everyone\nview: clean\n' },
+    ]);
   });
 
   it('is no part of an agent’s edit written to the file, which is no save', async () => {
