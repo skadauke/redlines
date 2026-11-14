@@ -262,11 +262,13 @@ export function randomDocument(random: () => number, options: RandomDocumentOpti
       if (where === 3) return line('    ');
       return `- ${line('      ')}`;
     }
-    // An alert: a quote that starts with a type in brackets, then a paragraph's lines (not two
-    // paragraphs: a prefix edit of the blank quote line between them is written wrong, #358). Not
-    // in the documents of a pinned seed (`legacy`), which draw nothing here.
+    // An alert: a quote that starts with a type in brackets, then a paragraph's lines, and now and
+    // then a second paragraph after a blank line of the quote (until #358 a prefix edit of that blank
+    // line was written without its line breaks). Not in the documents of a pinned seed (`legacy`),
+    // which draw nothing here.
     if (options.legacy !== true && below(7) === 0) {
-      return `> ${pick(ALERT_LINES)}\n> ${line('> ')}`;
+      const alert = `> ${pick(ALERT_LINES)}\n> ${line('> ')}`;
+      return below(3) === 0 ? `${alert}\n>\n> ${line('> ')}` : alert;
     }
     const kind = below(10);
     if (kind < 5) return line('');

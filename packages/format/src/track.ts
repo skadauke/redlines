@@ -1106,6 +1106,31 @@ function typingOf(tokens: readonly Token[]): Typing {
 }
 
 /**
+ * The spaces that end the line before `position`, as the text shows them (the markers between them
+ * and in front of `position` are not seen), and whether they stand together in the file, right
+ * behind one another and right in front of `position`, with no marker among or after them.
+ */
+function spacesBefore(plan: Plan, position: number): { spaces: number; together: boolean } {
+  let spaces = 0;
+  let together = true;
+  let p = position;
+  while (spaces < 64) {
+    const q = stepLeft(plan.text, plan.markers, p);
+    if (q >= p || plan.text[q] !== ' ') break;
+    if (q + 1 !== p) together = false;
+    spaces++;
+    p = q;
+  }
+  return { spaces, together };
+}
+
+/** Why a change on the blank line under a line that ends in two spaces is refused when another
+ * change stands between them and the end of the line: what is typed there goes on the paragraph,
+ * which makes the spaces a hard break, and no change may stand between them and the line end. */
+const HARD_BREAK_SEPARATED =
+  'The line above ends in two spaces, which what is typed here makes a hard break, and another change stands between them and the end of that line. Decide the changes at the end of that line first.';
+
+/**
  * A change that touches a break takes all of it, with the prefix of the next block: a deletion
  * never leaves a bullet or a `#` behind a marker, and a join takes the break and the prefix of the
  * second block (format §3.4). A point inside a break moves to its start. A change that starts in
@@ -1117,13 +1142,29 @@ function typingOf(tokens: readonly Token[]): Typing {
  * is widened to the start of the break and to the end of the prefix, and the text that comes into it
  * is typed again on either side: `lead` before what is typed, `kept` after.
  *
+ * So is a change that replaces text inside a blank line of the break, as the `>` of the blank line
+ * between two paragraphs of a quote does when a space is typed after it (#358): it takes no line
+ * break away, and the marker can't stand on that line, so it is widened to the whole break and the
+ * prefix of the block after it, and what stays of the break is typed again on either side, as text:
+ * `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which holds
+ * them, is not typed as breaks; `kept`, the rest of a prefix, never holds one. A deletion there is
+ * not this: it takes the break, or is `blankLineCut`'s, or, in the shapes that rule does not know,
+ * is written as a join (#447).
+ *
  * The break after the text of a setext heading holds its underline (`breakLength`), but a change
  * that starts inside the underline or behind it, and does not take all of it, does not touch the
- * heading's own text: it starts behind the underline, where no marker may stand, and is refused.
+ * heading's own text: it starts behind the underline, where no marker may stand, and is refused. A
+ * replacement that takes all of the underline is the rule above, with the underline typed again.
  */
-function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: string; lead: string } {
+function coverBreaks(
+  plan: Plan,
+  from: number,
+  to: number,
+  typed = '',
+): Range & { kept: string; lead: string; tail: string } {
   let kept = '';
   let lead = '';
+  let tail = '';
   // The first line of the file has no break in front of it.
   const first = from < to ? prefixEnd(plan, from) : undefined;
   if (first !== undefined && to > first) from = first;
@@ -1148,12 +1189,8 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
       const insidePrefix = from >= prefix && prefix < found.end;
       // Not when the break is the author's own split's: the split branch below cancels it, and
       // the break must not go with it.
-      if (
-        insidePrefix &&
-        to <= found.end &&
-        from > found.start &&
-        !splitUnits(plan).some((u) => u.own && u.marker.to === found.start)
-      ) {
+      const own = () => splitUnits(plan).some((u) => u.own && u.marker.to === found.start);
+      if (insidePrefix && to <= found.end && from > found.start && !own()) {
         // Inside the prefix: the line break stays, and so do the rest of the prefix on either side.
         lead = visibleText(plan.text, plan.markers, found.start, from);
         kept = visibleText(plan.text, plan.markers, to, found.end);
@@ -1161,23 +1198,54 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
         to = found.end;
         continue;
       }
+      // A range that starts inside the underline of a setext heading that the break holds, or
+      // behind it, and does not take all of it, starts behind it: the underline is the heading's
+      // own, and a deletion that took it would leave a paragraph (#372). No marker may stand
+      // there, so the change is refused.
+      const under =
+        from > found.start && from < prefix ? underlineOfBreak(plan.text, found.start) : undefined;
+      const partly = under !== undefined && !(from <= lineStart(plan.text, under) && to >= under);
+      // Replaced text inside one line of the break between its first line break and the line of the
+      // next block, with no line break in the range: the break stays, all of it, with what is typed
+      // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
+      if (
+        typed !== '' &&
+        !partly &&
+        from > found.start &&
+        lineStart(plan.text, from) < prefix &&
+        to <= lineEnd(plan.text, from) &&
+        !own()
+      ) {
+        lead = visibleText(plan.text, plan.markers, found.start, from);
+        tail = visibleText(plan.text, plan.markers, to, found.end);
+        // Two spaces or more at the end of the line above are a hard break once the line under it
+        // goes on the paragraph (what is typed is not blank): in front of the opener, and not in the
+        // text that is typed again, they would no longer end their line for a reader that does not
+        // know the markers. They go into the change, where they stand right in front of the break;
+        // where another change stands between them and it, the change is refused.
+        const { spaces, together } = spacesBefore(plan, found.start);
+        const next = (lead + typed + tail).split(/\r?\n/)[1] ?? '';
+        let begin = found.start;
+        if (spaces >= 2 && /[^ \t>]/.test(next)) {
+          if (!together) throw new EditError(HARD_BREAK_SEPARATED, 'no-legal-placement');
+          begin = found.start - spaces;
+          lead = ' '.repeat(spaces) + lead;
+        }
+        from = begin;
+        to = found.end;
+        continue;
+      }
       if (from > found.start && (from > prefix || (insidePrefix && to > found.end))) {
         from = found.end;
       } else {
-        // A range that starts inside the underline of a setext heading that the break holds, or
-        // behind it, and does not take all of it, starts behind it: the underline is the heading's
-        // own, and a deletion that took it would leave a paragraph (#372). No marker may stand
-        // there, so the change is refused.
-        const under = from > found.start ? underlineOfBreak(plan.text, found.start) : undefined;
-        const partly = under !== undefined && !(from <= lineStart(plan.text, under) && to >= under);
-        from = partly ? under : Math.min(from, found.start);
+        from = under !== undefined && partly ? under : Math.min(from, found.start);
       }
       // The rest of a prefix that the range ends in is written again after what replaces it.
       if (to > prefix && to < found.end) kept = plan.text.slice(to, found.end);
       to = Math.max(to, found.end);
     }
   }
-  return { from, to, kept, lead };
+  return { from, to, kept, lead, tail };
 }
 
 /**
@@ -3932,14 +4000,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
     !ownTextOnly(plan, from, to)
       ? (coverBlocks(plan, from, to) ?? firstPrefix(plan, from, to))
       : undefined;
-  // The text of a prefix that a change inside it is widened by, in front of what is typed.
+  // The text of a prefix that a change inside it is widened by, in front of what is typed, and the
+  // text of a break that a change inside a blank line of it is widened by, behind it.
   let lead = '';
+  let tail = '';
   if (blocks) ({ from, to } = blocks);
   else if (!past) {
-    const covered = coverBreaks(plan, from, to);
+    const covered = coverBreaks(plan, from, to, typed);
     ({ from, to } = covered);
     typed += covered.kept;
     lead = covered.lead;
+    tail = covered.tail;
   }
   const covers = { from, to };
   if (from === to && typed === '') return;
@@ -4033,6 +4104,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
+    // What stays of a break after a change inside a blank line of it is typed again as text too,
+    // its line breaks and the prefix of the next block with them.
+    if (tail !== '' && from === covers.from && to === covers.to) tokens.push({ text: tail });
     const settled = settleTrail(plan, { from, to }, tokens);
     ({ from, to } = settled.range);
     typing = { ...typingOf(settled.tokens), ...(plain ? { plain: true } : {}) };

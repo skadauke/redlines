@@ -210,8 +210,12 @@ its case; each is a bug. The list is what has been found, not a count of what is
   reads as a heading in some order of decisions: the format refuses a numbered sibling that would
   become the item's first child, not an item with no text (#433; Backspace at a nested first item
   waits for such a change since #292).
-- A prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-  changes, is written without its line breaks (#358).
+- A deletion inside a blank line of a break that takes no line break, in a shape that the rule for a
+  quote's blank lines does not know (the `>` of a blank line indented in a list item, in the break of
+  a pending split, a quote that starts at the blank line), is written as the join of the two blocks;
+  the last check sees it only where letters differ (#447, #418). So is a replacement inside the
+  blank line of the break of the author's own pending split, and a line break typed there with
+  letters as well (#419).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
   skips micromark's reading for that shape (#299).
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
