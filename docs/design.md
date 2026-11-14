@@ -457,8 +457,13 @@ mode has no counterpart in the desktop app.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
-  notice makes that a deliberate choice. There is no "Just Mine" for now: a person's own tracking,
-  apart from the file's, is left for later.
+  notice makes that a deliberate choice. A file that comes to ask while it is open, when the window
+  reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
+  Track Changes turns on, under the same notice, and nothing is written, since the file asks
+  already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
+  tracking is switched off under them; the next switch they make writes the file's setting again.
+  A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
+  Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
@@ -1187,7 +1192,14 @@ without each: a half-written comment is gone with the page, and nothing is saved
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
-nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+nothing in it run. The app tells a window of paths by the same two limits: the names in a folder,
+only for a project folder a sidebar shows and for the folders below it that the sidebar lists (none
+hidden, none that git ignores), and the real path of a file, links followed, only for a file the
+person opened or saved and for what is inside a project folder a sidebar shows, with no hidden name
+below the folder. A link in a project that leads out of it is no more known than the file it leads
+to, and anything else asked of gets one refusal, which says nothing of whether the path is there.
+Asking for a document's project is what shows it, once the person has opened or saved the document,
+by a path with no `..` in it, as a dialog gives it. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
 dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and
