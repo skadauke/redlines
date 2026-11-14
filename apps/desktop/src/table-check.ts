@@ -8,8 +8,10 @@
 // pasteboard, a paste of a range lands in the cells and adds the rows and columns it needs, deleted, inserted and
 // moved rows and columns are drawn (ghosts lined up to the pixel, tints, double marks, bars in Simple),
 // the grips, the + and the dragging of rows and columns work, an alignment change is drawn, carded and
-// made from the menu and the grip, a table deleted whole is a ghost table (its columns lined up, the
-// rows past eight folded into one line, not editable, carded), a row with fewer cells than the header is
+// made, with Track Changes off and on, from the menu and the grip (the point mark that ends the header's
+// last cell, which Redlines writes, and the span around the table, which another tool wrote), a table
+// deleted whole is a ghost table (its columns lined up, the rows past eight folded into one line, not
+// editable, carded), a row with fewer cells than the header is
 // drawn with empty cells after its last and typing in one writes its pipes first, a row with more draws
 // none beyond the header's and no key puts the caret in one, an empty cell holds a filler of its own
 // whatever its padding and its row is as tall as a row of text, the caret can stand in an empty cell
@@ -21,7 +23,10 @@
 // The checks of Stage 4 (the ghost table, the cells a row lacks, the empty cell's filler, the second
 // ⌫) were first run in Chromium, the built-in browser's engine, which is not WKWebView: what they
 // measure there (the hit test, the layout of the cells, `user-select`, typing by `execCommand`) is
-// Chromium's until the sweep runs the file in WKWebView, and each says where the engine could differ.
+// Chromium's until the sweep runs the file in WKWebView, and each says where the engine could differ. So
+// are those of the tracked alignment (#281: the point mark written, drawn, carded and undone, and drawn
+// as in a padded header when the header has no last pipe): the computed alignment, the rows' heights, the
+// cells' edges, the underline's style, the card's hit test and the typing are Chromium's, and each says so.
 //
 // Each check loads its document and does what a person does, and reports one console line,
 // `TABLE-CHECK <name> pass` or `TABLE-CHECK <name> FAIL <json>`, then
@@ -355,9 +360,32 @@ async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> 
 /** A document with the table and a ledger, for the row checks: Track Changes decides what it writes. */
 const ROWS = GRID.replace('| Plums | 4 | a\\|b<br>x |', '| Plums | 4 | ok |');
 
-/** A table whose Count column was centered by someone else (the old delimiter row kept in the change),
- * with its ledger. */
+/** A table whose Count column was centered by someone else, as Redlines writes it (format §3.7, #281): one
+ * mark with no closer ends the header's last cell, and keeps the old delimiter row. With its ledger. */
 const WITH_ALIGN = [
+  'Intro paragraph.',
+  '',
+  '| Fruit | Count<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|--> |',
+  '| ----- | :---: |',
+  '| Apples | 3 |',
+  '| Plums | 4 |',
+  '',
+  'Below.',
+  '',
+  '<!-- redlines',
+  'version: 1',
+  'people:',
+  '  bo: {name: Bo Chen}',
+  'marks:',
+  '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+  '-->',
+  '',
+].join('\n');
+
+/** The same change as another tool writes it, which Redlines reads and no longer writes: the opener on the
+ * line above the table and the closer below it, with the old delimiter row kept in the change and a
+ * ledger. */
+const WITH_ALIGN_SPAN = [
   'Intro paragraph.',
   '',
   '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|-->',
@@ -380,6 +408,51 @@ const WITH_ALIGN = [
   '-->',
   '',
 ].join('\n');
+
+/**
+ * The point form of `WITH_ALIGN`'s table where the mark is the line's end, because the header has no
+ * closing pipe or none of its pipes at the edges: the header, the delimiter row and the rows are `header`,
+ * `delimiter` and `rows`, with a ledger.
+ */
+const alignEnd = (header: string, delimiter: string, rows: string[]): string =>
+  [
+    'Intro paragraph.',
+    '',
+    header,
+    delimiter,
+    ...rows,
+    '',
+    'Below.',
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  bo: {name: Bo Chen}',
+    'marks:',
+    '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+    '-->',
+    '',
+  ].join('\n');
+
+/** The point form where the header has no closing pipe, where no row has a pipe at its edges, and where
+ * spaces follow the mark: the mark is the line's end, and the spaces stay after it. */
+const ALIGN_ENDS: Record<string, string> = {
+  'no-closing-pipe': alignEnd(
+    '| Fruit | Count<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->',
+    '| ----- | :---:',
+    ['| Apples | 3', '| Plums | 4'],
+  ),
+  'no-pipes-at-the-edges': alignEnd(
+    'Fruit | Count<!--fmt k3x9 align=-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->',
+    '----- | :---:',
+    ['Apples | 3', 'Plums | 4'],
+  ),
+  'spaces-after-the-mark': alignEnd(
+    'Fruit | Count<!--fmt k3x9 align=-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->   ',
+    '----- | :---:',
+    ['Apples | 3', 'Plums | 4'],
+  ),
+};
 
 /** The computed text alignment of each cell of column `col`, row by row. */
 const alignedAs = (editor: Editor, col: number): string[] =>
@@ -446,6 +519,69 @@ async function colGripOf(editor: Editor, col: number): Promise<HTMLElement | nul
 /** The header's real cells, left to right: ghosts are no column of the document. */
 const headerCells = (editor: Editor): HTMLElement[] =>
   (cellElements(editor)[0] ?? []).filter((cell) => cell.dataset['col'] !== undefined);
+
+/** What the page's notice line says now, or null when it shows nothing. */
+const shownNotice = (): string | null => {
+  const box = document.querySelector<HTMLElement>('.rl-notice');
+  return box && !box.hidden ? (box.textContent ?? '').trim() : null;
+};
+
+/** Waits for a passing notice to give the line back (they show for 2.4 s), so that one shown next is new. */
+async function noticeClears(): Promise<void> {
+  for (let tries = 0; tries < 40 && shownNotice() !== null; tries++)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/** A press of the primary button on `target`, as a click makes it (down, then up at the same place), and
+ * the card that opens over it, or null. */
+async function cardOver(editor: Editor, target: HTMLElement): Promise<HTMLElement | null> {
+  const box = await reveal(target);
+  const x = box.left + box.width / 2;
+  const y = box.top + box.height / 2;
+  mouse(target, 'mousedown', x, y);
+  mouse(window, 'mouseup', x, y);
+  await frames();
+  await frames();
+  return editor.view.dom.ownerDocument.querySelector<HTMLElement>('.rl-card');
+}
+
+/** What the page draws of the table now: each cell's text, alignment and box, the bars on the rows, the
+ * dotted underlines, and whether a marker shows. */
+function shapeOf(editor: Editor) {
+  const grid = cellElements(editor);
+  return {
+    texts: gridTexts(grid),
+    aligns: grid.map((row) => row.map((cell) => getComputedStyle(cell).textAlign)),
+    boxes: grid.flatMap((row) =>
+      row.flatMap((cell) => {
+        const box = cell.getBoundingClientRect();
+        return [box.left, box.top, box.width, box.height];
+      }),
+    ),
+    bars: lineElements(editor).map((line) => line.classList.contains('rl-bar')),
+    underlined: [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')].map(
+      (el) => el.textContent,
+    ),
+    marker: /<!--|align=/.test(editor.view.contentDOM.textContent ?? ''),
+    lined: linedUp(editor),
+  };
+}
+
+/** How the shape of a table differs from the one it should have: the texts, alignments, bars and
+ * underlines as they are, the boxes to within half a pixel; or null where it does not. */
+function shapeDiff(want: ReturnType<typeof shapeOf>, shape: ReturnType<typeof shapeOf>) {
+  const out: Record<string, unknown> = {};
+  for (const key of ['texts', 'aligns', 'bars', 'underlined', 'marker'] as const) {
+    if (!same(want[key], shape[key])) out[key] = { want: want[key], got: shape[key] };
+  }
+  if (
+    want.boxes.length !== shape.boxes.length ||
+    shape.boxes.some((n, i) => !(Math.abs(n - (want.boxes[i] ?? NaN)) <= 0.5))
+  )
+    out['boxes'] = { want: want.boxes.map(Math.round), got: shape.boxes.map(Math.round) };
+  if (!(shape.lined.off <= 0.5)) out['lines-up'] = shape.lined;
+  return Object.keys(out).length ? out : null;
+}
 
 /** A table of `rows` rows, the header's and the body's, in three columns whose cells differ in length
  * from row to row, so that lining them up is the browser's work: a layout that gave each row its own
@@ -2141,41 +2277,127 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Align with Track Changes on is refused, in words on the page's notice, and writes nothing: never a
-    // silent no-op, from the command and from the column grip's menu.
-    name: 'align-with-track-changes-on-is-refused-in-words',
+    // Align with Track Changes on, from the Table menu's command and from the column grip's menu (format
+    // §3.7, #281): one point mark at the end of the header line, in front of its last pipe, with the old
+    // delimiter row in it, the delimiter row as asked and nothing else written, so that no row grew a line.
+    // In Clean, Simple and Redlines the column draws as asked, the others as they were, and the columns
+    // still line up; Redlines has the bar on the header row and the dotted underline under the changed
+    // column's header text and no other, Simple the bar alone, Clean neither, and no marker shows. The caret
+    // stays in its cell (the grip's column stays selected), and one Undo gives the document back, the caret
+    // with it. Chromium-measured: the computed alignment, the rows' heights, the cells' edges and the
+    // underline's style.
+    name: 'align-with-track-changes-on-writes-the-point-mark-and-undoes',
     async run(editor) {
-      const WORDS =
-        "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
       const problems: Record<string, unknown> = {};
-      const shown = () => {
-        const box = document.querySelector<HTMLElement>('.rl-notice');
-        return box && !box.hidden ? (box.textContent ?? '').trim() : null;
-      };
-      await load(editor, ROWS, true);
-      await place(editor, cellOf(editor, 1, 1).textFrom);
-      const before = doc(editor);
-      if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
-      await frames();
-      if (doc(editor) !== before) problems['written'] = doc(editor);
-      if (shown() !== WORDS) problems['notice'] = shown();
-      // From the column grip's menu.
-      await load(editor, ROWS, true);
-      const grip = await colGripOf(editor, 1);
-      if (!grip) return { ...problems, grip: 'none shows' };
-      const box = grip.getBoundingClientRect();
-      mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-      mouse(window, 'mouseup', box.left + 3, box.top + 3);
-      await frames();
-      const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
-        (i) => i.textContent === 'Align Right',
-      );
-      if (!item) return { ...problems, menu: 'no Align Right' };
-      const text = doc(editor);
-      mouse(item, 'mousedown', 0, 0);
-      await frames();
-      if (doc(editor) !== text) problems['menu-written'] = doc(editor);
-      if (shown() !== WORDS) problems['menu-notice'] = shown();
+      const views = ['clean', 'simple', 'redlines'] as const;
+      const heights = () => lineElements(editor).map((line) => line.getBoundingClientRect().height);
+      const columns = () => [0, 1, 2].map((col) => alignedAs(editor, col));
+      for (const route of ['command', 'grip'] as const) {
+        const want = route === 'command' ? 'center' : 'right';
+        const delimiter =
+          route === 'command' ? '| ----- | :---: | ---- |' : '| ----- | ----: | ---- |';
+        await load(editor, ROWS, true);
+        // What each view draws before: the rows' heights and the alignment of each column.
+        const snapshot = () => ({ heights: heights(), aligns: columns() });
+        const before = {} as Record<(typeof views)[number], ReturnType<typeof snapshot>>;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          before[view] = snapshot();
+        }
+        editor.setViewMode('redlines');
+        await frames();
+        await place(editor, cellOf(editor, 1, 1).textFrom);
+        const caret = head(editor);
+        if (route === 'command') {
+          if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
+        } else {
+          const grip = await colGripOf(editor, 1);
+          if (!grip) return { ...problems, grip: 'none shows' };
+          const box = grip.getBoundingClientRect();
+          mouse(grip, 'mousedown', box.left + 3, box.top + 3);
+          mouse(window, 'mouseup', box.left + 3, box.top + 3);
+          await frames();
+          const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
+            (i) => i.textContent === 'Align Right',
+          );
+          if (!item) return { ...problems, menu: 'no Align Right' };
+          mouse(item, 'mousedown', 0, 0);
+        }
+        await frames();
+        // The file: one mark on the header line, in front of its last pipe; the delimiter row as asked; and
+        // nothing else but the ledger written.
+        const text = doc(editor);
+        const marks = text.match(/<!--fmt /g) ?? [];
+        if (marks.length !== 1) problems[`${route}-marks`] = marks.length;
+        const header = text.split('\n')[2];
+        if (!/^\| Fruit \| Count \| Note<!--fmt [a-z0-9]{4} align=[^>]*--> \|$/.test(header ?? ''))
+          problems[`${route}-header`] = header;
+        if (text.split('\n')[3] !== delimiter) problems[`${route}-delimiter`] = text.split('\n')[3];
+        const body = text.slice(0, Math.max(0, text.indexOf('<!-- redlines'))).trimEnd();
+        if (
+          body.replace(/<!--fmt [a-z0-9]{4} align=[^>]*-->/, '') !==
+          ROWS.replace('| ----- | ----- | ---- |', delimiter)
+        )
+          problems[`${route}-written`] = body;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          const label = `${route}-${view}`;
+          const now = snapshot();
+          if (!(now.aligns[1]?.length === 4 && now.aligns[1].every((a) => a === want)))
+            problems[`${label}-aligned`] = now.aligns[1];
+          if (
+            !same(now.aligns[0], before[view].aligns[0]) ||
+            !same(now.aligns[2], before[view].aligns[2])
+          )
+            problems[`${label}-others`] = [now.aligns[0], now.aligns[2]];
+          // No row grew a line: the mark takes no room.
+          if (
+            now.heights.length !== before[view].heights.length ||
+            now.heights.some((h, i) => !(Math.abs(h - (before[view].heights[i] ?? NaN)) <= 0.5))
+          )
+            problems[`${label}-height`] = { before: before[view].heights, after: now.heights };
+          const lined = linedUp(editor);
+          if (!(lined.off <= 0.5) || lined.cells.some((n) => n !== 3))
+            problems[`${label}-lines-up`] = lined;
+          const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+          if (
+            bars.join() !==
+            (view === 'clean' ? 'false,false,false,false' : 'true,false,false,false')
+          )
+            problems[`${label}-bars`] = bars;
+          const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+          const underlined = marked.map((el) => el.textContent).join('|');
+          if (underlined !== (view === 'redlines' ? 'Count' : ''))
+            problems[`${label}-underline`] = underlined;
+          if (view === 'redlines') {
+            const style = marked[0] && getComputedStyle(marked[0]);
+            if (
+              !style?.textDecorationLine.includes('underline') ||
+              style.textDecorationStyle !== 'dotted'
+            )
+              problems[`${label}-dotted`] = style && [
+                style.textDecorationLine,
+                style.textDecorationStyle,
+              ];
+          }
+          if (/<!--|align=/.test(editor.view.contentDOM.textContent ?? ''))
+            problems[`${label}-marker`] = (editor.view.contentDOM.textContent ?? '').slice(0, 100);
+        }
+        if (route === 'command') {
+          if (!inText(cellOf(editor, 1, 1), head(editor)))
+            problems['command-caret'] = [head(editor), cellOf(editor, 1, 1).textFrom];
+        } else {
+          const cols = touchedCols(editor.view.state);
+          if (cols?.first !== 1 || cols.last !== 1)
+            problems['grip-selection'] = cols && [cols.first, cols.last];
+        }
+        if (!undo(editor.view) || doc(editor) !== ROWS)
+          problems[`${route}-undo`] = doc(editor).replaceAll('\n', '⏎').slice(0, 200);
+        else if (route === 'command' && head(editor) !== caret)
+          problems['command-undo-caret'] = [head(editor), caret];
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -2221,13 +2443,74 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Someone else's pending alignment change in Redlines: the new alignment, a dotted underline under the
-    // header text of the column changed and a bar on the header row; its card names the column and the old
-    // alignment; and with Track Changes on a letter typed right under its table is refused, in words
-    // naming the person, and writes nothing.
-    name: 'pending-alignment-change-in-redlines-is-drawn-carded-and-guards-the-gap',
+    // Someone else's pending alignment change, the point mark that ends the header's last cell, in Redlines
+    // (format §3.7, #281): the new alignment, a dotted underline under the header text of the column
+    // changed and a bar on the header row; its card names the column and the old alignment, with Accept and
+    // Reject; and with Track Changes on a letter typed at the end of the last header cell lands in front of
+    // the mark, and one typed on the line under the table is written, with no notice: the mark has no closer
+    // there for it to share a line with. Chromium-measured: the underline's style, the hit test of the card's
+    // press, and the typing, which is the engine's own (`execCommand`).
+    name: 'pending-alignment-change-in-redlines-is-drawn-and-carded',
     async run(editor) {
       await load(editor, WITH_ALIGN, false);
+      editor.setViewMode('redlines');
+      await frames();
+      const problems: Record<string, unknown> = {};
+      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+      if (marked.map((el) => el.textContent).join('|') !== 'Count')
+        problems['underlined'] = marked.map((el) => el.textContent);
+      const style = marked[0] && getComputedStyle(marked[0]);
+      if (
+        !style?.textDecorationLine.includes('underline') ||
+        style.textDecorationStyle !== 'dotted'
+      )
+        problems['dotted'] = style && [style.textDecorationLine, style.textDecorationStyle];
+      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['centered'] = alignedAs(editor, 1);
+      const target = marked[0];
+      if (!target) return { ...problems, card: 'nothing to press' };
+      const card = await cardOver(editor, target);
+      const what = card?.querySelector('.rl-card-what')?.textContent;
+      if (what !== 'Formatted: column Count centered (was default)')
+        problems['card'] = what ?? 'no card';
+      const buttons = [...(card?.querySelectorAll<HTMLElement>('.rl-card-button') ?? [])].map(
+        (button) => button.getAttribute('aria-label') ?? button.textContent,
+      );
+      if (buttons.join() !== 'Accept,Reject') problems['buttons'] = buttons;
+      // With Track Changes on, a letter at the end of the last header cell is in front of the mark.
+      editor.setTracking(true, { inFile: false });
+      await noticeClears();
+      await place(editor, cellOf(editor, 0, 1).textTo);
+      document.execCommand('insertText', false, 'x');
+      await frames();
+      if (
+        !/\| Fruit \| Count<!--ins ([a-z0-9]{4})-->x<!--\/\1--><!--fmt k3x9 align=/.test(
+          doc(editor),
+        )
+      )
+        problems['header-letter'] = doc(editor).split('\n')[2];
+      // One on the line under the table is written, and says nothing.
+      const under = doc(editor).indexOf('Below.');
+      await place(editor, under);
+      document.execCommand('insertText', false, 'y');
+      await frames();
+      if (!/<!--ins ([a-z0-9]{4})-->\s*y<!--\/\1-->Below\./.test(doc(editor)))
+        problems['gap-letter'] = doc(editor).slice(under - 20, under + 40);
+      if (shownNotice() !== null) problems['gap-notice'] = shownNotice();
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The span form of an alignment change, which another tool wrote and Redlines still reads and draws
+    // (format §3.7, #281): the opener above the table, the closer below it. In Redlines the new alignment, a
+    // dotted underline under the header text of the column changed and a bar on the header row; its card
+    // names the column and the old alignment; and with Track Changes on a letter typed right under its table
+    // is refused, in words naming the person, and writes nothing: the closer stands there.
+    name: 'span-form-alignment-change-from-another-tool-is-still-drawn-and-guards-the-gap',
+    async run(editor) {
+      await load(editor, WITH_ALIGN_SPAN, false);
       editor.setViewMode('redlines');
       await frames();
       const problems: Record<string, unknown> = {};
@@ -2275,36 +2558,101 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Someone else's pending alignment change in Simple: the bar on the header row and nothing else of
-    // the change (no underline), the new alignment, and the visible text Clean's, with no gap where the
-    // markers and the blank lines around them are.
+    // Someone else's pending alignment change in Simple, as the point form and as the span form: the bar on
+    // the header row and nothing else of the change (no underline), the new alignment, and the visible text
+    // Clean's, with no gap where the markers and the blank lines around the span form's are. Chromium-
+    // measured: the rows' tops, the cells' edges and the computed alignment and decoration.
     name: 'pending-alignment-change-in-simple',
     async run(editor) {
-      await load(editor, WITH_ALIGN, false);
       const problems: Record<string, unknown> = {};
-      editor.setViewMode('clean');
-      await frames();
-      const clean = editor.view.contentDOM.textContent ?? '';
-      const cleanTop = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
-      editor.setViewMode('simple');
-      await frames();
-      const text = editor.view.contentDOM.textContent ?? '';
-      if (text !== clean)
-        problems['text'] = { simple: text.slice(0, 100), clean: clean.slice(0, 100) };
-      if (/align=|<!--/.test(text)) problems['markers'] = text.slice(0, 100);
-      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
-      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
-      if (editor.view.contentDOM.querySelector('.rl-fmt')) problems['underline'] = 'drawn';
-      for (const cell of headerCells(editor)) {
-        if (getComputedStyle(cell).textDecorationLine !== 'none')
-          problems['header-decoration'] = getComputedStyle(cell).textDecorationLine;
+      for (const [form, source] of [
+        ['point', WITH_ALIGN],
+        ['span', WITH_ALIGN_SPAN],
+      ] as const) {
+        await load(editor, source, false);
+        editor.setViewMode('clean');
+        await frames();
+        const clean = editor.view.contentDOM.textContent ?? '';
+        const cleanTop = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+        editor.setViewMode('simple');
+        await frames();
+        const text = editor.view.contentDOM.textContent ?? '';
+        if (text !== clean)
+          problems[`${form}-text`] = { simple: text.slice(0, 100), clean: clean.slice(0, 100) };
+        if (/align=|<!--/.test(text)) problems[`${form}-markers`] = text.slice(0, 100);
+        const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+        if (bars.join() !== 'true,false,false') problems[`${form}-bars`] = bars;
+        if (editor.view.contentDOM.querySelector('.rl-fmt'))
+          problems[`${form}-underline`] = 'drawn';
+        for (const cell of headerCells(editor)) {
+          if (getComputedStyle(cell).textDecorationLine !== 'none')
+            problems[`${form}-header-decoration`] = getComputedStyle(cell).textDecorationLine;
+        }
+        if (alignedAs(editor, 1).some((a) => a !== 'center'))
+          problems[`${form}-centered`] = alignedAs(editor, 1);
+        const top = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+        if (Math.abs(top - cleanTop) > 0.5)
+          problems[`${form}-gap`] = { simple: top, clean: cleanTop };
+        const aligned = linedUp(editor);
+        if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2))
+          problems[`${form}-lines-up`] = aligned;
       }
-      if (alignedAs(editor, 1).some((a) => a !== 'center'))
-        problems['centered'] = alignedAs(editor, 1);
-      const top = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
-      if (Math.abs(top - cleanTop) > 0.5) problems['gap'] = { simple: top, clean: cleanTop };
-      const aligned = linedUp(editor);
-      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2)) problems['lines-up'] = aligned;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A pending alignment change, the point mark, in a header that has no closing pipe, in a table with no
+    // pipe at the edges of its rows, and in a header with spaces after the mark (the mark is the line's end
+    // there, and the spaces stay after it): drawn as it is in the padded header, in Redlines, Simple and
+    // Clean: the same text, alignment, bars and underline, the same cells to within half a pixel, the
+    // columns lined up, no marker shown; and its card names the column and the old alignment. Each form is
+    // checked for what the padded one is as well, so that a pass means it draws right. Chromium-measured:
+    // the cells' edges, the computed alignment and the hit test of the card's press.
+    name: 'pending-alignment-change-in-a-header-without-its-last-pipe-draws-as-a-padded-one',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const views = ['redlines', 'simple', 'clean'] as const;
+      const shapes = async (source: string) => {
+        await load(editor, source, false);
+        const found = {} as Record<(typeof views)[number], ReturnType<typeof shapeOf>>;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          found[view] = shapeOf(editor);
+        }
+        return found;
+      };
+      const padded = await shapes(WITH_ALIGN);
+      for (const view of views) {
+        const shape = padded[view];
+        if (shape.texts.join('/') !== 'Fruit|Count/Apples|3/Plums|4')
+          problems[`padded-${view}-texts`] = shape.texts;
+        if (shape.aligns.length !== 3 || shape.aligns.some((row) => row[1] !== 'center'))
+          problems[`padded-${view}`] = shape.aligns;
+        if (shape.lined.cells.some((n) => n !== 2)) problems[`padded-${view}-cells`] = shape.lined;
+        if (shape.bars.join() !== (view === 'clean' ? 'false,false,false' : 'true,false,false'))
+          problems[`padded-${view}-bars`] = shape.bars;
+        if (shape.underlined.join('|') !== (view === 'redlines' ? 'Count' : ''))
+          problems[`padded-${view}-underline`] = shape.underlined;
+      }
+      for (const [name, source] of Object.entries(ALIGN_ENDS)) {
+        const found = await shapes(source);
+        for (const view of views) {
+          const diff = shapeDiff(padded[view], found[view]);
+          if (diff) problems[`${name}-${view}`] = diff;
+        }
+        // The card, in Redlines.
+        editor.setViewMode('redlines');
+        await frames();
+        const target = editor.view.contentDOM.querySelector<HTMLElement>('.rl-fmt');
+        if (!target) {
+          problems[`${name}-card`] = 'nothing to press';
+          continue;
+        }
+        const what = (await cardOver(editor, target))?.querySelector('.rl-card-what')?.textContent;
+        if (what !== 'Formatted: column Count centered (was default)')
+          problems[`${name}-card`] = what ?? 'no card';
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },

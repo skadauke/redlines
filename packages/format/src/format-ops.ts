@@ -24,15 +24,18 @@ export type FormatOp =
   /** Changes the type of an alert, `> [!NOTE]` and its kin, to `type` (`note`, `tip`, `info`…). */
   | { kind: 'callout'; type: string }
   | { kind: 'indent'; by: 1 | -1 }
-  /** Columns of a table aligned otherwise: each with its header's text, the alignment it has now and
-   * the one it had (format §3.7). Never asked for; read from a change's `align=` for views. */
+  /** Columns of a table aligned otherwise: each with its name (the newest view of its header cell), the
+   * alignment it has now and the one it had (format §3.7). Never asked for; read from a change's
+   * `align=` for views. */
   | { kind: 'align'; columns: AlignedColumn[] };
 
 /** A column whose alignment a format change changed. */
 export interface AlignedColumn {
   /** The column, from 0. */
   col: number;
-  /** The text of its header cell. */
+  /** The newest view of its header cell, markers removed: the text of a deletion, which its marker
+   * holds, goes with it, and the text of an insertion stays; entities, escapes and emphasis stay as
+   * written (`A\|B`). Empty when no text shows, and the label then names the column by its number. */
   name: string;
   now: '' | 'left' | 'center' | 'right';
   was: '' | 'left' | 'center' | 'right';

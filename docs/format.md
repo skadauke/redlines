@@ -3602,8 +3602,10 @@ The library derives three read-only views of a document. None is ever stored.
   old one. The original view keeps the mark at the end of the header's last cell while it rejects
   the columns, and then undoes it there. In the review view the note stands where the mark stands,
   as a box's does, and names what changed:
-  `| Fruit  | Count | Price{>>[k3x9 ada] Formatted: column Count centered (was default)<<} |`. The
-  closer of the range form is replaced by the note, on a line of its own after the table.
+  `| Fruit  | Count | Price{>>[k3x9 ada] Formatted: column Count centered (was default)<<} |`. A
+  column is named by its header cell as the newest view shows it, with the markers of every change
+  in the cell removed, and by its number (`column 2`) when nothing of the cell shows. The closer of
+  the range form is replaced by the note, on a line of its own after the table.
 
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.

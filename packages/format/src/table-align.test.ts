@@ -17,6 +17,7 @@ import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import {
+  alignChange,
   alignLabel,
   alignMarkOf,
   alignWas,
@@ -2795,6 +2796,113 @@ describe('a point alignment change, written by another person', () => {
     const kinds = [span, point, bold, box].map((mark) => mark !== undefined && isAlignPoint(mark));
     expect(kinds).toEqual([false, true, false, false]);
     expect(format.isAlignPoint).toBe(isAlignPoint);
+  });
+});
+
+// A change of alignment names the columns it changed by the text of their header cells, as the page shows
+// it: the newest view of the cell, with the markers of other changes gone (the text of a deletion, which its
+// marker holds, with them) and the text of an insertion kept. The card in the editor and the note in the
+// review view both say it, for the point form that Redlines writes and for the span form that other tools
+// wrote.
+describe('the name of the column an alignment change names (format §3.7, #281)', () => {
+  const OLD = encodeValue('| ----- | ----- |');
+  /** `cell` as the header cell of the column that Bo centered, in the two forms of his change: the point at
+   * the end of the header, and the span around the table. */
+  const forms = (cell: string, marks: Record<string, string> = {}, threads: string[] = []) => ({
+    point: file(
+      `| Fruit | ${cell}<!--fmt k3x9 align=${OLD}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+      { k3x9: 'bo', ...marks },
+      threads,
+    ),
+    span: file(
+      `<!--fmt k3x9 align=${OLD}-->\n\n| Fruit | ${cell} |\n| ----- | :---: |\n| Apples | 3 |\n\n<!--/k3x9-->`,
+      { k3x9: 'bo', ...marks },
+      threads,
+    ),
+  });
+  const columnsOf = (text: string) => {
+    const parsed = parse(text);
+    const mark = parsed.marks.find((found) => found.id === 'k3x9');
+    return mark ? alignChange(parsed, mark) : undefined;
+  };
+  const was = (name: string) => [{ col: 1, name, now: 'center', was: '' }];
+
+  it('is the text of a plain header cell, as it was', () => {
+    for (const [form, text] of Object.entries(forms('Count'))) {
+      expect(columnsOf(text), form).toEqual(was('Count'));
+    }
+  });
+
+  it('keeps the text of an insertion in the cell, and leaves its markers out', () => {
+    for (const [form, text] of Object.entries(
+      forms('Count<!--ins m2bd-->x<!--/m2bd-->', { m2bd: 'bo' }),
+    )) {
+      expect(columnsOf(text), form).toEqual(was('Countx'));
+    }
+    for (const [form, text] of Object.entries(
+      forms('Co<!--ins m2bd-->x<!--/m2bd-->unt', { m2bd: 'bo' }),
+    )) {
+      expect(columnsOf(text), form).toEqual(was('Coxunt'));
+    }
+  });
+
+  it('leaves out the text of a deletion in the cell, which its marker holds', () => {
+    for (const [form, text] of Object.entries(forms('Count<!--del g5nb y-->', { g5nb: 'bo' }))) {
+      expect(columnsOf(text), form).toEqual(was('Count'));
+    }
+    for (const [form, text] of Object.entries(forms('Co<!--del g5nb ZZ-->unt', { g5nb: 'bo' }))) {
+      expect(columnsOf(text), form).toEqual(was('Count'));
+    }
+    // A cell all of whose text is deleted shows none: the column is named by its place.
+    for (const [form, text] of Object.entries(forms('<!--del g5nb Count-->', { g5nb: 'bo' }))) {
+      expect(columnsOf(text), form).toEqual(was(''));
+      const parsed = parse(text);
+      const change = formatChange(
+        parsed,
+        parsed.marks.find((mark) => mark.id === 'k3x9')!,
+      );
+      expect(change, form).toEqual([{ kind: 'align', columns: was('') }]);
+      expect(reviewView(text), form).toContain('Formatted: column 2 centered (was default)');
+    }
+  });
+
+  it('names a cell that was replaced by its new text, and not by the text its marker holds', () => {
+    const replaced = forms('<!--sub g5nb Count-->Total<!--/g5nb-->', { g5nb: 'bo' });
+    for (const [form, text] of Object.entries(replaced)) {
+      expect(columnsOf(text), form).toEqual(was('Total'));
+    }
+  });
+
+  it('leaves out the markers of a comment in the cell, a point or a range', () => {
+    const note = thread('c9qf', 'bo');
+    for (const cell of ['Count<!--cmt c9qf-->', '<!--cmt c9qf-->Count<!--/c9qf-->']) {
+      for (const [form, text] of Object.entries(forms(cell, {}, note))) {
+        expect(columnsOf(text), `${form} ${cell}`).toEqual(was('Count'));
+      }
+    }
+  });
+
+  it('is the same in the card’s change and in the review view’s note', () => {
+    for (const [form, text] of Object.entries(
+      forms('Count<!--ins m2bd-->x<!--/m2bd-->', { m2bd: 'bo' }),
+    )) {
+      const parsed = parse(text);
+      const mark = parsed.marks.find((found) => found.id === 'k3x9')!;
+      expect(formatChange(parsed, mark), form).toEqual([{ kind: 'align', columns: was('Countx') }]);
+      expect(reviewView(text), form).toContain(
+        '[k3x9 bo] Formatted: column Countx centered (was default)',
+      );
+      expect(reviewView(text), form).not.toContain('<!--');
+    }
+  });
+
+  it('names a column by its own cell, in a header that the mark does not end', () => {
+    // Bo's insertion is in the cell of the column that changed, and the mark stands in the last cell.
+    const text = file(POINT_BODY.replace('Count |', 'Count<!--ins m2bd-->x<!--/m2bd--> |'), {
+      k3x9: 'bo',
+      m2bd: 'bo',
+    });
+    expect(columnsOf(text)).toEqual(was('Countx'));
   });
 });
 
