@@ -42,6 +42,7 @@
     "allow-open-preferences",
     "allow-open-window",
     "allow-opened-files",
+    "allow-paste-in-field",
     "allow-print-window",
     "allow-project-root",
     "allow-quit-all",

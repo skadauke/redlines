@@ -10,7 +10,7 @@ import {
 import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
 import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
 import { expect } from 'vitest';
-import { bodyStart, frontMatterEnd, prefixLength } from './blocks.ts';
+import { bodyStart, frontMatterEnd, openerRange, prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -512,6 +512,37 @@ export function expectInOrder(label: string, threads: string[], after: string): 
     `${label}: threads`,
   ).toEqual(threads);
   return parsed;
+}
+
+/** Every marker of the mark `id` ends before the ledger, and nothing follows the ledger but the
+ * file's last line break: the editor writes no text after it (format §5.1). */
+export function expectMarkersBeforeLedger(label: string, text: string, id: string): void {
+  const parsed = parse(text);
+  const mark = parsed.marks.find((m) => m.id === id);
+  expect(mark, `${label}: no mark ${id}`).toBeDefined();
+  const ledger = parsed.ledgerRange;
+  if (!ledger) return;
+  for (const segment of mark?.segments ?? []) {
+    expect(openerRange(segment).to, `${label}: an opener ends in the ledger`).toBeLessThanOrEqual(
+      ledger.from,
+    );
+    expect(segment.close?.to ?? 0, `${label}: a closer ends in the ledger`).toBeLessThanOrEqual(
+      ledger.from,
+    );
+  }
+  expect(text.slice(ledger.to), `${label}: text after the ledger`).toMatch(/^(?:\r\n|\n|\r)?$/);
+}
+
+/**
+ * Whether an anchor on a range of `text` that ends at `to` has no place for its closer, by design
+ * (format §4): the range reaches the end of the body, and the body ends in the closing `_` of
+ * emphasis, whose flanking a marker would change (§3.1, rule 5), so that the next place is after the
+ * ledger, where nothing is written. The random tests leave these refusals out of the ones they
+ * count as a construct that has no place for its marker.
+ */
+export function endsInClosingUnderscore(text: string, to: number): boolean {
+  const end = parse(text).ledgerRange?.from ?? text.length;
+  return to >= end && /[\p{L}\p{N}]_+$/u.test(newestView(text).text.trimEnd());
 }
 
 /** The body of a file, ending in one line break: a ledger leaves a blank line in front of it. */
