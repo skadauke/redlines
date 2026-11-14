@@ -841,7 +841,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   on it opens its card and puts no caret there. A **moved row** has a double underline and the tint at
   its new place, and a ghost with a double strikethrough at the old; its card is the moved row's, and
   accepting or rejecting either half decides both (rejecting moves the row itself back, with what
-  was typed in it since). The cards say "Inserted row", "Deleted row" and "Moved row" (and
+  was typed in it since and its comments). The cards say "Inserted row", "Deleted row" and "Moved row" (and
   "Deleted 3 rows" for rows deleted together). Simple draws the bars of the same rows and no ghost,
   tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
   Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)

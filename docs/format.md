@@ -2149,11 +2149,12 @@ it, one per line:
   the old place a plain deletion. With Track Changes off the row goes as text, and what was pending in
   it goes with it.
 - **Rule 4, comments in a deleted row.** A comment in a row that leaves the table, deleted or
-  rejected, becomes a point comment at the start of the text of the first cell of the row below, or at
-  the end of the text of the last cell of the row above for the last row (and where the row below has
-  no pipe at its start, which could not hold the marker, there too). A comment with a part that
-  stays loses only the part in the row, and one with an end in the row keeps its other end, the end
-  that left standing where the point goes. A highlight has no point form and goes.
+  rejected (a moved row does not leave: it goes back with its comments, "Moving rows", below),
+  becomes a point comment at the start of the text of the first cell of the row below, or at the end
+  of the text of the last cell of the row above for the last row (and where the row below has no
+  pipe at its start, which could not hold the marker, there too). A comment with a part that stays
+  loses only the part in the row, and one with an end in the row keeps its other end, the end that
+  left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it can't be
   deleted until that change is decided ("Bo Chen's pending change is in this column. Decide it
   first."), nor can a column that is another person's pending insertion or move ("Bo Chen's inserted
@@ -2242,8 +2243,14 @@ it, one per line:
   insertion or move can't be moved. A row that is your own pending insertion is moved plainly. A row
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
-  typed in it since and its comments, and takes the deletion line away. Either half decides both. A
-  row with no pipe at its start (a table without outer pipes) is written at its new place with a
+  typed in it since and its comments, and takes the deletion line away. Either half decides both.
+  A comment or a highlight in the row goes with it: a range in a cell, a range across two cells or a
+  point. At the new place it stands in the row where it stood. Rejecting the move gives the row back
+  with it, in the same place, and nothing of it stays behind. The kept copy below the table holds
+  none of it (a comment is no change, and is in no deletion's payload). A highlight that runs across
+  rows, made before the move, is decided the same way: its end in the moving row goes with the row,
+  and its other end stays where it is.
+  A row with no pipe at its start (a table without outer pipes) is written at its new place with a
   plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
   same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
   at its place reading as it did, whatever has been typed, commented or decided in it since (a mark

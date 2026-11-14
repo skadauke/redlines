@@ -51,6 +51,7 @@ import {
   deletedRowText,
   joinPoints,
   removeDeletionLines,
+  rewrittenRows,
   rowMarker,
   rowTextOf,
   setPositions,
@@ -1355,6 +1356,9 @@ export interface RowDecision {
   decided: string[];
   /** The comments and highlights in rows that leave, which the changes deal with. */
   anchored: Set<string>;
+  /** The comments and highlights in rows that are taken out and written again, which travel with
+   * the text: a comment in a moved row goes back with the row. */
+  travelling: Set<string>;
 }
 
 /**
@@ -1399,6 +1403,7 @@ export function decideRows(
   const decided = [...wanted];
   const changes: TextChange[] = [];
   const anchored = new Set<string>();
+  const travelling = new Set<string>();
 
   if (action === 'accept' && !original) {
     for (const i of decidedRows) {
@@ -1406,7 +1411,7 @@ export function decideRows(
       if (marker) changes.push({ ...marker, insert: '' });
     }
     changes.push(...removeDeletionLines(text, table, decidedLines));
-    return { changes, decided, anchored };
+    return { changes, decided, anchored, travelling };
   }
 
   const twinLine = (i: number): number | undefined => {
@@ -1452,8 +1457,24 @@ export function decideRows(
       const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
       if (row !== -1 && leaving.has(row)) anchored.add(mark.id);
     }
+    // A comment or a highlight in a row that is taken out and written again is written with it
+    // (format §3.7, "Moving rows"): a decision of the text would leave its markers at the place the row
+    // leaves, and the row would have them a second time where it goes.
+    const rewritten = [...rewrittenRows(cur)].flatMap((i) => table.rows[i] ?? []);
+    if (rewritten.length > 0) {
+      const inRewritten = (at: number) => rewritten.some((row) => row.from <= at && at <= row.to);
+      for (const mark of parsed.marks) {
+        if ((mark.kind !== 'cmt' && mark.kind !== 'hl') || anchored.has(mark.id)) continue;
+        const inside = mark.segments.some((segment) =>
+          [segment.open, segment.close].some(
+            (range) => range !== undefined && inRewritten(range.from),
+          ),
+        );
+        if (inside) travelling.add(mark.id);
+      }
+    }
   }
-  return { changes: joinPoints(changes), decided, anchored };
+  return { changes: joinPoints(changes), decided, anchored, travelling };
 }
 
 function relocatedPatch(text: string, table: TableRead, index: number): TextChange[] {
