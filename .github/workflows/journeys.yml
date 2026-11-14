@@ -1,0 +1,125 @@
+# The journeys: Playwright in WebKit, driving the desktop app's page as a person does, with
+# screenshots (apps/desktop/journeys). It runs on a Mac, since WebKit there is the app's engine
+# and the approved screenshots (baselines) are drawn by it. It is the testing tiers:
+#
+# - a pull request runs the short tier, as a job of its own beside `check` in ci.yml: the smoke
+#   journeys, and the journeys tagged for the areas of the paths it changes (src/areas.ts), in the
+#   light look at 100%;
+# - a push to main runs the middle tier: every journey in the light look, and the smoke journeys in
+#   the other three looks (dark, and 200% text, light and dark); nobody waits on it;
+# - the sweep, by manual dispatch, runs the full tier: every journey in all four looks.
+#
+# Every run uploads the screenshots (and the diffs of any that changed) as `journeys-test-results`,
+# and the look review's folder as `look-review` (apps/desktop/journeys/look-review.md).
+name: Journeys
+
+on:
+  pull_request:
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+  push:
+    branches: [main]
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: journeys-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journeys:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A pull request's changed paths come from its merge base with the target branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The pnpm version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install WebKit
+        run: pnpm --filter @redlines/journeys exec playwright install webkit
+
+      # The journeys for this pull request: the smoke ones and those of the areas it changes.
+      - name: Choose the journeys
+        id: choose
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          grep=''
+          if [ "$EVENT" = pull_request ]; then
+            grep=$(git diff --name-only "$BASE...$HEAD" |
+              node --experimental-strip-types --disable-warning=ExperimentalWarning \
+                apps/desktop/journeys/scripts/areas.ts)
+          fi
+          echo "grep=$grep" >> "$GITHUB_OUTPUT"
+          echo "The journeys: ${grep:-all}"
+
+      # One run, so that its report holds every picture. A pull request: the light look, the journeys
+      # chosen. Main: every journey in the light look and the smoke journeys in the other three
+      # (JOURNEYS_OTHER_GREP). The sweep: every journey in all four. A failure here doesn't stop the
+      # screenshots from being collected below.
+      - name: Run the journeys
+        env:
+          EVENT: ${{ github.event_name }}
+          GREP: ${{ steps.choose.outputs.grep }}
+        run: |
+          case "$EVENT" in
+            pull_request) export JOURNEYS_PROJECTS=light ;;
+            push) export JOURNEYS_PROJECTS=all JOURNEYS_OTHER_GREP='@smoke' ;;
+            *) export JOURNEYS_PROJECTS=all ;;
+          esac
+          if [ -n "$GREP" ]; then
+            pnpm --filter @redlines/journeys test --grep "$GREP"
+          else
+            pnpm --filter @redlines/journeys test
+          fi
+
+      - name: Collect the screenshots for the look review
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @redlines/journeys look || true
+
+      - name: Upload the screenshots and diffs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: journeys-test-results
+          path: |
+            apps/desktop/journeys/test-results/
+            apps/desktop/journeys/playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload the look review
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: look-review
+          path: apps/desktop/journeys/look-review/
+          retention-days: 14
+          if-no-files-found: ignore

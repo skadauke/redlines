@@ -23,6 +23,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
+| `apps/desktop/journeys` | `@redlines/journeys`: Playwright journeys in WebKit against the desktop dev page, screenshot baselines, the look review (not shipped) |
 | `apps/embed-smoke`      | `@redlines/embed-smoke`: the smallest embed of the core and review, which holds the core's size (not shipped) |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
@@ -44,8 +45,8 @@ and [docs/format.md](docs/format.md) (the file format).
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
-Workspace members are `packages/*`, `plugins/*`, `apps/*` and `apps/desktop/quicklook`
-(`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
+Workspace members are `packages/*`, `plugins/*`, `apps/*`, `apps/desktop/quicklook` and
+`apps/desktop/journeys` (`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
 before use.
 
 ## Commands
@@ -86,6 +87,22 @@ repo root.
   `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks;
   `REDLINES_QUIT_ANSWER` takes the same words for the second question, asked when the Redlines to be
   replaced is open (nothing else ever quits it)
+- Journeys (`apps/desktop/journeys`, [its README](apps/desktop/journeys/README.md)): Playwright in
+  WebKit drives the desktop dev page as a person does (keys, typing in bursts, paste, clicks, drags)
+  and takes screenshots; they are how a change gets looked at, not only tested. Once per machine,
+  `pnpm --filter @redlines/journeys exec playwright install webkit`. `pnpm journeys` runs them (it
+  starts the dev server on `JOURNEYS_PORT`, 1482 unless your lane has its own port; `-g @smoke`, or a
+  spec file, picks some; `JOURNEYS_PROJECTS=all` runs the four looks, light and dark at 100% and
+  200% text). `j.baseline(name)` compares the window with the approved image in
+  `journeys/baselines/` (at most 15 pixels differ; a failed run leaves the picture it got and a
+  diff in `test-results/`), and `pnpm journeys:accept` approves changes on purpose: look at each
+  changed image before you commit it. A bug that's still open is `known(issue, …)`: green while it
+  stands, red when the fix lands, and `JOURNEYS_EVIDENCE=1` shows its failure. `pnpm journeys:look`
+  collects a run's pictures into `journeys/look-review/INDEX.md` for the look review
+  ([look-review.md](apps/desktop/journeys/look-review.md): the checklist, and how a lane uses it);
+  `apps/desktop/scripts/app-windows` screenshots a built `Redlines.app`'s own windows (it needs
+  Screen Recording for the terminal, once). Baselines are drawn by WebKit on macOS, as the app is;
+  a journey is a `tests/*.spec.ts` file in the package (not a vitest test)
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
@@ -157,6 +174,14 @@ repo root.
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
   changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
   test checks.
+- `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
+  baselines are drawn by it), as a job of its own beside `check`: **pull requests** run the smoke
+  journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
+  look; **pushes to main** run every journey in the light look and the smoke journeys in the other
+  three looks (nobody waits on it; a red main goes to the coordinator); **manual dispatch is the
+  sweep**: every journey in all four looks. It ignores the same paths as `ci.yml`. Every run uploads
+  `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
+  failed comparison) and `look-review` (the pictures in order, with INDEX.md).
 - The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
   (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
