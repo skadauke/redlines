@@ -148,6 +148,7 @@ describe('the tables plugin', () => {
       'table.insertColumnLeft',
       'table.insertColumnRight',
       'table.deleteColumn',
+      'table.deleteTable',
       'table.moveColumnLeft',
       'table.moveColumnRight',
       'table.alignLeft',
@@ -541,6 +542,101 @@ describe('the column commands', () => {
     tracked.commands.run('table.deleteColumn');
     expect(tracked.getDoc()).toBe(after);
     void header;
+  });
+});
+
+describe('Delete Table', () => {
+  const table = ['| a | b |', '| - | - |', '| 11 | 12 |', '| 21 | 22 |'].join('\n');
+  const doc = `Intro.\n\n${table}\n\nAfter.\n`;
+  const inCell = doc.indexOf('22') + 1;
+  const ledger =
+    '\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n  k3x9: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  /** A table with another person's pending insertion in a cell. */
+  const pending = `Intro.\n\n| a | b |\n| - | - |\n| 11 | 1<!--ins k3x9-->2<!--/k3x9--> |\n\nAfter.\n${ledger}`;
+
+  it('is listed under the Table menu with no key, after Delete Column', () => {
+    const editor = mount(doc);
+    const list = editor.commands.list();
+    const ids = list.map((c) => c.id);
+    expect(ids.indexOf('table.deleteTable')).toBe(ids.indexOf('table.deleteColumn') + 1);
+    const command = list.find((c) => c.id === 'table.deleteTable');
+    expect(command).toMatchObject({ title: 'Delete Table', menu: 'table' });
+    expect(command?.shortcut).toBeUndefined();
+  });
+
+  it('is enabled in a table, and disabled elsewhere, where it does nothing', () => {
+    const editor = mount(doc);
+    select(editor, inCell);
+    expect(editor.getUiState().enabledCommands).toContain('table.deleteTable');
+    select(editor, 3);
+    expect(editor.getUiState().enabledCommands).not.toContain('table.deleteTable');
+    expect(editor.commands.run('table.deleteTable')).toBe(false);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('deletes the table the caret is in, and the caret goes where it was', () => {
+    const editor = mount(doc);
+    select(editor, inCell);
+    expect(editor.commands.run('table.deleteTable')).toBe(true);
+    expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
+    expect(editor.view.state.selection.main.head).toBe('Intro.\n\n'.length);
+    expect(notices).toEqual([]);
+  });
+
+  it('deletes the table the selected cells are in, whatever is selected', () => {
+    const editor = mount(doc);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('11'), head: doc.indexOf('22') + 2 } });
+    expect(editor.commands.run('table.deleteTable')).toBe(true);
+    expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
+  });
+
+  it('writes the deletion of the table as a block with Track Changes on, which rejecting undoes', () => {
+    const editor = mount(doc, true);
+    select(editor, inCell);
+    expect(editor.commands.run('table.deleteTable')).toBe(true);
+    const after = editor.getDoc();
+    expect(after).toMatch(/^Intro\.\n\n<!--del \w{4} [^]*-->\n\nAfter\./);
+    const id = /<!--del (\w{4})/.exec(after)?.[1];
+    editor.reject(id!);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('is one step to undo, named, which brings back the selection it was made with', () => {
+    for (const tracking of [false, true]) {
+      const editor = mount(doc, tracking);
+      select(editor, inCell);
+      editor.commands.run('table.deleteTable');
+      expect(editor.getUiState().undo).toBe('Delete Table');
+      editor.undo();
+      expect(editor.getDoc()).toBe(doc);
+      expect(editor.view.state.selection.main).toMatchObject({ anchor: inCell, head: inCell });
+    }
+  });
+
+  it('says why in the format’s words, and writes nothing, while another person’s change is pending in it', () => {
+    const editor = mount(pending, true);
+    select(editor, pending.indexOf('11') + 1);
+    expect(editor.commands.run('table.deleteTable')).toBe(true);
+    expect(notices).toEqual(["Bo Chen's pending change is in this table. Decide it first."]);
+    expect(editor.getDoc()).toBe(pending);
+    expect(editor.getUiState().undo).toBeNull();
+    // With Track Changes off the table goes, with what was pending in it.
+    const plain = mount(pending, false);
+    select(plain, pending.indexOf('11') + 1);
+    expect(plain.commands.run('table.deleteTable')).toBe(true);
+    expect(plain.getDoc()).not.toContain('| a |');
+  });
+
+  it('has a keyboard path too: Select Table, then ⌫ twice', () => {
+    const editor = mount(doc);
+    select(editor, inCell);
+    editor.commands.run('table.selectTable');
+    press(editor, 'Backspace');
+    // The cells are cleared, and the table is still there.
+    expect(editor.getDoc()).not.toBe(doc);
+    expect(editor.getDoc()).toContain('| - | - |');
+    press(editor, 'Backspace');
+    expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
   });
 });
 

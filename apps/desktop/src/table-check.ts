@@ -1398,7 +1398,7 @@ const CHECKS: Check[] = [
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
           items.map((i) => i.textContent).join('|') !==
-          'Insert Row Above|Insert Row Below|Delete Row|Move Row Up|Move Row Down|Clear Contents'
+          'Insert Row Above|Insert Row Below|Delete Row|Delete Table|Move Row Up|Move Row Down|Clear Contents'
         )
           problems[`${view}-items`] = items.map((i) => i.textContent);
         const selected = rectOf(editor.view.state);
@@ -1769,7 +1769,7 @@ const CHECKS: Check[] = [
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
           items.map((i) => i.textContent).join('|') !==
-          'Insert Column Left|Insert Column Right|Delete Column|Move Column Left|Move Column Right|Align Left|Align Center|Align Right|Default Alignment|Clear Contents'
+          'Insert Column Left|Insert Column Right|Delete Column|Delete Table|Move Column Left|Move Column Right|Align Left|Align Center|Align Right|Default Alignment|Clear Contents'
         )
           problems[`${view}-items`] = items.map((i) => i.textContent);
         const selected = touchedCols(editor.view.state);

@@ -17,6 +17,7 @@ import {
   type SelectionRange,
 } from '@codemirror/state';
 import { type EditorView } from '@codemirror/view';
+import { pastHidden } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
@@ -111,6 +112,17 @@ export function cellsOfRect(rect: Rect): Cell[] {
 export function selectedCells(state: EditorState): Cell[] {
   const rect = rectOf(state);
   return rect ? cellsOfRect(rect) : [];
+}
+
+/**
+ * Whether a cell has no text in the version being edited: it holds nothing, or only what the newest
+ * text leaves out (a deletion, the markers round an insertion, a comment's anchor). It is what the
+ * page shows of the cell, read from the stretches the caret steps over (`pastHidden`), so that it
+ * costs the cell's own markers and never the table or the document. A cell that holds a line break
+ * shows one, and has text in this sense.
+ */
+export function cellIsEmpty(state: EditorState, cell: Cell): boolean {
+  return pastHidden(state, cell.textFrom, true) >= cell.textTo;
 }
 
 /** What a rectangle is, when it reaches the table's edges: whole rows, whole columns, the table. */
@@ -259,8 +271,9 @@ export function rectSpec(
 
 /**
  * Clears the text of `cells`, one change and one step to undo, and leaves the rectangle they are
- * of selected (a second key then has the cells to act on). True also when there was nothing to
- * clear: the key is taken and writes nothing.
+ * of selected (a second ⌫ then has the cells to act on: when they are whole rows or columns, and
+ * empty now, it deletes them, `keys.ts`). True also when there was nothing to clear: the key is
+ * taken and writes nothing.
  */
 export function clearCells(view: EditorView, cells: readonly Cell[]): boolean {
   const { state } = view;

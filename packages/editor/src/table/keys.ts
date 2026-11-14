@@ -17,8 +17,24 @@ import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table } from './model.ts';
-import { deleteCols, deleteRows, insertCols, insertRowAfter, insertRows, moveRows } from './ops.ts';
-import { cellOfRef, cellsOfRect, clearCells, rectOf, selectRect, whole } from './cells.ts';
+import {
+  deleteCols,
+  deleteRows,
+  deleteTable,
+  insertCols,
+  insertRowAfter,
+  insertRows,
+  moveRows,
+} from './ops.ts';
+import {
+  cellIsEmpty,
+  cellOfRef,
+  cellsOfRect,
+  clearCells,
+  rectOf,
+  selectRect,
+  whole,
+} from './cells.ts';
 import { deleteReach } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
 
@@ -381,10 +397,24 @@ const lineBreak: Command = (view) => {
   });
 };
 
-/** ⌫ and ⌦ with cells selected: their text goes, as one change. */
+/**
+ * ⌫ and ⌦ with cells selected: their text goes, as one change. Pressed again, with whole rows, whole
+ * columns or the whole table selected and every one of their cells empty (they show no text), the rows,
+ * the columns or the table go, by the operation that Delete Row, Delete Column or Delete Table runs,
+ * and the notice says what refuses it. Text is only ever cleared by the key: a row that has some is
+ * never deleted by one keystroke. Only a rectangle is asked, and only its own cells are read.
+ */
 function clearSelectedCells(view: EditorView): boolean {
-  const rect = rectOf(view.state);
-  return rect ? clearCells(view, cellsOfRect(rect)) : false;
+  const { state } = view;
+  const rect = rectOf(state);
+  if (!rect) return false;
+  const cells = cellsOfRect(rect);
+  const kind = whole(rect);
+  if (kind && cells.length > 0 && cells.every((cell) => cellIsEmpty(state, cell))) {
+    if (kind === 'table') return deleteTable(view);
+    return kind === 'row' ? deleteRows(view) : deleteCols(view);
+  }
+  return clearCells(view, cells);
 }
 
 /** ⌫: nothing at a cell's start, a `<br>` whole after it; a selection or a character is the

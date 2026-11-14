@@ -121,6 +121,7 @@ describe('row grips', () => {
       'Insert Row Above',
       'Insert Row Below',
       'Delete Row',
+      'Delete Table',
       'Move Row Up',
       'Move Row Down',
       'Clear Contents',
@@ -159,6 +160,22 @@ describe('row grips', () => {
     mouse(item!, 'mousedown');
     expect(editor.getDoc()).not.toContain('21');
     expect(editor.getDoc()).toContain('11');
+  });
+
+  it('deletes the table from the menu, as the command does', () => {
+    for (const tracking of [false, true]) {
+      const editor = mount(DOC, tracking);
+      move(editor, LEFT + 50, rowY(2));
+      mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
+      mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+      const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+        (el) => el.textContent === 'Delete Table',
+      );
+      mouse(item!, 'mousedown');
+      expect(menuItems(editor)).toEqual([]);
+      if (tracking) expect(editor.getDoc()).toMatch(/<!--del \w{4} /);
+      else expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
+    }
   });
 
   it('closes the menu on Esc and keeps the selection', () => {
@@ -208,6 +225,7 @@ describe('column grips', () => {
       'Insert Column Left',
       'Insert Column Right',
       'Delete Column',
+      'Delete Table',
       'Move Column Left',
       'Move Column Right',
       'Align Left',
@@ -278,6 +296,19 @@ describe('column grips', () => {
     mouse(item!, 'mousedown');
     expect(editor.getDoc()).not.toContain('22');
     expect(editor.getDoc()).toContain('21');
+  });
+
+  it('deletes the table from the column menu, as the command does', () => {
+    const editor = mount();
+    move(editor, colX(1), TOP - 10);
+    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+      (el) => el.textContent === 'Delete Table',
+    );
+    mouse(item!, 'mousedown');
+    expect(menuItems(editor)).toEqual([]);
+    expect(editor.getDoc()).toBe('Intro.\n\nAfter.\n');
   });
 
   it('shows a + within 8 px of a column boundary in the top strip, and not at 9', () => {

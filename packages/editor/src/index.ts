@@ -111,6 +111,7 @@ export {
   colTitles,
   deleteCols,
   deleteRows,
+  deleteTable,
   insertColsAt,
   insertCols,
   insertRowBelow,

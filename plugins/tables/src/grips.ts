@@ -20,6 +20,7 @@ import {
   colTitles,
   deleteCols,
   deleteRows,
+  deleteTable,
   insertCols,
   insertColsAt,
   insertRows,
@@ -683,6 +684,7 @@ class Grips {
             [colTitles.insertLeft(state), () => insertCols(this.view, true)],
             [colTitles.insertRight(state), () => insertCols(this.view, false)],
             [colTitles.delete(state), () => deleteCols(this.view)],
+            ['Delete Table', () => deleteTable(this.view)],
             [colTitles.moveLeft(state), () => moveCols(this.view, true)],
             [colTitles.moveRight(state), () => moveCols(this.view, false)],
             // The columns' alignment, the caret's column checked.
@@ -696,6 +698,7 @@ class Grips {
             [rowTitles.insertAbove(state), () => insertRows(this.view, true)],
             [rowTitles.insertBelow(state), () => insertRows(this.view, false)],
             [rowTitles.delete(state), () => deleteRows(this.view)],
+            ['Delete Table', () => deleteTable(this.view)],
             [rowTitles.moveUp(state), () => moveRows(this.view, true)],
             [rowTitles.moveDown(state), () => moveRows(this.view, false)],
             ['Clear Contents', () => clearCells(this.view, selectedCells(state))],

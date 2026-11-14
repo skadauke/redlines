@@ -200,6 +200,18 @@ export function deleteRows(view: EditorView): boolean {
   return perform(view, { kind: 'deleteRows', table: touched.table.from, rows }, 'table.delete.row');
 }
 
+/**
+ * Deletes the table the selection is in, whole: a block deletion with Track Changes on, the text of
+ * the table taken out with it off. The caret goes to the start of the text that follows it, or to the
+ * end of the text before it when none does. The format refuses it where another person's pending
+ * change is in the table (rule 6), and the refusal is told.
+ */
+export function deleteTable(view: EditorView): boolean {
+  const touched = touchedRows(view.state);
+  if (!touched) return false;
+  return perform(view, { kind: 'deleteTable', table: touched.table.from }, 'table.delete.table');
+}
+
 /** Moves rows `first` to `last` of `table` to the boundary `to` (0 above the header, the number of
  * rows below the last), and keeps them selected as they were. A boundary that is where they are is
  * no move: it says so. */
