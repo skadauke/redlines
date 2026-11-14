@@ -2006,6 +2006,19 @@ it, one per line:
   other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
   of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
   can unmake the table, as an edit of any line can unmake what it is).
+- **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
+  after its last. Typing into one writes the pipes it needs first, plain, in both versions (the rule
+  above: the pipes are no change), and then the text, as typing in any cell is written: an insertion
+  with Track Changes on, plain text with it off. Under a header of three columns `| 1 |` becomes
+  `| 1 | | x |` for an `x` in the third. With Track Changes on `x` is the insertion, and rejecting it
+  leaves `| 1 | |  |`, which reads as the row did, in every order of decisions. A row with no closing
+  pipe is given none, only the pipes between its cells: `| 1 | 2` becomes `| 1 | 2 | x`. A row that
+  is one `|` is a row with an empty first cell. The operation `fillCells` (a row, a column and the
+  text) writes it; with no text it writes the pipes alone, which the editor does when an input
+  method starts to compose there. A row that is the copy of a move still pending takes it only with
+  Track Changes off, which writes it in both halves as any plain edit there is; with it on, and for
+  the pipes alone, it is refused ("Bo Chen's move of this row is pending. Decide it first."). A pipe
+  or a line break in the text is refused as in any cell.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.

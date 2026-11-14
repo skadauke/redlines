@@ -42,6 +42,7 @@ import {
   ruleThree,
   ruleThreeCols,
 } from './table-rules.ts';
+import { fillCells } from './table-fill.ts';
 import {
   addDeletionLines,
   afterRemoval,
@@ -93,7 +94,10 @@ export type TableOp =
   /** The columns `cols` aligned as `align` (format §3.7, rule 5). */
   | { kind: 'align'; table: number; cols: number[]; align: TableAlign }
   /** The whole table, as a block (format §3.4, §3.7 rule 6). */
-  | { kind: 'deleteTable'; table: number };
+  | { kind: 'deleteTable'; table: number }
+  /** The cell `col` of body row `row` (0 the header), which the row lacks: its pipes are written, plain,
+   * and `text`, when there is some, is typed into it (format §3.7, "A cell a row lacks"). */
+  | { kind: 'fillCells'; table: number; row: number; col: number; text?: string };
 
 /** What is pending in a table, by axis (format §3.7). */
 export interface TablePending {
@@ -186,6 +190,9 @@ export function ruleTwo(
     // The table goes whole: your own pending changes in it are folded into the deletion, whatever
     // axis they are on, and another person's are refused (rule 6), not asked to be decided by axis.
     case 'deleteTable':
+      return null;
+    // A cell typed in is a cell edit, which any change pending in the table allows.
+    case 'fillCells':
       return null;
   }
 }
@@ -858,6 +865,7 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
   const parsed = parse(text);
   const table = tableOf(text, parsed, op);
   if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
+  if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
   if (op.kind === 'deleteRows') return deleteRows(text, parsed, table, rowsOf(table, op.rows), ctx);
   if (op.kind === 'moveRows') {
     return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, ctx);
@@ -953,6 +961,7 @@ export function untrackedTableEdit(
   const parsed = parse(text);
   const table = tableOf(text, parsed, op);
   if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, null, ctx);
+  if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, null, ctx);
   if (op.kind === 'deleteRows')
     return deleteRows(text, parsed, table, rowsOf(table, op.rows), null);
   if (op.kind === 'moveRows') {
