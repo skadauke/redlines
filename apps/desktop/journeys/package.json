@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "accept": "playwright test --update-snapshots=changed"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0"
