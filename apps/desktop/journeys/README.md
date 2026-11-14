@@ -31,6 +31,8 @@ run leaves the picture it got, the approved one and a diff in `test-results/<jou
 
 - A short run is the light 100% look. `JOURNEYS_PROJECTS=all pnpm journeys` runs all four looks
   (`light`, `dark`, `light-200`, `dark-200`; or a list of them separated by commas).
+- `JOURNEYS_OTHER_GREP=@smoke` limits the looks other than the light one to the journeys matching it
+  (what main runs in dark and at 200%).
 - **Accepting a change on purpose:** `pnpm journeys:accept` (with the arguments of a run:
   `pnpm journeys:accept tests/lists.spec.ts`) rewrites the baselines that changed, and writes the
   ones that don't exist yet. A plain run never writes one: a missing baseline fails it. It rewrites
@@ -76,4 +78,21 @@ Keys and the mouse are real browser events. A paste is the browser's `paste` eve
 sent to the editor (it reaches the editor's paste handling, not the browser's own); the journey
 fails if the editor didn't take it. Only setup and reading go through the page's hook
 (`window.__redlines`, `src/journey-hook.ts`, set only in development in a plain tab). A script
-error in the page fails the journey. Not in CI yet: a later PR adds the job.
+error in the page fails the journey. CI: `.github/workflows/journeys.yml` (below).
+
+## CI
+
+`.github/workflows/journeys.yml` runs them on a macOS runner (WebKit there is the app's engine, and
+baselines are drawn by it), as a job of its own in parallel with `check`:
+
+| When | What | Looks |
+|---|---|---|
+| a pull request | the `@smoke` journeys, and those of the areas its paths touch (`src/areas.ts`) | light |
+| a push to main | every journey, and the smoke journeys again | light; dark, 200% and dark 200% for the smoke ones |
+| manual dispatch (the sweep) | every journey | all four |
+
+A change to a path every journey draws through (the format, the editor's core, the themes, the
+page's own code, the journeys, the workflow) runs every journey. The run uploads `journeys-test-results`
+(the pictures, and for a failed comparison the picture got, the approved one and the diff) and
+`look-review` (the pictures in order, with INDEX.md; see [look-review.md](look-review.md)). To
+approve a changed baseline, run `pnpm journeys:accept` on a Mac and commit the images.

@@ -3,7 +3,9 @@ import { areasFor, grepFor } from './areas.ts';
 
 describe('the journeys a pull request runs', () => {
   it('runs the smoke journeys alone for a path no journey is about', () => {
-    expect(grepFor(['apps/desktop/src-tauri/src/lib.rs', 'packages/cli/src/main.ts'])).toBe('@smoke');
+    expect(grepFor(['apps/desktop/src-tauri/src/lib.rs', 'packages/cli/src/main.ts'])).toBe(
+      '@smoke',
+    );
     expect(grepFor([])).toBe('@smoke');
   });
 

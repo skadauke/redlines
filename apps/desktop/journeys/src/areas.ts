@@ -17,11 +17,17 @@ const RULES: readonly (readonly [RegExp, Effect])[] = [
   [/^packages\/editor\/src\/(tracked|clipboard|history)\//, 'all'],
   [/^apps\/desktop\/src\/(main|styles|zoom|text-size|document|settings|journey-hook)[^/]*$/, 'all'],
   [/^apps\/desktop\/(journeys\/|index\.html|vite\.config\.ts|package\.json)/, 'all'],
-  [/^(\.github\/workflows\/journeys\.yml|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml)$/, 'all'],
+  [
+    /^(\.github\/workflows\/journeys\.yml|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml)$/,
+    'all',
+  ],
   // Areas.
   [/^(packages\/editor\/src\/blocks\/|plugins\/formatting\/)/, ['lists', 'blocks']],
   [/^(packages\/editor\/src\/table\/|plugins\/tables\/)/, ['tables']],
-  [/^(packages\/editor\/src\/preview\/|plugins\/(code|emoji)\/)/, ['lists', 'blocks', 'links', 'tables']],
+  [
+    /^(packages\/editor\/src\/preview\/|plugins\/(code|emoji)\/)/,
+    ['lists', 'blocks', 'links', 'tables'],
+  ],
   [/^(plugins\/(review|palette)\/|apps\/desktop\/src\/ui\/)/, ['views', 'links']],
 ];
 
