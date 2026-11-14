@@ -75,6 +75,7 @@ import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
+import { barLayer } from './tracked/bar-layer.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
@@ -92,8 +93,10 @@ import {
   lineBreakMarksFacet,
   markupViewCompartment,
   markupViewFacet,
+  menuViewOf,
   parsedField,
   peopleFacet,
+  setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
@@ -153,6 +156,7 @@ export {
   chooseViewEffects,
   isChange,
   markupViewFacet,
+  menuViewOf,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -205,6 +209,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const saveTracking = options.saveTracking ?? false;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
+  /**
+   * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
+   * the markup view, unless the review bar showed the full markup without choosing it, or the
+   * document opened in the full markup by its ledger (format §5.6); it starts over with each
+   * document, from the look the document opened in (`lookOf`).
+   */
+  let shownLook: MarkupView = markupView;
+  /** The look of Redlines that `state` shows, or the markup view when it shows another view. */
+  const lookOf = (state: EditorState): MarkupView => {
+    const shown = state.field(viewModeField);
+    return shown === 'simple' || shown === 'redlines' ? shown : markupView;
+  };
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
   let told: string | null = null;
@@ -218,7 +234,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
-    barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
+    barLayer(),
+    barSwitch(),
     trackedTyping(),
     openBlocks(),
     emptyLineTyping,
@@ -260,6 +277,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       }
       const { startState, state } = update;
       markupView = state.facet(markupViewFacet);
+      const shown = state.field(viewModeField);
+      if (shown === 'simple' || shown === 'redlines') shownLook = shown;
       const viewChanged =
         startState.field(viewModeField) !== state.field(viewModeField) ||
         startState.facet(markupViewFacet) !== markupView;
@@ -333,6 +352,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
+  shownLook = lookOf(view.state);
   /** Asks the host to record the people of the document that its record lacks. */
   function tellNewPeople(): void {
     if (destroyed || !people || !options.onNewPeople) return;
@@ -366,6 +386,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
       view.setState(stateFor(loadFile(doc)));
+      shownLook = lookOf(view.state);
       told = fileText(view.state);
       report();
       tellNewPeople();
@@ -404,6 +425,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    showView: (menuView) => {
+      if (menuView !== 'redlines') {
+        view.dispatch({ effects: chooseViewEffects(menuView) });
+        return;
+      }
+      // Redlines shown already, in either look, stays as it is: only a click on a change bar
+      // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
+      // nothing: the look chosen stays the one a click made.
+      if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
+      view.dispatch({ effects: setViewModeEffect.of(shownLook) });
+    },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });

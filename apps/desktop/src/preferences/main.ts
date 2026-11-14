@@ -11,6 +11,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
 import {
   agentSetup,
+  agentSkills,
   createDetectionProcesses,
   homeAccess,
   openFilesAndFoldersSettings,
@@ -171,10 +172,19 @@ const deps: PaneDeps = {
               signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
               stop: () => agentSetup.stop(provider.id),
               running: () => setups.running(provider.id),
+              // The skill that teaches the agent Redlines files, in the folder it reads skills
+              // from. OpenClaw reads Codex's folder too.
+              skill: {
+                status: () => agentSkills.status(provider.id),
+                install: () => agentSkills.install(provider.id),
+                ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
+              },
             }
           : {}),
       })),
       copy: copyText,
+      // The command line is installed in General, which the skill needs.
+      showGeneral: () => show('general'),
       // What macOS holds back from Redlines, asked when the person picks the home folder.
       ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.

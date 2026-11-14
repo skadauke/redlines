@@ -51,6 +51,8 @@ body {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  /* How much of the page's lower edge the word count's fade covers (see .rl-footer). */
+  --rl-footer-room: 44px;
 }
 
 .rl-titlebar-host {
@@ -112,6 +114,52 @@ body {
 
 #editor .cm-editor.cm-focused {
   outline: none;
+}
+
+/*
+ * The word count (word-count.ts): a small gray label in the page's lower right corner, on a fade of
+ * the page's color that rises from the window's lower edge as the title bar's falls from the top,
+ * so that the text and the notes that scroll under it are gone before they meet it. Over the page's
+ * text, under the review bar, the notifications and whatever else floats; it takes no pointer, and
+ * stops short of a classic scrollbar, and of the edge where an overlay one is drawn. It follows the
+ * theme and the window zoom as any text does.
+ */
+.rl-footer {
+  position: absolute;
+  right: max(var(--rl-scrollbar, 0px), 12px);
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  height: var(--rl-footer-room);
+  background: linear-gradient(
+    to top,
+    var(--rl-page, Canvas) 0,
+    var(--rl-page, Canvas) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/*
+ * What scrolls into view stops short of the fade, as of the title bar above: a comment box opened
+ * near the bottom, a find match. (The editor keeps its own caret clear of it by a scroll margin.)
+ * The page is marked while the count is shown.
+ */
+.rl-has-footer .rl-scroller {
+  scroll-padding-bottom: var(--rl-footer-room);
+}
+
+/* Level with the notifications' lowest card, which hides it whole when one is shown. */
+.rl-word-count {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /*
@@ -784,6 +832,7 @@ body {
 
   .rl-titlebar,
   .rl-main::after,
+  .rl-footer,
   .rl-sidebar,
   .rl-rail,
   .rl-review-bar,
@@ -850,5 +899,32 @@ body {
 
   #editor .rl-bar-mixed::before {
     border-left-color: var(--rl-mixed);
+  }
+
+  /*
+   * The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the text
+   * differently: the layer is left out, and each line that holds a change prints a bar down its
+   * whole paragraph, as the lines drew it before the layer.
+   */
+  #editor .rl-bar-layer {
+    display: none;
+  }
+
+  #editor .cm-line.rl-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -24px;
+    width: 0;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .cm-line.rl-bar-mixed::before {
+    border-left-color: var(--rl-mixed);
+  }
+
+  #editor .cm-line.rl-quote.rl-bar::before {
+    left: -26px;
   }
 }

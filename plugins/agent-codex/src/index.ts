@@ -150,6 +150,11 @@ export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: Code
     ...DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
     '-c',
     'web_search="disabled"',
+    // Skills, the person's own among them (Redlines' skill, installed from Preferences, is one),
+    // are for a Codex run by hand: a run here acts through the toolbox, and a skill's file is
+    // outside what it may read. Tested with `codex debug prompt-input`, which then lists none.
+    '-c',
+    'skills.include_instructions=false',
     '--',
     request.prompt,
   ];
