@@ -321,10 +321,19 @@ export interface Editor {
    * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
    * shown in the look that was shown last: the one a click on a change bar chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
-   * chooses no look, and when Redlines is shown already, in either look, it does nothing: only a
-   * click on a change bar chooses a look.
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
+   * on a change bar, or `switchLook`, chooses a look.
    */
   showView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does and with the same
+   * effect: the full markup goes to the simple look and the simple look to the full markup, the
+   * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
+   * looking at (the one with the caret when it is on the screen, else the first on it) stays where
+   * it was. It does nothing in Clean and Raw, which have no look. A host's View menu has it as a
+   * switch (design §5.3), so that the looks need no pointer.
+   */
+  switchLook(): void;
   /**
    * Changes the look of Redlines that an automatic switch shows, such as when the person chose
    * another in another window. It never changes the view that is shown: only a choice made here

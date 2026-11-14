@@ -176,6 +176,49 @@ function targetAt(
   return Math.abs(x - center) <= REACH ? found : null;
 }
 
+/**
+ * Switches Redlines' two looks, the simple look to the full markup and back, with the line at `pos`
+ * where it was: its distance from the top of the screen is noted now and put back once the new view
+ * is measured. A line the new view doesn't draw has the top of the one after it, which `lineTop`
+ * gives for its position. `before` is the line's top when it isn't a line's (a struck block's own).
+ * Nothing in Clean or Raw, which have no look. It chooses the look, as the click on a bar does.
+ */
+export function switchLookAt(
+  view: EditorView,
+  pos: number,
+  geometry: BarGeometry = pageGeometry,
+  before?: number,
+): void {
+  const mode = view.state.field(viewModeField);
+  if (mode !== 'simple' && mode !== 'redlines') return;
+  const start = before ?? geometry.lineTop(view, pos);
+  const top = () => geometry.lineTop(view, Math.min(pos, view.state.doc.length));
+  const keep = (after: number) => {
+    // Chosen now, after the switch: a document that fits the window in Simple has no scrolling
+    // ancestor until Redlines makes the page taller.
+    if (Math.abs(after - start) >= 0.5) scrollerOf(view).scrollTop += after - start;
+  };
+  view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
+  // At once, from the page as it is drawn, and again once CodeMirror has measured it, which can
+  // move lines (an image that loads, a height it learns).
+  keep(top());
+  view.requestMeasure({ read: top, write: keep });
+}
+
+/**
+ * The line a person is looking at, for a switch that has no pointer to say: the one with the caret
+ * when it is on the screen, else the first on it. Its position is where the line starts.
+ */
+export function lookedAtLine(view: EditorView): number {
+  const scroller = scrollerOf(view).getBoundingClientRect();
+  const head = view.state.selection.main.head;
+  const caret = view.coordsAtPos(head);
+  if (caret && caret.bottom > scroller.top && caret.top < scroller.bottom) {
+    return view.lineBlockAt(head).from;
+  }
+  return view.lineBlockAtHeight(Math.max(0, scroller.top - view.documentTop)).from;
+}
+
 const setHover = StateEffect.define<number | null>();
 
 const hotLine = Decoration.line({ class: 'rl-bar-hot' });
@@ -320,26 +363,16 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         for (const handler of view.state.facet(barClickHandlers)) {
           if (handler(view, target.pos, target.mark, target.span)) return;
         }
-        // The line under the pointer keeps its place: its distance from the top of the screen is
-        // noted now and put back once the new view is measured. A line the new view doesn't draw
-        // has the top of the one after it, which `lineTop` gives for its position.
-        // A struck block is no line: it is its own top, and Simple, which doesn't draw it, gives its
-        // place to the block after it (`target.pos` is where that begins).
+        // The line under the pointer keeps its place. A struck block is no line: it is its own top,
+        // and Simple, which doesn't draw it, gives its place to the block after it (`target.pos`
+        // is where that begins).
         const struck = target.element.classList.contains('rl-struck') && target.element.isConnected;
-        const before = struck
-          ? target.element.getBoundingClientRect().top
-          : geometry.lineTop(view, target.pos);
-        const top = () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length));
-        const keep = (after: number) => {
-          // Chosen now, after the switch: a document that fits the window in Simple has no
-          // scrolling ancestor until Redlines makes the page taller.
-          if (Math.abs(after - before) >= 0.5) scrollerOf(view).scrollTop += after - before;
-        };
-        view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
-        // At once, from the page as it is drawn, and again once CodeMirror has measured it, which
-        // can move lines (an image that loads, a height it learns).
-        keep(top());
-        view.requestMeasure({ read: top, write: keep });
+        switchLookAt(
+          view,
+          target.pos,
+          geometry,
+          struck ? target.element.getBoundingClientRect().top : undefined,
+        );
       }
     },
   );

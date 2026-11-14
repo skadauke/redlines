@@ -9,6 +9,8 @@ import {
   TOOLTIP_MS,
   TRACKING_ARIA_KEY,
   TRACKING_KEY,
+  LOOK_ARIA_KEY,
+  LOOK_KEY,
   VIEW_ARIA_KEYS,
   VIEW_KEYS,
   wordCount,
@@ -34,6 +36,7 @@ function setup(state: Partial<TitleBarState> = {}) {
   document.body.append(root);
   const actions = {
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
@@ -593,6 +596,33 @@ describe('title bar', () => {
     expect(actions.setView).toHaveBeenCalledWith('redlines');
   });
 
+  it('has a Simple Look switch below the views with ⌥⌘4, on in the simple look, off in the full markup', () => {
+    const { actions, menu, button, bar } = setup({ view: 'redlines' });
+    hover(button('View'));
+    const look = () => item(menu('View'), 'Simple Look');
+    expect(look().getAttribute('role')).toBe('menuitemcheckbox');
+    expect(look().textContent).toBe('Simple Look⌥⌘4');
+    expect(look().getAttribute('aria-checked')).toBe('false');
+    expect(look().disabled).toBe(false);
+    // It is no view: the radio items stay three.
+    expect(menu('View').querySelectorAll('[role="menuitemradio"]')).toHaveLength(3);
+    look().click();
+    expect(actions.switchLook).toHaveBeenCalledOnce();
+    expect(actions.setView).not.toHaveBeenCalled();
+    bar.update({ ...BASE, hasRedlines: true, view: 'simple' });
+    expect(look().getAttribute('aria-checked')).toBe('true');
+    expect(look().disabled).toBe(false);
+  });
+
+  it('has no Simple Look to choose in Clean or Raw', () => {
+    const { actions, menu, bar, button } = setup({ view: 'clean' });
+    hover(button('View'));
+    expect(item(menu('View'), 'Simple Look').disabled).toBe(true);
+    bar.update({ ...BASE, view: 'raw' });
+    expect(item(menu('View'), 'Simple Look').disabled).toBe(true);
+    expect(actions.switchLook).not.toHaveBeenCalled();
+  });
+
   it('checks Redlines, and no other view, in its simple look', () => {
     const { menu } = setup({ view: 'simple' });
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
@@ -975,6 +1005,8 @@ describe('the keys the icons name', () => {
       expect(VIEW_KEYS[view], view).toBe(mac(accelerator(text)));
       expect(VIEW_ARIA_KEYS[view], view).toBe(aria(accelerator(text)));
     }
+    expect(LOOK_KEY).toBe(mac(accelerator('Simple Look')));
+    expect(LOOK_ARIA_KEY).toBe(aria(accelerator('Simple Look')));
     expect(TRACKING_KEY).toBe(mac(accelerator('Track Changes')));
     expect(TRACKING_ARIA_KEY).toBe(aria(accelerator('Track Changes')));
   });

@@ -76,7 +76,7 @@ import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
-import { barSwitch } from './tracked/bar-switch.ts';
+import { barSwitch, lookedAtLine, switchLookAt } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
@@ -442,6 +442,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
       view.dispatch({ effects: setViewModeEffect.of(shownLook) });
     },
+    switchLook: () => switchLookAt(view, lookedAtLine(view)),
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });

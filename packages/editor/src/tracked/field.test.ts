@@ -189,6 +189,32 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState().view).toBe('simple');
   });
 
+  it('turns the simple look on and off while Redlines shows, and chooses the look as a click does (#330)', () => {
+    const editor = load(marked, { markupView: 'redlines' });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
+  });
+
+  it('switches the look the review bar showed in the full markup without choosing it', () => {
+    const editor = load(marked, { markupView: 'simple' });
+    editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    // The full markup is shown, the simple look is the one remembered: the switch turns it on.
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+  });
+
+  it('does nothing in Clean and Raw, which have no look to switch', () => {
+    const editor = load(marked, { markupView: 'redlines' });
+    for (const view of ['clean', 'raw'] as const) {
+      editor.showView(view);
+      editor.switchLook();
+      expect(editor.getUiState()).toMatchObject({ view, markupView: 'redlines' });
+    }
+  });
+
   it('shows Clean and Raw as they are, and never changes the look', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.showView('raw');

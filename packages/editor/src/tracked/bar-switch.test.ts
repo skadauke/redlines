@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
 import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { barMeasure, type BarMeasure, hotBar } from './bar-layer.ts';
-import { type BarGeometry, barClickHandlers, barSwitch } from './bar-switch.ts';
+import {
+  type BarGeometry,
+  barClickHandlers,
+  barSwitch,
+  lookedAtLine,
+  switchLookAt,
+} from './bar-switch.ts';
 import { viewModeField } from './field.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -101,6 +107,63 @@ describe('the click on a change bar', () => {
     // Lines above grew 10 px each; the scroller moved so that the line stayed.
     expect(layout.lineTop(editor.view, line)).toBeCloseTo(before, 0);
     expect(scrollDOM.scrollTop).toBe(17);
+  });
+
+  it('switches the looks for a command as for a click, keeping the line it is given where it was (#330)', async () => {
+    const editor = load({ view: 'simple' });
+    const { scrollDOM } = editor.view;
+    scrollDOM.scrollTop = 7;
+    const line = editor.view.state.doc.line(2).from;
+    const before = layout.lineTop(editor.view, line);
+    switchLookAt(editor.view, line, layout);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(viewOf(editor)).toBe('redlines');
+    expect(editor.getUiState().markupView).toBe('redlines');
+    expect(layout.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+    expect(scrollDOM.scrollTop).toBe(17);
+    // And back, the line where it was again.
+    switchLookAt(editor.view, line, layout);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(viewOf(editor)).toBe('simple');
+    expect(layout.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+    expect(scrollDOM.scrollTop).toBe(7);
+  });
+
+  it('looks at the line with the caret when it is on the screen, else the first line on the screen', () => {
+    const editor = load({ view: 'simple' });
+    const { view } = editor;
+    const second = view.state.doc.line(2).from;
+    view.dispatch({ selection: { anchor: second + 1 } });
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      bottom: 100,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const caretAt = (top: number) =>
+      vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 0, right: 5, top, bottom: top + 20 });
+    caretAt(40);
+    expect(lookedAtLine(view)).toBe(second);
+    // The caret below or above the screen: the line at the top of it, which the view says.
+    const first = vi.spyOn(view, 'lineBlockAtHeight').mockReturnValue({ from: 7 } as never);
+    caretAt(300);
+    expect(lookedAtLine(view)).toBe(7);
+    caretAt(-50);
+    expect(lookedAtLine(view)).toBe(7);
+    expect(first).toHaveBeenCalledTimes(2);
+  });
+
+  it('switches nothing in Clean or Raw', () => {
+    for (const view of ['clean', 'raw'] as const) {
+      const editor = load({ view });
+      switchLookAt(editor.view, 0, layout);
+      expect(viewOf(editor)).toBe(view);
+    }
   });
 
   it('moves no selection, caret or focus', () => {

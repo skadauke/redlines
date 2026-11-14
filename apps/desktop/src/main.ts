@@ -758,6 +758,7 @@ function renameDocument(): void {
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleTracking,
   openReview,
   toggleResolved,
@@ -844,6 +845,7 @@ const commands: MenuCommands = {
     }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleSidebar,
   toggleTracking,
   openReview,
