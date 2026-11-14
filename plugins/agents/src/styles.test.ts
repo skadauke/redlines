@@ -34,6 +34,17 @@ describe('the agents plugin styles', () => {
     expect(ASK_STYLE).not.toMatch(/\.rl-qa-lost[^}]*--rl-ink-3|outline:[^;]*--rl-ink-3/);
   });
 
+  it('keeps the Ask bubble’s page color where the rail lays it out, and drops only its z-index', () => {
+    const railed = /\.rl-qa\.rl-qa-railed\s*\{([^}]*)\}/.exec(ASK_STYLE)?.[1] ?? '';
+    expect(railed).toContain('z-index: auto');
+    // The notes slide aside for a moment as the bubble takes its place: they show through a bubble
+    // that has no color.
+    expect(railed).not.toMatch(/background/);
+    expect(/\.rl-qa\s*\{([^}]*)\}/.exec(ASK_STYLE)?.[1]).toContain(
+      'background-color: var(--rl-page)',
+    );
+  });
+
   it('hides the words said only to a screen reader, without taking them out of the text', () => {
     const rule = /\.rl-qa-sr\s*\{([^}]*)\}/.exec(ASK_STYLE)?.[1] ?? '';
     expect(rule).toContain('position: absolute');

@@ -13,6 +13,9 @@ const px = (n: number) => `calc(${n}px * var(--rl-note-scale, 1))`;
 /** The width of the rail's notes, which the bubble has too, at the theme's own size. */
 export const BUBBLE_WIDTH = 248;
 
+/** The class of the bubble while the rail lays it out among its notes (`AskOptions.pinToRail`). */
+export const RAILED = 'rl-qa-railed';
+
 export const ASK_STYLE = `
 .rl-qa {
   position: absolute;
@@ -29,6 +32,14 @@ export const ASK_STYLE = `
   font-size: var(--rl-size-ui-scaled);
   line-height: 1.38;
   cursor: default;
+}
+/*
+ * Laid out among the rail's notes, which make room for it, the bubble covers none and needs no
+ * z-index to be over them. It keeps its page color: the notes it pushed aside slide for a moment
+ * (180 ms), and show through a bubble that has none.
+ */
+.rl-qa.${RAILED} {
+  z-index: auto;
 }
 .rl-qa-question {
   margin: ${px(2)} 0 ${px(4)};

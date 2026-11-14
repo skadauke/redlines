@@ -728,6 +728,10 @@ const ask = createAsk(editor, {
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
+  // Where the rail shows its notes, it lays the bubble out among them, level with the selection,
+  // and the notes make room for it; elsewhere (narrow window, Clean, no comments) Ask hangs the
+  // bubble by the selection itself.
+  pinToRail: (el, anchor, lost) => review.pinToRail(el, anchor, lost),
   showLog: () => showAgentLogs(),
   openPreferences: () => openAgentPreferences(),
   // A long answer worth keeping or editing: an Untitled document in a new window. Ask keeps the
@@ -842,6 +846,7 @@ function renameDocument(): void {
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleTracking,
   openReview,
   toggleResolved,
@@ -928,6 +933,7 @@ const commands: MenuCommands = {
     }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleSidebar,
   toggleTracking,
   openReview,

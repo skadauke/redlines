@@ -45,8 +45,9 @@ const barOpen = StateField.define<boolean>({
   update(open, tr) {
     for (const effect of tr.effects) if (effect.is(setBarOpen)) open = effect.value;
     // A person who chooses to read has stopped deciding: showing the simple look closes the bar, so
-    // that it never steps through changes the page doesn't show. In the app nothing but a click on
-    // a change bar shows it, and while the bar is open that click opens a card instead.
+    // that it never steps through changes the page doesn't show. In the app a click on a change bar
+    // or the View menu's Simple Look switch shows it; while the bar is open, that click opens a
+    // card instead.
     const simple = (state: EditorState) => state.field(viewModeField) === 'simple';
     return open && simple(tr.state) && !simple(tr.startState) ? false : open;
   },
