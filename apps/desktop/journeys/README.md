@@ -20,6 +20,12 @@ A server you started yourself (`JOURNEYS_BASE_URL=http://localhost:1482`) is use
 Screenshots of a run are in `apps/desktop/journeys/test-results/**/shots/`; a failed run also has
 a trace (`pnpm --filter @redlines/journeys exec playwright show-trace <trace.zip>`).
 
+## The look review
+
+`pnpm journeys:look` collects a run's screenshots into `apps/desktop/journeys/look-review/` with an
+`INDEX.md`, for an agent or a person to check against the checklist. How a lane uses it:
+[look-review.md](look-review.md).
+
 ## Writing one
 
 ```ts

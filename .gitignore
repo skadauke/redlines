@@ -28,3 +28,5 @@ apps/desktop/quicklook/build/
 # screenshots of the run.
 apps/desktop/journeys/test-results/
 apps/desktop/journeys/playwright-report/
+# The pictures collected for a look review (apps/desktop/journeys/scripts/look-review.ts)
+apps/desktop/journeys/look-review/
