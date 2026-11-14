@@ -502,7 +502,9 @@ function edited(
   if (from === to && typed === '') return [];
   // All the text of a wrapped line goes with the line break in front of it, as it does with Track
   // Changes on (`wrappedLineStart`): the line left empty would part the paragraph (#427).
-  if (typed === '' && !half) from = wrappedLineStart(text, parsed, markers, from, to) ?? from;
+  if (typed === '' && !half) {
+    from = wrappedLineStart(text, parsed, markers, from, to, { marker: false }) ?? from;
+  }
   // A file without marks and ledger takes the edit as it is, unless the edit makes one.
   if (markers.length === 0) {
     const plain = [{ from, to, insert: typed }];

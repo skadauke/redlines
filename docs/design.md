@@ -1515,7 +1515,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
 | Command       | Parameters                           | On a Redlines document                                                                                                                       |
 | ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `view`        | `path`, `view_range`                 | Returns the newest view with numbered lines. Markers, deleted text and the ledger are not in it                                               |
-| `str_replace` | `path`, `old_str`, `new_str`         | `old_str` must match the newest view once. A rewrite is one change, a small fix stays small ([§3.11](format.md#311-changes-from-a-new-text)) |
+| `str_replace` | `path`, `old_str`, `new_str`         | `old_str` must match the newest view once. A rewrite is one change, a small fix stays small ([§3.11](format.md#311-changes-from-a-new-text)). Deleting all the text of a wrapped line takes its line break too, so that the paragraph does not part ([§3.2](format.md#32-line-starts)) |
 | `insert`      | `path`, `insert_line`, `insert_text` | Inserts after a line of the newest view. Refused if the document changed since the agent's last `view`, because line numbers may have moved    |
 | `create`      | `path`, `file_text`                  | Creates a new document. Refused for an existing one, whose edits must be tracked                                                              |
 
