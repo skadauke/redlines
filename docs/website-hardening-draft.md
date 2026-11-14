@@ -125,13 +125,12 @@ We would rather say it than have you find it.
   still writes something that reads differently from what it shows, or leaves a change that can't be
   decided. Each is an open issue, and the list is what has been found, not a count of what is there:
   - numbered lists under Backspace (#292);
-  - a prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-    changes (#358);
+  - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
+    change in the break of your own pending line break there (#419);
   - typing over one `*` of a pending bold's `**` (#299);
   - a bold change on a line that rejecting a pending deletion makes a link definition (#335), and
     typing at the end of a link reference definition (#262);
-  - deleting the last block after a setext heading (#372), and rejecting a row move with a comment in
-    the moved row (#371);
+  - rejecting a row move with a comment in the moved row (#371);
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
   - an indented numbered item or bullet under an item, which the format's checks read as a new item
