@@ -114,7 +114,7 @@ export class Journey {
    * The text as CodeMirror holds it, with LF line breaks, which is what offsets (`place`,
    * `caret`) count. It differs from `text()` only in a file with CRLF line breaks.
    */
-  private cmText(): Promise<string> {
+  cmText(): Promise<string> {
     return this.page.evaluate(() => window.__redlines!.editor.view.state.doc.toString());
   }
 
@@ -351,9 +351,9 @@ export class Journey {
  * (`defineConfig<JourneyOptions>` and `use: { scheme: 'dark', textSize: 2 }`) and `start` can
  * override. A script error in the page fails the journey.
  */
-export const test = base.extend<
-  JourneyOptions & { start: (options?: StartOptions) => Promise<Journey> }
->({
+export type Start = (options?: StartOptions) => Promise<Journey>;
+
+export const test = base.extend<JourneyOptions & { start: Start }>({
   scheme: ['light', { option: true }],
   textSize: [1, { option: true }],
   start: async ({ page, scheme, textSize }, use, testInfo) => {
@@ -370,6 +370,24 @@ export const test = base.extend<
     expect(errors, 'no script error in the page').toEqual([]);
   },
 });
+
+/**
+ * A journey that fails today because of an open issue: `known(510, 'pasting a bullet…', body)`.
+ * It is a `test.fail`, so the run is green while the bug stands, and goes red when the fix lands
+ * ("expected to fail, but passed"): then the lane that fixed it changes `known(510, …)` to
+ * `test(…)`, and the journey guards the fix. `JOURNEYS_EVIDENCE=1` runs it as an ordinary test,
+ * to show the failure: that is the evidence for the issue.
+ */
+export function known(
+  issue: number,
+  title: string,
+  body: (fixtures: { start: Start; page: Page }, info: TestInfo) => Promise<void> | void,
+): void {
+  const name = `${title} (#${issue})`;
+  const details = { annotation: { type: 'issue', description: `#${issue}` } };
+  if (process.env['JOURNEYS_EVIDENCE']) test(name, details, body);
+  else test.fail(name, details, body);
+}
 
 /** Opens the page in the state asked for, and waits until it is drawn and still. */
 async function openPage(page: Page, look: JourneyOptions, options: StartOptions): Promise<void> {
