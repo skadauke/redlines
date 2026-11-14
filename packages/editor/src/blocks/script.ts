@@ -63,10 +63,16 @@ export type KeyName =
 
 /**
  * A step of a script: a key, text typed over the selection as the keyboard types it, an agent's
- * edit (a paragraph of its own at the top of the document), or a decision on the first pending
- * change (accepted or rejected, where the format decides it).
+ * edit (a paragraph of its own at the top of the document), a decision on the first pending
+ * change (accepted or rejected, where the format decides it), or Track Changes switched on or off
+ * for this editor.
  */
-export type Step = KeyName | { type: string } | { agent: string } | { decide: 'accept' | 'reject' };
+export type Step =
+  | KeyName
+  | { type: string }
+  | { agent: string }
+  | { decide: 'accept' | 'reject' }
+  | { tracking: boolean };
 
 /** What `checkInvariants` holds every script to, by name, for a script to skip with a reason. */
 export type Invariant =
@@ -177,6 +183,8 @@ export interface ScriptResult {
   historyFailures: string[];
   /** The steps after which `getDoc` was not the document with the open block taken back. */
   fileTextFailures: string[];
+  /** Whether an empty item is open after the keys (out of the file, the caret in it). */
+  openItem: boolean;
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -405,6 +413,8 @@ function play(editor: Editor, step: Step): boolean {
       group: 'walk',
       agent: 'Claude',
     });
+  } else if ('tracking' in step) {
+    editor.setTracking(step.tracking, { inFile: false });
   } else {
     const mark = parse(editor.getDoc()).marks.find((m) => m.kind !== 'split' && m.kind !== 'cmt');
     if (mark) {
@@ -611,6 +621,7 @@ export function runScript(script: Script): ScriptResult {
       listReadFailures,
       historyFailures: [],
       fileTextFailures,
+      openItem: openBlock(editor.view.state)?.item === true,
     };
     result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
