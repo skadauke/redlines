@@ -78,8 +78,12 @@ export interface Taken {
   openBefore: OpenBlock | null;
   /** Whether it opened the empty block (there was none before it). */
   opened: boolean;
-  /** Whether its step in the history is joined to the one before it (a Return over a selection). */
-  joined: boolean;
+  /**
+   * What it did, as made, when its step in the history is joined to the one before it (a Return
+   * over a selection, or on the empty line Shift-Return opened, whose take-back it follows); null
+   * when it is a step of its own.
+   */
+  joined: ChangeSet | null;
   /** How many steps were done before it, to take the history back to (`dropStepsEffect`). */
   depth: number;
 }
@@ -403,7 +407,7 @@ export const recordField = StateField.define<readonly Taken[]>({
           opened: openBefore === null && openAfter !== null,
           // Whether the history added the Return to the step before it, which it does only for
           // an edit next to that step's: a closer between them keeps the Return a step of its own.
-          joined: doneDepth(tr.state) === doneDepth(tr.startState),
+          joined: doneDepth(tr.state) === doneDepth(tr.startState) ? tr.changes : null,
           depth: doneDepth(tr.startState),
         },
       ];
@@ -628,9 +632,9 @@ function takeBackSpec(
     effects.push(
       dropStepsEffect.of({
         // A joined Return's step is the deletion's too: that step stays, and only the Return is
-        // mapped out of it.
+        // taken out of it.
         depth: first.depth,
-        mapping: first.joined ? first.changes.desc : null,
+        joined: first.joined,
       }),
     );
     return {
