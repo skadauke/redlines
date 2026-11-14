@@ -4,8 +4,10 @@
 // plan plain edits that the tracked layer records as it records typing, and never write markers.
 //
 // ← and → are CodeMirror's: the caret steps over the atoms of `stops.ts`, so a press at a cell's
-// edge lands in the next cell's text. Everything else that depends on the cell's edges, or on the
-// cells around it, is here.
+// edge lands in the next cell's text; here they only go from one cell a row lacks to the next, which
+// stand at one place (`missing.ts`), and in and out of them. Everything else that depends on the
+// cell's edges, or on the cells around it, is here. A caret in a cell a row lacks is in an empty cell
+// at the end of its row: the keys treat it so, and write nothing until text is typed (`fill.ts`).
 
 import { EditorSelection, type EditorState, type Extension, Prec } from '@codemirror/state';
 import { type Command, EditorView, keymap } from '@codemirror/view';
@@ -16,7 +18,8 @@ import { blockAt } from '../blocks/structure.ts';
 import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
-import { type Cell, type Row, type Table } from './model.ts';
+import { type Cell, type Row, type Table, cellAt } from './model.ts';
+import { missingCaret, missingCells, missingSpec, virtualCell } from './missing.ts';
 import {
   deleteCols,
   deleteRows,
@@ -58,10 +61,25 @@ interface Here {
   head: number;
 }
 
+/** Where the caret is, when it is in a cell its row lacks. */
+function hereMissing(state: EditorState): Here | null {
+  const lacking = missingCaret(state);
+  return lacking
+    ? {
+        table: lacking.table,
+        row: lacking.row,
+        cell: lacking.cell,
+        head: state.selection.main.head,
+      }
+    : null;
+}
+
 function hereIn(state: EditorState): Here | null {
   if (state.field(viewModeField, false) === 'raw') return null;
   const { main } = state.selection;
   if (state.selection.ranges.length > 1 || !main.empty) return null;
+  const lacking = hereMissing(state);
+  if (lacking) return lacking;
   const found = shownCellAt(state, main.head);
   if (!found) return null;
   const row = found.table.rows.find((r) => r.cells.includes(found.cell));
@@ -98,12 +116,24 @@ function onEdgeLine(view: EditorView, cell: Cell, pos: number, first: boolean): 
   return mine === null || edge === null || Math.abs(mine - edge) < 2;
 }
 
-/** The cell above or below the caret's, in the same column: the last of a short row. */
+/** The cell above or below the caret's, in the same column: one its row lacks, in a short row. */
 function neighbourCell(here: Here, down: boolean): Cell | null {
   const row = here.table.rows[here.row.index + (down ? 1 : -1)];
   if (!row) return null;
   const shown = row.cells.filter((cell) => cell.col < here.table.columns);
-  return shown.find((cell) => cell.col === here.cell.col) ?? shown.at(-1) ?? null;
+  return (
+    shown.find((cell) => cell.col === here.cell.col) ??
+    missingCells(here.table, row).find((cell) => cell.col === here.cell.col) ??
+    shown.at(-1) ??
+    null
+  );
+}
+
+/** The caret in `cell` at `pos`, which for a cell its row lacks is the end of the row, in that cell. */
+function goToCell(view: EditorView, cell: Cell, pos: number): boolean {
+  if (!cell.missing) return goTo(view, pos);
+  view.dispatch(missingSpec(cell));
+  return true;
 }
 
 /**
@@ -138,7 +168,7 @@ function vertical(view: EditorView, down: boolean): boolean {
     if (moved !== here.head) return goTo(view, clamp(moved, here.cell));
   }
   const target = neighbourCell(here, down);
-  if (target) return goTo(view, placeIn(view, here, target, down));
+  if (target) return goToCell(view, target, placeIn(view, here, target, down));
   // Out of the table: to the block above or below.
   const block = blockAt(state, here.head);
   if (!block) return true;
@@ -152,12 +182,65 @@ function vertical(view: EditorView, down: boolean): boolean {
   return goTo(view, down ? outOfHidden(state, startOf(state, next), true) : endOf(state, next));
 }
 
+/**
+ * ← and →, where they are not CodeMirror's: from one cell a row lacks to the next, which stand at one
+ * place; from the end of the text of the last cell of a row that lacks some into the first of them, and
+ * back from the first cell of the row below into the last of them. Out of the last, and back out of the
+ * first, to the cells there are, they are CodeMirror's (false), and over the atoms of `stops.ts`.
+ */
+function sideways(forward: boolean): Command {
+  return (view) => {
+    const { state } = view;
+    if (state.field(viewModeField, false) === 'raw') return false;
+    const lacking = missingCaret(state);
+    if (lacking) {
+      const { table, row, cell } = lacking;
+      const col = cell.col + (forward ? 1 : -1);
+      // Past the last of them, the next row; back from the first, the last cell's text.
+      if (forward && col >= table.columns) return false;
+      if (!forward && col < row.cells.length) {
+        const last = row.cells.at(-1);
+        if (!last) return false;
+        view.dispatch({
+          selection: EditorSelection.cursor(last.textTo),
+          userEvent: 'select',
+          scrollIntoView: true,
+        });
+        return true;
+      }
+      view.dispatch(missingSpec(virtualCell(row, col)));
+      return true;
+    }
+    const { selection } = state;
+    if (selection.ranges.length > 1 || !selection.main.empty) return false;
+    const found = cellAt(state, selection.main.head);
+    if (!found) return false;
+    const { table, row } = found;
+    const { head } = selection.main;
+    if (forward) {
+      const last = row.cells.at(-1);
+      if (row.header || !last || row.cells.length >= table.columns || head !== last.textTo) {
+        return false;
+      }
+      view.dispatch(missingSpec(virtualCell(row, row.cells.length)));
+      return true;
+    }
+    const first = row.cells[0];
+    const above = table.rows[row.index - 1];
+    if (!first || head !== first.textFrom || !above || above.header) return false;
+    if (above.cells.length >= table.columns) return false;
+    view.dispatch(missingSpec(virtualCell(above, table.columns - 1)));
+    return true;
+  };
+}
+
 /** ⌥← and ⌥→: by word inside the cell; at its edge, as ← and → go, to the next cell. */
 function byWord(view: EditorView, forward: boolean): boolean {
   const here = hereIn(view.state);
   if (!here) return false;
   const { main } = view.state.selection;
   const atEdge = forward ? here.head >= here.cell.textTo : here.head <= here.cell.textFrom;
+  if (atEdge && sideways(forward)(view)) return true;
   const to = atEdge ? view.moveByChar(main, forward) : view.moveByGroup(main, forward);
   return goTo(view, atEdge ? to.head : clamp(to.head, here.cell));
 }
@@ -203,6 +286,8 @@ function cellParagraph(forward: boolean, extend: boolean): Command {
  * out of a cell is for `reach.ts`. */
 function cellOfSelection(state: EditorState): Here | null {
   if (state.field(viewModeField, false) === 'raw' || state.selection.ranges.length > 1) return null;
+  const lacking = hereMissing(state);
+  if (lacking) return lacking;
   const { from, to } = state.selection.main;
   const a = shownCellAt(state, from);
   const b = shownCellAt(state, to);
@@ -248,20 +333,29 @@ function remove(view: EditorView, span: Span, forward: boolean): boolean {
   return true;
 }
 
+/** The cells of a row as the caret walks them: those GFM shows, then those the row lacks. */
+function walked(table: Table, row: Row): Cell[] {
+  return [...row.cells.filter((cell) => cell.col < table.columns), ...missingCells(table, row)];
+}
+
 /** The cell after (before) the caret's in reading order, or null at the table's end (start). */
 function nextCell(here: Here, forward: boolean): Cell | null {
-  const shown = (row: Row) => row.cells.filter((cell) => cell.col < here.table.columns);
-  const mine = shown(here.row);
-  const beside = mine[mine.indexOf(here.cell) + (forward ? 1 : -1)];
+  const mine = walked(here.table, here.row);
+  const at = mine.findIndex((cell) => cell.col === here.cell.col);
+  const beside = at === -1 ? undefined : mine[at + (forward ? 1 : -1)];
   if (beside) return beside;
   const row = here.table.rows[here.row.index + (forward ? 1 : -1)];
   if (!row) return null;
-  const cells = shown(row);
+  const cells = walked(here.table, row);
   return (forward ? cells[0] : cells.at(-1)) ?? null;
 }
 
-/** Selects a cell's text (an empty cell gets the caret). */
+/** Selects a cell's text (an empty cell gets the caret, and so does one its row lacks). */
 function selectCell(view: EditorView, cell: Cell): boolean {
+  if (cell.missing) {
+    view.dispatch(missingSpec(cell));
+    return true;
+  }
   const selection = visibleSelection(
     view.state,
     EditorSelection.single(cell.textFrom, cell.textTo),
@@ -273,6 +367,8 @@ function selectCell(view: EditorView, cell: Cell): boolean {
 /** The cell that holds the head of the selection, with one selection in a view that draws tables. */
 function cellOfHead(state: EditorState): Here | null {
   if (state.field(viewModeField, false) === 'raw' || state.selection.ranges.length > 1) return null;
+  const lacking = hereMissing(state);
+  if (lacking) return lacking;
   const { head } = state.selection.main;
   const found = shownCellAt(state, head);
   const row = found && found.table.rows.find((r) => r.cells.includes(found.cell));
@@ -389,6 +485,16 @@ const lineBreak: Command = (view) => {
   const here = cellOfSelection(view.state);
   if (!here) return false;
   const { from, to } = view.state.selection.main;
+  // In a cell its row lacks, the break is the text typed there: its pipes are written first.
+  if (here.cell.missing) {
+    view.dispatch({
+      changes: { from, to, insert: '<br>' },
+      selection: EditorSelection.cursor(from + 4),
+      userEvent: 'input.break.line',
+      scrollIntoView: true,
+    });
+    return true;
+  }
   return applyKeyEdit(view, {
     changes: [{ from, to, insert: '<br>' }],
     selection: EditorSelection.single(from + 4),
@@ -540,6 +646,8 @@ export function tableKeymap(): Extension {
     cellBreaks,
     Prec.highest(
       keymap.of([
+        { key: 'ArrowLeft', run: sideways(false) },
+        { key: 'ArrowRight', run: sideways(true) },
         { key: 'ArrowUp', run: key('ArrowUp') },
         { key: 'ArrowDown', run: key('ArrowDown') },
         { key: 'Home', run: key('Home') },

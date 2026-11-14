@@ -68,10 +68,15 @@ describe('a table laid out as a table', () => {
       // The text outside the table is outside the wrapper.
       expect(wrapper?.textContent).not.toContain('Intro.');
       expect(wrapper?.textContent).not.toContain('After.');
-      // Nothing but a cell is a child of a row, and the cells hold the row's whole text.
+      // Nothing but a cell is a child of a row (CodeMirror's own buffers beside a widget, and its line-end
+      // break, aside: the theme hides them in a row with cells of its own), and the cells hold the
+      // row's whole text.
       for (const row of rows(wrapper!)) {
-        expect([...row.children].every((child) => child.classList.contains('rl-tc'))).toBe(true);
-        expect(row.textContent).toBe([...row.children].map((c) => c.textContent).join(''));
+        const children = [...row.children].filter(
+          (c) => !c.classList.contains('cm-widgetBuffer') && c.tagName !== 'BR',
+        );
+        expect(children.every((child) => child.classList.contains('rl-tc'))).toBe(true);
+        expect(row.textContent).toBe(children.map((c) => c.textContent).join(''));
       }
       // Every character of each row is in exactly one cell: the cells' ranges tile the row.
       const { cells } = layoutOf(editor.view.state);

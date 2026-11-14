@@ -65,6 +65,7 @@ import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
+import { tableFill } from './table/fill.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
@@ -220,6 +221,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableLayout(),
     tableGhosts(),
     tableStops(),
+    // After the stops, whose guard it runs ahead of.
+    tableFill(),
     tableMouse(),
     tableReach(),
     tableWidths(),

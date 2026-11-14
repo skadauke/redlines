@@ -23,6 +23,9 @@ export interface Cell {
   textTo: number;
   /** The cell's index in its row. */
   col: number;
+  /** A cell the row lacks (`missing.ts`): GFM reads it as blank, and it has no text of the document, so
+   * its ends are all one place, the end of the row. */
+  missing?: true;
 }
 
 export interface Row {

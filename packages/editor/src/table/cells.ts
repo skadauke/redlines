@@ -21,6 +21,7 @@ import { pastHidden } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
+import { missingCaret } from './missing.ts';
 
 /** A cell of a table by its row (0 the header) and column. */
 export interface CellRef {
@@ -60,7 +61,14 @@ function textCellAt(
 /** The cell the head of the selection is in, with its table and row, or null outside a table. */
 export function headCell(state: EditorState): { table: Table; row: Row; cell: Cell } | null {
   if (state.field(viewModeField, false) === 'raw') return null;
-  return textCellAt(state, state.selection.main.head);
+  return caretCell(state) ?? textCellAt(state, state.selection.main.head);
+}
+
+/** The cell its row lacks that the caret is in, as a cell found: it has no text, and no range of its own
+ * (`missing.ts`). Null where the caret is in no such cell. */
+function caretCell(state: EditorState): { table: Table; row: Row; cell: Cell } | null {
+  const lacking = missingCaret(state);
+  return lacking ? { table: lacking.table, row: lacking.row, cell: lacking.cell } : null;
 }
 
 /**
@@ -128,8 +136,11 @@ export function cellIsEmpty(state: EditorState, cell: Cell): boolean {
 /** What a rectangle is, when it reaches the table's edges: whole rows, whole columns, the table. */
 export function whole(rect: Rect): 'row' | 'column' | 'table' | null {
   const { table } = rect;
-  const last = table.rows.length - 1;
-  const tall = rect.rows[0] === 0 && rect.rows[1] === last;
+  // Tall: from the header down to the last row that has a cell in the columns (a row that lacks them
+  // has no cell there to select), as a row is wide to its last cell.
+  const tall =
+    rect.rows[0] === 0 &&
+    table.rows.slice(rect.rows[1] + 1).every((row) => shown(table, row).length <= rect.cols[0]);
   // Wide: from the first column to the last cell of every row it covers (a short row ends early).
   const wide =
     rect.cols[0] === 0 &&
@@ -150,12 +161,39 @@ export function cellOfRef(table: Table, ref: CellRef): Cell | null {
   return cells.find((cell) => cell.col === ref.col) ?? cells.at(-1) ?? null;
 }
 
-/** The selection of a rectangle from one cell's text to another's. */
+/** The cell of a table at a row and column, when the row has it. */
+function cellAtRef(table: Table, row: number, col: number): Cell | undefined {
+  return table.rows[row]?.cells.find((cell) => cell.col === col && cell.col < table.columns);
+}
+
+/**
+ * The selection of a rectangle from one cell's text to another's. The ends are cells there are: where
+ * a corner is a cell its row lacks, the rectangle's other two corners are tried (a whole table whose
+ * last row is short), and a column that the last rows lack ends at the last row that has it. Only a
+ * rectangle with no such ends falls back to the last cell of a short row, which is a row's, and a row
+ * selected is that row's cells.
+ */
 export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorSelection | null {
-  const a = cellOfRef(table, from);
-  const b = cellOfRef(table, to);
-  if (!a || !b) return null;
-  return EditorSelection.single(a.textFrom, b.textTo);
+  const a = cellAtRef(table, from.row, from.col);
+  const b = cellAtRef(table, to.row, to.col);
+  if (a && b) return EditorSelection.single(a.textFrom, b.textTo);
+  const top = Math.min(from.row, to.row);
+  const bottom = Math.max(from.row, to.row);
+  const left = Math.min(from.col, to.col);
+  const right = Math.max(from.col, to.col);
+  const c = cellAtRef(table, top, right);
+  const d = cellAtRef(table, bottom, left);
+  if (c && d) return EditorSelection.single(c.textFrom, d.textTo);
+  if (left === right) {
+    const start = cellAtRef(table, top, left);
+    for (let row = bottom; row > top && start; row--) {
+      const end = cellAtRef(table, row, left);
+      if (end) return EditorSelection.single(start.textFrom, end.textTo);
+    }
+  }
+  const x = cellOfRef(table, from);
+  const y = cellOfRef(table, to);
+  return x && y ? EditorSelection.single(x.textFrom, y.textTo) : null;
 }
 
 /** The comment a rectangle makes: on the selected cells' text in one row, on the whole rows across
@@ -189,7 +227,8 @@ export function selectRect(view: EditorView, scope: Scope): boolean {
   const { state } = view;
   if (state.field(viewModeField, false) === 'raw') return false;
   const { head } = state.selection.main;
-  const found = textCellAt(state, head) ?? textCellAt(state, state.selection.main.anchor);
+  const found =
+    caretCell(state) ?? textCellAt(state, head) ?? textCellAt(state, state.selection.main.anchor);
   if (!found) return false;
   const { table, row, cell } = found;
   let selection: EditorSelection | null;

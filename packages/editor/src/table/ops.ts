@@ -27,8 +27,13 @@ import {
 } from '../tracked/typing.ts';
 import type { Align, Row, Table } from './model.ts';
 import { rectOf, rectSelection } from './cells.ts';
+import { missingCaret } from './missing.ts';
 import { shownCellAt } from './stops.ts';
 import { tablesField } from './model.ts';
+
+/** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
+export type Planned =
+  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string };
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
 export function planned(
@@ -37,9 +42,17 @@ export function planned(
   group?: string,
   /** The text to work on, when it is not the state's (a paste that does several things in a row). */
   onText?: string,
-):
-  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string } {
-  const { state } = view;
+): Planned {
+  return plannedIn(view.state, op, group, onText);
+}
+
+/** `planned` for a state, where there is no view (a transaction filter's). */
+export function plannedIn(
+  state: EditorState,
+  op: TableOp,
+  group?: string,
+  onText?: string,
+): Planned {
   const text = onText ?? state.doc.toString();
   try {
     if (state.field(trackingField))
@@ -286,6 +299,18 @@ export function touchedCols(state: EditorState): {
       row: rect.head.row,
     };
   }
+  // A caret in a cell its row lacks is in the column it was put in.
+  const lacking = missingCaret(state);
+  if (lacking) {
+    const { col } = lacking.cell;
+    return {
+      table: lacking.table,
+      first: col,
+      last: col,
+      rectangle: false,
+      row: lacking.row.index,
+    };
+  }
   const found = shownCellAt(state, state.selection.main.head);
   const row = found?.table.rows.find((r) => r.cells.includes(found.cell));
   return found && row
@@ -447,8 +472,8 @@ export function moveCols(view: EditorView, left: boolean): boolean {
 export function caretAlign(state: EditorState): Align | null {
   const touched = touchedCols(state);
   if (!touched) return null;
-  const found = shownCellAt(state, state.selection.main.head);
-  const col = found?.cell.col ?? touched.first;
+  const found = missingCaret(state)?.cell ?? shownCellAt(state, state.selection.main.head)?.cell;
+  const col = found?.col ?? touched.first;
   return touched.table.aligns[col] ?? null;
 }
 

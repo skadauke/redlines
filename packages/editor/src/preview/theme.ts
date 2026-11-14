@@ -256,6 +256,28 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc[data-align="right"]': { textAlign: 'right' },
   // A cell that is empty has a filler for the caret to stand on, which takes no room.
   '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
+  // The cells a row lacks (`table/missing.ts`) stand at the end of the row, where the page's own caret
+  // can't say which of them it is in: the one the caret is in draws it, and the line's own is hidden.
+  // (The last cell of a row has no padding on its right, and the break CodeMirror ends a line with, hidden
+  // below, would be the last child.)
+  '.rl-tc-missing:last-of-type': { paddingRight: '0' },
+  '.rl-tc-active > .rl-tc-fill': { position: 'relative', overflow: 'visible' },
+  '.rl-tc-active > .rl-tc-fill::after': {
+    content: '""',
+    position: 'absolute',
+    left: '0',
+    top: '0.12em',
+    bottom: '0.12em',
+    borderLeft: '1px solid var(--rl-caret, var(--rl-author-1))',
+  },
+  '.cm-line:has(> .rl-tc-active)': { caretColor: 'transparent' },
+  // CodeMirror's buffers beside a widget and its line-end break are inline boxes in the row, each of
+  // which a table row wraps in a cell of its own: between the cells of a row that lacks some they would
+  // push the cells after them a column along. They are not needed there, for the caret is never beside
+  // a widget of the row (found in a browser, measuring the cells of a row).
+  '.rl-trow:has(> .rl-tc-missing) > .cm-widgetBuffer, .rl-trow:has(> .rl-tc-missing) > br': {
+    display: 'none',
+  },
   // The cells a selection reaches (`table/reach.ts`): the system's selection color, over the whole
   // cell; the text highlight stays for what lies outside the table.
   // The cell is painted, not the mark: a block mark inside a cell, between the widget buffers
