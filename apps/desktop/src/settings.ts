@@ -9,10 +9,14 @@ import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
-import { LADDER } from './text-size.ts';
+import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
 
-/** How much of the surroundings an agent may read (design, Scope). */
-export type AgentScope = 'folder' | 'document';
+/**
+ * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
+ * folder and the home folder, which the plugin API calls `everything` (Preferences › Agents says
+ * "This folder and my home folder").
+ */
+export type AgentScope = 'document' | 'folder' | 'everything';
 
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;
@@ -26,9 +30,11 @@ export interface Settings {
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
-   * The markup view chosen last, Simple or Redlines, which a window shows wherever it picks one
-   * for the person (design: Which markup view, when). Every window follows it for the documents it
-   * opens next and for its own switches, and none changes the view it shows for it.
+   * The look of Redlines chosen last with a click on a change bar, the full markup or Simple (the
+   * simple look), which a window shows wherever it picks Redlines for the person, and when the
+   * View menu shows Redlines (design: Which look, when). A document opens in Redlines' simple look
+   * when this is `'simple'`. Every window follows it for the documents it opens next and for its
+   * own switches, and none changes the view it shows for it.
    */
   markupView: MarkupView;
   /**
@@ -49,7 +55,7 @@ export interface Settings {
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   /**
-   * The zoom of every window (zoom.ts), a rung of the ladder (text-size.ts). The app keeps the
+   * The zoom of every window (zoom.ts), a rung of the window zoom's ladder (`ZOOM_LADDER`, text-size.ts). The app keeps the
    * level in its own file and sets it on every window; this is the copy each window asks from.
    */
   zoom: number;
@@ -62,6 +68,8 @@ export interface Settings {
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
+  /** Whether the word count shows in the window's lower right corner (design §5.1). */
+  showWordCount: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -100,6 +108,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   closePairs: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
+  showWordCount: true,
   agentScope: 'folder',
   consent: {},
   people: [],
@@ -118,7 +127,13 @@ export function loadSettings(): Settings {
   }
   const value = (stored ?? {}) as Record<string, unknown>;
   const flag = (
-    key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates' | 'showLineBreakMarks',
+    key:
+      | 'sidebarOpen'
+      | 'showResolved'
+      | 'rotateIcon'
+      | 'checkForUpdates'
+      | 'showLineBreakMarks'
+      | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -146,7 +161,10 @@ export function loadSettings(): Settings {
     closePairs: typing('closePairs'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
-    agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
+    showWordCount: flag('showWordCount'),
+    agentScope: isAgentScope(value['agentScope'])
+      ? value['agentScope']
+      : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
     newDocumentFolder:
@@ -204,7 +222,7 @@ function consentOf(value: unknown): Settings['consent'] {
   const consent: Settings['consent'] = {};
   if (typeof value !== 'object' || value === null) return consent;
   for (const [key, answer] of Object.entries(value as Record<string, unknown>)) {
-    if (answer === 'folder' || answer === 'document' || answer === 'no') consent[key] = answer;
+    if (isAgentScope(answer) || answer === 'no') consent[key] = answer;
   }
   return consent;
 }
@@ -321,20 +339,26 @@ function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
 }
 
+function isAgentScope(value: unknown): value is AgentScope {
+  return value === 'document' || value === 'folder' || value === 'everything';
+}
+
 function isAppearanceChoice(value: unknown): value is AppearanceChoice {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-/** A text size: any whole percent from 80 to 200, where a pinch may leave it (text-size.ts). */
+/** A text size: any whole percent from 80 to 400, where a pinch may leave it (text-size.ts). */
 function isTextSize(value: unknown): value is number {
   if (typeof value !== 'number') return false;
   const percent = value * 100;
   return (
-    percent >= 80 - 1e-9 && percent <= 200 + 1e-9 && Math.abs(percent - Math.round(percent)) < 1e-9
+    percent >= TEXT_LEAST * 100 - 1e-9 &&
+    percent <= TEXT_MOST * 100 + 1e-9 &&
+    Math.abs(percent - Math.round(percent)) < 1e-9
   );
 }
 
-/** A rung of the ladder (text-size.ts): the zoom is always one. */
+/** A rung of the window zoom's ladder (text-size.ts): the zoom is always one. */
 function isRung(value: unknown): value is number {
-  return typeof value === 'number' && LADDER.includes(value);
+  return typeof value === 'number' && ZOOM_LADDER.includes(value);
 }

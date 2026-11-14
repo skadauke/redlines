@@ -13,7 +13,7 @@ import {
   randomDocument,
   seeded,
 } from '../../../format/src/random-docs.ts';
-import { type Invariant, invariantProblems, runScript, type Step } from './script.ts';
+import { type Invariant, invariantProblems, runScript, settle, type Step } from './script.ts';
 
 const KEYS: Step[] = [
   'Enter',
@@ -127,9 +127,11 @@ const ADJACENT = fuzzCount(12);
 const STEPS = 5;
 
 /** Plays the walks of seeds 1 to `count`, over `adjacent` documents or the usual ones. */
-function walk(count: number, adjacent: boolean, stage2 = false): void {
+async function walk(count: number, adjacent: boolean, stage2 = false): Promise<void> {
   const failures: string[] = [];
   for (let seed = 1; seed <= count; seed++) {
+    // See `settle`: the editors of the seeds before are released only as the loop turns.
+    await settle();
     const random = seeded(seed);
     const below = (n: number) => Math.floor(random() * n);
     const doc = adjacent
@@ -181,24 +183,24 @@ function walk(count: number, adjacent: boolean, stage2 = false): void {
 
 it(
   `holds every invariant over ${WALKS} random walks of ${STEPS} keys`,
-  () => walk(WALKS, false),
+  async () => walk(WALKS, false),
   600_000,
 );
 
 it(
   `holds every invariant over ${ADJACENT} walks over lists side by side`,
-  () => walk(ADJACENT, true),
+  async () => walk(ADJACENT, true),
   600_000,
 );
 
 it(
   `holds every invariant over ${WALKS} walks of Tab and ⌥↑ ⌥↓ with the list keys`,
-  () => walk(WALKS, false, true),
+  async () => walk(WALKS, false, true),
   600_000,
 );
 
 it(
   `holds every invariant over ${ADJACENT} walks of Tab and ⌥↑ ⌥↓ over lists side by side`,
-  () => walk(ADJACENT, true, true),
+  async () => walk(ADJACENT, true, true),
   600_000,
 );

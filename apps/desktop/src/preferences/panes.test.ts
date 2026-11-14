@@ -110,6 +110,7 @@ describe('the panes', () => {
       'Close brackets and Markdown pairs',
       'Track Changes on for new documents',
       'Show line break marks (¶)',
+      'Show word count',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
   });
@@ -139,6 +140,14 @@ describe('the panes', () => {
     marks.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenLastCalledWith({ showLineBreakMarks: true });
     expect(now().showLineBreakMarks).toBe(true);
+
+    // The word count in the corner starts shown, and hides at once.
+    const count = control<HTMLInputElement>(container, 'Show word count', 'input');
+    expect(count.checked).toBe(true);
+    count.checked = false;
+    count.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ showWordCount: false });
+    expect(now().showWordCount).toBe(false);
   });
 
   it('starts each control at the stored setting', () => {
@@ -286,9 +295,13 @@ describe('the panes', () => {
     for (let i = 0; i < 10; i++) smaller?.click();
     expect(now().textSize).toBe(0.8);
     expect(smaller?.disabled).toBe(true);
-    for (let i = 0; i < 10; i++) larger?.click();
-    expect(now().textSize).toBe(2);
+    // Past the window zoom's 200%, to 400%: the text goes twice as far.
+    for (let i = 0; i < 20; i++) larger?.click();
+    expect(now().textSize).toBe(4);
+    expect(shown()).toBe('400%');
     expect(larger?.disabled).toBe(true);
+    smaller?.click();
+    expect(now().textSize).toBe(3);
   });
 
   it('shows a text size between rungs and steps from it to the next rung', () => {

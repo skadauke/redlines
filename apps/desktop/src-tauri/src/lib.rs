@@ -437,6 +437,12 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_logs_open,
             #[cfg(unix)]
+            agents::agent_home_reach,
+            #[cfg(unix)]
+            agents::agent_home_access,
+            #[cfg(unix)]
+            agents::open_files_and_folders_settings,
+            #[cfg(unix)]
             agents::agent_update,
             #[cfg(unix)]
             agents::agent_sign_in,
@@ -444,6 +450,10 @@ pub fn run() {
             agents::agent_setup_stop,
             #[cfg(unix)]
             agents::agent_terminal_sign_in,
+            #[cfg(unix)]
+            agents::skill_status,
+            #[cfg(unix)]
+            agents::skill_install,
             #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]

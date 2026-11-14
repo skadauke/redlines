@@ -3,8 +3,11 @@
 
 /** The two demos; the bundle holds their documents. */
 export type DemoName = 'plan' | 'design';
-/** The editor's views, as `ViewMode` has them (a type test in the embed holds them equal). */
-export type DemoView = 'clean' | 'simple' | 'redlines' | 'raw';
+/**
+ * The views a View menu lists, as `MenuView` has them (a type test in the embed holds them equal).
+ * Simple is no view of its own: it is Redlines' simple look, switched by a click on a change bar.
+ */
+export type DemoView = 'clean' | 'redlines' | 'raw';
 
 export interface DemoOptions {
   demo: DemoName;

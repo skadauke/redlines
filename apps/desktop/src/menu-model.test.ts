@@ -188,11 +188,11 @@ describe('the menu model', () => {
       ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
+    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
-      ['Simple', 'Alt+CmdOrCtrl+2'],
-      ['Redlines', 'Alt+CmdOrCtrl+3'],
-      ['Raw', 'Alt+CmdOrCtrl+4'],
+      ['Redlines', 'Alt+CmdOrCtrl+2'],
+      ['Raw', 'Alt+CmdOrCtrl+3'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -253,7 +253,11 @@ describe('the menu model', () => {
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
     click('View', 'Raw');
-    expect(c.setView).toHaveBeenCalledWith('raw');
+    expect(c.setView).toHaveBeenLastCalledWith('raw');
+    // Redlines, which the editor shows in the look last chosen with a click on a change bar.
+    click('View', 'Redlines');
+    expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledTimes(2);
     click('View', 'Larger Text');
     expect(c.biggerText).toHaveBeenCalledOnce();
     click('View', 'Smaller Text');
@@ -292,11 +296,10 @@ describe('the menu model', () => {
     const model = appMenuModel(commands(), registryOf());
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
+    // The simple look is Redlines too: the check stays on the one item.
+    expect(redlines.checked?.(state({ view: 'simple' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
-    const simple = actionRow(model, 'View', 'Simple');
-    expect(simple.checked?.(state({ view: 'simple' }))).toBe(true);
-    expect(simple.checked?.(state({ view: 'redlines' }))).toBe(false);
-    expect(simple.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
+    expect(redlines.checked?.(state({ view: 'clean' }))).toBe(false);
     // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
     expect(redlines.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
 
@@ -329,7 +332,9 @@ describe('the menu model', () => {
     expect(enabledAt('Zoom Out', { zoom: 0.8 })).toBe(false);
     expect(enabledAt('Zoom Out', { zoom: 0.9 })).toBe(true);
     expect(enabledAt('Actual Text Size', { textSize: 1 })).toBe(false);
-    expect(enabledAt('Larger Text', { textSize: 2 })).toBe(false);
+    expect(enabledAt('Larger Text', { textSize: 4 })).toBe(false);
+    // Past 200%, where the window zoom stops: the text goes on to 400%.
+    for (const size of [2, 2.5, 3]) expect(enabledAt('Larger Text', { textSize: size })).toBe(true);
     expect(enabledAt('Smaller Text', { textSize: 0.8 })).toBe(false);
     for (const text of ['Actual Text Size', 'Larger Text', 'Smaller Text']) {
       expect(enabledAt(text, { textSize: 1.37 }), text).toBe(true);

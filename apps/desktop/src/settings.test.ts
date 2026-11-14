@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { meetPeople } from '@redlines/editor';
+import { createEditor, meetPeople, menuViewOf } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
@@ -66,6 +66,7 @@ describe('settings', () => {
       closePairs: true,
       trackNewDocuments: false,
       showLineBreakMarks: false,
+      showWordCount: true,
       agentScope: 'folder',
       consent: {},
       people: [],
@@ -92,6 +93,7 @@ describe('settings', () => {
       closePairs: false,
       trackNewDocuments: true,
       showLineBreakMarks: true,
+      showWordCount: false,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [
@@ -109,6 +111,23 @@ describe('settings', () => {
     });
     expect(SETTINGS_KEY).toBe('redlines.settings');
     expect(loadSettings()).toEqual(changed);
+  });
+
+  it('opens a document with redlines in Redlines’ simple look when the saved look is Simple', () => {
+    // Stored by a build that listed Simple in the View menu: the value stays what it was.
+    localStorage.setItem(SETTINGS_KEY, '{"markupView":"simple"}');
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: 'We ship in <!--ins b2b2-->April<!--/b2b2-->.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      markupView: loadSettings().markupView,
+    });
+    // The simple look is the Redlines view as the View menu lists it.
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+    expect(menuViewOf(editor.getUiState().view)).toBe('redlines');
+    editor.destroy();
+    parent.remove();
   });
 
   it('keeps the markup view like the other settings, reaching the other windows but setting no view', () => {
@@ -273,12 +292,21 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
-  it('keeps a text size of any whole percent from 80 to 200, and takes the default for any other', () => {
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
-    expect(loadSettings().textSize).toBe(1.5);
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.37}');
-    expect(loadSettings().textSize).toBe(1.37);
-    for (const stored of ['"1.5"', '3', '0', 'null', '1.375', '0.79', '2.01']) {
+  it('shows the word count unless the person hides it, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().showWordCount).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showWordCount: false });
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":true}');
+    expect(loadSettings().showWordCount).toBe(true);
+  });
+
+  it('keeps a text size of any whole percent from 80 to 400, and takes the default for any other', () => {
+    for (const kept of [1.5, 1.37, 2.01, 2.5, 3, 4]) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${kept}}`);
+      expect(loadSettings().textSize).toBe(kept);
+    }
+    for (const stored of ['"1.5"', '4.01', '5', '0', 'null', '1.375', '0.79', '3.999']) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
     }
@@ -306,7 +334,7 @@ describe('settings', () => {
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
     localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
     expect(loadSettings().zoom).toBe(1.25);
-    for (const stored of ['"1.25"', '1.3', '3', '0', 'null']) {
+    for (const stored of ['"1.25"', '1.3', '2.5', '3', '4', '0', 'null']) {
       localStorage.setItem(SETTINGS_KEY, `{"zoom":${stored}}`);
       expect(loadSettings().zoom).toBe(1);
     }
@@ -359,7 +387,8 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
-        agentScope: 'everything',
+        showWordCount: 'no',
+        agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
     );
@@ -376,6 +405,33 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
       expect(loadSettings().identity).toBeNull();
     }
+  });
+
+  it('keeps the three scopes an agent may read, and the answers that name them', () => {
+    for (const agentScope of ['document', 'folder', 'everything']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ agentScope }));
+      expect(loadSettings().agentScope).toBe(agentScope);
+    }
+    // The default stays This folder, for a setting that is missing or not a scope.
+    localStorage.setItem(SETTINGS_KEY, '{}');
+    expect(loadSettings().agentScope).toBe('folder');
+    expect(DEFAULT_SETTINGS.agentScope).toBe('folder');
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        consent: {
+          'claude|/notes': 'everything',
+          'codex|/notes': 'document',
+          'claude|/a': 'no',
+          'codex|/b': 'machine',
+        },
+      }),
+    );
+    expect(loadSettings().consent).toEqual({
+      'claude|/notes': 'everything',
+      'codex|/notes': 'document',
+      'claude|/a': 'no',
+    });
   });
 
   it('keeps what other windows saved when one setting changes', () => {
