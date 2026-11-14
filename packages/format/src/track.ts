@@ -55,6 +55,7 @@ import {
   openerRange,
   prefixLength,
   scaffold,
+  underlineOfBreak,
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
@@ -1283,6 +1284,11 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   if (!starts || !ends) return undefined;
   const first = lead === '' ? start : line;
   const newlines = (a: number, b: number) => text.slice(a, b).split('\n').length - 1;
+  // The break in front of the deleted blocks holds the underline of a setext heading above them
+  // (`breakLength`), which is the heading's own: no marker may stand behind it, and a deletion that
+  // took it would leave the heading's text a paragraph. That break stays, and does not go with the
+  // blocks, as no break does in front of the first block of the body.
+  const underlined = before !== undefined && underlineOfBreak(text, before.start) !== undefined;
   if (firstAfter) {
     // The blank lines that follow the first break are part of it: the block starts after them.
     let after = firstAfter;
@@ -1305,13 +1311,14 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
     // start of the body are no break between blocks: the break after the deleted ones goes.
     const keepsAfter =
       before &&
+      !underlined &&
       visibleText(text, markers, plan.bodyStart, before.start).trim() !== '' &&
       newlines(before.start, lineStart(text, before.end)) < newlines(firstAfter.start, next);
     if (keepsAfter) return { from: before.start, to: Math.max(firstAfter.start, start) };
     if (sibling) return { from: start, to: after.end };
     return lead === '' ? { from: first, to: next } : { from: first, to: next, at: start };
   }
-  if (before) return { from: before.start, to };
+  if (before && !underlined) return { from: before.start, to };
   return lead === '' ? { from: first, to } : { from: first, to, at: start };
 }
 

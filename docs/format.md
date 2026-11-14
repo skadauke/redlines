@@ -1444,6 +1444,19 @@ item's, because a marker can't stand between two items:
 break that goes is the one after the blocks, or the one before them when that is the stronger of
 the two, so that the last item of a list and the paragraph after it stay a list and a paragraph.
 
+**Under a setext heading,** the break in front of the deleted blocks does not go, for it holds the
+heading's underline (below), and the underline is the heading's own: no marker may stand behind it
+(§3.1), and a payload that held it would leave the heading's text a paragraph, in the file and once
+the deletion is accepted (#372). The last blocks of a text under a setext heading are deleted
+without the break in front of them, as the only block of a text is: the opener stands where the
+first of them was, alone on its line, the payload is the blocks alone and the blank line above
+stays (`Title⏎===⏎⏎<!--del k3x9 Last.-->`). The newest view reads the heading and a blank line
+after it, accepting leaves the heading, and rejecting gives every byte back. Where blocks follow
+the deleted ones, the break after them goes with them, even where it is the stronger of the two,
+and the break in front of them stays. Right under the underline, with no blank line
+(`Title⏎===⏎Last.`), the line above the block takes no change, and the deletion is refused, as
+under a rule or a code fence.
+
 **Whole-block insertion** puts the opener on its own line before the first new block (§3.3) and
 the closer at the end of the last one. Every inserted break inside it is a `split` with the
 insertion's id; the opener never implies a break. Otherwise a block whose remaining text is all
