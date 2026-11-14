@@ -135,12 +135,18 @@ own. The file's header says how: the same file runs in a checkout whose keys are
 with `REDLINES_COST=record`, which prints the numbers; on today's main it would measure the block
 keys against themselves, and the file's imports are newer than that commit, so recording them again
 means carrying the file back to a build like it. A key may take at most twice what that build's
-took. `hidden.test.ts` holds the hidden lines' pass to a linear cost, and
+took. `hidden.test.ts` holds the hidden lines' pass to a linear cost (4,000 lines of markers may
+take at most eight times what 1,000 take: linear is four, quadratic sixteen), and
 `preview/long-document.test.ts` holds the drawing, and a keystroke, in long documents with deleted
 blocks and tables to bounds that are a multiple of the markdown parse of the document alone.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
-busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
-which CI's check job sets.
+busy machine fails a bound only when it keeps failing. Where a timing and its yardstick are both
+cheap to repeat (a key in code and the document's parse; the hidden lines' pass at two sizes), the
+two take turns and each is held to its fastest run, so that a runner slowed for a few seconds slows
+both alike. And a bound is a multiple of the yardstick with no milliseconds of its own: a fixed
+allowance doesn't follow a runner that is three times slower than a Mac, and a key in code held to
+twice the parse plus two milliseconds stood at 0.86 of that on CI. These run only with
+`REDLINES_COST=check`, which CI's check job sets.
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
