@@ -37,7 +37,14 @@ import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { cellEscapes } from './escape.ts';
 import { type Dirty, type DirtyTable, dirtyOf, type Span } from './dirty.ts';
-import { type Cell, type Row, type Table, cellAt, endsAtPipe, tablesField } from './model.ts';
+import {
+  type Cell,
+  type Row,
+  type Table,
+  cellAt,
+  endsBeforeNextCell,
+  tablesField,
+} from './model.ts';
 import { isMissingStop, missingField } from './missing.ts';
 
 export const TEXT_IN_CELLS = "A table's text goes in its cells.";
@@ -224,9 +231,9 @@ export function isStop(state: EditorState, pos: number): boolean {
 
 /**
  * The nearest stop to `pos`, and whether it is the end of its cell's own mark with a cell after it in the
- * row: the stop of an empty cell with one space of padding or none, or the end of text with none after it
- * (`holds` in `model.ts`). That place is also where the next cell's mark starts, and the page draws a caret
- * on the side after its position by default, which there is in the next cell.
+ * row (`endsBeforeNextCell`): the stop of an empty cell with one space of padding or none, or the end of
+ * text with none after it (`holds` in `model.ts`). That place is also where the next cell's mark starts,
+ * and the page draws a caret on the side after its position by default, which there is in the next cell.
  */
 function stopNear(state: EditorState, pos: number, caret: boolean): { pos: number; ends: boolean } {
   const looked = cellAt(state, pos);
@@ -237,8 +244,7 @@ function stopNear(state: EditorState, pos: number, caret: boolean): { pos: numbe
   // Inside a line break, the nearer end of it (the start, when they are as near).
   const br = breaksIn(state, found.cell).find((b) => b.from < inCell && inCell < b.to);
   const stop = br ? (inCell - br.from <= br.to - inCell ? br.from : br.to) : inCell;
-  const ends =
-    stop === found.cell.to && endsAtPipe(found.cell) && looked.row.cells.at(-1) !== found.cell;
+  const ends = stop === found.cell.to && endsBeforeNextCell(looked.row, found.cell);
   return { pos: stop, ends };
 }
 

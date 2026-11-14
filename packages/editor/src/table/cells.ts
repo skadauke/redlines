@@ -21,7 +21,7 @@ import { pastHidden } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
-import { missingCaret } from './missing.ts';
+import { missingCaret, missingSpec } from './missing.ts';
 
 /** A cell of a table by its row (0 the header) and column. */
 export interface CellRef {
@@ -238,7 +238,8 @@ export type Scope = 'cell' | 'row' | 'column' | 'table';
 
 /**
  * Selects the caret's cell (its text), row, column or the whole table, as a rectangle (so that
- * `whole` reports it). False where the selection has no cell, or in Raw.
+ * `whole` reports it). A cell its row lacks has no text, so selecting it keeps the caret there.
+ * False where the selection has no cell, or in Raw.
  */
 export function selectRect(view: EditorView, scope: Scope): boolean {
   const { state } = view;
@@ -249,8 +250,15 @@ export function selectRect(view: EditorView, scope: Scope): boolean {
   if (!found) return false;
   const { table, row, cell } = found;
   let selection: EditorSelection | null;
-  if (scope === 'cell') selection = EditorSelection.single(cell.textFrom, cell.textTo);
-  else if (scope === 'row') {
+  if (scope === 'cell') {
+    // A cell its row lacks has no text to select: the caret stays in it, in its column. (A plain
+    // selection at the end of the row would put it in the first cell the row lacks.)
+    if (cell.missing) {
+      view.dispatch(missingSpec(cell));
+      return true;
+    }
+    selection = EditorSelection.single(cell.textFrom, cell.textTo);
+  } else if (scope === 'row') {
     selection = rectSelection(
       table,
       { row: row.index, col: 0 },

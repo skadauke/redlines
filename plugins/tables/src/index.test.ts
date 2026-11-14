@@ -217,6 +217,24 @@ describe('Select Cell, Row, Column and Table', () => {
     expect(selection(editor)).toBe(G.slice(2, G.length - 2));
   });
 
+  it('Select Cell keeps the caret in a cell its row lacks, in its column, and writes nothing', () => {
+    const short = '| a | b | c |\n| - | - | - |\n| 1 |\n| 2 | 3 | 4 |\n';
+    const editor = mount(short);
+    select(editor, short.indexOf('1') + 1);
+    press(editor, 'Tab');
+    press(editor, 'Tab');
+    const active = () =>
+      [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc-active')].map(
+        (cell) => cell.dataset['col'],
+      );
+    expect(active()).toEqual(['2']);
+    expect(editor.getUiState().enabledCommands).toContain('table.selectCell');
+    expect(editor.commands.run('table.selectCell')).toBe(true);
+    expect(active()).toEqual(['2']);
+    expect(editor.view.state.selection.main.empty).toBe(true);
+    expect(editor.getDoc()).toBe(short);
+  });
+
   it('are disabled outside a table, and do nothing there', () => {
     const editor = mount(doc);
     select(editor, 3);

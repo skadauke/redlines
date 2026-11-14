@@ -420,25 +420,31 @@ export function cellAt(
 }
 
 /**
- * Whether the text of `cell` ends where its mark does, at the next pipe, with no padding after it. Its last
- * stop is that place: an empty cell with one space of padding or none (`| |`, `||`), which has only that
- * one, or text with none after it (`| y|`, `|a|b|`, what typing a letter into `| |` writes).
+ * Whether the text of `cell` ends where its mark does, with no padding after it, and `row` has a cell after
+ * it: the place is the pipe between the two, where the next cell's mark begins. Its last stop is that
+ * place: an empty cell with one space of padding or none (`| |`, `||`), which has only that one, or text
+ * with none after it (`| y|`, `|a|b|`, what typing a letter into `| |` writes). The last cell of a row ends
+ * before no cell, whether a pipe closes the row or not: where its text reaches the end of its mark (the
+ * closing pipe, or the end of a row with none), there is no next pipe.
  */
-export const endsAtPipe = (cell: Cell): boolean => cell.textTo === cell.to;
+export const endsBeforeNextCell = (row: Row, cell: Cell): boolean =>
+  cell.textTo === cell.to && row.cells.at(-1) !== cell;
 
 /**
- * Whether `cell` holds the position `pos`. A cell holds the positions from the pipe in front of it up to
- * the next pipe, as a position in a pipe or in padding is in the cell it belongs to, and the last cell of a
- * row (`last`) holds all that follows it in the row. That makes the position in front of a pipe, where one
+ * Whether `cell` of `row` holds the position `pos`. A cell holds the positions from the pipe in front of it
+ * up to the next pipe, as a position in a pipe or in padding is in the cell it belongs to, and the last cell
+ * of a row holds all that follows it in the row. That makes the position in front of a pipe, where one
  * cell's mark ends and the next begins, the next cell's, except where the cell before it ends its text
- * there (`endsAtPipe`): that place is the cell's own last stop. The next cell's first stop is after its own
- * pipe, so the place is a stop of one cell only, and the cell that has a stop at a position is the cell that
- * holds it: the rule of the stops (`stops.ts`), and of the keys, the presses and the edits that find a cell
- * from a position.
+ * there (`endsBeforeNextCell`): that place is the cell's own last stop. The next cell's first stop is after
+ * its own pipe, so the place is a stop of one cell only, and the cell that has a stop at a position is the
+ * cell that holds it: the rule of the stops (`stops.ts`), and of the keys, the presses and the edits that
+ * find a cell from a position.
  */
-function holds(cell: Cell, pos: number, last: boolean): boolean {
+function holds(row: Row, cell: Cell, pos: number): boolean {
   if (pos < cell.from) return false;
-  return last || pos < cell.to || (pos === cell.to && endsAtPipe(cell));
+  return (
+    row.cells.at(-1) === cell || pos < cell.to || (pos === cell.to && endsBeforeNextCell(row, cell))
+  );
 }
 
 function within(table: Table, pos: number): { table: Table; row: Row; cell: Cell } | null {
@@ -447,8 +453,7 @@ function within(table: Table, pos: number): { table: Table; row: Row; cell: Cell
   let row = table.rows.find((r) => r.from <= pos && pos <= r.to);
   row ??= table.rows[0];
   if (!row || row.cells.length === 0) return null;
-  const end = row.cells.length - 1;
-  let cell = row.cells.find((c, i) => holds(c, pos, i === end));
+  let cell = row.cells.find((c) => holds(row, c, pos));
   cell ??= row.cells.at(-1);
   if (!cell) return null;
   return { table, row, cell };

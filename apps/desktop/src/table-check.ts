@@ -2693,14 +2693,25 @@ const CHECKS: Check[] = [
         if (first !== '1' || caretMissing(editor) !== '2')
           problems[`${label}-tab`] = [first, caretMissing(editor)];
         if (doc(editor) !== start) problems[`${label}-tab-wrote`] = doc(editor);
-        // The cell draws the caret, a line high, and the page's own is hidden in the row.
+        // The cell draws the caret, a line high, while the editor has the focus, and none without it; the
+        // page's own is hidden in the row. CodeMirror marks the focus (`cm-focused`) only where the document
+        // has it too, as a pane that is not the active window has not, so the class is put on for the one
+        // measure and off for the other, and left as it was.
         const active = editor.view.contentDOM.querySelector<HTMLElement>('.rl-tc-active');
         const fill = active?.querySelector<HTMLElement>(':scope > .rl-tc-fill');
-        const drawn = fill && getComputedStyle(fill, '::after');
-        if (!drawn || drawn.borderLeftWidth !== '1px' || !(parseFloat(drawn.height) > 4))
-          problems[`${label}-caret`] = drawn
-            ? [drawn.borderLeftWidth, drawn.height]
-            : 'no cell draws the caret';
+        const root = editor.view.dom;
+        const focused = root.classList.contains('cm-focused');
+        const lineWith = (focus: boolean) => {
+          root.classList.toggle('cm-focused', focus);
+          const style = fill && getComputedStyle(fill, '::after');
+          return style ? { width: style.borderLeftWidth, height: parseFloat(style.height) } : null;
+        };
+        const drawn = lineWith(true);
+        const blurred = lineWith(false);
+        root.classList.toggle('cm-focused', focused);
+        if (!drawn || drawn.width !== '1px' || !(drawn.height > 4))
+          problems[`${label}-caret`] = drawn ?? 'no cell draws the caret';
+        if (blurred && blurred.width !== '0px') problems[`${label}-caret-unfocused`] = blurred;
         const own = active && getComputedStyle(active.closest('.cm-line') ?? active).caretColor;
         if (own !== 'transparent' && own !== 'rgba(0, 0, 0, 0)')
           problems[`${label}-own-caret`] = own ?? 'no cell draws the caret';

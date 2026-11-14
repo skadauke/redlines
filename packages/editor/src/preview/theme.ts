@@ -351,7 +351,10 @@ export const baseThemeSpec: ThemeSpec = {
   // below, would be the last child.)
   '.rl-tc-missing:last-of-type': { paddingRight: '0' },
   '.rl-tc-active > .rl-tc-fill': { position: 'relative', overflow: 'visible' },
-  '.rl-tc-active > .rl-tc-fill::after': {
+  // The line stands only while the editor has the focus, as CodeMirror's own cursor does: a solid line
+  // left after the editor blurs or the window is deactivated would be a caret in a text that has none
+  // (the page's own is hidden below either way).
+  '&.cm-focused .rl-tc-active > .rl-tc-fill::after': {
     content: '""',
     position: 'absolute',
     left: '0',

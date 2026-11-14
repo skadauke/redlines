@@ -441,6 +441,32 @@ describe('the commands of a caret in a cell a row lacks', () => {
     expect(editor.getDoc().split('\n')[0]).toMatch(/^\| a \| b \| +\| c \|$/);
     expect(editor.getDoc().split('\n')[2]).toBe('| 1 |');
   });
+
+  it('Select Cell, as the Table menu runs it, keeps the caret in the cell it is in', () => {
+    const doc = '| a | b | c |\n| - | - | - |\n| 1 |\n| 2 | 3 | 4 |';
+    const end = at(doc, '| 1 |') + '| 1 |'.length;
+    const editor = load(doc, at(doc, '1', 1));
+    press(editor, 'Tab');
+    press(editor, 'Tab');
+    expect(lacking(editor)).toBe(2);
+    // The cell has no text to select: the caret stays in it, in its column, and nothing is written.
+    expect(selectRect(editor.view, 'cell')).toBe(true);
+    expect([lacking(editor), head(editor), editor.view.state.selection.main.empty]).toEqual([
+      2,
+      end,
+      true,
+    ]);
+    expect(editor.getDoc()).toBe(doc);
+    // The first of the two the row lacks, too, and a cell the row has still selects its text.
+    press(editor, 'ArrowLeft');
+    expect(selectRect(editor.view, 'cell')).toBe(true);
+    expect([lacking(editor), head(editor)]).toEqual([1, end]);
+    editor.view.dispatch({ selection: { anchor: at(doc, '3') } });
+    expect(selectRect(editor.view, 'cell')).toBe(true);
+    const { from, to } = editor.view.state.selection.main;
+    expect(editor.view.state.sliceDoc(from, to)).toBe('3');
+    expect(editor.getDoc()).toBe(doc);
+  });
 });
 
 describe('every key at every place of a row with more cells than the header', () => {
