@@ -1,13 +1,15 @@
 // Markdown as the HTML a copy puts on the clipboard (design §5.10), for Google Docs, Mail, Pages
 // and Word to paste. The Markdown is the selection's newest text; the HTML says the same, with no
 // Redlines markup, no comments and no class a target can't use. Everything is escaped, and raw HTML
-// in the source is text, never live.
+// in the source is text, never live. The tags `<sub>` and `<sup>` are formats, not raw HTML: a pair
+// is copied as the element.
 //
 // The fonts are inline, in the order a target that reads only the first name it has works with:
 // the font a person opens a document in Word or Google Docs with, then its metric-compatible twin
 // that Redlines bundles (design §6.6), then a generic family.
 
 import { GFM, parser } from '@lezer/markdown';
+import { scriptTags } from '../preview/script.ts';
 
 /** The font stacks of a copy. */
 export interface FontStacks {
@@ -38,7 +40,8 @@ export const DEFAULT_FONTS: FontStacks = {
   mono: STACKS.cousine!,
 };
 
-const markdown = parser.configure(GFM);
+// The tags of subscript and superscript are read as pairs, so that they are copied as live tags.
+const markdown = parser.configure([GFM, scriptTags]);
 
 /** A reference label as definitions and uses agree on it. */
 const key = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -170,6 +173,10 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
         return wrap('strong', node, 'EmphasisMark');
       case 'Strikethrough':
         return wrap('del', node, 'StrikethroughMark');
+      case 'Subscript':
+        return wrap('sub', node, 'SubscriptMark');
+      case 'Superscript':
+        return wrap('sup', node, 'SuperscriptMark');
       case 'InlineCode': {
         const marks = node.getChildren('CodeMark');
         const from = marks[0]?.to ?? node.from;

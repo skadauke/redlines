@@ -1,7 +1,9 @@
 // Images in the preview (design, Rendering): a local path relative to the document, or a URL,
-// drawn in place of its syntax, except while the caret is on it. What a pending change contains is
-// never fetched: an agent misled by text it read could otherwise leak what it read through an image
-// URL the moment its edit lands, so the image shows its alt text until the change is accepted.
+// drawn in place of its syntax, except while the caret is on it (but for a link a paste or a drop
+// has just added, which is drawn while the caret is still at its end: `fresh.ts`). What a pending
+// change contains is never fetched: an agent misled by text it read could otherwise leak what it
+// read through an image URL the moment its edit lands, so the image shows its alt text until the
+// change is accepted.
 
 import type { EditorState } from '@codemirror/state';
 import { Facet, StateEffect } from '@codemirror/state';
@@ -34,11 +36,25 @@ function sourceOf(written: string): Source {
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };
   if (!url || SCHEME.test(url)) return { kind: 'none' };
-  try {
-    return { kind: 'local', path: decodeURI(url) };
-  } catch {
-    return { kind: 'local', path: url };
-  }
+  return { kind: 'local', path: decodePath(url) };
+}
+
+/**
+ * A path written as a link destination, with every percent code decoded, those of `#` and `?`
+ * included, which a path in a document is never a fragment or a query of: `Photo%20%232.png` is
+ * `Photo #2.png`. A name whose codes are broken, such as a lone `%`, stays as it is written.
+ */
+function decodePath(url: string): string {
+  return url
+    .split('/')
+    .map((name) => {
+      try {
+        return decodeURIComponent(name);
+      } catch {
+        return name;
+      }
+    })
+    .join('/');
 }
 
 /** Whether a pending change covers any of `from`–`to`: its markers or what they hold. */

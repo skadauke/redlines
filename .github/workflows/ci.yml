@@ -1,15 +1,29 @@
 # Checks the workspace (type checks, lint, tests, formatting), that the desktop app's Rust code
 # and the `redlines` program compile cleanly and pass their tests, and that the Mac app's Quick Look
-# extension builds and runs. Changes that touch only docs, the website or Markdown files skip it;
-# the website has its own workflow, website.yml.
+# extension builds and runs. Changes that touch only docs, the website or Markdown files skip it,
+# except the skill's files, which are Markdown that a test checks against its source
+# (apps/desktop/src/skills.node.test.ts); the website has its own workflow, website.yml. A later
+# pattern of `paths` brings a file back that an earlier `!` pattern left out.
 name: CI
 
 on:
   pull_request:
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
   push:
     branches: [main]
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
 
 permissions:
   contents: read
@@ -47,8 +61,10 @@ jobs:
       - name: Test
         run: pnpm test
         env:
-          # The block keys' cost test runs here, on a runner that does nothing else (see blocks/cost.test.ts).
-          REDLINES_COST: check
+          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main, on a
+          # runner that does nothing else. Pull requests skip them while Epic #329's lanes merge a dozen
+          # PRs a day; main's runs and the Epic's Sunday sweep still run them.
+          REDLINES_COST: ${{ github.event_name == 'push' && 'check' || '' }}
 
       - name: Check formatting
         run: pnpm format:check

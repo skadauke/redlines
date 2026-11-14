@@ -1,17 +1,22 @@
-// Formatting commands (spec: Menus): bold, italic, code, strikethrough, links and clearing for
-// text, and the type of a paragraph, its lists, and the table, rule and code block that start one.
+// Formatting commands (spec: Menus): bold, italic, code, strikethrough, subscript, superscript,
+// links and clearing for text, and the type of a paragraph, its lists, and the table, rule and code
+// block that start one.
 // They are commands of the registry, which binds their keys and draws the Format and Paragraph
 // menus; none has a button. With Track Changes on a format change is a tracked `fmt` mark, with it
 // off the syntax is written directly, and what a block adds is an insertion like typing.
 
 import { isolateHistory } from '@codemirror/commands';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { ChangeSet, type EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
   type Author,
   boxChange,
+  calloutMenuEffect,
+  calloutName,
+  calloutOf,
+  type CalloutMenuRequest,
   checkBoxEffect,
   type Editor,
   markupViewFacet,
@@ -30,6 +35,7 @@ import {
 import {
   type BlockType,
   EditError,
+  GITHUB_TYPES,
   applyChanges,
   type FormatOp,
   idsIn,
@@ -43,6 +49,7 @@ import {
   untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
+import { calloutMenuTheme, closeCalloutMenu, openCalloutMenu } from './callout-menu.ts';
 import { closeLinkPopover, linkTheme, openLinkPopover } from './link-popover.ts';
 
 export interface FormattingOptions {
@@ -54,6 +61,10 @@ export interface FormattingOptions {
 
 const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
+ * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
+const TAGS_NOT_A_PAIR =
+  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Raw.";
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
@@ -71,6 +82,10 @@ const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or s
  * longer stretch of items is checked by sixes, as one change. */
 const CHECK_AT_A_TIME = 6;
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
+/** What Alert writes: the type line, and a body whose text is selected, so that typing writes it
+ * (a tracked insertion can't end with an empty quote line, which would take the block after it). */
+const ALERT = '> [!NOTE]\n> Text';
+const ALERT_BODY = 'Text';
 const NO_TRACKED_HEADING_CODE =
   "A heading can't become a code block while Track Changes is on. Make it body text first.";
 
@@ -80,6 +95,9 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   italic: 'Emphasis',
   strike: 'Strikethrough',
   code: 'InlineCode',
+  // The tags `<sub>` and `<sup>`, which the editor's parse reads as nodes (preview/script.ts).
+  sub: 'Subscript',
+  sup: 'Superscript',
 };
 /** What a format makes text, for a sentence. */
 const INLINE_WORD: Record<InlineFormat, string> = {
@@ -87,6 +105,8 @@ const INLINE_WORD: Record<InlineFormat, string> = {
   italic: 'italic',
   strike: 'struck through',
   code: 'code',
+  sub: 'subscript',
+  sup: 'superscript',
 };
 
 /** Whether the text of a cell is inside one node of `name` from end to end (hidden markers aside). */
@@ -242,7 +262,8 @@ function personOf(author: Author): Person {
 
 /**
  * Adds the formatting commands to an editor: Bold ⌘B, Italic ⌘I, Code ⌃`, Strikethrough ⌃⇧`,
- * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⇧⌘N, Headings
+ * Subscript ⌥⌘, Superscript ⌥⌘., Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the
+ * Paragraph menu Body ⇧⌘N, Headings
  * ⌘1 to ⌘6, Quote, lists, Check Item ⇧⌘U, Code Block, Table, Horizontal Rule, Indent ⌘] and
  * Outdent ⌘[. Returns a function that takes them out again.
  *
@@ -250,7 +271,12 @@ function personOf(author: Author): Person {
  */
 export function createFormatting(editor: Editor, options: FormattingOptions): () => void {
   const { view } = editor;
-  const notice = (message: string) => options.notice(message);
+  /** How many notices have been shown, to know whether a refusal said something. */
+  let noticed = 0;
+  const notice = (message: string) => {
+    noticed++;
+    options.notice(message);
+  };
   const removeTheme = editor.addExtension(linkTheme);
 
   /** Whether the selection can be edited at all: Raw is read-only while edits are tracked. */
@@ -420,7 +446,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         return false;
       }
       const on = !atSelection(view.state).some(({ name }) => name === INLINE_NODE[format_]);
-      return format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      const saidBefore = noticed;
+      const done = format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
+      // The parse says the format is on and the format's reader finds none to take off, as it can
+      // pair a tag otherwise (it reads emphasis first): nothing happened, and says why.
+      if (!done && !on && noticed === saidBefore && (format_ === 'sub' || format_ === 'sup')) {
+        notice(TAGS_NOT_A_PAIR);
+      }
+      return done;
     };
 
   const block =
@@ -448,6 +481,26 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         emptyItem ? () => WRITE_ITEM : undefined,
       );
     };
+
+  /**
+   * Where `count` characters that a reader sees stand after `from` in the document: the markers of
+   * tracked changes in between are not counted, so that a place in a block that was inserted as a
+   * tracked change is the one its text asks for.
+   */
+  const afterVisible = (from: number, count: number): number => {
+    const text = view.state.doc.toString();
+    let at = from;
+    for (let seen = 0; seen < count && at < text.length;) {
+      if (text.startsWith('<!--', at)) {
+        const end = text.indexOf('-->', at);
+        at = end === -1 ? text.length : end + 3;
+      } else {
+        at++;
+        seen++;
+      }
+    }
+    return at;
+  };
 
   /**
    * Whether the caret is on an empty line, as Return leaves one. A line of a list item's or a
@@ -480,7 +533,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (done) {
       const start = view.state.doc.toString().indexOf(find, line.from);
       if (start >= 0) {
-        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+        const anchor = afterVisible(start, caret);
+        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
       }
     }
     return done;
@@ -498,7 +552,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (done && selected > 0) {
       const start = view.state.doc.toString().indexOf(find, at);
       if (start >= 0) {
-        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+        const anchor = afterVisible(start, caret);
+        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
       }
     }
     return done;
@@ -778,11 +833,63 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     );
   }
 
+  /**
+   * The menu in an alert's title asks for the types (`calloutMenuEffect`): the menu hangs from the
+   * button, and choosing a type is a block format change of the alert, tracked or plain.
+   */
+  function listenForCalloutMenu(): () => void {
+    const ask = ({ pos, type, anchor }: CalloutMenuRequest) => {
+      const { doc } = view.state;
+      // The place is the alert's, if it still is: the text may have changed since the press.
+      if (!Number.isInteger(pos) || pos < 0 || pos > doc.length) return;
+      if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
+      // GitHub's types, and any other that a file has already: it is the file's to offer.
+      const others: string[] = [];
+      // An alert is a quote at the left edge, which the editor reads as it draws it: a type in code,
+      // or in a later line of a quote, is no alert's.
+      ensureSyntaxTree(view.state, doc.length, 100)?.iterate({
+        enter: (node) => {
+          if (node.name !== 'Blockquote')
+            return node.name !== 'FencedCode' && node.name !== 'CodeBlock';
+          const found = calloutOf(view.state, node.node);
+          if (found && !GITHUB_TYPES.includes(found.type) && !others.includes(found.type)) {
+            others.push(found.type);
+          }
+          return false;
+        },
+      });
+      openCalloutMenu(view, {
+        anchor,
+        types: [...GITHUB_TYPES, ...others].map((each) => ({
+          type: each,
+          name: calloutName(each),
+        })),
+        current: type,
+        choose: (to) =>
+          void format({ from: pos, to: pos }, { kind: 'callout', type: to }, 'format.callout'),
+      });
+    };
+    return editor.addExtension([
+      calloutMenuTheme,
+      EditorView.updateListener.of(({ transactions, docChanged }) => {
+        // A menu is for the text it was opened on.
+        if (docChanged) closeCalloutMenu(view);
+        for (const tr of transactions) {
+          for (const effect of tr.effects) if (effect.is(calloutMenuEffect)) ask(effect.value);
+        }
+      }),
+    ]);
+  }
+
   const commands: EditorCommand[] = [
     inlineCommand('format.bold', 'Bold', 'Mod-b', 'bold'),
     inlineCommand('format.italic', 'Italic', 'Mod-i', 'italic'),
     inlineCommand('format.code', 'Code', 'Ctrl-`', 'code'),
     inlineCommand('format.strike', 'Strikethrough', 'Ctrl-Shift-`', 'strike'),
+    // Word's keys for these, ⌘= and ⇧⌘=, are View's Zoom In. Google Docs' ⌘, and ⌘. are Preferences and
+    // Cancel on the Mac, so these take ⌥ too.
+    inlineCommand('format.sub', 'Subscript', 'Mod-Alt-,', 'sub'),
+    inlineCommand('format.sup', 'Superscript', 'Mod-Alt-.', 'sup'),
     command('format', 'link', {
       id: 'format.link',
       title: 'Link…',
@@ -832,6 +939,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
     }),
     command('paragraph', 'insert', {
+      id: 'block.alert',
+      title: 'Alert',
+      // A new alert after the block the caret is in, or on the empty paragraph it is in, with its
+      // body's text selected: the type is changed from the menu in its title.
+      run: () =>
+        insertBlock(ALERT, '> [!NOTE]', ALERT.length - ALERT_BODY.length, ALERT_BODY.length),
+    }),
+    command('paragraph', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
       run: () => insertBlock('---', '---', 3),
@@ -862,10 +977,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
 
   const removeCommands = editor.commands.register(commands);
   const removeBoxes = listenForBoxes();
+  const removeCalloutMenu = listenForCalloutMenu();
   return () => {
     closeLinkPopover(view);
+    closeCalloutMenu(view);
     removeCommands();
     removeBoxes();
+    removeCalloutMenu();
     removeTheme();
   };
 }
@@ -882,6 +1000,8 @@ export const plugin: Plugin = {
         { id: 'format.italic', title: 'Italic', shortcut: 'Mod-i' },
         { id: 'format.code', title: 'Code', shortcut: 'Ctrl-`' },
         { id: 'format.strike', title: 'Strikethrough', shortcut: 'Ctrl-Shift-`' },
+        { id: 'format.sub', title: 'Subscript', shortcut: 'Mod-Alt-,' },
+        { id: 'format.sup', title: 'Superscript', shortcut: 'Mod-Alt-.' },
         { id: 'format.link', title: 'Link…', shortcut: 'Mod-k' },
         { id: 'format.clear', title: 'Clear Formatting', shortcut: 'Mod-\\' },
         { id: 'block.body', title: 'Body', shortcut: 'Mod-Shift-n' },
@@ -898,6 +1018,7 @@ export const plugin: Plugin = {
         { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
+        { id: 'block.alert', title: 'Alert' },
         { id: 'block.rule', title: 'Horizontal Rule' },
         { id: 'block.indent', title: 'Indent', shortcut: 'Mod-]' },
         { id: 'block.outdent', title: 'Outdent', shortcut: 'Mod-[' },

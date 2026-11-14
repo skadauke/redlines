@@ -105,7 +105,7 @@ These choices in the design follow from the findings above:
   result.
 - Track Changes is on or off, as in Word, rather than Google Docs' three modes, and it never
   changes silently. Where a host enforces roles, non-owners have it locked on. Agents follow their
-  person's setting, or a level set for them: Ask, Suggest or Auto.
+  person's setting, or a level set for them: Propose, Suggest or Auto.
 - A review bar, opened on demand, shows "Change 3 of 17," filter chips by person, agent and kind,
   and Accept and Reject buttons that move on, with single-key triage (J, K, A, X, R, E, U).
 - Bulk decisions work by person, selection, section or agent run. Each is confirmed with counts and

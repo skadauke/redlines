@@ -31,6 +31,16 @@ import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
+/**
+ * Lets the event loop turn, which a loop of scripts must do now and then (`await settle()`, once a
+ * script or once a seed). A script's editors are destroyed, but happy-dom's `requestAnimationFrame`
+ * answers with an object, so CodeMirror's `destroy()` does not take it for a pending frame and
+ * never cancels the frame it asked for: each editor stays reachable from a timer until a macrotask
+ * turn. A loop that never yields held them all, about 18 MB a seed, and ran out of memory at
+ * `REDLINES_FUZZ=200` (#286). A turn that is only a microtask does not release them.
+ */
+export const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
 export type KeyName =
   | 'Enter'
@@ -53,10 +63,16 @@ export type KeyName =
 
 /**
  * A step of a script: a key, text typed over the selection as the keyboard types it, an agent's
- * edit (a paragraph of its own at the top of the document), or a decision on the first pending
- * change (accepted or rejected, where the format decides it).
+ * edit (a paragraph of its own at the top of the document), a decision on the first pending
+ * change (accepted or rejected, where the format decides it), or Track Changes switched on or off
+ * for this editor.
  */
-export type Step = KeyName | { type: string } | { agent: string } | { decide: 'accept' | 'reject' };
+export type Step =
+  | KeyName
+  | { type: string }
+  | { agent: string }
+  | { decide: 'accept' | 'reject' }
+  | { tracking: boolean };
 
 /** What `checkInvariants` holds every script to, by name, for a script to skip with a reason. */
 export type Invariant =
@@ -89,7 +105,11 @@ export type Invariant =
   /** After the keys, and after leaving an empty paragraph still open, Undo all the way back gives
    * only texts the document had, and ends at the starting file: no step whose text a take-back
    * removed is left to replay. */
-  | 'history';
+  | 'history'
+  /** After every step, the file the editor gives (`getDoc`, what is saved) is its document with
+   * the open empty paragraph taken back, as it stands: no text twice or lost (a file of LF line
+   * breaks, whose line breaks the editor gives back as they are). */
+  | 'file-text';
 
 export interface Script {
   name: string;
@@ -134,6 +154,8 @@ export interface StepResult {
   /** The file before and after the step. */
   before: string;
   after: string;
+  /** The line the caret was on before the step, and its column in it. */
+  caretLine: { text: string; col: number };
 }
 
 export interface ScriptResult {
@@ -159,6 +181,10 @@ export interface ScriptResult {
   listReadFailures: string[];
   /** What Undo all the way back gave that the document never had, or where it ended. */
   historyFailures: string[];
+  /** The steps after which `getDoc` was not the document with the open block taken back. */
+  fileTextFailures: string[];
+  /** Whether an empty item is open after the keys (out of the file, the caret in it). */
+  openItem: boolean;
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -223,8 +249,14 @@ function expandDoc(script: Script): Expanded {
     if (!id) throw new Error(`${script.name}: ${tag} closes nothing`);
     return `<!--/${id}-->`;
   };
+  // A document with a ledger of its own is a file as it is written, which no shortened marker is
+  // in: the tags `<sub>` and `</sub>` of subscript, in a file that a generator of random documents
+  // made, are no markers of a substitution.
+  const asFile = script.doc.includes('<!-- redlines');
   let text = characters(script.doc).replace(
-    /<split>|<ins>|<\/ins>|<del ([^>]*)>|<sub ([^>]*)>|<\/sub>|<fmt ([^>]*)>|<\/fmt>/g,
+    asFile
+      ? /(?!)/g
+      : /<split>|<ins>|<\/ins>|<del ([^>]*)>|<sub ([^>]*)>|<\/sub>|<fmt ([^>]*)>|<\/fmt>/g,
     (tag, del?: string, sub?: string, fmt?: string) => {
       if (tag === '<split>') return `<!--split ${take()}-->`;
       if (tag === '<ins>') {
@@ -381,6 +413,8 @@ function play(editor: Editor, step: Step): boolean {
       group: 'walk',
       agent: 'Claude',
     });
+  } else if ('tracking' in step) {
+    editor.setTracking(step.tracking, { inFile: false });
   } else {
     const mark = parse(editor.getDoc()).marks.find((m) => m.kind !== 'split' && m.kind !== 'cmt');
     if (mark) {
@@ -397,7 +431,7 @@ function play(editor: Editor, step: Step): boolean {
 }
 
 /** Whether a step is Undo or Redo: it is no step of its own to take back. */
-const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z';
+const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z' || step === 'Mod-y';
 
 /** The body with the caret or the selection in it, in the notation. */
 function caretText(editor: Editor): string {
@@ -547,19 +581,32 @@ export function runScript(script: Script): ScriptResult {
     const start = editor.getDoc();
     const openCaretFailures: string[] = [];
     const listReadFailures: string[] = [];
+    const fileTextFailures: string[] = [];
     const unread = unreadItems(start);
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
+      const { head } = editor.view.state.selection.main;
+      const caretOn = editor.view.state.doc.lineAt(head);
+      const caretLine = { text: caretOn.text, col: head - caretOn.from };
       const handled = play(editor, step);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
+      if (!start.includes('\r')) {
+        const given = editor.getDoc();
+        const held = textWithoutOpen(editor.view.state);
+        if (given !== held) {
+          fileTextFailures.push(
+            `step ${i + 1} (${JSON.stringify(step)}): the file is ${notation(given)}, not ${notation(held)}`,
+          );
+        }
+      }
       const more = unreadItems(editor.getDoc()) - unread;
       if (more > 0) {
         listReadFailures.push(
           `step ${i + 1} (${JSON.stringify(step)}): ${more} more lines start an item than micromark reads in ${notation(bodyOf(editor.getDoc()))}`,
         );
       }
-      return { step, handled, before, after: editor.getDoc() };
+      return { step, handled, before, after: editor.getDoc(), caretLine };
     });
     const result: ScriptResult = {
       script,
@@ -573,6 +620,8 @@ export function runScript(script: Script): ScriptResult {
       openCaretFailures,
       listReadFailures,
       historyFailures: [],
+      fileTextFailures,
+      openItem: openBlock(editor.view.state)?.item === true,
     };
     result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
@@ -969,6 +1018,7 @@ export function invariantProblems(result: ScriptResult): Record<Invariant, strin
     'list-reads': result.listReadFailures,
     'open-caret': result.openCaretFailures,
     history: result.historyFailures,
+    'file-text': result.fileTextFailures,
   };
 }
 

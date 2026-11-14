@@ -12,6 +12,7 @@ import type {
   AgentState,
   HostAgents,
   HostRelay,
+  McpEndpoint,
 } from '@redlines/plugin-api';
 
 function reasonOf(error: unknown): string {
@@ -20,6 +21,9 @@ function reasonOf(error: unknown): string {
 
 /** How long what detection found is kept. */
 const KEEP_MS = 60_000;
+
+/** What an agent with no toolbox is handed in its place: nothing to connect to. */
+const NO_TOOLS: McpEndpoint = { command: '', args: [] };
 
 export interface MacAgents extends HostAgents {
   forget(): void;
@@ -57,7 +61,13 @@ export function createMacAgents(
           found: false,
           help: `${provider.name} couldn't be checked: ${reasonOf(error)}`,
         }));
-        return { id: provider.id, name: provider.name, readLimit: provider.readLimit, state };
+        return {
+          id: provider.id,
+          name: provider.name,
+          readLimit: provider.readLimit,
+          ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          state,
+        };
       }),
     );
 
@@ -84,6 +94,16 @@ export function createMacAgents(
       const provider = find(current) ?? (options.more ? find(await look()) : undefined);
       if (!provider) {
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
+        return;
+      }
+      // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
+      // an error that its tools never started.
+      if (provider.toolbox === false) {
+        for await (const event of provider.run(request, NO_TOOLS, signal)) {
+          if (event.type === 'error') agents.forget();
+          yield event;
+          if (event.type === 'done' || event.type === 'error') return;
+        }
         return;
       }
       let line: Awaited<ReturnType<HostRelay['open']>>;

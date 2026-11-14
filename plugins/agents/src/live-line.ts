@@ -10,11 +10,12 @@
 import { LIMITS } from '@redlines/agent-tools';
 import { assignColors, type Author, type MetPerson } from '@redlines/editor';
 import type { Parsed } from '@redlines/format';
+import type { AgentScope } from '@redlines/plugin-api';
 import { icon } from '@redlines/review';
 import { agentHandle, type LiveLine, type RunController } from './runs.ts';
 
 export interface LiveLineActions {
-  answer(answer: 'folder' | 'document' | 'no'): void;
+  answer(answer: AgentScope | 'no'): void;
   stop(): void;
   dismiss(): void;
   /** Shows a failed run's log. Without it, a failure offers none. */
@@ -374,10 +375,39 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
 }
 
 /** The question's title: what is asked, and of whom. */
-function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): string {
+function askTitle({ agentName, readLimit, toolbox }: LiveLine & { kind: 'asking' }): string {
+  // An agent with no toolbox is sent what it needs, in its prompt, and reads nothing itself here.
+  if (toolbox === false) return `Send this document and this thread to ${agentName}?`;
   return readLimit === 'machine'
     ? `Allow ${agentName} to read files on this Mac?`
     : `Allow ${agentName} to read this folder?`;
+}
+
+/**
+ * What the question means, in a sentence. A run changes this document; a question (`readOnly`)
+ * changes nothing, for an agent that is held to reading its folder. One that can't be held to it
+ * (`readLimit` is 'machine': an agent the person added) is told as it is: its own settings decide
+ * what it reads, and for a question it may also act on its own, which Redlines can't stop.
+ */
+function askNote({
+  agentName,
+  folder,
+  readLimit,
+  readOnly,
+  toolbox,
+}: LiveLine & { kind: 'asking' }): string {
+  // An agent with no toolbox is sent the document and the thread, and answers in a reply. What
+  // Allow keeps is the folder, which it reads none of.
+  if (toolbox === false) {
+    return `When you write ${agentName}’s name in a comment, it is sent the document and that comment thread, which go to its OpenClaw Gateway, wherever that runs. Allow remembers it for ${folder === '' ? 'documents that aren’t in a folder yet' : 'documents in this folder'}. It can’t change the document: what it says is posted as a reply. What else it can read is up to its own settings.`;
+  }
+  if (readLimit === 'machine') {
+    const reads = `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`;
+    return readOnly === true ? `${reads} It may also act on its own.` : reads;
+  }
+  return readOnly === true
+    ? `${agentName} reads files here to answer, and changes nothing.`
+    : `${agentName} reads files here to answer, and changes only this document.`;
 }
 
 let askCount = 0;
@@ -402,34 +432,44 @@ function asking(
 ): Node[] {
   const { agentName } = line;
   const machine = line.readLimit === 'machine';
+  // An agent that reads the whole machine can't be held to a home folder either.
+  const home = line.home === true && !machine;
   const id = `rl-ask-${++askCount}`;
   const title = block('rl-ask-title', askTitle(line));
   title.id = `${id}-title`;
   const described: string[] = [];
   const children: Node[] = [title];
-  if (!machine) {
+  // The answer is kept for the folder, and for an agent with no toolbox it is the only thing the
+  // folder is for: say which, though the agent reads none of it.
+  if (!machine || (line.toolbox === false && line.folder !== '')) {
     const folder = block('rl-ask-folder', shortFolder(line.folder));
     folder.id = `${id}-folder`;
     folder.title = line.folder;
     described.push(folder.id);
     children.push(folder);
   }
-  const note = block(
-    'rl-ask-note',
-    machine
-      ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
-      : `${agentName} reads files here to answer, and changes only this document.`,
-  );
+  const note = block('rl-ask-note', askNote(line));
   note.id = `${id}-note`;
   described.push(note.id);
   children.push(note);
+  if (home) {
+    // The wider answer, said plainly where it is given: what it opens, what it leaves out, and the
+    // risk of what someone else wrote in the document.
+    const wider = block(
+      'rl-ask-note',
+      `Allow Folder and Home Folder also lets ${agentName} read other files in your home folder, except hidden files and ~/Library. macOS may ask whether Redlines can access your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through Redlines: say yes there to let it. Text someone else wrote in the document could try to make it quote a private file in a comment.`,
+    );
+    wider.id = `${id}-home`;
+    described.push(wider.id);
+    children.push(wider);
+  }
 
   panel.setAttribute('aria-labelledby', title.id);
   panel.setAttribute('aria-describedby', described.join(' '));
 
   // An answer from the keyboard gives it back to where it was, else to the document, for the
   // button that had it is gone, and a Return must never land on the running line's Stop.
-  const give = (answer: 'folder' | 'document' | 'no') => {
+  const give = (answer: AgentScope | 'no') => {
     if (panel.contains(document.activeElement)) {
       const back = cameFrom.get(panel);
       if (back?.isConnected && !panel.contains(back) && back instanceof HTMLElement) back.focus();
@@ -442,6 +482,7 @@ function asking(
   answers.className = 'rl-ask-answers';
   answers.append(
     button('rl-ask-allow', 'Allow', () => give('folder')),
+    ...(home ? [button('', 'Allow Folder and Home Folder', () => give('everything'))] : []),
     // An agent that reads the whole machine can't be held to this document.
     ...(machine ? [] : [button('', 'Just This Document', () => give('document'))]),
     button('', 'Not Now', () => give('no')),

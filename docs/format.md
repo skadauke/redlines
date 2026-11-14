@@ -171,8 +171,15 @@ mark's markers there than the file had.
 - Joining two blocks deletes the break between them (§3.4). There is no separate kind for it.
 - A highlight is a review annotation, hidden outside Redlines like every mark. Highlighting as
   part of the content (`==text==`, `<mark>`) is formatting, and adding it is a format change
-  (`+mark`). Accepting or rejecting a highlight dismisses it and leaves the text; a highlight
-  whose text is all removed by a decision goes with it.
+  (`+mark`). A highlight is made on a range of text, and on nothing else: it has no point form, so
+  a range that covers no text that reads in the newest view is refused ("Select some text to
+  highlight."): a point, line breaks alone, markers alone, or a deletion alone, whose old text is
+  in no view. A range that holds a deletion and text is fine, and covers the deletion. A highlight
+  changes no text, so neither view reads otherwise once it is made. Making one writes its markers,
+  placed as a comment's are (§4), and its entry in the ledger (`by` and `at`, §5.4), and adds its
+  author to `people`. Accepting or rejecting a highlight dismisses it and leaves the text, which is
+  how it is taken away, and gives back the file it was made on; a highlight whose text is all
+  removed by a decision goes with it.
 
 ### 2.3 Ids
 
@@ -272,15 +279,44 @@ applies its inverse:
 | `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above (§3.7)      |
 
-- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
-  `md-image`, which restores Markdown image syntax when an image resize is rejected.
+- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE` (an alert's
+  old type, below), and `md-image`, which restores Markdown image syntax when an image resize is
+  rejected.
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
-- The serializer writes formatting in the file's dialect: `<sub>` in `.md`, `~x~` in pandoc files
-  (§9.1). New emphasis is `*` and `**`, strikethrough is `~~`, and code has one more backtick than
-  its text has in a row, with a space inside them next to a backtick. Emphasis written with `_`
-  stays as it is.
+- The serializer writes formatting in the file's dialect (§9.1), except subscript and superscript,
+  which are the tags `<sub>` and `<sup>` in every file type. New emphasis is `*` and `**`,
+  strikethrough is `~~`, and code has one more backtick than its text has in a row, with a space
+  inside them next to a backtick. Emphasis written with `_` stays as it is.
+- **Subscript and superscript** are the first of a short list of inline HTML tags that are formats:
+  `<!--fmt m2bd +sub--><sub>2</sub><!--/m2bd-->`. The list is `<sub>` and `<sup>`, built; `<mark>`
+  (highlight, `+mark`) and `<ins>` (underline, `+underline`), which §2.2 names and nothing writes
+  yet; and `<br>`, the line break of a table cell (§3.7), which is not a format of text. No other tag
+  is on it. Any other tag is an inline HTML tag, which shows as written and takes no marker inside
+  it (§3.5). What is read as a format is the tag as the serializer writes it: `<sub>`, `</sub>`,
+  `<sup>` and `</sup>`, in lowercase, with no attributes and no space in them, so `-sub` and `-sup`
+  carry no syntax and rejecting writes the tag back.
+  - A closing tag pairs with the nearest opening tag of its name before it that is read as a format
+    and has no closing tag yet, in one paragraph, and in one link text or one table cell, as
+    emphasis does. A tag with no pair, an escaped tag (`\<sub>`, which is text), a tag in code, in an
+    HTML comment, in an image, in a link's address, in math, in a footnote reference, in an entity or
+    a shortcode, in a URL or in an attribute block, a pair that crosses another format's syntax, and
+    a tag written otherwise (`<SUB>`, `<sub class="x">`) are no format: the text stays as written,
+    and turning a format off does nothing to it, with a notice that says so.
+  - A format is written only around text whose tags of its name are whole pairs: a stray `</sub>`
+    or `<sub>` in the text would pair with the one written, and the change is refused, in words
+    that say so ("This text has a <sub> or <sup> tag without its pair…"). A backslash in front of
+    the text, which would escape the opening tag, goes into the pair with the character it
+    escapes (`<sub>\b</sub>`); text that ends in a backslash, which would escape the closing tag,
+    is refused, as it is for the other formats.
+  - Formats nest as they do for emphasis: one around all of another goes outside its syntax, and a
+    piece that crosses the edge of a format is cut there. Turning a format off takes the whole run of
+    it, and the same tag inside itself (`<sub>a <sub>b</sub></sub>`) is two runs, in a mark each.
+    Clear Formatting takes them off with the other formats (`-sub`, `-sup`).
+  - A tag takes no marker inside it (§3.1, rule 1), and the markers of a format change stand outside
+    its tags, as they stand outside any syntax (the example above). Text typed inside a pair is
+    typed text, in an insertion of its own, whose markers may stand against a tag.
 - An inline format change stays inside one block. A block format change opens on its own line
   before the block (§3.3) and closes at the end of the block.
 - A range that crosses blocks is one mark per block, and the marks share a `group` (§5.4).
@@ -310,27 +346,92 @@ message "Accept or reject the changes in this paragraph first." (`no-legal-place
 paragraph goes on into the paragraphs that a pending mark in it reaches into, as rejecting a split or
 an insertion with a break in it joins two paragraphs. Comments and highlights don't count, and nor
 do changes in other paragraphs, though those in the same list, table or block quote are tried with
-the change (below).
+the change (below). The change of a block that is all your own new text is the exception
+(below).
 
 Your own pending changes don't count:
 
 - Text that is all inside your own insertion, or the new text of your own substitution, takes the
   syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
   rejecting it takes the syntax with it.
-- A block change of a block that is all your own pending insertion, such as a paragraph you typed
+- **A block change of a block that is all your own pending insertion**, such as a paragraph you typed
   (`One.\n\n<!--ins k3x9-->\n\n## Title<!--/k3x9-->`) or an item your pending split made and you typed
   in, is an edit of that insertion: the block's new syntax is written in it as Track Changes off
-  would write it in the newest view, as typed text, and the change makes no mark of its own. In the
+  would write it in the newest view, as typed text, and the change makes no mark of its own.
+  Accepting or rejecting the insertion then reads right, because the syntax is part of it. In the
   break of your own split inside the insertion, the syntax stays where it is written, so that an
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
-  It is so only where every line the change reads or writes is all your own new text; where no
-  marker but those of that insertion and of the marks inside it stands between the block and the
-  text around it (another mark there could, once decided, bring the block into the text next to it,
-  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
-  and makes no marker start a line; and, where it is not written as typing is, where every order of
-  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
-  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
-  change, below.
+  The rule and its limits (#173):
+  - *Which changes.* Every block change: the type (Body, Heading 1 to 6, Quote, Bulleted, Numbered
+    and Task List, of which the palette's Quote is the same command, and the type of an alert,
+    #311), an indent or an outdent, and a box checked. A block that has the type asked already is
+    left as it is, with no refusal. Code Block, Table and Horizontal Rule are no block changes: the
+    editor writes their syntax as typing, which in your own insertion is typed text too.
+  - *Where the caret stands.* Anywhere in the block, on either side of the hidden markers at its
+    ends: the End key and a click past the end of the line leave the caret after the closer of your
+    insertion, and a selection may end there. The block is read by its text, not by the side of a
+    marker.
+  - *What is all your own.* Every character of the line or lines the change reads or writes is inside
+    insertions of yours, the syntax of the block included. A paragraph you typed qualifies, and so
+    does any paragraph of a document you typed in one go, which is one insertion with your split
+    between its paragraphs: the title, the first of them, as the last. A block that is only partly
+    yours, such as words typed in front of or behind older text, or into a heading, an item or a quote
+    that was there (its `#`s, bullet or `> ` are older), is a block change with a mark, below; and
+    where your insertion starts it, its opener would have to move, so it is refused: "Your new text
+    starts this block, and would have to move. Accept or reject your new text and its line breaks
+    first." Where the block can't change for its own sake, whatever its marks (a heading is one line;
+    a line of it would start a block of its own; it is in a list item or a quote), the refusal says
+    that, as it does for any block.
+  - *Marks near the block.* The marks that stand in its lines, and in the lines between it and the
+    text around it, are what decides how the syntax at its start reads. A mark further off, as the
+    splits between the other paragraphs of a document typed in one go, decides nothing of it, so
+    the number of paragraphs makes no difference. Your own splits stand next to it as typing has
+    always had them, and so do comments and highlights inside your insertion, at its start too. A
+    change of another person's inside the text, where every order of deciding it reads alike (below),
+    doesn't stop it; but not one that holds a line break (words with one deleted or replaced, a
+    split of theirs), which could make the block read as a table or a setext heading, or end it, in
+    a state that no reading of its lines sees: it is decided first. Nor one that starts the block:
+    their deletion of the first word, once rejected, would bring that word back in front of the
+    syntax, which would then stand in the middle of a line as text. Those are refused as any block
+    with another person's change is: "Accept or reject the changes in this paragraph first." A
+    comment or a highlight around your insertion, its opener alone on the line in front of yours,
+    starts the block from outside it, and is decided first: "Your new text starts this block, and
+    would have to move. Accept or reject your new text and its line breaks first."
+  - *Between the block and the text around it* stand only the markers of the insertion it is in and
+    of marks inside it: another mark there could, once decided, bring the block into the text next to
+    it, where its syntax would be text. For a change of type, your own split after the block, which
+    parts it from the text after it (a paragraph typed in front of one, then Return:
+    `<!--ins k3x9-->\n\n## Title<!--/k3x9--><!--split d3x9-->\n\nText`), is no such mark, and may
+    stand there: rejecting it takes the break and the prefix of the next line away and joins that
+    line to the block's. The lines that follow must read after the block's line as they read after a
+    paragraph's. So the joined line is the only line of its block, and the block under the blank
+    line after it starts at the left edge (an indented line there would go on a new item, where it
+    was code); or the line right under it starts, at the left edge, a block that interrupts a
+    paragraph whatever comes before it: a heading, a fence (a backtick fence whose info string holds
+    a backtick is no fence), or a bullet, a `1.` or a quote that holds text, a letter or a bracket,
+    and no other marker (which starts a list or a quote of its own after a heading and is text in a
+    paragraph), and a quote not after a quote, whose lines would go on it. A line of a wrapped
+    paragraph, a setext underline, a table's delimiter row and a number other than 1 are none of
+    these. A heading changed to another level has no such lines to read. Elsewhere it is refused:
+    "Rejecting the line break after your new paragraph would join the text below to it, which this
+    change would read otherwise. Accept your new paragraph and its line break first.", and where a
+    pending change stands in those lines, "A pending change stands in the lines just below your new
+    paragraph, which its line break parts it from. Accept or reject it, your new paragraph and its
+    line break first." Any other mark there, anyone's, makes the change a block change, below.
+  - *Every order of deciding.* Where only your own splits and comments and highlights stand near the
+    block, nothing is tried that typing has not always stood next to. Where another person's change
+    or your split after the block does, every order of deciding those marks and the insertion (four
+    at most) reads the same as without the change. It is tried on the block and the blocks next to
+    it, as any block change is, so the cost does not grow with the file. In each state, every
+    decision of the walk, the file reads as the same words, on both readings of CommonMark, in as
+    many blocks; so a deletion of another person's that is rejected can't leave the syntax in the
+    middle of a line, and a split that is rejected can't join a line to the block's that would read
+    otherwise. A decision works with the change exactly where it works without it, rejecting the
+    insertion gives back what it did before, the edit makes no mark and leaves the original view as
+    it was, and no marker starts a line. The tests judge every state by micromark 4.0.2 with GFM:
+    the block changed as asked, every other block as it was, the words the same; for a document
+    with more marks than every order can be tried for, in random orders.
+  Otherwise the change is a block change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
@@ -710,7 +811,8 @@ away.
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
   included, adds or takes away a line break in it or between it and the block before or after it.
-  What the block is, and where it ends, would depend on that change. Decide it first. A change holds
+  What the block is, and where it ends, would depend on that change. Decide it first (a block that is
+  all your own new text is no such block: §2.6, "Your own pending changes don't count"). A change holds
   a line break when its text as a view reads it has one: an insertion's or a substitution's new text
   in the newest view, a deletion's or a substitution's old text in the original view, and a split's
   break. A line break that only carries a marker is in no view, and is not one: typing at the start
@@ -854,6 +956,43 @@ away.
   or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
+**Alerts.** A quote whose first line is a type in brackets, `> [!NOTE]`, is a GitHub alert, and
+the editor draws it as a box with an icon and a title. The type is syntax, not words, as bold's
+stars are: GitHub's five types (`NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`) are written in
+capitals, and any other type that a file has, as `[!info]`, in lowercase, and all are read in any
+case. A change of the type is one mark on the whole alert, `was=callout-TYPE`, with the old type in
+lowercase, and `was=callout-TYPE=WORD` with the old word as written where the serializer would
+write it otherwise (`was=callout-note=note` for `[!note]`). The opener stands alone on the line
+before the alert, with a blank line after it, and the closer at the end of the alert's last line,
+so that every line of the alert is as it was and every renderer reads an alert (§3.3); the word in
+the brackets is the new type.
+
+```markdown
+<!--fmt q2hw was=callout-note-->
+
+> [!TIP]
+> Useful information.<!--/q2hw-->
+```
+
+- Rejecting writes the old word back and takes the markers away, and accepting takes the markers
+  away. The new type is any word of lowercase letters, digits and hyphens that starts with a
+  letter. A title or a fold mark after the type, which GitHub shows as text, is kept as written.
+- Only an alert at the left edge changes type: a quote that every line of starts with `>`, whose
+  first line is the type, with a blank line before it (or the start of the file, the end of front
+  matter, a heading, a thematic break or a closing fence) and after it (or the end of the file). A quote in a list item
+  or in another quote, a quote whose first line is anything else, and a quote with a line of text
+  that goes on from it are refused, in words that say what they are. The caret may be in any line
+  of the alert.
+- It works with the pending changes of the author's own in the alert, and with comments and
+  highlights. Another person's pending change in it, and one that adds or takes away a line break in
+  or around it, is decided first, as for every block change.
+- The author's own change of the type is changed in place: turned back to the old type it goes,
+  and changed again it stays one mark, with the first old type. In an alert of the author's own
+  pending insertion the type is written plainly, with no mark. With Track Changes off the new type
+  is written plainly.
+- A change of the type changes no words (the readings that decisions are held to leave the type
+  out), so every order of decisions reads alike.
+
 ## 3. Where markers go
 
 Markers sit in Markdown that other programs parse, so they may only go where no renderer changes
@@ -869,7 +1008,16 @@ at the outer edge of a whole inline construct. A marker never goes:
 
 1. inside a code span, autolink, bare URL, `www.` or email link, entity, backslash escape,
    footnote reference, emoji shortcode, math, inline HTML tag, task checkbox, list marker or
-   heading `#` sequence;
+   heading `#` sequence. An emoji is one character, which no marker parts, though it may be several
+   code points (a flag, a keycap, a skin tone, a family and any other ZWJ sequence, a heart with
+   its variation selector) and is two UTF-16 units outside the first plane: a position inside one
+   is on the whole of it, as inside an entity, so that a change that starts inside one takes all of
+   it as a substitution (`<!--sub k3x9 👨‍👩‍👧-->👨<!--/k3x9-->`). A change that starts or ends between
+   the two units of one character, or inserts half of one, is refused, in words that say so: it
+   would leave half a character in the file, which no tool reads back (the editor never makes one;
+   a program that counts in code units can). A shortcode is `:name:` of gemoji's kind: lowercase
+   letters, digits, `_` and `-` with a letter among them, `+1`, `-1`, `100` and `1234`, and the
+   six names of one letter (`:x:`), whichever of them GitHub knows;
 2. inside a link destination, title or reference label, between `]` and `(`, or inside the text of
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
@@ -937,12 +1085,30 @@ at the outer edge of a whole inline construct. A marker never goes:
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
    underline only in the container of the line of text above it: under a list item's line and to
    the left of its text, or with fewer quote markers, it would be a lazy line, which no underline
-   can be, and `- ` there is the bullet of the next item;
+   can be, and `- ` there is the bullet of the next item. For the opener of typed text, a bullet
+   that a split's marker stands on after a space (`- <!--split k3x9-->`) is not such a line: the
+   file reads it as an item whose first line is the marker, the newest view reads it as the
+   underline, and an opener beside the split's marker changes neither reading (§3.4, *Typing under
+   a bullet that the view reads as an underline*). A comment or a highlight, which has no text to
+   write there, is refused there as on any such line, and so is a marker that follows the dash
+   with no space (`-<!--split k3x9-->` is text of the paragraph, not an item);
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
-9. inside pandoc's `~x~` or `^x^`; after or inside `{…}` attributes; on `:::` lines; before or
+9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
+   (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
+   attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
+   or a digit and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`. GitHub shows a
+   shortcode as its emoji at the start of a text or after a space, and as written with a letter or
+   a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
+   where it shows as the emoji. A change whose end would stand there, as when text is typed or a
+   word is replaced in front of a shortcode, takes the shortcode into the change, as a substitution
+   of it (`Camp <!--sub k3x9 :tent:-->x:tent:<!--/k3x9--> here`), which reads alike in every order
+   of decisions; a change whose start or edge would stand there, such as deleting the letter or
+   formatting the shortcode alone, is refused, in words that say so. The letter after a shortcode,
+   where GitHub shows the emoji too, is no place of this rule, and nor is punctuation before one
+   (not built, #388). The rule is held where a marker is placed: text that an author types or
+   edits inside their own pending insertion keeps the markers it has.
 
 A change that would put a marker in one of these places is widened instead, so that the newest and
 the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
@@ -967,6 +1133,27 @@ middle of a paragraph it splits the paragraph.
   of the previous line, and the line break goes into the change. Typing `X ` at the start of the
   second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
   the break by itself and the new text, so that both views keep the break.
+- A deletion of all the text of a wrapped line, a middle or the last line of a paragraph or an
+  item, takes the line break in front of the line with it, and no new text brings the break back:
+  `one⏎two⏎three` without `two` is `one<!--del ID \ntwo-->⏎three` (#427). The marker stands at the
+  end of the line above, and the break after the deleted line stays, as the break between the lines
+  that are left, so the block neither parts in two (the empty line that a deletion of the text
+  alone leaves is a paragraph break) nor loses a line it still has. The break takes what belongs
+  to it: the prefix of the deleted line (`> `, the indentation of an item's lines), and the two
+  spaces or the backslash of a hard break that end the line above, which are in the payload
+  (`one\⏎two⏎three` without `two` is `one<!--del ID \\\ntwo-->⏎three`: the backslash, then the
+  break, then the line). The spaces or the backslash that end the deleted line itself stay, and end
+  the line above in their place: the paragraph keeps the hard break it had before the line below.
+  Several lines in a row go the same way, with the breaks between them. The newest view has the
+  lines that are left, the original has all of them, and other readers read the file as the newest
+  view, in every order of decisions. The first line of a block goes the other way, with the break
+  after it (§3.4), for no break stands in front of it. A line that is not a line of a paragraph
+  (code, an HTML block, a table row, the line under a setext heading's underline) is deleted as it
+  was. A deletion that starts at the beginning of a wrapped line and goes on past the end of its
+  paragraph is not written by this rule, and is refused as a change whose marker would start a line
+  is (`no-legal-placement`): the words give the way out, which is to start the selection at the
+  end of the line above, so that the line break goes with the text, or to leave the first word of
+  the line out of it.
 - A table row that holds a marker is written with a leading `|`.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
@@ -1020,8 +1207,11 @@ The importer ships in April.
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
   line at the item's content column.
-- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark at the start of the
-  alert's body uses a blank `>` line after `[!TYPE]`.
+- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark that starts at the start
+  of the alert's body is written as any mark at the start of a wrapped line is (§3.2): its opener
+  goes at the end of the `[!TYPE]` line and the line break is in the change, so that no marker
+  starts the body's line and the alert stays one. The blank `>` line that the research found as a
+  workaround for the renderers that lose the alert is never written.
 - An image alone in its paragraph gets own-line markers with blank lines around them. Any marker
   inside that paragraph stops pandoc from making the image a figure.
 - An own-line marker never sits between two lines of one paragraph, heading or table, between
@@ -1104,6 +1294,24 @@ The merged block keeps the first block's type, as in Word. Rejecting puts the ex
 a prefix (`- `, `> `, `## `) and goes on past it changes the text after the prefix, and the prefix
 stays: the block keeps its type.
 
+**A deletion of a setext underline** takes the underline whole, with the line break in front of it,
+and the blank lines after it stay: `Title<!--del k3x9 \n===-->\n\nNext.` reads as `Title` and
+`Next.`, two paragraphs, in the newest view, and rejecting puts the underline back. The break that
+holds an underline holds the blank lines after it too, and a change that touches a break takes all
+of it; a range that starts after the text above, on its line (at the end of it, or inside it), and
+ends where the underline does is the exception, since what follows is the break between the two
+blocks that are left. The line above has to be words, not another block's (a comment, a fence, a
+definition, a rule, front matter: there the break goes with it, as before), and the range does not
+start a line (a heading's second line and its underline are written as before, the marker standing
+after the first line's break). A range that goes on into the break after the underline (a selection
+of the line with its own line break), or takes the block below, takes all of it as before, and one
+that starts inside the underline and doesn't take all of it is refused (it would leave a paragraph
+where a heading was). The empty bullet that CommonMark reads as the underline of the text above it
+(`- one⏎  - ⏎⏎After.`) is such an underline: the editor's Backspace and Delete in it write
+`- one<!--del k3x9 \n  - -->\n\nAfter.` and not the join `- oneAfter.` (#441). Where the break in
+front of the item is another person's pending split, deleting it takes the whole break, the blank
+lines too (the join stays until they decide the split).
+
 **A change inside a prefix** does not touch the line break in front of the block: the digit of a
 list item's number replaced by the next (the editor does that to the items below the one Enter is
 pressed in), a bullet replaced by another, the `#`s of a heading. A marker can't stand in a
@@ -1129,6 +1337,29 @@ editor that wants the line's place left empty writes its own line breaks in fron
 they are, and the file never holds them (Return in the empty first item of a list at the start of a
 file).
 
+**A change inside a blank line of a break** that replaces its text and takes no line break away is
+written the same way: the `>` of the blank line between two paragraphs of a quote replaced by `> `,
+as a space typed after it is. A marker can't stand on that line either, so the change is a
+substitution of the whole break and the prefix of the block after it, and the new text is that
+break as it now is, line breaks and all, so that none of them is lost
+(`> One<!--sub k3x9 \n>\n> Two-->⏎> ⏎> Two<!--/k3x9-->`, the closer after the first word as above,
+with the changes next to the break as they are, a pending deletion at the end of the first
+paragraph, an insertion at the start of the second). Accepting gives the text that was typed, and
+rejecting gives every byte back. It was written as the typed text alone before (#358), which lost
+both line breaks. Two spaces or more at the end of the line above, which what is typed makes a
+hard break (the paragraph goes on), go into the change, in front of the opener, so that they still
+end their line for a reader that does not know the markers; where another change stands between
+them and the line end, the edit is refused. The underline of a setext heading is a line of the
+break: replacing all of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading),
+and a change of a part of it is refused (below, under a setext heading). Where the closer or
+another change next to the break has no place, the edit is refused, as any edit is. The break of
+the author's own pending split is left as it was (#419). A deletion there is not this: a change
+that takes a line break away takes all of the break (above), taking the quote markers or the white
+space out of a blank line is the rule for a quote's blank lines (below), and a deletion that
+takes no line break and that rule does not know (the `>` of a blank line indented in a list item,
+in the break of a pending split) is written as the join of the two blocks, which the last check
+sees only where letters differ (#447).
+
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block
 stays on the line (taking the first block of a longer list or quote out of it), is the prefix's
@@ -1152,7 +1383,25 @@ file, the newest and the original view read it alike. A pending deletion that em
 an item with text in the file and as an empty item in the view, and is refused, as is any mark on
 those lines in front of such an item. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
-list in its list while a line below it would read as text of it, and says so.
+list in its list while a line below it would read as text of it, and says so. The editor's Backspace
+at a first item does not rely on that rule alone. Wherever the item is in the file, with Track Changes
+on or off, taking its marker away (the first item of a list at the top level going out of its list,
+the first item of a nested list going up a level, and Delete at the end of the paragraph above a
+list, which takes the first item's marker into it) waits when the line right below the item holds a
+marker of a change and is text of the paragraph above it (an item with no text, a number other than
+1, an underline) in some of the ways the file reads and not in all: as it is, as the newest view
+reads it and as the original view reads it (an item whose only text is a deletion, which the file
+reads as an item and the newest view as an underline of the item's text; an item whose only text is
+an insertion, which the original view reads so). Taking the marker out then writes a file that reads
+as a heading in some order of deciding, which no reading of the file shows. The words ask for the
+change below to be decided first (#292). A nested first item going up a level is also kept where the
+line after it and its nested items, which stays where it is, would come to stand under the text of
+the last paragraph of them: it is indented far enough to continue the item that holds that paragraph
+once the item has moved, and was not where it stood, and it is a number other than 1, an empty item
+or an underline (a numbered item, the first of another list in the parent item, one column less
+indented than the item, or as deep as the text of its child). The format's own refusal reads the next
+item at the item's indentation only, and is not made where it refuses first (tabs, a pending break):
+the key says so in the format's words for a numbered item, and in its own for the others.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
@@ -1337,6 +1586,33 @@ line together with a line break of it leaves the other line break, as in plain t
 nothing but your own pending text and splits writes no marker, wherever it starts. Where the marker
 of a comment stands in it, which stays, the deletion is placed as any change is.
 
+**Typing under a bullet that the view reads as an underline.** A line break typed at the start of
+the text of a bullet item that stands under a line of text, or under the line of the item it is in,
+writes its split on the bullet's line (`- one⏎  - <!--split w8nn-->⏎    café 42`). The file reads
+that line as an item; the newest view reads it as the underline of the text above it, a heading,
+since an empty item can't interrupt a paragraph (§3.1, rule 7). The two readings differ before
+anything is typed (the file and the newest view of the first raw break are not read alike: #443), and
+every order of deciding the changes still reads alike. Words that the author of the breaks types on a
+blank line of them are written as at any other item: one insertion that starts on the bullet's line,
+in front of the split's marker, which is typed again in it
+(`- one⏎  - <!--ins k3x9--><!--split p7qd-->⏎    new words<!--/k3x9--><!--split d3x9-->⏎    ⏎    café 42`,
+#143). Every order of deciding the changes reads alike; accepting all gives the newest view and
+rejecting all the original. A comment or a highlight there is refused, with the words of every
+syntax-only line. Where the bullet is indented by two or three columns past the text above it (or
+past the text of the item it stands in), the lines of the break are four columns or more past that
+text, which the newest view reads as indented code under the underline, where no marker is read,
+and the words are refused, wherever under the bullet they are typed: "The line breaks typed after
+this bullet make it read as the underline of the text above it, so what is typed under it would be
+indented code, where its markers would not be read. Reject those line breaks first, or turn Track
+Changes off." The words are used only where the bullet does underline text (words above it, not a
+heading, a rule, a fence, HTML, a table, a definition or front matter, where the empty item that
+ends the list is the cause and the generic words for code are told); and not for typed text that has
+a line of four columns in it, which is code of its own. (Four columns of white space that are typed
+make code of their own, and are refused as any change in code is.) The editor's Return does not
+write this break: it writes the empty item above the list, with a blank line in front of it where
+the list stands under text (*A blank line and an item in an item's text*), so it comes from a paste
+or an agent.
+
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
 break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back.
@@ -1413,6 +1689,29 @@ item's, because a marker can't stand between two items:
 `- one`, `- two`, `- three` without `- two` is `- one`⏎`- <!--del k3x9 two\n- -->`⏎`  three`. The
 break that goes is the one after the blocks, or the one before them when that is the stronger of
 the two, so that the last item of a list and the paragraph after it stay a list and a paragraph.
+
+**Under a setext heading,** the break in front of the deleted blocks does not go, for it holds the
+heading's underline (above), and the underline is the heading's own: no marker may stand behind it
+(§3.1), and a payload that held it would leave the heading's text a paragraph, in the file and once
+the deletion is accepted (#372). The last blocks of a text under a setext heading are deleted
+without the break in front of them, as the only block of a text is: the opener stands where the
+first of them was, alone on its line, the payload is the blocks alone and the blank line above
+stays (`Title⏎===⏎⏎<!--del k3x9 Last.-->`). The newest view reads the heading and a blank line
+after it, accepting leaves the heading, and rejecting gives every byte back. A range that starts
+behind the underline, in the blank lines under it, and goes on into the blocks starts at the first
+of them, so that the blank lines stay: the underline is not what it takes. A range that takes part
+of the underline, or only the blank lines under it (the join of the block below onto the heading,
+which the editor refuses as well), is refused as any change in a line that is only syntax is; one
+that starts at the underline or in front of it and takes all of it takes the break with it, as the
+person asked. Where blocks follow the deleted ones, the break after them goes with them, even
+where it is the stronger of the two, and the break in front of them stays. A deleted setext
+heading goes with its underline, which is in the break after it, and so is never left to make a
+heading of the block in front of it. Right under the underline, with no blank line
+(`Title⏎===⏎Last.`), the line above the block takes no change, and the deletion is refused, as
+under a rule or a code fence. The break reads a line of `=` or `-` in the container of the line
+above it, with a blank line after it, as that line's underline, whatever the line above is: where
+CommonMark makes a rule of it (under an ATX heading, a rule or a fence), the blocks under it are
+deleted alone as well, as under a heading.
 
 **Whole-block insertion** puts the opener on its own line before the first new block (§3.3) and
 the closer at the end of the last one. Every inserted break inside it is a `split` with the
@@ -1783,7 +2082,9 @@ as typed.
   and format changes in the row are marked as usual, and accepting one leaves its text in the row,
   still pending with the row. Typing at the start of the first cell goes after the marker.
 - Accepting the row removes the marker; other pending marks inside stay pending. Rejecting the row
-  removes it with everything in it.
+  removes it with everything in it, and a highlight with a marker in it and the other outside the
+  row would be left with one: while a row is pending, a highlight is not made across rows or out
+  of the table, or in front of the row's marker (the end of "Moving rows", below, has the words).
 - A new header row has the marker in its first header cell. The old header becomes body row 1, and
   rejecting the insertion makes it the header again. Making an existing row the header is a move
   to the top.
@@ -1848,11 +2149,12 @@ it, one per line:
   the old place a plain deletion. With Track Changes off the row goes as text, and what was pending in
   it goes with it.
 - **Rule 4, comments in a deleted row.** A comment in a row that leaves the table, deleted or
-  rejected, becomes a point comment at the start of the text of the first cell of the row below, or at
-  the end of the text of the last cell of the row above for the last row (and where the row below has
-  no pipe at its start, which could not hold the marker, there too). A comment with a part that
-  stays loses only the part in the row, and one with an end in the row keeps its other end, the end
-  that left standing where the point goes. A highlight has no point form and goes.
+  rejected (a moved row does not leave: it goes back with its comments, "Moving rows", below),
+  becomes a point comment at the start of the text of the first cell of the row below, or at the end
+  of the text of the last cell of the row above for the last row (and where the row below has no
+  pipe at its start, which could not hold the marker, there too). A comment with a part that stays
+  loses only the part in the row, and one with an end in the row keeps its other end, the end that
+  left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it can't be
   deleted until that change is decided ("Bo Chen's pending change is in this column. Decide it
   first."), nor can a column that is another person's pending insertion or move ("Bo Chen's inserted
@@ -1872,6 +2174,56 @@ it, one per line:
   the table instead."). With Track Changes off the columns go from the original as well, so the last
   column that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
+- **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
+  table is §3.4's ordinary deletion and is held to none of these bullets. A table that goes whole
+  is a deletion of a block (§3.4): one deletion, in front of the block after the table, or behind
+  the block before it when the table ends the text. Its payload is the table as it reads with your
+  own pending changes rejected, and its comments are left out. The rule that a table keeps a row is
+  for deleting rows: the whole table may go.
+  - **Another person's pending changes stay theirs.** With Track Changes on, a table that holds one
+    can't be deleted until it is decided ("Bo Chen's pending change is in this table. Decide it
+    first."). That is a change in a cell, an inserted or moved row or column, a row or column
+    deleted and kept below the table, an alignment change, and a pending change whose text holds
+    the table. Comments and highlights are no changes.
+  - **Your own fold into the deletion,** as rejecting them would. A row or column you inserted is
+    removed outright, rows and columns you deleted or moved are in the payload as they were, and
+    your alignment change is undone. The deletion lines the table kept go with it, and their ledger
+    entries. A table that is part of the text of your own pending insertion is taken out of that
+    text, with no deletion; when it was all of the text, the insertion goes. A change of yours that
+    can't be undone with the table, as a format change that a later edit altered, is refused in the
+    same words.
+  - **Comments become point comments where the table was,** as in a row that leaves (rule 4): at the
+    start of the text of the block after the table, or, where that block can hold no marker, at the
+    end of the text of the block before it. A comment with a part that stays loses only the part in
+    the table. A highlight has no point form and goes. A comment with one end in the table and the
+    other outside it is refused ("Bo Chen's comment runs from this table into the text next to it.
+    Delete it first, or turn off Track Changes."), and so is one that no text next to the table
+    can keep, as when the table is all the text ("Bo Chen's comment is in this table, and no text
+    next to it can keep it. Delete the comment first, or turn off Track Changes.").
+  - **Where Track Changes has no place to write it.** The deletion's marker stands in front of the
+    block after the table, or behind the block before it when the table ends the text. It can't
+    stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
+    a table that ends the text right after one is refused too. A table that starts right under the
+    line above it, with no blank line between, and is followed by something, is refused as well,
+    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals,
+    except that of a table before a never-closed fence (issue #454), says which it is and what to
+    do: put a paragraph between the table and the code block or the rule (a pending insertion
+    counts), or a blank line above the table, or turn off Track Changes, which takes the table as
+    text ("This table can't be deleted with Track Changes on while a code block follows it with no
+    text between. Put a paragraph between them first, or turn off Track Changes."). A heading that
+    has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`) takes no change at its end. A
+    table right under one is refused, whether something follows it or not, and so is a table that
+    ends the text right after one, with a blank line between or not. Those refusals are in the
+    words of any edit at the end of such a heading ("A heading's closing #s and attributes take no
+    change."), which don't say what to do. A blank line between them gives a table that has text
+    after it its place, and a paragraph between them gives one that ends the text its place.
+  - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
+    and their ledger entries, and the blank lines after it (the break before it, when nothing
+    follows). Its comments become points as above. A comment that has no place so, or runs out of
+    the table, keeps a point where the text was, as it does for any text that goes (§3.10).
+  - Every order of decisions reads the same, judged against micromark 4.0.2. The newest view has no
+    table, and the original has the table as it read with your own changes rejected. Rejecting the
+    deletion writes the payload back, and decides nothing else.
 - **Order and positions.** The deletion lines are kept in the order of their positions, those at one
   position in the order the rows had. A row is written back at its position when its deletion is
   rejected, in front of the row that is at that position then; the deletions at the same position
@@ -1891,8 +2243,14 @@ it, one per line:
   insertion or move can't be moved. A row that is your own pending insertion is moved plainly. A row
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
-  typed in it since and its comments, and takes the deletion line away. Either half decides both. A
-  row with no pipe at its start (a table without outer pipes) is written at its new place with a
+  typed in it since and its comments, and takes the deletion line away. Either half decides both.
+  A comment or a highlight in the row goes with it: a range in a cell, a range across two cells or a
+  point. At the new place it stands in the row where it stood. Rejecting the move gives the row back
+  with it, in the same place, and nothing of it stays behind. The kept copy below the table holds
+  none of it (a comment is no change, and is in no deletion's payload). A highlight that runs across
+  rows, made before the move, is decided the same way: its end in the moving row goes with the row,
+  and its other end stays where it is.
+  A row with no pipe at its start (a table without outer pipes) is written at its new place with a
   plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
   same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
   at its place reading as it did, whatever has been typed, commented or decided in it since (a mark
@@ -1906,9 +2264,26 @@ it, one per line:
   Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
   at its start has its opener at the end of the row above, so it crosses the line break, and moving
   rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
-  table with a row move pending is refused, naming the person who moved the rows. Deleting the header
-  is refused in the same two cases (the row that would be the header has another number of cells,
-  or a comment's marker after its closing pipe is a cell too many), tracked or not. A
+  table with a row move pending is refused, naming the person who moved the rows. A highlight is
+  refused more widely, as deciding a row takes away or moves the markers in it and a highlight has
+  no point form to be left as (a comment becomes one): in a table with a row inserted or moved and
+  pending, adding a highlight whose markers are in different rows, or one in a row, or among the
+  deleted rows kept under the table, and the other outside it, is refused, naming the person whose
+  change it is ("Ada Lovelace's change of rows in this table is pending, and this highlight would
+  run from one row into the next, or out of the table. Decide the change first, or highlight
+  inside one row."). Highlighting the first cell of a row with no pipe at its start is refused in
+  the same table, which puts the opener at the end of the row above, in words that say so, as
+  "inside one row" would not help ("... this highlight would start at the end of the row above, as a
+  row with no pipe at its start can't hold a marker at its start. Decide the change first, or
+  start the highlight after the first cell of the row."). So is one that would start in front of
+  the mark of a pending row, at the start of its first cell, or between the mark and the space
+  after it, which hides the mark from the table ("... this highlight would start at the very start
+  of the first cell of a row that is inserted or moved, where the mark of the row is. Decide the
+  change first, or start the highlight at the text of the row."). A highlight inside one row, from the
+  text of a cell on, and one over the whole table, from the text before it to the text after it,
+  are made, and every decision of the rows is possible with them there. Deleting the header is
+  refused in the same two cases (the row that would be the header has another number of cells, or a
+  comment's marker after its closing pipe is a cell too many), tracked or not. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first
@@ -1942,11 +2317,11 @@ it, one per line:
 
 **Other table rules:**
 
-- Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
-  that has none, because a change begins in its first cell, the editor writes a plain `| ` in
-  front of it first, in both versions, so that nothing reads differently. This holds for a row with
-  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
-  is still refused.
+- **Rule 7, a row's outer pipes.** Rows that hold markers have a leading `|`. When a marker has to
+  stand at the start of a row that has none, because a change begins in its first cell, the editor
+  writes a plain `| ` in front of it first, in both versions, so that nothing reads differently.
+  This holds for a row with no pipe at all too (the first under the delimiter row, say). A format
+  change in a row without one is still refused.
   The same is written when an edit takes all the text of the first cell of a row that has no leading
   pipe, or of the last cell of one that has no trailing pipe (a deletion, tracked or not): the pipe
   beside the cell would become the row's outer pipe, the row would have a cell less, a header one
@@ -1959,12 +2334,39 @@ it, one per line:
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
   "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
   the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
-  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
-  front of the table's first row as it does in front of a paragraph's first line, and everything
-  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  held to this: a deletion of a whole table is the block deletion of §3.4 (rule 6 above), and the
+  table is the marker's payload. A row whose cells are all dashes is a row like any
   other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
   of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
   can unmake the table, as an edit of any line can unmake what it is).
+- **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
+  after its last. The file has no text for them, so there is no place in it to type. Typing into one
+  writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
+  differently. It then writes the text as typing in any cell is written, an insertion with Track
+  Changes on and plain text with it off. The operation `fillCells` (a row, a column and the text)
+  writes both.
+  - **The pipes and the text** go after the row's last character. A row with a closing pipe gets
+    ` |` for each cell in between and then ` text |`: under a header of three columns, `| 1 |`
+    becomes `| 1 | | x |` for an `x` in the third. A row with no closing pipe gets the pipes between
+    its cells and none at the end: `| 1 | 2` becomes `| 1 | 2 | x`. A row that is one `|` has one
+    empty cell, and an `x` in its first missing cell makes it `| | x`.
+  - **With Track Changes on** the `x` is the insertion. Rejecting it leaves `| 1 | |  |`, which
+    reads as the row did, in every order of decisions.
+  - **With no text** the operation writes the pipes alone, so that the cell is there to put a caret
+    in, and every row then ends in a closing pipe: `| 1 | 2` becomes `| 1 | 2 |  |`. The editor
+    does this when an input method starts to compose in the cell.
+  - **Refused:** a pipe or a line break in the text, as in any cell; a cell the row has, and a
+    column the table lacks ("That cell is not one its row lacks."); the header, and a row the
+    table lacks ("There is no such row in this table.").
+  - **A row at the new place of a move that is not yet decided** (the row with the
+    `<!--ins ID row-->` mark, whose old place is kept below the table) would get the pipes in that
+    half of the move only, and rejecting the move would give back a row that reads otherwise. With
+    Track Changes off the typing is a plain edit, written in both halves of the move as any plain
+    edit there is (Moving columns, above). With Track Changes on it is refused, and so are the
+    pipes alone, with it on or off. The refusal names the person who made the move ("Bo Chen's
+    move of this row is pending. Decide it first, or turn off Track Changes." for typed text, and
+    the same without the last words for the pipes alone, which turning it off would not write),
+    and says "Your move" to that person.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
@@ -1974,7 +2376,7 @@ it, one per line:
   with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
   below the last row goes above all of them, at the end of that row.
 - A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
-  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  otherwise, with as many empty cells as the header and a leading pipe (rule 7). Nothing else is
   re-padded.
 - **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
   **Redlines writes alignment changes with Track Changes off only** (the Align commands are refused with
@@ -2119,8 +2521,10 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
 `frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
-an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
-edited with Track Changes on yet."
+an edit there is refused with the error code `front-matter`: "Front matter can't be edited with
+Track Changes on yet." A comment or a highlight there is refused with the same code, in words
+about what it is: "A comment can't be anchored in front matter yet." and "A highlight can't be made
+in front matter yet. Select text in the body instead."
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
 the body's, and are written plain; anything else typed there is refused as an edit of front matter.
@@ -2219,6 +2623,9 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   front of an opener.
 
 **Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
+A deletion of all the text of a wrapped line takes the same range as with Track Changes on (§3.2): the
+line and the line break in front of it, with the prefix of the line and the syntax of the hard break
+above it. Left in, the empty line would be a paragraph break (#427).
 
 - A mark whose text is all deleted goes, with its ledger entry: an insertion, a highlight or a
   format change with nothing left in it, and a split whose break is deleted. A mark that keeps some
@@ -2367,7 +2774,30 @@ A comment thread is anchored in the body and stored in the ledger under the same
   item's indentation), starts where the text above it ends, as at the start of any line; at the
   start of the body, and under another blank line, where no text is right above it, it starts at
   the text of the block below: an opener alone on the blank line would take its line break for its
-  carrier (§3.3).
+  carrier (§3.3). A range that reaches into the ledger, as select all does by ending at the end of
+  the file, ends where the body does, for a comment's as for a highlight's: no anchor is written in
+  the ledger or after it (§5.1), and a point at the very end of the file is at the end of the body.
+  A range that ends right after the closing `_` of emphasis that ends the body has no place for
+  its closer: a marker there would change how the `_` flanks (§3.1, rule 5), and the next place is
+  past the ledger. It is refused, with the error code `no-legal-placement` and "There is no place
+  for the markers of this comment."; the text inside the underscores can be anchored.
+- **Highlights** (§2.2) are anchored as comments are, and have no thread:
+  `<!--hl ID-->text<!--/ID-->`, a range that may span blocks, with its entry in `marks` (§5.4).
+  Making one changes no text. Its ends are placed as a comment's are (above, and §3.1 to §3.3,
+  at the end of the body too), and it is refused where a comment's anchor is, in words about
+  highlights: in code or an HTML comment, where its markers
+  would not be read (`inside-code`, "A highlight can't be made inside code or an HTML comment, …"),
+  in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
+  the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the
+  reason, and "Select other text to highlight."), and across rows of a table, or out of it, while a
+  row is inserted or moved and pending in it (§3.7). A highlight has no point form, and covers text: a range that covers no
+  text that reads in the newest view, once its ends are placed, is refused with the error code
+  `empty-range` ("Select some text to highlight."). That is a point, the line breaks between two
+  blocks, markers alone (the opener or the closer of an insertion, a comment's anchor, a
+  highlight's), or a deletion alone, whose old text is in no view. A range that holds a deletion
+  and text is made, and covers the deletion. (Dismissing a highlight over markers alone would not
+  give the file back: over a comment and a deletion alone, it would leave the comment a point.)
+  Accepting or rejecting a highlight, which dismisses it and leaves the text, takes it away again.
 - **Typing** at the end of a comment's range extends it. Typing at its start doesn't. A highlight's
   range takes typed text the same way, with Track Changes on or off. A line break is not text of
   the range: Enter at its end goes after the closer, and in front of it after the opener, so that
@@ -2494,7 +2924,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
-| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
+| `view`        | `clean`, `redlines` or `simple`: the view the file opens in, as last saved (§5.6)                  |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2595,12 +3025,17 @@ same values.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
-- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
-  it was last saved. Redlines opens the file in it, in place of the markup view that the person
-  has remembered, which opens the files that have none.
-  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
-    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
-    markup views, is written as `redlines`.
+  - A window that reloads the file because it changed on disk reads the setting again: a file that
+    newly carries `tracking: everyone` turns Track Changes on, under the same notice, and the
+    switch writes nothing, since the file asks already. One that no longer carries it leaves
+    Track Changes as the window has it, so that nobody's tracking is switched off under them.
+- **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
+  it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
+  text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
+  Redlines opens the file in it, in place of the markup view that the person has remembered, which
+  opens the files that record none.
+  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
+    source, and a save made in Raw leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
@@ -2609,8 +3044,9 @@ same values.
     whatever tool or version wrote it.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
-    file with no changes or comments, Clean and Redlines look the same anyway.
-  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+    file with no changes or comments, Clean, Redlines and Simple look the same anyway, except that
+    only the full markup draws ordinary HTML comments (design §5.3).
+  - A value other than these three is dropped with a warning, as an unknown `tracking` is.
   - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
     of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
     `w:view` is the page layout (Print, Web, Draft), not how markup is shown.
@@ -2969,10 +3405,23 @@ Agents edit the newest view, and the library turns their edits into tracked chan
 
 - A Redlines file keeps its extension: `.md`, `.qmd`, `.Rmd` or `.txt`. A new extension would lose
   GitHub's rendering and every Markdown, R Markdown and Quarto tool.
-- `.md` files are written in GitHub Flavored Markdown: `<sub>`, `<sup>`, `<mark>`, `<ins>` for
-  underline, `<img width>`, `<dl>`, GitHub alerts.
-- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `~x~`, `^x^`, `[x]{.mark}`,
-  `{width=}`, `{#id}`, Quarto callouts.
+- `.md` files are written in GitHub Flavored Markdown: `<mark>`, `<ins>` for underline,
+  `<img width>`, `<dl>`, GitHub alerts.
+- `.qmd` and `.Rmd` files are written in pandoc's Markdown: `[x]{.mark}`, `{width=}`, `{#id}`,
+  Quarto callouts.
+- Subscript and superscript are `<sub>` and `<sup>` in every file type (§2.6). pandoc's `~x~` and
+  `^x^` would not read the same in both dialects: a single `~x~` is strikethrough on GitHub, and
+  `^x^` shows there as text. pandoc reads the tags as raw HTML, which its Word output drops
+  ([research](research/syntax.md)), so a `.qmd` or `.Rmd` file rendered to Word through pandoc
+  loses them; Redlines' own Word export keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept as written:
+  Redlines never writes either, never turns one into a tag, and doesn't read it as subscript or
+  superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
+  strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
+  would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
+- Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
+  Quarto or VS Code, so Redlines never writes one: choosing an emoji after a colon writes the
+  character. A shortcode that a file already has is kept as written, and is one character for a
+  change (§3.1, rules 1 and 9).
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and

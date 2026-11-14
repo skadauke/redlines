@@ -175,13 +175,12 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
       return el?.matches('.cm-content') ? 'editor' : (el?.textContent ?? '').trim();
     });
   const seen: string[] = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab');
     seen.push(await focused());
   }
-  expect(seen.slice(0, 9)).toEqual([
+  expect(seen.slice(0, 8)).toEqual([
     'Clean',
-    'Simple',
     'Redlines',
     'Raw',
     'Track Changes',

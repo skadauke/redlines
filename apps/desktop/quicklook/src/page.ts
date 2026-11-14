@@ -1,6 +1,7 @@
 // The page that Quick Look draws: one document of HTML and CSS, with no script, no network and no
 // file beside it. The Content-Security-Policy says so too, for a page whose text came from a file
-// that anyone could have written: nothing loads but the stylesheet and the fonts inside it.
+// that anyone could have written: nothing loads but the stylesheet and the fonts inside it, and the
+// images that the extension attached to its answer (`cid:`), never one from a server.
 
 import documentCss from './document.css?raw';
 import { fontFaces } from './fonts.ts';
@@ -43,7 +44,7 @@ export function page({ title, notice, frontMatter, body, after }: PageParts): st
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src cid:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>

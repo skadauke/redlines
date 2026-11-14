@@ -257,7 +257,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
   else if (tracking !== undefined) warn('bad-ledger', `Unknown tracking setting ${tracking}`);
 
   const view = str(doc['view']);
-  if (view === 'clean' || view === 'redlines') ledger.view = view;
+  if (view === 'clean' || view === 'redlines' || view === 'simple') ledger.view = view;
   else if (view !== undefined) warn('bad-ledger', `Unknown view setting ${view}`);
 
   const history = str(doc['history']);

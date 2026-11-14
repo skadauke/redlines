@@ -5,7 +5,7 @@
 // selects the row (⇧-press extends) and opens its menu; a drag moves the rows (`drag.ts`); a + shows
 // within 8 px of a row boundary (`plus.ts`). Interface text takes the theme's sizes.
 
-import { type Extension } from '@codemirror/state';
+import { type EditorState, type Extension } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -20,6 +20,7 @@ import {
   colTitles,
   deleteCols,
   deleteRows,
+  deleteTable,
   insertCols,
   insertColsAt,
   insertRows,
@@ -28,6 +29,7 @@ import {
   moveColsTo,
   moveRows,
   moveRowsTo,
+  rectOf,
   rectSelection,
   rowTitles,
   selectedCells,
@@ -35,9 +37,24 @@ import {
   touchedCols,
   touchedRows,
   type Table,
+  type TableCell,
 } from '@redlines/editor';
 import { beginDrag, DRAG_SLOP, type Drag } from './drag.ts';
 import { boundariesOf, colBoundariesOf, PLUS_REACH, plusBoundary } from './plus.ts';
+
+/**
+ * The cells a grip menu's Clear Contents clears: the rectangle the grip selected; where the selection is
+ * the text of one cell, which is no rectangle (the column of a table of a header alone, the row of a
+ * table of one column and a header alone), that cell.
+ */
+function cellsToClear(state: EditorState): readonly TableCell[] {
+  const cells = selectedCells(state);
+  if (cells.length > 0 || rectOf(state)) return cells;
+  const { from, to } = state.selection.main;
+  const all = tablesOf(state).flatMap((table) => table.rows.flatMap((row) => row.cells));
+  const cell = all.find((c) => c.textFrom === from && c.textTo === to);
+  return cell ? [cell] : [];
+}
 
 /** How far above a table its column grips stand: the strip above it. */
 const COL_STRIP = 28;
@@ -108,10 +125,14 @@ function rowBox(line: HTMLElement): { top: number; bottom: number } {
   };
 }
 
-/** What is measured of each table, kept until the state (the text, the selection, a decoration), the scroll or the table's place changes. */
+/**
+ * What is measured of each table, kept until the state (the text, the selection, a decoration), the
+ * scroll or the table's place changes: its place is its top and its left, which moves when the
+ * table scrolls sideways in its box.
+ */
 const measured = new WeakMap<
   HTMLElement,
-  { state: unknown; scroll: number; top: number; drawn: Drawn }
+  { state: unknown; scroll: number; top: number; left: number; drawn: Drawn }
 >();
 
 /**
@@ -140,6 +161,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
       known.state === view.state &&
       known.scroll === view.scrollDOM.scrollTop &&
       known.top === box.top &&
+      known.left === box.left &&
       known.drawn.table === table
     ) {
       drawn.push(known.drawn);
@@ -166,6 +188,7 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
       state: view.state,
       scroll: view.scrollDOM.scrollTop,
       top: box.top,
+      left: box.left,
       drawn: one,
     });
     drawn.push(one);
@@ -199,6 +222,10 @@ class Grips {
   private readonly onMove = (event: MouseEvent) => this.moved(event);
   private readonly onLeave = (event: MouseEvent) => {
     if (!this.drag && !this.layer.contains(event.relatedTarget as Node | null)) this.hide();
+  };
+  private readonly onBoxScroll = (event: Event) => {
+    // The editor's own scroll is heard by the plugin's observer; this is what scrolls inside it.
+    if (event.target !== this.view.scrollDOM && !this.drag) this.hide();
   };
   private readonly onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && (this.drag || this.menu)) {
@@ -237,6 +264,9 @@ class Grips {
     view.dom.append(this.layer);
     view.dom.addEventListener('mousemove', this.onMove);
     view.dom.addEventListener('mouseleave', this.onLeave);
+    // A table scrolls sideways in its own box, and a scroll doesn't bubble to the editor: the grip
+    // would stay where the column was.
+    view.dom.addEventListener('scroll', this.onBoxScroll, true);
     window.addEventListener('keydown', this.onKey, true);
     window.addEventListener('mouseup', this.onUp);
     window.addEventListener('mousedown', this.onAway, true);
@@ -252,6 +282,7 @@ class Grips {
     this.drag = null;
     this.view.dom.removeEventListener('mousemove', this.onMove);
     this.view.dom.removeEventListener('mouseleave', this.onLeave);
+    this.view.dom.removeEventListener('scroll', this.onBoxScroll, true);
     window.removeEventListener('keydown', this.onKey, true);
     window.removeEventListener('mouseup', this.onUp);
     window.removeEventListener('mousedown', this.onAway, true);
@@ -683,6 +714,7 @@ class Grips {
             [colTitles.insertLeft(state), () => insertCols(this.view, true)],
             [colTitles.insertRight(state), () => insertCols(this.view, false)],
             [colTitles.delete(state), () => deleteCols(this.view)],
+            ['Delete Table', () => deleteTable(this.view)],
             [colTitles.moveLeft(state), () => moveCols(this.view, true)],
             [colTitles.moveRight(state), () => moveCols(this.view, false)],
             // The columns' alignment, the caret's column checked.
@@ -690,15 +722,16 @@ class Grips {
             ['Align Center', () => alignCols(this.view, 'center'), now === 'center'],
             ['Align Right', () => alignCols(this.view, 'right'), now === 'right'],
             ['Default Alignment', () => alignCols(this.view, ''), now === ''],
-            ['Clear Contents', () => clearCells(this.view, selectedCells(state))],
+            ['Clear Contents', () => clearCells(this.view, cellsToClear(state))],
           ]
         : [
             [rowTitles.insertAbove(state), () => insertRows(this.view, true)],
             [rowTitles.insertBelow(state), () => insertRows(this.view, false)],
             [rowTitles.delete(state), () => deleteRows(this.view)],
+            ['Delete Table', () => deleteTable(this.view)],
             [rowTitles.moveUp(state), () => moveRows(this.view, true)],
             [rowTitles.moveDown(state), () => moveRows(this.view, false)],
-            ['Clear Contents', () => clearCells(this.view, selectedCells(state))],
+            ['Clear Contents', () => clearCells(this.view, cellsToClear(state))],
           ];
     const menu = document.createElement('div');
     menu.className = 'rl-grip-menu';

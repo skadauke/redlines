@@ -45,6 +45,19 @@ describe('keystroke scripts', () => {
     expect(() => checkInvariants(result)).toThrow(/hidden: hidden-caret/);
   });
 
+  it('reads a document with a ledger of its own as the file it is: its <sub> tags are no markers', () => {
+    // The notation's `<sub …>` and `</sub>` are a substitution's markers, and the tags of
+    // subscript, in a file the generator of random documents made, are not (#310).
+    const result = runScript({
+      name: 'file',
+      doc: `H<sub>2</sub>O and <!--ins b2b2-->x<sup>2</sup><!--/b2b2-->.‸${LEDGER}`,
+      keys: [],
+      tc: true,
+      expect: {},
+    });
+    expect(result.file).toContain('H<sub>2</sub>O and <!--ins b2b2-->x<sup>2</sup><!--/b2b2-->.');
+  });
+
   it('writes out shortened markers with the given ids, and shortens them again', () => {
     const result = runScript({
       name: 'markers',

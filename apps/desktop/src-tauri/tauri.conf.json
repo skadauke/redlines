@@ -44,7 +44,7 @@
         "url": "preferences.html",
         "title": "Preferences",
         "width": 560,
-        "height": 400,
+        "height": 440,
         "resizable": false,
         "minimizable": false,
         "maximizable": false,

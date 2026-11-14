@@ -140,7 +140,20 @@ describe("a paste that stands against another person's pending mark (#81)", () =
 
 describe("another person's pending marks around the change (#81)", () => {
   it('read as micromark reads them, in every order of decisions', { timeout: 5_400_000 }, () => {
-    const pieces = ['a', 'bc', ' ', '*', '**', '***', '_', '__', 'word'];
+    const pieces = [
+      'a',
+      'bc',
+      ' ',
+      '*',
+      '**',
+      '***',
+      '_',
+      '__',
+      'word',
+      '<sub>',
+      '</sub>',
+      '<sup>x</sup>',
+    ];
     // Bo's mark stands next to the caret, or a word or a space away, or touches the change.
     const targets = [
       'Start <!--ins k3x9-->yy<!--/k3x9--> ‸middle End',
@@ -214,7 +227,23 @@ describe('an emphasis opened far back on the line (#81)', () => {
 
 describe('text pasted before a letter reads as micromark reads it (#81)', () => {
   it('for random words and runs of `*`, `_` and `**`', () => {
-    const pieces = ['a', 'bc', ' ', ' ', '*', '**', '***', '_', '__', '*', '**', 'word'];
+    const pieces = [
+      'a',
+      'bc',
+      ' ',
+      ' ',
+      '*',
+      '**',
+      '***',
+      '_',
+      '__',
+      '*',
+      '**',
+      'word',
+      '<sub>',
+      '</sub>',
+      '<sup>x</sup>',
+    ];
     const targets = ['Start ‸middle End', 'Start‸ middle End', 'one *two ‸three* four'];
     let insertions = 0;
     let substitutions = 0;

@@ -529,6 +529,8 @@ describe('a format change in code (#153)', () => {
     italic(true),
     inline('strike', true),
     inline('code', true),
+    inline('sub', true),
+    inline('sup', true),
     link('https://x.example'),
     clear,
     { kind: 'block', to: 'h2' },
@@ -1748,7 +1750,24 @@ describe('parseFormatOps', () => {
     expect(parseFormatOps('was=h2')[0]?.inverse).toEqual({ kind: 'block', to: 'h2' });
     expect(parseFormatOps('+check')[0]?.inverse).toEqual({ kind: 'check', checked: false });
     expect(parseFormatOps('-check')[0]?.inverse).toEqual({ kind: 'check', checked: true });
-    for (const op of ['+mark', 'was=callout-note', '@width=10', 'align=x', '+html=<u>']) {
+    // An alert's old type is a block change too (#311), which only a word of its type can be.
+    expect(parseFormatOps('was=callout-note')[0]?.inverse).toEqual({
+      kind: 'callout',
+      type: 'note',
+    });
+    expect(parseFormatOps('was=callout-note=Note')[0]?.inverse).toEqual({
+      kind: 'callout',
+      type: 'note',
+    });
+    for (const op of [
+      '+mark',
+      'was=callout-note=tip',
+      'was=callout-Note',
+      'was=callout-',
+      '@width=10',
+      'align=x',
+      '+html=<u>',
+    ]) {
       expect(parseFormatOps(op)[0]?.inverse, op).toBeUndefined();
     }
     expect(parseFormatOps('')).toEqual([]);
@@ -1876,9 +1895,13 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     italic(true),
     inline('strike', true),
     inline('code', true),
+    inline('sub', true),
+    inline('sup', true),
     bold(false),
     italic(false),
     inline('code', false),
+    inline('sub', false),
+    inline('sup', false),
     clear,
     link('https://new.example/a'),
     link(null),
@@ -1892,6 +1915,11 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     { kind: 'check', checked: false },
     { kind: 'indent', by: 1 },
     { kind: 'indent', by: -1 },
+    // The type of an alert (#311): refused where there is none, written where there is.
+    { kind: 'callout', type: 'tip' },
+    { kind: 'callout', type: 'note' },
+    { kind: 'callout', type: 'info' },
+    { kind: 'callout', type: 'my-type2' },
   ];
   const cy: Person = { handle: 'cy', name: 'Cy Young' };
 
@@ -1912,6 +1940,19 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       'k,',
       '[r]',
       'm*n',
+      '<sub>s</sub>',
+      '<sup>t u</sup>',
+      '**<sub>v</sub>**',
+      'H<sub>2</sub>O',
+      '</sub>',
+      '<sup>',
+      '\\<sub>',
+      ':tent:',
+      'a:smile:',
+      ':+1:',
+      '👨‍👩‍👧',
+      '🇩🇪',
+      '👍🏽',
     ];
     const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
     // Blocks whose lines read as they do only with the rest of the block: nested items indented
@@ -1990,12 +2031,16 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     return { from: Math.min(one, two), to: Math.max(one, two) };
   }
 
-  /** The words of the newest view, which a format change does not change. */
   /** The words of the newest view, which a format change does not change, without the syntax that
-   * starts a line: a list's numbers and boxes are a block's type, not its words. */
+   * starts a line: a list's numbers and boxes are a block's type, not its words. The tags of
+   * subscript and superscript are syntax too. */
   const letters = (text: string) =>
     newestView(text)
       .text.replace(/^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/gm, '')
+      // The type of an alert is syntax, as bold's stars are (#311).
+      .replace(/^\[![A-Za-z][A-Za-z0-9-]*\]/gm, '')
+      // A tag that a backslash escapes is text.
+      .replace(/(?<=(?:^|[^\\])(?:\\\\)*)<\/?(?:sub|sup)>/g, '')
       .replace(/[^\p{L}\p{N}]+/gu, '');
 
   it('never starts a line with a marker, and every decision of every mark comes out right', () => {

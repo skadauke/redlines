@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { undo, undoDepth } from '@redlines/editor';
+import { chooseViewEffects, undo, undoDepth, viewModeField } from '@redlines/editor';
 import { accept, applyChanges, parse } from '@redlines/format';
 import { describe, expect, it, vi } from 'vitest';
 import { mountDemo } from './demo.ts';
@@ -32,6 +32,22 @@ describe('mountDemo', () => {
     expect(states.at(-1)!.canComment).toBe(false);
     expect(handle.startComment()).toBe(false);
     expect(notices.at(-1)).toBe("A comment can't be added in Raw. Switch to Redlines to add one.");
+  });
+
+  it('keeps Redlines pressed in its simple look, and shows that look again from Clean', () => {
+    const { handle, view, states } = mountForTest('plan');
+    // A click on a change bar is what switches to the simple look.
+    view.dispatch({ effects: chooseViewEffects('simple') });
+    expect(view.state.field(viewModeField)).toBe('simple');
+    expect(states.at(-1)!.view).toBe('redlines');
+    handle.setView('clean');
+    expect(states.at(-1)!.view).toBe('clean');
+    handle.setView('redlines');
+    expect(view.state.field(viewModeField)).toBe('simple');
+    expect(states.at(-1)!.view).toBe('redlines');
+    // Reset is the original: the full markup.
+    handle.reset();
+    expect(view.state.field(viewModeField)).toBe('redlines');
   });
 
   it('turns typing into an insertion by Ada while Track Changes is on', () => {

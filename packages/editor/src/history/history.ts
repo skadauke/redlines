@@ -90,13 +90,18 @@ export const joinsStep = Annotation.define<true>();
 export const joinsNewestStep = Annotation.define<true>();
 
 /**
- * Takes the steps done back to `depth` of them, and maps the rest through `mapping`, if any
- * (Redlines): a take-back of Returns outside the history carries it, with the depth before the
- * first Return it takes back, so that no step of a Return it took back, nor of what was done and
- * undone between them, is left to replay. Mapping alone drops only a step that inserted and
- * deleted nothing, since an inverse that inserts survives it.
+ * Takes the steps done back to `depth` of them (Redlines): a take-back of Returns outside the
+ * history carries it, with the depth before the first Return it takes back, so that no step of a
+ * Return it took back, nor of what was done and undone between them, is left to replay. When that
+ * Return was joined to the step at `depth` (a Return over a selection, or after the take-back of an
+ * empty line), `joined` holds the changes it made, and the step stays without them: it undoes what
+ * it undid before the join, from the text as it was before the Return. They are composed out of
+ * the step, not mapped away. A Return can replace text that the step replaced too (a ledger, which
+ * the tracked layer writes again): its inverse then puts the old text back, and the step, mapped
+ * over it, no longer deleted that text but still inserted its own beside it, a second ledger in
+ * the file.
  */
-export const dropStepsEffect = StateEffect.define<{ depth: number; mapping: ChangeDesc | null }>();
+export const dropStepsEffect = StateEffect.define<{ depth: number; joined: ChangeSet | null }>();
 
 /**
  * How many steps have been done, for `dropStepsEffect`'s depth (Redlines): counted from the start of
@@ -211,7 +216,7 @@ const historyField_ = StateField.define<HistoryState>({
     if (drop) {
       // The text is as before those steps again: the steps below them need no mapping of it.
       state = state.dropSteps(drop.value.depth);
-      return drop.value.mapping ? state.addMapping(drop.value.mapping) : state;
+      return drop.value.joined ? state.unjoin(drop.value.joined) : state;
     }
     const isolate = tr.annotation(isolateHistory);
     if (isolate === 'full' || isolate === 'before') state = state.isolate();
@@ -685,6 +690,40 @@ class HistoryState {
       0,
       undefined,
       true,
+      this.trimmed,
+    );
+  }
+
+  /**
+   * The newest step with `joined` taken out of it, the changes the history added to it (a Return
+   * that it joined to the step): the text is as it was before them, and the step undoes what it
+   * did before them, exactly. `joined` and the step's changes, which undo both, compose into that.
+   */
+  unjoin(joined: ChangeSet): HistoryState {
+    const last = this.done[this.done.length - 1];
+    if (!last?.changes) return this;
+    const back = joined.invertedDesc;
+    const done = this.done.slice(0, -1);
+    // The step's effects stay as they are: their positions are in the text it gives back, which
+    // `joined` never touched. The selections after it are in the text it made, which `joined`
+    // changed.
+    done.push(
+      new HistEvent(
+        joined.compose(last.changes),
+        last.effects,
+        last.mapped,
+        last.startSelection,
+        last.selectionsAfter.map((selection) => selection.map(back)),
+        last.owner,
+        last.label,
+      ),
+    );
+    return new HistoryState(
+      done,
+      this.undone,
+      this.prevTime,
+      this.prevUserEvent,
+      this.isolated,
       this.trimmed,
     );
   }

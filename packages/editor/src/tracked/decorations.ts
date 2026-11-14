@@ -41,6 +41,14 @@ import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
+import {
+  GHOST_ROWS,
+  ghostColors,
+  ghostTableDOM,
+  ghostTableHeight,
+  ghostTableOf,
+  type GhostTable,
+} from '../table/ghost-table.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -152,14 +160,17 @@ interface StruckRun {
 interface StruckBlock {
   kind: DeletedBlockKind;
   runs: StruckRun[];
+  /** A deleted table, drawn as a ghost table (`table/ghost-table.ts`), not as runs of its source. */
+  table?: GhostTable;
 }
 
 /**
  * A whole-block deletion (format §3.4) drawn as the blocks it deleted, struck where they were.
  * `lines` is its marker's own line, which the hidden lines around it hide (the widget replaces
  * them); `before` is the line of the next item of a list, whose bullet the deletion leaves in
- * front of its marker, and the blocks are drawn above it; `after` is the line above a block
- * deleted at the end of the text, and the blocks are drawn below it.
+ * front of its marker, and the blocks are drawn above it (so are the blocks of a deletion that is
+ * all the text, above its marker's own line); `after` is the line above a block deleted at the end
+ * of the text, and the blocks are drawn below it.
  */
 interface Struck {
   id: string;
@@ -334,6 +345,8 @@ function struckBlocks(
     const line = doc.lineAt(first.open.from);
     const lead = doc.sliceString(line.from, first.open.from).replace(MARKER, '');
     let where: Struck['where'];
+    // A deletion that is all the text of the file: no block above holds its marker, none follows it.
+    let alone = false;
     let segments: { segment: Segment; mark: MarkRange }[] = mark.segments.map((segment) => ({
       segment,
       mark,
@@ -378,14 +391,22 @@ function struckBlocks(
       where = 'after';
       if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
         continue;
+      // The first line of the file, with no text above it, has no block above to hold the marker:
+      // the blocks are drawn above its line, which is hidden like the ledger and leaves the caret
+      // a place, as in Clean.
+      alone = BLANK.test(lead) && line.number === 1;
+      if (alone) where = 'before';
     }
     const blocks = replaced
       ? [replaced]
       : deletedBlocks(
           segments.map(({ segment }) => segment),
-          { lead, atEnd: where === 'after' },
+          { lead, atEnd: where === 'after' || alone, alone, tableRows: GHOST_ROWS },
         );
     if (!blocks) continue;
+    // Of the text that is all the text, only a table is drawn as a block: any other stays as the text
+    // on its line that it is, which the caret rests on (`hideMarkerLines`).
+    if (alone && !blocks.every((block) => block.kind.kind === 'table')) continue;
     // Each stretch of the blocks' text in the color of the person who deleted it.
     const owners: { to: number; color: number }[] = [];
     let total = 0;
@@ -395,6 +416,12 @@ function struckBlocks(
     }
     const drawn = new Set<number>();
     const struckBlock = blocks.map((block): StruckBlock => {
+      // A table is drawn as a table, with its cells' text in the colors of whose it is.
+      if (block.kind.kind === 'table') {
+        const table = ghostTableOf(block.kind, owners, colorOf(mark), marks);
+        for (const color of ghostColors(table)) drawn.add(color);
+        return { kind: { ...block.kind, rows: [] }, runs: [], table };
+      }
       const runs: StruckRun[] = [];
       const add = (text: string, color: number) => {
         const previous = runs.at(-1);
@@ -443,7 +470,7 @@ function analyze(state: EditorState, kept: number | null): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
-  // Simple is Redlines with every change's look off (design: The four views): the same parts and
+  // Simple is Redlines with every change's look off (design: The views and the looks): the same parts and
   // layers, so that the bars land on the same lines, with no text and no class, and no marks of
   // line breaks. Comments, highlights and pins are drawn as in Redlines.
   const markup = mode === 'redlines' || mode === 'simple';
@@ -832,22 +859,40 @@ function barClass(colors: Set<number>): string {
   return colors.size === 1 && only ? `rl-bar ${colorClass(only)}` : 'rl-bar rl-bar-mixed';
 }
 
-/** The change bar classes of each line, by line number. */
-function bars(doc: Text, model: Model): Map<number, string> {
+/**
+ * Where a change is, for the change bars: the text it is drawn on, from `from` to `to`, or a point
+ * (`from` is `to`) where it stands: deleted text, which a view may hide, an inserted line break, a
+ * box checked, a table's row. In its author's color.
+ */
+export interface ChangeSpan {
+  from: number;
+  to: number;
+  color: number;
+}
+
+/** The changes of a model, in the order of the parts that hold them. */
+function changeSpans(model: Model): ChangeSpan[] {
+  const spans: ChangeSpan[] = [];
+  for (const { from, to, color, change } of model.layers)
+    if (change) spans.push({ from, to, color });
+  for (const { from, parts } of model.hidden) {
+    for (const part of parts) if (part.change) spans.push({ from, to: from, color: part.color });
+  }
+  for (const { at, parts } of model.placed) {
+    for (const part of parts) if (part.change) spans.push({ from: at, to: at, color: part.color });
+  }
+  return spans;
+}
+
+/** The change bar classes of each line, by line number: which lines hold a change, and whose. */
+function bars(doc: Text, spans: readonly ChangeSpan[]): Map<number, string> {
   const colors = new Map<number, Set<number>>();
-  const add = (from: number, to: number, color: number) => {
+  for (const { from, to, color } of spans) {
     for (let n = doc.lineAt(from).number, last = doc.lineAt(to).number; n <= last; n++) {
       const onLine = colors.get(n);
       if (onLine) onLine.add(color);
       else colors.set(n, new Set([color]));
     }
-  };
-  for (const layer of model.layers) if (layer.change) add(layer.from, layer.to, layer.color);
-  for (const { from, parts } of model.hidden) {
-    for (const part of parts) if (part.change) add(from, from, part.color);
-  }
-  for (const { at, parts } of model.placed) {
-    for (const part of parts) if (part.change) add(at, at, part.color);
   }
   return new Map([...colors].map(([n, onLine]) => [n, barClass(onLine)]));
 }
@@ -939,7 +984,14 @@ class StruckWidget extends WidgetType {
   }
 
   override get estimatedHeight(): number {
-    return this.deleted.reduce((sum, item) => sum + item.blocks.length * 28, 0);
+    return this.deleted.reduce(
+      (sum, item) =>
+        item.blocks.reduce(
+          (height, block) => height + (block.table ? ghostTableHeight(block.table) : 28),
+          sum,
+        ),
+      0,
+    );
   }
 
   override toDOM(): HTMLElement {
@@ -950,6 +1002,12 @@ class StruckWidget extends WidgetType {
     for (const deleted of this.deleted) {
       const bar = barClass(deleted.colors);
       for (const block of deleted.blocks) {
+        // A table is its own element, laid out as a table (`table/ghost-table.ts`), and no item.
+        if (block.table) {
+          wrap.append(ghostTableDOM(block.table, deleted.id, bar));
+          item = false;
+          continue;
+        }
         const { kind } = block;
         const div = document.createElement('div');
         div.dataset['mark'] = deleted.id;
@@ -1030,6 +1088,8 @@ const BLANK_ATOM = new Atom(false);
 
 interface Display {
   model: Model;
+  /** The changes, where the bars are drawn (`bar-layer.ts`). */
+  spans: ChangeSpan[];
   /** The blank line the caret is on, which is drawn (`keptLine`). */
   kept: number | null;
   decorations: DecorationSet;
@@ -1130,7 +1190,8 @@ function display(state: EditorState): Display {
   for (const { at, className } of model.rows) {
     ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
   }
-  for (const [n, className] of bars(doc, model)) {
+  const spans = changeSpans(model);
+  for (const [n, className] of bars(doc, spans)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
     if (block && line.to <= block.to) continue;
@@ -1138,10 +1199,19 @@ function display(state: EditorState): Display {
   }
   return {
     model,
+    spans,
     kept,
     decorations: Decoration.set(ranges, true),
     atomic: atomicRanges(doc, model),
   };
+}
+
+/**
+ * Where the changes are, for the change bars: the one list, which the layer that draws them and the
+ * click on a bar both go by. It is the same array until the display is drawn again.
+ */
+export function trackedChangeSpans(state: EditorState): readonly ChangeSpan[] {
+  return state.field(trackedField).spans;
 }
 
 /** The tracked layer's decorations for a state. Exported for tests; the editor caches them. */
@@ -1496,9 +1566,11 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     whiteSpace: 'nowrap',
   },
   '.rl-split::before': { content: '"¶"', fontSize: '0.8em', color: 'var(--rl-color)' },
-  // A change bar: 2px, 24px left of the column, as tall as the line.
+  // A change bar: 2px, 24px left of the column. The bars of the text are drawn in a layer, beside
+  // the screen lines that hold a change (bar-layer.ts), and the line says only that it holds one
+  // (`rl-bar`). A struck block draws its own bar, as tall as the block.
   '.rl-bar': { position: 'relative' },
-  '.rl-bar::before': {
+  '.rl-bar:not(.cm-line)::before': {
     content: '""',
     position: 'absolute',
     top: '0',
@@ -1509,7 +1581,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   '.rl-bar-mixed::before': { backgroundColor: 'var(--rl-mixed)' },
   // Under the pointer, in Simple and Redlines, a bar is wider (3 px instead of 2): a click on it
-  // switches the views (bar-switch.ts). The pointer is a hand over its target.
+  // switches the looks (bar-switch.ts). The pointer is a hand over its target.
   '.rl-bar.rl-bar-hot::before': { width: '3px' },
   // A quote's own border would move its bar right.
   '.rl-quote.rl-bar::before': { left: '-26px' },

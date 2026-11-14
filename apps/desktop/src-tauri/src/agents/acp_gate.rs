@@ -7,8 +7,12 @@
 //! - `initialize`, once, exactly as `plugins/agent-acp` writes it: no terminal, no files.
 //! - `session/new`, once: the folder the run was started for, and the toolbox as the only MCP
 //!   server, which is the bundled program on a socket of this window's, as for Claude and Codex
-//!   (`allowed.rs`). No `_meta`.
-//! - `session/prompt`: text, to the session the agent opened. `session/cancel`, to that session.
+//!   (`allowed.rs`). No `_meta`. For OpenClaw's bridge, which has no toolbox, no MCP server at
+//!   all, and a `_meta` of exactly a session key (`redlines-<16 hex digits>`, after `agent:<id>:`
+//!   when the person named the agent). Never a label: the bridge reads one as the name of a
+//!   session that is there already, and fails when it isn't.
+//! - `session/prompt`: text, to the session the agent opened, and for OpenClaw's bridge also a
+//!   `_meta` of exactly `{"prefixCwd": false}`. `session/cancel`, to that session.
 //! - Answers, only to what the agent asked and hasn't been answered: an error to anything, and to
 //!   `session/request_permission` a refusal, or `allow_once` for the six toolbox tools and for reads
 //!   inside the session's folder (`allows`). Never `allow_always`, which an agent may keep.
@@ -23,6 +27,8 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value, json};
+
+use super::acp::Bridge;
 
 /// The six tools of the toolbox, which the relay answers and which act only on the document.
 const TOOLBOX: [&str; 6] = [
@@ -50,6 +56,8 @@ pub struct Conversation {
     /// The agent's requests the window hasn't answered, by id, with what a permission asks.
     waiting: HashMap<String, Option<Value>>,
     session: Option<Session>,
+    /// Set for OpenClaw's bridge: no toolbox, and a session of its own for the document.
+    bridge: Option<Bridge>,
 }
 
 enum Asked {
@@ -73,7 +81,14 @@ impl Conversation {
             asked: HashMap::new(),
             waiting: HashMap::new(),
             session: None,
+            bridge: None,
         }
+    }
+
+    /// The same conversation with an agent that is OpenClaw's bridge, if it is one.
+    pub fn for_bridge(mut self, bridge: Option<Bridge>) -> Self {
+        self.bridge = bridge;
+        self
     }
 
     /// A line from the agent, which may ask something the window may then answer, or open the
@@ -188,9 +203,13 @@ impl Conversation {
                 Ok(Asked::NewSession(folder))
             }
             "session/prompt" => {
-                let shaped = params
-                    .as_object()
-                    .is_some_and(|params| has_exactly(params, &["sessionId", "prompt"]));
+                // OpenClaw's bridge is asked not to put this Mac's folder at the head of a prompt.
+                let shaped = params.as_object().is_some_and(|params| {
+                    has_exactly(params, &["sessionId", "prompt"])
+                        || (self.bridge.is_some()
+                            && has_exactly(params, &["sessionId", "prompt", "_meta"])
+                            && params["_meta"] == json!({ "prefixCwd": false }))
+                });
                 let text_only = params
                     .get("prompt")
                     .and_then(Value::as_array)
@@ -204,9 +223,13 @@ impl Conversation {
         }
     }
 
-    /// The folder of a `session/new` that names only the toolbox, on one of `sockets`.
+    /// The folder of a `session/new` that names only the toolbox, on one of `sockets`; for
+    /// OpenClaw's bridge, that names no MCP server, and a key that is the shape `sessionOf` writes.
     fn check_new_session(&self, params: &Value, sockets: &[String]) -> Result<PathBuf, String> {
         let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
+        if let Some(bridge) = &self.bridge {
+            return self.check_bridge_session(params, bridge);
+        }
         let params = params
             .as_object()
             .filter(|params| has_exactly(params, &["cwd", "mcpServers"]))
@@ -234,6 +257,38 @@ impl Conversation {
         {
             return Err(refused(
                 "with any MCP server but the toolbox on this window's relay",
+            ));
+        }
+        Ok(folder)
+    }
+
+    /// The folder of a `session/new` to OpenClaw's bridge: the run's folder, no MCP server, which
+    /// the bridge rejects and which has none to name, and the thread's session key in `_meta`.
+    fn check_bridge_session(&self, params: &Value, bridge: &Bridge) -> Result<PathBuf, String> {
+        let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
+        let params = params
+            .as_object()
+            .filter(|params| has_exactly(params, &["cwd", "mcpServers", "_meta"]))
+            .ok_or_else(|| refused("with more than a folder, no MCP server and a session's key"))?;
+        let folder = params["cwd"]
+            .as_str()
+            .filter(|cwd| *cwd == self.folder)
+            .map(PathBuf::from)
+            .filter(|folder| folder.is_absolute() && !climbs(folder))
+            .ok_or_else(|| refused("in any folder but the one it was started for"))?;
+        if params["mcpServers"] != json!([]) {
+            return Err(refused("with an MCP server: this agent has no toolbox"));
+        }
+        // The key only: a label names a session that has to be there already, and wins over the
+        // key, so a session with one fails to open (and any other `_meta` is the window's to say).
+        let meta = params["_meta"]
+            .as_object()
+            .filter(|meta| has_exactly(meta, &["sessionKey"]))
+            .ok_or_else(|| refused("with more than a session's key"))?;
+        let key = meta["sessionKey"].as_str().unwrap_or_default();
+        if !session_key_is_ours(key, bridge) {
+            return Err(refused(
+                "with a key that isn't one of Redlines' for this agent",
             ));
         }
         Ok(folder)
@@ -287,6 +342,23 @@ impl Conversation {
             _ => false,
         }
     }
+}
+
+/// Whether a session key is the shape `sessionOf` in `plugins/agent-acp` writes: `redlines-` and
+/// sixteen lowercase hex digits, after `agent:<id>:` when the person named the agent, and with no
+/// agent in front of it when they didn't (a key could otherwise say any agent's name).
+fn session_key_is_ours(key: &str, bridge: &Bridge) -> bool {
+    let rest = match &bridge.agent {
+        Some(agent) => key.strip_prefix(&format!("agent:{agent}:")),
+        None => Some(key),
+    };
+    rest.and_then(|rest| rest.strip_prefix("redlines-"))
+        .is_some_and(|hash| {
+            hash.len() == 16
+                && hash
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+        })
 }
 
 /// A JSON-RPC id as a key, as the agent wrote it: `1` and `"1"` are two ids. Only whole numbers
@@ -888,5 +960,272 @@ mod tests {
         let refused = talk.check(&line(&message), &sockets()).unwrap_err();
         assert!(!refused.contains("private"), "{refused}");
         assert!(!refused.contains("secret"), "{refused}");
+    }
+
+    fn for_openclaw(agent: Option<&str>) -> Conversation {
+        Conversation::new(BUNDLED, FOLDER).for_bridge(Some(Bridge {
+            agent: agent.map(str::to_owned),
+        }))
+    }
+
+    fn bridge_new_session_with(meta: Value) -> Value {
+        new_session_with(json!({ "cwd": FOLDER, "mcpServers": [], "_meta": meta }))
+    }
+
+    fn bridge_new_session(key: &str) -> Value {
+        bridge_new_session_with(json!({ "sessionKey": key }))
+    }
+
+    fn bridge_prompt_with(meta: Value) -> Value {
+        prompt_with(json!({ "sessionId": SESSION,
+                            "prompt": [{ "type": "text", "text": "Fix the spelling." }],
+                            "_meta": meta }))
+    }
+
+    /// A conversation with OpenClaw's bridge that has opened its session.
+    fn bridge_opened(agent: Option<&str>, key: &str) -> Conversation {
+        let mut talk = for_openclaw(agent);
+        talk.check(&line(&initialize()), &sockets()).unwrap();
+        talk.heard(r#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#);
+        talk.check(&line(&bridge_new_session(key)), &sockets())
+            .unwrap();
+        talk.heard(r#"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"sess-1"}}"#);
+        talk
+    }
+
+    #[test]
+    fn the_providers_messages_for_openclaws_bridge_pass_as_they_are() {
+        let lines = provider_lines();
+        let acp = &lines.acp;
+        let sockets = [lines.socket.clone()];
+        for bridge in [&acp.bridge, &acp.bridge_default] {
+            let mut talk =
+                Conversation::new(&lines.bundled, &acp.folder).for_bridge(Some(Bridge {
+                    agent: bridge.agent.clone(),
+                }));
+            for (name, message, answer) in [
+                (
+                    "initialize",
+                    &acp.messages["initialize"],
+                    json!({ "jsonrpc": "2.0", "id": 0, "result": {} }),
+                ),
+                (
+                    "session/new",
+                    &bridge.messages["session/new"],
+                    json!({ "jsonrpc": "2.0", "id": 1, "result": { "sessionId": acp.session_id } }),
+                ),
+                (
+                    "session/prompt",
+                    &bridge.messages["session/prompt"],
+                    Value::Null,
+                ),
+                (
+                    "session/cancel",
+                    &acp.messages["session/cancel"],
+                    Value::Null,
+                ),
+            ] {
+                assert_eq!(
+                    talk.check(&line(message), &sockets),
+                    Ok(line(message)),
+                    "{name}"
+                );
+                if !answer.is_null() {
+                    talk.heard(&line(&answer));
+                }
+            }
+        }
+        // And the same messages are not the toolbox agents': the other way round is refused too.
+        let mut talk = Conversation::new(&lines.bundled, &acp.folder);
+        talk.check(&line(&acp.messages["initialize"]), &sockets)
+            .unwrap();
+        assert!(
+            talk.check(&line(&acp.bridge.messages["session/new"]), &sockets)
+                .is_err(),
+            "a session with no toolbox, to an agent that has one"
+        );
+    }
+
+    #[test]
+    fn a_bridges_session_has_no_mcp_server_and_a_key_of_redlines_and_nothing_else() {
+        let key = "agent:moby:redlines-0a1b2c3d4e5f6071";
+        let said = |agent: Option<&str>, message: &Value| {
+            let mut talk = for_openclaw(agent);
+            talk.check(&line(&initialize()), &sockets()).unwrap();
+            talk.check(&line(message), &sockets())
+        };
+        assert!(said(Some("moby"), &bridge_new_session(key)).is_ok());
+        assert!(said(None, &bridge_new_session("redlines-0a1b2c3d4e5f6071")).is_ok());
+        // The toolbox, which the bridge rejects, and which an agent with none has no use for.
+        assert!(
+            said(
+                Some("moby"),
+                &new_session_with(
+                    json!({ "cwd": FOLDER, "mcpServers": [server(BUNDLED, SOCKET)],
+                                          "_meta": { "sessionKey": key } })
+                )
+            )
+            .is_err()
+        );
+        // No `_meta`, or more of it than a key, or another folder.
+        assert!(
+            said(
+                Some("moby"),
+                &new_session_with(json!({ "cwd": FOLDER, "mcpServers": [] }))
+            )
+            .is_err()
+        );
+        assert!(
+            said(
+                Some("moby"),
+                &bridge_new_session_with(json!({ "sessionKey": key, "resetSession": true }))
+            )
+            .is_err()
+        );
+        assert!(
+            said(
+                Some("moby"),
+                &new_session_with(json!({ "cwd": "/Users/ada/else", "mcpServers": [],
+                                          "_meta": { "sessionKey": key } }))
+            )
+            .is_err()
+        );
+        // A label, which the bridge reads as the name of a session that is there already, and
+        // looks up before the key: with one, a session that doesn't exist yet fails to open.
+        for label in ["Redlines: plan.md", ""] {
+            assert!(
+                said(
+                    Some("moby"),
+                    &bridge_new_session_with(json!({ "sessionKey": key, "sessionLabel": label }))
+                )
+                .is_err(),
+                "{label:?}"
+            );
+        }
+        assert!(
+            said(
+                Some("moby"),
+                &bridge_new_session_with(json!({ "sessionLabel": "Redlines: plan.md" }))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_bridges_key_names_the_agent_the_person_named_and_no_other() {
+        let said = |agent: Option<&str>, key: &str| {
+            let mut talk = for_openclaw(agent);
+            talk.check(&line(&initialize()), &sockets()).unwrap();
+            talk.check(&line(&bridge_new_session(key)), &sockets())
+        };
+        for refused in [
+            // Another agent's namespace, or none, or the main session itself.
+            ("agent:main:redlines-0a1b2c3d4e5f6071", Some("moby")),
+            ("redlines-0a1b2c3d4e5f6071", Some("moby")),
+            ("agent:moby:main", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f6071", None),
+            ("agent:main:redlines-0a1b2c3d4e5f6071", None),
+            // Not sixteen lowercase hex digits (the eight of an earlier version are too few),
+            // or something after them.
+            ("agent:moby:redlines-0a1b2c3d", Some("moby")),
+            ("agent:moby:redlines-0A1B2C3D4E5F6071", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f607", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f60718", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f607g", Some("moby")),
+            ("agent:moby:redlines-0a1b2c3d4e5f6071:more", Some("moby")),
+            ("agent:moby:redlines-", Some("moby")),
+            ("", None),
+            ("acp-bridge:0a1b2c3d4e5f6071", None),
+        ] {
+            assert!(said(refused.1, refused.0).is_err(), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_bridge_may_ask_for_no_cwd_prefix_and_only_that() {
+        let key = "agent:moby:redlines-0a1b2c3d4e5f6071";
+        let mut talk = bridge_opened(Some("moby"), key);
+        for refused in [
+            json!({ "prefixCwd": true }),
+            json!({ "prefixCwd": false, "thinking": "high" }),
+            json!({ "thinking": "high" }),
+            json!({ "deliver": true }),
+            json!({}),
+        ] {
+            assert!(
+                talk.check(&line(&bridge_prompt_with(refused.clone())), &sockets())
+                    .is_err(),
+                "{refused}"
+            );
+        }
+        assert!(
+            talk.check(
+                &line(&bridge_prompt_with(json!({ "prefixCwd": false }))),
+                &sockets()
+            )
+            .is_ok()
+        );
+        // An agent with a toolbox is sent no `_meta` at all.
+        let mut other = opened();
+        assert!(
+            other
+                .check(
+                    &line(&bridge_prompt_with(json!({ "prefixCwd": false }))),
+                    &sockets()
+                )
+                .is_err()
+        );
+        assert!(other.check(&line(&prompt()), &sockets()).is_ok());
+    }
+
+    #[test]
+    fn a_bridge_is_refused_what_any_agent_is_refused() {
+        let mut talk = bridge_opened(Some("moby"), "agent:moby:redlines-0a1b2c3d4e5f6071");
+        // A prompt that isn't text to its session, a second session and the modes.
+        assert!(
+            talk.check(
+                &line(&prompt_with(
+                    json!({ "sessionId": "other", "prompt": [], "_meta": { "prefixCwd": false } })
+                )),
+                &sockets()
+            )
+            .is_err()
+        );
+        assert!(
+            talk.check(
+                &line(&bridge_new_session("agent:moby:redlines-0a1b2c3d4e5f6071")),
+                &sockets()
+            )
+            .is_err(),
+            "a second session"
+        );
+        assert!(
+            talk.check(
+                &line(
+                    &json!({ "jsonrpc": "2.0", "id": 9, "method": "session/set_mode",
+                                "params": { "sessionId": SESSION, "modeId": "bypass" } })
+                ),
+                &sockets()
+            )
+            .is_err()
+        );
+        // A refusal of a command, which OpenClaw relays when a Gateway asks, is allowed; its
+        // approval is not.
+        talk.heard(&permission_request(
+            7,
+            json!({ "toolCallId": "x", "title": "Command approval requested", "kind": "execute",
+                    "status": "pending" }),
+            json!([
+                { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+                { "optionId": "allow-always", "name": "Allow always", "kind": "allow_always" },
+                { "optionId": "deny", "name": "Deny", "kind": "reject_once" },
+            ]),
+        ));
+        assert!(talk.check(&selected(7, "allow-once"), &sockets()).is_err());
+        assert!(
+            talk.check(&selected(7, "allow-always"), &sockets())
+                .is_err()
+        );
+        assert!(talk.check(&selected(7, "deny"), &sockets()).is_ok());
     }
 }

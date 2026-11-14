@@ -14,12 +14,23 @@ export const findProgram = (program: string) => invoke<string | null>('agent_whi
 export const runProgram = (program: string, args: string[]) =>
   invoke<{ code: number | null; stdout: string }>('agent_exec', { program, args });
 
+/**
+ * The folders among what an agent may read at This folder and my home folder (Desktop, Documents,
+ * Downloads, iCloud Drive, cloud folders, volumes) that macOS isn't letting Redlines read: each is
+ * listed from the app, which is also what makes macOS ask the person, once, for Redlines, which
+ * the agents' reads are counted as. A window asks before a run at that scope, and Preferences
+ * when the person picks it (agents/reach.rs).
+ */
+export const homeAccess = () => invoke<{ name: string; folder: string }[]>('agent_home_access');
+
 /** An Agent Client Protocol agent the person added (`AcpAgent` in agents/acp.rs). */
 export interface AcpAgent {
   id: string;
   name: string;
   program: string;
   args: string[];
+  /** Set for OpenClaw's bridge, which has no toolbox: the OpenClaw agent, if one was named. */
+  bridge?: { agent?: string };
 }
 
 /** A program and its arguments as the person allowed them: a word with a space in it is quoted. */

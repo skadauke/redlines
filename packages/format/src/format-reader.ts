@@ -292,6 +292,84 @@ function inTable(text: string, position: number): boolean {
 const LINK_DEST =
   /^\s*(?:<(?:[^<>\n\\]|\\.)*>|(?!<)\S*)(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\)))?\s*$/s;
 
+/** The tags that are formats (format §2.6): `<sub>` and `<sup>`, written exactly so, in lowercase and
+ * with no attributes. Any other tag is shown as written and is no format. */
+const FORMAT_TAG = /^<(\/?)(sub|sup)>$/;
+
+/** A tag of a pair, in offsets of the visible text. */
+interface FormatTag {
+  format: 'sub' | 'sup';
+  from: number;
+  to: number;
+  closing: boolean;
+  /** The text of a link or the cell of a table that it is in: a pair is read only within one. */
+  scope: string;
+}
+
+/**
+ * The spans of the tags that are formats, paired as HTML pairs them: a closing tag with the nearest
+ * opening tag of its name before it that no closing tag has. A tag with no pair, an escaped tag, a tag
+ * in code, a comment, an image, a link's address or any other construct that takes no marker, a pair
+ * that has the edge of a link or of a table cell between its tags, and a pair that crosses another
+ * span are no span: the tags show as written. `others` are the spans of the emphasis and code.
+ */
+function readTagSpans(
+  v: string,
+  hits: readonly Hit[],
+  links: readonly LinkSpan[],
+  walls: readonly number[],
+  others: readonly Span[],
+): Span[] {
+  const blocked = hits.filter((hit) => hit.kind !== 'tag' && hit.refuse === undefined && !hit.text);
+  const addresses = links.map(({ dest }) => dest);
+  const tags: FormatTag[] = [];
+  for (const hit of hits) {
+    if (hit.kind !== 'tag') continue;
+    const found = FORMAT_TAG.exec(v.slice(hit.from, hit.to));
+    if (!found) continue;
+    let backslashes = 0;
+    while (hit.from - 1 - backslashes >= 0 && v[hit.from - 1 - backslashes] === '\\') backslashes++;
+    if (backslashes % 2 === 1) continue;
+    const inside = (range: Range) => range.from <= hit.from && hit.to <= range.to;
+    if (blocked.some(inside) || addresses.some(inside)) continue;
+    const link = links.findIndex(({ text }) => inside(text));
+    const cell = walls.filter((wall) => wall < hit.from).length;
+    tags.push({
+      format: found[2] === 'sub' ? 'sub' : 'sup',
+      from: hit.from,
+      to: hit.to,
+      closing: found[1] === '/',
+      scope: `${link}:${cell}`,
+    });
+  }
+  tags.sort((a, b) => a.from - b.from);
+  const spans: Span[] = [];
+  const open: FormatTag[] = [];
+  for (const tag of tags) {
+    if (!tag.closing) {
+      open.push(tag);
+      continue;
+    }
+    for (let i = open.length - 1; i >= 0; i--) {
+      const opener = open[i];
+      if (!opener || opener.format !== tag.format || opener.scope !== tag.scope) continue;
+      open.splice(i, 1);
+      spans.push({
+        format: tag.format,
+        open: { from: opener.from, to: opener.to },
+        close: { from: tag.from, to: tag.to },
+      });
+      break;
+    }
+  }
+  const crosses = (a: Span, b: Span) =>
+    (a.open.from < b.open.from && b.open.from < a.close.to && a.close.to < b.close.to) ||
+    (b.open.from < a.open.from && a.open.from < b.close.to && b.close.to < a.close.to);
+  return spans.filter(
+    (span) => ![...others, ...spans].some((other) => other !== span && crosses(span, other)),
+  );
+}
+
 export function readLayout(
   reader: FormatReader,
   range: Range,
@@ -342,7 +420,7 @@ export function readLayout(
     else if (hit.text && hit.dest) {
       const { from, to, text: inner, dest } = hit;
       links.push({ from, to, text: inner, dest, inline: hit.kind === 'link' });
-    } else blank(hit.from + 1, hit.to - 1, 'x');
+    } else if (hit.kind !== 'emoji') blank(hit.from + 1, hit.to - 1, 'x');
   }
 
   const roles = new Uint8Array(v.length);
@@ -403,6 +481,7 @@ export function readLayout(
       close: { from: code.to - run - pad, to: code.to },
     });
   }
+  spans.push(...readTagSpans(v, hits, links, walls, spans));
   for (const { open, close } of spans) {
     roles.fill(SYNTAX, open.from, open.to);
     roles.fill(SYNTAX, close.from, close.to);
@@ -444,6 +523,8 @@ function plainOf(layout: Layout): string {
     else if (kind === 'autolink') dropped.add(from).add(to - 1);
     else if (kind === 'symbol' || kind === 'footnote' || kind === 'reference') symbols.add(from);
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
+    // The type of an alert is syntax, as bold's stars are: changing it changes no words (#311).
+    else if (kind === 'alert') drop(from + 2, to - 1);
     else if (alt) {
       drop(from, alt.from);
       drop(alt.to, to);

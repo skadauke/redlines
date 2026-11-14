@@ -59,6 +59,9 @@ importers:
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@redlines/emoji':
+        specifier: workspace:*
+        version: link:../../plugins/emoji
       '@redlines/find':
         specifier: workspace:*
         version: link:../../plugins/find
@@ -68,6 +71,9 @@ importers:
       '@redlines/formatting':
         specifier: workspace:*
         version: link:../../plugins/formatting
+      '@redlines/outline':
+        specifier: workspace:*
+        version: link:../../plugins/outline
       '@redlines/palette':
         specifier: workspace:*
         version: link:../../plugins/palette
@@ -302,6 +308,12 @@ importers:
 
   plugins/agents:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
@@ -335,6 +347,24 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.1
         version: 1.2.5
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/emoji:
+    dependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -386,6 +416,27 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/outline:
+    dependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@lezer/common':
+        specifier: ^1.5.3
+        version: 1.5.3
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api

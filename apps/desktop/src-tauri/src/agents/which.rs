@@ -38,6 +38,9 @@ pub struct Programs {
     environment: Vec<(OsString, OsString)>,
     /// The only program that may be an agent's MCP server.
     bundled: PathBuf,
+    /// The home folder, whose visible folders an agent may read at This folder and my home folder
+    /// (`reach.rs`). Empty where there is none, and then there are none to read.
+    home: PathBuf,
     execs: Execs,
     remembered: Mutex<Remembered>,
 }
@@ -66,9 +69,34 @@ impl Programs {
             login_shell_timeout: LOGIN_SHELL_TIMEOUT,
             environment,
             bundled,
+            home: PathBuf::new(),
             execs: Execs::default(),
             remembered: Mutex::default(),
         }
+    }
+
+    /// The same, with `home` as the home folder.
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = home;
+        self
+    }
+
+    /// The folders of the home folder an agent may read at This folder and my home folder: the
+    /// same list each time it is asked, which a window's command line for an agent is checked
+    /// against (`allowed.rs`).
+    pub fn home_reach(&self) -> Option<super::reach::HomeReach> {
+        super::reach::of(&self.home)
+    }
+
+    /// The protected folders among those, which macOS isn't letting this program read: found by
+    /// listing each, which is what makes macOS ask the person the first time.
+    pub fn home_refused(&self) -> Vec<super::reach::Protected> {
+        // The home folder as the reach names it, which is how the roots below it are written.
+        let Some(reach) = self.home_reach() else {
+            return Vec::new();
+        };
+        let places = super::reach::protected(Path::new(&reach.home), &reach.roots);
+        super::reach::refused(&places)
     }
 
     /// Finds programs as this app, as this user, on this machine.
@@ -94,6 +122,11 @@ impl Programs {
             shell,
             clean_environment(std::env::vars_os()),
             bundled,
+        )
+        .with_home(
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
         )
     }
 
@@ -158,6 +191,22 @@ impl Programs {
         found.to_str().map(str::to_owned)
     }
 
+    /// Where a login shell finds a plain name, as an agent's shell finds the `redlines` command.
+    /// Unlike `find_program`, the places this app keeps programs in aren't looked in first, so a
+    /// command in a folder that isn't on a shell's `PATH` isn't found.
+    pub fn on_login_path(&self, name: &str) -> Option<String> {
+        if !is_plain_name(name) {
+            return None;
+        }
+        let answer = self.ask_login_shell(name);
+        let mut remembered = self.remembered();
+        remembered.asked_for_path = true;
+        if remembered.login_path.is_none() {
+            remembered.login_path = answer.path;
+        }
+        answer.found?.to_str().map(str::to_owned)
+    }
+
     /// The `redlines` program in the app, or `None` if the app can't find its own.
     pub fn bundled(&self) -> Option<&str> {
         self.bundled.to_str().filter(|path| !path.is_empty())
@@ -197,12 +246,31 @@ impl Programs {
         args: &[String],
         sockets: &[String],
     ) -> Result<(), String> {
+        let agent = self.agent_at(program)?;
         let known = Known {
             bundled: self.bundled.to_str().unwrap_or_default(),
             sockets,
             program_folders: &program_folders(program),
+            reach: None,
         };
-        check_run_line(self.agent_at(program)?, args, &known)
+        let first = check_run_line(agent, args, &known);
+        if first.is_ok() {
+            return first;
+        }
+        // Only a line of the home folder scope is made from what is in the home folder, which is
+        // listed and resolved here, so that a start at any other scope never waits on it (a link
+        // into a mount that has gone, say).
+        match self.home_reach() {
+            Some(reach) => check_run_line(
+                agent,
+                args,
+                &Known {
+                    reach: Some(&reach),
+                    ..known
+                },
+            ),
+            None => first,
+        }
     }
 
     /// Whether `program` may be run to its end with these arguments: what `which` returned for its
@@ -422,6 +490,28 @@ mod tests {
         let programs = programs(vec![], shell, environment);
         assert_eq!(programs.which("codex").as_deref(), program.to_str());
         assert_eq!(programs.which("claude"), None);
+    }
+
+    #[test]
+    fn a_login_shell_finds_a_name_only_on_its_own_path() {
+        let temp = TempFolder::new("which-on-path");
+        let on_path = temp.path().join("on-path");
+        let program = with_program(&on_path, "redlines");
+        // A known place of the app's has one too, which a shell that doesn't look there doesn't see.
+        let known = temp.path().join("known");
+        with_program(&known, "other");
+        let path_line = format!("{}:/usr/bin:/bin", on_path.display());
+        let (shell, environment) = login_shell(temp.path(), &path_line);
+        let programs = programs(vec![known], shell, environment);
+        assert_eq!(
+            programs.on_login_path("redlines").as_deref(),
+            program.to_str()
+        );
+        assert_eq!(programs.on_login_path("other"), None);
+        // Only a plain name goes into what the shell is asked.
+        assert_eq!(programs.on_login_path("redlines; echo hi"), None);
+        assert_eq!(programs.on_login_path("../redlines"), None);
+        assert_eq!(programs.on_login_path(""), None);
     }
 
     #[test]

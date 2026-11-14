@@ -1,0 +1,13 @@
+{
+  "name": "redlines",
+  "version": "0.1.0",
+  "description": "Teaches Claude Code to read a Redlines file with its review view and to change it only through the redlines command line, so that its edits are tracked suggestions in its name.",
+  "author": {
+    "name": "skadauke",
+    "url": "https://github.com/skadauke"
+  },
+  "homepage": "https://www.redlines.md/",
+  "repository": "https://github.com/skadauke/redlines",
+  "license": "MIT",
+  "keywords": ["markdown", "tracked-changes", "comments", "review"]
+}

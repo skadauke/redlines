@@ -4,6 +4,7 @@
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
+import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
 import type { Range } from './types.ts';
 
@@ -46,6 +47,9 @@ export interface Paragraph {
 }
 
 const BLANK = /^[ \t>]*$/;
+
+/** The refusal of a marker on a line that is only Markdown syntax: a fence, a rule, a bullet. */
+export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
 
 export function visible(
   text: string,
@@ -113,6 +117,9 @@ export interface Hit {
   backslash?: boolean;
   kind?:
     | 'symbol'
+    /** An emoji of several code points, or outside the first plane: no marker goes in it, and it
+     * reads as the character it is. */
+    | 'emoji'
     | 'footnote'
     | 'url'
     | 'autolink'
@@ -121,7 +128,8 @@ export interface Hit {
     | 'link'
     | 'reference'
     | 'image'
-    | 'comment';
+    | 'comment'
+    | 'alert';
   text?: Range;
   dest?: Range;
   /** The alt text of an image. */
@@ -138,9 +146,37 @@ const WWW = /(?<![\w.])www\.[^\s<]+/g;
 const EMAIL = /[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 const FOOTNOTE = /\[\^[^\]\s]+\]/g;
 const MATH = /(?<![\\$])\$(?=\S)[^$\n]*?(?<=[^\s\\$])\$(?![\d$])|(?<![\\$])\$[^\s$\\]\$(?![\d$])/g;
-const SHORTCODE = /(?<![A-Za-z0-9]):[a-z][a-z0-9_+-]*:(?![A-Za-z0-9])/g;
+const SHORTCODE = new RegExp(SHORTCODE_SOURCE, 'g');
+
+/** A skin tone or a variation selector, which a picture takes after it. */
+const TONE = '(?:[\\u{1F3FB}-\\u{1F3FF}]|\\uFE0F)';
+
+/**
+ * An emoji that is more than one code point (#312): a flag, a keycap, a ZWJ sequence such as a family,
+ * a picture with a skin tone or a variation selector, and the flag of a subdivision. Each is one
+ * character to a reader, which no marker may part. A picture of one code point outside the first
+ * plane is two UTF-16 units, which no marker may part either.
+ */
+const EMOJI = new RegExp(
+  [
+    '\\p{Regional_Indicator}{2}',
+    '[#*0-9]\\uFE0F?\\u20E3',
+    '\\p{Extended_Pictographic}[\\u{E0020}-\\u{E007E}]+\\u{E007F}',
+    `\\p{Extended_Pictographic}${TONE}*(?:\\u200D\\p{Extended_Pictographic}${TONE}*)+`,
+    `\\p{Extended_Pictographic}${TONE}+`,
+    '[\\u{10000}-\\u{10FFFF}]',
+  ].join('|'),
+  'gu',
+);
+/** What an emoji has that other text has not: a surrogate, a variation selector, a joiner or the
+ * combining keycap. */
+const MAY_BE_EMOJI = /[\ud800-\udfff]|\u200d|\ufe0f|\u20e3/;
+/** What a change is told that would leave a shortcode at the start of a text with a letter before it. */
+const STUCK_SHORTCODE =
+  'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.';
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
-const ALERT = /^[ \t>]*\[![A-Za-z]+\]/gm;
+/** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
+const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
 /** The end of a URL in running text: GitHub leaves out the punctuation that ends a sentence, and
  * a closing parenthesis that has no opening one. */
@@ -243,10 +279,20 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
     hits.push(hit);
   };
   for (const m of w.matchAll(AUTOLINK)) inside(m.index, m.index + m[0].length, 'autolink');
-  for (const m of w.matchAll(TAG)) inside(m.index, m.index + m[0].length, 'tag');
+  // A `<` that a backslash escapes starts no tag: the tag's text is text.
+  for (const m of w.matchAll(TAG)) {
+    if (!isEscaped(w, m.index)) inside(m.index, m.index + m[0].length, 'tag');
+  }
   for (const m of w.matchAll(FOOTNOTE)) inside(m.index, m.index + m[0].length, 'footnote');
-  for (const re of [ENTITY, MATH, SHORTCODE, ATTRIBUTES]) {
+  // A shortcode has a colon, and an emoji has a surrogate, a variation selector, a joiner or a
+  // keycap: the keystroke's cost is the same for the text that has none.
+  const symbols = [ENTITY, MATH, ATTRIBUTES];
+  if (w.includes(':')) symbols.push(SHORTCODE);
+  for (const re of symbols) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
+  }
+  if (MAY_BE_EMOJI.test(w)) {
+    for (const m of w.matchAll(EMOJI)) inside(m.index, m.index + m[0].length, 'emoji');
   }
   for (const m of w.matchAll(BARE_URL)) inside(m.index, m.index + trimUrl(m[0]).length, 'url');
   for (const m of w.matchAll(EMAIL)) {
@@ -272,7 +318,9 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       hi: end - 1,
       from: open,
       to: end,
-      refuse: 'A marker can not go in or before [!TYPE].',
+      kind: 'alert',
+      refuse:
+        "This is an alert's type: a change can't start in it or before it. Choose another type from the alert's menu, or edit the text of the alert.",
     });
   }
   // Escapes: a backslash and the character it escapes. A backslash before a marker escapes it.
@@ -444,6 +492,40 @@ function lazyUnder(above: string, line: string): boolean {
 }
 
 /**
+ * Whether a line can be underlined as the text of a setext heading: words, not a blank line nor the
+ * syntax of another block (a heading, a thematic break, a fence, HTML, a table row, a definition).
+ */
+export function textLike(line: string): boolean {
+  const rest = line.replace(/^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
+  return (
+    rest !== '' &&
+    !/^(?:#{1,6}(?:[ \t]|$)|(?:[-*_=][ \t]*){2,}$|`{3,}|~{3,}|<|\||\[[^\]]*\]:)/.test(rest)
+  );
+}
+
+/**
+ * Whether `line` is a bullet with nothing after it that reads as the setext underline of the text
+ * in `above`, the line over it: an empty item can't interrupt a paragraph, and an underline is no
+ * lazy line (#143).
+ */
+export function underliningBullet(above: string, line: string): boolean {
+  return /^[ \t>]*-[ \t]*$/.test(line) && textLike(above) && !lazyUnder(above, line);
+}
+
+/**
+ * Whether a split's marker starts on the line of `text` that `position` is on, after a bullet and
+ * the white space after it (`-<marker>` is no item: its dash is text of the paragraph).
+ */
+function splitOnLine(text: string, hidden: readonly Range[], position: number): boolean {
+  const from = lineStart(text, position);
+  const to = lineEnd(text, position);
+  if (!/^[ \t>]*-[ \t]+<!--/.test(text.slice(from, to))) return false;
+  return hidden.some(
+    (range) => range.from >= from && range.from <= to && text.startsWith('<!--split ', range.from),
+  );
+}
+
+/**
  * What the rules of format §3.1 to §3.3 say about a marker at `position` of `text`. `hidden` are the
  * ranges of the markers that are in the text: they are not looked at, and a line made of nothing
  * else is a blank line. `around` gives the characters next to the marker when they are not those
@@ -480,13 +562,24 @@ export function inspectPlace(
   // can be, such as the bullet of the next item (#143).
   const lineAbove = start > 0 ? v.slice(v.lastIndexOf('\n', start - 2) + 1, start - 1) : above;
   const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
+  // A bullet that a split's marker stands on is an item in the file, whose first line is the marker,
+  // wherever the view reads the bullet as the underline of the text above it: an empty item can't
+  // interrupt a paragraph. An opener written beside the split's marker, for typed text (the caller
+  // gives the text after it), changes neither reading; a comment or a highlight, which has no text
+  // to write there, would stand on a line that the view reads as an underline, and stays refused
+  // (#143).
+  const ofSplit =
+    around.after !== undefined &&
+    /^[ \t>]*-[ \t]*$/.test(lineText) &&
+    splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
   if (
     !around.joined &&
+    !ofSplit &&
     isSyntaxLine(lineText, underlines && !(first && start === 0)) &&
     !isTableRowAt(text, position)
   ) {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   const prefix = prefixLength(lineText);
   const heading = /^#{1,6}[ \t]+/.exec(lineText.slice(prefix))?.[0].length ?? 0;
@@ -530,6 +623,28 @@ export function inspectPlace(
     // The end is just after the construct's last character, not after the markers that follow it.
     return { kind: 'construct', from: offsetAt(widest.from), to: offsetAt(widest.to - 1) + 1 };
   }
+  // A shortcode that a letter or a digit stands against is no emoji to GitHub, which shows it only
+  // at the start of a text or after a space; a marker between the two would leave it at the start of
+  // a text, where it shows as the emoji (format §3.1, rule 9). What stands on each side of the marker
+  // is what the change leaves there: `around`, or the text of the paragraph.
+  const upcoming =
+    around.after !== undefined ? around.after.slice(0, 80) : v.slice(index, index + 80);
+  if (upcoming.startsWith(':')) {
+    const beforeMarker = around.before !== undefined ? around.before.slice(-1) : v[index - 1];
+    const code = shortcodeAt(upcoming);
+    if (code !== null && isWord(beforeMarker)) {
+      // A closer, which has the text of the change before it (`around.before`), takes the shortcode
+      // into the change, as a closer inside any construct does: the shortcode is then in the old text
+      // and the new, and no marker stands between it and the letter. An opener, or a format's edge,
+      // has no such way, and is refused.
+      if (around.before === undefined) return { kind: 'refuse', reason: STUCK_SHORTCODE };
+      return {
+        kind: 'construct',
+        from: offsetAt(index),
+        to: offsetAt(index + code.length - 1) + 1,
+      };
+    }
+  }
 
   // The trailing spaces of a hard break.
   const trailing = / {2,}$/.exec(lineText);
@@ -546,7 +661,7 @@ export function inspectPlace(
   if (kind === 'block') return { kind: 'block' };
   if (kind === 'continuation') return { kind: 'continuation' };
   if (kind === 'syntax') {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   return { kind: 'ok' };
 }

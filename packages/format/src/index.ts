@@ -2,11 +2,12 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { frontMatterEnd, openerRange } from './blocks.ts';
-export { deletedBlocks } from './deleted-blocks.ts';
+export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
   DeletedBlockKind,
   DeletedBlocksContext,
+  DeletedCell,
   DeletedPiece,
 } from './deleted-blocks.ts';
 export { readBlocks } from './block-read.ts';
@@ -26,6 +27,7 @@ export {
 } from './agent.ts';
 export { agentWorkOf } from './agent-work.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
+export { addHighlight } from './highlights.ts';
 export {
   accept,
   acceptAll,
@@ -37,8 +39,10 @@ export {
   rejectMarks,
 } from './decide.ts';
 export { suggestionOf, suggestions } from './suggestion.ts';
-export { formatChange } from './format-blocks.ts';
+export { formatChange, NUMBERED_CHILD as OUTDENT_NUMBERED_CHILD } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
+export { ALERT_LINE, GITHUB_TYPES, calloutWord, typeOfWord } from './callout.ts';
+export { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 export type {
   AlignedColumn,
   BlockType,

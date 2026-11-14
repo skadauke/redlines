@@ -115,6 +115,99 @@ describe('inside a line (format §3.1)', () => {
     expect(place('at 10:‸30:45 today')).toEqual(OK);
   });
 
+  it('knows every shape of an emoji shortcode: gemoji names have digits, `+`, `-` and `_` in them (#312)', () => {
+    for (const code of [
+      ':smile:',
+      ':+1:',
+      ':-1:',
+      ':100:',
+      ':1234:',
+      ':8ball:',
+      ':1st_place_medal:',
+      ':t-rex:',
+      ':e-mail:',
+      ':non-potable_water:',
+      ':flag_de:',
+      ':x:',
+      ':a:',
+    ]) {
+      const half = Math.floor(code.length / 2);
+      const marked = `a ${code.slice(0, half)}‸${code.slice(half)} b`;
+      expect(construct(marked), code).toBe(code);
+    }
+    // A name starts and ends with a letter or a digit, and parts its words with one `_` or `-`.
+    for (const text of ['see :_th‸is_: ok', 'see :-x‸-: ok', 'see :a‸b_: ok', 'see :a‸-_b: ok']) {
+      expect(place(text), text).toEqual(OK);
+    }
+    // Times and ratios are no shortcode, and neither are words with a colon in them.
+    for (const text of [
+      'at 10:‸30:45 today',
+      'a 1:‸2:3 ratio',
+      'Note:‸ this',
+      'one :‸ two',
+      'a ::‸:: b',
+      'the :‸xy z',
+      'the :‸Smile: b',
+    ]) {
+      expect(place(text), text).toEqual(OK);
+    }
+  });
+
+  it('keeps a position between a letter and a shortcode free of markers, and no other (#312)', () => {
+    // A marker there would leave the shortcode at the start of a text, where GitHub shows it as the
+    // emoji, as it doesn't with the letter against it.
+    const refused = {
+      kind: 'refuse',
+      reason:
+        'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.',
+    };
+    expect(place('a‸:tent: b')).toEqual(refused);
+    expect(place('é‸:tent: b')).toEqual(refused);
+    expect(place('日‸:tent: b')).toEqual(refused);
+    expect(place('9‸:tent: b')).toEqual(refused);
+    expect(place('a‸:+1: b')).toEqual(refused);
+    // Inside it a position is on the whole shortcode, as in an entity.
+    expect(construct('a:te‸nt: b')).toBe(':tent:');
+    // A letter after it changes nothing: GitHub shows the emoji there too.
+    expect(place('a :tent:‸b')).toEqual(OK);
+    expect(place('a :tent:‸9')).toEqual(OK);
+    // Next to a space, punctuation or another shortcode it is as free as any text.
+    expect(place('a ‸:tent: b')).toEqual(OK);
+    expect(place('a :tent:‸ b')).toEqual(OK);
+    expect(place('(‸:tent:) b')).toEqual(OK);
+    expect(place('a (:tent:‸)')).toEqual(OK);
+    expect(place('x:‸:tent: b')).toEqual(OK);
+    expect(place('a :tent:‸. b')).toEqual(OK);
+    expect(place(':smile:‸:tent: b')).toEqual(OK);
+  });
+
+  it('puts a position inside an emoji that is more than one character on the whole of it (#312)', () => {
+    const sequences: [string, string][] = [
+      ['family', '👨‍👩‍👧'],
+      ['couple', '👩‍❤️‍👨'],
+      ['skin tone', '👍🏽'],
+      ['flag', '🇩🇪'],
+      ['keycap', '1️⃣'],
+      ['heart with a variation selector', '❤️'],
+      ['person with a ZWJ and a tone', '🧑🏽‍💻'],
+      ['subdivision flag', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'],
+    ];
+    for (const [name, emoji] of sequences) {
+      const units = [...emoji];
+      // Between any two of its code points, and not at its edges.
+      for (let cut = 1; cut < units.length; cut++) {
+        const marked = `a ${units.slice(0, cut).join('')}‸${units.slice(cut).join('')} b`;
+        expect(construct(marked), `${name} at ${cut}`).toBe(emoji);
+      }
+      expect(place(`a ‸${emoji} b`), `${name} before`).toEqual(OK);
+      expect(place(`a ${emoji}‸ b`), `${name} after`).toEqual(OK);
+    }
+    // A picture of one code point is two UTF-16 units, which a position doesn't part.
+    expect(construct('a \uD83D‸\uDE00 b')).toBe('😀');
+    expect(place('a 😀‸ b')).toEqual(OK);
+    expect(place('a ‸😀 b')).toEqual(OK);
+  });
+
   it('puts a position between a backslash and the next character on the escape', () => {
     expect(construct('a \\‸* b')).toBe('\\*');
     expect(construct('a \\‸n b')).toBe('\\n');

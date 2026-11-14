@@ -9,6 +9,13 @@
 // so the messages are built in one place below, and `provider-lines.node.test.ts` in apps/desktop
 // holds them, and the permission rule, to the copies the Rust side is tested against.
 //
+// OpenClaw's bridge (`openclaw acp`) is one agent of this kind that can't be given the toolbox: it
+// rejects an MCP server in `session/new`, never calls the client's files or terminal, and the
+// Gateway it forwards to may be on another machine. The host recognizes it (`bridge`), and the run
+// then has no toolbox: `session/new` names no MCP server and asks for a session of its own for the
+// thread (`_meta.sessionKey`), and the prompt carries the thread and the document
+// (`replyOnlyRequest` in packages/agent-tools); the agent's last message is the reply.
+//
 // An agent asks before it acts, as its own settings say (`session/request_permission`). Redlines
 // allows the six toolbox tools and reads inside the run's folder, and refuses everything else. An
 // agent may still act on its own without asking, as its own settings allow: that is the agent's
@@ -26,6 +33,15 @@ import { definePlugin } from '@redlines/plugin-api';
 import type { FolderOptions } from '@redlines/agent-process';
 import { TOOLBOX_STATUS, clip, isRecord, reasonOf, runAgent } from '@redlines/agent-process';
 
+/** What the host knows of an agent that is OpenClaw's bridge: the agent it forwards to. */
+export interface Bridge {
+  /**
+   * The OpenClaw agent's id, when the person gave one (`--session agent:<id>:main`). Without it,
+   * a session key belongs to the Gateway's default agent.
+   */
+  agent?: string;
+}
+
 /** An agent the person added: what the host's list says of it. */
 export interface AcpConfig {
   /** What its handles start with, such as `gemini`. */
@@ -35,6 +51,8 @@ export interface AcpConfig {
   /** The program the host starts, for showing. */
   command: string;
   args: string[];
+  /** Set for OpenClaw's bridge, which has no toolbox. */
+  bridge?: Bridge;
 }
 
 /** The version of the protocol this speaks. */
@@ -76,19 +94,74 @@ export function newSessionMessage(folder: string, tools: McpEndpoint): object {
   };
 }
 
+/** A 64-bit FNV-1a hash as sixteen hex digits: a name that never shows what it is the hash of. */
+function hashOf(text: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(text)) {
+    hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
+/**
+ * The session of a thread at OpenClaw's Gateway: one key for each thread, from a hash of the
+ * document's path and the thread's id (never the path, which a remote Gateway has no use for), so
+ * that the agent keeps the thread between prompts and nothing else: a prompt to a session ends the
+ * one running in it, so two threads must not share one. A key names an agent when the person gave
+ * one (`agent:moby:redlines-0123456789abcdef`), and else belongs to the Gateway's default agent.
+ * The host holds it to this shape (acp_gate.rs).
+ *
+ * It sends no label (`_meta.sessionLabel`). The bridge reads a label as the name of a session that
+ * is there already, and looks it up before it looks at the key: a label of a session that doesn't
+ * exist yet fails the run.
+ */
+export function sessionOf(
+  bridge: Bridge,
+  request: Pick<AgentRequest, 'documentPath' | 'thread'>,
+): string {
+  const base = `redlines-${hashOf(`${request.documentPath ?? ''}\u0000${request.thread}`)}`;
+  return bridge.agent === undefined ? base : `agent:${bridge.agent}:${base}`;
+}
+
+/**
+ * A session for a bridge: no MCP server, which the bridge rejects, and the key of the thread's
+ * session in `_meta`, which it reads (`sessionKey`).
+ */
+export function bridgeSessionMessage(folder: string, key: string): object {
+  return {
+    jsonrpc: '2.0',
+    id: NEW_SESSION,
+    method: 'session/new',
+    params: { cwd: folder, mcpServers: [], _meta: { sessionKey: key } },
+  };
+}
+
+/**
+ * The prompt to a bridge: as for any agent, and with `prefixCwd` off, which keeps the bridge from
+ * putting this Mac's folder at the head of the prompt for an agent that may be elsewhere.
+ */
+export function bridgePromptMessage(sessionId: string, request: AgentRequest): object {
+  return { ...promptMessage(sessionId, request), params: promptParams(sessionId, request, true) };
+}
+
+function promptParams(sessionId: string, request: AgentRequest, bridge: boolean): object {
+  return {
+    sessionId,
+    prompt: [
+      { type: 'text', text: request.systemPrompt },
+      { type: 'text', text: request.prompt },
+    ],
+    ...(bridge ? { _meta: { prefixCwd: false } } : {}),
+  };
+}
+
 /** The protocol has no system prompt: it goes first, as text, and the person's words after it. */
 export function promptMessage(sessionId: string, request: AgentRequest): object {
   return {
     jsonrpc: '2.0',
     id: PROMPT,
     method: 'session/prompt',
-    params: {
-      sessionId,
-      prompt: [
-        { type: 'text', text: request.systemPrompt },
-        { type: 'text', text: request.prompt },
-      ],
-    },
+    params: promptParams(sessionId, request, false),
   };
 }
 
@@ -255,6 +328,8 @@ export interface AcpState {
   folder: string;
   request: AgentRequest;
   tools: McpEndpoint;
+  /** Set for OpenClaw's bridge: its sessions have no toolbox. */
+  bridge?: Bridge;
   /**
    * Sends a message. If the host refuses it, `instead` goes in its place; a refusal of that, or of
    * a message with nothing in its place, ends the run with `failure`.
@@ -265,7 +340,16 @@ export interface AcpState {
   message: string;
   /** Why the run is failing, once something has said so. */
   failure?: string;
+  /** For a bridge: why the Gateway cut the turn short, as the bridge said it. */
+  interruption?: string;
 }
+
+/**
+ * How OpenClaw's bridge begins a message of its own that says why a turn was cut short (the Gateway
+ * disconnected, the run failed): it sends it as the agent's words and then ends the turn as it
+ * ends one that was answered.
+ */
+const INTERRUPTION = '[OpenClaw interruption]';
 
 /** The first line of an agent's message, as plain words, and no longer than stderr's are kept. */
 function firstLine(text: unknown): string {
@@ -273,7 +357,12 @@ function firstLine(text: unknown): string {
 }
 
 function errorMessage(error: unknown): string {
-  return isRecord(error) ? firstLine(error['message']) : '';
+  if (!isRecord(error)) return '';
+  // An agent that fails inside a request may say why only in `data`, as OpenClaw's bridge does
+  // (`-32603 Internal error`, with the words in `data.details`): the words are the better ones.
+  const data = error['data'];
+  const details = isRecord(data) ? firstLine(data['details']) : '';
+  return details || firstLine(error['message']);
 }
 
 function isAuthRequired(error: unknown): boolean {
@@ -299,7 +388,11 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
           message: `${name} speaks a version of the Agent Client Protocol that Redlines doesn’t.`,
         };
       }
-      state.send(newSessionMessage(state.folder, state.tools));
+      state.send(
+        state.bridge
+          ? bridgeSessionMessage(state.folder, sessionOf(state.bridge, state.request))
+          : newSessionMessage(state.folder, state.tools),
+      );
       return null;
     case NEW_SESSION: {
       if (isAuthRequired(error)) {
@@ -319,7 +412,11 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
         };
       }
       state.sessionId = sessionId;
-      state.send(promptMessage(sessionId, state.request));
+      state.send(
+        state.bridge
+          ? bridgePromptMessage(sessionId, state.request)
+          : promptMessage(sessionId, state.request),
+      );
       // Early news, because the model's first move can be seconds away.
       return { type: 'status', text: 'Thinking…' };
     }
@@ -330,6 +427,15 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
       }
       switch (result['stopReason']) {
         case 'end_turn': {
+          // A turn the Gateway cut short is a failure, not an answer to post as the reply.
+          if (state.interruption !== undefined) {
+            return {
+              type: 'error',
+              message: state.interruption
+                ? `${name} stopped: ${state.interruption}`
+                : `${name} stopped.`,
+            };
+          }
           const finalText = state.message.trim();
           return finalText ? { type: 'done', finalText } : { type: 'done' };
         }
@@ -386,7 +492,12 @@ function fromUpdate(params: unknown, state: AcpState): AgentEvent | null {
     case 'agent_message_chunk': {
       const content = update['content'];
       if (isRecord(content) && content['type'] === 'text' && typeof content['text'] === 'string') {
-        state.message += content['text'];
+        const text = content['text'];
+        if (state.bridge && text.startsWith(INTERRUPTION)) {
+          state.interruption = firstLine(text.slice(INTERRUPTION.length));
+        } else {
+          state.message += text;
+        }
       }
       return null;
     }
@@ -435,6 +546,8 @@ export function createAcpProvider(
     id,
     name,
     readLimit: 'machine',
+    // OpenClaw's bridge takes no tools of the client's: the host sets none up for it.
+    ...(config.bridge === undefined ? {} : { toolbox: false as const }),
 
     // The handshake at each run is what shows an agent works; there is no status command to ask.
     detect() {
@@ -445,7 +558,15 @@ export function createAcpProvider(
 
     run(request, tools, signal) {
       const startAcp = processes.startAcp?.bind(processes);
-      const state: AcpState = { name, folder: '', request, tools, message: '', send: () => {} };
+      const state: AcpState = {
+        name,
+        folder: '',
+        request,
+        tools,
+        message: '',
+        send: () => {},
+        ...(config.bridge === undefined ? {} : { bridge: config.bridge }),
+      };
       return runAgent<AcpState>(
         processes,
         {

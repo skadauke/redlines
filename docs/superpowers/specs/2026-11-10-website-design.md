@@ -281,7 +281,7 @@ Paint never wait for 400 KB, and a visitor on a metered connection chooses to pa
 ```ts
 /** The two demos; the bundle holds their documents. */
 export type DemoName = 'plan' | 'design';
-/** The editor's views, as `ViewMode` has them (a type test in the embed holds them equal). */
+/** The views a View menu lists, as `MenuView` has them (a type test in the embed holds them equal). */
 export type DemoView = 'clean' | 'redlines' | 'raw';
 
 export interface DemoOptions {
@@ -322,17 +322,17 @@ and a document the page passed in would be a second copy.
 site's TypeScript can't resolve `@redlines/*` from `website/`, and a hand-kept copy of the types
 would drift. A type-only import is erased before the bundler sees it.
 **Call: the embed holds the view list** (`[{ view: 'clean', label: 'Clean' }, ...]`) in an object
-that `satisfies Record<ViewMode, string>`, because the editor exports no list of its views (the
-app's View menu writes them out too): a fourth `ViewMode` fails the embed's type check until it has
+that `satisfies Record<MenuView, string>`, because the editor exports no list of its views (the
+app's View menu writes them out too): a fourth `MenuView` fails the embed's type check until it has
 a label, and the page then draws it with no change of its own.
 
 **Call: the controls are drawn by the page, not by the embed.** The view switch, the Track Changes
 switch and Reset already exist on the site as React (`ViewSwitch`, `SheetBar`), in the site's type
 and tokens, with the site's focus rings and `aria-pressed` pattern. The embed supplies state and
 actions; it draws only the document and the review interface inside it. The view buttons come from
-`DemoState.views`, so when the simple-markup view of
-[#182](https://github.com/skadauke/redlines/issues/182) lands, the page shows it with no change to
-the site.
+`DemoState.views`, which lists Clean, Redlines and Raw. The simple look of
+[#182](https://github.com/skadauke/redlines/issues/182) is no view of its own (#303 folded it into
+Redlines): a click on a change bar in the document switches to it, so the page has no button for it.
 
 `mountDemo` does, in order, what `embed-smoke`'s `mountEmbed` does and `apps/desktop` does for a
 window: `createEditor` (typing: `smartPunctuation: true`, `spellCheck: false`, `closePairs: false`;
@@ -1036,8 +1036,8 @@ The conformance suite for this work, where each line fails if the property break
    and clean text (the drift guard).
 10. **Size:** `pnpm --filter @redlines/website-embed size` fails over budget, and when the JS is
     split.
-11. **Types:** `DemoView` and the editor's `ViewMode` are each assignable to the other, and the view
-    list covers every `ViewMode` (a compile-time test, run by `pnpm typecheck`).
+11. **Types:** `DemoView` and the editor's `MenuView` are each assignable to the other, and the view
+    list covers every `MenuView` (a compile-time test, run by `pnpm typecheck`).
 
 **In `plugins/review` / `plugins/agents`:** `startComment(initialText)` opens the box with the text,
 returns false in Raw, posts nothing by itself, and leaves a draft set aside on that anchor, or one
@@ -1117,9 +1117,10 @@ and 7. The old `AgentDemo` and its animation code are deleted.
 
 **Stage 4 — polish and keeping it true.**
 The `saveData` button, `npm run perf` and a trim if the budget is tight, and the list of checks by
-hand for Stephan. The fourth view (simple markup,
-[#182](https://github.com/skadauke/redlines/issues/182)) lands with #182: the page picks it up from
-`DemoState.views`, and the hero caption gets a line then.
+hand for Stephan. The simple look (simple markup,
+[#182](https://github.com/skadauke/redlines/issues/182)), first planned as a fourth view button and
+since #303 a look of Redlines reached by a click on a change bar, needs no button: the hero caption
+may get a line about the click.
 
 **Stage 5 — publish (each step on Stephan's yes).**
 The push trigger in `deploy-website.yml`, with the lines in its header, `website/README.md` and

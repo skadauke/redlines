@@ -17,9 +17,11 @@ import {
   type SelectionRange,
 } from '@codemirror/state';
 import { type EditorView } from '@codemirror/view';
+import { pastHidden } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
+import { missingCaret, missingSpec } from './missing.ts';
 
 /** A cell of a table by its row (0 the header) and column. */
 export interface CellRef {
@@ -59,7 +61,14 @@ function textCellAt(
 /** The cell the head of the selection is in, with its table and row, or null outside a table. */
 export function headCell(state: EditorState): { table: Table; row: Row; cell: Cell } | null {
   if (state.field(viewModeField, false) === 'raw') return null;
-  return textCellAt(state, state.selection.main.head);
+  return caretCell(state) ?? textCellAt(state, state.selection.main.head);
+}
+
+/** The cell its row lacks that the caret is in, as a cell found: it has no text, and no range of its own
+ * (`missing.ts`). Null where the caret is in no such cell. */
+function caretCell(state: EditorState): { table: Table; row: Row; cell: Cell } | null {
+  const lacking = missingCaret(state);
+  return lacking ? { table: lacking.table, row: lacking.row, cell: lacking.cell } : null;
 }
 
 /**
@@ -113,11 +122,30 @@ export function selectedCells(state: EditorState): Cell[] {
   return rect ? cellsOfRect(rect) : [];
 }
 
+/** How many cells `cellIsEmpty` has read, for tests: the second ⌫ reads the cells it selects, once. */
+export const emptyStats = { cells: 0 };
+
+/**
+ * Whether a cell shows no text: it holds nothing, or only what the page leaves out of it (a deletion,
+ * the markers round an insertion, a comment's anchor; an author's own HTML comment too, in Clean and
+ * Simple, where it is hidden, and not in Redlines, which draws it as a note). It is what the page shows
+ * of the cell, read from the stretches the caret steps over (`pastHidden`), so that it costs the cell's
+ * own markers and never the table or the document. A cell that holds a line break shows one, and has
+ * text in this sense.
+ */
+export function cellIsEmpty(state: EditorState, cell: Cell): boolean {
+  emptyStats.cells++;
+  return pastHidden(state, cell.textFrom, true) >= cell.textTo;
+}
+
 /** What a rectangle is, when it reaches the table's edges: whole rows, whole columns, the table. */
 export function whole(rect: Rect): 'row' | 'column' | 'table' | null {
   const { table } = rect;
-  const last = table.rows.length - 1;
-  const tall = rect.rows[0] === 0 && rect.rows[1] === last;
+  // Tall: from the header down to the last row that has a cell in the columns (a row that lacks them
+  // has no cell there to select), as a row is wide to its last cell.
+  const tall =
+    rect.rows[0] === 0 &&
+    table.rows.slice(rect.rows[1] + 1).every((row) => shown(table, row).length <= rect.cols[0]);
   // Wide: from the first column to the last cell of every row it covers (a short row ends early).
   const wide =
     rect.cols[0] === 0 &&
@@ -138,12 +166,51 @@ export function cellOfRef(table: Table, ref: CellRef): Cell | null {
   return cells.find((cell) => cell.col === ref.col) ?? cells.at(-1) ?? null;
 }
 
-/** The selection of a rectangle from one cell's text to another's. */
+/** The cell of a table at a row and column, when the row has it. */
+function cellAtRef(table: Table, row: number, col: number): Cell | undefined {
+  return table.rows[row]?.cells.find((cell) => cell.col === col && cell.col < table.columns);
+}
+
+/**
+ * The selection of a rectangle from one cell's text to another's. The ends are cells there are: where
+ * a corner is a cell its row lacks, the selection is of the cells the rectangle has, from the first row
+ * that has one to the last, and from its left column to the farthest any of those rows reaches. A row
+ * has its cells from the first on, so the left corners are cells, and of the other two corners one pair
+ * is wherever the header (which has every column) is in the rectangle: a whole table whose last row is
+ * short, a column that the last rows lack. A column that no body row reaches is the header's cell, and
+ * the selection is its text (one cell is no rectangle of cells). Only a rectangle with no such ends
+ * falls back to the last cell of a short row, which is a row's, and a row selected is that row's cells.
+ */
 export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorSelection | null {
-  const a = cellOfRef(table, from);
-  const b = cellOfRef(table, to);
-  if (!a || !b) return null;
-  return EditorSelection.single(a.textFrom, b.textTo);
+  const a = cellAtRef(table, from.row, from.col);
+  const b = cellAtRef(table, to.row, to.col);
+  if (a && b) return EditorSelection.single(a.textFrom, b.textTo);
+  const top = Math.min(from.row, to.row);
+  const bottom = Math.max(from.row, to.row);
+  const left = Math.min(from.col, to.col);
+  const right = Math.max(from.col, to.col);
+  // The rows that have a cell in the columns, and how far along them those cells go.
+  let first = -1;
+  let last = -1;
+  let far = left;
+  for (let row = top; row <= bottom; row++) {
+    const have = table.rows[row] ? shown(table, table.rows[row]!).length : 0;
+    if (have <= left) continue;
+    if (first === -1) first = row;
+    last = row;
+    far = Math.max(far, Math.min(right, have - 1));
+  }
+  if (first !== -1) {
+    const topLeft = cellAtRef(table, first, left);
+    const bottomFar = cellAtRef(table, last, far);
+    if (topLeft && bottomFar) return EditorSelection.single(topLeft.textFrom, bottomFar.textTo);
+    const topFar = cellAtRef(table, first, far);
+    const bottomLeft = cellAtRef(table, last, left);
+    if (topFar && bottomLeft) return EditorSelection.single(topFar.textFrom, bottomLeft.textTo);
+  }
+  const x = cellOfRef(table, from);
+  const y = cellOfRef(table, to);
+  return x && y ? EditorSelection.single(x.textFrom, y.textTo) : null;
 }
 
 /** The comment a rectangle makes: on the selected cells' text in one row, on the whole rows across
@@ -171,18 +238,27 @@ export type Scope = 'cell' | 'row' | 'column' | 'table';
 
 /**
  * Selects the caret's cell (its text), row, column or the whole table, as a rectangle (so that
- * `whole` reports it). False where the selection has no cell, or in Raw.
+ * `whole` reports it). A cell its row lacks has no text, so selecting it keeps the caret there.
+ * False where the selection has no cell, or in Raw.
  */
 export function selectRect(view: EditorView, scope: Scope): boolean {
   const { state } = view;
   if (state.field(viewModeField, false) === 'raw') return false;
   const { head } = state.selection.main;
-  const found = textCellAt(state, head) ?? textCellAt(state, state.selection.main.anchor);
+  const found =
+    caretCell(state) ?? textCellAt(state, head) ?? textCellAt(state, state.selection.main.anchor);
   if (!found) return false;
   const { table, row, cell } = found;
   let selection: EditorSelection | null;
-  if (scope === 'cell') selection = EditorSelection.single(cell.textFrom, cell.textTo);
-  else if (scope === 'row') {
+  if (scope === 'cell') {
+    // A cell its row lacks has no text to select: the caret stays in it, in its column. (A plain
+    // selection at the end of the row would put it in the first cell the row lacks.)
+    if (cell.missing) {
+      view.dispatch(missingSpec(cell));
+      return true;
+    }
+    selection = EditorSelection.single(cell.textFrom, cell.textTo);
+  } else if (scope === 'row') {
     selection = rectSelection(
       table,
       { row: row.index, col: 0 },
@@ -259,7 +335,8 @@ export function rectSpec(
 
 /**
  * Clears the text of `cells`, one change and one step to undo, and leaves the rectangle they are
- * of selected (a second key then has the cells to act on). True also when there was nothing to
+ * of selected (a second ⌫ then has the cells to act on: when they are whole rows, whole columns or
+ * the whole table, and empty now, it deletes them, `keys.ts`). True also when there was nothing to
  * clear: the key is taken and writes nothing.
  */
 export function clearCells(view: EditorView, cells: readonly Cell[]): boolean {

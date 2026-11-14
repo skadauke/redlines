@@ -1,0 +1,21 @@
+{
+  "name": "@redlines/emoji",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Emoji shortcodes: the ones in a file drawn as their emoji, and a list of matches after a colon.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@redlines/editor": "workspace:*",
+    "@redlines/plugin-api": "workspace:*"
+  }
+}

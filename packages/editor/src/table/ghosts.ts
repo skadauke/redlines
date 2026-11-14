@@ -12,6 +12,7 @@ import { readRowCells } from '@redlines/format';
 import type { MarkRange } from '@redlines/format';
 import { colorClass, colorsOf } from '../tracked/colors.ts';
 import { isRowDeletion, parsedField, viewModeField } from '../tracked/field.ts';
+import { ghostTableLook } from './ghost-table.ts';
 import { type Table, tablesField } from './model.ts';
 
 /** A deleted row of a table, as it is drawn. */
@@ -216,7 +217,7 @@ const ghostPress = EditorView.domEventHandlers({
   },
 });
 
-/** Deleted rows drawn as ghost rows. */
+/** Deleted rows drawn as ghost rows, and a table deleted whole as a ghost table. */
 export function tableGhosts(): Extension {
-  return [ghostField, ghostPress];
+  return [ghostField, ghostPress, ghostTableLook()];
 }

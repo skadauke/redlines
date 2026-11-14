@@ -29,12 +29,13 @@ scope:
 
 ## One dialect per file type
 
-The serializer writes GitHub's syntax in `.md` files and pandoc's in `.qmd` and `.Rmd` files. It
-reads all the common variants and never rewrites syntax it didn't change.
+The serializer writes GitHub's syntax in `.md` files and pandoc's in `.qmd` and `.Rmd` files, except
+for subscript and superscript, which are `<sub>` and `<sup>` in every file type. It reads all the
+common variants and never rewrites syntax it didn't change.
 
 | Element                     | `.md` (GitHub) writes                                    | `.qmd`, `.Rmd` (pandoc) writes | Watch out for                                                                  |
 | --------------------------- | -------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------ |
-| Subscript, superscript      | `<sub>`, `<sup>`                                         | `~x~`, `^x^`                   | **A single `~x~` is strikethrough on GitHub and subscript in pandoc** (tested) |
+| Subscript, superscript      | `<sub>`, `<sup>`                                         | `<sub>`, `<sup>`               | **A single `~x~` is strikethrough on GitHub and subscript in pandoc** (tested), so pandoc's `~x~` and `^x^` are kept as written, never written. pandoc's Word output drops the tags |
 | Highlight                   | `<mark>`                                                 | `[x]{.mark}`                   | `==x==` shows literally on GitHub; pandoc needs `+mark`                        |
 | Underline                   | `<ins>`                                                  | `[x]{.underline}`              | **GitHub strips `<u>`** (tested), though some editors write it for underline   |
 | Heading IDs                 | none (GitHub makes its own); `{#id}` kept if present     | `{#id}`                        | `{#id}` shows as text on GitHub, in VS Code, Typora and Obsidian               |
@@ -150,7 +151,10 @@ an `hl` into a tracked highlight.
   - on a link-reference definition line;
   - between definition-list items;
   - right after `[^n]: `; before or inside `[!NOTE]`; before a task checkbox;
-  - between a letter and an emoji shortcode;
+  - between a letter and an emoji shortcode (GitHub's own renderer, asked through its `/markdown`
+    endpoint: `:tent:` alone or after a space is ⛺, `a:tent:` and `(:tent:` stay text, and a comment
+    between the `a` and the `:tent:`, as a marker is, makes it ⛺; what follows it, as in
+    `:tent:abc`, changes nothing);
   - around a backslash line break;
   - inside alt text.
 

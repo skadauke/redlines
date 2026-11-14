@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MAX_CHARS, firstPart, renderPreview } from './render.ts';
+import { MAX_CHARS, firstPart, previewImages, renderPreview } from './render.ts';
 
 const fixture = (name: string) =>
   readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf8');
@@ -196,7 +196,7 @@ describe('renderPreview', () => {
 
     it('says in its own words that nothing loads', () => {
       expect(html).toContain(
-        `content="default-src 'none'; style-src 'unsafe-inline'; font-src data:"`,
+        `content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src cid:"`,
       );
     });
 
@@ -239,5 +239,77 @@ describe('firstPart', () => {
 
   it('cuts at the limit when the second half has no blank line', () => {
     expect(firstPart('a\n\n' + 'b'.repeat(30), 20)).toBe('a\n\n' + 'b'.repeat(17));
+  });
+});
+
+describe('the local images of a preview', () => {
+  const text = [
+    '# Pictures',
+    '',
+    'One ![first](images/one.png) and ![remote](https://example.com/r.png) and ![spaced](my%20pics/two%20.jpg?raw=1#frag).',
+    '',
+    '![first again](images/one.png)',
+    '',
+    '![reference][r] ![data](data:image/png;base64,AAAA) ![abs](/tmp/abs.png) ![network](//host/x.png)',
+    '',
+    '[r]: ../up/three.gif',
+    '',
+  ].join('\n');
+
+  it('are the paths the document wrote, in order, each once, and none that is not a path', () => {
+    expect(previewImages(text)).toEqual([
+      'images/one.png',
+      'my pics/two .jpg',
+      '../up/three.gif',
+      '/tmp/abs.png',
+    ]);
+  });
+
+  it('are none, with no look at the text, for a document with no image', () => {
+    expect(previewImages('# Nothing\n\nA [link](a.png) and `![code](b.png)`.\n')).toEqual([]);
+  });
+
+  it('are those of the Clean view: a change accepted brings its image, and a deleted one takes it away', () => {
+    const changed =
+      'Kept ![kept](kept.png). <!--ins k3x9-->![added](added.png)<!--/k3x9--> ' +
+      '<!--del w2rf ![removed](removed.png)--> Done.\n';
+    expect(previewImages(changed)).toEqual(['kept.png', 'added.png']);
+  });
+
+  it('leave out the front matter, and stop where the preview does', () => {
+    expect(previewImages('---\ntitle: ![x](front.png)\n---\n\n![body](body.png)\n')).toEqual([
+      'body.png',
+    ]);
+    const many = Array.from({ length: 60 }, (_, n) => `![n](n${n}.png)`).join('\n\n');
+    expect(previewImages(many)).toHaveLength(40);
+  });
+
+  it('are drawn when the host loaded them, by the path the document wrote, and are their alt text when it did not', () => {
+    const html = renderPreview(
+      text,
+      'pictures.md',
+      false,
+      new Map([
+        ['images/one.png', 'img-0'],
+        ['my pics/two .jpg', 'img-1'],
+        ['/tmp/abs.png', 'bad name'],
+      ]),
+    );
+    expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="first">');
+    expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="first again">');
+    expect(html).toContain('<img class="rl-image" src="cid:img-1" alt="spaced">');
+    // One that the host asked for under a name that isn't one, and one that it didn't load.
+    expect(html).toContain('<span class="rl-image">abs</span>');
+    expect(html).toContain('<span class="rl-image">reference</span>');
+    // None from a server, and none from the page.
+    expect(html).toContain('<span class="rl-image">remote</span>');
+    expect(html).not.toMatch(/<img[^>]*src="(?!cid:)/);
+    expect(html).not.toMatch(/https?:\/\/example\.com\/r\.png/);
+  });
+
+  it('draw nothing but alt text when the host loaded none, as the page always did', () => {
+    const html = renderPreview(text, 'pictures.md');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('<span class="rl-image">first</span>');
   });
 });

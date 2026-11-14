@@ -4,10 +4,27 @@ import {
   ignorePinch,
   LADDER,
   stepSize,
+  TEXT_LEAST,
+  TEXT_MOST,
   watchPinch,
   WHEEL_QUIET_MS,
+  ZOOM_LADDER,
   type PinchHandlers,
 } from './text-size.ts';
+
+describe('the ladders', () => {
+  it('give the text twice the window zoom’s reach, from 80% to 400%', () => {
+    expect(LADDER).toEqual([0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4]);
+    expect([TEXT_LEAST, TEXT_MOST]).toEqual([0.8, 4]);
+    expect(LADDER.at(0)).toBe(TEXT_LEAST);
+    expect(LADDER.at(-1)).toBe(TEXT_MOST);
+  });
+
+  it('leave the window zoom where it was, from 80% to 200%, as the app’s own ladder has it', () => {
+    expect(ZOOM_LADDER).toEqual([0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]);
+    for (const rung of ZOOM_LADDER) expect(LADDER).toContain(rung);
+  });
+});
 
 describe('stepSize', () => {
   it('moves along the ladder', () => {
@@ -17,10 +34,34 @@ describe('stepSize', () => {
     expect(stepSize(1.1, -2)).toBe(0.9);
   });
 
+  it('goes on past 200% to 250%, 300% and 400%, and back', () => {
+    expect(stepSize(2, 1)).toBe(2.5);
+    expect(stepSize(2.5, 1)).toBe(3);
+    expect(stepSize(3, 1)).toBe(4);
+    expect(stepSize(1, 7)).toBe(3);
+    expect(stepSize(4, -1)).toBe(3);
+    expect(stepSize(3, -1)).toBe(2.5);
+    expect(stepSize(2.5, -1)).toBe(2);
+    expect(stepSize(2.2, 1)).toBe(2.5);
+    expect(stepSize(2.2, -1)).toBe(2);
+    expect(stepSize(3.5, 1)).toBe(4);
+    expect(stepSize(3.5, -1)).toBe(3);
+  });
+
+  it('steps along the window zoom’s own ladder when it is given, which stops at 200%', () => {
+    expect(stepSize(1, 1, ZOOM_LADDER)).toBe(1.1);
+    expect(stepSize(2, 1, ZOOM_LADDER)).toBe(2);
+    expect(stepSize(1, 99, ZOOM_LADDER)).toBe(2);
+    expect(stepSize(2, -1, ZOOM_LADDER)).toBe(1.75);
+    expect(stepSize(0.8, -1, ZOOM_LADDER)).toBe(0.8);
+    expect(stepSize(2.5, -1, ZOOM_LADDER)).toBe(2);
+    expect(stepSize(1.37, 1, ZOOM_LADDER)).toBe(1.5);
+  });
+
   it('stays at the ends', () => {
-    expect(stepSize(2, 1)).toBe(2);
+    expect(stepSize(4, 1)).toBe(4);
     expect(stepSize(0.8, -1)).toBe(0.8);
-    expect(stepSize(1, 99)).toBe(2);
+    expect(stepSize(1, 99)).toBe(4);
     expect(stepSize(1, -99)).toBe(0.8);
   });
 
@@ -29,7 +70,7 @@ describe('stepSize', () => {
     expect(stepSize(1.37, -1)).toBe(1.25);
     expect(stepSize(1.02, -1)).toBe(1);
     expect(stepSize(1.02, 1)).toBe(1.1);
-    expect(stepSize(5, -1)).toBe(2);
+    expect(stepSize(5, -1)).toBe(4);
     expect(LADDER).toContain(stepSize(0.1, 1));
   });
 
@@ -87,14 +128,14 @@ describe('watchPinch', () => {
     stop();
   });
 
-  it('holds at 80% and 200%, and moves back at once when the fingers turn', () => {
-    const made = handlers(1.75);
+  it('holds at 80% and 400%, and moves back at once when the fingers turn', () => {
+    const made = handlers(3.5);
     const { stop, send } = pinch(made);
     send(gesture('gesturestart'));
     send(gesture('gesturechange', 1.2));
-    expect(made.change).toHaveBeenLastCalledWith(2);
+    expect(made.change).toHaveBeenLastCalledWith(4);
     send(gesture('gesturechange', 1.1));
-    expect(made.change).toHaveBeenLastCalledWith(Math.round((2 / 1.2) * 1.1 * 100) / 100);
+    expect(made.change).toHaveBeenLastCalledWith(Math.round((4 / 1.2) * 1.1 * 100) / 100);
     // The other end.
     send(gesture('gestureend'));
     const low = handlers(0.9);

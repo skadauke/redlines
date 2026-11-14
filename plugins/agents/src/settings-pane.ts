@@ -8,12 +8,18 @@
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
 import type { AgentState } from '@redlines/plugin-api';
+import { privacyMessage } from './blocked-message.ts';
+import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
+import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
+import { skillControls, type PaneSkill } from './skill-controls.ts';
+
+export type { PaneSkill, SkillInstalled, SkillState } from './skill-controls.ts';
 
 /** The part of the app's settings this pane reads and changes. */
 export interface AgentsPaneSettings {
-  agentScope: 'folder' | 'document';
+  agentScope: 'document' | 'folder' | 'everything';
   /** What the person allowed each agent, keyed `agent|folder`. */
-  consent: Record<string, 'folder' | 'document' | 'no'>;
+  consent: Record<string, 'document' | 'folder' | 'everything' | 'no'>;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -45,6 +51,8 @@ export interface SetupUnderWay {
 export interface PaneAgent {
   id: string;
   name: string;
+  /** Installs the Redlines skill for the agent. Without it, the row says nothing of a skill. */
+  skill?: PaneSkill;
   /** `fresh` asks the program again, where the host keeps what it found. */
   detect(fresh?: boolean): Promise<AgentState>;
   /** Runs the agent's own updater, for the way it was installed, which the host knows. */
@@ -69,6 +77,24 @@ export interface AgentsPaneDeps {
   /** Puts text on the clipboard, for the install command's Copy. Without it, there is no Copy. */
   copy?(text: string): Promise<void>;
   /**
+   * Shows the General pane, where the command line is installed, which the skill needs. Without
+   * it, the pane says where the command line is installed and offers no button.
+   */
+  showGeneral?(): void;
+  /**
+   * Lists the folders among what an agent may read at This folder and my home folder that macOS
+   * isn't letting Redlines read, from the app, which is also what makes macOS ask the person, once:
+   * so it is asked when the person picks that choice, a moment they expect, and never before.
+   */
+  homeAccess?(): Promise<readonly { name: string; folder: string }[]>;
+  /** Opens System Settings at Privacy & Security › Files and Folders. */
+  openFilesAndFoldersSettings?(): Promise<void>;
+  /**
+   * The agents of an OpenClaw Gateway, where the host keeps a list: a section to add one by its
+   * name, the Gateway's address and the path of its token file. Without it, there is none.
+   */
+  openclaw?: OpenClawDeps;
+  /**
    * The other agents, where the host keeps a list. Adding and removing ask the person first, in
    * the host's own question, and reject with a line to show when they say no.
    */
@@ -85,36 +111,28 @@ export interface AgentsPaneDeps {
 
 const ANSWERS = {
   folder: 'May read the folder',
+  everything: 'May read the folder and the home folder',
   document: 'This document only',
   no: 'Not allowed',
 } as const;
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+/** What a remembered answer of an agent with no toolbox says: it reads nothing, it is sent. */
+const ANSWER_SENT = 'May be sent the document and its comment thread';
 
-let nextId = 0;
-
-function row(label: string, control: HTMLElement, note?: HTMLElement): HTMLElement {
-  const id = `rl-agents-${nextId++}`;
-  const root = el('div', 'rl-pref-row');
-  root.dataset['row'] = label;
-  const text = el('div', 'rl-pref-label', label);
-  text.id = id;
-  const field = el('div', 'rl-pref-control');
-  field.append(control);
-  if (note) field.append(note);
-  control.setAttribute('aria-labelledby', id);
-  root.append(text, field);
-  return root;
-}
+/**
+ * What the home folder choice means, said plainly, as the choice is made: what it opens and leaves
+ * out, that writes don't change, the risk of what someone else wrote in a document, and that macOS
+ * will ask (Documents, Desktop, Downloads and iCloud Drive are protected folders).
+ */
+const HOME_NOTE =
+  'Agents can read related files anywhere in your home folder, such as a reference document in ' +
+  'another project. Hidden files and folders and ~/Library are left out, except the cloud ' +
+  'folders in it (iCloud Drive, Dropbox, Google Drive, OneDrive and Box). Agents change only the ' +
+  'document. Text in a document that someone else wrote, such as a comment, a reply or deleted ' +
+  'text, could try to make an agent read a private file and quote it into a comment or a ' +
+  'suggestion, which then travels with the document. macOS may ask whether Redlines can access ' +
+  'your Documents, Desktop or Downloads folder or iCloud Drive, because agents read through ' +
+  'Redlines: say yes there to let them.';
 
 /**
  * Draws the pane in `container`, after what it holds. Returns a function that stops late answers
@@ -149,22 +167,94 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     drawn.start();
   }
 
+  if (deps.openclaw) {
+    container.append(
+      renderOpenClaw(deps.openclaw, {
+        alive: () => alive,
+        // What an agent was allowed isn't what another of its name is: Remove takes the answers.
+        forgetAnswers: (agent) => {
+          const consent = deps.settings().consent;
+          const kept = Object.entries(consent).filter(([key]) => !key.startsWith(`${agent}|`));
+          if (kept.length === Object.keys(consent).length) return;
+          deps.update({ consent: Object.fromEntries(kept) });
+          drawRemembered();
+        },
+        ...(deps.showGeneral ? { showGeneral: () => deps.showGeneral?.() } : {}),
+      }),
+    );
+  }
   if (deps.others) container.append(otherAgents(deps.others, () => alive));
 
   const scope = el('select');
   for (const [value, label] of [
     ['document', 'This document'],
     ['folder', 'This folder'],
+    ['everything', 'This folder and my home folder'],
   ] as const) {
     const option = el('option', undefined, label);
     option.value = value;
     scope.append(option);
   }
   scope.value = deps.settings().agentScope;
-  scope.addEventListener('change', () =>
-    deps.update({ agentScope: scope.value === 'document' ? 'document' : 'folder' }),
-  );
-  container.append(row('What agents may read', scope));
+  // The note comes with the widest choice, where the risk is, and goes with it.
+  // The risk is said where the choice is made, and a screen reader says it with the choice and
+  // again when the choice changes it.
+  const scopeNote = el('div', 'rl-pref-note');
+  scopeNote.id = uniqueId();
+  scopeNote.setAttribute('role', 'status');
+  scope.setAttribute('aria-describedby', scopeNote.id);
+  const showScopeNote = () => {
+    scopeNote.textContent = scope.value === 'everything' ? HOME_NOTE : '';
+  };
+  showScopeNote();
+  // What macOS holds back from Redlines, found when the choice is made: the folders, and a way to
+  // System Settings, where Redlines can be turned on.
+  const holdingBack = el('div', 'rl-pref-note rl-pref-failure');
+  holdingBack.setAttribute('role', 'status');
+  let looking = 0;
+  const lookForRefusals = () => {
+    const mine = ++looking;
+    holdingBack.replaceChildren();
+    if (scope.value !== 'everything' || !deps.homeAccess) return;
+    let asking: Promise<readonly { name: string; folder: string }[]>;
+    try {
+      asking = deps.homeAccess();
+    } catch (error) {
+      asking = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    asking.then(
+      (refused) => {
+        if (!alive || mine !== looking || refused.length === 0) return;
+        const lines = refused.map(({ name, folder }) =>
+          el('div', undefined, privacyMessage(folder, name).text),
+        );
+        const open = button('Open System Settings');
+        open.addEventListener('click', () => {
+          const failed = () => {
+            if (alive) holdingBack.append(el('div', undefined, 'Couldn’t open System Settings.'));
+          };
+          try {
+            void Promise.resolve(deps.openFilesAndFoldersSettings?.()).catch(failed);
+          } catch {
+            failed();
+          }
+        });
+        holdingBack.replaceChildren(...lines, open);
+      },
+      () => {},
+    );
+  };
+  scope.addEventListener('change', () => {
+    const chosen = scope.value;
+    deps.update({
+      agentScope: chosen === 'document' || chosen === 'everything' ? chosen : 'folder',
+    });
+    showScopeNote();
+    lookForRefusals();
+  });
+  const scopeExtras = el('div');
+  scopeExtras.append(scopeNote, holdingBack);
+  container.append(row('What agents may read', scope, scopeExtras));
 
   // The remembered answers: a row only while there are any.
   let remembered: HTMLElement | null = null;
@@ -176,7 +266,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     else if (next) logs.before(next);
     remembered = next;
   };
-  const list = (entries: [string, 'folder' | 'document' | 'no'][]): HTMLElement => {
+  const list = (entries: [string, AgentsPaneSettings['consent'][string]][]): HTMLElement => {
     const items = el('div', 'rl-pref-list');
     for (const [key, answer] of entries) {
       const split = key.indexOf('|');
@@ -185,8 +275,15 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       const item = el('div', 'rl-pref-item');
       item.dataset['key'] = key;
       const what = el('div', 'rl-pref-item-text');
+      // An agent that isn't Claude or Codex is an OpenClaw agent, which has no toolbox: allowing
+      // it in a folder is allowing it to be sent the document and the thread, not to read.
+      const sent = !names.has(agent) && answer === 'folder';
       what.append(
-        el('span', undefined, `${names.get(agent) ?? agent} · ${ANSWERS[answer]}`),
+        el(
+          'span',
+          undefined,
+          `${names.get(agent) ?? agent} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`,
+        ),
         el('span', 'rl-pref-note', folder),
       );
       const forget = el('button', 'rl-pref-button', 'Forget');
@@ -270,8 +367,17 @@ function agentRow(
   const actions = el('div', 'rl-pref-inline rl-pref-actions');
   const said = el('div', 'rl-pref-note rl-pref-failure');
   said.setAttribute('role', 'status');
+  // The Redlines skill, which teaches the agent what a Redlines file is: its state, the button
+  // that installs it, and what installing said.
+  const skillUi = skillControls({
+    agent,
+    alive,
+    showGeneral: () => deps.showGeneral?.(),
+    canGeneral: deps.showGeneral !== undefined,
+    fallbackFocus: () => actions.querySelector('button'),
+  });
   const rest = el('div');
-  rest.append(where, help, install, actions, said);
+  rest.append(where, help, install, actions, said, ...skillUi.nodes);
   const root = row(agent.name, status, rest);
 
   /** The latest question asked, so that an older answer never draws over a newer one. */
@@ -342,6 +448,7 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
+        skillUi.look(state?.found === true);
         const ready = state?.found === true && state.signedIn;
         if (ready) {
           waiting.delete(agent.id);
@@ -445,27 +552,6 @@ function agentRow(
       else check(false);
     },
   };
-}
-
-function button(text: string, label?: string): HTMLButtonElement {
-  const node = el('button', 'rl-pref-button', text);
-  node.type = 'button';
-  if (label) node.setAttribute('aria-label', label);
-  return node;
-}
-
-function textField(label: string, placeholder: string): HTMLInputElement {
-  const input = el('input', 'rl-pref-text');
-  input.type = 'text';
-  input.placeholder = placeholder;
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.setAttribute('aria-label', label);
-  return input;
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

@@ -1,0 +1,12 @@
+{
+  "name": "redlines",
+  "description": "Redlines for Claude Code: a skill that teaches Claude to work in Redlines files.",
+  "owner": { "name": "skadauke", "url": "https://github.com/skadauke" },
+  "plugins": [
+    {
+      "name": "redlines",
+      "source": "./integrations/claude-code",
+      "description": "Read a Redlines file with its review view, and change it only through the redlines command line, so that Claude's edits are tracked suggestions in its name."
+    }
+  ]
+}

@@ -1241,6 +1241,8 @@ describe(
       '[h i](u.md)',
       '[r]',
       'm*n',
+      '<sub>s</sub>',
+      '<sup>t u</sup>',
     ];
     /** What co-authors type: words mostly, and now and then what reaches past a paragraph. */
     const TYPED = [
@@ -1268,9 +1270,12 @@ describe(
       italic(true),
       inline('strike', true),
       inline('code', true),
+      inline('sub', true),
+      inline('sup', true),
       bold(false),
       italic(false),
       inline('code', false),
+      inline('sub', false),
       clear,
       link('https://new.example/a'),
       link(null),

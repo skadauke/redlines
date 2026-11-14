@@ -80,10 +80,13 @@ class FakeHost implements Host {
   }
   /** The names the save dialog was asked to start from. */
   suggested: string[] = [];
+  /** The folders it was asked to start in, as the controller gave them (null for none). */
+  startedIn: (string | null | undefined)[] = [];
   /** What Save As fails with, as the real host does for a name that isn't a document's. */
   saveAsError: Error | null = null;
-  async saveAs(text: string, suggestedName: string) {
+  async saveAs(text: string, suggestedName: string, folder?: string | null) {
     this.suggested.push(suggestedName);
+    this.startedIn.push(folder);
     if (this.saveAsError) throw this.saveAsError;
     if (this.saveAsPath) await this.write(this.saveAsPath, text);
     return this.saveAsPath;
@@ -150,6 +153,18 @@ class FakeHost implements Host {
     this.draftAsked++;
     return Promise.resolve(this.discardDraft);
   }
+  askToSaveForImage() {
+    return Promise.resolve(false);
+  }
+  chooseImages() {
+    return Promise.resolve(null);
+  }
+  addImages() {
+    return Promise.resolve({ paths: [], refused: [] });
+  }
+  listenForImageDrops() {
+    return Promise.resolve(() => {});
+  }
   listenForFiles() {
     return Promise.resolve();
   }
@@ -195,6 +210,7 @@ function setup(
     onLoading?: (path: string | null) => void;
     hasDraft?: () => boolean;
     author?: () => string;
+    newDocumentFolder?: () => string | null;
   } = {},
 ) {
   const host = new FakeHost();
@@ -353,6 +369,46 @@ describe('DocumentController', () => {
     await controller.open('/docs/notes.txt');
     await controller.saveAs();
     expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.txt']);
+  });
+
+  it('starts the save dialog of a document with no file in the default folder, and a saved one in its own', async () => {
+    const { host, controller } = setup(
+      { '/docs/notes.md': 'One\n' },
+      { newDocumentFolder: () => '/Users/ada/Notes' },
+    );
+    await controller.create();
+    await controller.saveAs();
+    await controller.open('/docs/notes.md');
+    await controller.saveAs();
+    // The folder is for a name alone; a saved document's dialog starts from its full path.
+    expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.md']);
+    expect(host.startedIn).toEqual(['/Users/ada/Notes', null]);
+  });
+
+  it('leaves the save dialog to macOS while no default folder is set', async () => {
+    const { host, controller } = setup();
+    await controller.create();
+    await controller.saveAs();
+    expect(host.startedIn).toEqual([null]);
+  });
+
+  it('reads the default folder each time the dialog opens, so a change in Preferences counts at once', async () => {
+    let folder: string | null = null;
+    const { host, controller } = setup({}, { newDocumentFolder: () => folder });
+    await controller.create();
+    host.saveAsPath = null;
+    await controller.saveAs();
+    folder = '/Users/ada/Drafts';
+    await controller.saveAs();
+    expect(host.startedIn).toEqual([null, '/Users/ada/Drafts']);
+  });
+
+  it('also starts Save for a document with no file in the default folder', async () => {
+    const { host, editor, controller } = setup({}, { newDocumentFolder: () => '/Users/ada/Notes' });
+    await controller.create();
+    editor.type('Hello\n');
+    await controller.save();
+    expect(host.startedIn).toEqual(['/Users/ada/Notes']);
   });
 
   it('says why Save As wrote nothing for a name that isn’t a document’s, and stays as it was', async () => {
@@ -1054,6 +1110,39 @@ describe('a file that asks everyone to track changes', () => {
     host.files.set('/docs/plan.md', `${asking}More\n`);
     await controller.externalChange();
     expect(state()?.notice).toBeNull();
+  });
+
+  it('says why Track Changes is on when the file on disk newly asks everyone to track (#364)', async () => {
+    // The editor turns Track Changes on when it reloads such a file (`reloadDoc`), as when it opens
+    // one, and the notice is the same.
+    const { host, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()).toMatchObject({ notice: TRACKING_FOR_EVERYONE, dirty: false });
+  });
+
+  it('says nothing when the file on disk stops asking, or asked already', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    host.files.set('/docs/plan.md', 'Plan\n\n<!-- redlines\nversion: 1\n-->\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    // It asks again: that is news, as it is for a file that newly asks.
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+  });
+
+  it('keeps the edits and says nothing of tracking while there are unsaved edits', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
   });
 
   it('is not announced for a file that does not ask, or for a new document', async () => {

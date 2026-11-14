@@ -97,7 +97,7 @@ interface Span {
 }
 
 /** The stretches of `from`..`to` that the preview hides when the caret is elsewhere: the marks of
- * emphasis, code and strikethrough, a link's brackets and destination (its text shows), an image's
+ * emphasis, code, strikethrough, subscript and superscript, a link's brackets and destination (its text shows), an image's
  * syntax (its alt text stands in for the picture) and an autolink's angle brackets. */
 function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
   const hidden: Span[] = [];
@@ -113,6 +113,8 @@ function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
         case 'EmphasisMark':
         case 'CodeMark':
         case 'StrikethroughMark':
+        case 'SubscriptMark':
+        case 'SuperscriptMark':
           hide(node.from, node.to);
           break;
         case 'Link':
@@ -287,10 +289,13 @@ interface CellFont {
   padding: number;
 }
 
-/** The font of a cell of the table: found from a cell on the page, or worked out from the editor's. */
+/** The font of a cell of the table: found from a cell on the page, or worked out from the editor's. A
+ * cell of a table of the document (`.rl-tbl`): a table deleted whole is drawn above where it was as a
+ * table too, of cells of its own, whose padding is another (the only cell of a row has none on its
+ * right) and would put the columns of the table below it too narrow. */
 function fontOf(view: EditorView, header: boolean): CellFont {
   const cell = view.contentDOM.querySelector<HTMLElement>(
-    header ? '.rl-th .rl-tc' : '.rl-trow:not(.rl-th) .rl-tc',
+    header ? '.rl-tbl .rl-th .rl-tc' : '.rl-tbl .rl-trow:not(.rl-th) .rl-tc',
   );
   const style = getComputedStyle(cell ?? view.contentDOM);
   const size = Number.parseFloat(style.fontSize) || 16;

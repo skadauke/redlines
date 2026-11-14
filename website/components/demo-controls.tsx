@@ -6,7 +6,7 @@ import { demos } from '../lib/demos';
 import { PenIcon, TrackingIcon } from './icons';
 
 /** The editor's views, as the real controls are labeled (the embed's `VIEWS`). */
-const VIEW_LABELS = ['Clean', 'Simple', 'Redlines', 'Raw'];
+const VIEW_LABELS = ['Clean', 'Redlines', 'Raw'];
 
 // The controls the page draws for a panel: the editor supplies state and actions, and the page
 // draws them in its own type and tokens. Labels are words. Under a coarse pointer every control is

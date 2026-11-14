@@ -15,7 +15,7 @@ import type {
 } from '@redlines/plugin-api';
 import { findProgram, runProgram } from './agent-programs.ts';
 
-export { acpAgents, commandLine, type AcpAgent } from './agent-programs.ts';
+export { acpAgents, commandLine, homeAccess, type AcpAgent } from './agent-programs.ts';
 
 /** What the Rust side says about a run (`RunMessage` in agents/process.rs). */
 type RunMessage =
@@ -85,6 +85,15 @@ async function startThrough(
     },
   };
 }
+
+/**
+ * What an agent may read at This folder and my home folder, which the app makes (agents/reach.rs):
+ * the home folder, and the visible folders of it to grant, never a hidden one and never ~/Library
+ * but its cloud folders, each link by its name and by where it leads. Nothing where there is none
+ * to give. The agent's command line names them, and the app checks the line against the same when
+ * the agent starts.
+ */
+export const homeReach = () => invoke<{ home: string; roots: string[] } | null>('agent_home_reach');
 
 /** Programs on this machine, as the app's Rust side allows them. */
 export function createProcesses(): HostProcesses {

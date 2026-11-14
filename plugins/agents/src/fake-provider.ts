@@ -88,6 +88,8 @@ export function fakeProvider(options: {
   id?: string;
   name?: string;
   readLimit?: 'folder' | 'machine';
+  /** `false` for an agent that answers in text and has no toolbox, as an OpenClaw agent. */
+  toolbox?: false;
   state?: AgentState;
   /** How it is detected, for a test that holds detection; by default as `state` says, at once. */
   detect?: () => Promise<AgentState>;
@@ -96,13 +98,19 @@ export function fakeProvider(options: {
     id: options.id ?? 'claude',
     name: options.name ?? 'Claude',
     readLimit: options.readLimit ?? 'folder',
+    ...(options.toolbox === false ? { toolbox: false as const } : {}),
     requests: [],
     script: options.script,
     detect:
       options.detect ?? (() => Promise.resolve(options.state ?? { found: true, signedIn: true })),
     run(request, tools, signal) {
       provider.requests.push(request);
-      return provider.script({ request, tools: options.relay.connect(tools), signal });
+      // An agent with no toolbox has no line to connect to: calling a tool is an error.
+      const connection =
+        options.toolbox === false
+          ? toolClient(() => Promise.reject(new Error('This agent has no toolbox.')))
+          : options.relay.connect(tools);
+      return provider.script({ request, tools: connection, signal });
     },
   };
   return provider;

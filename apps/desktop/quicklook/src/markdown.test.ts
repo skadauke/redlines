@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { micromark } from 'micromark';
 import { gfm, gfmHtml } from 'micromark-extension-gfm';
-import { chunkEngine, chunkHeader, markdownToHtml, withoutComments } from './markdown.ts';
+import {
+  chunkEngine,
+  chunkHeader,
+  localImagePath,
+  localImageSources,
+  markdownToHtml,
+  withoutComments,
+} from './markdown.ts';
 
 describe('markdownToHtml', () => {
   it('draws Markdown, with GitHub’s extensions', () => {
@@ -90,6 +97,36 @@ describe('markdownToHtml', () => {
       expect(html).toContain(
         '<span class="rl-image">a &quot;quoted&quot; &lt;b&gt;word&lt;/b&gt; &amp; more</span>',
       );
+    });
+
+    it('is the picture itself when the host loaded the file, and nothing else is', () => {
+      const html = markdownToHtml(
+        'A ![caret](icon.png "The icon") and ![other](other.png) and ![remote](https://example.com/icon.png).\n',
+        new Map([
+          ['icon.png', 'img-0'],
+          ['https://example.com/icon.png', 'img-1'],
+        ]),
+      );
+      expect(html).toBe(
+        '<p>A <img class="rl-image" src="cid:img-0" alt="caret"> and <span class="rl-image">other</span> and <span class="rl-image">remote</span>.</p>\n',
+      );
+    });
+
+    it('is a picture under a name that is a name, and its alt text is escaped', () => {
+      const html = markdownToHtml(
+        '![a "q" <b>](x.png) ![y](y.png) ![z](z.png)\n',
+        new Map([
+          ['x.png', 'img-0'],
+          ['y.png', 'img" onerror="alert(1)'],
+          ['z.png', ''],
+        ]),
+      );
+      expect(html).toContain(
+        '<img class="rl-image" src="cid:img-0" alt="a &quot;q&quot; &lt;b&gt;">',
+      );
+      expect(html).not.toContain('onerror');
+      expect(html).toContain('<span class="rl-image">y</span>');
+      expect(html).toContain('<span class="rl-image">z</span>');
     });
 
     it('can be a link’s text', () => {
@@ -274,5 +311,52 @@ describe('markdownToHtml, where the text has nothing of what it changes', () => 
     expect(markdownToHtml(source).replaceAll(' class="rl-loose"', '')).toBe(
       micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()] }),
     );
+  });
+});
+
+describe('localImagePath', () => {
+  it('is the path the document wrote, undone from the HTML and from the percent-encoding', () => {
+    expect(localImagePath('images/one.png')).toBe('images/one.png');
+    expect(localImagePath('my%20pics/two%20.jpg')).toBe('my pics/two .jpg');
+    expect(localImagePath('a&amp;b.png')).toBe('a&b.png');
+    expect(localImagePath('../up/a.png')).toBe('../up/a.png');
+    expect(localImagePath('/abs/a.png')).toBe('/abs/a.png');
+    expect(localImagePath('caf%C3%A9.png')).toBe('café.png');
+  });
+
+  it('leaves out a query and a fragment, which are no part of a file’s name', () => {
+    expect(localImagePath('a.png?raw=1')).toBe('a.png');
+    expect(localImagePath('a.png#frag')).toBe('a.png');
+  });
+
+  it('is nothing for an address that is not a path', () => {
+    for (const src of [
+      'https://example.com/a.png',
+      'http://x/a.png',
+      'data:image/png;base64,AAAA',
+      'file:///etc/passwd',
+      '//host/a.png',
+      'C:/x/a.png',
+      'javascript:alert(1)',
+      '',
+      '#only-a-fragment',
+      '%ZZ.png',
+      'a%00b.png',
+    ]) {
+      expect(localImagePath(src), src).toBeNull();
+    }
+  });
+});
+
+describe('localImageSources', () => {
+  it('lists the local images of the HTML, in order, each once', () => {
+    const html =
+      '<p><img src="a.png" alt="" /> <img src="https://x/b.png" alt="" /> <img src="a.png" alt="" title="t" /> <img src="c%20d.png" alt="x" /></p>';
+    expect(localImageSources(html)).toEqual(['a.png', 'c d.png']);
+  });
+
+  it('is no more than a preview asks about', () => {
+    const html = Array.from({ length: 80 }, (_, n) => `<img src="n${n}.png" alt="" />`).join('');
+    expect(localImageSources(html)).toHaveLength(40);
   });
 });

@@ -64,6 +64,14 @@ const IN_SYNTAX: Row[] = [
     off: { file: 'One ~~str~~⏎⏎~~ike~~ two.' },
     on: { file: 'One ~~str<ins>~~<split>⏎⏎~~</ins>ike~~ two.' },
   },
+  // Subscript is parted the same way (structure.test.ts); a script can't show it, because its
+  // notation's `<sub …>` and `</sub>` are a substitution's markers.
+  {
+    name: 'inside superscript: its tags close and open again',
+    doc: 'x<sup>a‸b</sup> y',
+    off: { file: 'x<sup>a</sup>⏎⏎<sup>b</sup> y' },
+    on: { file: 'x<sup>a<ins></sup><split>⏎⏎<sup></ins>b</sup> y' },
+  },
   {
     name: 'inside a code span: it is parted as a whole',
     doc: 'One `co‸de` two.',

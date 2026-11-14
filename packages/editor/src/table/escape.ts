@@ -50,7 +50,7 @@ const isInput = (tr: Transaction) =>
 /** The annotations a transaction that puts text in carries that the editor reads: the user event that
  * the history groups by, whether it is added to the history or isolated in it, whether it is
  * remote, and which group of edits it is of. Read through the public API, one by one. */
-function annotationsOf(tr: Transaction): Annotation<unknown>[] {
+export function annotationsOf(tr: Transaction): Annotation<unknown>[] {
   const types = [
     Transaction.userEvent,
     Transaction.addToHistory,

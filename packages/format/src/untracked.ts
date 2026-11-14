@@ -13,6 +13,7 @@
 // What has no legal form is refused. The result is checked against the plain edit of both views,
 // and an edit that would come out otherwise is refused too, so the file is never damaged.
 
+import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
@@ -49,6 +50,7 @@ import {
 } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
+import { wrappedLineStart } from './wrapped-line.ts';
 
 /**
  * What an untracked edit needs besides the text: the random bytes of the ids of the marks that it
@@ -462,6 +464,7 @@ function edited(
       `The edit ${edit.from}-${edit.to} is out of order or outside the text (${text.length} characters)`,
     );
   }
+  assertWholeCharacters(text, edit);
   const typed = inEol(edit.insert, eolOf(text));
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
@@ -496,6 +499,9 @@ function edited(
     to = Math.max(from, snapOut(markers, edit.to, false));
   }
   if (from === to && typed === '') return [];
+  // All the text of a wrapped line goes with the line break in front of it, as it does with Track
+  // Changes on (`wrappedLineStart`): the line left empty would part the paragraph (#427).
+  if (typed === '' && !half) from = wrappedLineStart(text, parsed, markers, from, to) ?? from;
   // A file without marks and ledger takes the edit as it is, unless the edit makes one.
   if (markers.length === 0) {
     const plain = [{ from, to, insert: typed }];

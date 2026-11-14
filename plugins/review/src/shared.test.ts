@@ -14,6 +14,17 @@ describe('formatLabel', () => {
     expect(formatLabel([{ kind: 'clear' }])).toBe('Plain text');
   });
 
+  it('names the type an alert was changed to, as a person reads it', () => {
+    expect(formatLabel([{ kind: 'callout', type: 'tip' }])).toBe('Alert: Tip');
+    expect(formatLabel([{ kind: 'callout', type: 'important' }])).toBe('Alert: Important');
+    expect(formatLabel([{ kind: 'callout', type: 'info' }])).toBe('Alert: Info');
+  });
+
+  it('names subscript and superscript', () => {
+    expect(formatLabel([{ kind: 'inline', format: 'sub', on: true }])).toBe('Subscript');
+    expect(formatLabel([{ kind: 'inline', format: 'sup', on: false }])).toBe('Not superscript');
+  });
+
   it('names block types, indents and boxes', () => {
     const names = (['p', 'h2', 'ul', 'ol', 'task', 'quote'] as const).map((to) =>
       formatLabel([{ kind: 'block', to }]),

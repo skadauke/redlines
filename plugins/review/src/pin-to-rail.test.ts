@@ -1,0 +1,664 @@
+// @vitest-environment happy-dom
+import type { Editor } from '@redlines/editor';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PinnedElement, ReviewController } from './index.ts';
+import {
+  button,
+  file,
+  frame,
+  mount,
+  PEOPLE,
+  stubHeights,
+  stubWidth,
+  thread,
+  tick,
+  unmountAll,
+} from './test-helpers.ts';
+
+// An element the host has the rail lay out among its notes (`pinToRail`): Ask's bubble. The rail
+// lays it out level with its anchor, as a new comment's box is, and the notes around it make room.
+
+const restores: (() => void)[] = [];
+afterEach(() => {
+  unmountAll();
+  for (const restore of restores.splice(0).reverse()) restore();
+  vi.restoreAllMocks();
+});
+
+/** Five paragraphs, on lines 1, 3, 5, 7 and 9, with a thread on all but the third. */
+const DOC = file(
+  [
+    'One <!--cmt c2dk-->alpha<!--/c2dk-->.',
+    'Two <!--cmt c3fm-->beta<!--/c3fm-->.',
+    'Three target words.',
+    'Four <!--cmt c4gn-->delta<!--/c4gn-->.',
+    'Five <!--cmt c5hp-->epsilon<!--/c5hp-->.',
+  ].join('\n\n'),
+  [
+    ...PEOPLE,
+    'comments:',
+    ...thread('c2dk', 'bo', 'A'),
+    ...thread('c3fm', 'bo', 'B'),
+    ...thread('c4gn', 'bo', 'D'),
+    ...thread('c5hp', 'bo', 'E'),
+  ],
+);
+
+/** Two threads level with the third paragraph's word, one before it and one after it. */
+const SAME_LINE = file(
+  [
+    'One <!--cmt c2dk-->alpha<!--/c2dk-->.',
+    'Three <!--cmt c3fm-->before<!--/c3fm--> target <!--cmt c4gn-->after<!--/c4gn--> words.',
+    'Five <!--cmt c5hp-->epsilon<!--/c5hp-->.',
+  ].join('\n\n'),
+  [
+    ...PEOPLE,
+    'comments:',
+    ...thread('c2dk', 'bo', 'A'),
+    ...thread('c3fm', 'bo', 'B'),
+    ...thread('c4gn', 'bo', 'C'),
+    ...thread('c5hp', 'bo', 'E'),
+  ],
+);
+
+/** A file with no comment in it: its rail has no note. */
+const NO_NOTES = file('One.\n\nTwo target words.', PEOPLE);
+
+const NOTE = 60;
+const GAP = 8;
+
+/**
+ * An editor whose paragraphs stand 100 px apart from 100 (line 1, 3, 5...), notes 60 px high, in a
+ * window wide enough for the rail, with the notes laid out.
+ */
+async function load(doc = DOC) {
+  restores.push(stubHeights({ 'rl-note': NOTE, 'rl-note-actions': 22 }));
+  const { editor, review } = mount(doc);
+  stubWidth(editor.view.scrollDOM, 1200);
+  const scroll = { by: 0 };
+  vi.spyOn(editor.view, 'coordsAtPos').mockImplementation((pos) => {
+    const line = editor.view.state.doc.lineAt(pos).number;
+    const top = 100 + 100 * ((line - 1) / 2) - scroll.by;
+    return { left: 0, right: 5, top, bottom: top + 20 };
+  });
+  // A move of the selection that is on no anchor makes the rail place its notes again.
+  editor.view.dispatch({ selection: { anchor: 0 } });
+  await frame();
+  const scrollTo = async (by: number) => {
+    scroll.by = by;
+    editor.view.scrollDOM.scrollTop = by;
+    editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
+    await frame();
+  };
+  return { editor, review, scrollTo };
+}
+
+const notes = (editor: Editor) => [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note')];
+const top = (el: HTMLElement) => parseFloat(el.style.top);
+const tops = (editor: Editor) => notes(editor).map(top);
+const railOf = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+const at = (editor: Editor, word: string) => editor.view.state.doc.toString().indexOf(word);
+
+/** An element of the host's, `height` high, in the editor's scroller, where Ask puts its bubble. */
+function hostElement(editor: Editor, height: number) {
+  const el = document.createElement('div');
+  el.className = 'host-box';
+  el.append(document.createTextNode('The host’s own words'));
+  editor.view.scrollDOM.append(el);
+  const box = { height };
+  Object.defineProperty(el, 'offsetHeight', { configurable: true, get: () => box.height });
+  return { el, box };
+}
+
+/** Pins an element of the host's `height` high at the start of `word`. */
+function pinAt(
+  { editor, review }: { editor: Editor; review: ReviewController },
+  word: string,
+  height: number,
+) {
+  const { el, box } = hostElement(editor, height);
+  const lost = vi.fn();
+  const pin: PinnedElement | null = review.pinToRail(el, () => at(editor, word), lost);
+  return { el, box, pin, lost };
+}
+
+/** Whether any two of the boxes, each as `[top, height]`, are closer than the gap or overlap. */
+function crowded(boxes: [number, number][]): boolean {
+  const sorted = [...boxes].sort((a, b) => a[0] - b[0]);
+  return sorted.some(([start, height], i) => {
+    const next = sorted[i + 1];
+    return next !== undefined && next[0] < start + height + GAP;
+  });
+}
+
+describe('pinToRail', () => {
+  it('lays the element out level with its anchor, as a note is, at the rail’s left', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    // The notes without it: each level with its own anchor.
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    const { el, pin } = pinAt(loaded, 'target', 200);
+    expect(pin).not.toBeNull();
+    await frame();
+    // The anchor's line is at 300, and a note is raised by 5 so that the first lines align.
+    expect(top(el)).toBe(295);
+    expect(el.style.left).not.toBe('');
+    expect(el.style.left).toBe(railOf(editor).style.left);
+  });
+
+  it('pushes the notes below it down by its height and the gap, and leaves those above alone', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    pinAt(loaded, 'target', 200);
+    await frame();
+    // Alpha and beta, above, stay where they were; delta goes below the element (295 + 200 + 8),
+    // and epsilon below delta.
+    expect(tops(editor)).toEqual([95, 195, 295 + 200 + GAP, 295 + 200 + GAP + NOTE + GAP]);
+  });
+
+  it('lays the notes out again when its height changes', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const { box, pin } = pinAt(loaded, 'target', 200);
+    await frame();
+    expect(tops(editor).slice(2)).toEqual([503, 571]);
+    box.height = 300;
+    pin?.resized();
+    await frame();
+    expect(tops(editor).slice(2)).toEqual([603, 671]);
+    // Short, it leaves the notes where their anchors are.
+    box.height = 20;
+    pin?.resized();
+    await frame();
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+  });
+
+  it('returns the notes to their places on release, and leaves the element as it is', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const { el, pin, lost } = pinAt(loaded, 'target', 200);
+    await frame();
+    expect(tops(editor).slice(2)).toEqual([503, 571]);
+    pin?.release();
+    await frame();
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    // The rail never owned it: it is in the page where the host put it, with its content, and
+    // never was inside the rail.
+    expect(el.parentElement).toBe(editor.view.scrollDOM);
+    expect(el.textContent).toBe('The host’s own words');
+    expect(railOf(editor).contains(el)).toBe(false);
+    // A release is the host's own doing: the rail doesn't say that it let go.
+    await tick();
+    expect(lost).not.toHaveBeenCalled();
+    // Once released, the handle does nothing more: it scrolls to nothing.
+    expect(() => {
+      pin?.resized();
+      pin?.reveal();
+      pin?.release();
+    }).not.toThrow();
+    await frame();
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('gives the notes back to the view on release: they follow the first anchor in view again', async () => {
+    const loaded = await load(SAME_LINE);
+    const { editor, scrollTo } = loaded;
+    // Before the element: the notes at the top of the page, alpha level with its anchor, and the two
+    // on the selection's line stacked down from beside it.
+    const alone = [95, 195, 263, 331];
+    expect(tops(editor)).toEqual(alone);
+    const { pin } = pinAt(loaded, 'target', 200);
+    await frame();
+    await scrollTo(250);
+    // Held, it stays level with its anchor, wherever the page is scrolled to.
+    const held = tops(editor);
+    expect(held).not.toEqual(alone);
+    pin?.release();
+    await frame();
+    // With only epsilon's anchor in view (on the line at 300), epsilon's note is the one level with
+    // it, and the three before it stack up from it. (A rail that kept the element's note, with no
+    // height, after the release would leave delta's note at 203, and the notes where they are as the
+    // page scrolls.)
+    const follows = [59, 127, 195, 295];
+    expect(tops(editor)).toEqual(follows);
+    // It goes on following the view, up and down.
+    await scrollTo(0);
+    expect(tops(editor)).toEqual(alone);
+    await scrollTo(250);
+    expect(tops(editor)).toEqual(follows);
+  });
+
+  it('does nothing for a handle the rail no longer holds: after release, and after it let go', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const measure = vi.spyOn(editor.view, 'requestMeasure');
+    const released = pinAt(loaded, 'target', 200);
+    await frame();
+    released.pin?.release();
+    await frame();
+    const dropped = pinAt(loaded, 'target', 200);
+    await frame();
+    // Clean shows no note: the rail lets go of the element, and says so.
+    editor.setViewMode('clean');
+    await tick();
+    expect(dropped.lost).toHaveBeenCalledOnce();
+    await frame();
+    scroll.mockClear();
+    measure.mockClear();
+    for (const { pin } of [released, dropped]) {
+      pin?.resized();
+      pin?.reveal();
+      pin?.release();
+    }
+    // Nothing is asked of the editor, and nothing scrolls to an element the rail doesn't lay out.
+    expect(measure).not.toHaveBeenCalled();
+    await frame();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('clears two notes on the selection’s line, one above it and one below, and covers none', async () => {
+    const loaded = await load(SAME_LINE);
+    const { editor } = loaded;
+    const { el } = pinAt(loaded, 'target', 200);
+    await frame();
+    const shown = notes(editor);
+    expect(shown).toHaveLength(4);
+    // The element is level with the selection (200, raised by 5). The note on the word before it
+    // goes up, clear of it, and the note on the word after it down, below it; alpha, above, makes
+    // room for the first, and epsilon, below, for the second.
+    expect(top(el)).toBe(195);
+    expect(shown.map(top)).toEqual([
+      195 - GAP - NOTE - GAP - NOTE,
+      195 - GAP - NOTE,
+      195 + 200 + GAP,
+      195 + 200 + GAP + NOTE + GAP,
+    ]);
+    expect(
+      crowded([...shown.map((note): [number, number] => [top(note), NOTE]), [top(el), 200]]),
+    ).toBe(false);
+  });
+
+  it('puts a note on the same text above it, as it does for a new comment’s box', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const { el } = pinAt(loaded, 'delta', 100);
+    await frame();
+    // Delta's own note and the element have one anchor: the note goes up, clear of the element
+    // (395 - 8 - 60), and epsilon goes below it (395 + 100 + 8).
+    expect(top(el)).toBe(395);
+    expect(tops(editor)).toEqual([95, 195, 327, 503]);
+  });
+
+  it('keeps it level with its anchor wherever the page is scrolled to, as a new comment is', async () => {
+    const loaded = await load();
+    const { editor, scrollTo } = loaded;
+    const { el } = pinAt(loaded, 'target', 200);
+    await frame();
+    expect(tops(editor)).toEqual([95, 195, 503, 571]);
+    // Scrolled far past every anchor: the notes are not arranged around the last one instead.
+    await scrollTo(1000);
+    expect(top(el)).toBe(295);
+    expect(tops(editor)).toEqual([95, 195, 503, 571]);
+    await scrollTo(0);
+    expect(top(el)).toBe(295);
+    expect(tops(editor)).toEqual([95, 195, 503, 571]);
+  });
+
+  it('follows its anchor through edits', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const { el } = pinAt(loaded, 'target', 200);
+    await frame();
+    expect(top(el)).toBe(295);
+    // A paragraph above it: everything is two lines, 100 px, lower, and the anchor went with the text.
+    editor.view.dispatch({ changes: { from: 0, insert: 'A new first paragraph.\n\n' } });
+    await frame();
+    expect(top(el)).toBe(395);
+    expect(tops(editor).slice(2)).toEqual([603, 671]);
+  });
+
+  it('stays level when a new comment is written too, and the box is placed around it', async () => {
+    const loaded = await load();
+    const { editor, review, scrollTo } = loaded;
+    const { el } = pinAt(loaded, 'target', 200);
+    const from = at(editor, 'delta');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 5 } });
+    expect(review.startComment()).toBe(true);
+    await frame();
+    // Alpha, beta, delta's note, the new comment's box and epsilon: none touches the element or
+    // another note.
+    const shown = notes(editor);
+    expect(shown).toHaveLength(5);
+    expect(top(el)).toBe(295);
+    expect(
+      crowded([...shown.map((note): [number, number] => [top(note), NOTE]), [top(el), 200]]),
+    ).toBe(false);
+    // The element is the one that stays level: the box, on delta's text (at 395), is placed after
+    // delta's note, below the element, and is not level with its text.
+    const box = shown.find((note) => note.classList.contains('rl-note-writing'));
+    expect(top(box!)).toBe(295 + 200 + GAP + NOTE + GAP);
+    expect(top(box!)).toBeGreaterThan(395);
+    await scrollTo(1000);
+    expect(top(el)).toBe(295);
+    expect(top(box!)).toBe(295 + 200 + GAP + NOTE + GAP);
+  });
+
+  it('holds one element level at a time: given two, the first in the text, and the other is laid out around it', async () => {
+    const loaded = await load();
+    const { editor, scrollTo } = loaded;
+    const first = pinAt(loaded, 'target', 200);
+    const second = pinAt(loaded, 'epsilon', 100);
+    await frame();
+    // The first is level with its text, wherever the page is scrolled to. The second is placed
+    // after epsilon's note, as a note is, and is not level with its own text (at 495).
+    const expected = {
+      notes: [95, 195, 295 + 200 + GAP, 295 + 200 + GAP + NOTE + GAP],
+      first: 295,
+      second: 295 + 200 + GAP + 2 * (NOTE + GAP),
+    };
+    const placed = () => ({ notes: tops(editor), first: top(first.el), second: top(second.el) });
+    expect(placed()).toEqual(expected);
+    expect(second.pin).not.toBeNull();
+    await scrollTo(1000);
+    expect(placed()).toEqual(expected);
+    // Clear of each other, though: nothing is covered.
+    expect(
+      crowded([
+        ...tops(editor).map((note): [number, number] => [note, NOTE]),
+        [top(first.el), 200],
+        [top(second.el), 100],
+      ]),
+    ).toBe(false);
+  });
+
+  it('makes the page as long as the element needs', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    pinAt(loaded, 'epsilon', 400);
+    await frame();
+    // At epsilon's line (500, raised by 5), 400 high, with a foot of 24 under it.
+    expect(parseFloat(editor.view.scrollDOM.style.minHeight)).toBeGreaterThanOrEqual(
+      495 + 400 + 24,
+    );
+  });
+
+  it('scrolls it into view once the rail has placed it', async () => {
+    const loaded = await load();
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const { el, pin } = pinAt(loaded, 'target', 200);
+    pin?.reveal();
+    expect(scroll).not.toHaveBeenCalled();
+    await frame();
+    expect(scroll).toHaveBeenCalledOnce();
+    expect(scroll.mock.contexts[0]).toBe(el);
+    expect(top(el)).toBe(295);
+  });
+
+  it('writes its place again when the host placed it in between', async () => {
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el, pin } = pinAt(loaded, 'target', 200);
+    await frame();
+    expect(top(el)).toBe(295);
+    pin?.release();
+    // The host hangs it by the selection itself, as it does where the rail doesn't hold it.
+    el.style.top = '999px';
+    const again = review.pinToRail(
+      el,
+      () => at(editor, 'target'),
+      () => {},
+    );
+    expect(again).not.toBeNull();
+    await frame();
+    expect(top(el)).toBe(295);
+  });
+
+  it('takes an anchor past the end of the text', async () => {
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el } = hostElement(editor, 100);
+    expect(
+      review.pinToRail(
+        el,
+        () => 10_000_000,
+        () => {},
+      ),
+    ).not.toBeNull();
+    await frame();
+    expect(top(el)).not.toBeNaN();
+  });
+
+  it('keeps the anchor it read at the last sync: `resized` measures the height again, and nothing more', async () => {
+    const loaded = await load();
+    const { editor } = loaded;
+    const { el, box } = hostElement(editor, 100);
+    const spot = { word: 'target' };
+    const pin = loaded.review.pinToRail(
+      el,
+      () => at(editor, spot.word),
+      () => {},
+    );
+    await frame();
+    expect(top(el)).toBe(295);
+    // Delta goes below the element, and epsilon, on its own line further down, is clear of it.
+    expect(tops(editor)).toEqual([95, 195, 295 + 100 + GAP, 495]);
+    // The anchor moved to epsilon's line, and the element grew: the notes below it make room for
+    // its new height, and the element is where it was, since nothing has read the anchor again.
+    spot.word = 'epsilon';
+    box.height = 300;
+    pin?.resized();
+    await frame();
+    expect(top(el)).toBe(295);
+    expect(tops(editor).slice(2)).toEqual([295 + 300 + GAP, 295 + 300 + GAP + NOTE + GAP]);
+    // The next sync, here a move of the selection, reads it: the element is level with epsilon.
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    expect(top(el)).toBe(495);
+    // Epsilon's own note, on the same text, goes above it, and delta's above that.
+    expect(tops(editor)).toEqual([95, 195, 495 - GAP - NOTE - GAP - NOTE, 495 - GAP - NOTE]);
+  });
+
+  it('lets go of an element whose anchor throws, says so once, and the rail goes on working', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el } = hostElement(editor, 200);
+    const broken = { value: false };
+    const lost = vi.fn();
+    const pin = review.pinToRail(
+      el,
+      () => {
+        if (broken.value) throw new Error('The host’s anchor broke');
+        return at(editor, 'target');
+      },
+      lost,
+    );
+    expect(pin).not.toBeNull();
+    await frame();
+    expect(tops(editor).slice(2)).toEqual([503, 571]);
+    // The next sync reads the anchor, and it throws: that is no reason for the editor to switch
+    // the rail off, which it does for an update that throws.
+    broken.value = true;
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    await tick();
+    expect(errors).not.toHaveBeenCalled();
+    expect(lost).toHaveBeenCalledOnce();
+    expect(notes(editor)).toHaveLength(4);
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+    // The rail is still there to answer: the first note resolves, and the rest are laid out again.
+    button(notes(editor)[0]!, 'Resolve').click();
+    await frame();
+    expect(errors).not.toHaveBeenCalled();
+    expect(notes(editor)).toHaveLength(3);
+    expect(tops(editor)).toEqual([195, 395, 495]);
+    // What it held does nothing now, and it was told once.
+    pin?.resized();
+    pin?.release();
+    await tick();
+    expect(lost).toHaveBeenCalledOnce();
+  });
+
+  it('takes no element whose anchor throws as it is pinned, and does not say it lost it', async () => {
+    const loaded = await load();
+    const { editor, review } = loaded;
+    const { el } = hostElement(editor, 200);
+    const lost = vi.fn();
+    const pin = review.pinToRail(
+      el,
+      () => {
+        throw new Error('The host’s anchor broke');
+      },
+      lost,
+    );
+    expect(pin).toBeNull();
+    await frame();
+    await tick();
+    // Nothing was written to the element, and the notes are where they were.
+    expect(lost).not.toHaveBeenCalled();
+    expect(el.style.top).toBe('');
+    expect(tops(editor)).toEqual([95, 195, 395, 495]);
+  });
+
+  describe('where the rail does not show its notes in full', () => {
+    it('takes nothing in a narrow editor, where the notes are dots', async () => {
+      const loaded = await load();
+      const { editor, review } = loaded;
+      stubWidth(editor.view.scrollDOM, 700);
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      await frame();
+      await tick();
+      expect(railOf(editor).classList).toContain('rl-rail-compact');
+      const { el, pin, lost } = pinAt({ editor, review }, 'target', 200);
+      expect(pin).toBeNull();
+      await frame();
+      expect(lost).not.toHaveBeenCalled();
+      // It is left as it is: no place was written.
+      expect(el.style.top).toBe('');
+      expect(el.style.left).toBe('');
+    });
+
+    it('takes nothing in Clean or Raw, where the rail shows no note', async () => {
+      const loaded = await load();
+      loaded.editor.setViewMode('clean');
+      expect(pinAt(loaded, 'target', 200).pin).toBeNull();
+      loaded.editor.setViewMode('raw');
+      expect(pinAt(loaded, 'target', 200).pin).toBeNull();
+      loaded.editor.setViewMode('redlines');
+      expect(pinAt(loaded, 'target', 200).pin).not.toBeNull();
+    });
+
+    it('takes nothing while it has no note of its own: the column makes no room for one', async () => {
+      const bare = await load(NO_NOTES);
+      bare.editor.setViewMode('redlines');
+      expect(bare.editor.view.dom.classList).not.toContain('rl-has-rail');
+      const { el, pin } = pinAt(bare, 'target', 200);
+      expect(pin).toBeNull();
+      await frame();
+      expect(el.style.top).toBe('');
+      expect(bare.editor.view.dom.classList).not.toContain('rl-has-rail');
+    });
+
+    it('lets go of it when the editor turns narrow, and says so once, for the host to place it', async () => {
+      const loaded = await load();
+      const { editor } = loaded;
+      const { el, pin, lost } = pinAt(loaded, 'target', 200);
+      await frame();
+      expect(top(el)).toBe(295);
+      stubWidth(editor.view.scrollDOM, 700);
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      await frame();
+      await tick();
+      expect(railOf(editor).classList).toContain('rl-rail-compact');
+      expect(lost).toHaveBeenCalledOnce();
+      // The dots are the notes' alone: one for each note, and none for the element.
+      expect(editor.view.dom.querySelectorAll('.rl-note-dot')).toHaveLength(4);
+      // Nothing of the host's is removed, and what it holds does nothing now.
+      expect(el.parentElement).toBe(editor.view.scrollDOM);
+      pin?.release();
+      pin?.resized();
+      await frame();
+      expect(lost).toHaveBeenCalledOnce();
+      // The rail is whole again, and takes it.
+      stubWidth(editor.view.scrollDOM, 1200);
+      editor.view.dispatch({ selection: { anchor: 2 } });
+      await frame();
+      await tick();
+      expect(railOf(editor).classList).not.toContain('rl-rail-compact');
+      expect(pinAt(loaded, 'target', 200).pin).not.toBeNull();
+    });
+
+    it('lets go of it when the view is Clean, and when the last note goes', async () => {
+      const loaded = await load();
+      const { editor } = loaded;
+      const first = pinAt(loaded, 'target', 200);
+      await frame();
+      editor.setViewMode('clean');
+      // After the update that did it, not in it: the host places the element by reading the
+      // layout, which an update doesn't allow.
+      expect(first.lost).not.toHaveBeenCalled();
+      await tick();
+      expect(first.lost).toHaveBeenCalledOnce();
+      editor.setViewMode('redlines');
+      await frame();
+      expect(tops(editor)).toEqual([95, 195, 395, 495]);
+      // A rail whose last note is gone is no rail: the column takes its room back.
+      const second = pinAt(loaded, 'target', 200);
+      expect(second.pin).not.toBeNull();
+      await frame();
+      expect(tops(editor).slice(2)).toEqual([503, 571]);
+      for (let left = 4; left > 0; left--) {
+        expect(second.lost).not.toHaveBeenCalled();
+        button(notes(editor)[0]!, 'Resolve').click();
+      }
+      await tick();
+      expect(notes(editor)).toHaveLength(0);
+      expect(second.lost).toHaveBeenCalledOnce();
+    });
+
+    it('does not say so to a host that released the element after the rail let go of it', async () => {
+      const loaded = await load();
+      const { editor } = loaded;
+      const { pin, lost } = pinAt(loaded, 'target', 200);
+      await frame();
+      // The rail lets go of it (Clean shows no note), and the host, closing in the same moment,
+      // releases it before it was told: it asked for the release, and is told nothing.
+      editor.setViewMode('clean');
+      pin?.release();
+      await tick();
+      expect(lost).not.toHaveBeenCalled();
+      // The same where the loss was the anchor's.
+      editor.setViewMode('redlines');
+      const { el } = hostElement(editor, 100);
+      const broken = { value: false };
+      const again = vi.fn();
+      const second = loaded.review.pinToRail(
+        el,
+        () => {
+          if (broken.value) throw new Error('The host’s anchor broke');
+          return at(editor, 'target');
+        },
+        again,
+      );
+      await frame();
+      broken.value = true;
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      second?.release();
+      await tick();
+      expect(again).not.toHaveBeenCalled();
+    });
+
+    it('says so, once, when the rail goes with its document', async () => {
+      const loaded = await load();
+      const { editor } = loaded;
+      const { lost } = pinAt(loaded, 'target', 200);
+      await frame();
+      editor.setDoc(NO_NOTES);
+      await tick();
+      expect(lost).toHaveBeenCalledOnce();
+    });
+  });
+});

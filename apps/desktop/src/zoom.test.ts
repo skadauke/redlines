@@ -5,6 +5,7 @@ import {
   applyZoom,
   followZoom,
   initialZoom,
+  nextZoom,
   REPORT_WAIT_MS,
   RESIZE_WAIT_MS,
   ZOOM_EVENT,
@@ -55,12 +56,31 @@ describe('initialZoom', () => {
   it('takes the level the initialization script handed the page, if it is a rung', () => {
     script.__REDLINES_ZOOM__ = 1.5;
     expect(initialZoom()).toBe(1.5);
-    for (const level of [1.3, '1.5', null, undefined]) {
+    // The text's rungs above 200% are not zooms of the window.
+    for (const level of [1.3, 2.5, 3, 4, '1.5', null, undefined]) {
       script.__REDLINES_ZOOM__ = level;
       expect(initialZoom()).toBeNull();
     }
     delete script.__REDLINES_ZOOM__;
     expect(initialZoom()).toBeNull();
+  });
+});
+
+describe('nextZoom', () => {
+  it('steps the window zoom’s own ladder, which stops at 200% where the text’s goes on to 400%', () => {
+    expect(nextZoom(1, { by: 1 })).toBe(1.1);
+    expect(nextZoom(1.75, { by: 1 })).toBe(2);
+    expect(nextZoom(2, { by: 1 })).toBe(2);
+    expect(nextZoom(0.9, { by: -1 })).toBe(0.8);
+    expect(nextZoom(0.8, { by: -1 })).toBe(0.8);
+    // Between two rungs it goes to the next one in its direction, as the text size does.
+    expect(nextZoom(1.3, { by: 1 })).toBe(1.5);
+    expect(nextZoom(1.3, { by: -1 })).toBe(1.25);
+  });
+
+  it('goes to the level it is told, for Actual Size', () => {
+    expect(nextZoom(1.75, { to: 1 })).toBe(1);
+    expect(nextZoom(1, { to: 1 })).toBe(1);
   });
 });
 

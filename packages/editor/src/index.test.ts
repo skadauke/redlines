@@ -207,6 +207,53 @@ describe('isChange', () => {
       expect(selected(editor)).toBe('importer');
     });
 
+    describe('Track Changes and a file that asks everyone to track (#364)', () => {
+      const ledger = (...settings: string[]) =>
+        `<!-- redlines\nversion: 1\n${settings.map((line) => `${line}\n`).join('')}-->\n`;
+      const plain = `One.\n\n${ledger()}`;
+      const asking = `One.\n\n${ledger('tracking: everyone')}`;
+      const tracking = (editor: ReturnType<typeof mount>) => editor.getUiState().tracking;
+
+      it('turns Track Changes on when the reloaded file newly asks everyone to track', () => {
+        const editor = mount(plain);
+        expect(tracking(editor)).toBe(false);
+        editor.reloadDoc(asking);
+        expect(tracking(editor)).toBe(true);
+        // The file asks already: the switch writes nothing, and the text is the file's.
+        expect(editor.getDoc()).toBe(asking);
+        expect(editor.getUiState()).toMatchObject({ canUndo: false });
+      });
+
+      it('does so for a file that gained a ledger, and for a window that was tracking before', () => {
+        const editor = mount('One.\n');
+        editor.reloadDoc(asking);
+        expect(tracking(editor)).toBe(true);
+        // On already: it stays on.
+        const on = mount(plain);
+        on.setTracking(true, { inFile: false });
+        on.reloadDoc(asking);
+        expect(tracking(on)).toBe(true);
+      });
+
+      it('leaves Track Changes as it is when the file asked already: a person who turned it off keeps it off', () => {
+        const editor = mount(asking);
+        expect(tracking(editor)).toBe(true);
+        editor.setTracking(false, { inFile: false });
+        editor.reloadDoc(asking.replace('One.', 'One, two.'));
+        expect(tracking(editor)).toBe(false);
+      });
+
+      it('leaves Track Changes on when the reloaded file stops asking, and off when it never asked', () => {
+        const editor = mount(asking);
+        expect(tracking(editor)).toBe(true);
+        editor.reloadDoc(plain);
+        expect(tracking(editor)).toBe(true);
+        const never = mount(plain);
+        never.reloadDoc(plain.replace('One.', 'One, two.'));
+        expect(tracking(never)).toBe(false);
+      });
+    });
+
     it('keeps a backwards selection backwards', () => {
       const editor = mount('Alpha beta importer gamma delta.\n');
       const from = editor.view.state.doc.toString().indexOf('importer');

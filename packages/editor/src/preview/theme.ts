@@ -56,6 +56,10 @@ export const baseThemeSpec: ThemeSpec = {
     // The measure grows with the text size, between margins that grow above 100%.
     maxWidth: 'calc(var(--rl-column) * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
     margin: '0 auto',
+    // Narrower than the widest thing in it, if it comes to that: a table's cells can't fit the
+    // column at 400%, and the table scrolls in its own box, where the column would otherwise grow
+    // to its width and the page scroll sideways.
+    minWidth: '0',
     padding: `${s(32)} var(--rl-margin, 24px) 30vh`,
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
     // The text cursor, also in hosts whose chrome sets the default arrow.
@@ -101,6 +105,16 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-strong': { fontWeight: '700' },
   '.rl-em': { fontStyle: 'italic' },
   '.rl-strike': { textDecoration: 'line-through', color: 'var(--rl-ink-2)' },
+  // Subscript and superscript are smaller, and moved from the baseline without changing the line's
+  // height, so that a line with one is as tall as the others.
+  '.rl-sub, .rl-sup': {
+    fontSize: '0.75em',
+    lineHeight: '0',
+    position: 'relative',
+    verticalAlign: 'baseline',
+  },
+  '.rl-sub': { bottom: '-0.25em' },
+  '.rl-sup': { top: '-0.5em' },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.84em',
@@ -125,6 +139,73 @@ export const baseThemeSpec: ThemeSpec = {
     fontSize: 'var(--rl-quote-size)',
     color: 'var(--rl-quote-color)',
   },
+
+  // Alerts (#311): the lines of the quote are a box, tinted like code and not like a quote, with a
+  // title row on its first line: an icon, the type's name and a menu that shows for the pointer or
+  // the caret and is gone otherwise. Gray: color is for people, and a pending change of the type is
+  // in its author's.
+  '.rl-callout': {
+    backgroundColor: 'var(--rl-tint)',
+    padding: `0 ${s(16)}`,
+  },
+  '.rl-callout-first': {
+    borderTopLeftRadius: '8px',
+    borderTopRightRadius: '8px',
+    paddingTop: s(10),
+  },
+  '.rl-callout-last': {
+    borderBottomLeftRadius: '8px',
+    borderBottomRightRadius: '8px',
+    paddingBottom: s(10),
+  },
+  '.rl-callout-head': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.45em',
+    fontWeight: '600',
+    color: 'var(--rl-ink)',
+    cursor: 'text',
+  },
+  '.rl-callout-text': { fontWeight: '600' },
+  '.rl-callout-icon': {
+    width: '1em',
+    height: '1em',
+    flex: 'none',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.3',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    color: 'var(--rl-ink-2)',
+  },
+  '.rl-callout-menu': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    margin: '0 0 0 0.1em',
+    padding: '0.1em 0.2em',
+    border: 'none',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: 'var(--rl-ink-3)',
+    opacity: '0',
+    cursor: 'pointer',
+    font: 'inherit',
+  },
+  '.rl-callout-menu svg': {
+    width: '0.8em',
+    height: '0.8em',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.5',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.rl-callout-title:hover .rl-callout-menu, .rl-callout-active .rl-callout-menu, .rl-callout-menu:focus-visible':
+    { opacity: '1' },
+  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
+  '.rl-callout-menu:focus': { outline: 'none' },
+  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
   // inline, it sits in the text. A missing one is its alt text, quietly.
@@ -254,8 +335,41 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc[data-align="left"]': { textAlign: 'left' },
   '.rl-tc[data-align="center"]': { textAlign: 'center' },
   '.rl-tc[data-align="right"]': { textAlign: 'right' },
-  // A cell that is empty has a filler for the caret to stand on, which takes no room.
-  '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
+  // A cell that is empty has a filler for the caret to stand on, which takes no room. An inline-block
+  // with `overflow: hidden` rests its bottom edge on the baseline, so a box as high as a line made the
+  // line, and the row, 6.85 px taller than a line of text (measured in Chromium); aligned to the top
+  // of the line it is no taller than the line.
+  '.rl-tc-fill': {
+    display: 'inline-block',
+    width: '0',
+    overflow: 'hidden',
+    verticalAlign: 'top',
+  },
+  // The cells a row lacks (`table/missing.ts`) stand at the end of the row, where the page's own caret
+  // can't say which of them it is in: the one the caret is in draws it, and the line's own is hidden.
+  // (The last cell of a row has no padding on its right, and the break CodeMirror ends a line with, hidden
+  // below, would be the last child.)
+  '.rl-tc-missing:last-of-type': { paddingRight: '0' },
+  '.rl-tc-active > .rl-tc-fill': { position: 'relative', overflow: 'visible' },
+  // The line stands only while the editor has the focus, as CodeMirror's own cursor does: a solid line
+  // left after the editor blurs or the window is deactivated would be a caret in a text that has none
+  // (the page's own is hidden below either way).
+  '&.cm-focused .rl-tc-active > .rl-tc-fill::after': {
+    content: '""',
+    position: 'absolute',
+    left: '0',
+    top: '0.12em',
+    bottom: '0.12em',
+    borderLeft: '1px solid var(--rl-caret, var(--rl-author-1))',
+  },
+  '.cm-line:has(> .rl-tc-active)': { caretColor: 'transparent' },
+  // CodeMirror's buffers beside a widget and its line-end break are inline boxes in the row, each of
+  // which a table row wraps in a cell of its own: between the cells of a row that lacks some they would
+  // push the cells after them a column along. They are not needed there, for the caret is never beside
+  // a widget of the row (found in a browser, measuring the cells of a row).
+  '.rl-trow:has(> .rl-tc-missing) > .cm-widgetBuffer, .rl-trow:has(> .rl-tc-missing) > br': {
+    display: 'none',
+  },
   // The cells a selection reaches (`table/reach.ts`): the system's selection color, over the whole
   // cell; the text highlight stays for what lies outside the table.
   // The cell is painted, not the mark: a block mark inside a cell, between the widget buffers

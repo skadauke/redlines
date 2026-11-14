@@ -9,13 +9,51 @@ import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
-import { LADDER } from './text-size.ts';
+import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
 
-/** How much of the surroundings an agent may read (design, Scope). */
-export type AgentScope = 'folder' | 'document';
+/**
+ * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
+ * folder and the home folder, which the plugin API calls `everything` (Preferences › Agents says
+ * "This folder and my home folder").
+ */
+export type AgentScope = 'document' | 'folder' | 'everything';
 
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;
+
+/**
+ * Where the images added to a document are saved (#308): in a folder beside it, named by
+ * `imageFolderName`; in a folder named for the document, `<name>.assets`; or in the document's own
+ * folder. All of them are inside the folder of the document, where the preview loads images from.
+ */
+export type ImagePlace = 'folder' | 'assets' | 'same';
+
+/** The most characters the name of the folder for images may have. */
+const MAX_FOLDER_NAME = 100;
+
+/**
+ * What is wrong with the name typed for a folder for images, as a sentence for the person, or null
+ * when a folder beside the document can have it: a name, of no more than `MAX_FOLDER_NAME`
+ * characters, with no slash and no control character, and not a hidden one, which the preview
+ * wouldn't load images from (src-tauri/src/image_files.rs says the same of all but the length).
+ */
+export function imageFolderNameProblem(typed: string): string | null {
+  const name = typed.trim();
+  if (name === '') return 'A folder needs a name.';
+  if (name.length > MAX_FOLDER_NAME) {
+    return `A folder’s name can’t be longer than ${MAX_FOLDER_NAME} characters.`;
+  }
+  const control = (char: string) => char < ' ' || (char >= '\u007f' && char <= '\u009f');
+  const plain =
+    !name.startsWith('.') &&
+    ![...name].some((char) => char === '/' || char === '\\' || control(char));
+  return plain ? null : 'A folder’s name has no slash and doesn’t start with a dot.';
+}
+
+/** The name of a folder for images as typed, without the spaces around it, or null if it has none. */
+export function imageFolderNameOf(typed: string): string | null {
+  return imageFolderNameProblem(typed) === null ? typed.trim() : null;
+}
 
 export interface Settings {
   /** The theme of every window, in light and dark alike. */
@@ -26,9 +64,13 @@ export interface Settings {
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
-   * The markup view chosen last, Simple or Redlines, which a window shows wherever it picks one
-   * for the person (design: Which markup view, when). Every window follows it for the documents it
-   * opens next and for its own switches, and none changes the view it shows for it.
+   * The look of Redlines chosen last with a click on a change bar or the Simple Look switch, the
+   * full markup or Simple (the
+   * simple look), which a window shows wherever it picks Redlines for the person, and when the
+   * View menu shows Redlines (design: Which look, when). A document that records no view in its
+   * ledger, and has redlines, opens in Redlines' simple look when this is `'simple'`. Every window
+   * follows it for the documents it opens next and for its own switches, and none changes the view
+   * it shows for it.
    */
   markupView: MarkupView;
   /**
@@ -49,7 +91,7 @@ export interface Settings {
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   /**
-   * The zoom of every window (zoom.ts), a rung of the ladder (text-size.ts). The app keeps the
+   * The zoom of every window (zoom.ts), a rung of the window zoom's ladder (`ZOOM_LADDER`, text-size.ts). The app keeps the
    * level in its own file and sets it on every window; this is the copy each window asks from.
    */
   zoom: number;
@@ -58,10 +100,15 @@ export interface Settings {
   smartPunctuation: boolean;
   /** Closing brackets and Markdown pairs as you type. */
   closePairs: boolean;
+  /** A list of matching emoji after a colon and two letters (`:te`), which a choice writes as the
+   * character itself. The shortcodes already in a file are drawn as their emoji either way. */
+  emojiSuggestions: boolean;
   /** Whether a new document starts with Track Changes on. */
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
+  /** Whether the word count shows in the window's lower right corner (design §5.1). */
+  showWordCount: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -71,6 +118,16 @@ export interface Settings {
    * given (design §5.5). Never you, who always have the first color.
    */
   people: readonly MetPerson[];
+  /**
+   * The folder the Save dialog opens in for a document that has no file yet (Preferences, General,
+   * #309), as a full path; null leaves it to macOS, which opens it where it last saved. Save As of
+   * a saved document starts in that document's own folder, whatever this says.
+   */
+  newDocumentFolder: string | null;
+  /** Where the images dropped or pasted into a document are saved (#308). */
+  imagePlace: ImagePlace;
+  /** The name of the folder beside the document, for `imagePlace: 'folder'`. */
+  imageFolderName: string;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -92,11 +149,16 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   spellCheck: true,
   smartPunctuation: true,
   closePairs: true,
+  emojiSuggestions: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
+  showWordCount: true,
   agentScope: 'folder',
   consent: {},
   people: [],
+  newDocumentFolder: null,
+  imagePlace: 'folder',
+  imageFolderName: 'images',
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -111,10 +173,18 @@ export function loadSettings(): Settings {
   }
   const value = (stored ?? {}) as Record<string, unknown>;
   const flag = (
-    key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates' | 'showLineBreakMarks',
+    key:
+      | 'sidebarOpen'
+      | 'showResolved'
+      | 'rotateIcon'
+      | 'checkForUpdates'
+      | 'showLineBreakMarks'
+      | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
-  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
-    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
+  const typing = (
+    key:
+      'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions' | 'trackNewDocuments',
+  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   return {
     theme: themeOf(value),
     appearance: isAppearanceChoice(value['appearance'])
@@ -137,11 +207,26 @@ export function loadSettings(): Settings {
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
+    emojiSuggestions: typing('emojiSuggestions'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
-    agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
+    showWordCount: flag('showWordCount'),
+    agentScope: isAgentScope(value['agentScope'])
+      ? value['agentScope']
+      : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
+    newDocumentFolder:
+      typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
+        ? value['newDocumentFolder']
+        : null,
+    imagePlace: isImagePlace(value['imagePlace'])
+      ? value['imagePlace']
+      : DEFAULT_SETTINGS.imagePlace,
+    imageFolderName:
+      (typeof value['imageFolderName'] === 'string' &&
+        imageFolderNameOf(value['imageFolderName'])) ||
+      DEFAULT_SETTINGS.imageFolderName,
   };
 }
 
@@ -193,7 +278,7 @@ function consentOf(value: unknown): Settings['consent'] {
   const consent: Settings['consent'] = {};
   if (typeof value !== 'object' || value === null) return consent;
   for (const [key, answer] of Object.entries(value as Record<string, unknown>)) {
-    if (answer === 'folder' || answer === 'document' || answer === 'no') consent[key] = answer;
+    if (isAgentScope(answer) || answer === 'no') consent[key] = answer;
   }
   return consent;
 }
@@ -310,20 +395,30 @@ function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
 }
 
+function isImagePlace(value: unknown): value is ImagePlace {
+  return value === 'folder' || value === 'assets' || value === 'same';
+}
+
+function isAgentScope(value: unknown): value is AgentScope {
+  return value === 'document' || value === 'folder' || value === 'everything';
+}
+
 function isAppearanceChoice(value: unknown): value is AppearanceChoice {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-/** A text size: any whole percent from 80 to 200, where a pinch may leave it (text-size.ts). */
+/** A text size: any whole percent from 80 to 400, where a pinch may leave it (text-size.ts). */
 function isTextSize(value: unknown): value is number {
   if (typeof value !== 'number') return false;
   const percent = value * 100;
   return (
-    percent >= 80 - 1e-9 && percent <= 200 + 1e-9 && Math.abs(percent - Math.round(percent)) < 1e-9
+    percent >= TEXT_LEAST * 100 - 1e-9 &&
+    percent <= TEXT_MOST * 100 + 1e-9 &&
+    Math.abs(percent - Math.round(percent)) < 1e-9
   );
 }
 
-/** A rung of the ladder (text-size.ts): the zoom is always one. */
+/** A rung of the window zoom's ladder (text-size.ts): the zoom is always one. */
 function isRung(value: unknown): value is number {
-  return typeof value === 'number' && LADDER.includes(value);
+  return typeof value === 'number' && ZOOM_LADDER.includes(value);
 }

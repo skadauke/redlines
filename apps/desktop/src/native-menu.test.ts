@@ -129,6 +129,7 @@ function commands() {
     print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
@@ -204,7 +205,7 @@ describe('the menu bar', () => {
   it('offers the Redlines view, and its shortcut, whatever the document holds', async () => {
     const menu = await createNativeMenu(modelOf(commands()));
     const redlines = itemWith('check', 'Redlines');
-    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+3');
+    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+2');
     // A disabled item takes its shortcut with it.
     menu.update(documentState({ hasRedlines: false }));
     expect(redlines.enabled).toBe(true);
@@ -214,6 +215,37 @@ describe('the menu bar', () => {
     menu.update(documentState({ hasRedlines: false, view: 'redlines' }));
     expect(redlines.enabled).toBe(true);
     expect(redlines.checked).toBe(true);
+  });
+
+  it('lists Clean, Redlines and Raw, with Redlines checked in its simple look too', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const names = ['Clean', 'Simple', 'Redlines', 'Raw'];
+    const views = made.items.filter(
+      (item) => item.kind === 'check' && item.text !== undefined && names.includes(item.text),
+    );
+    expect(views.map((item) => [item.text, item.accelerator])).toEqual([
+      ['Clean', 'Alt+CmdOrCtrl+1'],
+      ['Redlines', 'Alt+CmdOrCtrl+2'],
+      ['Raw', 'Alt+CmdOrCtrl+3'],
+    ]);
+    menu.update(documentState({ hasRedlines: true, view: 'simple' }));
+    expect(views.map((item) => item.checked)).toEqual([false, true, false]);
+    menu.update(documentState({ hasRedlines: true, view: 'raw' }));
+    expect(views.map((item) => item.checked)).toEqual([false, false, true]);
+  });
+
+  it('has a Simple Look switch with ⌥⌘4, on in the simple look and there to choose only in Redlines', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const look = made.items.find((item) => item.kind === 'check' && item.text === 'Simple Look');
+    expect(look?.accelerator).toBe('Alt+CmdOrCtrl+4');
+    menu.update(documentState({ view: 'redlines' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, true]);
+    menu.update(documentState({ view: 'simple' }));
+    expect([look?.checked, look?.enabled]).toEqual([true, true]);
+    menu.update(documentState({ view: 'clean' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
+    menu.update(documentState({ view: 'raw' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
   });
 
   it('keeps reviewing for documents with redlines', async () => {
@@ -501,15 +533,17 @@ describe('browser shortcuts', () => {
     expect(press('KeyE', { metaKey: true, shiftKey: true })).toBe(true);
     expect(c.toggleTracking).toHaveBeenCalledOnce();
     // Option changes the character typed, so the key's position decides.
-    press('Digit4', { metaKey: true, altKey: true, key: '¢' });
-    expect(c.setView).toHaveBeenCalledWith('raw');
-    // Redlines and Simple are there for any document, so their keys never wait for redlines.
     press('Digit3', { metaKey: true, altKey: true, key: '£' });
-    expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledWith('raw');
+    // Redlines is there for any document, so its key never waits for redlines.
     press('Digit2', { metaKey: true, altKey: true, key: '™' });
-    expect(c.setView).toHaveBeenLastCalledWith('simple');
+    expect(c.setView).toHaveBeenLastCalledWith('redlines');
     press('Digit1', { metaKey: true, altKey: true, key: '¡' });
     expect(c.setView).toHaveBeenLastCalledWith('clean');
+    // The fourth key is Simple Look, which switches the look and shows no view.
+    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(true);
+    expect(c.switchLook).toHaveBeenCalledOnce();
+    expect(c.setView).toHaveBeenCalledTimes(3);
     press('KeyS', { metaKey: true, ctrlKey: true });
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     expect(c.save).not.toHaveBeenCalled();
@@ -639,7 +673,7 @@ describe('+ typed as a key', () => {
     expect(c.zoomIn).not.toHaveBeenCalled();
     // The text size has its own limit.
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(true);
-    state = documentState({ textSize: 2 });
+    state = documentState({ textSize: 4 });
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(false);
     expect(c.biggerText).toHaveBeenCalledOnce();
     stop();

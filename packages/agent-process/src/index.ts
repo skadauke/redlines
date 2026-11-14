@@ -384,3 +384,12 @@ async function* follow<S>(
     if (!over) stop();
   }
 }
+
+export {
+  blockedRead,
+  blockedStatus,
+  homeScope,
+  insideReach,
+  protectedFolder,
+  type RunReach,
+} from './blocked.ts';

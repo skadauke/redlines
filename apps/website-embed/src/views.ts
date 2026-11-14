@@ -1,15 +1,15 @@
-import type { ViewMode } from '@redlines/editor';
+import type { MenuView } from '@redlines/editor';
 
 // The editor exports no list of its views (the app's View menu writes them out too). A fourth
-// `ViewMode` fails this file's type check until it has a label, and the page then draws it.
+// `MenuView` fails this file's type check until it has a label, and the page then draws it. Simple
+// is no view: it is Redlines' simple look, which a click on a change bar switches to.
 const LABELS = {
   clean: 'Clean',
-  simple: 'Simple',
   redlines: 'Redlines',
   raw: 'Raw',
-} satisfies Record<ViewMode, string>;
+} satisfies Record<MenuView, string>;
 
 /** The views the editor offers, in order, with the words the app's View menu uses. */
-export const VIEWS: readonly { view: ViewMode; label: string }[] = (
-  Object.keys(LABELS) as ViewMode[]
+export const VIEWS: readonly { view: MenuView; label: string }[] = (
+  Object.keys(LABELS) as MenuView[]
 ).map((view) => ({ view, label: LABELS[view] }));

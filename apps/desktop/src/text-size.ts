@@ -1,8 +1,23 @@
-// One text size, for the document and its margin notes (not the title bar): the ladder ⌘+ and ⌘−
-// walk, the pinch that walks it too, and the CSS token that carries the size.
+// One text size, for the document and its margin notes (not the title bar): the ladder ⌃⌘= and ⌃⌘−
+// walk, the pinch that walks it too, and the CSS token that carries the size. The window zoom has
+// a ladder of its own, which is shorter (`ZOOM_LADDER`).
 
-/** The sizes, as multiples of the theme's own. 1 is the theme's size. */
-export const LADDER: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+/** The window zoom's rungs, as multiples of the app's own size, from 80% to 200%: the app's own
+ * ladder (`LADDER` in src-tauri/src/zoom.rs) says the same. */
+export const ZOOM_LADDER: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+
+/** The least and the most the window zoom may be: the ends of its ladder. */
+export const ZOOM_LEAST = 0.8;
+export const ZOOM_MOST = 2;
+
+/** The least and the most a text size may be, as multiples of the theme's size: what a pinch
+ * reaches, and the ends of `LADDER`. */
+export const TEXT_LEAST = 0.8;
+export const TEXT_MOST = 4;
+
+/** The text sizes, as multiples of the theme's own. 1 is the theme's size. They go on past the
+ * window zoom's, to 400%, so that the text can be made really big. */
+export const LADDER: readonly number[] = [...ZOOM_LADDER, 2.5, 3, 4];
 
 /** How much a wheel tick that stands for a pinch counts: the scale is e to this times -deltaY. */
 export const WHEEL_SENSITIVITY = 0.01;
@@ -10,29 +25,26 @@ export const WHEEL_SENSITIVITY = 0.01;
 /** A wheel pinch ends when the wheel has been quiet this long. */
 export const WHEEL_QUIET_MS = 250;
 
-/** The least and the most a pinch makes the text, as multiples of the theme's size. */
-const LEAST = 0.8;
-const MOST = 2;
-
 /** How close two sizes are to be the same: a size is a whole percent, so far inside it. */
 const SAME = 1e-9;
 
 /**
- * `size` moved `by` rungs of the ladder: up from the first rung above it, or down from the last
- * below it, so that a size between two (137%) steps to the next one (150% or 125%), and a rung to
- * its neighbor. Held at the ends of the ladder; no steps leaves the size as it is.
+ * `size` moved `by` rungs of the text's ladder, or of `ladder` (the window zoom passes its own):
+ * up from the first rung above it, or down from the last below it, so that a size between two
+ * (137%) steps to the next one (150% or 125%), and a rung to its neighbor. Held at the ends of the
+ * ladder; no steps leaves the size as it is.
  */
-export function stepSize(size: number, by: number): number {
+export function stepSize(size: number, by: number, ladder: readonly number[] = LADDER): number {
   if (by === 0) return size;
-  const last = LADDER.length - 1;
+  const last = ladder.length - 1;
   if (by > 0) {
-    const above = LADDER.findIndex((rung) => rung > size + SAME);
-    if (above === -1) return LADDER[last] ?? 1;
-    return LADDER[Math.min(last, above + by - 1)] ?? 1;
+    const above = ladder.findIndex((rung) => rung > size + SAME);
+    if (above === -1) return ladder[last] ?? 1;
+    return ladder[Math.min(last, above + by - 1)] ?? 1;
   }
-  const below = LADDER.findLastIndex((rung) => rung < size - SAME);
-  if (below === -1) return LADDER[0] ?? 1;
-  return LADDER[Math.max(0, below + by + 1)] ?? 1;
+  const below = ladder.findLastIndex((rung) => rung < size - SAME);
+  if (below === -1) return ladder[0] ?? 1;
+  return ladder[Math.max(0, below + by + 1)] ?? 1;
 }
 
 /** Puts the size on the page, where the theme's text sizes read it. */
@@ -63,7 +75,7 @@ const point = (event: Event): { x: number; y: number } | null => {
 
 /**
  * Follows a pinch on the trackpad, and keeps the page from magnifying itself. The size is the one
- * when the pinch began times the gesture's scale, held between 80% and 200% and rounded to a whole
+ * when the pinch began times the gesture's scale, held between 80% and 400% and rounded to a whole
  * percent; at a limit it is held and the start is re-based, so that reversing the fingers moves it
  * at once. `change` hears each new size, `end` the last, once: at `gestureend`, when the window
  * loses the focus, or when the wheel has been quiet. WKWebView sends `gesturestart`,
@@ -85,9 +97,9 @@ export function watchPinch(target: Window, handlers: PinchHandlers): () => void 
   const follow = (scale: number) => {
     if (!active) return;
     let raw = base * scale;
-    if (raw > MOST) base = MOST / scale;
-    else if (raw < LEAST) base = LEAST / scale;
-    raw = Math.min(MOST, Math.max(LEAST, raw));
+    if (raw > TEXT_MOST) base = TEXT_MOST / scale;
+    else if (raw < TEXT_LEAST) base = TEXT_LEAST / scale;
+    raw = Math.min(TEXT_MOST, Math.max(TEXT_LEAST, raw));
     const next = Math.round(raw * 100) / 100;
     if (next === size) return;
     size = next;
