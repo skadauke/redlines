@@ -5,14 +5,17 @@
 // changes (a point mark at the end of the header's last cell, #281): while one is pending the mark ends
 // the header's last cell, in every state, and the original view has its old delimiter row. Some tables
 // hold the unbalanced halves of code spans and raw comments, which the scan pairs across the cells and
-// rows of a table; a state that the alignment change is not the cause of (the same file with the mark cut
-// out fails the same check) and that holds one is left out, counted by the issue it is (#376, #480). A merge
-// can leave a column change and an alignment change together, which no operation writes: Ada's mark is
-// joined by hand to the columns that are pending (but no move), and every decision but the rejection of the
-// mark is possible in every order, but those that the same state refuses without the mark (#477: a table
-// keeps one column), and the one that would hide the mark between two backticks or the halves of a comment,
-// which is refused in words and is possible once the mark is accepted. `REDLINES_FUZZ` sets how many tables
-// (6000 before a stage merges), `REDLINES_SEED` the seed, and `REDLINES_FUZZ_STATS` prints the counts.
+// rows of a table. What the alignment change is not the cause of is left out, counted by the mechanism
+// that left it out: a step that leaves a pending mark unread beside a half that pairs across cells
+// (#480), a step that hides the file's ledger or brings a hidden one back (#483), and a file that fails
+// the same first check without the mark (the file with the mark cut out fails the check that the file
+// fails first, as the alignment suite holds it). A merge can leave a column change and an alignment
+// change together, which no operation writes: Ada's mark is joined by hand to the columns that are
+// pending (but no move), and every decision but the rejection of the mark is possible in every order,
+// but those that the same state refuses without the mark (#477: a table keeps one column), and the one
+// that would hide the mark between two backticks or the halves of a comment, which is refused in words
+// and is possible once the mark is accepted. `REDLINES_FUZZ` sets how many tables (6000 before a stage
+// merges), `REDLINES_SEED` the seed, and `REDLINES_FUZZ_STATS` prints the counts.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
@@ -25,6 +28,7 @@ import { tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
+  CheckFailed,
   TIME,
   ada,
   blockLeaves,
@@ -38,10 +42,12 @@ import {
   expectInOrder,
   expectNoDecisionRefused,
   expectPointHolds,
+  failsFirstWithout,
   file,
+  ledgersRead,
+  named,
   pendingPoint,
   problemsOf,
-  ledgersRead,
   unreadMarkers,
   withoutPoints,
 } from './test-helpers.ts';
@@ -182,7 +188,9 @@ function expectMergeDecided(
   const walk = (current: string, path: string) => {
     if (seen.has(current) || noOriginal(current)) return;
     seen.add(current);
-    expectPointHolds(`${label} [${path}]`, current, false);
+    named('the alignment change is not kept', () =>
+      expectPointHolds(`${label} [${path}]`, current, false),
+    );
     const point = pendingPoint(current)?.id;
     for (const { id, kind } of parse(current).marks) {
       if (kind === 'cmt' || kind === 'hl') continue;
@@ -241,18 +249,24 @@ function expectMergeDecided(
               continue;
             }
           }
-          throw new Error(
-            `${label}: ${how} ${id} is refused after [${path}]: ${error.message}\n${current}`,
-            { cause: error },
+          // The same state without the alignment change does not refuse it, so no control can say that it is older.
+          throw new CheckFailed(
+            'a decision is refused beside the alignment change',
+            new Error(
+              `${label}: ${how} ${id} is refused after [${path}]: ${error.message}\n${current}`,
+              { cause: error },
+            ),
           );
         }
         // Deciding another change leaves the alignment change pending, and read: the mark survives a column that
         // leaves, where a scan that pairs the halves of code spans and comments across the cells could hide it.
         if (point !== undefined && id !== point) {
-          expect(
-            pendingPoint(next)?.id,
-            `${label}: ${how} ${id} leaves the alignment change read, after [${path}]\n${next}`,
-          ).toBe(point);
+          named('the alignment change is not kept', () =>
+            expect(
+              pendingPoint(next)?.id,
+              `${label}: ${how} ${id} leaves the alignment change read, after [${path}]\n${next}`,
+            ).toBe(point),
+          );
         }
         walk(next, `${path} ${how} ${id}`);
       }
@@ -271,12 +285,21 @@ describe('rows and columns, random', () => {
     let withColumns = 0;
     let withAlign = 0;
     // The tables that hold halves of code spans or comments, and the same with an alignment change pending at the end;
-    // those left out because the file without the mark fails the same (older: #376, #480); the merges drawn, the
-    // states they were decided in, and the rejections of the mark that they refused.
+    // those left out, by the mechanism that left them out, none of them the alignment change's: a step that left a
+    // pending mark unread beside a half that pairs across cells (#480), a step that hid the file's ledger or brought a
+    // hidden one back (#483), and a file that fails the same first check without its mark (by check, the merges
+    // apart); the merges drawn, the states they were decided in, and the rejections of the mark that they refused.
     let withHalves = 0;
     let halvesWithAlign = 0;
-    let older = 0;
+    let olderUnread = 0;
+    let olderLedger = 0;
+    let olderControl = 0;
     let olderMerges = 0;
+    const olderBy = new Map<string, number>();
+    const olderFor = (failed: unknown) => {
+      const check = failed instanceof CheckFailed ? failed.check : 'unnamed';
+      olderBy.set(check, (olderBy.get(check) ?? 0) + 1);
+    };
     let merges = 0;
     let mergeStates = 0;
     let mergeRefusals = 0;
@@ -568,60 +591,67 @@ describe('rows and columns, random', () => {
             `${label}: the alignment change is gone with its marker`,
           ).not.toContain(`<!--fmt ${was.id} `);
         }
-        // A step that leaves a marker where the scan does not read it, beside a half of a code span or of a comment
-        // (#480: a plain column deletion or move, and a row inserted below a half, write what the half hides, and the
-        // change is lost with its entry), or that brings a ledger that the half hid back into view as a second one (a
-        // column deletion that takes the half away), is older than the alignment change, which is held to be read
-        // (above). The table's story ends here, and is counted.
-        if (
-          halves &&
-          (unreadMarkers(text) > unreadMarkers(prev) || ledgersRead(text) !== ledgersRead(prev))
-        ) {
+        // A lone backtick or half of a raw comment pairs with another across the cells and the rows of a table and hides
+        // what stands between them, so the file as the scan reads it is not the one that an operation wrote. Two
+        // mechanisms, each older than the alignment change (the mark is held to be read, above), each ends the story
+        // of the table at the step that shows it, counted:
+        // - #483: a lone `<!--` hides the file's ledger: a tracked row or column operation loses it or writes a second
+        //   one, and a deletion that takes the half away revives a stale one (the count of ledgers read changes);
+        // - #480: a lone backtick or comment half that pairs across cells leaves a pending mark unread (a plain column
+        //   deletion or move writes what the half hides, and a change is lost with its entry).
+        if (halves && ledgersRead(text) !== ledgersRead(prev)) {
+          olderLedger++;
+          abandoned = true;
+          break;
+        }
+        if (halves && unreadMarkers(text) > unreadMarkers(prev)) {
+          olderUnread++;
           abandoned = true;
           break;
         }
         const sound = (state: string) => {
           if (parse(state).marks.length > 0) {
-            expectInOrder(
-              label,
-              parse(state).ledger.comments.map((t) => t.id),
-              state,
+            named('the comments are out of order', () =>
+              expectInOrder(
+                label,
+                parse(state).ledger.comments.map((t) => t.id),
+                state,
+              ),
             );
           }
           // The oracle reads the newest and the original as one table, as wide as its header.
-          let views: string[];
-          try {
-            views = [newestView(state).text, originalView(state).text];
-          } catch (error) {
-            throw new Error(`${label}: ${String(error)}\n${state}`, { cause: error });
-          }
+          const views = named("a view can't be read", () => {
+            try {
+              return [newestView(state).text, originalView(state).text];
+            } catch (error) {
+              throw new Error(`${label}: ${String(error)}\n${state}`, { cause: error });
+            }
+          });
           for (const view of views) {
             const found = tablesOf(view);
-            expect(found, label).toHaveLength(1);
+            named('a view is not a table', () => expect(found, label).toHaveLength(1));
             const wide = found[0]?.rows?.[0]?.length;
-            expect(
-              found[0]?.rows?.every((r) => r.length === wide),
-              label,
-            ).toBe(true);
+            named("a view's rows are not as wide as its header", () =>
+              expect(
+                found[0]?.rows?.every((r) => r.length === wide),
+                label,
+              ).toBe(true),
+            );
           }
         };
         try {
           sound(text);
         } catch (error) {
-          // The state is as unsound without the alignment change, in a table that holds a half of a code span or a
-          // comment: older (#376, #480: a half that a change leaves open takes the ledger in, and a change is read
-          // without its entry). The table's story ends here, and is counted.
-          if (halves) {
-            let control = true;
-            try {
-              sound(withoutPoints(text));
-            } catch {
-              control = false;
-            }
-            if (!control) {
-              abandoned = true;
-              break;
-            }
+          // A state that fails the same first check without the alignment change, in a table with a lone half, is
+          // older than the change. The two mechanisms above, seen in what a check reads, are most of it: a ledger that
+          // a lone `<!--` hides reads as a file with no entries (#483), and a half that pairs across cells hides a pending
+          // change from a view (#480). Counted by the check that failed. The table's story ends here. A control that
+          // passes, or that fails another check first, is no excuse: the mark made it fail.
+          if (halves && failsFirstWithout(error, text, sound)) {
+            olderControl++;
+            olderFor(error);
+            abandoned = true;
+            break;
           }
           throw error;
         }
@@ -629,28 +659,9 @@ describe('rows and columns, random', () => {
         // columns, the rows and the cells, and the original view has its old delimiter row.
         expectPointHolds(label, text);
       }
-      if (abandoned) {
-        older++;
-        continue;
-      }
+      if (abandoned) continue;
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
       const marks = parse(text).marks.length;
-      /**
-       * A state that fails as it does without the alignment change, in a table that holds a half of a code span or a
-       * comment, is older than the change, and left out and counted: a comment over a backtick makes decisions
-       * refused as hiding changes in code (#376), and a column deletion or move can leave another person's change
-       * unread beside a lone backtick or comment half, or take the ledger in, with nothing said (#480). A file that
-       * is sound without the mark and not with it fails: `control` is the same checks on the file without it.
-       */
-      const olderThanTheMark = (state: string, control: (state: string) => void): boolean => {
-        if (!halves) return false;
-        try {
-          control(withoutPoints(state));
-        } catch {
-          return true;
-        }
-        return false;
-      };
       // A merge, in a quarter of the tables and in most of those with halves, where the scan pairs them across the
       // cells that a column leaves and the cells it comes to: Ada's alignment change joined by hand to the column
       // changes pending in this one, decided in every order. Every decision but the rejection of the mark is possible.
@@ -658,7 +669,9 @@ describe('rows and columns, random', () => {
         const merged = mergedWithMark(text);
         if (merged && parse(merged).marks.length <= 6) {
           const checks = (state: string) => {
-            expectEveryOrderAlike(`${label} (merged)`, state, exactly);
+            named('the orders of decisions differ', () =>
+              expectEveryOrderAlike(`${label} (merged)`, state, exactly),
+            );
             return expectMergeDecided(`${label} (merged)`, state);
           };
           try {
@@ -671,11 +684,17 @@ describe('rows and columns, random', () => {
             mergeWithout += walked.without;
             mergeNoOriginals += walked.noOriginals;
           } catch (error) {
+            // The merge fails the same first check without the mark (the orders of decisions differ), in a table with a lone
+            // half whose pairing across cells hides a change, or a ledger (#480, #483, as above): older than the change.
+            // The decision that the walk finds refused beside the mark, and the mark not kept, are the mark's, and no
+            // control excuses them.
             const control = (state: string) => {
-              expectEveryOrderAlike(label, state, exactly);
-              expectNoDecisionRefused(label, state);
+              named('the orders of decisions differ', () =>
+                expectEveryOrderAlike(label, state, exactly),
+              );
+              named('a decision is refused', () => expectNoDecisionRefused(label, state));
             };
-            if (!olderThanTheMark(merged, control)) throw error;
+            if (!(halves && failsFirstWithout(error, merged, control))) throw error;
             olderMerges++;
           }
         }
@@ -687,64 +706,98 @@ describe('rows and columns, random', () => {
       if (halves) withHalves++;
       if (halves && /<!--fmt \w{4} align=/.test(text)) halvesWithAlign++;
       const finals = (state: string) => {
-        try {
-          expectEveryOrderAlike(label, state, exactly);
-          // With an alignment change pending, every single decision is possible in every order.
-          if (/<!--fmt \w{4} align=/.test(state)) {
-            expectNoDecisionRefused(label, state, { unlessWithout: true, refusedWithout });
-          }
-        } catch (error) {
+        // What failed, with the outcomes of the orders that differ, for the one who reads the failure.
+        const detailed = (error: unknown) => {
           const { outcomes } = everyOrder(state, exactly);
           const lines = [...outcomes]
             .filter(([, r]) => r.size > 1)
             .map(
               ([k, r]) => `${k}: ${[...r].map((x) => JSON.stringify(bodyOf(x))).join('  VS  ')}`,
             );
-          throw new Error(`${String(error)}\n${state}\n${lines.join('\n')}`, { cause: error });
-        }
-        try {
-          rejectAll(state);
-        } catch (error) {
-          throw new Error(`${label}: ${String(error)}\n${state}\nBEFORE LAST:\n${history.at(-1)}`, {
-            cause: error,
+          return new Error(`${String(error)}\n${state}\n${lines.join('\n')}`, { cause: error });
+        };
+        named('the orders of decisions differ', () => {
+          try {
+            expectEveryOrderAlike(label, state, exactly);
+          } catch (error) {
+            throw detailed(error);
+          }
+        });
+        // With an alignment change pending, every single decision is possible in every order.
+        if (/<!--fmt \w{4} align=/.test(state)) {
+          named('a decision is refused', () => {
+            try {
+              expectNoDecisionRefused(label, state, { unlessWithout: true, refusedWithout });
+            } catch (error) {
+              throw detailed(error);
+            }
           });
         }
+        named('rejecting all is refused', () => {
+          try {
+            rejectAll(state);
+          } catch (error) {
+            throw new Error(
+              `${label}: ${String(error)}\n${state}\nBEFORE LAST:\n${history.at(-1)}`,
+              { cause: error },
+            );
+          }
+        });
         // Comments stay (they are decided by no one); every change is gone, and what is left reads as
         // the newest view, or as the original.
         const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
-        let accepted: string;
-        try {
-          accepted = applyChanges(state, acceptAll(state));
-        } catch (error) {
-          throw new Error(`${label}: accept all: ${String(error)}\n${state}`, { cause: error });
-        }
-        expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
-        const tidy = (view: string) => view.replace(/\s+$/, '');
-        expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(
-          tidy(newestView(state).text),
+        const accepted = named('accepting all is refused', () => {
+          try {
+            return applyChanges(state, acceptAll(state));
+          } catch (error) {
+            throw new Error(`${label}: accept all: ${String(error)}\n${state}`, { cause: error });
+          }
+        });
+        named('accepting all leaves changes', () =>
+          expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]),
         );
-        const rejected = applyChanges(state, rejectAll(state));
+        const tidy = (view: string) => view.replace(/\s+$/, '');
+        named('accepting all is not the newest view', () =>
+          expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(
+            tidy(newestView(state).text),
+          ),
+        );
+        const rejected = named('rejecting all is refused', () =>
+          applyChanges(state, rejectAll(state)),
+        );
         // A format change that a plain edit has since altered can't be undone and stays (format §2.6).
-        expect(
-          left(rejected).filter((m) => m.kind !== 'fmt'),
-          `${label}: reject all leaves changes`,
-        ).toEqual([]);
+        named('rejecting all leaves changes', () =>
+          expect(
+            left(rejected).filter((m) => m.kind !== 'fmt'),
+            `${label}: reject all leaves changes`,
+          ).toEqual([]),
+        );
         if (left(rejected).length === 0) {
-          expect(tidy(originalView(rejected).text), `${label}: reject all`).toBe(
-            tidy(originalView(state).text),
+          named('rejecting all is not the original view', () =>
+            expect(tidy(originalView(rejected).text), `${label}: reject all`).toBe(
+              tidy(originalView(state).text),
+            ),
           );
         }
       };
       try {
         finals(text);
       } catch (error) {
-        if (!olderThanTheMark(text, finals)) throw error;
-        older++;
+        // The same first check fails without the alignment change, in a table with a lone half: older than the change.
+        // The mechanisms are those of the steps above seen in what a check reads (#483: a ledger that a lone `<!--`
+        // hides; #480: a half that pairs across cells and hides a pending change, so that a decision that would bring a
+        // half back is refused in the words of a change it would hide, #376). Counted by the check that failed. A
+        // control that passes, or that fails another check first, is no excuse: the mark made it fail.
+        if (!(halves && failsFirstWithout(error, text, finals))) throw error;
+        olderControl++;
+        olderFor(error);
       }
     }
+    const older = olderUnread + olderLedger + olderControl;
     if (process.env['REDLINES_FUZZ_STATS']) {
+      const byCheck = [...olderBy].map(([check, count]) => `${check} ${count}`).join(', ');
       console.log(
-        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (${olderMerges} merges), merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeRefusals} rejections of the mark refused, ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
+        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}), merges left out the same way ${olderMerges}, merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeRefusals} rejections of the mark refused, ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
       );
     }
     expect(used).toBeGreaterThan(10);

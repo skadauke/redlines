@@ -1081,3 +1081,49 @@ export function unreadMarkers(state: string): number {
 export function ledgersRead(state: string): number {
   return scan(state).ledgers.length;
 }
+
+/**
+ * A check of a random suite that failed, with the name it is known by. A file that fails a check is older than its
+ * alignment change only where the same file with the change cut out fails the same check first (`failsFirstWithout`),
+ * as the alignment suite holds it (`found.failed[0] === found.checks[0]`): a control that passes, or that fails another
+ * check first, is no excuse.
+ */
+export class CheckFailed extends Error {
+  /** The name of the check, the same for the same check of any file. */
+  check: string;
+
+  constructor(check: string, cause: unknown) {
+    super(`${check}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'CheckFailed';
+    this.check = check;
+  }
+}
+
+/** Runs `run` as the check `check`: what it throws is a `CheckFailed` of that name, with what it threw as its cause. */
+export function named<T>(check: string, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    throw error instanceof CheckFailed ? error : new CheckFailed(check, error);
+  }
+}
+
+/**
+ * Whether `failed`, what a file `state` threw in `run` (a sequence of named checks, which stops at the first to fail),
+ * is older than the file's alignment change: the same file with its point alignment marks cut out (`withoutPoints`)
+ * fails the same check first. A failure that is no `CheckFailed` has no name to compare and is never excused, nor is
+ * one that the control does not fail, or fails after another check.
+ */
+export function failsFirstWithout(
+  failed: unknown,
+  state: string,
+  run: (state: string) => void,
+): boolean {
+  if (!(failed instanceof CheckFailed)) return false;
+  try {
+    run(withoutPoints(state));
+  } catch (error) {
+    return error instanceof CheckFailed && error.check === failed.check;
+  }
+  return false;
+}
