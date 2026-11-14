@@ -23,8 +23,8 @@ const bodyText = (text: string) => bodyOf(text).replace(/\n+$/, '');
 const leaves = (text: string) => JSON.stringify(blockLeaves(text));
 
 /** Ada deletes `from` to `to` of the body, with Track Changes on: the file before and after. */
-function deleteRange(body: string, from: number, to: number) {
-  const before = file(body);
+function deleteRange(body: string, from: number, to: number, marks: Record<string, string> = {}) {
+  const before = file(body, marks);
   const result = trackedEdits(before, [{ from, to, insert: '' }], context(ada, ['m2bd']));
   return { before, after: applyChanges(before, result.changes) };
 }
@@ -75,6 +75,15 @@ describe('a deletion of a setext underline with the break in front of it (#441)'
       // An underline in an item, in a quote.
       ['- one\n  ---\n\nNext.', '\n  ---', '- one\n\nNext.'],
       ['> one\n> ---\n>\n> Next.', '\n> ---', '> one\n>\n> Next.'],
+      // The range starts in the text above, after some of it.
+      ['Title\n===\n\nNext.', 'itle\n===', 'T\n\nNext.'],
+      // The block below is a fence, a table.
+      ['Title\n===\n\n```\ncode\n```', '\n===', 'Title\n\n```\ncode\n```'],
+      [
+        'Title\n===\n\n| a | b |\n| - | - |\n| 1 | 2 |',
+        '\n===',
+        'Title\n\n| a | b |\n| - | - |\n| 1 | 2 |',
+      ],
     ];
     for (const [body, deleted, kept] of cases)
       expectKept(JSON.stringify(body), body, deleted, kept);
@@ -134,5 +143,42 @@ describe('a deletion of a setext underline with the break in front of it (#441)'
     expect(() =>
       trackedEdits(before, [{ from, to: from + 2, insert: '' }], context(ada, ['m2bd'])),
     ).toThrow(EditError);
+  });
+
+  it('is written as before where the range starts a line, as the second line of a heading does', () => {
+    // The marker of the deletion would start the line `Line two`: the range goes on through the
+    // break after the underline, as it always did, and is not refused.
+    const body = 'Line one\nLine two\n===\n\nNext.';
+    const [from, to] = rangeOf(body, 'Line two\n===');
+    const { after } = deleteRange(body, from, to);
+    expect(bodyText(originalView(after).text)).toBe(body);
+    expect(parse(after).warnings).toEqual([]);
+    expectEveryOrderAlike('a second line of a heading', after);
+  });
+
+  it('is written as before where what is above the break is no text: a comment, a definition', () => {
+    // The line above is another block's, not words that an underline can hold, so the break after
+    // the underline goes with it as it did (after a fence the format refuses it, as it did).
+    for (const body of ['<!-- c -->\n- \n\nNext.', '[a]: http://x\n- \n\nNext.']) {
+      const [from, to] = rangeOf(body, '\n- ');
+      const { after } = deleteRange(body, from, to);
+      expect(bodyText(originalView(after).text), body).toBe(body);
+      expect(bodyText(newestView(after).text), body).toBe(
+        body.slice(0, from) + body.slice(body.indexOf('Next.')),
+      );
+      expectEveryOrderAlike(body, after);
+    }
+  });
+
+  it('leaves the blank line with other people’s changes in the text above and below', () => {
+    // Bo's insertion in the heading's text and another in the paragraph below.
+    const body =
+      'Title <!--ins k3x9-->new<!--/k3x9-->\n===\n\nNext <!--ins m4cf-->more<!--/m4cf-->';
+    const [from, to] = rangeOf(body, '\n===');
+    const { after } = deleteRange(body, from, to, { k3x9: 'bo', m4cf: 'bo' });
+    expect(bodyText(after)).toContain('\n\nNext ');
+    expect(bodyText(originalView(after).text)).toBe('Title \n===\n\nNext ');
+    expect(parse(after).warnings).toEqual([]);
+    expectEveryOrderAlike('other people’s changes', after);
   });
 });

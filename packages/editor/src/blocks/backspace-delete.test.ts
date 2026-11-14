@@ -359,10 +359,12 @@ describe('Backspace in an empty block', () => {
 });
 
 describe('Delete in an empty item that a blank line separates from the block below (#441)', () => {
-  // The forward edit takes the blank line below the item and keeps the break above it, which left
-  // the block below closer to the text above than it was: a line of the item above (a lazy line),
-  // and, under an empty nested bullet, the underline of `one`. The item goes with the break above
-  // it, as Backspace takes it, and the blank line stays, with Track Changes on and off.
+  // With no blank line above the item and one below it, the forward edit took the blank line below
+  // and kept the break above, which left the block below right under the text above: a line of the
+  // item above (a lazy line), and, under an empty nested bullet, the underline of `one`. The item
+  // goes with the break above it, as Backspace takes it, and the blank line stays, with Track
+  // Changes on and off. With a blank line above it, or front matter or a table in the way, the
+  // forward edit as before.
   scriptRows(
     both([
       {
@@ -421,6 +423,20 @@ describe('Delete in an empty item that a blank line separates from the block bel
         keys: DEL,
         off: { caret: 'One.⏎⏎‸Two.' },
         on: { caret: 'One.⏎⏎<del ## ⏎⏎>⏎⏎‸Two.' },
+      },
+      {
+        name: 'front matter above the item: the forward edit, as before (Backspace is refused there)',
+        doc: '---⏎a: 1⏎---⏎- ‸⏎⏎After.',
+        keys: DEL,
+        off: { file: '---⏎a: 1⏎---⏎After.' },
+        on: { file: '---⏎a: 1⏎---⏎<del - ⏎⏎>⏎⏎After.' },
+      },
+      {
+        name: 'a blank line above the item and two below it: the forward edit, as before',
+        doc: 'One.⏎⏎- ‸⏎⏎⏎After.',
+        keys: DEL,
+        off: { file: 'One.⏎⏎After.' },
+        on: { file: 'One.⏎⏎<del - ⏎⏎⏎>⏎⏎After.' },
       },
       {
         name: 'Delete, then ⌘Z',

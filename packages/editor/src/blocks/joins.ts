@@ -472,12 +472,20 @@ function removeEmpty(
 ): KeyEdit {
   const { prev, next } = neighbours(state, block);
   if (userEvent === 'delete.forward.block' && next) {
-    // A longer break below the block than above it: the forward edit takes the one below and keeps
-    // the one above, which leaves the next block closer to the text above than it was, as a line of
-    // it (`- one⏎- ‸⏎⏎After.`: the paragraph is a lazy line of the item; `- one⏎  - ‸⏎⏎After.`: the
-    // same, and an empty bullet is the underline of `one`). The block goes with the break above it,
-    // as Backspace takes it, and the longer break below stays (#441).
-    if (prev && blankLines(state, block, next) > blankLines(state, prev, block)) {
+    // No blank line above the block and one below it: the forward edit takes the one below and
+    // keeps the line break above, which leaves the next block right under the text above, as a
+    // line of it (`- one⏎- ‸⏎⏎After.`: the paragraph is a lazy line of the item; `- one⏎  - ‸⏎⏎After.`:
+    // the same, and an empty bullet is the underline of `one`). The block goes with the break
+    // above it, as Backspace takes it, and the blank line stays (#441). With a blank line above,
+    // the forward edit keeps one and is sound; front matter above has no break to take, and the
+    // caret in a table's hidden pipes is no place for the key to leave it.
+    if (
+      prev &&
+      prev.kind !== 'front-matter' &&
+      next.kind !== 'table' &&
+      blankLines(state, prev, block) === 0 &&
+      blankLines(state, block, next) > 0
+    ) {
       return edit(
         state,
         [{ from: prev.lines.to, to: block.lines.to }],
