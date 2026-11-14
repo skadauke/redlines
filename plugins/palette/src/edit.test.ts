@@ -70,15 +70,15 @@ describe('pageClipboard', () => {
     expect(editor.view.state.doc.toString()).toMatch(/^Hello<!--ins (\w+)--> there<!--\/\1-->/);
   });
 
-  it('pastes with the host’s own Paste when it has one, as ⌘V does, and reads no text', async () => {
+  it('pastes with the host’s own Paste when it has one, and reads no text', async () => {
     const editor = mount('Hello world');
     const read = vi.fn(() => Promise.resolve('plain'));
     const native = vi.fn(() => Promise.resolve(true));
     const focus = vi.spyOn(editor.view, 'focus');
     await pageClipboard(editor, read, native).paste();
     expect(native).toHaveBeenCalledOnce();
-    // The keyboard is in the document when it is asked, as for the Mac's own Paste.
-    expect(focus).toHaveBeenCalled();
+    // The keyboard is in the document before it is asked, as for the Mac's own Paste.
+    expect(focus.mock.invocationCallOrder[0]).toBeLessThan(native.mock.invocationCallOrder[0] ?? 0);
     expect(read).not.toHaveBeenCalled();
     // The page's own paste event does the pasting, which the host's Paste makes: nothing is
     // written here.
@@ -88,10 +88,14 @@ describe('pageClipboard', () => {
   it.each<[string, () => Promise<boolean>]>([
     ['says nothing took it', () => Promise.resolve(false)],
     ['fails', () => Promise.reject(new Error('no'))],
-  ])('pastes the clipboard’s text when the host’s Paste %s', async (_what, native) => {
+  ])('pastes the clipboard’s text when the host’s Paste %s', async (_what, run) => {
     const editor = mount('Hello world');
     editor.view.dispatch({ selection: { anchor: 5, head: 11 } });
+    const native = vi.fn(run);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await pageClipboard(editor, () => Promise.resolve(', there'), native).paste();
+    // It was asked first, and what it said didn't take it.
+    expect(native).toHaveBeenCalledOnce();
     expect(editor.view.state.doc.toString()).toBe('Hello, there');
   });
 

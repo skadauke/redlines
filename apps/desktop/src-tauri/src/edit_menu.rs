@@ -1,4 +1,4 @@
-//! Undo and Redo in a text field. The Edit menu's two items are the app's own (`src/menu-model.ts`),
+//! Undo, Redo and Paste in a text field. The Edit menu's undo items are the app's own (`src/menu-model.ts`),
 //! so that they can say what the document's history takes back; in the document they call the
 //! editor. With the keys in a text field, a comment box, the find bar or a Preferences field, they
 //! send what the Mac's own items send: `undo:` or `redo:` to the first responder of the window
@@ -10,7 +10,6 @@
 //! where the Mac's `paste:` gives the page a paste event with the clipboard's HTML, as ⌘V does.
 
 /// The action a Mac's Undo or Redo item sends to the first responder.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn action_name(redo: bool) -> &'static str {
     if redo { "redo:" } else { "undo:" }
 }
@@ -32,9 +31,26 @@ fn key_window(app: &tauri::AppHandle) -> Option<String> {
         .map(|(label, _)| label)
 }
 
+/// Whether the system's pasteboard holds anything at all. The Edit menu's Paste is disabled when it
+/// doesn't, which is why a Paste from the keys can't give the page an empty paste; sending `paste:`
+/// ourselves skips that check.
+#[cfg(target_os = "macos")]
+fn pasteboard_has_content() -> bool {
+    use objc2_app_kit::NSPasteboard;
+    NSPasteboard::generalPasteboard()
+        .types()
+        .is_some_and(|types| types.count() > 0)
+}
+
 /// Sends `action` down the responder chain of the window that has the keys, as the Mac's own Edit
-/// items do, and says whether something took it.
-async fn send_action(app: &tauri::AppHandle, action: &'static str) -> Result<bool, String> {
+/// items do, and says whether something took it. With `needs_content`, nothing is sent while the
+/// pasteboard is empty: the page would get a paste of nothing, which the editor takes for a paste
+/// over the selection and deletes it, and the caller says that there is nothing to paste instead.
+async fn send_action(
+    app: &tauri::AppHandle,
+    action: &'static str,
+    needs_content: bool,
+) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -43,6 +59,9 @@ async fn send_action(app: &tauri::AppHandle, action: &'static str) -> Result<boo
             use objc2::runtime::Sel;
             use objc2_app_kit::NSApplication;
             let handled = MainThreadMarker::new().is_some_and(|main| {
+                if needs_content && !pasteboard_has_content() {
+                    return false;
+                }
                 let action =
                     Sel::register(&std::ffi::CString::new(action).expect("a name without a NUL"));
                 // SAFETY: `undo:`, `redo:` and `paste:` take a sender, and nil is one.
@@ -59,7 +78,7 @@ async fn send_action(app: &tauri::AppHandle, action: &'static str) -> Result<boo
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, action);
+        let _ = (app, action, needs_content);
         Ok(false)
     }
 }
@@ -75,7 +94,7 @@ pub async fn undo_in_field(
     if !may_undo(window.label(), key_window(&app).as_deref()) {
         return Ok(false);
     }
-    send_action(&app, action_name(redo)).await
+    send_action(&app, action_name(redo), false).await
 }
 
 /// The action a Mac's Paste item sends to the first responder.
@@ -91,8 +110,9 @@ fn may_paste(caller: &str, key: Option<&str>) -> bool {
 /// Pastes into the window as the Mac's Paste item does: `paste:` down the responder chain of the
 /// window that has the keys, which WebKit answers with a paste in the page, with the clipboard's
 /// HTML and text as ⌘V gives them, so that the editor converts what a web page or Word put there
-/// to Markdown. Says whether something took it. The page's own `execCommand('paste')` would need
-/// WebKit's confirmation of a paste from a button, and the clipboard plugin reads text alone.
+/// to Markdown. Says whether something took it: not when nothing is on the pasteboard (the page
+/// then says so), nor when no responder takes `paste:`. The page's own `execCommand('paste')` would
+/// need WebKit's confirmation of a paste from a button, and the clipboard plugin reads text alone.
 #[tauri::command]
 pub async fn paste_in_field(
     app: tauri::AppHandle,
@@ -101,7 +121,7 @@ pub async fn paste_in_field(
     if !may_paste(window.label(), key_window(&app).as_deref()) {
         return Ok(false);
     }
-    send_action(&app, PASTE).await
+    send_action(&app, PASTE, true).await
 }
 
 /// The system's beep, as the Mac makes it for an Undo that finds nothing.
@@ -120,7 +140,7 @@ pub fn beep() {
 
 #[cfg(test)]
 mod tests {
-    use super::{PASTE, action_name, may_paste, may_undo};
+    use super::{action_name, may_paste, may_undo};
 
     #[test]
     fn undo_reaches_the_callers_own_window_and_preferences_only() {
@@ -146,10 +166,5 @@ mod tests {
         assert!(!may_paste("doc-1", Some("preferences")));
         assert!(!may_paste("doc-1", Some("install")));
         assert!(!may_paste("doc-1", None));
-    }
-
-    #[test]
-    fn paste_is_the_action_the_macs_item_sends() {
-        assert_eq!(PASTE, "paste:");
     }
 }

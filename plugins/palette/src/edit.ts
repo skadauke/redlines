@@ -20,17 +20,16 @@ export interface PaletteClipboard {
 }
 
 /**
- * A clipboard for a page that has no more than the page's own: Cut and Copy are the editing commands
- * the editor's `cut` and `copy` handlers answer, which the page runs for a press of the palette (a
- * gesture it allows), and Paste reads the clipboard's text through the host, which a page cannot do
- * from a menu without WebKit's own Paste confirmation, and pastes it as ⇧⌘V does: through the
- * editor's own path, as the paster's insertion while Track Changes is on. A clipboard with no text
- * says so, by rejecting.
+ * A clipboard for a page: Cut and Copy are the editing commands the editor's `cut` and `copy`
+ * handlers answer, which the page runs for a press of the palette (a gesture it allows).
  *
- * Where the host has a native Paste (`paste`: the Mac's own `paste:` to the page, which WebKit
- * answers with a paste event that carries the clipboard's HTML), that is Paste: the editor then
- * converts what a web page or Word put there to Markdown, as ⌘V does. It is the fallback's turn
- * when the host has none, or says nothing took it, or fails.
+ * Paste is the host's own where it has one (`paste`: the Mac's own `paste:` to the page, which WebKit
+ * answers with a paste event that carries the clipboard's HTML), so that the editor converts what a
+ * web page or Word put there to Markdown, as ⌘V does. It is the fallback's turn when the host has
+ * none, or says nothing took it (an empty clipboard, or nothing to take the action), or fails: Paste
+ * then reads the clipboard's text through the host, which a page cannot do from a menu without
+ * WebKit's own Paste confirmation, and pastes it as ⇧⌘V does: through the editor's own path, as the
+ * paster's insertion while Track Changes is on. A clipboard with no text says so, by rejecting.
  */
 export function pageClipboard(
   editor: Editor,
@@ -49,7 +48,13 @@ export function pageClipboard(
       if (paste) {
         // The keyboard is in the document, as for the Mac's own Paste.
         editor.focus();
-        if (await paste().catch(() => false)) return;
+        const taken = await paste().catch((error: unknown) => {
+          // Not for the person: the text is pasted instead. But a grant or a command gone missing
+          // would otherwise lose the conversion of HTML without a word.
+          console.error('The host could not paste', error);
+          return false;
+        });
+        if (taken) return;
       }
       const text = await readText();
       if (!text) throw new Error('The clipboard has no text');

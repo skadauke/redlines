@@ -380,7 +380,10 @@ const palette = createPalette(editor, {
   clipboard: pageClipboard(
     editor,
     () => host.readClipboardText(),
-    () => host.pasteInDocument?.() ?? Promise.resolve(false),
+    // A tab has none, and reads the clipboard in the click that asked, as it did.
+    'pasteInDocument' in host
+      ? () => host.pasteInDocument?.() ?? Promise.resolve(false)
+      : undefined,
   ),
   ...(isTauri
     ? {
