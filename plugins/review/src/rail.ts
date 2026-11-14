@@ -564,8 +564,9 @@ interface Layout {
   open: number[];
   openLines: LineBox[];
   /**
-   * The index of the note to keep level with its anchor if that is in view, or -1: an element the
-   * host has laid out, else the selected note.
+   * The index of the note to keep level with its anchor if that is in view, or -1: the first
+   * element the host has laid out, else the selected note, which is a new comment's while it is
+   * written.
    */
   selected: number;
   /** Whether that note keeps its anchor's height wherever the page is scrolled to. */
@@ -1008,7 +1009,9 @@ class Rail {
     const settled = settledOf(notes);
     // A resolved note gives way, and is never the one that keeps its anchor's height.
     const open = notes.flatMap((_, i) => (settled?.[i] ? [] : [i]));
-    // An element of the host's keeps its anchor's height, as a new comment being written does.
+    // An element of the host's keeps its anchor's height, as a new comment being written does, and
+    // before it: with both, the element stays level and the comment's box is placed around it as
+    // any note is, which may be lower than its text. With several elements, the first in the text.
     const level = notes.findIndex(({ host }) => host);
     return {
       notes,
@@ -1105,8 +1108,8 @@ class Rail {
           openLines,
           seen,
           open.indexOf(selected),
-          // A new comment being written, or an element of the host's, stays where it is, wherever
-          // the page is scrolled to.
+          // An element of the host's, else a new comment being written, stays where it is,
+          // wherever the page is scrolled to.
           stays,
         )
       ] ?? 0;
@@ -1336,6 +1339,11 @@ class Rail {
    * it, so that none is covered. The rail sets its `left` and `top`, as for a note, and neither
    * draws it nor moves it in the page: the host makes it as wide as a note, fills it and tells the
    * rail when its height changes (`resized`).
+   *
+   * The element is the one that stays level, and anything else is placed around it: a comment's
+   * box open at the same time is laid out like any note, below the element if its text is, and so
+   * may sit lower than its text. The rail holds one element at a time in this way: given two, the
+   * first in the text stays level, and the other is laid out around it as a note is.
    *
    * The rail reads `anchor` when it syncs its notes, which is when the document or the selection
    * changes, among other things, and not at each layout: `resized` measures the element's height

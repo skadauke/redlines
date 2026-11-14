@@ -101,6 +101,11 @@ export interface ReviewController {
    * tells the rail when its height changes (`resized`, which measures the height again and
    * nothing more) and takes it out of the page itself.
    *
+   * The element is the one that stays level, and anything else is placed around it: a comment's
+   * box open at the same time is laid out like any note, below the element if its text is, and so
+   * may sit lower than its text. The rail holds one element at a time in this way: given two, the
+   * first in the text stays level, and the other is laid out around it as a note is.
+   *
    * It returns null, and lays out nothing, where the rail doesn't show its notes in full: in a
    * narrow editor (the notes are dots), in Clean and Raw, and when the rail has no note of its own,
    * where the column makes no room for it, and when `anchor` throws. The host places the element

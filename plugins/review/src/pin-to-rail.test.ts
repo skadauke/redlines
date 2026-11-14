@@ -320,20 +320,57 @@ describe('pinToRail', () => {
     expect(tops(editor).slice(2)).toEqual([603, 671]);
   });
 
-  it('keeps clear of a new comment being written, which is laid out too', async () => {
+  it('stays level when a new comment is written too, and the box is placed around it', async () => {
     const loaded = await load();
-    const { editor, review } = loaded;
+    const { editor, review, scrollTo } = loaded;
     const { el } = pinAt(loaded, 'target', 200);
     const from = at(editor, 'delta');
     editor.view.dispatch({ selection: { anchor: from, head: from + 5 } });
     expect(review.startComment()).toBe(true);
     await frame();
-    // Alpha, beta, the new comment, delta and epsilon: none touches the element or another note.
+    // Alpha, beta, delta's note, the new comment's box and epsilon: none touches the element or
+    // another note.
     const shown = notes(editor);
     expect(shown).toHaveLength(5);
     expect(top(el)).toBe(295);
     expect(
       crowded([...shown.map((note): [number, number] => [top(note), NOTE]), [top(el), 200]]),
+    ).toBe(false);
+    // The element is the one that stays level: the box, on delta's text (at 395), is placed after
+    // delta's note, below the element, and is not level with its text.
+    const box = shown.find((note) => note.classList.contains('rl-note-writing'));
+    expect(top(box!)).toBe(295 + 200 + GAP + NOTE + GAP);
+    expect(top(box!)).toBeGreaterThan(395);
+    await scrollTo(1000);
+    expect(top(el)).toBe(295);
+    expect(top(box!)).toBe(295 + 200 + GAP + NOTE + GAP);
+  });
+
+  it('holds one element level at a time: given two, the first in the text, and the other is laid out around it', async () => {
+    const loaded = await load();
+    const { editor, scrollTo } = loaded;
+    const first = pinAt(loaded, 'target', 200);
+    const second = pinAt(loaded, 'epsilon', 100);
+    await frame();
+    // The first is level with its text, wherever the page is scrolled to. The second is placed
+    // after epsilon's note, as a note is, and is not level with its own text (at 495).
+    const expected = {
+      notes: [95, 195, 295 + 200 + GAP, 295 + 200 + GAP + NOTE + GAP],
+      first: 295,
+      second: 295 + 200 + GAP + 2 * (NOTE + GAP),
+    };
+    const placed = () => ({ notes: tops(editor), first: top(first.el), second: top(second.el) });
+    expect(placed()).toEqual(expected);
+    expect(second.pin).not.toBeNull();
+    await scrollTo(1000);
+    expect(placed()).toEqual(expected);
+    // Clear of each other, though: nothing is covered.
+    expect(
+      crowded([
+        ...tops(editor).map((note): [number, number] => [note, NOTE]),
+        [top(first.el), 200],
+        [top(second.el), 100],
+      ]),
     ).toBe(false);
   });
 
