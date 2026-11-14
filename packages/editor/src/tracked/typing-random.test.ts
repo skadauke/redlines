@@ -184,6 +184,8 @@ function randomTyping(
   return { checked, excused, misses };
 }
 
+// A walk of a few hundred edits, 1.5 s alone and 5 s or more on a busy machine, where the default
+// timeout is 5 s (#356): it gets the 60 s that CI's runners and a shared Mac need.
 it.each([
   ['on', true],
   ['off', false],
@@ -200,6 +202,7 @@ it.each([
     expect(misses).toEqual([]);
     expect(excused).toBeLessThanOrEqual(Math.ceil(checked / 50));
   },
+  60_000,
 );
 
 /** Subscript and superscript, whose tags the preview hides (#310), and the tags typed whole and in
@@ -214,13 +217,17 @@ const scriptTypings = ['<sub>', '</sub>', '<sup>', '</sup>', 'H<sub>2</sub>O', '
 it.each([
   ['on', true],
   ['off', false],
-])('puts the caret right after text typed next to subscript, Track Changes %s', (_, tracking) => {
-  const { checked, misses } = randomTyping(
-    tracking,
-    scriptDocuments,
-    scriptTypings,
-    tracking ? 20261103 : 20261104,
-  );
-  expect(checked).toBeGreaterThan(40);
-  expect(misses).toEqual([]);
-});
+])(
+  'puts the caret right after text typed next to subscript, Track Changes %s',
+  (_, tracking) => {
+    const { checked, misses } = randomTyping(
+      tracking,
+      scriptDocuments,
+      scriptTypings,
+      tracking ? 20261103 : 20261104,
+    );
+    expect(checked).toBeGreaterThan(40);
+    expect(misses).toEqual([]);
+  },
+  60_000,
+);

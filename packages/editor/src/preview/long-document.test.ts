@@ -286,6 +286,8 @@ describe('a long document with thousands of deleted blocks', () => {
   const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-10-31T09:30Z}\n`).join('');
   const doc = `${paragraphs.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${marks}-->\n`;
 
+  // Parsing the document whole takes more than the default 5 s on a busy machine (#356), though
+  // the test counts visits and times nothing.
   it('visits a few segments for each deletion, not every mark', () => {
     const state = editorFor(doc).view.state;
     expect(state.field(parsedField).marks.length).toBe(6000);
@@ -296,7 +298,7 @@ describe('a long document with thousands of deleted blocks', () => {
     expect(widgets).toHaveLength(2000);
     expect(struckStats.visited).toBeGreaterThan(0);
     expect(struckStats.visited).toBeLessThan(2000 * 8);
-  });
+  }, 60_000);
 });
 
 describe('a long document with a table', () => {
