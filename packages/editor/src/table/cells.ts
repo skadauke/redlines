@@ -168,10 +168,13 @@ function cellAtRef(table: Table, row: number, col: number): Cell | undefined {
 
 /**
  * The selection of a rectangle from one cell's text to another's. The ends are cells there are: where
- * a corner is a cell its row lacks, the rectangle's other two corners are tried (a whole table whose
- * last row is short), and a column that the last rows lack ends at the last row that has it. Only a
- * rectangle with no such ends falls back to the last cell of a short row, which is a row's, and a row
- * selected is that row's cells.
+ * a corner is a cell its row lacks, the selection is of the cells the rectangle has, from the first row
+ * that has one to the last, and from its left column to the farthest any of those rows reaches. A row
+ * has its cells from the first on, so the left corners are cells, and of the other two corners one pair
+ * is wherever the header (which has every column) is in the rectangle: a whole table whose last row is
+ * short, a column that the last rows lack. A column that no body row reaches is the header's cell, and
+ * the selection is its text (one cell is no rectangle of cells). Only a rectangle with no such ends
+ * falls back to the last cell of a short row, which is a row's, and a row selected is that row's cells.
  */
 export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorSelection | null {
   const a = cellAtRef(table, from.row, from.col);
@@ -181,15 +184,24 @@ export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorS
   const bottom = Math.max(from.row, to.row);
   const left = Math.min(from.col, to.col);
   const right = Math.max(from.col, to.col);
-  const c = cellAtRef(table, top, right);
-  const d = cellAtRef(table, bottom, left);
-  if (c && d) return EditorSelection.single(c.textFrom, d.textTo);
-  if (left === right) {
-    const start = cellAtRef(table, top, left);
-    for (let row = bottom; row > top && start; row--) {
-      const end = cellAtRef(table, row, left);
-      if (end) return EditorSelection.single(start.textFrom, end.textTo);
-    }
+  // The rows that have a cell in the columns, and how far along them those cells go.
+  let first = -1;
+  let last = -1;
+  let far = left;
+  for (let row = top; row <= bottom; row++) {
+    const have = table.rows[row] ? shown(table, table.rows[row]!).length : 0;
+    if (have <= left) continue;
+    if (first === -1) first = row;
+    last = row;
+    far = Math.max(far, Math.min(right, have - 1));
+  }
+  if (first !== -1) {
+    const topLeft = cellAtRef(table, first, left);
+    const bottomFar = cellAtRef(table, last, far);
+    if (topLeft && bottomFar) return EditorSelection.single(topLeft.textFrom, bottomFar.textTo);
+    const topFar = cellAtRef(table, first, far);
+    const bottomLeft = cellAtRef(table, last, left);
+    if (topFar && bottomLeft) return EditorSelection.single(topFar.textFrom, bottomLeft.textTo);
   }
   const x = cellOfRef(table, from);
   const y = cellOfRef(table, to);

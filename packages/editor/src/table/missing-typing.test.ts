@@ -10,8 +10,9 @@ import { newestView, originalView, parse, readTables } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor, redo, undo } from '../index.ts';
-import { cellsOfRect, rectOf, selectRect, whole } from './cells.ts';
+import { cellsOfRect, rectOf, rectSelection, selectRect, whole } from './cells.ts';
 import { missingCaret } from './missing.ts';
+import { tablesOf } from './model.ts';
 
 interface Row {
   name: string;
@@ -498,6 +499,99 @@ describe('selecting a column that the last row does not reach', () => {
     expect(selectRect(editor.view, 'column')).toBe(true);
     expect(rectOf(editor.view.state)?.cols).toEqual([1, 1]);
     expect(cellsOfRect(rectOf(editor.view.state)!)).toHaveLength(3);
+  });
+});
+
+describe('selecting a column that no body row reaches', () => {
+  // The header has the column and every row below lacks it: the column is the header's cell alone.
+  const NONE = '| a | b | c |\n| - | - | - |\n| 1 | 2 |\n| 4 | 5 |';
+  const selected = (editor: Editor) => {
+    const { from, to } = editor.view.state.selection.main;
+    return editor.view.state.sliceDoc(from, to);
+  };
+  /** An editor on `doc` with the caret in the header cell `c`, or in the cell of column 2 that the last
+   * row lacks, which → from the end of the row's last cell reaches. */
+  function start(doc: string, tracking: boolean, where: 'header' | 'missing'): Editor {
+    if (where === 'header') return load(doc, doc.indexOf('c'), tracking);
+    const editor = load(doc, doc.lastIndexOf('5') + 1, tracking);
+    press(editor, 'ArrowRight');
+    expect(lacking(editor)).toBe(2);
+    return editor;
+  }
+
+  for (const tracking of [false, true]) {
+    for (const where of ['header', 'missing'] as const) {
+      const label = `from ${where === 'header' ? 'the header cell' : 'a cell its row lacks'}, Track Changes ${tracking ? 'on' : 'off'}`;
+
+      it(`selects the header's cell alone, and ⌫⌫ touches no other column, ${label}`, () => {
+        const editor = start(NONE, tracking, where);
+        expect(selectRect(editor.view, 'column')).toBe(true);
+        // Not b, not the table: the one cell, as text, which is no rectangle of cells.
+        expect(selected(editor)).toBe('c');
+        expect(rectOf(editor.view.state)).toBeNull();
+        press(editor, 'Backspace');
+        const cleared = '| a | b |  |\n| - | - | - |\n| 1 | 2 |\n| 4 | 5 |';
+        expect(newestView(editor.getDoc()).text).toBe(cleared);
+        // A second ⌫ has nothing more to take: no cell of another column, no refusal.
+        press(editor, 'Backspace');
+        expect(newestView(editor.getDoc()).text).toBe(cleared);
+        expect(notices(editor)).toEqual([]);
+        if (tracking) expect(originalView(editor.getDoc()).text).toBe(NONE);
+      });
+    }
+  }
+
+  it('selects the header cell alone in a table of one short row, not the table', () => {
+    const doc = '| a | b | c |\n| - | - | - |\n| 1 |';
+    for (const col of [1, 2]) {
+      const editor = load(doc, doc.length, false);
+      // The end of the row is in its first missing cell; → goes on to the next.
+      for (let n = 1; n < col; n++) press(editor, 'ArrowRight');
+      expect(lacking(editor)).toBe(col);
+      expect(selectRect(editor.view, 'column')).toBe(true);
+      expect(selected(editor)).toBe(col === 1 ? 'b' : 'c');
+      expect(rectOf(editor.view.state)).toBeNull();
+      press(editor, 'Backspace');
+      press(editor, 'Backspace');
+      // The table has its columns, its row and its other header cells, and the file was no more.
+      expect(editor.getDoc()).toBe(doc.replace(col === 1 ? '| b |' : '| c |', '|  |'));
+      expect(notices(editor)).toEqual([]);
+    }
+  });
+
+  it('selects the cells of several columns that no body row reaches, and ⌫⌫ takes only those', () => {
+    const doc = '| a | b | c | d |\n| - | - | - | - |\n| 1 | 2 |\n| 4 | 5 |';
+    for (const tracking of [false, true]) {
+      const editor = load(doc, 0, tracking);
+      const table = tablesOf(editor.view.state)[0]!;
+      const selection = rectSelection(table, { row: 0, col: 2 }, { row: 2, col: 3 });
+      expect(selection).not.toBeNull();
+      editor.view.dispatch({ selection: selection! });
+      expect(selected(editor)).toBe('c | d');
+      const rect = rectOf(editor.view.state)!;
+      expect([rect.rows, rect.cols]).toEqual([
+        [0, 0],
+        [2, 3],
+      ]);
+      expect(whole(rect)).toBe('column');
+      press(editor, 'Backspace');
+      expect(newestView(editor.getDoc()).text).toBe(
+        '| a | b |  |  |\n| - | - | - | - |\n| 1 | 2 |\n| 4 | 5 |',
+      );
+      press(editor, 'Backspace');
+      if (tracking) {
+        // The format refuses columns that rows lack, in words, and nothing else changes.
+        expect(notices(editor)).toEqual([
+          'A row of this table has fewer cells than its header. Fill it in first.',
+        ]);
+        expect(newestView(editor.getDoc()).text).toBe(
+          '| a | b |  |  |\n| - | - | - | - |\n| 1 | 2 |\n| 4 | 5 |',
+        );
+      } else {
+        expect(editor.getDoc()).toBe('| a | b |\n| - | - |\n| 1 | 2 |\n| 4 | 5 |');
+        expect(notices(editor)).toEqual([]);
+      }
+    }
   });
 });
 
