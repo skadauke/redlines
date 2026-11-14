@@ -1137,6 +1137,12 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
         to = from;
       }
     } else if (found.end > from && found.start < to) {
+      // A range that takes a setext underline whole, with the line break in front of it, and ends
+      // where the underline does, takes the break after it no further: the blank lines that follow
+      // stay, as they keep the text above and the block below apart, and the text above is a
+      // paragraph without its underline (#441).
+      const underEnd = from <= found.start ? underlineOfBreak(plan.text, found.start) : undefined;
+      if (underEnd !== undefined && to === underEnd && underEnd < found.end) continue;
       // From the very start of a line with a prefix, past the prefix, is a change of the block's
       // text, and does not touch the break in front of it.
       const insidePrefix = from >= prefix && prefix < found.end;

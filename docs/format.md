@@ -1273,6 +1273,18 @@ The merged block keeps the first block's type, as in Word. Rejecting puts the ex
 a prefix (`- `, `> `, `## `) and goes on past it changes the text after the prefix, and the prefix
 stays: the block keeps its type.
 
+**A deletion of a setext underline** takes the underline whole, with the line break in front of it,
+and the blank lines after it stay: `Title<!--del k3x9 \n===-->\n\nNext.` reads as `Title` and
+`Next.`, two paragraphs, in the newest view, and rejecting puts the underline back. The break that
+holds an underline holds the blank lines after it too, and a change that touches a break takes all
+of it; a range that ends where the underline does is the exception, since what follows is the
+break between the two blocks that are left. A range that goes on into the break after the
+underline, or takes the block below, takes all of it as before, and one that starts inside the
+underline and doesn't take all of it is refused (it would leave a paragraph where a heading was).
+The empty bullet that CommonMark reads as the underline of the text above it (`- one⏎  - ⏎⏎After.`)
+is such an underline: the editor's Backspace and Delete in it write `- one<!--del k3x9 ⏎  - -->⏎⏎After.`
+and not the join `- oneAfter.` (#441).
+
 **A change inside a prefix** does not touch the line break in front of the block: the digit of a
 list item's number replaced by the next (the editor does that to the items below the one Enter is
 pressed in), a bullet replaced by another, the `#`s of a heading. A marker can't stand in a
