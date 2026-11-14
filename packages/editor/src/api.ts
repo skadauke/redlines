@@ -144,14 +144,17 @@ export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
   author: Author;
-  /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
+  /**
+   * Default: the view the ledger says (`view`, format §5.6), else the markup view when the
+   * document has redlines, else 'clean' (design §5.3).
+   */
   view?: ViewMode;
   /**
    * The look of Redlines the editor shows where it picks Redlines for you: when a document with
-   * redlines opens, and when a tracked change or a comment is made in Clean. Default: 'redlines',
-   * the full markup; a document whose saved look is 'simple' opens in Redlines' simple look. The
-   * host is told when the person chooses another, with a click on a change bar
-   * (`EditorUiState.markupView`).
+   * redlines opens (and records no view in its ledger), and when a tracked change or a comment is
+   * made in Clean. Default: 'redlines', the full markup; with 'simple', such a document opens in
+   * Redlines' simple look. The host is told when the person chooses another, with a click on a
+   * change bar (`EditorUiState.markupView`).
    */
   markupView?: MarkupView;
   /**

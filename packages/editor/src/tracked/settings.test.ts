@@ -81,6 +81,7 @@ describe('the view a document opens in (format §5.6)', () => {
     // With nothing to show, as well: a file that only says how it was left.
     const plain = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: redlines\n-->\n`;
     expect(load(plain).getUiState().view).toBe('redlines');
+    expect(load(plain.replace('view: redlines', 'view: simple')).getUiState().view).toBe('simple');
   });
 
   it('wins over the markup view the app remembered, which opens the files that have none', () => {
