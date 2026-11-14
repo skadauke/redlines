@@ -186,7 +186,9 @@ describe('markdownPreview', () => {
     /** The spacing classes of the lines that start with `text`, in order. */
     const spaceOf = (doc: string, text: string) => {
       const editor = editorAt(doc, 0);
-      const line = editor.view.state.doc.lineAt(doc.indexOf(text));
+      // A text that starts with a line break names the last line that matches (an empty one).
+      const at = text.startsWith('\n') ? doc.lastIndexOf(text) + 1 : doc.indexOf(text);
+      const line = editor.view.state.doc.lineAt(at);
       return decorations(editor)
         .filter((d) => d.kind === 'line' && d.from === line.from)
         .flatMap((d) => d.className.split(' '))
@@ -211,6 +213,12 @@ describe('markdownPreview', () => {
       ['between a nested item and its parent, loose', '- a\n\n  - b', '  - b', 'rl-space-loose'],
       ['between the items of a loose list', '- a\n\n- b', '- b', 'rl-space-loose'],
       ['between the paragraphs of an item', '- p1\n\n  p2', '  p2', 'rl-space-loose'],
+      // An empty item takes the space above it as it has once text is typed in it (#509): the item
+      // would jump down a few pixels on the first letter.
+      ['above an empty item of a tight list', '- a\n- b\n- ', '\n- ', 'rl-space-item'],
+      ['above an empty item nested under its parent', '- a\n  - ', '\n  - ', 'rl-space-item'],
+      ['above an empty numbered item', '1. a\n2. ', '\n2. ', 'rl-space-item'],
+      ['above an empty item of a loose list', '- a\n\n- b\n\n- ', '\n- ', 'rl-space-loose'],
       ['between the paragraphs of a quote', '> One.\n>\n> Two.', '> Two.', 'rl-space-loose'],
       ['under a quote', '> One.\n\nTwo.', 'Two.', 'rl-space-block'],
     ])('is drawn by kind %s', (_, doc, line, spacing) => {
