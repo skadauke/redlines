@@ -1127,6 +1127,27 @@ middle of a paragraph it splits the paragraph.
   of the previous line, and the line break goes into the change. Typing `X ` at the start of the
   second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
   the break by itself and the new text, so that both views keep the break.
+- A deletion of all the text of a wrapped line, a middle or the last line of a paragraph or an
+  item, takes the line break in front of the line with it, and no new text brings the break back:
+  `one⏎two⏎three` without `two` is `one<!--del ID \ntwo-->⏎three` (#427). The marker stands at the
+  end of the line above, and the break after the deleted line stays, as the break between the lines
+  that are left, so the block neither parts in two (the empty line that a deletion of the text
+  alone leaves is a paragraph break) nor loses a line it still has. The break takes what belongs
+  to it: the prefix of the deleted line (`> `, the indentation of an item's lines), and the two
+  spaces or the backslash of a hard break that end the line above, which are in the payload
+  (`one\⏎two⏎three` without `two` is `one<!--del ID \\\ntwo-->⏎three`: the backslash, then the
+  break, then the line). The spaces or the backslash that end the deleted line itself stay, and end
+  the line above in their place: the paragraph keeps the hard break it had before the line below.
+  Several lines in a row go the same way, with the breaks between them. The newest view has the
+  lines that are left, the original has all of them, and other readers read the file as the newest
+  view, in every order of decisions. The first line of a block goes the other way, with the break
+  after it (§3.4), for no break stands in front of it. A line that is not a line of a paragraph
+  (code, an HTML block, a table row, the line under a setext heading's underline) is deleted as it
+  was. A deletion that starts at the beginning of a wrapped line and goes on past the end of its
+  paragraph is not written by this rule, and is refused as a change whose marker would start a line
+  is (`no-legal-placement`): the words give the way out, which is to start the selection at the
+  end of the line above, so that the line break goes with the text, or to leave the first word of
+  the line out of it.
 - A table row that holds a marker is written with a leading `|`.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
@@ -2444,6 +2465,9 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   front of an opener.
 
 **Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
+A deletion of all the text of a wrapped line takes the same range as with Track Changes on (§3.2): the
+line and the line break in front of it, with the prefix of the line and the syntax of the hard break
+above it. Left in, the empty line would be a paragraph break (#427).
 
 - A mark whose text is all deleted goes, with its ledger entry: an insertion, a highlight or a
   format change with nothing left in it, and a split whose break is deleted. A mark that keeps some
