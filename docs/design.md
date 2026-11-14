@@ -1178,7 +1178,13 @@ without each: a half-written comment is gone with the page, and nothing is saved
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
-nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+nothing in it run. The app tells a window of paths by the same two limits: the names in a folder,
+only for a project folder a sidebar shows and for the folders below it that the sidebar lists (none
+hidden, none that git ignores), and the real path of a file, links followed, only for a file the
+person opened or saved and for what is inside a project folder a sidebar shows, so that a window
+can't find out which files are on the disk, or where a link leads. Asking for a document's project
+is what shows it, once the person has opened or saved the document. Anything else gets the same
+refusal, whether it is there or not. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
 dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and

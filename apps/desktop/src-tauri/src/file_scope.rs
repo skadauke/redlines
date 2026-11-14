@@ -132,6 +132,51 @@ pub fn real(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// The file at `path`, as it really is, links followed, if a window may know of it: a file the
+/// person opened or saved (the scope allows the file the path really is), or what is inside a
+/// project folder a sidebar shows (`shown`, `Projects`), by what it really is, so that a link in a
+/// project that leads out of it is no more known than the file it leads to. Any other path gets one
+/// line, which says nothing of whether the path is there, and so neither tells the window which
+/// files are on the disk nor where a link leads (design, 6.5).
+pub fn known_real(
+    scope: &tauri::fs::Scope,
+    shown: &[PathBuf],
+    path: &Path,
+) -> Result<PathBuf, String> {
+    let refused = || format!("Redlines doesn’t look at {}.", path.display());
+    let missing = |error: std::io::Error| format!("{}: {error}", path.display());
+    if !path.is_absolute() {
+        return Err(refused());
+    }
+    let real = std::fs::canonicalize(path);
+    if allowed(scope, path) {
+        return real.map_err(missing);
+    }
+    let in_project = |path: &Path| {
+        shown
+            .iter()
+            .any(|folder| path.starts_with(folder) || path.starts_with(self::real(folder)))
+    };
+    match real {
+        Ok(real) if in_project(&real) => Ok(real),
+        Ok(_) => Err(refused()),
+        // What isn't there is told of only where the path stopped inside a project: at the deepest
+        // folder on the way that is there, as it really is, which a link out of the project or a
+        // `..` would have put somewhere else. Anywhere else it is refused as what is there is.
+        Err(error) => {
+            let reached = path
+                .ancestors()
+                .skip(1)
+                .find_map(|up| std::fs::canonicalize(up).ok());
+            if reached.is_some_and(|reached| in_project(&reached)) {
+                Err(missing(error))
+            } else {
+                Err(refused())
+            }
+        }
+    }
+}
+
 /// Whether `scope` allows the file at `path`, as the file system plugin asks: by the file the path
 /// really is.
 pub fn allowed(scope: &tauri::fs::Scope, path: &Path) -> bool {
@@ -173,6 +218,22 @@ pub fn set_up(app: &AppHandle) {
         }
     }
     app.manage(remembered);
+}
+
+/// A window asks for the project of the document at `path`. The sidebar shows it, if the person
+/// opened or saved the document: what `hold` does of this, without remembering the document.
+pub fn show_project(app: &AppHandle, path: &str) -> bool {
+    show(&app.fs_scope(), &app.state::<Projects>(), path)
+}
+
+/// `show_project`, with the app's parts.
+fn show(scope: &tauri::fs::Scope, projects: &Projects, path: &str) -> bool {
+    let path = Path::new(path);
+    if !allowed(scope, path) {
+        return false;
+    }
+    projects.show(path);
+    true
 }
 
 /// A window says it holds the document at `path`. Says whether it may: then the app remembers the
@@ -447,6 +508,158 @@ mod tests {
         assert!(allowed(&scope, &folder.join("notes-link.md")));
         assert!(scope.is_allowed(std::fs::canonicalize(cloud.join("notes.md")).unwrap()));
         std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_window_learns_the_real_path_of_a_file_it_was_given_or_one_in_a_project_it_shows() {
+        use std::os::unix::fs::symlink;
+
+        let disk = folder("real-path");
+        let canonical = |path: PathBuf| std::fs::canonicalize(path).unwrap();
+        let [notes, work, project, secret] =
+            ["notes", "work", "project", "secret"].map(|name| disk.join(name));
+        for name in [&notes, &work, &project, &secret] {
+            std::fs::create_dir_all(name).unwrap();
+        }
+        for file in [
+            work.join("real-2026.md"),
+            project.join("plan.md"),
+            secret.join("key"),
+        ] {
+            std::fs::write(file, "").unwrap();
+        }
+        // Links as `ln -s` makes them: one to a file in another folder, one by a relative path.
+        let real = canonical(work.join("real-2026.md"));
+        symlink(&real, notes.join("plan.md")).unwrap();
+        symlink("../work/real-2026.md", notes.join("relative.md")).unwrap();
+        // A link in the project that goes out of it.
+        symlink(secret.join("key"), project.join("out")).unwrap();
+
+        let scope = scope();
+        // As the open dialog gives a file: the path the person went through.
+        scope.allow_file(notes.join("plan.md")).unwrap();
+        let shown = [project.clone()];
+        let real_of = |path: &Path| known_real(&scope, &shown, path);
+
+        // A file the window was given, by a link to it, by another link, and as it really is.
+        assert_eq!(real_of(&notes.join("plan.md")), Ok(real.clone()));
+        assert_eq!(real_of(&notes.join("relative.md")), Ok(real.clone()));
+        assert_eq!(real_of(&real), Ok(real.clone()));
+        // The project a sidebar shows, and what is in it.
+        assert_eq!(real_of(&project), Ok(canonical(project.clone())));
+        assert_eq!(
+            real_of(&project.join("plan.md")),
+            Ok(canonical(project.join("plan.md")))
+        );
+        // What isn't there is an error, not the path again.
+        assert!(real_of(&project.join("missing.md")).is_err());
+
+        // Nothing else on the disk, which the window could otherwise find out about.
+        assert!(real_of(&secret.join("key")).is_err());
+        assert!(real_of(&secret).is_err());
+        assert!(real_of(&work.join("other.md")).is_err());
+        // A link inside the project that leads out of it, and a way out by `..`.
+        assert!(real_of(&project.join("out")).is_err());
+        assert!(real_of(&project.join("../secret/key")).is_err());
+        // A path that starts from wherever the app was started says nothing of where that is.
+        let up: PathBuf = std::env::current_dir()
+            .unwrap()
+            .components()
+            .skip(1)
+            .map(|_| "..")
+            .collect();
+        let relative = up.join(project.join("plan.md").strip_prefix("/").unwrap());
+        assert!(relative.is_relative());
+        assert!(real_of(&relative).is_err());
+        std::fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_says_nothing_of_whether_the_file_is_there() {
+        let disk = folder("real-path-alike");
+        std::fs::create_dir_all(disk.join("project")).unwrap();
+        std::fs::create_dir_all(disk.join("secret")).unwrap();
+        std::fs::write(disk.join("secret/key"), "").unwrap();
+        let (scope, shown) = (scope(), [disk.join("project")]);
+        let refused = |path: PathBuf, name: &str| {
+            known_real(&scope, &shown, &path)
+                .unwrap_err()
+                .replace(name, "X")
+        };
+        // The same line for a file that is there and one that isn't, but for its name, outside the
+        // project, and for a way out of it that goes through `..`.
+        assert_eq!(
+            refused(disk.join("secret/key"), "key"),
+            refused(disk.join("secret/none"), "none")
+        );
+        assert_eq!(
+            refused(disk.join("project/../secret/key"), "key"),
+            refused(disk.join("project/../secret/none"), "none")
+        );
+        assert_eq!(
+            refused(disk.join("secret/key"), "secret/key"),
+            refused(
+                disk.join("project/../secret/none"),
+                "project/../secret/none"
+            )
+        );
+        std::fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_a_project_tells_nothing_of_what_is_past_it() {
+        let disk = folder("real-path-out");
+        std::fs::create_dir_all(disk.join("project")).unwrap();
+        std::fs::create_dir_all(disk.join("secret/sub")).unwrap();
+        std::fs::write(disk.join("secret/key"), "").unwrap();
+        std::os::unix::fs::symlink(disk.join("secret"), disk.join("project/out")).unwrap();
+        let (scope, shown) = (scope(), [disk.join("project")]);
+        let refused = |path: PathBuf, name: &str| {
+            known_real(&scope, &shown, &path)
+                .unwrap_err()
+                .replace(name, "X")
+        };
+        // Past a link that leads out of the project, what is there and what isn't are refused
+        // alike, however deep the path goes.
+        assert_eq!(
+            refused(disk.join("project/out/key"), "key"),
+            refused(disk.join("project/out/none"), "none")
+        );
+        assert_eq!(
+            refused(disk.join("project/out/sub"), "sub"),
+            refused(disk.join("project/out/nowhere/deeper"), "nowhere/deeper")
+        );
+        // In the project itself, what isn't there is told so, as it was.
+        let missing = known_real(&scope, &shown, &disk.join("project/missing.md")).unwrap_err();
+        assert!(!missing.starts_with("Redlines doesn’t look"), "{missing}");
+        std::fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_is_shown_for_a_file_the_scope_allows_and_for_none_it_doesnt() {
+        let disk = folder("show");
+        let (notes, ssh) = (disk.join("notes"), disk.join("ssh"));
+        for name in [&notes, &ssh] {
+            std::fs::create_dir_all(name).unwrap();
+        }
+        std::fs::write(notes.join("plan.md"), "").unwrap();
+        std::fs::write(ssh.join("key"), "").unwrap();
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(notes.join("plan.md")).unwrap();
+        let show = |path: &Path| show(&scope, &projects, &path.to_string_lossy());
+
+        // A file the window wasn't given shows no project, and the sidebar lists nothing in it.
+        assert!(!show(&ssh.join("key")));
+        assert!(projects.folders().is_empty());
+        // One it was given shows its project, once however often it is asked.
+        assert!(show(&notes.join("plan.md")));
+        assert!(show(&notes.join("plan.md")));
+        assert_eq!(projects.folders(), [notes.as_path()]);
+        std::fs::remove_dir_all(&disk).unwrap();
     }
 
     #[cfg(unix)]

@@ -57,14 +57,48 @@ fn too_broad(folder: &Path, home: Option<&Path>) -> bool {
     folder.parent().is_none() || home.is_some_and(|home| real(home).starts_with(&folder))
 }
 
-/// The entries of `folder`, which must be inside the project folder `root`, links followed: hidden
-/// ones, and those that git ignores, left out. Only this one folder is read, so a large folder
-/// further down costs nothing until it is opened.
-pub fn list(root: &Path, folder: &Path) -> Result<Vec<FileEntry>, String> {
-    list_with(root, folder, true)
+/// The entries of `folder`, if a sidebar shows it: `root` is the folder one of them shows (one of
+/// `shown`, as given or as it really is), and `folder` is that folder or below it through folders
+/// the sidebar lists, none hidden and none that git ignores (`shown_below`). The window names both,
+/// so neither is taken as it comes: a window that names a folder as its own root lists nothing, and
+/// no hidden or ignored folder is listed by name. The same line refuses every one of them, and says
+/// nothing of whether the folder is there.
+pub fn list_shown(shown: &[PathBuf], root: &Path, folder: &Path) -> Result<Vec<FileEntry>, String> {
+    list_shown_with(shown, root, folder, true)
 }
 
-/// `list`, with or without the excludes that the person's git config names for every repository.
+/// `list_shown`, with or without the excludes that the person's git config names for every
+/// repository.
+fn list_shown_with(
+    shown: &[PathBuf],
+    root: &Path,
+    folder: &Path,
+    global_excludes: bool,
+) -> Result<Vec<FileEntry>, String> {
+    let refused = || format!("Can’t read {}.", folder.display());
+    let real_root = file_scope::real(root);
+    if !shown
+        .iter()
+        .any(|project| file_scope::real(project) == real_root)
+    {
+        return Err(refused());
+    }
+    // As the window names them, or as they really are: a project folder may be a link.
+    let real_folder = file_scope::real(folder);
+    let tries = [(root, folder), (&real_root, &real_folder)];
+    if !tries
+        .into_iter()
+        .any(|(root, folder)| shown_below(root, folder, global_excludes).is_ok())
+    {
+        return Err(refused());
+    }
+    list_with(root, folder, global_excludes)
+}
+
+/// The entries of `folder`, which must be inside the project folder `root`, links followed: hidden
+/// ones, and those that git ignores, left out, and, with `global_excludes`, those that the excludes
+/// the person's git config names for every repository leave out. Only this one folder is read, so a
+/// large folder further down costs nothing until it is opened.
 fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<FileEntry>, String> {
     let cannot = |error: std::io::Error| format!("Can’t read {}: {error}", folder.display());
     let real_root = std::fs::canonicalize(root).map_err(cannot)?;
@@ -314,31 +348,39 @@ fn cannot_open(path: &Path) -> String {
     format!("Couldn’t open “{name}”.")
 }
 
-/// The file at `path`, as it really is, if the sidebar showing the folder `root` lists it: below
-/// the root through folders the sidebar lists, neither hidden nor ignored by git, and a plain file
-/// inside the root, also when a link names it. Otherwise a line to show the person. Each folder on
-/// the way is listed as the sidebar lists it (`list`).
-fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
-    let cannot = || cannot_open(path);
-    let below = path.strip_prefix(root).map_err(|_| cannot())?;
+/// Whether the sidebar showing the folder `root` lists `path`, which is `root` itself or below it:
+/// each name on the way is one that the folder before it lists as the sidebar lists it
+/// (`list_with`), so none is hidden, and none is ignored by git.
+fn shown_below(root: &Path, path: &Path, global_excludes: bool) -> Result<(), ()> {
+    let below = path.strip_prefix(root).map_err(|_| ())?;
     let mut folder = root.to_path_buf();
-    let mut names = below.components().peekable();
-    if names.peek().is_none() {
-        return Err(cannot());
-    }
-    for name in names {
+    for name in below.components() {
         let std::path::Component::Normal(name) = name else {
-            return Err(cannot());
+            return Err(());
         };
         let listed = list_with(root, &folder, global_excludes)
-            .map_err(|_| cannot())?
+            .map_err(|_| ())?
             .into_iter()
             .any(|entry| entry.name == name.to_string_lossy());
         if !listed {
-            return Err(cannot());
+            return Err(());
         }
         folder.push(name);
     }
+    Ok(())
+}
+
+/// The file at `path`, as it really is, if the sidebar showing the folder `root` lists it: below
+/// the root through folders the sidebar lists, neither hidden nor ignored by git, and a plain file
+/// inside the root, also when a link names it. Otherwise a line to show the person. Each folder on
+/// the way is listed as the sidebar lists it (`shown_below`).
+fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
+    let cannot = || cannot_open(path);
+    let below = path.strip_prefix(root).map_err(|_| cannot())?;
+    if below.components().next().is_none() {
+        return Err(cannot());
+    }
+    shown_below(root, path, global_excludes).map_err(|()| cannot())?;
     // A link the sidebar lists may name a file anywhere: what is read or written is that file.
     let real = std::fs::canonicalize(path).map_err(|_| cannot())?;
     let real_root = std::fs::canonicalize(root).map_err(|_| cannot())?;
@@ -403,16 +445,22 @@ fn document_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Path
     document(shown_file(root, path, global_excludes)?, path)
 }
 
-/// The project folder of the document at `path` (`root_of`).
+/// The project folder of the document at `path` (`root_of`). Asking for the project of a document
+/// the person opened or saved is what shows it, so that the sidebar, which has the folder from this
+/// answer, can then list it (`list_folder`) and the window can learn what is in it (`real_path`):
+/// no other call has to come first.
 #[tauri::command(async)]
-pub fn project_root(path: String) -> ProjectRoot {
+pub fn project_root(app: AppHandle, path: String) -> ProjectRoot {
+    file_scope::show_project(&app, &path);
     root_of(Path::new(&path), std::env::home_dir().as_deref())
 }
 
-/// The entries of a folder inside the project folder `root` (`list`).
+/// The entries of a folder that a sidebar shows, inside the project folder `root` that it shows
+/// (`list_shown`).
 #[tauri::command(async)]
-pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, String> {
-    list(Path::new(&root), Path::new(&folder))
+pub fn list_folder(app: AppHandle, root: String, folder: String) -> Result<Vec<FileEntry>, String> {
+    let shown = app.state::<Projects>().folders();
+    list_shown(&shown, Path::new(&root), Path::new(&folder))
 }
 
 /// Lets the windows read and write a document that the sidebar of a project a window shows lists
@@ -671,17 +719,151 @@ mod tests {
         let outside = folder("outside");
         make(&outside, &["secret.md", "repo/.git/", "repo/docs/plan.md"]);
         let repo = outside.join("repo");
-        assert!(list(&repo, &repo.join("docs/../..")).is_err());
-        assert!(list(&repo, &outside).is_err());
+        assert!(list_with(&repo, &repo.join("docs/../.."), false).is_err());
+        assert!(list_with(&repo, &outside, false).is_err());
         // A link inside the root to a folder outside it.
         symlink(&outside, repo.join("out")).unwrap();
-        assert!(list(&repo, &repo.join("out")).is_err());
+        assert!(list_with(&repo, &repo.join("out"), false).is_err());
         // A link to a folder inside the root is listed.
         symlink(repo.join("docs"), repo.join("in")).unwrap();
         assert_eq!(names(&repo, &repo.join("in")), ["plan.md"]);
         // And a folder that isn't there can't be.
-        assert!(list(&repo, &repo.join("missing")).is_err());
+        assert!(list_with(&repo, &repo.join("missing"), false).is_err());
         fs::remove_dir_all(&outside).unwrap();
+    }
+
+    /// The names `list_shown_with` gives, as `names` gives them (a `/` after each folder).
+    fn shown_names(shown: &[PathBuf], root: &Path, folder: &Path) -> Result<Vec<String>, String> {
+        list_shown_with(shown, root, folder, false).map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| {
+                    if entry.is_dir {
+                        format!("{}/", entry.name)
+                    } else {
+                        entry.name
+                    }
+                })
+                .collect()
+        })
+    }
+
+    #[test]
+    fn a_folder_is_listed_only_below_a_folder_a_sidebar_shows() {
+        let disk = folder("shown");
+        make(
+            &disk,
+            &[
+                "repo/.git/",
+                "repo/README.md",
+                "repo/docs/plan.md",
+                "elsewhere/secret.md",
+                "elsewhere/sub/more.md",
+            ],
+        );
+        let (repo, elsewhere) = (disk.join("repo"), disk.join("elsewhere"));
+        let shown = [repo.clone()];
+        // The folder the sidebar shows, and a folder in it.
+        assert_eq!(
+            shown_names(&shown, &repo, &repo).unwrap(),
+            ["README.md", "docs/"]
+        );
+        assert_eq!(
+            shown_names(&shown, &repo, &repo.join("docs")).unwrap(),
+            ["plan.md"]
+        );
+        // Named as its own root, any folder on the disk was listed.
+        assert!(shown_names(&shown, &elsewhere, &elsewhere).is_err());
+        assert!(shown_names(&shown, &elsewhere, &elsewhere.join("sub")).is_err());
+        // The project's root doesn't reach the folders around it either.
+        assert!(shown_names(&shown, &repo, &elsewhere).is_err());
+        assert!(shown_names(&shown, &repo, &repo.join("../elsewhere")).is_err());
+        // Where no sidebar shows anything, nothing is listed.
+        assert!(shown_names(&[], &repo, &repo).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_sidebar_lists_no_folder_it_hides() {
+        let repo = folder("shown-hidden");
+        make(
+            &repo,
+            &[
+                ".git/config",
+                ".ssh/id_ed25519",
+                ".github/ci.yml",
+                "dist/app.js",
+                "docs/plan.md",
+                "docs/.private/key",
+            ],
+        );
+        fs::write(repo.join(".gitignore"), "/dist\n").unwrap();
+        let shown = [repo.clone()];
+        // A hidden folder, and one git ignores, is no part of what the sidebar shows, so it isn't
+        // listed by name either.
+        for name in [".git", ".ssh", ".github", "dist", "docs/.private"] {
+            assert!(
+                shown_names(&shown, &repo, &repo.join(name)).is_err(),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            shown_names(&shown, &repo, &repo.join("docs")).unwrap(),
+            ["plan.md"]
+        );
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn a_sidebar_lists_a_folder_through_a_link_only_if_it_stays_in_the_project() {
+        let disk = folder("shown-link");
+        make(
+            &disk,
+            &["repo/.git/", "repo/docs/plan.md", "elsewhere/secret.md"],
+        );
+        let repo = disk.join("repo");
+        symlink(disk.join("elsewhere"), repo.join("out")).unwrap();
+        symlink(repo.join("docs"), repo.join("in")).unwrap();
+        let shown = [repo.clone()];
+        assert!(shown_names(&shown, &repo, &repo.join("out")).is_err());
+        assert_eq!(
+            shown_names(&shown, &repo, &repo.join("in")).unwrap(),
+            ["plan.md"]
+        );
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_project_folder_that_is_a_link_is_a_root_as_it_is_given_or_as_it_really_is() {
+        let disk = folder("shown-root-link");
+        make(&disk, &["cloud/notes/.git/", "cloud/notes/docs/plan.md"]);
+        let real = disk.join("cloud/notes");
+        let link = disk.join("notes");
+        symlink(&real, &link).unwrap();
+        // The sidebar shows the folder by the path the window holds, which goes through the link.
+        let shown = [link.clone()];
+        for (root, below) in [(&link, link.join("docs")), (&real, real.join("docs"))] {
+            assert_eq!(shown_names(&shown, root, &below).unwrap(), ["plan.md"]);
+            assert!(shown_names(&shown, root, &disk).is_err());
+        }
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_refusal_says_nothing_of_whether_the_folder_is_there() {
+        let disk = folder("shown-alike");
+        make(&disk, &["repo/.git/", "elsewhere/secret.md"]);
+        let shown = [disk.join("repo")];
+        let there = |name: &str| {
+            let folder = disk.join(name);
+            shown_names(&shown, &folder, &folder).unwrap_err()
+        };
+        // The same line for a folder that is there and one that isn't, but for the name.
+        assert_eq!(
+            there("elsewhere").replace("elsewhere", "X"),
+            there("nowhere").replace("nowhere", "X")
+        );
+        fs::remove_dir_all(&disk).unwrap();
     }
 
     #[test]
@@ -697,7 +879,7 @@ mod tests {
             names(&repo, &repo.join("again")),
             ["a", "again/", "b", "plan.md"]
         );
-        assert!(list(&repo, &repo.join("a")).is_err());
+        assert!(list_with(&repo, &repo.join("a"), false).is_err());
         fs::remove_dir_all(&repo).unwrap();
     }
 
