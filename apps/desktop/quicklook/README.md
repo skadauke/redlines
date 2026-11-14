@@ -18,7 +18,7 @@ no `console`. `rolldown.config.mjs` bundles it into `build/preview.js`, one scri
   matter taken off and shown plainly, the first 300,000 characters of the rest drawn, under the line
   of `summary.ts`.
 - `markdown.ts`: micromark with GitHub's extensions. HTML comments (the markers, and any note an
-  author left) are not shown, an image is its alt text, the options of an R Markdown or Quarto
+  author left) are not shown, an image is its alt text unless the extension loaded the file (`cid:`), the options of an R Markdown or Quarto
   chunk are kept as a line over its code, and a table sits in a box that scrolls. Raw HTML is
   text, never live.
 - `summary.ts`: what waits in a file: the changes, counted as suggestions as the review bar counts
@@ -38,8 +38,11 @@ no `console`. `rolldown.config.mjs` bundles it into `build/preview.js`, one scri
   line share it.
 - `harness/main.swift`: `preview-render`, the test command line. `build/preview-render preview.js
   file.md` prints the page, and how long it took.
-- `RedlinesPreview.entitlements`: the sandbox and JavaScriptCore's compiler. Nothing else: no
-  network.
+- `PreviewImages.swift`: loads the local images a document links to, by the app's own rule: inside
+  the document's project, no hidden file or folder, no link out of the project, the name and the
+  first bytes both saying it is an image; shared with the harness (`--images`, `--list-images`).
+- `RedlinesPreview.entitlements`: the sandbox, JavaScriptCore's compiler and a read-only exception
+  for files, which the images need. Nothing else: no network.
 
 `scripts/build-quicklook` writes the extension's Info.plist (its types are Markdown's two, and the
 dynamic types of `.qmd` and `.rmd`), compiles it with `swiftc` for both architectures, and signs it.

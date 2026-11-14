@@ -130,6 +130,13 @@ a {
   color: var(--rl-ink-3);
 }
 
+/* An image that the extension loaded from beside the document. */
+img.rl-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
 code {
   padding: 0.12em 0.38em;
   border-radius: 5px;
