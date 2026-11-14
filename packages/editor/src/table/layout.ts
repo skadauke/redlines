@@ -3,12 +3,15 @@
 // outer marks. A wrapper around the lines is the table, a line is a row, a cell is a mark that
 // nothing else splits. Pipes, padding and the delimiter row are hidden (the caret steps over them:
 // `stops.ts`), `<br>` is drawn as a line break, and an empty cell has a filler for the caret to
-// stand on. Raw draws none of it.
+// stand on. A row with fewer cells than the header is drawn with empty cells after its last, as GFM
+// reads it (`missing.ts`): a widget for each, at the end of the row. Raw draws none of it.
 //
 // What the prototype found, and the layout keeps to: nothing but a cell is a direct child of a row
-// (the change bar is drawn by the first cell, not the row); a wrapper ends at the table's last line,
-// so the blank line after the table, a struck block widget or the ledger are in none; a table in a
-// quote or a list item is no table here (`model.ts`), and stays source.
+// (the change bar is drawn by the first cell, not the row; the exception is the buffers and the
+// line-end break that CodeMirror puts beside the widgets of the cells a row lacks, which the theme
+// hides); a wrapper ends at the table's last line, so the blank line after the table, a struck block
+// widget or the ledger are in none; a table in a quote or a list item is no table here (`model.ts`),
+// and stays source.
 
 import {
   type EditorState,
@@ -31,11 +34,13 @@ import {
   ghostColPress,
   ghostColumnsOf,
   GhostColsWidget,
+  type InsertedColumn,
   insertedColumnsOf,
 } from './colghosts.ts';
 import { colorClass } from '../tracked/colors.ts';
 import { type Dirty, dirtyOf, type Span } from './dirty.ts';
-import { type Cell, type Row, type Table, tablesField } from './model.ts';
+import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
+import { type MissingCaret, missingCaret } from './missing.ts';
 import { BR } from './stops.ts';
 
 /** What the layout builds for a state. */
@@ -64,6 +69,72 @@ class FillerWidget extends WidgetType {
   }
 }
 
+/**
+ * A cell its row lacks (`missing.ts`): a cell of the row as any, taking its column's width and look, with
+ * a filler to give the caret a line. The cell the caret is in is `rl-tc-active`: it draws the caret
+ * itself (a position of the document can't say which of the cells at the end of the row the caret is in,
+ * so the page's own caret, which stands at the end of the row, is hidden there).
+ */
+class MissingCellWidget extends WidgetType {
+  readonly col: number;
+  readonly vcol: number;
+  readonly align: string;
+  readonly active: boolean;
+  readonly added: InsertedColumn | undefined;
+
+  constructor(
+    col: number,
+    vcol: number,
+    align: string,
+    active: boolean,
+    added: InsertedColumn | undefined,
+  ) {
+    super();
+    this.col = col;
+    this.vcol = vcol;
+    this.align = align;
+    this.active = active;
+    this.added = added;
+  }
+
+  override eq(other: WidgetType): boolean {
+    return (
+      other instanceof MissingCellWidget &&
+      other.col === this.col &&
+      other.vcol === this.vcol &&
+      other.align === this.align &&
+      other.active === this.active &&
+      other.added?.id === this.added?.id &&
+      other.added?.color === this.added?.color &&
+      other.added?.moved === this.added?.moved
+    );
+  }
+
+  override toDOM(): HTMLElement {
+    const cell = document.createElement('span');
+    const { added } = this;
+    cell.className = `rl-tc rl-tc-missing${this.active ? ' rl-tc-active' : ''}${
+      added ? ` rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}` : ''
+    }`;
+    cell.setAttribute('role', 'cell');
+    cell.setAttribute('aria-colindex', String(this.vcol + 1));
+    if (added) cell.dataset['mark'] = added.id;
+    cell.dataset['col'] = String(this.col);
+    cell.dataset['vcol'] = String(this.vcol);
+    cell.dataset['align'] = this.align;
+    const fill = document.createElement('span');
+    fill.className = 'rl-tc-fill';
+    fill.textContent = '​';
+    cell.append(fill);
+    return cell;
+  }
+
+  /** The editor sees a press: `missing.ts` puts the caret in the cell it is on. */
+  override ignoreEvent(): boolean {
+    return false;
+  }
+}
+
 /** A `<br>` written in a cell, drawn as the line break it is. */
 class BreakWidget extends WidgetType {
   override eq(other: WidgetType): boolean {
@@ -81,7 +152,16 @@ class BreakWidget extends WidgetType {
 }
 
 const HIDDEN = Decoration.replace({});
+/** An empty cell's filler, at its stop, between the padding that is hidden before it and after it. */
 const FILLER = Decoration.widget({ widget: new FillerWidget(), side: 1 });
+/**
+ * The filler of an empty cell whose stop is the end of its own mark. A cell with one space of padding or
+ * none (`| |`, `||`) has its only stop where the next cell begins, and a widget on the far side of that
+ * position (`FILLER`, side 1) is drawn in the next cell's mark: that cell holds a filler that is not its
+ * own, and the empty cell none. On the near side (-1) it is the last thing in the cell it is the filler
+ * of.
+ */
+const FILLER_AT_END = Decoration.widget({ widget: new FillerWidget(), side: -1 });
 const BREAK = Decoration.replace({ widget: new BreakWidget() });
 
 /** The data-align attribute of a cell, the delimiter row's alignment of its column. */
@@ -106,12 +186,20 @@ function markerIn(state: EditorState, cell: Cell): { from: number; to: number } 
 /** The rows built, for tests: the layout builds only the rows a change touches. */
 export const layoutStats = { rows: 0 };
 
+/** The caret's cell, when it is one its row lacks: asked at most once for a build, and only when a row
+ * lacks cells. */
+function caretOnce(state: EditorState): () => MissingCaret | null {
+  let found: MissingCaret | null | undefined;
+  return () => (found === undefined ? (found = missingCaret(state)) : found);
+}
+
 function rowDecorations(
   state: EditorState,
   table: Table,
   row: Row,
   out: Range<Decoration>[],
   cells: Range<Decoration>[],
+  caretOf: () => MissingCaret | null,
 ): void {
   layoutStats.rows++;
   // The deleted columns drawn in the table, each in the place of the pipe in front of the cell it comes
@@ -120,6 +208,9 @@ function rowDecorations(
   const ghosts = ghostColumnsOf(state, table.id);
   const inserted = insertedColumnsOf(state, table.id);
   const shownCount = Math.min(row.cells.length, table.columns);
+  // The cells a row lacks stand at its end, after its last cell's mark: a widget on the side of the text
+  // that follows (side 1, and up) is outside an inclusive mark that ends there.
+  const lacking = row.header ? 0 : Math.max(0, table.columns - row.cells.length);
   // How the ghosts that come back after the last column are drawn: in the place of the closing pipe;
   // or, in a row that has none (a table without outer pipes), at the end of its text, with the
   // header's delimiter row hidden under it.
@@ -221,8 +312,12 @@ function rowDecorations(
     if (appended === 'pipe' && i === shownCount - 1) {
       if (end > cell.textTo) out.push(HIDDEN.range(cell.textTo, end));
     } else if (cell.to > cell.textTo) out.push(HIDDEN.range(cell.textTo, cell.to));
-    if (cell.textFrom === cell.textTo) out.push(FILLER.range(cell.textFrom));
-    else {
+    if (cell.textFrom === cell.textTo) {
+      // (A cell that has no mark, because a deleted column's ghost took its only character, has no cell
+      // to stand at the end of: it is drawn as it was.)
+      const atEnd = cell.textFrom >= end && end > start;
+      out.push((atEnd ? FILLER_AT_END : FILLER).range(cell.textFrom));
+    } else {
       const text = state.sliceDoc(cell.textFrom, cell.textTo);
       for (const found of text.matchAll(BR)) {
         const at = cell.textFrom + found.index;
@@ -230,6 +325,22 @@ function rowDecorations(
       }
     }
   });
+  // The cells the row lacks, after the last, in the order of their columns; the one the caret is in
+  // draws it.
+  if (lacking > 0) {
+    const caret = caretOf();
+    const here = caret?.row.from === row.from ? caret.cell.col : -1;
+    for (let col = row.cells.length; col < table.columns; col++) {
+      const widget = new MissingCellWidget(
+        col,
+        col + ghosts.filter((ghost) => ghost.position <= col).length,
+        alignOf(table, col),
+        col === here,
+        inserted.find((column) => column.col === col),
+      );
+      out.push(Decoration.widget({ widget, side: 1 + col - row.cells.length }).range(row.to));
+    }
+  }
 }
 
 /** The two wrappers around the lines of a table: the one that scrolls and the one that is the table. */
@@ -269,9 +380,10 @@ export function layoutOf(state: EditorState): Layout {
   const wrappers: Range<BlockWrapper>[] = [];
   const out: Range<Decoration>[] = [];
   const cells: Range<Decoration>[] = [];
+  const caretOf = caretOnce(state);
   for (const table of tables) {
     wrappers.push(...wrappersOf(table));
-    for (const row of table.rows) rowDecorations(state, table, row, out, cells);
+    for (const row of table.rows) rowDecorations(state, table, row, out, cells, caretOf);
   }
   return {
     wrappers: BlockWrapper.set(wrappers, true),
@@ -293,11 +405,20 @@ const without = (from: number, to: number) => ({
  * (or that is new) built whole.
  */
 function patchLayout(value: Layout, tr: Transaction, dirty: Dirty): Layout {
-  let { wrappers, decorations, cells } = {
-    wrappers: value.wrappers.map(tr.changes),
-    decorations: value.decorations.map(tr.changes),
-    cells: value.cells.map(tr.changes),
-  };
+  return rebuild(
+    {
+      wrappers: value.wrappers.map(tr.changes),
+      decorations: value.decorations.map(tr.changes),
+      cells: value.cells.map(tr.changes),
+    },
+    tr.state,
+    dirty,
+  );
+}
+
+/** `layout`, a layout of the text `state` has, with what `dirty` names built again in it. */
+function rebuild(layout: Layout, state: EditorState, dirty: Dirty): Layout {
+  let { wrappers, decorations, cells } = layout;
   const dropRows = (span: Span) => {
     decorations = decorations.update(without(span.from, span.to));
     cells = cells.update(without(span.from, span.to));
@@ -313,11 +434,12 @@ function patchLayout(value: Layout, tr: Transaction, dirty: Dirty): Layout {
     if (rows === null) dropRows(clear);
     else for (const { clear: span } of rows) dropRows(span);
   }
+  const caretOf = caretOnce(state);
   for (const { table, rows } of dirty.tables) {
     const built = rows ? rows.map((r) => r.row) : table.rows;
     const out: Range<Decoration>[] = [];
     const inCells: Range<Decoration>[] = [];
-    for (const row of built) rowDecorations(tr.state, table, row, out, inCells);
+    for (const row of built) rowDecorations(state, table, row, out, inCells, caretOf);
     wrappers = wrappers.update({ add: wrappersOf(table), sort: true });
     decorations = decorations.update({ add: out, sort: true });
     cells = cells.update({ add: inCells, sort: true });
@@ -325,28 +447,67 @@ function patchLayout(value: Layout, tr: Transaction, dirty: Dirty): Layout {
   return { wrappers, decorations, cells };
 }
 
+/** The caret's cell, when it is one its row lacks, as the row's place and the cell in it. */
+const caretKey = (caret: MissingCaret | null): string | null =>
+  caret ? `${caret.row.from}:${caret.cell.col}` : null;
+
+/**
+ * The layout, with the rows drawn again that the caret has left or entered a cell its row lacks in: the
+ * cell it is in draws the caret (`MissingCellWidget`), which no change of the text brings about.
+ */
+function withCaret(layout: Layout, tr: Transaction): Layout {
+  if (!tr.selection && !tr.docChanged && !tr.effects.length) return layout;
+  const before = missingCaret(tr.startState);
+  const now = missingCaret(tr.state);
+  if (!before && !now) return layout;
+  if (!tr.docChanged && caretKey(before) === caretKey(now)) return layout;
+  // The row the caret left, where the text has put it; the row it is in.
+  const rows: { table: Table; row: Row }[] = [];
+  const note = (found: { table: Table; row: Row } | null) => {
+    if (found && !rows.some((r) => r.row.from === found.row.from)) rows.push(found);
+  };
+  if (before) note(cellAt(tr.state, tr.changes.mapPos(before.row.from, 1)));
+  note(now);
+  if (rows.length === 0) return layout;
+  const tables = new Map<Table, Row[]>();
+  for (const { table, row } of rows) tables.set(table, [...(tables.get(table) ?? []), row]);
+  const dirty: Dirty = {
+    tables: [...tables].map(([table, list]) => ({
+      table,
+      rows: list.map((row) => ({ row, clear: { from: row.from, to: row.to } })),
+      clear: { from: table.from, to: table.to },
+    })),
+    gone: [],
+  };
+  return rebuild(layout, tr.state, dirty);
+}
+
+function updateLayout(value: Layout, tr: Transaction): Layout {
+  const tables = tr.state.field(tablesField, false);
+  // Deleted columns come and go with the line below the table, with no row touched.
+  if (
+    tr.startState.field(colGhostField, false)?.key !== tr.state.field(colGhostField, false)?.key
+  ) {
+    return layoutOf(tr.state);
+  }
+  const changed =
+    tr.startState.field(tablesField, false) !== tables ||
+    tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
+  if (!changed) return value;
+  const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
+  // A change of view, or tables read again from a parse that went on, builds them all.
+  if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
+    return layoutOf(tr.state);
+  }
+  if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
+  const dirty = dirtyOf(tr);
+  return dirty ? patchLayout(value, tr, dirty) : layoutOf(tr.state);
+}
+
 const layoutField = StateField.define<Layout>({
   create: layoutOf,
   update(value, tr) {
-    const tables = tr.state.field(tablesField, false);
-    // Deleted columns come and go with the line below the table, with no row touched.
-    if (
-      tr.startState.field(colGhostField, false)?.key !== tr.state.field(colGhostField, false)?.key
-    ) {
-      return layoutOf(tr.state);
-    }
-    const changed =
-      tr.startState.field(tablesField, false) !== tables ||
-      tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-    if (!changed) return value;
-    const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-    // A change of view, or tables read again from a parse that went on, builds them all.
-    if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
-      return layoutOf(tr.state);
-    }
-    if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
-    const dirty = dirtyOf(tr);
-    return dirty ? patchLayout(value, tr, dirty) : layoutOf(tr.state);
+    return withCaret(updateLayout(value, tr), tr);
   },
   // From a state field rather than a view plugin, because the delimiter row is hidden with the line
   // break in front of it.

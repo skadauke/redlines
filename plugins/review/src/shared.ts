@@ -9,6 +9,7 @@ import {
   type EditContext,
   type FormatOp,
   alignLabel,
+  deletedTable,
   formatChange,
   type InlineFormat,
   type MarkRange,
@@ -224,6 +225,18 @@ export function rowsDone(changes: readonly MarkRange[]): string | null {
     : `${first.replace(/ (row|column)$/, ` ${changes.length} $1s`)}`;
 }
 
+/**
+ * What a table deleted whole did, in the words of a card and a note: `Deleted table (3 columns, 20
+ * rows)`, its rows the header's and the body's. Null for any other change, a deletion of more than
+ * the table included.
+ */
+export function tableDeleted(change: MarkRange): string | null {
+  const table = change.kind === 'del' && change.payload ? deletedTable(change.payload) : null;
+  if (!table) return null;
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  return `Deleted table (${count(table.columns, 'column')}, ${count(table.rows, 'row')})`;
+}
+
 /** What a change took out and what it put in: the one reading of a change's kind. A format change
  * changed no text, and has its label instead. */
 export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
@@ -249,13 +262,13 @@ function isBreak(text: string): boolean {
 
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
- * `Formatted: Bold`: on the card, and in the simple look on the note. A substitution with no old
- * text, such as the second part of one that untracked typing split (format §3.10), inserted its
- * text.
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs`,
+ * `Deleted table (3 columns, 20 rows)` or `Formatted: Bold`: on the card, and in the simple look on
+ * the note. A substitution with no old text, such as the second part of one that untracked typing
+ * split (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const row = rowsDone([change]);
+  const row = rowsDone([change]) ?? tableDeleted(change);
   if (row !== null) return row;
   const { old, added, label } = changeTexts(parsed, change);
   if (label !== undefined) return `Formatted: ${label}`;

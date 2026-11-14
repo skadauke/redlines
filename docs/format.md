@@ -1133,6 +1133,27 @@ middle of a paragraph it splits the paragraph.
   of the previous line, and the line break goes into the change. Typing `X ` at the start of the
   second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
   the break by itself and the new text, so that both views keep the break.
+- A deletion of all the text of a wrapped line, a middle or the last line of a paragraph or an
+  item, takes the line break in front of the line with it, and no new text brings the break back:
+  `one⏎two⏎three` without `two` is `one<!--del ID \ntwo-->⏎three` (#427). The marker stands at the
+  end of the line above, and the break after the deleted line stays, as the break between the lines
+  that are left, so the block neither parts in two (the empty line that a deletion of the text
+  alone leaves is a paragraph break) nor loses a line it still has. The break takes what belongs
+  to it: the prefix of the deleted line (`> `, the indentation of an item's lines), and the two
+  spaces or the backslash of a hard break that end the line above, which are in the payload
+  (`one\⏎two⏎three` without `two` is `one<!--del ID \\\ntwo-->⏎three`: the backslash, then the
+  break, then the line). The spaces or the backslash that end the deleted line itself stay, and end
+  the line above in their place: the paragraph keeps the hard break it had before the line below.
+  Several lines in a row go the same way, with the breaks between them. The newest view has the
+  lines that are left, the original has all of them, and other readers read the file as the newest
+  view, in every order of decisions. The first line of a block goes the other way, with the break
+  after it (§3.4), for no break stands in front of it. A line that is not a line of a paragraph
+  (code, an HTML block, a table row, the line under a setext heading's underline) is deleted as it
+  was. A deletion that starts at the beginning of a wrapped line and goes on past the end of its
+  paragraph is not written by this rule, and is refused as a change whose marker would start a line
+  is (`no-legal-placement`): the words give the way out, which is to start the selection at the
+  end of the line above, so that the line break goes with the text, or to leave the first word of
+  the line out of it.
 - A table row that holds a marker is written with a leading `|`.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
@@ -2153,6 +2174,56 @@ it, one per line:
   the table instead."). With Track Changes off the columns go from the original as well, so the last
   column that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
+- **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
+  table is §3.4's ordinary deletion and is held to none of these bullets. A table that goes whole
+  is a deletion of a block (§3.4): one deletion, in front of the block after the table, or behind
+  the block before it when the table ends the text. Its payload is the table as it reads with your
+  own pending changes rejected, and its comments are left out. The rule that a table keeps a row is
+  for deleting rows: the whole table may go.
+  - **Another person's pending changes stay theirs.** With Track Changes on, a table that holds one
+    can't be deleted until it is decided ("Bo Chen's pending change is in this table. Decide it
+    first."). That is a change in a cell, an inserted or moved row or column, a row or column
+    deleted and kept below the table, an alignment change, and a pending change whose text holds
+    the table. Comments and highlights are no changes.
+  - **Your own fold into the deletion,** as rejecting them would. A row or column you inserted is
+    removed outright, rows and columns you deleted or moved are in the payload as they were, and
+    your alignment change is undone. The deletion lines the table kept go with it, and their ledger
+    entries. A table that is part of the text of your own pending insertion is taken out of that
+    text, with no deletion; when it was all of the text, the insertion goes. A change of yours that
+    can't be undone with the table, as a format change that a later edit altered, is refused in the
+    same words.
+  - **Comments become point comments where the table was,** as in a row that leaves (rule 4): at the
+    start of the text of the block after the table, or, where that block can hold no marker, at the
+    end of the text of the block before it. A comment with a part that stays loses only the part in
+    the table. A highlight has no point form and goes. A comment with one end in the table and the
+    other outside it is refused ("Bo Chen's comment runs from this table into the text next to it.
+    Delete it first, or turn off Track Changes."), and so is one that no text next to the table
+    can keep, as when the table is all the text ("Bo Chen's comment is in this table, and no text
+    next to it can keep it. Delete the comment first, or turn off Track Changes.").
+  - **Where Track Changes has no place to write it.** The deletion's marker stands in front of the
+    block after the table, or behind the block before it when the table ends the text. It can't
+    stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
+    a table that ends the text right after one is refused too. A table that starts right under the
+    line above it, with no blank line between, and is followed by something, is refused as well,
+    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals,
+    except that of a table before a never-closed fence (issue #454), says which it is and what to
+    do: put a paragraph between the table and the code block or the rule (a pending insertion
+    counts), or a blank line above the table, or turn off Track Changes, which takes the table as
+    text ("This table can't be deleted with Track Changes on while a code block follows it with no
+    text between. Put a paragraph between them first, or turn off Track Changes."). A heading that
+    has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`) takes no change at its end. A
+    table right under one is refused, whether something follows it or not, and so is a table that
+    ends the text right after one, with a blank line between or not. Those refusals are in the
+    words of any edit at the end of such a heading ("A heading's closing #s and attributes take no
+    change."), which don't say what to do. A blank line between them gives a table that has text
+    after it its place, and a paragraph between them gives one that ends the text its place.
+  - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
+    and their ledger entries, and the blank lines after it (the break before it, when nothing
+    follows). Its comments become points as above. A comment that has no place so, or runs out of
+    the table, keeps a point where the text was, as it does for any text that goes (§3.10).
+  - Every order of decisions reads the same, judged against micromark 4.0.2. The newest view has no
+    table, and the original has the table as it read with your own changes rejected. Rejecting the
+    deletion writes the payload back, and decides nothing else.
 - **Order and positions.** The deletion lines are kept in the order of their positions, those at one
   position in the order the rows had. A row is written back at its position when its deletion is
   rejected, in front of the row that is at that position then; the deletions at the same position
@@ -2246,11 +2317,11 @@ it, one per line:
 
 **Other table rules:**
 
-- Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
-  that has none, because a change begins in its first cell, the editor writes a plain `| ` in
-  front of it first, in both versions, so that nothing reads differently. This holds for a row with
-  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
-  is still refused.
+- **Rule 7, a row's outer pipes.** Rows that hold markers have a leading `|`. When a marker has to
+  stand at the start of a row that has none, because a change begins in its first cell, the editor
+  writes a plain `| ` in front of it first, in both versions, so that nothing reads differently.
+  This holds for a row with no pipe at all too (the first under the delimiter row, say). A format
+  change in a row without one is still refused.
   The same is written when an edit takes all the text of the first cell of a row that has no leading
   pipe, or of the last cell of one that has no trailing pipe (a deletion, tracked or not): the pipe
   beside the cell would become the row's outer pipe, the row would have a cell less, a header one
@@ -2263,12 +2334,39 @@ it, one per line:
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
   "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
   the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
-  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
-  front of the table's first row as it does in front of a paragraph's first line, and everything
-  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  held to this: a deletion of a whole table is the block deletion of §3.4 (rule 6 above), and the
+  table is the marker's payload. A row whose cells are all dashes is a row like any
   other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
   of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
   can unmake the table, as an edit of any line can unmake what it is).
+- **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
+  after its last. The file has no text for them, so there is no place in it to type. Typing into one
+  writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
+  differently. It then writes the text as typing in any cell is written, an insertion with Track
+  Changes on and plain text with it off. The operation `fillCells` (a row, a column and the text)
+  writes both.
+  - **The pipes and the text** go after the row's last character. A row with a closing pipe gets
+    ` |` for each cell in between and then ` text |`: under a header of three columns, `| 1 |`
+    becomes `| 1 | | x |` for an `x` in the third. A row with no closing pipe gets the pipes between
+    its cells and none at the end: `| 1 | 2` becomes `| 1 | 2 | x`. A row that is one `|` has one
+    empty cell, and an `x` in its first missing cell makes it `| | x`.
+  - **With Track Changes on** the `x` is the insertion. Rejecting it leaves `| 1 | |  |`, which
+    reads as the row did, in every order of decisions.
+  - **With no text** the operation writes the pipes alone, so that the cell is there to put a caret
+    in, and every row then ends in a closing pipe: `| 1 | 2` becomes `| 1 | 2 |  |`. The editor
+    does this when an input method starts to compose in the cell.
+  - **Refused:** a pipe or a line break in the text, as in any cell; a cell the row has, and a
+    column the table lacks ("That cell is not one its row lacks."); the header, and a row the
+    table lacks ("There is no such row in this table.").
+  - **A row at the new place of a move that is not yet decided** (the row with the
+    `<!--ins ID row-->` mark, whose old place is kept below the table) would get the pipes in that
+    half of the move only, and rejecting the move would give back a row that reads otherwise. With
+    Track Changes off the typing is a plain edit, written in both halves of the move as any plain
+    edit there is (Moving columns, above). With Track Changes on it is refused, and so are the
+    pipes alone, with it on or off. The refusal names the person who made the move ("Bo Chen's
+    move of this row is pending. Decide it first, or turn off Track Changes." for typed text, and
+    the same without the last words for the pipes alone, which turning it off would not write),
+    and says "Your move" to that person.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
@@ -2278,7 +2376,7 @@ it, one per line:
   with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
   below the last row goes above all of them, at the end of that row.
 - A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
-  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  otherwise, with as many empty cells as the header and a leading pipe (rule 7). Nothing else is
   re-padded.
 - **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
   **Redlines writes alignment changes with Track Changes off only** (the Align commands are refused with
@@ -2525,6 +2623,9 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   front of an opener.
 
 **Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
+A deletion of all the text of a wrapped line takes the same range as with Track Changes on (§3.2): the
+line and the line break in front of it, with the prefix of the line and the syntax of the hard break
+above it. Left in, the empty line would be a paragraph break (#427).
 
 - A mark whose text is all deleted goes, with its ledger entry: an insertion, a highlight or a
   format change with nothing left in it, and a split whose break is deleted. A mark that keeps some

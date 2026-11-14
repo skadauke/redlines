@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import {
   accept,
   acceptAll,
@@ -20,14 +21,18 @@ import {
 } from './table-ops.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
+import { trackedEdit } from './track.ts';
 import {
   TIME,
   ada,
   blockLeaves,
+  bo,
   bodyOf,
   context,
+  exactly,
   expectEveryOrderAlike,
   expectInOrder,
+  expectNoDecisionRefused,
   file,
   thread,
 } from './test-helpers.ts';
@@ -426,5 +431,799 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
     const many = file(body, { k3x9: 'ada', w8nn: 'bo', p5qm: 'ada', m2bd: 'bo' });
     expectEveryOrderAlike('rows', many);
     expectEveryOrderAlike('rows exactly', many, (source) => source.replace(/\s+$/, ''));
+  });
+});
+
+// Deleting a table (format §3.4, §3.7 rule 6): a whole-block deletion of the table, its pending
+// changes folded in, or refused when they are another person's; its comments become points.
+describe('deleting a whole table (format §3.7, rule 6)', () => {
+  const around = (table: string) => `Intro.\n\n${table}\n\nAfter.`;
+  const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
+  const pending = (name: string) => `${name}'s pending change is in this table. Decide it first.`;
+  const CODE_AFTER =
+    "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.";
+  const CODE_BEFORE =
+    "This table can't be deleted with Track Changes on while it ends the text right after a code block or a rule. Put a paragraph between them first, or turn off Track Changes.";
+  const UNDER_TEXT =
+    "This table can't be deleted with Track Changes on while it starts right under the line above it, with no blank line between. Put a blank line between them first, or turn off Track Changes.";
+  const said = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return error instanceof EditError ? error.message : String(error);
+    }
+    return 'no error';
+  };
+  /** The tables that the newest view of `text` shows. */
+  const shown = (text: string) => {
+    const view = newestView(text).text;
+    return readTables(view, parse(view));
+  };
+  /** The refusal of `run`, which gives no changes: fails when it gives some instead. */
+  const refusal = (run: () => unknown): EditError => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    throw new Error('the deletion was not refused');
+  };
+
+  function remove(text: string, who: typeof ada | null = ada, ids = IDS) {
+    const table = readTables(text, parse(text))[0]?.from ?? 0;
+    const op: TableOp = { kind: 'deleteTable', table };
+    const done = who ? tableEdit(text, op, context(who, ids)) : untrackedTableEdit(text, op);
+    return { ...done, after: applyChanges(text, done.changes) };
+  }
+  type Shape<T> = T extends unknown ? Omit<T, 'table'> : never;
+  /** `text` after an operation on its table by `who`: a table with something pending in it. */
+  function made(text: string, op: Shape<TableOp>, who = bo, ids = ['m2bd', 'n3cd']) {
+    const table = readTables(text, parse(text))[0]?.from ?? 0;
+    const done = tableEdit(text, { ...op, table }, context(who, ids));
+    return applyChanges(text, done.changes);
+  }
+
+  const plainTable = file(around(FRUIT));
+  /** Tables with one thing pending in them, by the person `by`, in each kind that a table has. */
+  const pendingBy = (by: 'bo' | 'ada'): Record<string, string> => {
+    const who = by === 'bo' ? bo : ada;
+    const inline = (cell: string) => file(around(FRUIT.replace('Pears', cell)), { m2bd: by });
+    return {
+      'a cell edit': inline('Pe<!--ins m2bd-->x<!--/m2bd-->ars'),
+      'a deleted text in a cell': inline('P<!--del m2bd e-->ars'),
+      'a replaced text in a cell': inline('<!--sub m2bd Pears-->Pairs<!--/m2bd-->'),
+      'a format change in a cell': inline('<!--fmt m2bd +bold-->**Pears**<!--/m2bd-->'),
+      'an inserted row': made(plainTable, { kind: 'insertRows', after: 1, count: 1 }, who),
+      'a moved row': made(plainTable, { kind: 'moveRows', rows: [2], to: 1 }, who),
+      'a deleted row': made(plainTable, { kind: 'deleteRows', rows: [2] }, who),
+      'an inserted column': made(plainTable, { kind: 'insertCols', after: 1, count: 1 }, who),
+      'a moved column': made(plainTable, { kind: 'moveCols', cols: [0], to: 2 }, who),
+      'a deleted column': made(plainTable, { kind: 'deleteCols', cols: [1] }, who),
+      'an alignment change': made(plainTable, { kind: 'align', cols: [1], align: 'center' }, who, [
+        'm2bd',
+      ]),
+    };
+  };
+
+  it('is one block deletion in front of the block after the table, the table its payload', () => {
+    const done = remove(file(around(FRUIT)));
+    const marks = parse(done.after).marks;
+    expect(marks.map((mark) => [mark.id, mark.kind])).toEqual([['k3x9', 'del']]);
+    // The table and the break after it (format §3.4), as it reads.
+    expect(marks[0]?.payload).toBe(`${FRUIT}\n\n`);
+    expect(trimmed(done.after)).toMatch(/^Intro\.\n\n<!--del k3x9 [^]*-->\n\nAfter\.$/);
+    expect(parse(done.after).ledger.marks).toEqual({ k3x9: { by: 'ada', at: TIME } });
+    expectInOrder('table', [], done.after);
+    // The caret goes to the text that follows the table.
+    expect(done.after.slice(done.caret, done.caret + 6)).toBe('After.');
+  });
+
+  it('reads in the three views, and is decided in every order, rejecting gives every byte back', () => {
+    const text = file(around(FRUIT));
+    const done = remove(text);
+    expect(newestView(done.after).text).toBe('Intro.\n\nAfter.\n');
+    expect(originalView(done.after).text).toBe(`${around(FRUIT)}\n`);
+    expect(reviewView(done.after)).toBe(`Intro.\n\n{--${FRUIT}\n\n--}[k3x9 ada]After.\n`);
+    expect(trimmed(applyChanges(done.after, accept(done.after, 'k3x9')))).toBe('Intro.\n\nAfter.');
+    expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(around(FRUIT));
+    expect(trimmed(applyChanges(done.after, rejectAll(done.after)))).toBe(trimmed(text));
+    expect(blockLeaves(newestView(done.after).text).some((leaf) => leaf.kind === 'table')).toBe(
+      false,
+    );
+    expect(rowsOf(originalView(done.after).text)).toEqual(rowsOf(text));
+    expectEveryOrderAlike('table', done.after, exactly);
+    expectNoDecisionRefused('table', done.after);
+  });
+
+  it('is behind the block above when the table ends the text, and alone when it is all of it', () => {
+    const last = remove(file(`Intro.\n\n${FRUIT}`));
+    expect(parse(last.after).marks[0]?.payload).toBe(`\n\n${FRUIT}`);
+    expect(trimmed(last.after)).toMatch(/^Intro\.<!--del k3x9 [^]*-->$/);
+    expect(newestView(last.after).text).toBe('Intro.\n');
+    expect(last.after.slice(last.caret - 6, last.caret)).toBe('Intro.');
+    expectEveryOrderAlike('last', last.after, exactly);
+    expect(trimmed(applyChanges(last.after, reject(last.after, 'k3x9')))).toBe(
+      `Intro.\n\n${FRUIT}`,
+    );
+
+    const first = remove(file(`${FRUIT}\n\nAfter.`));
+    expect(parse(first.after).marks[0]?.payload).toBe(`${FRUIT}\n\n`);
+    expect(first.after.slice(first.caret, first.caret + 6)).toBe('After.');
+    expect(newestView(first.after).text).toBe('After.\n');
+    expectEveryOrderAlike('first', first.after, exactly);
+
+    const only = remove(file(FRUIT));
+    expect(parse(only.after).marks[0]?.payload).toBe(FRUIT);
+    expect(newestView(only.after).text).toBe('\n');
+    expect(only.caret).toBe(0);
+    expect(trimmed(applyChanges(only.after, reject(only.after, 'k3x9')))).toBe(FRUIT);
+    expectEveryOrderAlike('only', only.after, exactly);
+  });
+
+  it('deletes the table it is asked for, among tables and other blocks', () => {
+    const two = file(`One.\n\n${FRUIT}\n\nTwo.\n\n| z |\n| - |\n| y |\n\nThree.`);
+    const second = readTables(two, parse(two))[1]?.from ?? 0;
+    const done = tableEdit(two, { kind: 'deleteTable', table: second }, context(ada, ['k3x9']));
+    const after = applyChanges(two, done.changes);
+    expect(parse(after).marks[0]?.payload).toBe('| z |\n| - |\n| y |\n\n');
+    expect(newestView(after).text).toContain(`${FRUIT}\n\nTwo.\n\nThree.`);
+    expect(said(() => tableEdit(two, { kind: 'deleteTable', table: 3 }, context(ada, IDS)))).toBe(
+      'There is no table there.',
+    );
+    expectEveryOrderAlike('two tables', after, exactly);
+  });
+
+  it('keeps every character of cells with escaped pipes, code spans, links, emoji and ragged rows', () => {
+    const odd = [
+      '| a \\| b | `x\\|y` | [link](http://example.org/a_b) |',
+      '| --- | --- | --- |',
+      '| 👍🏽 | é | ![img](pic.png) |',
+      '| short |',
+      '| 1 | 2 | 3 | 4 |',
+    ].join('\n');
+    const text = file(around(odd));
+    expect(readTables(text, parse(text))).toHaveLength(1);
+    const done = remove(text);
+    expect(parse(done.after).marks[0]?.payload).toBe(`${odd}\n\n`);
+    expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(around(odd));
+    expectEveryOrderAlike('odd cells', done.after, exactly);
+    expect(trimmed(remove(text, null).after)).toBe('Intro.\n\nAfter.');
+  });
+
+  it('is not held up by another person’s change in the text around it or in another table', () => {
+    const other = FRUIT.replace('Fruit', 'Veg').replace(
+      'Pears',
+      'Pe<!--ins m2bd-->x<!--/m2bd-->ars',
+    );
+    const text = file(`Af<!--ins n3cd-->x<!--/n3cd-->ter.\n\n${FRUIT}\n\n${other}\n\nEnd.`, {
+      m2bd: 'bo',
+      n3cd: 'bo',
+    });
+    const done = remove(text);
+    expect(
+      parse(done.after)
+        .marks.map((mark) => mark.id)
+        .sort(),
+    ).toEqual(['k3x9', 'm2bd', 'n3cd']);
+    expect(rowsOf(newestView(done.after).text)?.[0]).toEqual(['Veg', 'Count']);
+    expectEveryOrderAlike('around', done.after, exactly);
+  });
+
+  it('writes the file’s own line breaks', () => {
+    const crlf = file(around(FRUIT).replaceAll('\n', '\r\n'));
+    const done = remove(crlf);
+    const body = bodyOf(done.after);
+    expect(body.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/);
+    expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(
+      around(FRUIT).replaceAll('\n', '\r\n'),
+    );
+    expectEveryOrderAlike('crlf', done.after, exactly);
+    const plain = remove(crlf, null);
+    expect(trimmed(plain.after)).toBe('Intro.\r\n\r\nAfter.');
+  });
+
+  it('deletes a table whose rows have no outer pipes, with no pipe to stand a marker at', () => {
+    for (const table of [
+      'Fruit | Count\n--- | ---\nApples | 3',
+      'Fruit | Count |\n--- | --- |\nApples | 3 |',
+      '| Fruit | Count\n| --- | ---\n| Apples | 3',
+    ]) {
+      const text = file(around(table));
+      const done = remove(text);
+      expect(parse(done.after).marks[0]?.payload, table).toBe(`${table}\n\n`);
+      expectEveryOrderAlike(table, done.after, exactly);
+      expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9'))), table).toBe(
+        around(table),
+      );
+      expect(trimmed(remove(text, null).after), table).toBe('Intro.\n\nAfter.');
+    }
+  });
+
+  it('keeps apart the paragraphs around a table that starts in the line under one', () => {
+    const text = file(`Intro.\n${FRUIT}\n\nAfter.`);
+    expect(readTables(text, parse(text))).toHaveLength(1);
+    // The blank line after the table stays: the paragraphs would be one without it.
+    expect(trimmed(remove(text, null).after)).toBe('Intro.\n\nAfter.');
+    // A tracked deletion there has no form, and is refused, in words of its own (below).
+    expect(refusal(() => remove(text)).message).toBe(UNDER_TEXT);
+  });
+
+  // With Track Changes on, the deletion's marker stands in front of the block after the table, or
+  // behind the block before it at the end of the text, and in some places no marker can stand. Each is
+  // refused in words that say what is in the way and what to do; each way out is held to work.
+  describe('where Track Changes has no place to write the deletion', () => {
+    const FENCES = [
+      '```\ncode\n```',
+      '~~~\ncode\n~~~',
+      '```js\ncode\n```',
+      '   ```\n   code\n   ```',
+    ];
+
+    it('refuses a code block after the table, and says to put a paragraph between them', () => {
+      for (const fence of FENCES) {
+        for (const [head, gap, tail] of [
+          ['Intro.\n\n', '\n\n', ''],
+          ['', '\n\n', ''],
+          ['Intro.\n\n', '\n', ''],
+          ['Intro.\n\n', '\n\n', '\n\nAfter.'],
+        ] as const) {
+          const label = JSON.stringify(head + FRUIT + gap + fence + tail);
+          const text = file(head + FRUIT + gap + fence + tail);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(CODE_AFTER);
+          expect(error.code, label).toBe('no-legal-placement');
+          // Track Changes off takes the table as text, and leaves the code block as it was.
+          expect(trimmed(remove(text, null).after), label).toBe(head + fence + tail);
+          // A paragraph between them, as text or as a pending insertion of anyone's, gives it a place.
+          const as = (between: string, marks: Record<string, string> = {}) =>
+            file(`${head}${FRUIT}\n\n${between}\n\n${fence}${tail}`, marks);
+          for (const fixed of [
+            as('Text.'),
+            as('<!--ins m2bd-->\n\nText.<!--/m2bd-->', { m2bd: 'ada' }),
+            as('<!--ins m2bd-->\n\nText.<!--/m2bd-->', { m2bd: 'bo' }),
+          ]) {
+            const done = remove(fixed);
+            expect(shown(done.after)).toHaveLength(0);
+            expectEveryOrderAlike(label, done.after, exactly);
+          }
+        }
+      }
+    });
+
+    it('refuses a table that ends the text right after a code block or a rule, and says so', () => {
+      for (const above of ['```\ncode\n```', '~~~\ncode\n~~~', '    code', '---']) {
+        for (const head of ['', 'Intro.\n\n']) {
+          const label = JSON.stringify(`${head}${above}\n\n${FRUIT}`);
+          const text = file(`${head}${above}\n\n${FRUIT}`);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(CODE_BEFORE);
+          expect(error.code, label).toBe('no-legal-placement');
+          expect(trimmed(remove(text, null).after), label).toBe(`${head}${above}`);
+          // A paragraph between them, or one after the table, gives it a place.
+          for (const fixed of [
+            `${head}${above}\n\nText.\n\n${FRUIT}`,
+            `${head}${above}\n\n${FRUIT}\n\nAfter.`,
+            `${head}${above}\n\n<!--ins m2bd-->\n\nText.<!--/m2bd-->\n\n${FRUIT}`,
+          ]) {
+            const done = remove(file(fixed, { m2bd: 'ada' }));
+            expect(shown(done.after)).toHaveLength(0);
+            expectEveryOrderAlike(label, done.after, exactly);
+          }
+        }
+      }
+    });
+
+    it('refuses a table on the line under a line of text, and says to put a blank line between', () => {
+      for (const above of [
+        'Intro.',
+        'One.\nTwo.',
+        'Intro.  ',
+        '---',
+        'Title\n=====',
+        '```\ncode\n```',
+      ]) {
+        const label = JSON.stringify(`${above}\n${FRUIT}`);
+        const text = file(`${above}\n${FRUIT}\n\nAfter.`);
+        expect(readTables(text, parse(text)), label).toHaveLength(1);
+        const error = refusal(() => remove(text));
+        expect(error.message, label).toBe(UNDER_TEXT);
+        expect(error.code, label).toBe('no-legal-placement');
+        expect(trimmed(remove(text, null).after), label).toBe(`${above}\n\nAfter.`);
+        // A blank line above the table gives it a place.
+        const done = remove(file(`${above}\n\n${FRUIT}\n\nAfter.`));
+        expect(shown(done.after)).toHaveLength(0);
+        expectEveryOrderAlike(label, done.after, exactly);
+      }
+    });
+
+    it('is given a place by a blank line that is typed with Track Changes on', () => {
+      const text = file(`Intro.\n${FRUIT}\n\nAfter.`);
+      const at = text.indexOf('Intro.') + 'Intro.'.length;
+      // (the editor's Return at the end of a paragraph writes a blank line)
+      const typed = applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from: at, to: at, insert: '\n\n' },
+          context(ada, ['m2bd', 'n3cd', 'p5qm']),
+        ),
+      );
+      expect(readTables(typed, parse(typed))).toHaveLength(1);
+      const done = remove(typed, ada, ['k3x9', 'w8nn']);
+      expect(shown(done.after)).toHaveLength(0);
+      expectEveryOrderAlike('typed blank line', done.after, exactly);
+    });
+
+    it('still deletes a table under a heading line or at the end of the text under a line of text', () => {
+      for (const body of [`## Head\n${FRUIT}\n\nAfter.`, `Intro.\n${FRUIT}`]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
+        expectEveryOrderAlike(body, done.after, exactly);
+      }
+    });
+
+    it('refuses a table next to a heading with closing #s or attributes in the words of any edit there', () => {
+      // (format §3.7, rule 6: such a heading takes no change at its end, so no marker can be written
+      // after it. The words are the ordinary ones, which say less than the others do.)
+      const WORDS = "A heading's closing #s and attributes take no change.";
+      for (const head of ['## Head ##', '## Head {#intro}']) {
+        for (const [shape, body] of [
+          ['right under it, with text after', `${head}\n${FRUIT}\n\nAfter.`],
+          ['right under it, ending the text', `${head}\n${FRUIT}`],
+          ['ending the text, a blank line between', `${head}\n\n${FRUIT}`],
+          [
+            'ending the text, a blank line before and after the heading',
+            `Intro.\n\n${head}\n\n${FRUIT}`,
+          ],
+        ] as const) {
+          const label = `${head}: ${shape}`;
+          const text = file(body);
+          expect(readTables(text, parse(text)), label).toHaveLength(1);
+          const error = refusal(() => remove(text));
+          expect(error.message, label).toBe(WORDS);
+          for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
+            expect(error.message, label).not.toBe(words);
+          }
+          // Track Changes off takes the table as text, as it does anywhere.
+          expect(shown(remove(text, null).after), label).toHaveLength(0);
+        }
+        // The two ways out: a blank line between them gives a table that has text after it its place,
+        // and a paragraph between them gives one that ends the text its place.
+        for (const fixed of [`${head}\n\n${FRUIT}\n\nAfter.`, `${head}\n\nText.\n\n${FRUIT}`]) {
+          const done = remove(file(fixed));
+          expect(shown(done.after), fixed).toHaveLength(0);
+          expectEveryOrderAlike(fixed, done.after, exactly);
+        }
+      }
+    });
+
+    it('leaves the other refusals as they are', () => {
+      // Another person's change is named before the shape of the neighbors is looked at.
+      const text = file(`Intro.\n${FRUIT.replace('Pears', 'Pe<!--ins m2bd-->x<!--/m2bd-->ars')}`, {
+        m2bd: 'bo',
+      });
+      expect(refusal(() => remove(text)).message).toBe(pending('Bo Chen'));
+    });
+
+    // What the words above are chosen by is the shape next to the table: a fence that opens the block
+    // after it, a table that ends the text after code or a rule, a table right under a line of text.
+    // A shape that looks like one and is none is refused as the ordinary deletion of a block is, in
+    // its words, unchanged.
+    it('gives the ordinary words, unchanged, for a shape that only looks like those', () => {
+      const ordinary = (text: string) => {
+        const table = readTables(text, parse(text))[0] as { from: number; to: number };
+        return refusal(() =>
+          trackedEdit(text, { from: table.from, to: table.to, insert: '' }, context(ada, IDS)),
+        );
+      };
+      const shapes: [string, string, string][] = [
+        // Code indented on both sides: the table is not at the end of the text, and no fence follows.
+        ['indented code on both sides', `    code\n\n${FRUIT}\n\n    more code`, 'inside-code'],
+        [
+          'indented code on both sides, under text',
+          `Intro.\n\n    code\n\n${FRUIT}\n\n    more code`,
+          'inside-code',
+        ],
+        // A fence that opens a list item is no block of its own after the table.
+        [
+          'a bulleted item that opens with a fence',
+          `Intro.\n\n${FRUIT}\n\n- \`\`\`\n  code\n  \`\`\``,
+          'unclosed-end',
+        ],
+        [
+          'a numbered item that opens with a fence',
+          `${FRUIT}\n\n1. \`\`\`\n   code\n   \`\`\``,
+          'unclosed-end',
+        ],
+      ];
+      for (const [name, body, code] of shapes) {
+        const text = file(body);
+        expect(readTables(text, parse(text)), name).toHaveLength(1);
+        const error = refusal(() => remove(text));
+        const generic = ordinary(text);
+        expect(error.message, name).toBe(generic.message);
+        expect(error.code, name).toBe(generic.code);
+        expect(error.code, name).toBe(code);
+        for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
+          expect(error.message, name).not.toBe(words);
+        }
+        // Track Changes off takes the table as text, as it does anywhere.
+        expect(shown(remove(text, null).after), name).toHaveLength(0);
+      }
+    });
+
+    it('deletes a table that has only code that is none of those next to it, in every order', () => {
+      for (const body of [
+        // Indented code after the table is no fence, and a quoted fence is a quote's.
+        `Intro.\n\n${FRUIT}\n\n    code`,
+        `Intro.\n\n${FRUIT}\n\n> \`\`\`\n> code\n> \`\`\``,
+      ]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
+        expectEveryOrderAlike(body, done.after, exactly);
+      }
+    });
+  });
+
+  describe('another person’s pending change stays theirs', () => {
+    for (const [name, text] of Object.entries(pendingBy('bo'))) {
+      it(`refuses ${name} of Bo’s, with Track Changes on, naming him`, () => {
+        // A refusal gives no changes (`refusal` fails on a return), and says whose change it is.
+        const error = refusal(() => remove(text));
+        expect(error.message).toBe(pending('Bo Chen'));
+        expect(error.code).toBe('no-legal-placement');
+      });
+    }
+
+    for (const [name, text] of Object.entries(pendingBy('ada'))) {
+      it(`refuses ${name} of Ada’s when Bo deletes the table`, () => {
+        expect(said(() => remove(text, bo))).toBe(pending('Ada Lovelace'));
+      });
+    }
+
+    it('is not refused for another person’s comment, which is no change', () => {
+      const text = file(
+        around(FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')),
+        {},
+        thread('c9qf', 'bo'),
+      );
+      expect(said(() => remove(text))).toBe('no error');
+    });
+
+    it('is refused for a pending change that holds the table, as it is for one in it', () => {
+      const text = file(`Intro.\n\n<!--ins m2bd-->\n\n${FRUIT}\n\n<!--/m2bd-->\n\nAfter.`, {
+        m2bd: 'bo',
+      });
+      expect(readTables(text, parse(text))).toHaveLength(1);
+      expect(said(() => remove(text))).toBe(pending('Bo Chen'));
+    });
+
+    it('names Bo for his change when Ada’s own row is pending beside it', () => {
+      const text = file(
+        around(
+          FRUIT.replace('| Pears ', '| <!--ins m2bd row--> Pears').replace(
+            'Apples',
+            'App<!--ins n3cd-->x<!--/n3cd-->les',
+          ),
+        ),
+        { m2bd: 'ada', n3cd: 'bo' },
+      );
+      expect(said(() => remove(text))).toBe(pending('Bo Chen'));
+    });
+  });
+
+  describe('your own pending changes fold into the deletion', () => {
+    const own = pendingBy('ada');
+    for (const [name, text] of Object.entries(own)) {
+      it(`undoes ${name} of your own in the payload, as rejecting it would`, () => {
+        const done = remove(text);
+        const marks = parse(done.after).marks;
+        // The one deletion, and nothing else of the table's marks: they are folded into it.
+        expect(marks.map((mark) => mark.kind)).toEqual(['del']);
+        expect(marks[0]?.payload).toBe(`${FRUIT}\n\n`);
+        expect(Object.keys(parse(done.after).ledger.marks)).toEqual([marks[0]?.id]);
+        // The original is as it was; the newest has no table.
+        expect(originalView(done.after).text).toBe(originalView(text).text);
+        expect(newestView(done.after).text).toBe('Intro.\n\nAfter.\n');
+        expectInOrder(name, [], done.after);
+        expectEveryOrderAlike(name, done.after, exactly);
+        expect(trimmed(applyChanges(done.after, reject(done.after, marks[0]?.id ?? '')))).toBe(
+          around(FRUIT),
+        );
+      });
+    }
+
+    it('removes your own pending row outright, and its ledger entry', () => {
+      const text = made(plainTable, { kind: 'insertRows', after: 1, count: 1 }, ada, ['m2bd']);
+      expect(parse(text).ledger.marks['m2bd']).toBeDefined();
+      const done = remove(text);
+      expect(parse(done.after).ledger.marks['m2bd']).toBeUndefined();
+      expect(trimmed(done.after)).not.toContain('row-->');
+    });
+
+    it('takes your own deletion lines in, so that their rows are in the table it keeps', () => {
+      const text = made(plainTable, { kind: 'deleteRows', rows: [1, 2] }, ada, [
+        'm2bd',
+        'n3cd',
+        'p5qm',
+      ]);
+      expect(trimmed(text)).toContain('<!--del n3cd row=');
+      const done = remove(text);
+      expect(trimmed(done.after)).not.toContain('row=');
+      expect(parse(done.after).marks[0]?.payload).toBe(`${FRUIT}\n\n`);
+      expect(rowsOf(originalView(done.after).text)).toEqual(rowsOf(plainTable));
+    });
+
+    it('is a table that your own insertion holds: the table goes from its text, which stays pending', () => {
+      const FIRST = `Intro.\n\n<!--ins m2bd-->\n\nNew words.<!--split n3cd-->\n\n${FRUIT}\n\n<!--/m2bd-->\n\nAfter.`;
+      const AFTER = `Intro.\n\n<!--ins m2bd-->\n\n${FRUIT}\n\nMore words.<!--/m2bd-->\n\nAfter.`;
+      for (const body of [FIRST, AFTER]) {
+        const text = file(body, { m2bd: 'ada', n3cd: 'ada' });
+        expect(readTables(text, parse(text))).toHaveLength(1);
+        const done = remove(text);
+        // No deletion: the table's text was your own, and is taken out of it.
+        expect(parse(done.after).marks.map((mark) => mark.kind)).not.toContain('del');
+        expect(parse(done.after).marks.some((mark) => mark.id === 'm2bd')).toBe(true);
+        expect(readTables(done.after, parse(done.after))).toHaveLength(0);
+        expect(newestView(done.after).text).toContain(
+          body.includes('New') ? 'New words.' : 'More words.',
+        );
+        expect(newestView(done.after).text).not.toContain('Fruit');
+        expect(originalView(done.after).text).toBe(originalView(text).text);
+        expectInOrder('own insertion', [], done.after);
+        expectEveryOrderAlike('own insertion', done.after, exactly);
+      }
+    });
+
+    it('refuses a change of yours that runs from the table into the text around it, which would take both', () => {
+      const text = file(
+        `Intro <!--ins m2bd-->words.\n\n${FRUIT.replace('Apples', 'Ap<!--/m2bd-->ples')}\n\nAfter.`,
+        { m2bd: 'ada' },
+      );
+      expect(readTables(text, parse(text))).toHaveLength(1);
+      expect(said(() => remove(text))).toBe(pending('Ada Lovelace'));
+      expect(said(() => remove(text, bo))).toBe(pending('Ada Lovelace'));
+    });
+
+    it('is a table that is only your own pending insertion: it goes with no trace', () => {
+      const text = file(`Intro.\n\n<!--ins m2bd-->\n\n${FRUIT}\n\n<!--/m2bd-->\n\nAfter.`, {
+        m2bd: 'ada',
+      });
+      const done = remove(text);
+      expect(parse(done.after).marks).toEqual([]);
+      expect(parse(done.after).ledger.marks).toEqual({});
+      expect(newestView(done.after).text).toBe(originalView(text).text);
+      expect(originalView(done.after).text).toBe(originalView(text).text);
+    });
+  });
+
+  describe('its comments become point comments where it was', () => {
+    const commented = (by: string, where = around) =>
+      file(
+        where(FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')),
+        {},
+        thread('c9qf', by),
+      );
+
+    it('puts a point at the start of the text of the block after it, whoever’s the thread is', () => {
+      for (const by of ['ada', 'bo']) {
+        const done = remove(commented(by));
+        expectInOrder(by, ['c9qf'], done.after);
+        const parsed = parse(done.after);
+        const point = parsed.marks.find((mark) => mark.id === 'c9qf');
+        const deletion = parsed.marks.find((mark) => mark.id === 'k3x9');
+        expect(point?.kind).toBe('cmt');
+        // A point: no closer, no text in the table, after the deletion's marker and before the text.
+        expect(point?.segments.map((segment) => segment.close)).toEqual([undefined]);
+        expect(point?.segments[0]?.open.from).toBeGreaterThanOrEqual(
+          deletion?.segments[0]?.open.to ?? Infinity,
+        );
+        expect(deletion?.payload).toBe(`${FRUIT}\n\n`);
+        expect(parsed.ledger.comments.find((t) => t.id === 'c9qf')?.by).toBe(by);
+        expect(newestView(done.after).text).toBe('Intro.\n\nAfter.\n');
+        expect(trimmed(applyChanges(done.after, accept(done.after, 'k3x9')))).toBe(
+          'Intro.\n\n<!--cmt c9qf-->\n\nAfter.',
+        );
+        expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(
+          `Intro.\n\n${FRUIT}\n\n<!--cmt c9qf-->\n\nAfter.`,
+        );
+        expectEveryOrderAlike(by, done.after, exactly);
+      }
+    });
+
+    it('puts it at the end of the text of the block before it when the table ends the text', () => {
+      const done = remove(commented('ada', (table) => `Intro.\n\n${table}`));
+      expectInOrder('last', ['c9qf'], done.after);
+      expect(trimmed(done.after)).toMatch(/^Intro\.<!--cmt c9qf--><!--del k3x9 [^]*-->$/);
+      expect(trimmed(applyChanges(done.after, accept(done.after, 'k3x9')))).toBe(
+        'Intro.<!--cmt c9qf-->',
+      );
+      expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(
+        `Intro.<!--cmt c9qf-->\n\n${FRUIT}`,
+      );
+    });
+
+    it('makes one point of a comment that runs over several rows, and keeps the order of many', () => {
+      const body = FRUIT.replace('Apples', '<!--cmt c9qf-->Apples')
+        .replace('Pears ', 'Pears<!--/c9qf-->')
+        .replace('| 3 ', '| <!--cmt d4rs-->3<!--/d4rs-->');
+      const text = file(around(body), {}, [...thread('c9qf', 'bo'), ...thread('d4rs', 'ada')]);
+      const done = remove(text);
+      expectInOrder('rows', ['c9qf', 'd4rs'], done.after);
+      const points = parse(done.after).marks.filter((mark) => mark.kind === 'cmt');
+      expect(points.map((mark) => mark.id)).toEqual(['c9qf', 'd4rs']);
+      expect(points.every((mark) => mark.segments.every((s) => s.close === undefined))).toBe(true);
+      const accepted = applyChanges(done.after, accept(done.after, 'k3x9'));
+      expect(parse(accepted).marks.map((mark) => mark.id)).toEqual(['c9qf', 'd4rs']);
+      expect(newestView(accepted).text).toBe('Intro.\n\nAfter.\n');
+    });
+
+    it('is in the table for a comment on a header with no pipe at its start, opened on the line above', () => {
+      const table = 'Fruit | Count\n-- | --\nApples | 3';
+      const bare = file(around(table));
+      const at = bare.indexOf('Fruit');
+      const text = applyChanges(
+        bare,
+        addComment(bare, { from: at, to: at + 5 }, 'A note.', context(bo, ['c9qf'])).changes,
+      );
+      // Its opener is alone on the line above the table, which it starts as a block.
+      expect(trimmed(text)).toContain('<!--cmt c9qf-->\n\nFruit');
+      const done = remove(text);
+      expectInOrder('header', ['c9qf'], done.after);
+      const point = parse(done.after).marks.find((mark) => mark.id === 'c9qf');
+      expect(point?.segments.map((segment) => segment.close)).toEqual([undefined]);
+      expect(newestView(done.after).text).toBe('Intro.\n\nAfter.\n');
+      expect(parse(done.after).marks.find((mark) => mark.id === 'k3x9')?.payload).toBe(
+        `${table}\n\n`,
+      );
+      expect(trimmed(applyChanges(done.after, reject(done.after, 'k3x9')))).toBe(
+        `Intro.\n\n${table}\n\n<!--cmt c9qf-->\n\nAfter.`,
+      );
+      expectEveryOrderAlike('header', done.after, exactly);
+      expect(trimmed(remove(text, null).after)).toBe('Intro.\n\n<!--cmt c9qf-->\n\nAfter.');
+    });
+
+    it('loses only the part in the table of a comment with a part that stays', () => {
+      const text = file(
+        around(FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')).replace(
+          'Intro.',
+          '<!--cmt c9qf-->Intro.<!--/c9qf-->',
+        ),
+        {},
+        thread('c9qf', 'bo'),
+      );
+      const done = remove(text);
+      expectInOrder('part', ['c9qf'], done.after);
+      const mark = parse(done.after).marks.find((m) => m.id === 'c9qf');
+      expect(mark?.segments).toHaveLength(1);
+      expect(trimmed(done.after)).toContain('<!--cmt c9qf-->Intro.<!--/c9qf-->');
+    });
+
+    it('lets a highlight go, which has no point form, with its ledger entry', () => {
+      const text = file(around(FRUIT.replace('Pears', '<!--hl h4jj-->Pears<!--/h4jj-->')), {
+        h4jj: 'bo',
+      });
+      const done = remove(text);
+      expect(parse(done.after).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      expect(Object.keys(parse(done.after).ledger.marks)).toEqual(['k3x9']);
+      expect(parse(done.after).marks[0]?.payload).toBe(`${FRUIT}\n\n`);
+      expectEveryOrderAlike('highlight', done.after, exactly);
+    });
+
+    it('refuses a comment that runs from the table into the text around it, naming its author', () => {
+      const words = (name: string) =>
+        `${name}'s comment runs from this table into the text next to it. Delete it first, or turn off Track Changes.`;
+      const above = file(
+        `Intro <!--cmt c9qf-->words.\n\n${FRUIT.replace('Pears', 'Pears<!--/c9qf-->')}\n\nAfter.`,
+        {},
+        thread('c9qf', 'bo'),
+      );
+      expect(said(() => remove(above))).toBe(words('Bo Chen'));
+      const below = file(
+        `Intro.\n\n${FRUIT.replace('Pears', '<!--cmt c9qf-->Pears')}\n\nAfter <!--/c9qf-->words.`,
+        {},
+        thread('c9qf', 'ada'),
+      );
+      expect(said(() => remove(below))).toBe(words('Ada Lovelace'));
+      // A comment that holds the whole table, with no marker in it, is not in the table.
+      const over = file(
+        `Intro <!--cmt c9qf-->words.\n\n${FRUIT}\n\nAfter <!--/c9qf-->words.`,
+        {},
+        thread('c9qf', 'bo'),
+      );
+      const done = remove(over);
+      expectInOrder('over', ['c9qf'], done.after);
+      expect(parse(done.after).marks.find((m) => m.id === 'c9qf')?.segments).toHaveLength(1);
+    });
+
+    it('refuses when the only text next to the table is code, which holds no point', () => {
+      const body = `${FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')}\n\n\`\`\`\ncode\n\`\`\``;
+      expect(said(() => remove(file(body, {}, thread('c9qf', 'bo'))))).toBe(
+        "Bo Chen's comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.",
+      );
+    });
+
+    it('refuses when no text is there to keep the point, and says to delete the comment', () => {
+      const only = file(
+        FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->'),
+        {},
+        thread('c9qf', 'bo'),
+      );
+      expect(said(() => remove(only))).toBe(
+        "Bo Chen's comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.",
+      );
+      // With Track Changes off the table goes as text and the comment keeps a point.
+      const plain = remove(only, null);
+      expect(trimmed(plain.after)).toBe('<!--cmt c9qf-->');
+      expect(parse(plain.after).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
+    });
+  });
+
+  describe('with Track Changes off', () => {
+    it('takes the table and the blank line after it out as text', () => {
+      const done = remove(file(around(FRUIT)), null);
+      expect(trimmed(done.after)).toBe('Intro.\n\nAfter.');
+      expect(done.after.slice(done.caret, done.caret + 6)).toBe('After.');
+      expect(parse(done.after).marks).toEqual([]);
+      const last = remove(file(`Intro.\n\n${FRUIT}`), null);
+      expect(trimmed(last.after)).toBe('Intro.');
+      expect(last.after.slice(last.caret - 6, last.caret)).toBe('Intro.');
+      expect(trimmed(remove(file(`${FRUIT}\n\nAfter.`), null).after)).toBe('After.');
+      expect(trimmed(remove(file(FRUIT), null).after)).toBe('');
+    });
+
+    it('is what accepting the tracked deletion leaves', () => {
+      for (const body of [around(FRUIT), `Intro.\n\n${FRUIT}`, `${FRUIT}\n\nAfter.`]) {
+        const text = file(body);
+        const tracked = remove(text);
+        const accepted = applyChanges(tracked.after, accept(tracked.after, 'k3x9'));
+        expect(trimmed(accepted), body).toBe(trimmed(remove(text, null).after));
+      }
+    });
+
+    it('takes what was pending in it with it, anyone’s, and its deletion lines and ledger entries', () => {
+      for (const by of ['bo', 'ada'] as const) {
+        for (const [name, text] of Object.entries(pendingBy(by))) {
+          const done = remove(text, null);
+          expect(trimmed(done.after), `${by} ${name}`).toBe('Intro.\n\nAfter.');
+          expect(parse(done.after).marks, `${by} ${name}`).toEqual([]);
+          expect(parse(done.after).ledger.marks, `${by} ${name}`).toEqual({});
+        }
+      }
+    });
+
+    it('keeps a comment of the table as a point where it was', () => {
+      const text = file(
+        around(FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')),
+        {},
+        thread('c9qf', 'bo'),
+      );
+      const done = remove(text, null);
+      expect(trimmed(done.after)).toBe('Intro.\n\n<!--cmt c9qf-->\n\nAfter.');
+      expectInOrder('plain comment', ['c9qf'], done.after);
+      const last = remove(
+        file(
+          `Intro.\n\n${FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')}`,
+          {},
+          thread('c9qf', 'bo'),
+        ),
+        null,
+      );
+      expect(trimmed(last.after)).toBe('Intro.<!--cmt c9qf-->');
+    });
+  });
+
+  it('is allowed whatever is pending, for rule 2 asks nothing of a deletion of the table', () => {
+    const all: TablePending = {
+      rowsInserted: true,
+      rowsChanged: true,
+      colsInserted: true,
+      colsChanged: true,
+      align: true,
+    };
+    for (const tracked of [true, false]) expect(ruleTwo('deleteTable', all, tracked)).toBeNull();
   });
 });

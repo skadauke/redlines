@@ -12,6 +12,7 @@ import {
   type EditorCommand,
   deleteCols,
   deleteRows,
+  deleteTable,
   headInTable,
   insertCols,
   insertRows,
@@ -104,6 +105,15 @@ export function createTables(editor: Editor): () => void {
       'columns',
     ),
     row('table.deleteColumn', colTitles.delete, 'Ctrl-Meta-Backspace', deleteCols, 'columns'),
+    // The whole table has no default key: ⌫ on a table whose cells are empty is its keyboard path.
+    {
+      id: 'table.deleteTable',
+      title: 'Delete Table',
+      menu: 'table',
+      group: 'columns',
+      isEnabled: headInTable,
+      run: (target) => deleteTable(target.view),
+    },
     // Moving columns has no default key: Alt with the arrows is the word and the row.
     {
       id: 'table.moveColumnLeft',
@@ -169,6 +179,7 @@ export const plugin: Plugin = {
           shortcut: 'Alt-Mod-ArrowRight',
         },
         { id: 'table.deleteColumn', title: 'Delete Column', shortcut: 'Ctrl-Meta-Backspace' },
+        { id: 'table.deleteTable', title: 'Delete Table' },
         { id: 'table.moveColumnLeft', title: 'Move Column Left' },
         { id: 'table.moveColumnRight', title: 'Move Column Right' },
         { id: 'table.alignLeft', title: 'Align Left' },

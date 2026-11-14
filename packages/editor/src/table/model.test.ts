@@ -62,6 +62,131 @@ describe('the tables of a state', () => {
   });
 });
 
+describe('a position where one cell’s mark ends and the next begins', () => {
+  // A cell's mark runs from the pipe in front of it to the next pipe, so the position in front of that
+  // pipe ends one mark and starts the next. It is the end of the first cell's text when that has no
+  // padding after it (an empty cell with one space or none, `| |` and `||`; text such as `| y|` and
+  // `|a|b|`), and then it is that cell's last stop, never the next cell's: its first stop is after its
+  // own pipe. Any other position there is the next cell's, as a position in a pipe is.
+  const doc = (row: string) => `| a | b | c |\n| - | - | - |\n${row}`;
+  const colsAt = (row: string) => {
+    const state = make(doc(row));
+    const start = doc(row).indexOf(row);
+    return (pos: number) => {
+      const found = cellAt(state, start + pos);
+      return found && [found.row.index, found.cell.col];
+    };
+  };
+
+  it('belongs to the empty cell with one space of padding, or none, whose text ends there', () => {
+    const at = colsAt('| 1 | | x |');
+    expect([at(4), at(5), at(6)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]);
+    // After the next cell's pipe it is the next cell's.
+    expect([at(7), at(8)]).toEqual([
+      [1, 2],
+      [1, 2],
+    ]);
+    const none = colsAt('| 1 || x |');
+    expect([none(4), none(5), none(6)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+    expect(colsAt('| | 1 | x |')(2)).toEqual([1, 0]);
+    expect(colsAt('| | | x |')(2)).toEqual([1, 0]);
+    expect(colsAt('| | | x |')(4)).toEqual([1, 1]);
+  });
+
+  it('belongs to a cell whose text has no padding after it', () => {
+    const at = colsAt('|a|b|c|');
+    expect([at(1), at(2), at(3), at(4), at(5), at(6)]).toEqual([
+      [1, 0],
+      [1, 0],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+      [1, 2],
+    ]);
+    // What typing one letter into `| |` writes: the cell ends where its text does.
+    const typed = colsAt('| 1 | y| x |');
+    expect([typed(6), typed(7), typed(8)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+  });
+
+  it('is still the next cell’s where the text before it ends earlier, as a pipe and padding are', () => {
+    const at = colsAt('| 1 | x |');
+    // The end of `1`'s text is its own; the pipe after its padding starts `x`'s mark.
+    expect([at(3), at(4), at(5), at(6)]).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]);
+    const two = colsAt('| 1 |  | x |');
+    expect([two(4), two(5), two(6), two(7), two(8)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+      [1, 2],
+    ]);
+  });
+
+  it('is the empty cell’s in a row with no outer pipes', () => {
+    const at = colsAt('1 | | x');
+    expect([at(2), at(3), at(4), at(5)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+  });
+
+  it('is no stop of two cells, in every row of cells of every padding, with or without outer pipes', () => {
+    // Every cell content of up to two spaces and one letter, in rows with a pipe at each end, at one
+    // end and at neither: the places where a cell's text stands never overlap, and `cellAt` gives each
+    // position that is one of them to the cell that has it.
+    const contents = ['', ' ', '  ', 'a', ' a', 'a ', ' a ', 'ab'];
+    let rows = 0;
+    for (const lead of [true, false]) {
+      for (const trail of [true, false]) {
+        for (const x of contents) {
+          for (const y of contents) {
+            for (const z of contents) {
+              const cells = [x, y, z];
+              // A cell that is empty and first in a row with no leading pipe is no cell the text can make.
+              const row = `${lead ? '|' : ''}${cells.join('|')}${trail ? '|' : ''}`;
+              const state = make(doc(row));
+              const [table] = tablesOf(state);
+              const body = table?.rows[1];
+              if (!table || !body) continue;
+              rows++;
+              for (let pos = body.from; pos <= body.to; pos++) {
+                const claimants = body.cells.filter((c) => c.textFrom <= pos && pos <= c.textTo);
+                expect(
+                  claimants.length,
+                  `${JSON.stringify(row)} at ${pos - body.from}`,
+                ).toBeLessThanOrEqual(1);
+                const found = cellAt(state, pos);
+                expect(found?.row, `${JSON.stringify(row)} at ${pos - body.from}`).toBe(body);
+                if (claimants[0]) expect(found?.cell, JSON.stringify(row)).toBe(claimants[0]);
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(rows).toBeGreaterThan(1000);
+  });
+});
+
 describe('read from the tree as its parse goes on', () => {
   it('takes in the tables that an edit’s own parse reaches, past where the tree before it ended', () => {
     // A busy machine stops the first parse early, so the tables are read from part of the text. The

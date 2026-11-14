@@ -120,6 +120,7 @@ import {
 } from './code-edit.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
+import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
 import type {
   DocView,
   EditContext,
@@ -1541,6 +1542,14 @@ function coverLine(plan: Plan, from: number, to: number): Range {
   return { from, to: next.end };
 }
 
+/** The refusal of a marker that would start a line of a paragraph (format §3.2). */
+const MARKER_STARTS_LINE = 'A marker here would start a line.';
+
+/** Why a deletion that starts at the beginning of a wrapped line, and is not all the text of lines
+ * of one paragraph (`wrappedLineStart`), is refused: what to do instead. */
+const WRAPPED_LINE_START =
+  'This deletion starts at the beginning of a line that goes on a paragraph, where its marker would start the line, and Markdown would read the start of a block there. Start the selection at the end of the line above, so that the line break goes with the deleted text, or leave the first word of the line out of it.';
+
 /** The message of a replacement that would leave a line with no text, which can't be written. */
 const BLANK_LINE =
   'This would leave a line with nothing but white space on it, and the marker of a deletion alone on its line takes the line break after it for its own. Take the line out with its line break, or keep some of its text.';
@@ -2445,7 +2454,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           refuse(open.reason);
         } else if (endsInPrefix(`\n${visibleBefore(plan, backslash)}`)) {
           // The backslash starts its line's text: the opener in front of it would start the line.
-          refuse('A marker here would start a line.');
+          refuse(MARKER_STARTS_LINE);
         } else {
           grew = true;
           grow(backslash, to);
@@ -2595,7 +2604,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           typing.plain === true && p === to && p < text.length
             ? nextWordEnd(plan, nextLineStart(text, p))
             : undefined;
-        if (end === undefined) refuse('A marker here would start a line.');
+        if (end === undefined) refuse(MARKER_STARTS_LINE);
         grow(from, end ?? p);
         continue;
       }
@@ -2603,7 +2612,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       grow(from, p);
     }
     if (state === `${from} ${to} ${left} ${right}`) {
-      if (right !== '' && typing.trail !== '') refuse('A marker here would start a line.');
+      if (right !== '' && typing.trail !== '') refuse(MARKER_STARTS_LINE);
       // A change that took in the backslash in front of it is one substitution, or nothing: with
       // other changes in its range, deciding them in another order could read it otherwise.
       if (grew && !soleReplace(plan, from, to, { ...typing, inner: left + typing.inner + right })) {
@@ -4031,6 +4040,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     tail = covered.tail;
   }
   const covers = { from, to };
+  // Whether the range starts at the text of a line that goes on a paragraph, and no marker may stand
+  // there: a refusal of that is told in the words of what to do instead.
+  let startsWrapped = false;
   if (from === to && typed === '') return;
   // A range that starts in the prefix of a block keeps the prefix; what is typed in place of it
   // does not write it again.
@@ -4045,7 +4057,14 @@ function planEdit(plan: Plan, edit: TextChange): void {
     from = to = pastBlockOpener(plan, from);
   }
   if (!past && !blocks && from < to && typed === '') {
-    ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
+    // All the text of a wrapped line goes with the line break in front of it, where a marker would
+    // start the line (#427); a replacement that keeps a break asks for the line to stay.
+    const wrapped = keepsBreak ? undefined : wrappedLineStart(text, plan.parsed, markers, from, to);
+    if (wrapped !== undefined && !ownTextOnly(plan, from, to)) from = wrapped;
+    else {
+      startsWrapped = !keepsBreak && atWrappedLine(text, markers, from);
+      ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
+    }
   }
   // The break of a split stays with its marker (format §3.4).
   if (!past) {
@@ -4129,9 +4148,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
     ({ from, to } = settled.range);
     typing = { ...typingOf(settled.tokens), ...(plain ? { plain: true } : {}) };
   }
-  const placed = past
-    ? { from, to, left: '', right: '' }
-    : legalize(plan, { from, to }, typing, blocks?.at);
+  let placed: Placed;
+  try {
+    placed = past
+      ? { from, to, left: '', right: '' }
+      : legalize(plan, { from, to }, typing, blocks?.at);
+  } catch (error) {
+    if (startsWrapped && error instanceof EditError && error.message === MARKER_STARTS_LINE) {
+      throw new EditError(WRAPPED_LINE_START, error.code);
+    }
+    throw error;
+  }
   // The old text ends in a backslash that a marker follows right after it: only a substitution
   // keeps that text in its marker, where deciding the changes in another order would give it back
   // in front of the marker of the new text (format §3.1).

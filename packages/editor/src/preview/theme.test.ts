@@ -56,6 +56,19 @@ describe('the column', () => {
     expect(spec['.rl-h2']).toMatchObject({ '--rl-above': '0.8em', paddingTop: 'var(--rl-above)' });
   });
 
+  it("draws the caret of a cell a row lacks only while the editor has the focus, as CodeMirror's own does", () => {
+    // A line drawn with no such guard stays solid after the editor blurs or the window is
+    // deactivated, while the page's own caret is hidden in the row.
+    const drawn = Object.keys(baseThemeSpec).filter(
+      (selector) => selector.includes('.rl-tc-active') && selector.includes('::after'),
+    );
+    expect(drawn).toEqual(['&.cm-focused .rl-tc-active > .rl-tc-fill::after']);
+    expect(baseThemeSpec[drawn[0]!]).toMatchObject({
+      borderLeft: '1px solid var(--rl-caret, var(--rl-author-1))',
+    });
+    expect(baseThemeSpec['.cm-line:has(> .rl-tc-active)']).toEqual({ caretColor: 'transparent' });
+  });
+
   it('gives Raw its column times the text size, and leaves the change bars where they are', () => {
     expect(trackedThemeSpec['&.rl-view-raw .cm-content']).toMatchObject({
       maxWidth: 'calc(760px * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
