@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openBlock } from '../blocks/open.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
 
@@ -223,6 +225,33 @@ describe('markdownPreview', () => {
       ['under a quote', '> One.\n\nTwo.', 'Two.', 'rl-space-block'],
     ])('is drawn by kind %s', (_, doc, line, spacing) => {
       expect(spaceOf(doc, line)).toEqual([spacing]);
+    });
+
+    it('keeps the space above an empty item while an empty paragraph is open (#509)', () => {
+      const doc = 'Intro\n\n- a\n- \n- b\n\nOutro';
+      const editor = editorAt(doc, 5);
+      const lineOf = () => editor.view.state.doc.line(4);
+      const classes = () =>
+        decorations(editor)
+          .filter((d) => d.kind === 'line' && d.from === lineOf().from)
+          .flatMap((d) => d.className.split(' '))
+          .filter((c) => c.startsWith('rl-space-'));
+      expect(classes()).toEqual(['rl-space-item']);
+      // Return at the end of "Intro" opens an empty paragraph, which reads as if it held a letter.
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+        'editor',
+      );
+      expect(openBlock(editor.view.state)).not.toBeNull();
+      const line = editor.view.state.doc.line(editor.view.state.doc.lines - 3);
+      expect(line.text).toBe('- ');
+      expect(
+        decorations(editor)
+          .filter((d) => d.kind === 'line' && d.from === line.from)
+          .flatMap((d) => d.className.split(' '))
+          .filter((c) => c.startsWith('rl-space-')),
+      ).toEqual(['rl-space-item']);
     });
 
     it('goes below the line above code or a table, whose first line is tinted or a widget', () => {

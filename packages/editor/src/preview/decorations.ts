@@ -229,7 +229,7 @@ class Builder {
  * (design: block editing, "Typed syntax"). Until then the line is drawn as body text, so that it
  * does not change kind with each character.
  */
-function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
+function loneMark(state: Source, node: SyntaxNode, mark: string): boolean {
   const first = node.getChild(mark);
   if (!first) return false;
   const line = state.doc.lineAt(first.from);
@@ -237,8 +237,11 @@ function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
   return rest === '' && node.to <= line.to;
 }
 
+/** The text that a node is read from: a state, or the reading of one. */
+type Source = Pick<EditorState, 'doc' | 'sliceDoc'>;
+
 /** The marker of a list item with nothing after it, which has no block to take the space above. */
-function emptyItemMark(state: EditorState, node: SyntaxNode): SyntaxNode | null {
+function emptyItemMark(state: Source, node: SyntaxNode): SyntaxNode | null {
   const mark = node.getChild('ListMark');
   if (!mark || loneMark(state, node, 'ListMark')) return null;
   const line = state.doc.lineAt(mark.from);
@@ -497,7 +500,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
     read.tree.iterate({
       enter: (ref) => {
         if (leafKind(ref.name)) leaves.push(ref.node);
-        else if (ref.name === 'OrderedList')
+        else if (ref.name === 'ListItem') {
+          // An empty item keeps the space above it while an empty paragraph is open too.
+          const mark = emptyItemMark(read.reading, ref.node);
+          if (mark) leaves.push(mark);
+        } else if (ref.name === 'OrderedList')
           countedNumbers(read.reading, ref.node, numbers, read.back);
       },
     });

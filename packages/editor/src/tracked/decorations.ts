@@ -149,6 +149,11 @@ interface Model {
   comments: Span[];
   /** Whole-block deletions drawn as blocks, in Redlines. */
   struck: Struck[];
+  /**
+   * Lines of markers alone that the join of a bullet's marker took along, by where each starts,
+   * with where the bullet's line starts: what is drawn at such a line is drawn there.
+   */
+  carriedLines: Map<number, number>;
 }
 
 /** A stretch of a struck block's text and the color of whoever deleted it. */
@@ -461,6 +466,7 @@ function analyze(state: EditorState, kept: number | null): Model {
   const model: Model = {
     hidden: [],
     blocks: [],
+    carriedLines: new Map(),
     placed: [],
     layers: [],
     rows: [],
@@ -812,6 +818,7 @@ function hideMarkerLines(
         all.push(...more);
         carried.push(...more.flatMap((marker) => marker.parts));
         absorbed.add(next);
+        model.carriedLines.set(doc.line(next).from, line.from);
         next++;
       }
       if (next > doc.lines) continue;
@@ -1179,7 +1186,13 @@ function display(state: EditorState): Display {
       ? { at: span.from, to: span.to, side: 0 as const }
       : item.where === 'after'
         ? { at: item.at, to: item.at, side: 1 as const }
-        : { at: doc.lineAt(item.at).from, to: doc.lineAt(item.at).from, side: -1 as const };
+        : (() => {
+            // A line the join of a bullet took along has no place of its own: its struck blocks
+            // are drawn at the bullet's line, above the join.
+            const at = doc.lineAt(item.at).from;
+            const place = model.carriedLines.get(at) ?? at;
+            return { at: place, to: place, side: -1 as const };
+          })();
     const key = `${slot.at} ${slot.side}`;
     const same = slots.get(key);
     if (same) same.items.push(item);

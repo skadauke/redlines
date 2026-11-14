@@ -161,3 +161,30 @@ describe('keys typed without waiting after Tab, Shift-Tab, Return and paste', ()
     }
   });
 });
+
+describe('a deleted item whose marker line the join of a bullet takes along', () => {
+  it('is still drawn struck in Redlines', () => {
+    const doc = [
+      '- one',
+      '- <!--fmt c3c3 was=indent=2-->',
+      '  <!--del b2b2 two-->',
+      '  <!--/c3c3--><!--del b2b2 \\n- -->',
+      '  three',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'marks:',
+      '  b2b2: {by: ada, at: 2026-11-01T10:00Z}',
+      '  c3c3: {by: ada, at: 2026-11-01T10:00Z}',
+      '-->',
+      '',
+    ].join('\n');
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: ada, view: 'redlines' });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
+    expect(editor.view.contentDOM.textContent).toContain('two');
+    expect(editor.view.contentDOM.textContent).toContain('three');
+  });
+});
