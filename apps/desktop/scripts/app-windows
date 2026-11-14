@@ -13,7 +13,7 @@ front of it.
     --debug      the debug build's app, src-tauri/target/debug/bundle/macos/Redlines.app
     --out DIR    where the PNG files and index.md go (default: apps/desktop/app-windows/)
     --file DOC   a document to open at launch (default: none: the app's own new document)
-    --panes      also opens Preferences and About with the menu's keys, and takes those (needs the
+    --panes      also opens Preferences (⌘,) and About (the app menu) and takes those (needs the
                  Accessibility permission for the terminal; without it they are skipped, said so)
     --wait N     seconds to let the app draw before each shot (default 4)
 
@@ -38,13 +38,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
 DESKTOP = HERE.parent
 HELPER_SOURCE = HERE / "window-list.swift"
 
 
-def fail(message: str) -> "None":
+def fail(message: str) -> NoReturn:
     print(f"app-windows: {message}", file=sys.stderr)
     sys.exit(1)
 
@@ -54,11 +55,15 @@ def build_helper(cache: Path) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     helper = cache / "window-list"
     if not helper.exists() or helper.stat().st_mtime < HELPER_SOURCE.stat().st_mtime:
+        # Built beside the helper under another name and moved into place, so that a second run
+        # never starts a half-written program.
+        partial = cache / f"window-list.{os.getpid()}"
         done = subprocess.run(
-            ["swiftc", "-O", str(HELPER_SOURCE), "-o", str(helper)], capture_output=True, text=True
+            ["swiftc", "-O", str(HELPER_SOURCE), "-o", str(partial)], capture_output=True, text=True
         )
         if done.returncode != 0:
             fail(f"could not compile window-list.swift (Xcode command line tools?):\n{done.stderr}")
+        os.replace(partial, helper)
     return helper
 
 
@@ -66,6 +71,12 @@ def program_of(app: Path) -> Path:
     with open(app / "Contents" / "Info.plist", "rb") as f:
         name = plistlib.load(f)["CFBundleExecutable"]
     return app / "Contents" / "MacOS" / name
+
+
+def process_name(app: Path) -> str:
+    with open(app / "Contents" / "Info.plist", "rb") as f:
+        info = plistlib.load(f)
+    return info.get("CFBundleName") or app.stem
 
 
 def windows_of(helper: Path, pids: list[int]) -> list[dict]:
@@ -81,6 +92,14 @@ def children_of(pid: int) -> list[int]:
     return [pid, *(int(p) for p in done.stdout.split())]
 
 
+def descendants_of(pid: int) -> list[int]:
+    """Every process the app started, at any depth, deepest last."""
+    found: list[int] = []
+    for child in children_of(pid)[1:]:
+        found += [child, *descendants_of(child)]
+    return found
+
+
 def real_windows(windows: list[dict]) -> list[dict]:
     """The windows a person sees: layer 0, on screen, and larger than a stray 1-pixel helper."""
     return [w for w in windows if w["layer"] == 0 and w["onscreen"] and w["width"] > 100]
@@ -90,16 +109,59 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "window"
 
 
-def keystroke(keys: str) -> bool:
-    """Types a menu key into the frontmost app, through System Events (needs Accessibility)."""
+def applescript_string(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def system_events(action: str) -> bool:
+    """Does something through System Events (needs Accessibility), and says when it can't."""
     done = subprocess.run(
-        ["osascript", "-e", f'tell application "System Events" to {keys}'],
+        ["osascript", "-e", f'tell application "System Events" to {action}'],
         capture_output=True,
         text=True,
     )
     if done.returncode != 0:
         print(f"app-windows: skipped, System Events refused: {done.stderr.strip()}", file=sys.stderr)
     return done.returncode == 0
+
+
+def bring_to_front(pid: int) -> bool:
+    """Makes the app's process the frontmost, and checks it is, so that keys reach it and no other."""
+    process = f"(first process whose unix id is {pid})"
+    if not system_events(f"set frontmost of {process} to true"):
+        return False
+    time.sleep(0.5)
+    done = subprocess.run(
+        ["osascript", "-e", f'tell application "System Events" to get frontmost of {process}'],
+        capture_output=True,
+        text=True,
+    )
+    if done.stdout.strip() != "true":
+        print("app-windows: skipped, the app did not come to the front", file=sys.stderr)
+        return False
+    return True
+
+
+def stop(pids: list[int]) -> None:
+    """Asks each process to quit, and kills what is still there after ten seconds."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        for _ in range(40):
+            if not any(alive(pid) for pid in pids):
+                return
+            time.sleep(0.25)
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def main() -> None:
@@ -115,25 +177,28 @@ def main() -> None:
     if sys.platform != "darwin":
         fail("this runs on a Mac")
     profile = "debug" if args.debug else "release"
-    app = args.app or DESKTOP / "src-tauri" / "target" / profile / "bundle" / "macos" / "Redlines.app"
+    default_app = DESKTOP / "src-tauri" / "target" / profile / "bundle" / "macos" / "Redlines.app"
+    # The real path: Launch Services starts the program by it, and the process list shows that.
+    app = (args.app or default_app).resolve()
     if not app.is_dir():
         fail(f"{app} is not there; build it with `pnpm tauri build --bundles app` in apps/desktop")
+    if args.file and not args.file.is_file():
+        fail(f"{args.file} is not a file")
 
-    helper = build_helper(args.out / ".tools")
+    helper = build_helper(DESKTOP / "app-windows" / ".tools")
     if subprocess.run([str(helper), "--preflight"], capture_output=True).returncode != 0:
         fail(
             "the terminal may not record the screen. Grant it in System Settings › Privacy & "
             "Security › Screen & System Audio Recording, then quit and open the terminal again."
         )
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    for old in args.out.glob("*.png"):
-        old.unlink()
-
     program = program_of(app)
+    out = args.out.resolve()
 
     def running() -> set[int]:
-        done = subprocess.run(["pgrep", "-f", f"^{re.escape(str(program))}"], capture_output=True, text=True)
+        # The program's own path alone, or followed by arguments: never a longer name.
+        pattern = f"^{re.escape(str(program))}( |$)"
+        done = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
         return {int(p) for p in done.stdout.split()}
 
     # Through Launch Services, as a double-click starts it (a new instance, so that one the person
@@ -141,65 +206,86 @@ def main() -> None:
     before = running()
     command = ["open", "-n", "-a", str(app)]
     if args.file:
-        command += ["--args", str(args.file.resolve())]
-    subprocess.run(command, check=True)
-    started = None
-    for _ in range(120):
-        new = running() - before
-        if new:
-            started = min(new)
-            break
-        time.sleep(0.25)
-    if started is None:
-        fail("the app did not start")
+        command.append(str(args.file.resolve()))
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as error:
+        fail(f"`open` could not start the app: {error}")
+
     taken: list[tuple[str, dict]] = []
     seen: set[int] = set()
-
-    def shoot(label: str) -> None:
-        pids = children_of(started)
-        for w in real_windows(windows_of(helper, pids)):
-            if w["id"] in seen:
-                continue
-            seen.add(w["id"])
-            name = f"{len(taken) + 1:02d}-{label}-{slug(w['title'])}.png"
-            # -o: no shadow, -x: no sound; the window alone, whatever is in front of it.
-            done = subprocess.run(["screencapture", "-x", "-o", f"-l{w['id']}", str(args.out / name)])
-            if done.returncode == 0:
-                taken.append((name, w))
-
+    cleared = False
+    started = None
     try:
+        for _ in range(120):
+            new = running() - before
+            if new:
+                break
+            time.sleep(0.25)
+        new = running() - before
+        if not new:
+            fail("the app did not start in 30 seconds")
+        if len(new) > 1:
+            started = None
+            fail(
+                f"{len(new)} new processes of the app appeared ({sorted(new)}): another one was "
+                "started meanwhile. Nothing was stopped; run it again."
+            )
+        started = next(iter(new))
+
+        def shoot(label: str) -> int:
+            nonlocal cleared
+            made = 0
+            for w in real_windows(windows_of(helper, children_of(started))):
+                if w["id"] in seen:
+                    continue
+                seen.add(w["id"])
+                out.mkdir(parents=True, exist_ok=True)
+                if not cleared:
+                    # Only what an earlier run of this wrote: numbered pictures and the index.
+                    for old in [*out.glob("[0-9][0-9]-*.png"), out / "index.md"]:
+                        old.unlink(missing_ok=True)
+                    cleared = True
+                name = f"{len(taken) + 1:02d}-{label}-{slug(w['title'])}.png"
+                # -o: no shadow, -x: no sound; the window alone, whatever is in front of it.
+                done = subprocess.run(["screencapture", "-x", "-o", f"-l{w['id']}", str(out / name)])
+                if done.returncode == 0:
+                    taken.append((name, w))
+                    made += 1
+            return made
+
         deadline = time.time() + 60
         while time.time() < deadline and not real_windows(windows_of(helper, children_of(started))):
             if started not in running():
                 fail("the app quit at launch")
             time.sleep(0.5)
         time.sleep(args.wait)
-        shoot("main")
-        if args.panes:
-            for label, keys in (
-                ("preferences", 'keystroke "," using command down'),
+        if not shoot("main"):
+            fail(
+                "no window was found. The screen may be locked, the app's window on another Space "
+                "or minimised, or the app shows nothing larger than 100 points."
+            )
+        if args.panes and bring_to_front(started):
+            name = applescript_string(f"About {process_name(app)}")
+            process = f"(first process whose unix id is {started})"
+            for label, action in (
+                ("preferences", f'tell {process} to keystroke "," using command down'),
+                ("about", f"tell {process} to click menu item {name} of menu 1 of menu bar item 2 of menu bar 1"),
             ):
-                if keystroke(keys):
+                if system_events(action):
                     time.sleep(args.wait)
-                    shoot(label)
+                    if not shoot(label):
+                        print(f"app-windows: no {label} window appeared", file=sys.stderr)
     finally:
-        # Only the process this started: asked to quit, and killed if it ignores the request.
-        if started in running():
-            os.kill(started, signal.SIGTERM)
-            for _ in range(40):
-                if started not in running():
-                    break
-                time.sleep(0.25)
-            else:
-                os.kill(started, signal.SIGKILL)
+        # Only what this started: the app and what it started, asked to quit, then killed.
+        if started is not None and alive(started):
+            stop([*descendants_of(started)[::-1], started])
 
     lines = ["# The app's windows", "", f"App: `{app}`", ""]
     for name, w in taken:
         lines.append(f"- `{name}`: {w['owner']} “{w['title']}”, {int(w['width'])}×{int(w['height'])}")
-    (args.out / "index.md").write_text("\n".join(lines) + "\n")
+    (out / "index.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
-    if not taken:
-        fail("no window was found")
 
 
 if __name__ == "__main__":
