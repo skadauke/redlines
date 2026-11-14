@@ -207,7 +207,10 @@ The window, on the desktop:
   image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
-  to save them. Cancel stops there and keeps every window open. Closing the last window quits.
+  to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
+  window opened for text (Ask's Open in New Window) can't be asked in its first moment, before its
+  page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
+  notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
   Print. Printing holds the whole document in light ink and prints the view as it shows, without
@@ -1471,8 +1474,13 @@ Agent edits are animated, like a streaming chat answer.
     first question is the person's comment, its answer the agent's reply in the agent's name, and
     each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
     reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
-    goes once the window is open: if it can't be, a notice says so and the bubble stays. Copy puts
-    the answer's text on the clipboard. Nothing is kept unless asked.
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. The text
+    is unsaved there as in any new document, and in the window's first moment, before its page has
+    said what it holds and can be asked about it, a quit, a restart or a logout, and the window's
+    own close, are refused, as a Cancel would be: the app says the window is still opening, and the
+    person tries again. The hold lasts ten seconds at most, so that a page that never loads can't
+    keep the app from quitting. Copy puts the answer's text on the clipboard. Nothing is kept
+    unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
