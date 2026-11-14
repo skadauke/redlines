@@ -189,6 +189,15 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState().view).toBe('simple');
   });
 
+  it('brings back the look remembered now, when no look was shown since the document opened in Clean', () => {
+    // The look is chosen by a click on a change bar in another window while this one shows Clean.
+    const editor = load(plain, { markupView: 'redlines' });
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setMarkupView('simple');
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('shows Clean and Raw as they are, and never changes the look', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.showView('raw');

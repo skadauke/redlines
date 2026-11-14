@@ -19,6 +19,7 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
+import { freshlyAdded } from './fresh.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
@@ -436,7 +437,8 @@ function autolink(b: Builder, node: SyntaxNode): void {
 
 /** An image drawn in place of its syntax, while the selection is elsewhere. */
 function image(b: Builder, node: SyntaxNode): void {
-  if (touches(b.state, node.from, node.to)) {
+  // A link a paste or a drop has just added is drawn with the caret at its end (`freshlyAdded`).
+  if (touches(b.state, node.from, node.to) && !freshlyAdded(b.state, node.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);

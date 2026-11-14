@@ -6,6 +6,7 @@ import { type Author, barClickHandlers, type Editor } from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
 import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
 import { cards } from './cards.ts';
+import { highlightsAt, highlightTitle, toggleHighlight } from './highlight.ts';
 import { type PinnedElement, rail, type RailOptions } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
@@ -24,6 +25,13 @@ export const manifest: PluginManifest = {
   version: '0.0.0',
   needs: ['document:read', 'document:edit', 'document:data'],
 };
+
+/**
+ * The id of the Highlight command, for a host that draws it itself, such as a palette that finds it
+ * in the editor's commands. It makes a reviewer's highlight on the selection, or on the word under
+ * the caret, and takes it away where the selection or caret is in one.
+ */
+export const HIGHLIGHT_COMMAND = 'highlight.toggle';
 
 export interface ReviewController {
   /** Opens the review bar, which is hidden until asked for. */
@@ -131,8 +139,8 @@ export interface ReviewOptions extends RailOptions {
 /**
  * Adds the review interface to an editor: notes in the right margin, cards on changes, and the
  * review bar. The host routes its menu commands and shortcuts to the controller, and draws Add
- * Comment (`comment.add`) from the editor's commands. The interface stays when the editor opens
- * another document (`Editor.setDoc`), with the bar closed.
+ * Comment (`comment.add`) and Highlight (`HIGHLIGHT_COMMAND`) from the editor's commands. The
+ * interface stays when the editor opens another document (`Editor.setDoc`), with the bar closed.
  */
 export function createReview(editor: Editor, options: ReviewOptions): ReviewController {
   const { view } = editor;
@@ -164,7 +172,8 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     }),
   ];
   const remove = editor.addExtension(extension);
-  // Comes last in the Format menu, which lists commands in the order they are registered.
+  // Come last in the Format menu, which lists commands in the order they are registered: Add
+  // Comment, then Highlight, in a group of their own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
   const removeCommands = editor.commands.register([
     {
       id: 'comment.add',
@@ -173,6 +182,15 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       menu: 'format',
       group: 'comment',
       run: () => notes.startComment(),
+    },
+    {
+      id: HIGHLIGHT_COMMAND,
+      title: highlightTitle,
+      shortcut: 'Mod-Shift-h',
+      menu: 'format',
+      group: 'comment',
+      run: () => toggleHighlight(ctx),
+      isActive: (state) => highlightsAt(state).length > 0,
     },
   ]);
 

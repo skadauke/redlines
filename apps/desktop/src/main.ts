@@ -17,7 +17,13 @@ import {
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
-import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import {
+  createEditor,
+  type Author,
+  type EditorTyping,
+  type EditorUiState,
+  type ImageSpot,
+} from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
@@ -35,6 +41,7 @@ import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
+import { addImages, type ImageAdding } from './image-add.ts';
 import { localImageUrl } from './images.ts';
 import {
   appMenuModel,
@@ -145,7 +152,18 @@ let menuState: MenuState | null = null;
 let draftsPending = false;
 
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
-const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+const windows = isTauri
+  ? await connectWindow(tauriWindowLink(), askAboutThisWindow, {
+      // A window opened for text can't be asked about it in its first moments, and its text would go
+      // with a quit or a close: the app holds both, and the person tries again.
+      held: (what) =>
+        notice.flash(
+          what === 'quit'
+            ? 'A window is still opening. Try again in a moment.'
+            : 'This window is still opening. Try closing it again in a moment.',
+        ),
+    })
+  : null;
 
 /**
  * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
@@ -245,6 +263,10 @@ const editor = createEditor(element('#editor'), {
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
+  // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
+  // browser tab): saved beside the document, and linked at the place they came to.
+  onImageFiles: (files, spot, pasted) =>
+    void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -325,6 +347,55 @@ createTables(editor);
 // matching emoji, as Preferences allow (asked each time).
 createEmoji(editor, { enabled: () => settings.emojiSuggestions });
 
+/**
+ * What adding images to this window's document needs of it (image-add.ts): its file, which a
+ * document with no file is saved to first, after asking; where the settings say images go, as
+ * they are when the images arrive; and the host, which saves them (src-tauri/src/image_files.rs).
+ */
+const imageAdding: ImageAdding = {
+  document: () => ({ path: controller.state.path, name: controller.state.name }),
+  place: () => {
+    const { imagePlace, imageFolderName } = loadSettings();
+    return { place: imagePlace, name: imageFolderName };
+  },
+  saveFirst: async () => (await host.askToSaveForImage()) && (await controller.saveAs()),
+  addImages: (path, folder, source) => host.addImages(path, folder, source),
+  notice: (message) => notice.flash(message),
+};
+
+/**
+ * Insert Image… (`image.insert`, #308): chooses image files in the system's panel and adds them as
+ * a drop or a paste does, at the caret. The app's own command, not a plugin's, since the panel is.
+ * A document with no file is saved first, before the panel: there is no folder for them until then.
+ */
+async function insertChosenImages(spot: ImageSpot): Promise<void> {
+  try {
+    if (controller.state.path === null && !(await imageAdding.saveFirst())) return spot.release();
+    const source = await host.chooseImages();
+    if (!source) return spot.release();
+    await addImages(imageAdding, spot, source);
+  } catch (error) {
+    spot.release();
+    notice.flash(error instanceof Error ? error.message : String(error));
+  }
+}
+
+// Registered before the review plugin's Add Comment, which comes last in Format.
+editor.commands.register([
+  {
+    id: 'image.insert',
+    title: 'Image…',
+    menu: 'format',
+    group: 'insert',
+    run: () => {
+      const spot = editor.imageSpot();
+      if (!spot) return false;
+      void insertChosenImages(spot);
+      return true;
+    },
+  },
+]);
+
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
 const review = createReview(editor, {
@@ -385,7 +456,16 @@ const palette = createPalette(editor, {
   container: main,
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
-  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
+  // and the clipboard's text otherwise.
+  clipboard: pageClipboard(
+    editor,
+    () => host.readClipboardText(),
+    // A tab has none, and reads the clipboard in the click that asked, as it did.
+    'pasteInDocument' in host
+      ? () => host.pasteInDocument?.() ?? Promise.resolve(false)
+      : undefined,
+  ),
   ...(isTauri
     ? {
         spelling: systemSpelling({
@@ -975,6 +1055,13 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // A window opened for text is held in its first moments: its page can't be asked about the
+    // text yet, and Tauri destroys the window when this handler lets it close, whatever the app
+    // prevented, so this is what holds it (the app tells the person: `close-held`).
+    if (await windows?.starting().catch(() => false)) {
+      event.preventDefault();
+      return;
+    }
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();
@@ -1044,6 +1131,15 @@ if (isTauri) {
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
+  // Image files dropped on the window go to its document, not to the files to open. The app keeps
+  // them and says where they landed, in points of the page, which the window zoom scales.
+  await host
+    .listenForImageDrops((drop) => {
+      const level = zoom?.level() ?? 1;
+      const spot = editor.imageSpot({ x: drop.x / level, y: drop.y / level });
+      if (spot) void addImages(imageAdding, spot, { kind: 'given', id: drop.id });
+    })
+    .catch((error: unknown) => console.error('Could not listen for images dropped', error));
   // A launch with no file to open: the document that was open last, when Preferences ask for it.
   // New is always empty, so this is for the first window alone.
   if (controller.untouched && getCurrentWindow().label === 'main') {
