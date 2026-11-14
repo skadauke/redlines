@@ -3471,16 +3471,18 @@ describe('a point alignment change beside other marks and edits', () => {
           seen: 0,
         },
         {
-          why: 'a plain `*` that closes a `**`, or an `_` that closes a `__`, after punctuation opens as well once `<` follows it, and the rule of three keeps it from closing',
-          holds: ({ tracked, cell }) =>
-            !tracked && /^(?:\*\*[^*]*[^\w\s*]\*|__[^_]*[^\w\s_]_)$/.test(cell),
+          // Typed tracked it stands in an insertion, which the mark follows as written, and accepting the insertion
+          // leaves it in front of the mark: some order of decisions reads otherwise (#466).
+          why: 'a `*` that closes a `**`, or an `_` that closes a `__`, after punctuation opens as well once `<` follows it, and the rule of three keeps it from closing, plain or in a tracked insertion that is accepted',
+          holds: ({ cell }) => /^(?:\*\*[^*]*[^\w\s*]\*|__[^_]*[^\w\s_]_)$/.test(cell),
           oracle: true,
           comment: false,
           seen: 0,
         },
         {
-          why: 'a tracked backslash can not stand in front of the mark, so it is written after it, where it goes on with a bare URL that the mark would then stand inside (§3.1)',
-          holds: ({ tracked, key, end }) => tracked && key === '\\' && /^https?:\/\/\S+$/.test(end),
+          why: 'a tracked backslash or underscore can not stand in front of the mark, so it is written after it, where it goes on with a bare URL that the mark would then stand inside (§3.1)',
+          holds: ({ tracked, key, end }) =>
+            tracked && (key === '\\' || key === '_') && /^https?:\/\/\S+$/.test(end),
           oracle: false,
           comment: false,
           seen: 0,
@@ -3580,6 +3582,260 @@ describe('a point alignment change beside other marks and edits', () => {
       ]).after;
       const x = at(run, 'x<!--fmt');
       expect(said(() => typed(run, x, '', null, x + 1))).toMatch(WORDS('Bo Chen'));
+    });
+  });
+
+  // The writer of the mark walks every order of decisions of the changes in its cell (`placeHolds`). An edit written
+  // after the mark leaves the changes in that cell as they were, with its own, and is held to the same walk (#466):
+  // refused, in words that name the change and say to decide it first, where some order of deciding the changes
+  // in the cell would leave the mark read otherwise or a decision refused. Only an edit in that one cell pays for it.
+  describe('an edit written after the mark, held to every order of decisions (#466)', () => {
+    const WALK = (who: string) =>
+      new RegExp(
+        `^${who}'s alignment change is at the end of this cell, where this edit would make Markdown read it, or the text before it, otherwise\\. Decide it first\\.$`,
+      );
+    const MANY = (who: string) =>
+      new RegExp(
+        `^${who}'s alignment change is at the end of this cell, and this edit would leave more changes pending in it than can be looked at together\\. Decide some of them first\\.$`,
+      );
+    const at = (text: string, find: string, plus = 0) => text.indexOf(find) + plus;
+    const cellEnd = (text: string) => lastCell(text).to;
+    /** The changes of `ids` in a header's last cell: Bo's typing, in front of the mark. */
+    const typedBy = (text: string, who: Person, ids: string[], word: string) =>
+      applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from: cellEnd(text), to: cellEnd(text), insert: word },
+          context(who, ids),
+        ),
+      );
+
+    /** The key of #466, step by step: the mark, a replacement, a plain `_`, and the tracked `\` that stands apart. */
+    function steps() {
+      let text = align(file('| b* |\n| ----- |\n|  |\n| x y |'), [0], 'left', ada, ['k3x9']).after;
+      const cell = lastCell(text);
+      text = applyChanges(
+        text,
+        trackedEdit(text, { ...cell, insert: 'é' }, context(ada, ['g9hj', 'm5nn'])),
+      );
+      const replaced = text;
+      text = applyChanges(
+        text,
+        untrackedEdit(text, { from: cellEnd(text), to: cellEnd(text), insert: '_' }),
+      );
+      const key = (state: string) =>
+        trackedEdit(
+          state,
+          { from: cellEnd(state), to: cellEnd(state), insert: '\\' },
+          context(ada, ['q6rs', 'w8nn', 'p5qm']),
+        );
+      return { replaced, typed: text, key };
+    }
+
+    it('refuses the key of #466, which leaves a mixed order in which a decision is refused', () => {
+      // `REDLINES_FUZZ=1500 REDLINES_SEED=7` of the alignment suite draws it: Ada aligns a column, replaces `b*` by
+      // `é` (tracked), types `_` at the end of the cell (plain) and then `\` (tracked), which can't stand in front
+      // of the mark and is written after it: a deletion of the `_` and an insertion `_\ ` after the mark. Rejecting
+      // the deletion and accepting the replacement is refused ("would change the newest text"), and an order reads
+      // otherwise. The edits before the key are written, and every order of their file reads alike.
+      const { replaced, typed, key } = steps();
+      expectDecided('the replacement', replaced, [1, 1, 1]);
+      expectDecided('the replacement and the `_`', typed, [1, 1, 1]);
+      expect(said(() => key(typed))).toMatch(MANY('Ada Lovelace'));
+      // The refusal leaves the file as it was, and deciding one of the changes in the cell lets the key be written.
+      for (const how of [accept, reject]) {
+        const decided = applyChanges(typed, how(typed, 'g9hj'));
+        const after = applyChanges(decided, key(decided));
+        expectDecided(`${how.name} g9hj, then the key`, after, [1, 1, 1]);
+      }
+    });
+
+    it('refuses a tracked deletion after which accepting it would leave a delimiter run in front of the mark', () => {
+      // `**a .*x`, the mark pending: Bo deletes the `x`. As written, the text in front of the mark ends in the
+      // deletion's marker and the mark reads as it does. Accepting the deletion leaves the `*` that closes the
+      // `**` after a full stop right in front of the mark, and the rule of three then keeps it from closing: an
+      // order that Markdown reads otherwise than the view does.
+      const start = file('| h | **a .*x |\n| - | - |\n| c | d |');
+      const text = align(start, [0], 'right', ada, ['k3x9']).after;
+      const x = at(text, 'x<!--fmt');
+      const deletion = { from: x, to: x + 1, insert: '' };
+      expect(said(() => trackedEdit(text, deletion, context(bo, ['c2dd', 'f3gg'])))).toMatch(
+        WALK('Ada Lovelace'),
+      );
+      // The mark's author deleting it is held to the same.
+      expect(said(() => trackedEdit(text, deletion, context(ada, ['c2dd', 'f3gg'])))).toMatch(
+        WALK('Ada Lovelace'),
+      );
+      // Where no alignment change is pending the deletion is written, and so is it with the mark decided.
+      expect(
+        said(() => trackedEdit(start, { from: x, to: x + 1, insert: '' }, context(bo, ['c2dd']))),
+      ).toBe('no error');
+      const accepted = applyChanges(text, accept(text, 'k3x9'));
+      const free = at(accepted, 'x |');
+      const done = applyChanges(
+        accepted,
+        trackedEdit(accepted, { from: free, to: free + 1, insert: '' }, context(bo, ['c2dd'])),
+      );
+      expectEveryOrderAlike('the mark decided first', done, exactly);
+    });
+
+    it('refuses a plain key written in front of a pending deletion that would leave a delimiter run in front of the mark', () => {
+      // `**a .` and Bo's deletion of an `x` after it, then the mark. A plain `*` typed in front of the deletion
+      // reads as it should as written, and accepting the deletion leaves it in front of the mark.
+      const base = file('| h | **a .x |\n| - | - |\n| c | d |');
+      const x = at(base, 'x |');
+      const bold = applyChanges(
+        base,
+        trackedEdit(base, { from: x, to: x + 1, insert: '' }, context(bo, ['c2dd', 'f3gg'])),
+      );
+      const text = align(bold, [0], 'right', ada, ['k3x9']).after;
+      expectDecided('the deletion and the mark', text, [2, 2]);
+      const dot = at(text, '.<!--del') + 1;
+      expect(said(() => untrackedEdit(text, { from: dot, to: dot, insert: '*' }))).toMatch(
+        WALK('Ada Lovelace'),
+      );
+      // Tracked, the `*` stands against the deletion's marker and is written again around it: more changes in the cell
+      // than the walk takes, which is refused as well.
+      expect(
+        said(() =>
+          trackedEdit(
+            text,
+            { from: dot, to: dot, insert: '*' },
+            context(bo, ['h4jj', 'm5nn', 'p5qm']),
+          ),
+        ),
+      ).toMatch(/^Ada Lovelace's alignment change is at the end of this cell, /);
+      // Another key there, and the same `*` in another cell, are written.
+      for (const insert of ['q', ' ']) {
+        const after = applyChanges(text, untrackedEdit(text, { from: dot, to: dot, insert }));
+        expectDecided(`plain ${JSON.stringify(insert)}`, after, [2, 2]);
+      }
+      const first = at(text, 'h |');
+      const other = applyChanges(
+        text,
+        untrackedEdit(text, { from: first, to: first, insert: '*' }),
+      );
+      expect(headerLine(other)).toMatch(/^\| \*h \|/);
+    });
+
+    it('writes an edit that every order of decisions reads alike, with changes pending in the cell', () => {
+      for (const [who, base] of [
+        [ada, POINT],
+        [bo, BY_ADA],
+      ] as const) {
+        const other = who === ada ? bo : ada;
+        const pending = typedBy(base, other, ['c2dd', 'f3gg'], 'x');
+        for (const insert of ['q', 'é', '_', '*', '~']) {
+          const end = cellEnd(pending);
+          const plain = applyChanges(
+            pending,
+            untrackedEdit(pending, { from: end, to: end, insert }),
+          );
+          expectDecided(`${who.handle} plain ${insert}`, plain);
+          // An underscore after another person's insertion is written after the mark, with the cell's padding
+          // deleted and written again: two changes more, which the next test looks at.
+          if (insert === '_') continue;
+          const tracked = applyChanges(
+            pending,
+            trackedEdit(pending, { from: end, to: end, insert }, context(who, ['h4jj', 'm5nn'])),
+          );
+          expectDecided(`${who.handle} tracked ${insert}`, tracked);
+        }
+      }
+    });
+
+    it('does not refuse an edit in a state that was refused already, which the edit did not make', () => {
+      // `**a .*x` deleted by Bo after the mark was written by hand: accepting it reads otherwise. A key typed in
+      // front of the text, a key in another cell and one in another row leave it as it was, and are written.
+      const text = file(
+        '| h | **a .*<!--del c2dd x--><!--fmt k3x9 align=\\|\\x20-\\x20\\|\\x20-\\x20\\|--> |\n| :- | - |\n| c | d |',
+        { c2dd: 'bo', k3x9: 'ada' },
+      );
+      for (const [name, from] of [
+        ['the start of the cell', at(text, '**a')],
+        ['another cell', at(text, 'h |')],
+        ['a body cell', at(text, 'c |')],
+      ] as const) {
+        expect(
+          said(() => untrackedEdit(text, { from, to: from, insert: 'q' })),
+          `plain, ${name}`,
+        ).toBe('no error');
+        expect(
+          said(() => trackedEdit(text, { from, to: from, insert: 'q' }, context(bo, ['f3gg']))),
+          `tracked, ${name}`,
+        ).toBe('no error');
+      }
+    });
+
+    it('holds the edit that adds a change to a cell with the most that the walk takes, and not one in a cell that has more already', () => {
+      // Two changes and the mark: a third change is refused, in words that say what to do, and a key that adds none
+      // is written. A merge that left three, which no edit made, does not refuse what is typed in the cell.
+      const marks = { c2dd: 'bo', f3gg: 'bo', h4jj: 'bo' };
+      const cell = (n: number) =>
+        ['b', 'c', 'd']
+          .slice(0, n)
+          .map(
+            (c, i) =>
+              `<!--ins ${['c2dd', 'f3gg', 'h4jj'][i]}-->${c}<!--/${['c2dd', 'f3gg', 'h4jj'][i]}-->`,
+          )
+          .join('');
+      const mark = markFor('| - | - |');
+      const two = file(`| h | a${cell(2)}${mark} |\n| :- | - |\n| c | d |`, {
+        ...marks,
+        k3x9: 'ada',
+      });
+      const end = cellEnd(two);
+      expect(
+        said(() => trackedEdit(two, { from: end, to: end, insert: 'z' }, context(ada, ['p5qm']))),
+      ).toMatch(MANY('Ada Lovelace'));
+      // A tracked underscore after another person's insertion is written after the mark, with the padding deleted and
+      // written again: two changes more, and refused as well. Typing into Bo's own insertion adds no change.
+      const pending = file(`| h | a${cell(1)}${mark} |\n| :- | - |\n| c | d |`, {
+        ...marks,
+        k3x9: 'ada',
+      });
+      const edge = cellEnd(pending);
+      expect(
+        said(() =>
+          trackedEdit(
+            pending,
+            { from: edge, to: edge, insert: '_' },
+            context(ada, ['p5qm', 'q6rs', 'r4st']),
+          ),
+        ),
+      ).toMatch(MANY('Ada Lovelace'));
+      expect(
+        said(() =>
+          trackedEdit(
+            pending,
+            { from: edge, to: edge, insert: 'z' },
+            context(ada, ['p5qm', 'q6rs']),
+          ),
+        ),
+      ).toBe('no error');
+      expect(
+        said(() =>
+          trackedEdit(two, { from: end - 12, to: end - 12, insert: 'z' }, context(bo, ['p5qm'])),
+        ),
+      ).toBe('no error');
+      expect(said(() => untrackedEdit(two, { from: end, to: end, insert: 'z' }))).toBe('no error');
+      const three = file(`| h | a${cell(3)}${mark} |\n| :- | - |\n| c | d |`, {
+        ...marks,
+        k3x9: 'ada',
+      });
+      const last = cellEnd(three);
+      for (const who of [ada, bo]) {
+        expect(
+          said(() =>
+            trackedEdit(three, { from: last, to: last, insert: 'z' }, context(who, ['p5qm'])),
+          ),
+          who.handle,
+        ).toBe('no error');
+      }
+      expect(said(() => untrackedEdit(three, { from: last, to: last, insert: 'z' }))).toBe(
+        'no error',
+      );
     });
   });
 });
@@ -3756,6 +4012,20 @@ describe('the walk that writes the mark, on the header alone and on the whole fi
     const words = pair('a<!--ins c2dd-->b<!--/c2dd--><!--del f3gg c-->');
     expect(answer(words, false)).toEqual({ said: 'written', where: 'header' });
     expect(answer(words, true)).toEqual({ said: 'written', where: 'file' });
+  });
+
+  it('keeps its mark off an underscore where it writes one, and an edit beside a mark that is there is not held to it', () => {
+    // `_b_` ends the cell: the writer does not write a new mark there (Call 9), and an edit that is written after
+    // the mark is held to the exact checks alone (`flank` off), as typing after it is.
+    const before = file('| h | _b_ |\n| --- | --- |\n| a | b |');
+    const after = file(`| h | _b_${markFor('| --- | --- |')} |\n| :-- | --- |\n| a | b |`, {
+      k3x9: 'ada',
+    });
+    const tableFrom = readTables(before, parse(before))[0]?.from ?? -1;
+    expect(said(() => placeHolds(before, after, 'k3x9', tableFrom))).toBe(PLACE);
+    expect(said(() => placeHolds(before, after, 'k3x9', tableFrom, false, true))).toBe(PLACE);
+    expect(placeHolds(before, after, 'k3x9', tableFrom, false, false)).toBe('header');
+    expect(placeHolds(before, after, 'k3x9', tableFrom, true, false)).toBe('file');
   });
 
   it('is the header, its delimiter row and the ledger of its marks, where the file reads like it', () => {

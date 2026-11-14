@@ -18,6 +18,7 @@ import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
+import { assertPointHolds } from './table-align.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
@@ -696,9 +697,13 @@ export function commitEdit(
       options.exempt ?? [],
     );
   }
-  if (ledgerChanges === undefined) return changes;
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
-  return joinChanges(text, changes, after, ledgerChanges);
+  const done =
+    ledgerChanges === undefined ? changes : joinChanges(text, changes, after, ledgerChanges);
+  // An edit in the cell that a pending alignment change ends is held to every order of decisions of the changes
+  // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
+  if (before && !removing) assertPointHolds(text, before, done);
+  return done;
 }
 
 /** How many markers of a file's body stand right after an unescaped backslash, which escapes them

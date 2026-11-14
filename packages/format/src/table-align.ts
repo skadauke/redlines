@@ -473,6 +473,9 @@ class LeftSlice extends Error {}
  * walks the whole files, for a test. The decisions of `before` are made when they are looked at, which is
  * when the file with the mark refuses one.
  *
+ * `flank` is `placeReads`'s: the writer keeps its mark off an underscore (Call 9), and an edit that is written
+ * beside a mark that is there already is held to the exact checks only (`assertPointHolds`).
+ *
  * @returns where the walk was done: on the `header` slices, or on the whole `file` (a state of the walk
  * that a slice does not stand for sends it there).
  * @throws EditError when the mark would be read otherwise in some state, or a decision would be refused
@@ -484,24 +487,31 @@ export function placeHolds(
   id: string,
   tableFrom: number,
   whole = false,
+  flank = true,
 ): 'header' | 'file' {
   const slices = whole
     ? undefined
     : { before: headerSlice(before, tableFrom), after: headerSlice(after, tableFrom) };
   if (slices?.before !== undefined && slices.after !== undefined) {
     try {
-      walkDecisions(slices.before, slices.after, id, true);
+      walkDecisions(slices.before, slices.after, id, true, flank);
       return 'header';
     } catch (error) {
       if (!(error instanceof LeftSlice)) throw error;
     }
   }
-  walkDecisions(before, after, id, false);
+  walkDecisions(before, after, id, false, flank);
   return 'file';
 }
 
 /** The walk of `placeHolds` over `before` and `after`, which are slices when `sliced`. */
-function walkDecisions(before: string, after: string, id: string, sliced: boolean): void {
+function walkDecisions(
+  before: string,
+  after: string,
+  id: string,
+  sliced: boolean,
+  flank: boolean,
+): void {
   const seen = new Set<string>();
   const decided = (text: string | undefined, other: string, how: typeof accept) => {
     if (text === undefined) return undefined;
@@ -527,7 +537,7 @@ function walkDecisions(before: string, after: string, id: string, sliced: boolea
     // Where the table is gone (the cell emptied of its text, and the header with it), the old row has no
     // table to be written back into, and the change could only be accepted.
     if (!table || !cell) throw refused(MARK_PLACE);
-    if (!placeReads(current, parsed, cell.textFrom, open.from)) throw refused(MARK_PLACE);
+    if (!placeReads(current, parsed, cell.textFrom, open.from, flank)) throw refused(MARK_PLACE);
     // Neither decision of the mark is refused in any state.
     for (const how of [accept, reject])
       if (decided(current, id, how) === null) throw refused(MARK_PLACE);
@@ -780,18 +790,127 @@ export function assertMarkHolds(
 ): void {
   const parsed = parse(after);
   const mark = readPoint(parsed, id);
-  const open = mark?.segments[0]?.open;
-  if (!mark || !open) throw hiddenError(removing);
-  // The same file with nothing where the mark is, and no entry for it.
-  const body = after.slice(0, open.from) + after.slice(open.to);
-  const ledger = workingLedger(parsed.ledger);
-  delete ledger.marks[id];
-  const without = applyChanges(body, setLedger(body, normalizeLedger(body, ledger)));
+  if (!mark) throw hiddenError(removing);
   try {
-    placeHolds(without, after, id, tableFrom);
+    placeHolds(withoutMark(after, parsed, mark), after, id, tableFrom);
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     throw refused(error.message === TOO_MANY ? TOO_MANY_COLUMNS : pointsReadWords(parsed, mark));
+  }
+}
+
+/** The file `text` (read as `parsed`) with nothing where the point alignment change `mark` is, and no entry for it
+ * in the ledger: what its decisions are compared with. */
+function withoutMark(text: string, parsed: Parsed, mark: MarkRange): string {
+  const open = mark.segments[0]?.open;
+  if (!open) return text;
+  const body = text.slice(0, open.from) + text.slice(open.to);
+  const ledger = workingLedger(parsed.ledger);
+  delete ledger.marks[mark.id];
+  return applyChanges(body, setLedger(body, normalizeLedger(body, ledger)));
+}
+
+/** The words of a refusal of an edit that would leave more changes pending in the cell that a point alignment
+ * change ends than the walk of every order of decisions takes (`CELL_CHANGES`). */
+function pointsManyWords(parsed: Parsed, mark: MarkRange): string {
+  const { by } = mark.entry;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s alignment change is at the end of this cell, and this edit would leave more changes pending in it than can be looked at together. Decide some of them first.`;
+}
+
+/**
+ * Where the point alignment change `mark` stands in `text` (read as `parsed`) when it is in the header's last cell
+ * of a table: that table, and how many changes besides it are pending in the cell (`changesIn`). Undefined where
+ * it is not (a merge can leave it in a body row, or in no table at all), which the walk does not look at.
+ */
+function standingOf(
+  text: string,
+  parsed: Parsed,
+  mark: MarkRange,
+): { table: TableRead; others: number } | undefined {
+  const open = mark.segments[0]?.open;
+  if (!open) return undefined;
+  const table = tablesOfText(text, parsed).find(
+    (candidate) => candidate.from <= open.from && open.to <= candidate.to,
+  );
+  const cell = table?.rows[0]?.cells.at(-1);
+  if (!table || !cell || open.from < cell.from || cell.to < open.to) return undefined;
+  return { table, others: changesIn(text, parsed, table, mark.id).length };
+}
+
+/** Whether the orders of decisions of the changes in the cell that the point alignment change `mark` ends in
+ * `text` hold, as an edit is held to them: the mark is read where it stands in every state, no decision is refused
+ * for it, and each of its own decisions can be made. */
+function holdsIn(text: string, parsed: Parsed, mark: MarkRange, tableFrom: number): boolean {
+  try {
+    placeHolds(withoutMark(text, parsed, mark), text, mark.id, tableFrom, false, false);
+    return true;
+  } catch (error) {
+    if (error instanceof EditError) return false;
+    throw error;
+  }
+}
+
+/**
+ * Throws when an edit written in the cell that a pending alignment change ends leaves a state, among those that
+ * deciding the changes in that cell one at a time in any order leaves, in which the mark is read otherwise, or a
+ * decision is refused, which the file did not have before it (#466). The writer of the mark walks every one of
+ * those orders (`placeHolds`); the edits written after it were held to the file as it is written and to the
+ * backslash rule alone (`assertPointsRead`), which is what a key can afford for each of its keystrokes, and a mixed
+ * order could slip through: typing after the mark leaves `_` between another change's closer and the mark, and
+ * rejecting the one and accepting the other reads the file otherwise. The walk is the writer's, on the header
+ * as a small file of its own (`headerSlice`), with the edit's exactness (`flank` off): a few milliseconds, paid by
+ * an edit that touches that one cell while the cell holds a change besides the mark, and by no other. A cell with
+ * none has one state, which `assertPointsRead` has looked at.
+ *
+ * The walk is the writer's bound: a cell that this edit would leave with more than `CELL_CHANGES` changes besides the
+ * mark is refused, in words that say to decide some first. A cell that held more already (a merge leaves such a file)
+ * is not refused for it, and an edit that does not make a state worse is not refused for what was there: where the
+ * walk fails after the edit and failed before it, the file was unsound already.
+ *
+ * `changes` are the edit's, ledger included, in offsets of `text`, which `parsed` reads. An edit that rewrites the
+ * mark itself is the operation's own to look at (a plain column operation, `assertMarkHolds`).
+ *
+ * @throws EditError naming the person whose alignment change it is.
+ */
+export function assertPointHolds(
+  text: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): void {
+  if (changes.length === 0) return;
+  for (const was of parsed.marks) {
+    if (!isAlignPoint(was)) continue;
+    const open = was.segments[0]?.open;
+    if (!open) continue;
+    if (changes.some((change) => change.from < open.to && open.from < change.to)) continue;
+    // The edit is in the cell that the mark ends, or, in a header of one cell, in the lines of its changes above.
+    const start = lineStart(text, open.from);
+    const { cells } = readRowCells(text, start, lineEnd(text, open.to));
+    const cell = cells.find(
+      (candidate) => candidate.from <= open.from && open.from <= candidate.to,
+    );
+    if (!cell) continue;
+    const from = cells.length === 1 ? carriersFrom(text, start) : cell.from;
+    if (!changes.some((change) => change.from <= cell.to && from <= change.to)) continue;
+    const after = applyChanges(text, changes);
+    const read = parse(after);
+    const mark = readPoint(read, was.id);
+    const now = mark ? standingOf(after, read, mark) : undefined;
+    if (!mark || !now || now.others === 0) continue;
+    // Where the mark stood before the edit, looked at only where the answer needs it.
+    const standing = () => standingOf(text, parsed, was);
+    if (now.others > CELL_CHANGES) {
+      const before = standing();
+      if (before && before.others <= CELL_CHANGES) throw refused(pointsManyWords(read, mark));
+      continue;
+    }
+    if (holdsIn(after, read, mark, now.table.from)) continue;
+    // A file that no order of decisions reads soundly already is not made so by this edit.
+    const before = standing();
+    if (before && holdsIn(text, parsed, was, before.table.from)) {
+      throw refused(pointsReadWords(read, mark));
+    }
   }
 }
 

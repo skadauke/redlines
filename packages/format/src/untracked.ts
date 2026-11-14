@@ -40,6 +40,7 @@ import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import { assertPointsRead } from './align-point.ts';
+import { assertPointHolds } from './table-align.ts';
 import { editMoveCopy } from './table-move-edit.ts';
 import {
   checkTableEdits,
@@ -844,6 +845,8 @@ function edited(
   }
   if (read && written !== undefined) {
     markersStayRead(text, parsed, written, read, changes, ctx.author);
+    // An edit in the cell that a pending alignment change ends is held to every order of decisions (#466).
+    assertPointHolds(text, parsed, result);
   }
   // No break of a split may come to depend on the decisions of the changes next to it (format
   // §3.4), as when the blank line between two splits' breaks is taken out.
