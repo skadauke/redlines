@@ -17,7 +17,13 @@ import {
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
-import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import {
+  createEditor,
+  type Author,
+  type EditorTyping,
+  type EditorUiState,
+  type ImageSpot,
+} from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
@@ -35,6 +41,7 @@ import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
+import { addImages, type ImageAdding } from './image-add.ts';
 import { localImageUrl } from './images.ts';
 import {
   appMenuModel,
@@ -256,6 +263,10 @@ const editor = createEditor(element('#editor'), {
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
+  // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
+  // browser tab): saved beside the document, and linked at the place they came to.
+  onImageFiles: (files, spot, pasted) =>
+    void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -335,6 +346,55 @@ createTables(editor);
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
 // matching emoji, as Preferences allow (asked each time).
 createEmoji(editor, { enabled: () => settings.emojiSuggestions });
+
+/**
+ * What adding images to this window's document needs of it (image-add.ts): its file, which a
+ * document with no file is saved to first, after asking; where the settings say images go, as
+ * they are when the images arrive; and the host, which saves them (src-tauri/src/image_files.rs).
+ */
+const imageAdding: ImageAdding = {
+  document: () => ({ path: controller.state.path, name: controller.state.name }),
+  place: () => {
+    const { imagePlace, imageFolderName } = loadSettings();
+    return { place: imagePlace, name: imageFolderName };
+  },
+  saveFirst: async () => (await host.askToSaveForImage()) && (await controller.saveAs()),
+  addImages: (path, folder, source) => host.addImages(path, folder, source),
+  notice: (message) => notice.flash(message),
+};
+
+/**
+ * Insert Image… (`image.insert`, #308): chooses image files in the system's panel and adds them as
+ * a drop or a paste does, at the caret. The app's own command, not a plugin's, since the panel is.
+ * A document with no file is saved first, before the panel: there is no folder for them until then.
+ */
+async function insertChosenImages(spot: ImageSpot): Promise<void> {
+  try {
+    if (controller.state.path === null && !(await imageAdding.saveFirst())) return spot.release();
+    const source = await host.chooseImages();
+    if (!source) return spot.release();
+    await addImages(imageAdding, spot, source);
+  } catch (error) {
+    spot.release();
+    notice.flash(error instanceof Error ? error.message : String(error));
+  }
+}
+
+// Registered before the review plugin's Add Comment, which comes last in Format.
+editor.commands.register([
+  {
+    id: 'image.insert',
+    title: 'Image…',
+    menu: 'format',
+    group: 'insert',
+    run: () => {
+      const spot = editor.imageSpot();
+      if (!spot) return false;
+      void insertChosenImages(spot);
+      return true;
+    },
+  },
+]);
 
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
@@ -782,6 +842,7 @@ function renameDocument(): void {
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleTracking,
   openReview,
   toggleResolved,
@@ -868,6 +929,7 @@ const commands: MenuCommands = {
     }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleSidebar,
   toggleTracking,
   openReview,
@@ -1067,6 +1129,15 @@ if (isTauri) {
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
+  // Image files dropped on the window go to its document, not to the files to open. The app keeps
+  // them and says where they landed, in points of the page, which the window zoom scales.
+  await host
+    .listenForImageDrops((drop) => {
+      const level = zoom?.level() ?? 1;
+      const spot = editor.imageSpot({ x: drop.x / level, y: drop.y / level });
+      if (spot) void addImages(imageAdding, spot, { kind: 'given', id: drop.id });
+    })
+    .catch((error: unknown) => console.error('Could not listen for images dropped', error));
   // A launch with no file to open: the document that was open last, when Preferences ask for it.
   // New is always empty, so this is for the first window alone.
   if (controller.untouched && getCurrentWindow().label === 'main') {

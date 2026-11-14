@@ -10,8 +10,8 @@ import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
  * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
  * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
- * change bar switches the two looks, and nothing else does, so a View menu lists three views
- * (`MenuView`).
+ * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
+ * (`MenuView`) and a switch for the look.
  */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
@@ -22,7 +22,7 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
 /**
- * The look of Redlines that a click on a change bar chose last, the full markup (`'redlines'`) or
+ * The look of Redlines that a click on a change bar or `switchLook` chose last, the full markup (`'redlines'`) or
  * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
@@ -39,7 +39,7 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
-  /** The look of Redlines chosen last, with a click on a change bar, which an automatic switch shows. */
+  /** The look of Redlines chosen last, with a click on a change bar or `switchLook`, which an automatic switch shows. */
   markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
@@ -140,6 +140,30 @@ export interface MetPerson {
   color: number;
 }
 
+/**
+ * Where the links of images being added will be written, held while the host saves the images
+ * (`EditorOptions.onImageFiles`, `Editor.imageSpot`). The spot follows the text around it, so what
+ * is written in the document meanwhile moves nothing.
+ */
+export interface ImageSpot {
+  /**
+   * Writes a link to each path, `![](path)` with the path as a link destination needs it written,
+   * at the spot: one after another, a space apart, and nothing else. They take the place of the text
+   * the selection held when a paste took the spot, but only while it is all still there: text
+   * written in it meanwhile stays, and the links go after it; text written at its edges stays
+   * outside. For a spot that held no text, the links go before what was written at it meanwhile. It
+   * is the person's own insertion, tracked while Track Changes is on, and one step for Undo, which
+   * the Edit menu calls Insert Image. The caret goes to the end of the links if it is still at the
+   * spot, and stays where the person put it otherwise; the preview draws the image all the same.
+   * Paths are as the document should reach the files, relative to it (`images/shot.png`). A spot is
+   * used once. Returns whether the links went in: when the document refuses them, or was replaced
+   * since, so that the spot is gone, the reason is said through `onNotice`.
+   */
+  insert(paths: readonly string[]): boolean;
+  /** Lets the spot go, when no image will be added. A spot that was used is let go already. */
+  release(): void;
+}
+
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
@@ -210,6 +234,17 @@ export interface EditorOptions {
    * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
    */
   resolveImage?: (src: string) => string | null;
+  /**
+   * Called when image files are pasted into the document, or dropped on it, with the files and the
+   * spot their links will go to (`ImageSpot`). The host saves each file where the document can
+   * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells
+   * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
+   * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
+   * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
+   * image where it can't (Raw while Track Changes is on, code) through `onNotice`, and the host is
+   * not called. Default: none, and the browser does what it does with such a paste or a drop.
+   */
+  onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
   /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
@@ -321,12 +356,21 @@ export interface Editor {
   setViewMode(mode: ViewMode): void;
   /**
    * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
-   * shown in the look that was shown last: the one a click on a change bar chose
+   * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
-   * chooses no look, and when Redlines is shown already, in either look, it does nothing: only a
-   * click on a change bar chooses a look.
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
+   * on a change bar, or `switchLook`, chooses a look.
    */
   showView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does and with the same
+   * effect: the full markup goes to the simple look and the simple look to the full markup, the
+   * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
+   * looking at (the one with the caret when it is on the screen, else the first on it) stays where
+   * it was. It does nothing in Clean and Raw, which have no look. A host's View menu has it as a
+   * switch (design §5.3), so that the looks need no pointer.
+   */
+  switchLook(): void;
   /**
    * Changes the look of Redlines that an automatic switch shows, such as when the person chose
    * another in another window. It never changes the view that is shown: only a choice made here
@@ -405,6 +449,13 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * The spot an image added now would go, for a host that has the images by other means than a
+   * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
+   * client point `at` is in the text, when given and over some, and otherwise the selection. Null
+   * when the editor takes no image there, which `onNotice` then says.
+   */
+  imageSpot(at?: { x: number; y: number }): ImageSpot | null;
   /**
    * The word at a position of the document, as the host's spell checker is asked about it: letters
    * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word

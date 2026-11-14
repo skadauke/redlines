@@ -41,6 +41,7 @@ import {
 } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -77,7 +78,7 @@ import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
-import { barSwitch } from './tracked/bar-switch.ts';
+import { barSwitch, lookedAt, switchLookAt } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
@@ -253,6 +254,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
+    // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
+    images(options.onImageFiles, options.onNotice),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -456,6 +459,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
       view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
+    switchLook: () => {
+      // Nothing to measure in Clean and Raw, which have no look to switch.
+      if (menuViewOf(view.state.field(viewModeField)) !== 'redlines') return;
+      const at = lookedAt(view);
+      switchLookAt(view, at.pos, undefined, undefined, at.row);
+    },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
@@ -598,6 +607,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     wordAt: (pos) => wordAt(view, pos),
     pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
+    imageSpot: (at) => imageSpot(view, at, options.onNotice),
     focus: () => view.focus(),
     destroy: () => {
       destroyed = true;
