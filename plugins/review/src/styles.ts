@@ -59,6 +59,10 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     scrollMargin: notePx(12),
     transition: 'border-color 120ms ease',
   },
+  // The notes slide into place when the note level with its anchor changes, as the page scrolls or
+  // another is selected: the rail has this class for a moment then (rail.ts), and not while a
+  // keystroke or a resize moves the text, when a note should keep up with its anchor.
+  '.rl-rail-sliding .rl-note': { transition: 'border-color 120ms ease, top 180ms ease' },
   // A hovered note, whose actions' hints rise above it, comes in front of its neighbors.
   '.rl-note:hover': { zIndex: '1', backgroundColor: 'var(--rl-page)' },
   '.rl-note-selected': { borderColor: 'var(--rl-color)' },
@@ -243,6 +247,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundColor: 'var(--rl-color)',
     cursor: 'default',
   },
+  '.rl-rail-sliding.rl-rail-compact .rl-note-dot': { transition: 'top 180ms ease' },
   // A target larger than the dot.
   '.rl-rail-compact .rl-note-dot::before': {
     content: '""',
@@ -459,9 +464,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
 
   '@media (prefers-reduced-motion: reduce)': {
-    '.rl-note, .rl-hint, .rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint': {
-      transition: 'none',
-    },
+    // Every selector above that moves something by a transition is here, with its own specificity.
+    '.rl-note, .rl-rail-sliding .rl-note, .rl-note-dot, .rl-rail-sliding.rl-rail-compact .rl-note-dot, .rl-hint, .rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint':
+      {
+        transition: 'none',
+      },
   },
 };
 

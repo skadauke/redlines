@@ -539,6 +539,26 @@ mode has no counterpart in the desktop app.
     decide it in place, in the simple look as in Redlines, in one step to undo, and the view and
     the scroll stay as they were; so that the decision isn't blind, the note says what it decides
     in the card's words ("Replaced 'March' with 'April'") where the page shows no old text.
+  - **The notes follow the view.** One note is level with its anchor and the others stack around
+    it: the ones after it go down past it, and the ones before it go up, past the top of the
+    screen if need be, never past the top of the page, where they stack from the top. So where
+    many comments crowd a section, the note level with the top of the screen is the one the text
+    there is about, and not one stacked down from far above. The one level with its anchor is the
+    selected note (clicked, or with the caret in its anchor) while its anchor is in view, else the
+    first note whose anchor is; with no anchor in view, the first note below the view, else the
+    last. A comment being written is always the one, and stays where it is while the person types
+    and scrolls. As the page scrolls, the note that is level with its anchor changes with the first
+    anchor in view, and the notes slide into place in a moment, as in Google Docs; they slide only
+    then, and not while a keystroke or a resize moves the text, and not at all under Reduce Motion.
+    Selecting a note brings it level with its anchor and moves the others out of its way. The dots
+    of a narrow window follow the same rule. A scroll places the notes again from what was last
+    measured, only when another note is the one, and writes the notes within a screen of the page,
+    and the rest as the page comes near them, so that it stays cheap in a long document. A
+    resolved note gives way as before: it is never the one that keeps its anchor's height. The
+    page is as long as the notes need when the first is level with its anchor, where they reach
+    their lowest, as it was before the notes followed the view, so that a crowded end of a document
+    leaves room under its text; it doesn't shrink as the page scrolls, which would move the page
+    under the person at its end, and grows only where a resolved note, shown, goes lower.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
