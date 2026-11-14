@@ -451,6 +451,10 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_terminal_sign_in,
             #[cfg(unix)]
+            agents::skill_status,
+            #[cfg(unix)]
+            agents::skill_install,
+            #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]
             agents::acp_agent_add,
