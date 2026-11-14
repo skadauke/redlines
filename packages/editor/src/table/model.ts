@@ -14,8 +14,10 @@ import { indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
 export type Align = '' | 'left' | 'center' | 'right';
 
 /** A cell: from the pipe in front of it (the start of the line for the first) to the next pipe (the
- * end of the line for the last). `textFrom` and `textTo` leave out the padding, and a marker of an
- * inserted row or column; an empty cell has one stop, where they meet. */
+ * end of the line for the last). `textFrom` and `textTo` leave out the padding, a marker of an
+ * inserted row or column, and the mark of an alignment change that ends the cell's text (`textTo`
+ * stops in front of it, so that typing and the caret stay there); an empty cell has one stop, where
+ * they meet. */
 export interface Cell {
   from: number;
   to: number;

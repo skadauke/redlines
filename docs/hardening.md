@@ -95,7 +95,11 @@ REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.tes
 `format-apart` at one seed.
 
 The tables have a **pair model** besides: every pair of operations on rows and columns by two
-people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7).
+people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7). A tracked
+alignment change, one mark at the end of the header row, is among the operations (#281), and
+`table-cols-random`, `table-format-random` and `table-rows-random` draw it with other people's
+marks, rows and columns around it: every order of deciding it reads alike, and the pair model,
+`table-cols-random` and `table-rows-random` fail on a decision of it that is refused.
 
 ### Differential runs against main
 
@@ -246,9 +250,8 @@ its case; each is a bug. The list is what has been found, not a count of what is
 **Refusals that are planned to go away.** Code that starts a list item, and indented code in an item
 or a quote, are refused with Track Changes on (#284). Typing in code that holds another person's
 pending code change is refused (#285): the issue asks for a form that reads alike in every order, or
-a proof that none exists, with the refusal kept. Aligning a column with Track Changes on is refused
-("Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.",
-#281). Bold over more than five cells of a table was one of them, and is not any more (#267).
+a proof that none exists, with the refusal kept. Bold over more than five cells of a table was one of
+them, and is not any more (#267).
 
 **What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word
 import into full history and live sessions with several authors in full history. §7 says what

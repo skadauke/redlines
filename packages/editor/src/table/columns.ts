@@ -49,9 +49,11 @@ export function tableAbove(state: EditorState, pos: number): Table | null {
 }
 
 /**
- * The table an alignment change is around (format §3.7), and the columns whose alignment it changed:
- * those where the delimiter row differs from the old one the change keeps. Null when no table is
- * there or the old row has not its columns.
+ * The table an alignment change is of (format §3.7), and the columns whose alignment it changed:
+ * those where the delimiter row differs from the old one the change keeps. A mark with no closer, the
+ * point form, is of the table that holds it, at the end of its header's last cell; one with a closer
+ * is of the table it is around, the span form that another tool wrote. Null when no table is there
+ * or the old row has not its columns.
  */
 export function alignedColumns(
   state: EditorState,
@@ -59,12 +61,19 @@ export function alignedColumns(
 ): { table: Table; cols: number[] } | null {
   const segment = mark.segments[0];
   if (!segment) return null;
-  const start = segment.carrier?.to ?? segment.open.to;
+  const tables = state.field(tablesField, false) ?? [];
   let table: Table | null = null;
-  for (const candidate of state.field(tablesField, false) ?? []) {
-    if (candidate.from >= start && (!table || candidate.from < table.from)) table = candidate;
+  if (segment.close) {
+    const start = segment.carrier?.to ?? segment.open.to;
+    for (const candidate of tables) {
+      if (candidate.from >= start && (!table || candidate.from < table.from)) table = candidate;
+    }
+    if (table && table.to > segment.close.from) return null;
+  } else {
+    const { open } = segment;
+    table = tables.find((found) => found.from <= open.from && open.to <= found.to) ?? null;
   }
-  if (!table || (segment.close && table.to > segment.close.from)) return null;
+  if (!table) return null;
   const was = alignWas(mark, table.columns);
   if (!was) return null;
   const cols = table.aligns.flatMap((align, col) => (align === was[col] ? [] : [col]));

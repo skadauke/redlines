@@ -816,6 +816,7 @@ describe('an inserted, deleted or moved table column', () => {
 
 describe('an alignment change of a table', () => {
   const SPEC = '\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|';
+  // The span form, which another tool wrote: the opener above the table, the closer below it.
   const CENTERED = file(
     `<!--fmt k3x9 align=${SPEC}-->\n\n| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |\n\n<!--/k3x9-->`,
     [...PEOPLE, 'marks:', '  k3x9: {by: bo, at: 2026-10-31T09:30Z}'],
@@ -856,5 +857,77 @@ describe('an alignment change of a table', () => {
         .editor.getUiState()
         .changes.map((change) => change.id),
     ).toEqual(['k3x9']);
+  });
+
+  describe('as the point that ends the header’s last cell, which Redlines writes', () => {
+    const POINT = file(
+      `| Fruit | Count<!--fmt k3x9 align=${SPEC}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+      [...PEOPLE, 'marks:', '  k3x9: {by: bo, at: 2026-10-31T09:30Z}'],
+    );
+
+    it('is described by the column it changed, as the span form is', () => {
+      const parsed = parse(POINT);
+      expect(describeChange(parsed, parsed.marks[0]!)).toBe(
+        'Formatted: column Count centered (was default)',
+      );
+    });
+
+    it('names the column by the text the page shows, with Bo’s insertion typed in its cell', async () => {
+      // The insertion's markers are not part of the name: they show nowhere on the page.
+      const typed = file(
+        `| Fruit | Count<!--ins m2bd-->x<!--/m2bd--><!--fmt k3x9 align=${SPEC}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+        [
+          ...PEOPLE,
+          'marks:',
+          '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+          '  m2bd: {by: bo, at: 2026-10-31T09:31Z}',
+        ],
+      );
+      const parsed = parse(typed);
+      expect(
+        describeChange(
+          parsed,
+          parsed.marks.find((found) => found.id === 'k3x9')!,
+        ),
+      ).toBe('Formatted: column Countx centered (was default)');
+      const { editor } = mount(typed);
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      expect(what(editor)).toBe('Formatted: column Countx centered (was default)');
+    });
+
+    it('opens its card on the header row, with Accept and Reject', async () => {
+      const { editor } = mount(POINT);
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      expect(what(editor)).toBe('Formatted: column Count centered (was default)');
+      expect(button(card(editor)!, 'Accept')).toBeInstanceOf(HTMLButtonElement);
+      expect(button(card(editor)!, 'Reject')).toBeInstanceOf(HTMLButtonElement);
+    });
+
+    it('Accept removes the mark and keeps the new alignment, and Reject writes the old row back', async () => {
+      const { editor } = mount(POINT, { real: true });
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      button(card(editor)!, 'Accept').click();
+      expect(editor.getDoc()).toContain('| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |');
+      expect(editor.getDoc()).not.toContain('<!--');
+      const rejecting = mount(POINT, { real: true });
+      rejecting.editor.setViewMode('redlines');
+      await clickOn(rejecting.editor, '.rl-fmt');
+      button(card(rejecting.editor)!, 'Reject').click();
+      expect(rejecting.editor.getDoc()).toContain(
+        '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |',
+      );
+      expect(rejecting.editor.getDoc()).not.toContain('<!--');
+    });
+
+    it('is listed once in the review bar’s changes', () => {
+      expect(
+        mount(POINT)
+          .editor.getUiState()
+          .changes.map((change) => change.id),
+      ).toEqual(['k3x9']);
+    });
   });
 });

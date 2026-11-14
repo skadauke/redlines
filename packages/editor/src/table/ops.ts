@@ -478,22 +478,17 @@ export function caretAlign(state: EditorState): Align | null {
   return touched.table.aligns[col] ?? null;
 }
 
-export const ALIGN_NOT_READY =
-  "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
-
 /**
- * Aligns the columns the selection touches: the delimiter row as it says, with Track Changes off
- * (format §3.7); with it on, a refusal in words. The selection stays where it is.
+ * Aligns the columns the selection touches (format §3.7): the delimiter row as it says with Track
+ * Changes off; with it on, the format's tracked change, one mark at the end of the header's last
+ * cell that keeps the old row. Either way it is one step to undo. The selection stays where it is,
+ * and a caret at the end of the last header cell stays in front of the mark. A refusal is the
+ * format's, told in its words, with nothing written; columns that have the alignment already are
+ * no change and no refusal.
  */
 export function alignCols(view: EditorView, align: Align): boolean {
   const touched = touchedCols(view.state);
   if (!touched) return false;
-  // A tracked alignment change is not written yet: where its closer should stand is open (#281). A
-  // refusal in words, never a silent no-op; a pending one from another tool is still decided.
-  if (view.state.field(trackingField)) {
-    view.dispatch({ effects: refusedEditEffect.of(ALIGN_NOT_READY) });
-    return true;
-  }
   const cols = Array.from(
     { length: touched.last - touched.first + 1 },
     (_, i) => touched.first + i,
@@ -504,8 +499,9 @@ export function alignCols(view: EditorView, align: Align): boolean {
     view,
     { kind: 'align', table: touched.table.from, cols, align },
     'table.align.col',
-    // A mark written at the start of the table is in front of the caret that stood there.
+    // The default mapping: text written where a caret stands goes after it, so a caret at the end of
+    // the last header cell stays in front of the mark.
     (_after, _done, changes) =>
-      view.state.selection.map(ChangeSet.of([...changes], view.state.doc.length), 1),
+      view.state.selection.map(ChangeSet.of([...changes], view.state.doc.length)),
   );
 }

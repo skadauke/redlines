@@ -924,7 +924,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // A change that takes all the text of a wrapped line takes the line break in front of it too,
         // where it is written as a deletion (format §3.2, #427), and as a replacement that has the
         // line in its new text where its words are hunked together: the plain replacement is the
-        // oracle here, so no line of the old string is emptied (`wrapped-line.test.ts` has those).
+        // oracle here, so no line of the old string is emptied (`wrapped-line.test.ts` has the agent's
+        // deletions of lines, written as deletions).
         const prefixWord = /^(?:[-*+>]|\d+\.|#{1,6})$/;
         const words = oldStr
           .split('\n')

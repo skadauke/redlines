@@ -81,7 +81,11 @@ their words:
 - *"A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit
   it."*
 - *"Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes."*
-- *"Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it."*
+- *"Accept or reject the alignment change in this table first."* A column inserted, deleted or moved
+  with Track Changes on, while a change to the table's alignment is pending. The alignment change
+  keeps the whole old row of dashes and colons under the header, and a deleted or moved column keeps
+  its own cell of that row; decided in some orders, the two would leave the old row a cell short or
+  long.
 
 In most of these the way out is to decide the other person's change first, or to turn Track Changes
 off for the edit; the refusal says which.
@@ -89,9 +93,8 @@ off for the edit; the refusal says which.
 **Some of these are planned to go away.** Code that starts a list item, and indented code in an item or
 a quote, can't change with Track Changes on yet (#284). Typing in code that holds another person's
 pending code change is refused (#285); the open issue asks for a way of writing it that reads the same
-in every order, or for a proof that there is none, in which case the refusal stays. Aligning a table's
-column with Track Changes on is refused for now (#281). Bold over more than five cells of a table used
-to be refused, and no longer is (#267).
+in every order, or for a proof that there is none, in which case the refusal stays. Bold over more
+than five cells of a table used to be refused, and no longer is (#267).
 
 ## The evidence, in numbers
 

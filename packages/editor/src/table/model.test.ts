@@ -1,10 +1,15 @@
+// @vitest-environment happy-dom
 import { markdown } from '@codemirror/lang-markdown';
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { EditorState, type ChangeSpec } from '@codemirror/state';
+import { ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language';
+import { EditorSelection, EditorState, type ChangeSpec } from '@codemirror/state';
 import { parse as parseFormat, readTables } from '@redlines/format';
+import { runScopeHandlers } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createEditor, type Editor } from '../index.ts';
 import { buildTables, cellAt, type Table, tablesField, tablesOf } from './model.ts';
+import { atomsOfState, isStop } from './stops.ts';
+import { shownText } from './widths.ts';
 
 const make = (doc: string) =>
   EditorState.create({ doc, extensions: [markdown({ extensions: GFM }), tablesField] });
@@ -386,5 +391,115 @@ describe('the tables of a state against the format reader (#290)', () => {
       );
       expect(mine, JSON.stringify(doc)).toEqual(format);
     }
+  });
+});
+
+describe('the header’s last cell, with the mark of an alignment change at the end of its text', () => {
+  // The point form (format §3.7): the mark has no closer, and ends the text of the header's last cell.
+  const MARK = '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|-->';
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  const PLAIN = '| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |\n';
+  const POINT = `${PLAIN.replace('Count', `Count${MARK}`)}${LEDGER}`;
+  /** Where the text of the last header cell ends, in both: the mark stands there. */
+  const END = PLAIN.indexOf('Count') + 'Count'.length;
+
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  function mount(doc: string, tracking = false): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking,
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    return editor;
+  }
+  const header = (editor: Editor) => tablesOf(editor.view.state)[0]!.rows[0]!;
+  const lastCell = (editor: Editor) => header(editor).cells.at(-1)!;
+
+  it('has its text in front of the mark, and the table as it reads without one', () => {
+    const state = make(POINT);
+    const [table] = tablesOf(state);
+    const [head, ...body] = table?.rows ?? [];
+    const text = (cell: { textFrom: number; textTo: number }) =>
+      state.sliceDoc(cell.textFrom, cell.textTo);
+    expect(head?.cells.map(text)).toEqual(['Fruit', 'Count']);
+    expect(head?.cells[1]?.textTo).toBe(END);
+    expect(state.sliceDoc(END, END + MARK.length)).toBe(MARK);
+    expect(body.map((row) => row.cells.map(text))).toEqual([['Apples', '3']]);
+    expect([table?.columns, table?.aligns]).toEqual([2, ['', 'center']]);
+  });
+
+  it('adds no caret stop and no atom to the table: the caret steps over the mark with the pipe', () => {
+    const marked = mount(POINT);
+    const plain = mount(PLAIN);
+    const stops = (editor: Editor) => {
+      const { from, to } = header(editor);
+      const found: number[] = [];
+      for (let pos = from; pos <= to; pos++) {
+        if (isStop(editor.view.state, pos)) found.push(pos - from);
+      }
+      return found;
+    };
+    expect(stops(marked)).toEqual(stops(plain));
+    expect(stops(marked)).toContain(END);
+    const atoms = (editor: Editor) => {
+      const found: [number, number][] = [];
+      for (const it = atomsOfState(editor.view.state).iter(); it.value; it.next()) {
+        found.push([it.from, it.to]);
+      }
+      return found;
+    };
+    // What is after the mark is the mark's length further on, and every atom is what it was.
+    const shifted = (pos: number) => (pos > END ? pos + MARK.length : pos);
+    expect(atoms(marked)).toEqual(atoms(plain).map(([from, to]) => [shifted(from), shifted(to)]));
+    // So → at the end of the text goes to the first cell below, and ← comes back.
+    const press = (key: string) =>
+      runScopeHandlers(marked.view, new KeyboardEvent('keydown', { key }), 'editor');
+    marked.view.dispatch({ selection: { anchor: END } });
+    press('ArrowRight');
+    expect(marked.view.state.selection.main.head).toBe(POINT.indexOf('Apples'));
+    press('ArrowLeft');
+    expect(marked.view.state.selection.main.head).toBe(END);
+  });
+
+  it('takes a tracked keystroke at the end of its text in front of the mark', () => {
+    const editor = mount(POINT, true);
+    const { view } = editor;
+    const type = (text: string) => {
+      const at = view.state.selection.main.head;
+      view.dispatch({
+        changes: { from: at, insert: text },
+        selection: EditorSelection.cursor(at + text.length),
+        userEvent: 'input.type',
+      });
+    };
+    view.dispatch({ selection: EditorSelection.cursor(lastCell(editor).textTo) });
+    type('x');
+    expect(view.state.doc.toString()).toMatch(
+      /\| Fruit \| Count<!--ins (\w{4})-->x<!--\/\1--><!--fmt k3x9 align=/,
+    );
+    const cell = lastCell(editor);
+    // The cell's text is what it was and the insertion: the mark is no part of it.
+    expect(view.state.sliceDoc(cell.textFrom, cell.textTo)).toMatch(
+      /^Count<!--ins \w{4}-->x<!--\/\w{4}-->$/,
+    );
+    expect(shownText(view.state, cell)).toBe('Countx');
+    expect(view.state.sliceDoc(cell.textTo, cell.textTo + '<!--fmt '.length)).toBe('<!--fmt ');
+    expect(isStop(view.state, view.state.selection.main.head)).toBe(true);
+    // Another letter goes on in the same place.
+    type('y');
+    expect(view.state.doc.toString()).toMatch(
+      /\| Fruit \| Count<!--ins (\w{4})-->xy<!--\/\1--><!--fmt k3x9 align=/,
+    );
+    expect(shownText(view.state, lastCell(editor))).toBe('Countxy');
   });
 });

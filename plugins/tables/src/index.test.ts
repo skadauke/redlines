@@ -714,12 +714,25 @@ describe('the alignment commands', () => {
   });
 
   it('do nothing, and say nothing, for the alignment the columns have already', () => {
-    const editor = mount(doc, false);
+    for (const tracking of [false, true]) {
+      const label = `Track Changes ${tracking ? 'on' : 'off'}`;
+      const editor = mount(doc, tracking);
+      select(editor, at('12'));
+      expect(editor.commands.run('table.alignCenter'), label).toBe(true);
+      expect(editor.getDoc(), label).toBe(doc);
+      expect(editor.getUiState().canUndo, label).toBe(false);
+      expect(notices, label).toEqual([]);
+    }
+    // The same for a column whose alignment is the change's own, which is pending: no second step.
+    const editor = mount(doc, true);
     select(editor, at('12'));
-    expect(editor.commands.run('table.alignCenter')).toBe(true);
-    expect(editor.getDoc()).toBe(doc);
-    expect(editor.getUiState().undo).toBeNull();
+    editor.commands.run('table.alignRight');
+    const pending = editor.getDoc();
+    editor.commands.run('table.alignRight');
+    expect(editor.getDoc()).toBe(pending);
     expect(notices).toEqual([]);
+    editor.undo();
+    expect(editor.getDoc()).toBe(doc);
   });
 
   it('align every column the selection touches', () => {
@@ -729,34 +742,277 @@ describe('the alignment commands', () => {
     expect(delimiter(editor)).toBe('| -: | --: | -: |');
   });
 
-  it('are refused with Track Changes on, in words, and write nothing', () => {
-    const READY =
-      "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
-    for (const id of [
-      'table.alignLeft',
-      'table.alignCenter',
-      'table.alignRight',
-      'table.alignDefault',
-    ]) {
-      const editor = mount(doc, true);
-      // A column that already has the alignment too: never a silent no-op.
-      for (const where of ['11', '12', '13']) {
-        notices.length = 0;
-        select(editor, at(where));
-        expect(editor.commands.run(id), id).toBe(true);
-        expect(editor.getDoc(), id).toBe(doc);
-        expect(notices, id).toEqual([READY]);
-      }
-      expect(editor.getUiState().undo).toBeNull();
-    }
-  });
+  // With Track Changes on, a change of alignment is one mark with no closer, at the end of the text of
+  // the header's last cell, that keeps the old delimiter row (format §3.7, #281): the commands write
+  // what the format gives, and say its words when it refuses.
 
-  it("are refused from the grip menu's command too, and column commands still work", () => {
+  /** The mark of a tracked alignment change, with its id. */
+  const MARK = /<!--fmt (\w{4}) align=[^>]*-->/;
+  /** The header line of a document whose header is `| a | b | c |`. */
+  const headerOf = (text: string) => text.split('\n').find((line) => line.startsWith('| a |'));
+  const type = (editor: Editor, text: string) => {
+    const head = editor.view.state.selection.main.head;
+    editor.view.dispatch({
+      changes: { from: head, insert: text },
+      selection: { anchor: head + text.length },
+      userEvent: 'input.type',
+    });
+  };
+  /** `doc` with Ada's alignment change pending: the second column right, as the command writes it. */
+  const aligned = (): string => {
     const editor = mount(doc, true);
     select(editor, at('12'));
     editor.commands.run('table.alignRight');
+    return editor.getDoc();
+  };
+  const ALIGN_FIRST = 'Accept or reject the alignment change in this table first.';
+  const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
+  const ROWS_FIRST = 'Accept or reject the row changes in this table first.';
+  /** Bo's alignment change as another person's file has it: the second column right, from center. */
+  const SPEC = '\\|\\x20-\\x20\\|\\x20:-:\\x20\\|\\x20-:\\x20\\|';
+  /** `body` with a ledger of Bo's marks `ids`. */
+  const withBo = (body: string, ids: string[]) => {
+    const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-11-01T10:00Z}\n`).join('');
+    return `${body}\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n${marks}-->\n`;
+  };
+  const byBo = () =>
+    withBo(doc.replace(':-:', '--:').replace('| c |', `| c<!--fmt k3x9 align=${SPEC}--> |`), [
+      'k3x9',
+    ]);
+
+  it('are a point mark in the header with Track Changes on, one step to undo', () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    expect(editor.commands.run('table.alignRight')).toBe(true);
+    const after = editor.getDoc();
+    // One mark with no closer, at the end of the header's last cell, in front of its padding.
+    expect(headerOf(after)).toMatch(/\| c<!--fmt \w{4} align=\\\|[^>]*--> \|/);
+    expect(after.match(/<!--fmt /g)).toHaveLength(1);
+    expect(delimiter(editor)).toBe('| - | --: | -: |');
+    // Nothing else is written in the text: no blank line, no line of its own for the mark.
+    const mark = MARK.exec(after)?.[0] ?? '';
+    expect(after.startsWith(doc.replace(':-:', '--:').replace('| c |', `| c${mark} |`))).toBe(true);
+    expect(notices).toEqual([]);
+    // The caret is in the cell it was in, which the mark has moved.
+    expect(editor.view.state.selection.main.head).toBe(after.indexOf('12') + 1);
+    // The ledger holds the one change, Ada's.
+    expect(Object.values(editor.getParsed().ledger.marks).map((entry) => entry.by)).toEqual([
+      'ada',
+    ]);
+    // One step to undo, which brings back the selection it was made with.
+    expect(editor.getUiState().canUndo).toBe(true);
+    editor.undo();
     expect(editor.getDoc()).toBe(doc);
-    editor.commands.run('table.insertColumnRight');
-    expect(editor.getDoc()).toMatch(/<!--ins \w+ col-->/);
+    expect(editor.view.state.selection.main).toMatchObject({ anchor: at('12'), head: at('12') });
+    expect(editor.getUiState().canUndo).toBe(false);
+  });
+
+  it('are named Align Column in Undo and Redo, with Track Changes off and on', () => {
+    for (const tracking of [false, true]) {
+      const label = `Track Changes ${tracking ? 'on' : 'off'}`;
+      const editor = mount(doc, tracking);
+      select(editor, at('12'));
+      editor.commands.run('table.alignRight');
+      expect(editor.getUiState(), label).toMatchObject({ undo: 'Align Column', redo: null });
+      editor.undo();
+      expect(editor.getUiState(), label).toMatchObject({ undo: null, redo: 'Align Column' });
+      editor.redo();
+      expect(editor.getUiState(), label).toMatchObject({ undo: 'Align Column', redo: null });
+    }
+  });
+
+  it('keeps a caret at the end of the last header cell in front of the mark', () => {
+    const editor = mount(doc, true);
+    const end = doc.indexOf('c |') + 1;
+    select(editor, end);
+    expect(editor.commands.run('table.alignCenter')).toBe(true);
+    expect(delimiter(editor)).toBe('| - | :-: | :-: |');
+    expect(editor.getDoc().slice(end, end + 8)).toBe('<!--fmt ');
+    expect(editor.view.state.selection.main.head).toBe(end);
+    // A key typed there is in front of the mark.
+    type(editor, 'x');
+    expect(editor.getDoc()).toMatch(/\| c<!--ins (\w{4})-->x<!--\/\1--><!--fmt \w{4} align=/);
+    expect(notices).toEqual([]);
+  });
+
+  it('changes your own pending change in place, and takes it away when the old alignments are back', () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    editor.commands.run('table.alignRight');
+    const first = MARK.exec(editor.getDoc())?.[0];
+    expect(first).toBeDefined();
+    select(editor, editor.getDoc().indexOf('13') + 1);
+    editor.commands.run('table.alignLeft');
+    // The one change is changed, with the old row it had: not a second mark.
+    expect(delimiter(editor)).toBe('| - | --: | :- |');
+    expect(editor.getDoc().match(/<!--fmt /g)).toHaveLength(1);
+    expect(MARK.exec(editor.getDoc())?.[0]).toBe(first);
+    expect(Object.keys(editor.getParsed().ledger.marks)).toHaveLength(1);
+    // The old alignments back, a column and then the other: the change goes, and the file is as it was.
+    select(editor, editor.getDoc().indexOf('12') + 1);
+    editor.commands.run('table.alignCenter');
+    expect(delimiter(editor)).toBe('| - | :-: | :- |');
+    expect(editor.getDoc()).toContain('<!--fmt ');
+    select(editor, editor.getDoc().indexOf('13') + 1);
+    editor.commands.run('table.alignRight');
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toEqual([]);
+  });
+
+  it('says why when another person’s alignment change, a column or the header is pending', () => {
+    // Bo's alignment change: Ada's is refused, in the format's words.
+    const bo = byBo();
+    const editor = mount(bo, true);
+    select(editor, bo.indexOf('11') + 1);
+    expect(editor.commands.run('table.alignLeft')).toBe(true);
+    expect(notices).toEqual(["Bo Chen's alignment change is pending. Decide it first."]);
+    expect(editor.getDoc()).toBe(bo);
+    expect(editor.getUiState().canUndo).toBe(false);
+
+    // A column pending (Ada's own): the alignment change waits for it.
+    notices.length = 0;
+    const columns = mount(doc, true);
+    select(columns, at('12'));
+    columns.commands.run('table.insertColumnRight');
+    const withColumn = columns.getDoc();
+    expect(withColumn).toMatch(/<!--ins \w{4} col-->/);
+    select(columns, withColumn.indexOf('11') + 1);
+    expect(columns.commands.run('table.alignRight')).toBe(true);
+    expect(notices).toEqual([COLUMNS_FIRST]);
+    expect(columns.getDoc()).toBe(withColumn);
+    expect(columns.getUiState().undo).toBe('Insert Column');
+
+    // The header itself a pending row (a row inserted above it): the same.
+    notices.length = 0;
+    const rows = mount(doc, true);
+    select(rows, doc.indexOf('| a |') + 2);
+    rows.commands.run('table.insertRowAbove');
+    const withRow = rows.getDoc();
+    expect(withRow).toMatch(/<!--ins \w{4} row-->/);
+    select(rows, withRow.indexOf('11') + 1);
+    expect(rows.commands.run('table.alignRight')).toBe(true);
+    expect(notices).toEqual([ROWS_FIRST]);
+    expect(rows.getDoc()).toBe(withRow);
+    expect(rows.getUiState().undo).toBe('Insert Row');
+  });
+
+  it('says why a column or header-row command is refused while an alignment change is pending', () => {
+    const pending = aligned();
+    const mark = MARK.exec(pending)?.[0] ?? '';
+    expect(mark).not.toBe('');
+    const inHeader = pending.indexOf('| a |') + 2;
+    const inFirstRow = pending.indexOf('11') + 1;
+    // Tracked, a column command and a row command that touches the header are refused, in words.
+    for (const [id, caret] of [
+      ['table.insertColumnRight', pending.indexOf('12') + 1],
+      ['table.deleteColumn', pending.indexOf('12') + 1],
+      ['table.moveColumnLeft', pending.indexOf('12') + 1],
+      ['table.insertRowAbove', inHeader],
+      ['table.deleteRow', inHeader],
+      ['table.moveRowUp', inFirstRow],
+    ] as const) {
+      notices.length = 0;
+      const editor = mount(pending, true);
+      select(editor, caret);
+      expect(editor.commands.run(id), id).toBe(true);
+      expect(notices, id).toEqual([ALIGN_FIRST]);
+      expect(editor.getDoc(), id).toBe(pending);
+      expect(editor.getUiState().canUndo, id).toBe(false);
+    }
+    // A row below the header and a row of the body are no hindrance, and the change stays.
+    notices.length = 0;
+    const below = mount(pending, true);
+    select(below, inHeader);
+    expect(below.commands.run('table.insertRowBelow')).toBe(true);
+    expect(below.getDoc()).toMatch(/<!--ins \w{4} row-->/);
+    expect(below.getDoc()).toContain(mark);
+    const removed = mount(pending, true);
+    select(removed, pending.indexOf('21') + 1);
+    expect(removed.commands.run('table.deleteRow')).toBe(true);
+    expect(removed.getDoc()).toMatch(/<!--del \w{4} row=/);
+    expect(removed.getDoc()).toContain(mark);
+    expect(notices).toEqual([]);
+
+    // With Track Changes off the column commands are written, and keep the change, with its old row, at the
+    // end of the header's last cell: rejecting it then writes back that row for the columns the table has.
+    const id = MARK.exec(pending)?.[1] ?? '';
+    for (const [command, where, old] of [
+      ['table.insertColumnRight', '12', '| - | :-: | - | -: |'],
+      ['table.deleteColumn', '13', '| - | :-: |'],
+      ['table.moveColumnLeft', '13', '| - | -: | :-: |'],
+    ] as const) {
+      const editor = mount(pending, false);
+      select(editor, pending.indexOf(where) + 1);
+      expect(editor.commands.run(command), command).toBe(true);
+      expect(notices, command).toEqual([]);
+      expect(editor.getDoc(), command).not.toBe(pending);
+      expect(editor.getDoc().match(/<!--fmt /g), command).toHaveLength(1);
+      expect(headerOf(editor.getDoc()), command).toMatch(
+        new RegExp(`<!--fmt ${id} align=[^>]*--> \\|$`),
+      );
+      editor.reject(id);
+      expect(delimiter(editor), command).toBe(old);
+      expect(editor.getDoc(), command).not.toContain('<!--fmt');
+    }
+  });
+
+  it('says the format’s words when a marker can’t stand at the end of the header, or too many changes are pending there, and writes nothing', () => {
+    // The end of the last header cell is read otherwise with a marker after an underscore.
+    const underscore = doc.replace('| c |', '| c_ |');
+    const editor = mount(underscore, true);
+    select(editor, underscore.indexOf('11') + 1);
+    expect(editor.commands.run('table.alignCenter')).toBe(true);
+    expect(notices).toEqual([
+      "A marker can't go at the end of this table's header, where Markdown would read it otherwise. Change the end of its last cell first, then align.",
+    ]);
+    expect(editor.getDoc()).toBe(underscore);
+    expect(editor.getUiState().canUndo).toBe(false);
+
+    // Three changes of Bo's in the cell are more than the format looks at in every order of deciding them.
+    notices.length = 0;
+    const crowded = withBo(
+      doc.replace('| c |', '| c<!--ins m2bd-->x<!--/m2bd--><!--del g5nb y--><!--del h4jj z--> |'),
+      ['m2bd', 'g5nb', 'h4jj'],
+    );
+    const many = mount(crowded, true);
+    select(many, crowded.indexOf('11') + 1);
+    expect(many.commands.run('table.alignCenter')).toBe(true);
+    expect(notices).toEqual([
+      "Decide the changes in the last cell of this table's header first, then align.",
+    ]);
+    expect(many.getDoc()).toBe(crowded);
+    expect(many.getUiState().canUndo).toBe(false);
+  });
+
+  it('says the format’s words when a tracked key at the end of the last header cell would leave more changes pending there than can be looked at together, and writes nothing', () => {
+    // Bo's insertion and deletion end the last header cell: Ada's alignment change is written after them,
+    // which the format takes (two changes besides the mark), and a key of hers there would be a third.
+    const start = withBo(
+      doc.replace('| c |', '| c<!--ins m2bd-->x<!--/m2bd--><!--del g5nb y--> |'),
+      ['m2bd', 'g5nb'],
+    );
+    const editor = mount(start, true);
+    select(editor, start.indexOf('13') + 1);
+    expect(editor.commands.run('table.alignCenter')).toBe(true);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toMatch(/<!--del g5nb y--><!--fmt \w{4} align=/);
+    const aligned = editor.getDoc();
+    select(editor, aligned.indexOf('<!--fmt'));
+    type(editor, 'z');
+    expect(notices).toEqual([
+      "Ada Lovelace's alignment change is at the end of this cell, and this edit would leave more changes pending in it than can be looked at together. Decide some of them first.",
+    ]);
+    expect(editor.getDoc()).toBe(aligned);
+    // The refused key left no step: one Undo takes the alignment change back, and Redo brings it again.
+    editor.undo();
+    expect(editor.getDoc()).toBe(start);
+    editor.redo();
+    expect(editor.getDoc()).toBe(aligned);
+    // Deciding one of the changes there lets the key be written, in front of the mark.
+    editor.accept('g5nb');
+    select(editor, editor.getDoc().indexOf('<!--fmt'));
+    type(editor, 'z');
+    expect(notices).toHaveLength(1);
+    expect(editor.getDoc()).toMatch(/<!--ins (\w{4})-->z<!--\/\1--><!--fmt \w{4} align=/);
   });
 });

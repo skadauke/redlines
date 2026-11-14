@@ -1551,7 +1551,7 @@ const MARKER_STARTS_LINE = 'A marker here would start a line.';
 /** Why a deletion that starts at the beginning of a wrapped line, and is not all the text of lines
  * of one paragraph (`wrappedLineStart`), is refused: what to do instead. */
 const WRAPPED_LINE_START =
-  'This deletion starts at the beginning of a line that goes on a paragraph, where its marker would start the line, and Markdown would read the start of a block there. Start the selection at the end of the line above, so that the line break goes with the deleted text, or leave the first word of the line out of it.';
+  'This deletion starts at the beginning of a line that goes on a paragraph, where its marker would start the line, and Markdown would read the start of a block there. Start the selection at the end of the line above, so that the line break goes with the deleted text.';
 
 /** The message of a replacement that would leave a line with no text, which can't be written. */
 const BLANK_LINE =
@@ -4047,10 +4047,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (!past && !blocks && from < to && typed === '') {
     // All the text of a wrapped line goes with the line break in front of it, where a marker would
     // start the line (#427); a replacement that keeps a break asks for the line to stay.
-    const wrapped = keepsBreak ? undefined : wrappedLineStart(text, plan.parsed, markers, from, to);
+    const wrapped = keepsBreak
+      ? undefined
+      : wrappedLineStart(text, plan.parsed, markers, from, to, { marker: true });
     if (wrapped !== undefined && !ownTextOnly(plan, from, to)) from = wrapped;
     else {
-      startsWrapped = !keepsBreak && atWrappedLine(text, markers, from);
+      startsWrapped = !keepsBreak && atWrappedLine(text, plan.parsed, markers, from);
       ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
     }
   }
