@@ -262,12 +262,13 @@ fn offer(app: &AppHandle, files: Vec<PathBuf>) {
 
 /// The file a path really is, with every link in it followed. The `redlines` command line follows
 /// links too, so it writes that file, in its folder and under its name, which is where the window
-/// has to look for changes to a file it opened through a link.
+/// has to look for changes to a file it opened through a link. Only for a file the person opened or
+/// saved, and what is inside a project folder a sidebar shows (`file_scope::known_real`).
 #[tauri::command(async)]
-fn real_path(path: String) -> Result<String, String> {
-    std::fs::canonicalize(&path)
+fn real_path(app: AppHandle, path: String) -> Result<String, String> {
+    let shown = app.state::<project::Projects>().folders();
+    file_scope::known_real(&app.fs_scope(), &shown, Path::new(&path))
         .map(|real| real.to_string_lossy().into_owned())
-        .map_err(|error| format!("{path}: {error}"))
 }
 
 /// Opens the Preferences window, or brings it forward: there is only ever one. It is made hidden,
@@ -396,6 +397,7 @@ pub fn run() {
             spelling::spelling_suggestions,
             spelling::spelling_learn,
             edit_menu::undo_in_field,
+            edit_menu::paste_in_field,
             open_preferences,
             open_about,
             dock_icon::app_icon_mark,
@@ -483,6 +485,10 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // A window opened for text can't be asked about it in its first moments: its close waits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                windows::close_requested(window.app_handle(), window.label(), api);
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
@@ -639,34 +645,6 @@ mod tests {
             PathBuf::from("-psn_0_12345"),
         ]);
         assert_eq!(found, vec![std::fs::canonicalize(&file).unwrap()]);
-        std::fs::remove_dir_all(&folder).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn real_path_follows_a_link_to_the_file_it_names() {
-        use std::os::unix::fs::symlink;
-
-        let folder =
-            std::env::temp_dir().join(format!("redlines-real-path-{}", std::process::id()));
-        let (notes, work) = (folder.join("notes"), folder.join("work"));
-        std::fs::create_dir_all(&notes).unwrap();
-        std::fs::create_dir_all(&work).unwrap();
-        let real = work.join("real-2026.md");
-        std::fs::write(&real, "# Plan\n").unwrap();
-        let real = std::fs::canonicalize(&real).unwrap();
-        // Links as `ln -s` makes them: one to a file in another folder, one by a relative path.
-        symlink(&real, notes.join("plan.md")).unwrap();
-        symlink("../work/real-2026.md", notes.join("relative.md")).unwrap();
-
-        let real_of = |path: PathBuf| real_path(path.to_string_lossy().into_owned());
-        let expected = Ok(real.to_string_lossy().into_owned());
-        assert_eq!(real_of(notes.join("plan.md")), expected);
-        assert_eq!(real_of(notes.join("relative.md")), expected);
-        // A file that is not a link is itself, as it really is.
-        assert_eq!(real_of(real.clone()), expected);
-        // What isn't there is an error, not the path again.
-        assert!(real_of(notes.join("missing.md")).is_err());
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
