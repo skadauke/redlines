@@ -210,16 +210,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   /**
-   * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
-   * the markup view, unless the review bar showed the full markup without choosing it, or the
-   * document opened in the look its ledger chose (format §5.6); it starts over with each document,
-   * from the look the document opened in (`lookOf`).
+   * The look of Redlines shown last in this document, which a View menu's Redlines brings back
+   * (`showView`): the look the review bar showed without choosing it, or the one its ledger chose
+   * (format §5.6), which the markup view may not be. Null while no look was shown, and then the
+   * markup view as it is now, which another window may have changed; it starts over with each
+   * document, from the look the document opened in (`lookOf`).
    */
-  let shownLook: MarkupView = markupView;
-  /** The look of Redlines that `state` shows, or the markup view when it shows another view. */
-  const lookOf = (state: EditorState): MarkupView => {
+  let shownLook: MarkupView | null = null;
+  /** The look of Redlines that `state` shows, or null when it shows another view. */
+  const lookOf = (state: EditorState): MarkupView | null => {
     const shown = state.field(viewModeField);
-    return shown === 'simple' || shown === 'redlines' ? shown : markupView;
+    return shown === 'simple' || shown === 'redlines' ? shown : null;
   };
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
@@ -434,7 +435,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
       // nothing: the look chosen stays the one a click made.
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
-      view.dispatch({ effects: setViewModeEffect.of(shownLook) });
+      view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;

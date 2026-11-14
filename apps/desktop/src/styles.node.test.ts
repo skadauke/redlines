@@ -134,8 +134,18 @@ describe('styles.css', () => {
       ({ selector }) => selector === '#editor .cm-line.rl-quote.rl-bar::before',
     );
     expect(quote?.declarations).toContain('left: -26px');
+    // A table row's bar is its first cell's, a background, which a printed page drops.
+    const row = all.find(
+      ({ selector }) => selector === '#editor .rl-trow.rl-bar > .rl-tc:first-child::before',
+    );
+    expect(row?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    expect(row?.declarations).toContain('background: none');
+    const rowMixed = all.find(
+      ({ selector }) => selector === '#editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before',
+    );
+    expect(rowMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
     // Among the print rules, and the bars nothing else draws as a background there.
-    for (const rule of [bar, mixed, layer, line, lineMixed, quote]) {
+    for (const rule of [bar, mixed, layer, line, lineMixed, quote, row, rowMixed]) {
       expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
     }
   });
