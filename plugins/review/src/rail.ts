@@ -1013,8 +1013,9 @@ class Rail {
     // A resolved note gives way, and is never the one that keeps its anchor's height.
     const open = notes.flatMap((_, i) => (settled?.[i] ? [] : [i]));
     // An element of the host's keeps its anchor's height, as a new comment being written does, and
-    // before it: with both, the element stays level and the comment's box is placed around it as
-    // any note is, which may be lower than its text. With several elements, the first in the text.
+    // takes precedence: with both, the element stays level and the comment's box is placed around it
+    // as any note is, which may leave it lower than its text. With several elements, the first in
+    // the text is the one.
     const level = notes.findIndex(({ host }) => host);
     return {
       notes,
