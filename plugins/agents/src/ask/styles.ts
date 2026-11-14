@@ -34,12 +34,12 @@ export const ASK_STYLE = `
   cursor: default;
 }
 /*
- * Laid out among the rail's notes, which make room for it, the bubble covers none: it needs
- * neither the z-index nor the page color behind it that it has where it hangs over the notes.
+ * Laid out among the rail's notes, which make room for it, the bubble covers none and needs no
+ * z-index to be over them. It keeps its page color: the notes it pushed aside slide for a moment
+ * (180 ms), and show through a bubble that has none.
  */
 .rl-qa.${RAILED} {
   z-index: auto;
-  background-color: transparent;
 }
 .rl-qa-question {
   margin: ${px(2)} 0 ${px(4)};
