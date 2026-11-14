@@ -9,8 +9,9 @@
 // `BLOCK-CHECK <name> FAIL <json>`, with the file, the caret and the hidden lines it found, then
 // `BLOCK-CHECK done <passed> passed, <failed> failed`. Tab and Escape then Tab are judged by what
 // the page does with the key event (`BLOCK-CHECK tab`); a triple-click is a synthetic `mousedown`
-// with three clicks in its `detail`, aimed at the text's own coordinates; a click on a task box is
-// a `mousedown` on its drawing.
+// with three clicks in its `detail`, aimed at the text's own coordinates; a click past the end of a
+// line is a `mousedown` at the right edge of the line's own element; a click on a task box is a
+// `mousedown` on its drawing.
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -29,6 +30,8 @@ type Step =
   | { triple: true }
   /** A click on the drawing of the task box with this index (from 0, in the order drawn). */
   | { click: number }
+  /** A click to the right of the caret's line, past the end of its text. */
+  | { clickPastEnd: true }
   /** Space on the task box with this index, focused first: the keyboard's way to change it. */
   | { space: number }
   /** Waits until the line of notices under the title bar is empty. */
@@ -61,6 +64,13 @@ const notation = (text: string) => text.replaceAll('\n', '⏎');
 
 /** The line of `pos`, 1-based. */
 const lineOf = (editor: Editor, pos: number) => editor.view.state.doc.lineAt(pos).number;
+
+/** null where the caret is on a line that has `text`; the line it is on otherwise. */
+function inLine(editor: Editor, text: string): unknown {
+  const { state } = editor.view;
+  const line = state.doc.lineAt(state.selection.main.head).text;
+  return line.includes(text) ? null : { caretLine: line };
+}
 
 /** The ids of eight pending inline changes (a word inserted, deleted or replaced, inside an item's
  * text), and a list that has them in its items after "one" and "two", with the ledger that goes
@@ -1149,6 +1159,32 @@ const CHECKS: Check[] = [
     file: '---⏎title: x⏎---⏎⏎Body.',
     open: true,
   },
+  // #434: the caret that End, or a click past the end of a line, leaves after the hidden closer of
+  // a typed paragraph's insertion, before the line break, is where the DOM can't tell the end of
+  // the line from the start of the next one: a command that changes the text (Paragraph › Heading
+  // 2) then took the caret to the next block. It rests in front of the closer, as typing leaves it.
+  {
+    name: 'tracked-end-then-heading-keeps-the-caret-in-the-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: 'Para one.' }, 'End', { command: 'block.h2' }],
+    tracking: true,
+    newest: 'One.⏎⏎## Para one.⏎⏎Next.',
+    test: (editor) => inLine(editor, 'Para one.'),
+  },
+  {
+    name: 'tracked-click-past-the-end-then-heading-keeps-the-caret-in-the-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: [
+      'Enter',
+      { type: 'Para one.' },
+      'ArrowLeft',
+      { clickPastEnd: true },
+      { command: 'block.h2' },
+    ],
+    tracking: true,
+    newest: 'One.⏎⏎## Para one.⏎⏎Next.',
+    test: (editor) => inLine(editor, 'Para one.'),
+  },
 ];
 
 const frames = async () => {
@@ -1196,6 +1232,26 @@ async function tripleClick(view: EditorView): Promise<void> {
     document.dispatchEvent(new MouseEvent('mouseup', init));
     await frames();
   }
+}
+
+/**
+ * A click to the right of the caret's line, past its end: the `mousedown` and the `mouseup` of one,
+ * on the line's own element, at the right edge of its text, at the height of its text (below the
+ * padding that spaces the block from the one above), where CodeMirror finds the end of the line.
+ */
+async function clickPastEnd(view: EditorView): Promise<void> {
+  const { node } = view.domAtPos(view.state.selection.main.head);
+  const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
+  if (!(line instanceof HTMLElement)) throw new Error('the caret is on no line');
+  const rect = line.getBoundingClientRect();
+  const top = rect.top + (Number.parseFloat(getComputedStyle(line).paddingTop) || 0);
+  const x = rect.right - 4;
+  const y = (top + rect.bottom) / 2;
+  const target = document.elementFromPoint(x, y) ?? line;
+  const init = { clientX: x, clientY: y, detail: 1, button: 0, bubbles: true, cancelable: true };
+  target.dispatchEvent(new MouseEvent('mousedown', init));
+  document.dispatchEvent(new MouseEvent('mouseup', init));
+  await frames();
 }
 
 /** A click on the drawing of a task box, as the `mousedown` the box listens to. */
@@ -1256,6 +1312,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   for (const step of check.steps) {
     if (typeof step === 'string') press(editor, step);
     else if ('triple' in step) await tripleClick(view);
+    else if ('clickPastEnd' in step) await clickPastEnd(view);
     else if ('click' in step) clickBox(editor, step.click);
     else if ('space' in step) spaceOnBox(editor, step.space);
     else if ('quiet' in step) await quiet();

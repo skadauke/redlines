@@ -406,12 +406,22 @@ const groupKey = (forward: boolean, extend: boolean) =>
     });
   });
 
-/** ⌘← and ⌃A, ⌘→ and ⌃E: the visual line's start or end, the block's text on its first or last row. */
+/**
+ * ⌘← and ⌃A, ⌘→, ⌃E and End: the visual line's start or end, the block's text on its first or last
+ * row. End rests in front of the hidden closers that end the text, where typing leaves the caret
+ * (#434): CodeMirror's End goes past them, to a place that the DOM can't tell from the start of
+ * the next line, where a command that changes the text takes the caret to the next block.
+ */
 const lineBoundaryKey = (forward: boolean) =>
   blockKey((view) => {
     const { main } = view.state.selection;
     if (view.state.selection.ranges.length > 1) return false;
-    const boundary = view.moveToLineBoundary(main, forward, true).head;
+    // The layout's answer; with none (or one on the wrong side of the caret), the line's own end.
+    let boundary = view.moveToLineBoundary(main, forward, true).head;
+    const line = view.state.doc.lineAt(main.head);
+    if (forward ? boundary < main.head : boundary > main.head) {
+      boundary = forward ? line.to : line.from;
+    }
     const pos = forward
       ? lineEndIn(view.state, main.head, boundary)
       : lineStartIn(view.state, main.head, boundary);
@@ -511,6 +521,8 @@ export function blockKeys(): Extension {
         { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
+        // End, as ⌘→ goes: in front of the closers that end a block's text (#434).
+        { key: 'End', run: lineBoundaryKey(true) },
         // The Mac's own keys, CodeMirror's `emacsStyleKeymap` and its ⌘ line keys.
         { mac: 'Cmd-ArrowLeft', run: lineBoundaryKey(false) },
         { mac: 'Cmd-ArrowRight', run: lineBoundaryKey(true) },

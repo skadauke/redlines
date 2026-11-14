@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { macBlockCommands } from './keys.ts';
-import { gapSide, lineEndIn, lineStartIn } from './motion.ts';
+import { gapSide, lineEndIn, lineStartIn, restingPlace } from './motion.ts';
 import { type Script, scriptRows } from './script.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -164,6 +164,98 @@ describe('typing at the very end of a document that ends in a closer, after →'
       })),
     ),
   );
+});
+
+describe('End rests in front of the hidden closers at the end of a block’s text (#434)', () => {
+  // After the closer of a paragraph's own insertion, before the line break, a command (⌘2) writes
+  // its change and the caret then goes to the start of the next block. Typing leaves the caret in
+  // front of the closer, inside the insertion; End does the same, as ⌘→ does. (The jump itself, in
+  // the DOM, is in the WebKit check: `apps/desktop/src/block-check.ts`.)
+  scriptRows([
+    {
+      name: 'End at the end of a typed paragraph, Track Changes on: in front of its closer',
+      doc: 'One.‸⏎⏎Next.',
+      keys: ['Enter', { type: 'Para one.' }, 'End'],
+      tc: true,
+      expect: { caret: 'One.⏎⏎<ins>⏎⏎Para one.‸</ins>⏎⏎Next.' },
+    },
+    {
+      name: 'End in an insertion that ends its block: in front of the closer',
+      doc: 'One.⏎⏎Two <ins>th‸ree</ins>⏎⏎Next.',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One.⏎⏎Two <ins>three‸</ins>⏎⏎Next.' },
+    },
+    {
+      name: 'End, then typing: the text goes into the insertion',
+      doc: 'One.⏎⏎Two <ins>th‸ree</ins>⏎⏎Next.',
+      keys: ['End', { type: 'x' }],
+      tc: true,
+      expect: { caret: 'One.⏎⏎Two <ins>threex‸</ins>⏎⏎Next.' },
+    },
+    {
+      name: 'End at the end of a comment’s range: in front of its closer',
+      doc: 'One <!--cmt c1-->t‸wo<!--/c1-->',
+      keys: ['End'],
+      tc: false,
+      expect: { caret: 'One <!--cmt c1-->two‸<!--/c1-->' },
+    },
+    {
+      name: 'End at the end of a block with no closer: its end, as ever',
+      doc: 'One th‸ree⏎⏎Next.',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One three‸⏎⏎Next.' },
+    },
+    {
+      name: 'End in a block that is not the last: the end of its own text, not the next block’s',
+      doc: 'One <ins>tw‸o</ins>⏎⏎Two <ins>three</ins>',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One <ins>two‸</ins>⏎⏎Two <ins>three</ins>' },
+    },
+  ]);
+});
+
+describe('a click past the end of a block’s text (#434)', () => {
+  // The caret that CodeMirror puts at the end of the line is inside the range of the hidden closers
+  // and the break after them, which the caret steps over: it goes on to the start of the next block.
+  // A click needs a layout, which happy-dom has none of (the click itself is in the WebKit check,
+  // `apps/desktop/src/block-check.ts`); `restingPlace` is where a click's position rests.
+  const LEDGER =
+    "\n\n<!-- redlines\n# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\nmarks:\n  k3x9: {by: ada, at: 2026-11-01T10:00Z}\n-->\n";
+  const body = 'One.\n\nTwo <!--ins k3x9-->three<!--/k3x9-->\n\nNext.\n\n```\ncode\n```';
+  const closer = '<!--/k3x9-->';
+
+  function mountFile(): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: body + LEDGER, author: ada, tracking: true });
+    mounted.push(editor);
+    return editor;
+  }
+
+  it('rests in front of the closers that end the text', () => {
+    const { state } = mountFile().view;
+    const doc = state.doc.toString();
+    const before = doc.indexOf(closer);
+    expect(restingPlace(state, before + closer.length)).toBe(before);
+  });
+
+  it('leaves every other place where it is', () => {
+    const { state } = mountFile().view;
+    const doc = state.doc.toString();
+    const places = [
+      doc.indexOf('thr') + 2,
+      doc.indexOf(closer),
+      doc.indexOf('One.') + 4,
+      doc.indexOf('Next.') + 5,
+      doc.indexOf('Next.'),
+      doc.indexOf('code') + 2,
+      doc.indexOf('code') + 4,
+    ];
+    for (const place of places) expect(restingPlace(state, place), String(place)).toBe(place);
+  });
 });
 
 describe('⌥↑ and ⌥↓ by paragraph', () => {
