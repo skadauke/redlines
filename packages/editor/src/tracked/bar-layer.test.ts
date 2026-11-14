@@ -6,9 +6,12 @@ import {
   barLayerThemeSpec,
   barMeasure,
   type BarMeasure,
+  hasRightToLeft,
   hotBar,
+  rowsOfRects,
   segmentsOf,
   setHotBar,
+  stopsOf,
   type DrawnPiece,
   type ScreenLine,
 } from './bar-layer.ts';
@@ -134,6 +137,116 @@ describe('segmentsOf', () => {
     expect(
       segmentsOf(one, [{ from: 0, to: 20, top: 0, bottom: 20 }], [{ from: 5, to: 6, color: 3 }]),
     ).toEqual([{ from: 0, to: 20, top: 0, bottom: 20, colors: [3] }]);
+  });
+});
+
+describe('rowsOfRects', () => {
+  it('makes one row of the pieces of a line that lie on the same row of the page, in any order', () => {
+    // The fragments of text, a marker's empty span and a widget buffer on three rows of 20 px.
+    const rects = [
+      { top: 104, bottom: 124 },
+      { top: 0, bottom: 20 },
+      { top: 2, bottom: 22 },
+      { top: 52, bottom: 72 },
+      { top: 0, bottom: 20 },
+      { top: 50, bottom: 70 },
+      { top: 100, bottom: 120 },
+    ];
+    expect(rowsOfRects(rects)).toEqual([
+      { top: 0, bottom: 22 },
+      { top: 50, bottom: 72 },
+      { top: 100, bottom: 124 },
+    ]);
+  });
+
+  it('keeps a row apart from the one below though an inline image makes it taller than its text', () => {
+    // Text on the first row, a 100 px image on the second (the text beside it low in it) and text
+    // on the third, which starts where the image ends.
+    const rects = [
+      { top: 0, bottom: 20 },
+      { top: 30, bottom: 130 },
+      { top: 110, bottom: 130 },
+      { top: 130, bottom: 150 },
+    ];
+    expect(rowsOfRects(rects)).toEqual([
+      { top: 0, bottom: 20 },
+      { top: 30, bottom: 130 },
+      { top: 130, bottom: 150 },
+    ]);
+  });
+
+  it('drops what has no height, such as a line break, and has no rows for nothing', () => {
+    expect(rowsOfRects([{ top: 5, bottom: 5 }])).toEqual([]);
+    expect(rowsOfRects([])).toEqual([]);
+    expect(
+      rowsOfRects([
+        { top: 0, bottom: 20 },
+        { top: 10, bottom: 10.5 },
+      ]),
+    ).toEqual([{ top: 0, bottom: 20 }]);
+  });
+});
+
+describe('hasRightToLeft', () => {
+  it('is true for Hebrew, Arabic and the like, anywhere in the text, and false for the rest', () => {
+    expect(hasRightToLeft('A word, שלום, and more')).toBe(true);
+    expect(hasRightToLeft('مرحبا')).toBe(true);
+    expect(hasRightToLeft('ܫܠܡܐ')).toBe(true);
+    expect(hasRightToLeft('An English line with `code`, ünïcödé, 日本語 and emoji 🎉')).toBe(false);
+    expect(hasRightToLeft('')).toBe(false);
+  });
+});
+
+describe('stopsOf', () => {
+  const line = { from: 100, to: 400 };
+  const rows = [
+    { top: 0, bottom: 20 },
+    { top: 28, bottom: 48 },
+    { top: 56, bottom: 76 },
+  ];
+
+  it('starts each screen line where the page says its row starts, and ends it where the next starts', () => {
+    const starts = new Map([
+      [rows[1], 180],
+      [rows[2], 290],
+    ]);
+    expect(stopsOf(rows, line, (row) => starts.get(row) ?? 0)).toEqual([
+      { from: 100, to: 180, top: 0, bottom: 20 },
+      { from: 180, to: 290, top: 28, bottom: 48 },
+      { from: 290, to: 400, top: 56, bottom: 76 },
+    ]);
+  });
+
+  it('starts the first at the line, and keeps the others in order and inside it', () => {
+    // A position the page gave before the row above, or past the end of the line, is put back.
+    const given = [0, 90, 900];
+    const stops = stopsOf(rows, line, (row) => given[rows.indexOf(row)] ?? 0);
+    expect(stops.map(({ from }) => from)).toEqual([100, 100, 400]);
+    expect(stops.map(({ to }) => to)).toEqual([100, 400, 400]);
+  });
+
+  it('gives the rows of a widget that wraps the one position, and the last of them the text after', () => {
+    // A struck widget at 150 that runs over the second and third rows: its rows start where it is.
+    const given = [0, 150, 150];
+    expect(stopsOf(rows, line, (row) => given[rows.indexOf(row)] ?? 0)).toEqual([
+      { from: 100, to: 150, top: 0, bottom: 20 },
+      { from: 150, to: 150, top: 28, bottom: 48 },
+      { from: 150, to: 400, top: 56, bottom: 76 },
+    ]);
+  });
+
+  it('is one screen line for a line with one row or none', () => {
+    expect(stopsOf([rows[0]!], line, () => 0)).toEqual([
+      { from: 100, to: 400, top: 0, bottom: 20 },
+    ]);
+    expect(stopsOf([], line, () => 0)).toEqual([]);
+  });
+
+  it('takes the rows past a limit for one screen line, the last, as tall as they are together', () => {
+    const many = Array.from({ length: 2500 }, (_, i) => ({ top: i * 20, bottom: i * 20 + 18 }));
+    const stops = stopsOf(many, { from: 0, to: 100000 }, (row) => many.indexOf(row) * 10);
+    expect(stops).toHaveLength(2000);
+    expect(stops.at(-1)).toMatchObject({ to: 100000, top: 1999 * 20, bottom: 2499 * 20 + 18 });
   });
 });
 

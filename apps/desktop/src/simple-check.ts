@@ -455,6 +455,92 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
+    name: 'a-bar-stays-on-the-rows-of-its-change-where-markers-and-widgets-start-rows',
+    async run(editor) {
+      await open(editor, 'redlines');
+      // A paragraph with one change and, before it, a marker the page hides or a widget it draws,
+      // after a number of words that moves where the line wraps: for some numbers the marker or
+      // widget starts a row. The bar must be beside the rows of the change, and no row beyond.
+      const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
+      const markers = [
+        '**bold words**',
+        '`code span`',
+        '[a link](https://example.org)',
+        '<sup>raised</sup>',
+        '<!--del m3m3 struck words in a widget-->',
+      ];
+      const ledger = (deleting: boolean) =>
+        [
+          '<!-- redlines',
+          'version: 1',
+          'people:',
+          '  ada: {name: Ada Lovelace}',
+          'marks:',
+          ...(deleting ? ['  m3m3: {by: ada, at: 2026-10-31T09:31Z}'] : []),
+          '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+          '-->',
+          '',
+        ].join('\n');
+      const failures: unknown[] = [];
+      let tried = 0;
+      for (const marker of markers) {
+        for (let n = 0; n < 26; n++) {
+          const doc = `${words(n)} ${marker} ${words(30)} <!--ins k3x9-->CHANGED words<!--/k3x9--> ${words(8)}\n\n${ledger(marker.startsWith('<!--del'))}`;
+          editor.reloadDoc(doc);
+          editor.setViewMode('redlines');
+          measureNow(editor);
+          measureNow(editor);
+          const changed = [
+            ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-ins, .rl-del'),
+          ].flatMap((el) => [...el.getClientRects()]);
+          const segs = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].map(
+            (el) => el.getBoundingClientRect(),
+          );
+          if (!changed.length || !segs.length) {
+            failures.push({ marker, n, changed: changed.length, segments: segs.length });
+            continue;
+          }
+          tried++;
+          const top = Math.min(...changed.map((r) => r.top));
+          const bottom = Math.max(...changed.map((r) => r.bottom));
+          // A bar's band reaches the line's own top and bottom, spacing included: less than a row.
+          const stray = segs.filter((r) => r.top < top - 12 || r.bottom > bottom + 12);
+          if (stray.length) {
+            failures.push({
+              marker,
+              n,
+              change: [Math.round(top), Math.round(bottom)],
+              bars: segs.map((r) => [Math.round(r.top), Math.round(r.bottom)]),
+            });
+          }
+        }
+      }
+      // Right-to-left text: a bar down its paragraph is all it promises, but beside the change.
+      const hebrew = Array.from({ length: 60 }, (_, i) => `מילה${i}`).join(' ');
+      editor.reloadDoc(`${hebrew} <!--ins k3x9-->שונה<!--/k3x9--> ${hebrew}\n\n${ledger(false)}`);
+      editor.setViewMode('redlines');
+      measureNow(editor);
+      measureNow(editor);
+      const inserted = editor.view.contentDOM.querySelector('.rl-ins')?.getBoundingClientRect();
+      const bars = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].map(
+        (el) => el.getBoundingClientRect(),
+      );
+      const beside = bars.some(
+        (bar) => !!inserted && bar.top <= inserted.top + 2 && bar.bottom >= inserted.bottom - 2,
+      );
+      if (!beside) {
+        failures.push({
+          rtl: true,
+          change: inserted && [inserted.top, inserted.bottom],
+          bars: bars.map((r) => [r.top, r.bottom]),
+        });
+      }
+      return failures.length
+        ? { tried, failed: failures.length, first: failures.slice(0, 4) }
+        : null;
+    },
+  },
+  {
     name: 'accept-on-a-note-in-simple-decides-in-place',
     async run(editor) {
       await open(editor, 'simple');

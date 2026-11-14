@@ -41,6 +41,7 @@ import {
 } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -218,16 +219,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   /**
-   * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
-   * the markup view, unless the review bar showed the full markup without choosing it, or the
-   * document opened in the look its ledger chose (format §5.6); it starts over with each document,
-   * from the look the document opened in (`lookOf`).
+   * The look of Redlines shown last in this document, which a View menu's Redlines brings back
+   * (`showView`): the look the review bar showed without choosing it, or the one its ledger chose
+   * (format §5.6), which the markup view may not be. Null while no look was shown, and then the
+   * markup view as it is now, which another window may have changed; it starts over with each
+   * document, from the look the document opened in (`lookOf`).
    */
-  let shownLook: MarkupView = markupView;
-  /** The look of Redlines that `state` shows, or the markup view when it shows another view. */
-  const lookOf = (state: EditorState): MarkupView => {
+  let shownLook: MarkupView | null = null;
+  /** The look of Redlines that `state` shows, or null when it shows another view. */
+  const lookOf = (state: EditorState): MarkupView | null => {
     const shown = state.field(viewModeField);
-    return shown === 'simple' || shown === 'redlines' ? shown : markupView;
+    return shown === 'simple' || shown === 'redlines' ? shown : null;
   };
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
@@ -252,6 +254,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
+    // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
+    images(options.onImageFiles, options.onNotice),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -402,6 +406,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     reloadDoc: (doc) => {
       const next = loadFile(doc);
       const { state } = view;
+      const asked = state.field(parsedField).ledger.tracking === 'everyone';
       const { changes, selection, effects } = newVersion(state, next.doc);
       // A change to the line breaks alone leaves the document's text as it was, but not the file's.
       const changed = !changes.empty || next.text !== fileText(state);
@@ -415,6 +420,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
       });
+      // A file that newly asks everyone to track changes is read as one that is opened: Track
+      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364). One
+      // that stops asking leaves it as it is, so that nobody's tracking is switched off under them.
+      if (
+        !asked &&
+        view.state.field(parsedField).ledger.tracking === 'everyone' &&
+        !view.state.field(trackingField)
+      ) {
+        view.dispatch({ effects: setTrackingEffect.of(true) });
+      }
     },
     applyAgentEdit: (doc, step) => {
       if (doc === fileText(view.state)) return;
@@ -442,7 +457,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
       // nothing: the look chosen stays the one a click made.
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
-      view.dispatch({ effects: setViewModeEffect.of(shownLook) });
+      view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
@@ -586,6 +601,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     wordAt: (pos) => wordAt(view, pos),
     pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
+    imageSpot: (at) => imageSpot(view, at, options.onNotice),
     focus: () => view.focus(),
     destroy: () => {
       destroyed = true;

@@ -131,20 +131,44 @@ export function carrierEnd(text: string, from: number, to: number): number {
 const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 
 /**
- * Past the setext underline that the line at `position` of `rest` is, with its line break, when it
+ * The line break that ends the setext underline that the line at `position` of `rest` is, when it
  * is one in the container of the line before (`linePrefix`) and a blank line follows it: the break
  * of a split at the end of a setext heading's text holds the underline that the first half of the
- * heading gets (format §3.4). Otherwise `position`.
+ * heading gets (format §3.4). Undefined where the line is no such underline.
  */
-function pastUnderline(linePrefix: string, rest: string, position: number): number {
+function underlineBreak(linePrefix: string, rest: string, position: number): number | undefined {
   const end = rest.indexOf('\n', position);
-  if (end === -1) return position;
+  if (end === -1) return undefined;
   const line = rest.slice(position, end).replace(/\r$/, '');
   const container = continuationPrefix(linePrefix);
-  if (!line.startsWith(container) || !UNDERLINE.test(line.slice(container.length))) return position;
+  if (!line.startsWith(container) || !UNDERLINE.test(line.slice(container.length))) {
+    return undefined;
+  }
   const after = rest.indexOf('\n', end + 1);
-  if (after === -1 || !isBlank(rest.slice(end + 1, after).replace(/\r$/, ''))) return position;
-  return end + 1;
+  if (after === -1 || !isBlank(rest.slice(end + 1, after).replace(/\r$/, ''))) return undefined;
+  return end;
+}
+
+/** Past the setext underline that the line at `position` of `rest` is, with its line break, when
+ * the break holds it (`underlineBreak`). Otherwise `position`. */
+function pastUnderline(linePrefix: string, rest: string, position: number): number {
+  const end = underlineBreak(linePrefix, rest, position);
+  return end === undefined ? position : end + 1;
+}
+
+/**
+ * Where the setext underline that the break at `start` holds ends, before its line break, or
+ * undefined where the break holds none (`breakLength`). The break is what stands between two
+ * blocks, and a block after the heading is deleted with it (format §3.4), but the underline is the
+ * heading's own, and no marker may stand behind it (format §3.1): a deletion that took it into the
+ * break would make a paragraph of the heading.
+ */
+export function underlineOfBreak(text: string, start: number): number | undefined {
+  const rest = text.slice(start, Math.min(start + 4096, text.length));
+  const first = /^[ \t]*\r?\n/.exec(rest);
+  if (!first) return undefined;
+  const end = underlineBreak(linePrefixAt(text, start), rest, first[0].length);
+  return end === undefined ? undefined : start + end - (rest[end - 1] === '\r' ? 1 : 0);
 }
 
 /**

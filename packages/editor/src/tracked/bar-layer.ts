@@ -6,7 +6,7 @@
 // The bars of table rows and of struck blocks are the line's and the block's own (`rl-bar`, drawn
 // by the table's first cell and by the block), and are not drawn here.
 
-import { EditorSelection, type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
+import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
 import { Direction, EditorView, layer, type LayerMarker, RectangleMarker } from '@codemirror/view';
 import { colorClass } from './colors.ts';
 import { type ChangeSpan, trackedChangeSpans } from './decorations.ts';
@@ -175,27 +175,93 @@ export function bandsOf(
   }));
 }
 
-/** The real page: the screen lines found by where CodeMirror says each one starts and ends. */
+/** The vertical extent of a box on the page, in the viewport's coordinates. */
+export interface Extent {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * The rows of a line of text from the rectangles of what it draws (`rects`, in any order): the
+ * fragments of its text, a hidden marker's empty span, a widget, an image. Those that lie on the
+ * same part of the page are one row, those that overlap by more than half of the smaller are, so
+ * that an inline image that makes a row taller leaves the row below it its own. A rectangle with
+ * no height, such as a line break's, is no part of a row.
+ */
+export function rowsOfRects(rects: readonly Extent[]): Extent[] {
+  const rows: Extent[] = [];
+  const sorted = rects
+    .filter(({ top, bottom }) => bottom - top > 1)
+    .sort((a, b) => a.top - b.top || a.bottom - b.bottom);
+  for (const { top, bottom } of sorted) {
+    const row = rows.at(-1);
+    const overlap = row ? Math.min(row.bottom, bottom) - Math.max(row.top, top) : -1;
+    if (row && overlap > 0.5 * Math.min(row.bottom - row.top, bottom - top)) {
+      row.top = Math.min(row.top, top);
+      row.bottom = Math.max(row.bottom, bottom);
+    } else rows.push({ top, bottom });
+  }
+  return rows;
+}
+
+/**
+ * The screen lines of a line of the file from its `rows`, with `startOf` saying where in the file
+ * a row starts (the page knows: the position at the row's edge). The first starts the line, and
+ * each of the others where the page says, never before the one above it or past the line's end; a
+ * struck widget that wraps has one position for all its rows. Rows past a limit are one screen
+ * line, the last, as tall as they are together.
+ */
+export function stopsOf(
+  rows: readonly Extent[],
+  line: { from: number; to: number },
+  startOf: (row: Extent) => number,
+): ScreenLine[] {
+  const stops: ScreenLine[] = [];
+  for (const [i, row] of rows.slice(0, MAX_SCREEN_LINES).entries()) {
+    const previous = stops.at(-1);
+    const from =
+      i === 0 || !previous ? line.from : Math.min(Math.max(startOf(row), previous.from), line.to);
+    stops.push({ from, to: line.to, top: row.top, bottom: row.bottom });
+    if (previous) previous.to = from;
+  }
+  const last = stops.at(-1);
+  const end = rows.at(-1);
+  if (last && end && rows.length > MAX_SCREEN_LINES) last.bottom = end.bottom;
+  return stops;
+}
+
+/** Letters of the scripts that run right to left: Hebrew, Arabic, Syriac, Thaana and their forms. */
+const RIGHT_TO_LEFT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * Whether `text` has letters that run right to left. Where a row mixes the two directions, its
+ * edges are not where its text starts and ends, and the positions at its edges say nothing of
+ * which row a change is on: such a line is one screen line, a bar down its paragraph.
+ */
+export const hasRightToLeft = (text: string): boolean => RIGHT_TO_LEFT.test(text);
+
+/**
+ * The real page: the screen lines found from the page's own boxes. The rows are where the
+ * rectangles of the line's content lie, and each row starts at the position at its left edge.
+ * Stepping through positions with `coordsAtPos` and `moveToLineBoundary` can't tell a row's end
+ * from the start of the next where a hidden marker or a widget is at the wrap: the zero-width
+ * nodes CodeMirror puts around it stay at the end of the row above, and the walk lost the rest of
+ * the paragraph (a bar down to its end).
+ */
 const pageMeasure: BarMeasure = {
   screenLines(view, line) {
     const el = lineElement(view, line.from);
     if (!el) return null;
     const box = el.getBoundingClientRect();
     if (!box.height) return null;
-    // Where each stretch of the text starts, its end and the text's own height there.
-    const stops: ScreenLine[] = [];
-    for (let pos = line.from; stops.length < MAX_SCREEN_LINES;) {
-      const coords = view.coordsAtPos(pos, 1);
-      if (!coords) break;
-      let end = Math.min(
-        line.to,
-        view.moveToLineBoundary(EditorSelection.cursor(pos, 1), true).head,
+    let stops: ScreenLine[] = [];
+    if (!hasRightToLeft(view.state.sliceDoc(line.from, line.to))) {
+      const range = el.ownerDocument.createRange();
+      range.selectNodeContents(el);
+      const rows = rowsOfRects([...range.getClientRects()]);
+      stops = stopsOf(rows, line, (row) =>
+        view.posAtCoords({ x: box.left + 1, y: (row.top + row.bottom) / 2 }, false),
       );
-      // A boundary that doesn't go on leaves the rest of the line as one screen line.
-      if (end <= pos || stops.length === MAX_SCREEN_LINES - 1) end = line.to;
-      stops.push({ from: pos, to: end, top: coords.top, bottom: coords.bottom });
-      if (end >= line.to) break;
-      pos = end;
     }
     return { left: box.left, lines: bandsOf(stops, box, line), drawn: struckPieces(el) };
   },
