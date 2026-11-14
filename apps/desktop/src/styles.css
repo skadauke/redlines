@@ -933,4 +933,15 @@ body {
   #editor .cm-line.rl-quote.rl-bar::before {
     left: -26px;
   }
+
+  /* A table row's bar is its first cell's, a background, which a printed page drops. */
+  #editor .rl-trow.rl-bar > .rl-tc:first-child::before {
+    width: 0;
+    background: none;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before {
+    border-left-color: var(--rl-mixed);
+  }
 }

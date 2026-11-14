@@ -131,17 +131,31 @@ const POLICY: &str = "default-src 'none'; img-src data:; style-src 'unsafe-inlin
 
 /// How much of a file is looked at to tell what it is: more than any image's signature, and the
 /// start of an SVG up to its root element.
-const HEAD: usize = 8192;
+pub(crate) const HEAD: usize = 8192;
 
 /// The largest image the app serves: far more than any image a document shows, and little enough
 /// that a document can't make the app read a larger file into memory.
-const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// The raster images the preview shows, by the extensions of their names, lowercase.
 const RASTER_NAMES: [&str; 14] = [
     "png", "apng", "jpg", "jpeg", "gif", "webp", "avif", "jxl", "heic", "heif", "bmp", "ico",
     "tif", "tiff",
 ];
+
+/// Whether the name of `path` is that of an image the preview shows: a raster image of
+/// `RASTER_NAMES`, or an SVG. The bytes are another question (`image_type`).
+pub(crate) fn has_image_name(path: &Path) -> bool {
+    path.extension()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|name| name == "svg" || RASTER_NAMES.contains(&name.as_str()))
+}
+
+/// The extensions of the images the preview shows, lowercase, for a panel that offers them.
+pub(crate) fn image_extensions() -> Vec<&'static str> {
+    RASTER_NAMES.iter().copied().chain(["svg"]).collect()
+}
 
 /// A test of the bytes a file starts with.
 type Signature = fn(&[u8]) -> bool;
@@ -206,7 +220,7 @@ fn image(
 /// Opens the file at `real`, a path with no link in it: never through a link put in its place
 /// since (`O_NOFOLLOW`), and without waiting for a writer, should it be a pipe by now
 /// (`O_NONBLOCK`), which is no image anyway.
-fn open(real: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open(real: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -248,7 +262,7 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
 /// an SVG is a filter, not a proof (a document type's subset can be built to fool it); what keeps
 /// an SVG inert is the policy and `nosniff` on every answer, and that the page loads it in an
 /// `<img>`.
-fn image_type(path: &Path, head: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_type(path: &Path, head: &[u8]) -> Option<&'static str> {
     let name = path.extension()?.to_str()?.to_ascii_lowercase();
     if name == "svg" {
         svg_markup(head).then_some("image/svg+xml")
