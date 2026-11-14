@@ -208,6 +208,10 @@ describe('the host in a browser tab', () => {
     await host.openWindow(undefined, undefined, '');
     expect(open).toHaveBeenCalledOnce();
   });
+
+  it('has no Paste of its own to give: a tab reads the clipboard’s text', () => {
+    expect(createHost().pasteInDocument).toBeUndefined();
+  });
 });
 
 describe('the host in the app', () => {
@@ -249,6 +253,15 @@ describe('the host in the app', () => {
       line: null,
       text: '# The answer\n\nIt is 42.\n',
     });
+  });
+
+  it('pastes into the document through the app, which sends the Mac’s own Paste', async () => {
+    vi.mocked(invoke).mockResolvedValue(true);
+    expect(await createHost().pasteInDocument?.()).toBe(true);
+    expect(invoke).toHaveBeenCalledWith('paste_in_field');
+    // Nothing took it: the page falls back to the clipboard's text.
+    vi.mocked(invoke).mockResolvedValue(false);
+    expect(await createHost().pasteInDocument?.()).toBe(false);
   });
 
   it('passes the text on as it is, to the byte, whatever it holds', async () => {

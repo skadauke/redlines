@@ -54,6 +54,7 @@ const COMMANDS: &[&str] = &[
     "open_preferences",
     "open_window",
     "opened_files",
+    "paste_in_field",
     "print_window",
     "project_root",
     "quit_all",

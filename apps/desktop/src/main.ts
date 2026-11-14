@@ -375,7 +375,13 @@ const palette = createPalette(editor, {
   container: main,
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
-  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
+  // and the clipboard's text otherwise.
+  clipboard: pageClipboard(
+    editor,
+    () => host.readClipboardText(),
+    () => host.pasteInDocument?.() ?? Promise.resolve(false),
+  ),
   ...(isTauri
     ? {
         spelling: systemSpelling({

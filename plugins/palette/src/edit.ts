@@ -12,7 +12,10 @@ export interface PaletteClipboard {
   cut(): void | Promise<void>;
   /** Copies the selection, as ⌘C does. */
   copy(): void | Promise<void>;
-  /** Pastes the clipboard at the selection: through the host, and the way ⌘V pastes. */
+  /**
+   * Pastes the clipboard at the selection: the host's own Paste where it has one, which is what
+   * ⌘V is, and otherwise the clipboard's text.
+   */
   paste(): void | Promise<void>;
 }
 
@@ -23,8 +26,17 @@ export interface PaletteClipboard {
  * from a menu without WebKit's own Paste confirmation, and pastes it as ⇧⌘V does: through the
  * editor's own path, as the paster's insertion while Track Changes is on. A clipboard with no text
  * says so, by rejecting.
+ *
+ * Where the host has a native Paste (`paste`: the Mac's own `paste:` to the page, which WebKit
+ * answers with a paste event that carries the clipboard's HTML), that is Paste: the editor then
+ * converts what a web page or Word put there to Markdown, as ⌘V does. It is the fallback's turn
+ * when the host has none, or says nothing took it, or fails.
  */
-export function pageClipboard(editor: Editor, readText: () => Promise<string>): PaletteClipboard {
+export function pageClipboard(
+  editor: Editor,
+  readText: () => Promise<string>,
+  paste?: () => Promise<boolean>,
+): PaletteClipboard {
   const doc = editor.view.dom.ownerDocument;
   const copying = (what: 'cut' | 'copy') => () => {
     editor.focus();
@@ -34,6 +46,11 @@ export function pageClipboard(editor: Editor, readText: () => Promise<string>): 
     cut: copying('cut'),
     copy: copying('copy'),
     paste: async () => {
+      if (paste) {
+        // The keyboard is in the document, as for the Mac's own Paste.
+        editor.focus();
+        if (await paste().catch(() => false)) return;
+      }
       const text = await readText();
       if (!text) throw new Error('The clipboard has no text');
       editor.pastePlain(text);
