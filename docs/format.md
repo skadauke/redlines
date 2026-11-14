@@ -346,7 +346,8 @@ message "Accept or reject the changes in this paragraph first." (`no-legal-place
 paragraph goes on into the paragraphs that a pending mark in it reaches into, as rejecting a split or
 an insertion with a break in it joins two paragraphs. Comments and highlights don't count, and nor
 do changes in other paragraphs, though those in the same list, table or block quote are tried with
-the change (below).
+the change (below). The change of a block that is all your own new text is the exception
+(below).
 
 Your own pending changes don't count:
 
@@ -362,32 +363,40 @@ Your own pending changes don't count:
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
   The rule and its limits (#173):
   - *Which changes.* Every block change: the type (Body, Heading 1 to 6, Quote, Bulleted, Numbered
-    and Task List; the palette's Quote is the same command), an indent or an outdent, and a box
-    checked. A block that has the type asked already is left as it is, with no refusal. Code Block,
-    Table and Horizontal Rule are no block changes: the editor writes their syntax as typing, which
-    in your own insertion is typed text too.
+    and Task List, of which the palette's Quote is the same command, and the type of an alert,
+    #311), an indent or an outdent, and a box checked. A block that has the type asked already is
+    left as it is, with no refusal. Code Block, Table and Horizontal Rule are no block changes: the
+    editor writes their syntax as typing, which in your own insertion is typed text too.
   - *Where the caret stands.* Anywhere in the block, on either side of the hidden markers at its
     ends: the End key and a click past the end of the line leave the caret after the closer of your
     insertion, and a selection may end there. The block is read by its text, not by the side of a
     marker.
   - *What is all your own.* Every character of the line or lines the change reads or writes is inside
-    insertions of yours, the syntax of the block included. A paragraph you typed qualifies. A block
-    that is only partly yours, such as words typed in front of or behind older text, or into a
-    heading, an item or a quote that was there (its `#`s, bullet or `> ` are older), is a block
-    change with a mark, below; and where your insertion starts it, its opener would have to move, so
-    it is refused: "Your new text starts this block, and would have to move. Accept or reject it
+    insertions of yours, the syntax of the block included. A paragraph you typed qualifies, and so
+    does any paragraph of a document you typed in one go, which is one insertion with your split
+    between its paragraphs: the title, the first of them, as the last. A block that is only partly
+    yours, such as words typed in front of or behind older text, or into a heading, an item or a quote
+    that was there (its `#`s, bullet or `> ` are older), is a block change with a mark, below; and
+    where your insertion starts it, its opener would have to move, so it is refused: "Your new text
+    starts this block, and would have to move. Accept or reject your new text and its line breaks
     first." Where the block can't change for its own sake, whatever its marks (a heading is one line;
     a line of it would start a block of its own; it is in a list item or a quote), the refusal says
     that, as it does for any block.
-  - *Marks inside your insertion.* A comment or a highlight inside it, at its start too, doesn't stop
-    it, and neither does a change of another person's inside the text where every order of deciding
-    it reads alike (below). One that starts the block does: their deletion of the first word, once
-    rejected, would bring that word back in front of the syntax, which would then stand in the middle
-    of a line as text. It is refused as any block with another person's change is: "Accept or reject
-    the changes in this paragraph first." A comment or a highlight around your insertion, its opener
-    alone on the line in front of yours, starts the block from outside it, and a mark that starts a
-    block is decided first (below): "Your new text starts this block, and would have to move. Accept
-    or reject it first."
+  - *Marks near the block.* The marks that stand in its lines, and in the lines between it and the
+    text around it, are what decides how the syntax at its start reads. A mark further off, as the
+    splits between the other paragraphs of a document typed in one go, decides nothing of it, so
+    the number of paragraphs makes no difference. Your own splits stand next to it as typing has
+    always had them, and so do comments and highlights inside your insertion, at its start too. A
+    change of another person's inside the text, where every order of deciding it reads alike (below),
+    doesn't stop it; but not one that holds a line break (words with one deleted or replaced, a
+    split of theirs), which could make the block read as a table or a setext heading, or end it, in
+    a state that no reading of its lines sees: it is decided first. Nor one that starts the block:
+    their deletion of the first word, once rejected, would bring that word back in front of the
+    syntax, which would then stand in the middle of a line as text. Those are refused as any block
+    with another person's change is: "Accept or reject the changes in this paragraph first." A
+    comment or a highlight around your insertion, its opener alone on the line in front of yours,
+    starts the block from outside it, and is decided first: "Your new text starts this block, and
+    would have to move. Accept or reject your new text and its line breaks first."
   - *Between the block and the text around it* stand only the markers of the insertion it is in and
     of marks inside it: another mark there could, once decided, bring the block into the text next to
     it, where its syntax would be text. For a change of type, your own split after the block, which
@@ -395,22 +404,33 @@ Your own pending changes don't count:
     `<!--ins k3x9-->\n\n## Title<!--/k3x9--><!--split d3x9-->\n\nText`), is no such mark, and may
     stand there: rejecting it takes the break and the prefix of the next line away and joins that
     line to the block's. The lines that follow must read after the block's line as they read after a
-    paragraph's: the joined line is the only line of its block (a blank line or the end of the text
-    follows), or the next line starts, at the left edge, a block that interrupts a paragraph (a
-    bullet or a `1.` with text, a heading, a fence, a quote; a quote not after a quote, whose lines
-    would go on it, and no setext underline). A heading changed to another level has no such lines
-    to read. Elsewhere it is refused: "Rejecting the line break after your new paragraph would join
-    the text below to it, which this change would read otherwise. Accept your new paragraph first."
-    Any other mark there, anyone's, makes the change a block change, below.
-  - *Every order of deciding* the marks it stands in (the insertion, the marks inside it, and your
-    split after it: four at most) reads the same as without the change. In each state, every
+    paragraph's. So the joined line is the only line of its block, and the block under the blank
+    line after it starts at the left edge (an indented line there would go on a new item, where it
+    was code); or the line right under it starts, at the left edge, a block that interrupts a
+    paragraph whatever comes before it: a heading, a fence (a backtick fence whose info string holds
+    a backtick is no fence), or a bullet, a `1.` or a quote that holds text, a letter or a bracket,
+    and no other marker (which starts a list or a quote of its own after a heading and is text in a
+    paragraph), and a quote not after a quote, whose lines would go on it. A line of a wrapped
+    paragraph, a setext underline, a table's delimiter row and a number other than 1 are none of
+    these. A heading changed to another level has no such lines to read. Elsewhere it is refused:
+    "Rejecting the line break after your new paragraph would join the text below to it, which this
+    change would read otherwise. Accept your new paragraph and its line break first.", and where a
+    pending change stands in those lines, "A pending change stands in the lines just below your new
+    paragraph, which its line break parts it from. Accept or reject it, your new paragraph and its
+    line break first." Any other mark there, anyone's, makes the change a block change, below.
+  - *Every order of deciding.* Where only your own splits and comments and highlights stand near the
+    block, nothing is tried that typing has not always stood next to. Where another person's change
+    or your split after the block does, every order of deciding those marks and the insertion (four
+    at most) reads the same as without the change. It is tried on the block and the blocks next to
+    it, as any block change is, so the cost does not grow with the file. In each state, every
     decision of the walk, the file reads as the same words, on both readings of CommonMark, in as
-    many blocks; so a deletion of another person's that is rejected can't leave the syntax in
-    the middle of a line, and a split that is rejected can't join a line to the block's that would
-    read otherwise. A decision works with the change exactly where it works without it, rejecting
-    the insertion gives back what it did before, the edit makes no mark and leaves the original view
-    as it was, and no marker starts a line. The tests judge every state by micromark 4.0.2 with GFM:
-    the block changed as asked, every other block as it was.
+    many blocks; so a deletion of another person's that is rejected can't leave the syntax in the
+    middle of a line, and a split that is rejected can't join a line to the block's that would read
+    otherwise. A decision works with the change exactly where it works without it, rejecting the
+    insertion gives back what it did before, the edit makes no mark and leaves the original view as
+    it was, and no marker starts a line. The tests judge every state by micromark 4.0.2 with GFM:
+    the block changed as asked, every other block as it was, the words the same; for a document
+    with more marks than every order can be tried for, in random orders.
   Otherwise the change is a block change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).

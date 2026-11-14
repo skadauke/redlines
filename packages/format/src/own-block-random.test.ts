@@ -13,6 +13,7 @@ import type { BlockType, FormatOp } from './format-ops.ts';
 import { trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
+import { decidable, expectSameWords, expectSampledDecisions } from './own-block-oracle.ts';
 import { LINE_PREFIX, trackedEdits } from './track.ts';
 import {
   REFUSALS,
@@ -47,6 +48,14 @@ const BLOCKS = [
   '- [ ] task one\n- [x] task two',
   '---',
   'Last words.',
+  // What reads differently once the first line of a block has the new syntax in front of it.
+  'Run this:\n\n    npm install',
+  '- a\n\n  para\n- b',
+  '> 1. a\n> 2. b',
+  'Text\n- -',
+  'Text\n```x`y\nmore',
+  'Line one\n---',
+  'Text\n| - |',
 ];
 
 /** What Ada types in front of a word that is only hers, which finds her paragraph again. */
@@ -99,16 +108,20 @@ describe('random block changes of a paragraph you just typed', () => {
       const blocks = Array.from({ length: 1 + below(3) }, () => pick(BLOCKS));
       let text = file(`${blocks.join('\n\n')}`, {});
       // Ada types her paragraph, as the editor writes one.
-      const form = below(5);
+      const form = below(6);
       try {
         const view = newestView(text);
         // The blocks of the body, which the file has no marks in yet: the view is the source.
         const found = viewBlocks(blocks.join('\n\n'));
         const block = pick(found);
-        if (form === 0 || found.length === 0) {
-          // After the last block, or in an empty file.
+        if (form === 0 || form === 5 || found.length === 0) {
+          // After the last block, or in an empty file; with `form` 5, a document typed in one go:
+          // several paragraphs, one of them the one with the token.
           const at = found.length === 0 ? 0 : (found[found.length - 1] as { end: number }).end;
-          const insert = found.length === 0 ? words : `\n\n${words}`;
+          const paragraphs = Array.from({ length: 3 + below(6) }, (_, i) => `Other ${i} words`);
+          paragraphs[below(paragraphs.length)] = words;
+          const typed = form === 5 ? paragraphs.join('\n\n') : words;
+          const insert = found.length === 0 ? typed : `\n\n${typed}`;
           const place = Math.min(view.map.toSource(at, -1), bodyEnd(text));
           text = applyChanges(
             text,
@@ -227,8 +240,14 @@ describe('random block changes of a paragraph you just typed', () => {
         // Nothing to change is no refusal, but only where the paragraph has that type already.
         const leaf = blockLeaves(newestView(text).text).find((l) => l.text.includes(token));
         const want = LEAF[to] as { kind: string; chain: string };
+        const boxed = /^\[[ xX]\] /.test(leaf?.text ?? '');
+        // A quote asked of what is in a quote already is left as it is.
+        const chain = leaf?.chain.join('>') ?? '';
         expect(
-          leaf !== undefined && leaf.kind === want.kind && leaf.chain.join('>') === want.chain,
+          leaf !== undefined &&
+            leaf.kind === want.kind &&
+            (to === 'quote' ? chain.includes('blockquote') : chain === want.chain) &&
+            (to === 'task' ? boxed : to === 'ul' || to === 'ol' ? !boxed : true),
           `${label}: a silent no-op, and the paragraph is ${JSON.stringify(leaf)}`,
         ).toBe(true);
         count('already that type');
@@ -239,15 +258,21 @@ describe('random block changes of a paragraph you just typed', () => {
       expectNoNewLineStarts(label, parse(text), parse(after));
       if (result.markIds.length === 0) {
         // Typed into her own insertion: every order of every decision reads as it does without the
-        // syntax, the typed block as asked, and the same in every order.
-        expectEveryDecision(label, text, after, [], {
-          inPlace: true,
-          structure: op,
-          alsoChanged: 1,
-          limit: 7,
-        });
-        expectEveryOrderAlike(label, after, exactly);
-        expectEveryOrderAlike(label, after);
+        // syntax, the typed block as asked, and the same in every order; for a document with more
+        // marks than every order can be tried for (typed in one go), random orders.
+        if (decidable(after).length <= 6) {
+          expectEveryDecision(label, text, after, [], {
+            inPlace: true,
+            structure: op,
+            alsoChanged: 1,
+            limit: 7,
+          });
+          expectEveryOrderAlike(label, after, exactly);
+          expectEveryOrderAlike(label, after);
+          expectSameWords(label, text, after);
+        } else {
+          expectSampledDecisions(label, text, after, op, seed, 8);
+        }
         count('typed into the insertion');
       } else {
         const reshaped = parse(text).marks.filter(

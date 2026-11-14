@@ -124,7 +124,9 @@ const READS_OTHERWISE =
   "This formatting can't be written here: Markdown would read the text next to it differently.";
 
 const JOINS =
-  'Rejecting the line break after your new paragraph would join the text below to it, which this change would read otherwise. Accept your new paragraph first.';
+  'Rejecting the line break after your new paragraph would join the text below to it, which this change would read otherwise. Accept your new paragraph and its line break first.';
+const JOINS_MARKED =
+  'A pending change stands in the lines just below your new paragraph, which its line break parts it from. Accept or reject it, your new paragraph and its line break first.';
 
 const IN_CODE_SPAN = "Text inside code can't be formatted. Select the whole code span instead.";
 
@@ -2492,9 +2494,14 @@ function hasType(view: string, at: number, to: BlockType): boolean {
     if (text.trim() === '') break;
     if (text.includes('|') && DELIMITER_ROW.test(text.trim())) return false;
   }
+  // A quote that holds an item, a heading or another quote is a block of its own kind, in a quote:
+  // its lines say no type that this change could leave as it is.
+  const inQuote = /^[ \t]{0,3}>/.test(line);
+  const inner = line.replace(/^[ \t]{0,3}>[ \t]?/, '');
+  if (inQuote && /^[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)]|#{1,6})(?:[ \t]|$))/.test(inner)) return false;
   const type: string = /^#{1,6}(?:[ \t]|$)/.test(line)
     ? `h${/^#+/.exec(line)?.[0].length ?? 0}`
-    : /^[ \t]{0,3}>/.test(line)
+    : inQuote
       ? 'quote'
       : /^[ \t]*[-*+][ \t]+\[[ xX]\](?:[ \t]|$)/.test(line)
         ? 'task'
@@ -2506,30 +2513,64 @@ function hasType(view: string, at: number, to: BlockType): boolean {
   return type === to;
 }
 
-/** A line that starts a block that interrupts a paragraph, at the left edge, and is no setext
- * underline: a bullet or a `1.` with text, a heading, a fence, a quote. */
-const INTERRUPTS = /^(?:[-*+][ \t]+\S|1[.)][ \t]+\S|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|>)/;
+/**
+ * A line at the left edge that starts a block that interrupts a paragraph, as CommonMark reads one
+ * in every state: a heading; a fence (a backtick fence whose info string holds a backtick is no
+ * fence); a bullet, a `1.` or a quote that holds text, a letter or a bracket, and not another
+ * marker, which would start a list or a quote of its own after a heading and be text in a paragraph.
+ */
+const INTERRUPTS =
+  /^(?:#{1,6}(?:[ \t]|$)|`{3,}[^`]*$|~{3,}|[-*+][ \t]+[\p{L}[]|1[.)][ \t]+[\p{L}[]|>[ \t]?\p{L})/u;
 
 /**
- * Whether the first line of the text after a block, joined to the block's line (rejecting the split
- * that parts them takes the break and the prefix of the line away), leaves the lines that follow it
- * read as they are read after a paragraph's line: right after a heading, a quote or an item's line
- * they read alike when the first line is the only one of its block, or the next starts a block that
- * interrupts a paragraph (not a quote, after a quote: that line would go on the quote). A heading
- * turned into another level has no such lines to read. Marks in those two lines are no part of it.
- * `at` is where the text after the block starts in the file, `last` where the block's last line ends
- * in the view `view`, `to` the type the block is changed to.
+ * Why the first line of the text after a block, joined to the block's line (rejecting the split that
+ * parts them takes the break and the prefix of the line away), would leave the lines that follow it
+ * read otherwise than they are read after a paragraph's line: the words of a refusal, or undefined
+ * where they read alike. Right after a heading, a quote or an item's line they read alike where
+ * the joined line is the only line of its block, and the block after the blank line under it starts
+ * at the left edge (an indented line there goes on an item); or where the next line starts a block
+ * that interrupts a paragraph (`INTERRUPTS`; a quote after a quote would go on it). A heading
+ * turned into another level has none of this to read. Marks in those lines are no part of it.
+ * `at` is where the text after the block starts in the file, `limit` where the body ends, `last`
+ * where the block's last line ends in the view `view`, `to` the type the block is changed to.
  */
-function joinsAlike(text: string, at: number, to: BlockType, last: number, view: string): boolean {
-  const [first, next] = text.slice(at).split('\n', 2);
-  if (first === undefined || first.includes('<!--') || next?.includes('<!--')) return false;
+function joinsAlike(
+  text: string,
+  at: number,
+  limit: number,
+  to: BlockType,
+  last: number,
+  view: string,
+): string | undefined {
+  const lineEndAt = (start: number) => {
+    const end = text.indexOf('\n', start);
+    return end === -1 || end > limit ? limit : end;
+  };
+  const after = (start: number) => {
+    const end = lineEndAt(start);
+    return end >= limit ? undefined : end + 1;
+  };
   const line = view.slice(
     view.lastIndexOf('\n', last - 1) + 1,
     view.indexOf('\n', last) + 1 || undefined,
   );
-  if (/^#{1,6}[ \t]/.test(line) && /^h[1-6]$/.test(to)) return true;
-  if (next === undefined || next.trim() === '') return true;
-  return INTERRUPTS.test(next) && !(to === 'quote' && next.startsWith('>'));
+  if (/^#{1,6}[ \t]/.test(line) && /^h[1-6]$/.test(to)) return undefined;
+  const first = text.slice(at, lineEndAt(at));
+  const nextStart = after(at);
+  const next = nextStart === undefined ? undefined : text.slice(nextStart, lineEndAt(nextStart));
+  if (first.includes('<!--') || next?.includes('<!--')) return JOINS_MARKED;
+  if (next === undefined) return undefined;
+  if (next.trim() !== '') {
+    return INTERRUPTS.test(next) && !(to === 'quote' && next.startsWith('>')) ? undefined : JOINS;
+  }
+  // A blank line: the next line with text must start at the left edge.
+  for (let start = after(nextStart ?? at); start !== undefined; start = after(start)) {
+    const row = text.slice(start, lineEndAt(start));
+    if (row.trim() === '') continue;
+    if (row.includes('<!--')) return JOINS_MARKED;
+    return /^[ \t]/.test(row) ? JOINS : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -2548,13 +2589,14 @@ function ownBlockEdit(
 ): TrackedEdits | undefined {
   // Cheaply first, as a block change is made at a key: the range starts in an insertion, or right
   // after the markers that end its text (a caret at the end of its line, past the hidden closer).
-  if (!inInsertion(text, range.from) && !inInsertion(text, beforeMarkers(text, range.from))) {
+  const past = beforeMarkers(text, range.from);
+  if (!inInsertion(text, range.from) && (past === range.from || !inInsertion(text, past))) {
     return undefined;
   }
   const parsed = parse(text);
-  const owned = parsed.marks
-    .filter((mark) => mark.kind === 'ins' && mark.entry.by === ctx.author.handle)
-    .flatMap((mark) => mark.segments.map((segment) => segment.content));
+  const me = ctx.author.handle;
+  const mine = parsed.marks.filter((mark) => mark.kind === 'ins' && mark.entry.by === me);
+  const owned = mine.flatMap((mark) => mark.segments.map((segment) => segment.content));
   if (owned.length === 0) return undefined;
   const newest = newestView(text);
   const { map } = newest;
@@ -2589,9 +2631,9 @@ function ownBlockEdit(
     // The block has the type asked already: nothing to change, as for any block, and no refusal
     // about its marks. Any other reason that nothing is written is the block's own, and is told as
     // the mark path tells it.
-    return op.kind === 'block' && allOwn([shown]) && hasType(view, shown.from, op.to)
-      ? { changes: [], markIds: [], extendedIds: [] }
-      : undefined;
+    const already =
+      op.kind === 'callout' || (op.kind === 'block' && hasType(view, shown.from, op.to));
+    return already && allOwn([shown]) ? { changes: [], markIds: [], extendedIds: [] } : undefined;
   }
   // Every character of the lines the change is asked on and writes in is your own new text.
   const lines = [shown, ...plain].map(linesOf);
@@ -2601,8 +2643,7 @@ function ownBlockEdit(
   // next to it, where its new syntax would read as text.
   const first = Math.min(...lines.map((line) => line.from));
   const last = Math.max(...lines.map((line) => line.to));
-  const holder = parsed.marks
-    .filter((mark) => mark.kind === 'ins' && mark.entry.by === ctx.author.handle)
+  const holder = mine
     .flatMap((mark) => mark.segments)
     .map((segment) => ({ from: segment.open.from, to: segment.close?.to ?? segment.content.to }))
     .find((span) => span.from <= map.toSource(first, 1) && map.toSource(first, 1) < span.to);
@@ -2615,13 +2656,14 @@ function ownBlockEdit(
     { from: map.toSource(textBefore, -1), to: map.toSource(first, 1) },
     { from: map.toSource(last, -1), to: map.toSource(textAfter, 1) },
   ];
+  const limit = parsed.ledgerRange?.from ?? text.length;
   // Your own split that parts the block from the text after it can't bring the block into the text
   // before it, and rejecting it leaves the syntax at the start of its line, with the first line of
   // the text after it joined to the block's: it may stand there, where the lines that follow read
   // alike joined to a heading, a quote or an item (`joinsAlike`), and is decided in every order with
   // the insertion (`decidedAlike`).
   const neighbors = new Set<string>();
-  let unjoined = false;
+  let unjoined: string | undefined;
   const foreign = markerRanges(parsed).filter((marker) => {
     if (marker.role === 'ledger') return false;
     if (holder.from <= marker.from && marker.to <= holder.to) return false;
@@ -2629,14 +2671,15 @@ function ownBlockEdit(
       const split = marker.mark;
       if (
         split?.kind !== 'split' ||
-        split.entry.by !== ctx.author.handle ||
+        split.entry.by !== me ||
         op.kind !== 'block' ||
         (marker.segment?.open.from ?? -1) < after.from
       ) {
         return true;
       }
-      if (!joinsAlike(text, after.to, op.to, last, view)) {
-        unjoined = true;
+      const reason = joinsAlike(text, after.to, limit, op.to, last, view);
+      if (reason !== undefined) {
+        unjoined ??= reason;
         return false;
       }
       neighbors.add(split.id);
@@ -2647,48 +2690,78 @@ function ownBlockEdit(
   if (foreign.length > 0) return undefined;
   // Only the line break after the block, which your own split parts it from the text after it by,
   // is in the way: it says what to do.
-  if (unjoined) throw refused(JOINS);
+  if (unjoined !== undefined) throw refused(unjoined);
   const edits = plain.map((change) => ({
     from: map.toSource(change.from, 1),
     to: change.to === change.from ? map.toSource(change.from, 1) : map.toSource(change.to, -1),
     insert: change.insert,
   }));
+  // The marks that stand at the block, in its lines and in the lines between it and the text around
+  // it: what decides how the syntax at its start reads. A mark further off, as the splits between
+  // the other paragraphs of a document typed in one go, decides nothing of it.
+  const holding = new Set(
+    mine
+      .filter((mark) =>
+        mark.segments.some(({ content }) =>
+          edits.some((edit) => content.from <= edit.from && edit.to <= content.to),
+        ),
+      )
+      .map((mark) => mark.id),
+  );
+  const near = new Map<string, MarkRange>();
+  for (const marker of markerRanges(parsed)) {
+    if (marker.role === 'ledger' || marker.mark === undefined) continue;
+    if (marker.to <= before.from || marker.from >= after.to) continue;
+    if (!holding.has(marker.mark.id)) near.set(marker.mark.id, marker.mark);
+  }
+  // A change of anyone's near the block that holds a line break (words with one deleted or
+  // replaced, a split of someone else's) can make the block read as a table or a setext heading, or
+  // end it, in a state that no reading of the lines here sees: it is decided first.
+  const breaks = (mark: MarkRange) =>
+    (mark.kind === 'split' && mark.entry.by !== me) ||
+    ((mark.kind === 'del' || mark.kind === 'sub') && (mark.payload ?? '').includes('\n')) ||
+    (mark.kind === 'sub' &&
+      mark.segments.some(({ content }) => text.slice(content.from, content.to).includes('\n')));
+  if ([...near.values()].some(breaks)) return undefined;
+  // Your own splits and the comments and highlights near it are what the typing of syntax into your
+  // insertion has always stood next to. Anything else near, and your split after it, is tried.
+  const trial =
+    neighbors.size > 0 ||
+    [...near.values()].some(
+      (mark) =>
+        !(mark.kind === 'split' && mark.entry.by === me) &&
+        mark.kind !== 'cmt' &&
+        mark.kind !== 'hl',
+    );
+  const ids = [...new Set([...holding, ...near.keys(), ...neighbors])];
   const reads = (after: string) =>
     newestView(after).text === applyChanges(view, plain) &&
     originalView(after).text === originalView(text).text &&
     lineStartMarkers(parse(after)) <= lineStartMarkers(parsed);
-  // What deciding the marks that the change stands in comes to is tried on the block and the
-  // blocks next to it, as for any block change: at a cost that does not grow with the file.
-  const alsoDecided = [...neighbors];
+  // What deciding those marks comes to is tried on the block and the blocks next to it, as for any
+  // block change: at a cost that does not grow with the file.
   let region: Range | undefined;
   const alike = (changes: readonly TextChange[]): boolean => {
+    if (!trial) return true;
+    if (ids.length > OWN_MARKS) return false;
     try {
       const reader = formatReader(text, parsed);
-      region ??= regionAround(
+      const area = (region ??= regionAround(
         reader,
         spansOf(reader, parsed),
         {
           from: lineStart(text, map.toSource(first, 1)),
           to: lineEnd(text, map.toSource(last, -1)),
         },
-        parsed.ledgerRange?.from ?? text.length,
-      );
-      const { from, to } = region;
+        limit,
+      ));
       const body = bodyChanges(parsed, changes);
-      if (body.some((change) => change.from < from || change.to > to)) return false;
-      const shifted = body.map((change) => ({
-        ...change,
-        from: change.from - from,
-        to: change.to - from,
-      }));
+      if (body.some((change) => change.from < area.from || change.to > area.to)) return false;
       return decidedAlike(
-        regionFile(text, parsed.ledger, region, []),
-        regionFile(text, parsed.ledger, region, body),
-        owned
-          .filter((content) => content.from >= from && content.to <= to)
-          .map((content) => ({ from: content.from - from, to: content.to - from })),
-        shifted,
-        alsoDecided,
+        regionFile(text, parsed.ledger, area, []),
+        regionFile(text, parsed.ledger, area, body),
+        ids,
+        holding,
       );
     } catch (error) {
       if (error instanceof EditError) return false;
@@ -2706,17 +2779,16 @@ function ownBlockEdit(
     if (!(error instanceof EditError)) throw error;
   }
   // Otherwise written where it is asked, inside the insertion, as in the break of your own split
-  // in it, which typing would move past the bullet: kept only where every order of deciding the
-  // marks it is in reads the same, and rejecting the insertion gives back what it did before.
+  // in it, which typing would move past the bullet, or in the first line of a paragraph of a
+  // document typed in one go: kept only where every order of deciding the marks at the block reads
+  // the same, and rejecting the insertion gives back what it did before.
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
   if (!reads(applyChanges(text, sorted)) || !alike(sorted)) return undefined;
-  const extended = parsed.marks
-    .filter(
-      (mark) =>
-        mark.kind === 'ins' &&
-        mark.segments.some(({ content }) =>
-          sorted.some((edit) => content.from <= edit.from && edit.to <= content.to),
-        ),
+  const extended = mine
+    .filter((mark) =>
+      mark.segments.some(({ content }) =>
+        sorted.some((edit) => content.from <= edit.from && edit.to <= content.to),
+      ),
     )
     .map((mark) => mark.id);
   return { changes: sorted, markIds: [], extendedIds: extended };
@@ -2742,48 +2814,22 @@ const readsAlike = (a: string, b: string): boolean =>
   blockCount(a) === blockCount(b);
 
 /**
- * Whether the syntax `edits` writes inside your own insertions (`owned`) leaves the marks it stands
- * in read alike: the file has no warning of marks and ledger, every order of deciding those marks
- * (the insertions and the marks inside them, and those `also` that stand next to them) gives one text
- * for each set of decisions, a decision works after the edit exactly where it works before it, and
- * once an insertion the edit wrote in is rejected the file reads as the same decisions do before the
- * edit.
+ * Whether the syntax written inside your own insertion (`after` is `before` with it) leaves the
+ * marks at the block read alike: the file has no warning of marks and ledger, every order of
+ * deciding `ids` (the insertions that hold the edit, `holders`, and the marks next to the block)
+ * gives one text for each set of decisions, in each state the file reads as the same words in as
+ * many blocks as without the syntax, a decision works after the edit exactly where it works before
+ * it, and once an insertion the edit wrote in is rejected the file reads as the same decisions do
+ * before the edit.
  */
 function decidedAlike(
   before: string,
   after: string,
-  owned: readonly Range[],
-  edits: readonly TextChange[],
-  also: readonly string[] = [],
+  ids: readonly string[],
+  holders: ReadonlySet<string>,
 ): boolean {
   const read = parse(after);
   if (read.warnings.some((warning) => STRUCTURAL_WARNINGS.has(warning.code))) return false;
-  const holding = owned.filter((content) =>
-    edits.some((edit) => content.from <= edit.from && edit.to <= content.to),
-  );
-  const ids = [
-    ...new Set([
-      ...parse(before)
-        .marks.filter((mark) =>
-          mark.segments.some(
-            (segment) =>
-              holding.some(
-                (content) => content.from <= segment.open.from && segment.open.to <= content.to,
-              ) || holding.some((content) => segment.content.from === content.from),
-          ),
-        )
-        .map((mark) => mark.id),
-      ...also,
-    ]),
-  ];
-  if (ids.length > OWN_MARKS) return false;
-  const holders = new Set(
-    parse(before)
-      .marks.filter((mark) =>
-        mark.segments.some((s) => holding.some((c) => c.from === s.content.from)),
-      )
-      .map((mark) => mark.id),
-  );
   const decide = (text: string, id: string, how: 'a' | 'r') => {
     try {
       return applyChanges(text, how === 'a' ? accept(text, id) : reject(text, id));
