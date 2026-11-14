@@ -99,7 +99,11 @@ export type Invariant =
   /** After the keys, and after leaving an empty paragraph still open, Undo all the way back gives
    * only texts the document had, and ends at the starting file: no step whose text a take-back
    * removed is left to replay. */
-  | 'history';
+  | 'history'
+  /** After every step, the file the editor gives (`getDoc`, what is saved) is its document with
+   * the open empty paragraph taken back, as it stands: no text twice or lost (a file of LF line
+   * breaks, whose line breaks the editor gives back as they are). */
+  | 'file-text';
 
 export interface Script {
   name: string;
@@ -171,6 +175,8 @@ export interface ScriptResult {
   listReadFailures: string[];
   /** What Undo all the way back gave that the document never had, or where it ended. */
   historyFailures: string[];
+  /** The steps after which `getDoc` was not the document with the open block taken back. */
+  fileTextFailures: string[];
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -565,6 +571,7 @@ export function runScript(script: Script): ScriptResult {
     const start = editor.getDoc();
     const openCaretFailures: string[] = [];
     const listReadFailures: string[] = [];
+    const fileTextFailures: string[] = [];
     const unread = unreadItems(start);
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
@@ -574,6 +581,15 @@ export function runScript(script: Script): ScriptResult {
       const handled = play(editor, step);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
+      if (!start.includes('\r')) {
+        const given = editor.getDoc();
+        const held = textWithoutOpen(editor.view.state);
+        if (given !== held) {
+          fileTextFailures.push(
+            `step ${i + 1} (${JSON.stringify(step)}): the file is ${notation(given)}, not ${notation(held)}`,
+          );
+        }
+      }
       const more = unreadItems(editor.getDoc()) - unread;
       if (more > 0) {
         listReadFailures.push(
@@ -594,6 +610,7 @@ export function runScript(script: Script): ScriptResult {
       openCaretFailures,
       listReadFailures,
       historyFailures: [],
+      fileTextFailures,
     };
     result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
@@ -990,6 +1007,7 @@ export function invariantProblems(result: ScriptResult): Record<Invariant, strin
     'list-reads': result.listReadFailures,
     'open-caret': result.openCaretFailures,
     history: result.historyFailures,
+    'file-text': result.fileTextFailures,
   };
 }
 

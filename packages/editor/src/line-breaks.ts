@@ -251,9 +251,21 @@ export function fileText(state: EditorState): string {
     });
   const parsed = state.field(parsedField, false);
   // The ledger of the document with the paragraph taken back: the live one, moved by the take-back
-  // (which never touches it), not a parse of the whole file for each update.
+  // where that leaves it alone (a parse of the whole file for each update is not needed then). It
+  // doesn't always: taking the Returns back from the record gives the file as it was, with the
+  // ledger the first tracked edit wrote gone or as it was, and an open item taken back by deciding
+  // its split takes the ledger's entries with it. A range moved through such a change is no
+  // ledger's: it lies in the body, which then comes out twice (`- onePara.- onePara.`, #439), or
+  // with a break lost. Where the take-back reaches the ledger, or writes one, it is read again.
   const live = parsed?.ledgerRange;
-  const ledger = live ? { from: back.mapPos(live.from, 1), to: back.mapPos(live.to, -1) } : null;
+  let reached = false;
+  back.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (live && fromA < live.to && toA > live.from) reached = true;
+    if (inserted.length > 0 && inserted.toString().includes('<!-- redlines')) reached = true;
+  });
+  let ledger: TextRange | null = null;
+  if (reached) ledger = parse(doc.toString()).ledgerRange ?? null;
+  else if (live) ledger = { from: back.mapPos(live.from, 1), to: back.mapPos(live.to, -1) };
   return textOf(state, doc, breaks, ledger);
 }
 

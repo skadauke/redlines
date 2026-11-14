@@ -485,7 +485,7 @@ function itemRemoval(state: EditorState, line: Line): ChangeSet | null {
       );
     if (split) {
       try {
-        changes = ChangeSet.of(reject(doc.toString(), split.id), doc.length);
+        changes = splitRejection(state, line, split.id);
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
       }
@@ -494,6 +494,36 @@ function itemRemoval(state: EditorState, line: Line): ChangeSet | null {
   }
   lastItemRemoval = { doc, line: line.from, changes };
   return changes;
+}
+
+/**
+ * The rejection of the split that made an open item's break, as changes of the document. The item
+ * is one that Markdown can't hold under the text above it (a nested bullet there is the text's
+ * underline), and the format reads it as that: its break reaches over the blank line below the item
+ * and joins the next block into the text above (`- one<split>⏎  - ⏎⏎Para.` gave `- onePara.`, and
+ * the file text with it, #439). So the split is rejected where the item is an item, at the level of
+ * its parent, with the change of its indentation first: the two are one set of changes of the
+ * document, with the ledger's entries taken along.
+ */
+function splitRejection(state: EditorState, line: Line, id: string): ChangeSet {
+  const { doc } = state;
+  const text = doc.toString();
+  const marker = /^[ \t>]*(?=(?:[-*+]|\d{1,9}[.)])[ \t]*$)/.exec(line.text)?.[0].length ?? 0;
+  // The item's parent, and what stands in front of its marker.
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(line.from + marker, 1);
+  while (node && node.name !== 'ListItem') node = node.parent;
+  let parent: SyntaxNode | null = node?.parent ?? null;
+  while (parent && parent.name !== 'ListItem') parent = parent.parent;
+  const mark = parent?.getChild('ListMark');
+  if (!mark) return ChangeSet.of(reject(text, id), doc.length);
+  const parentLine = doc.lineAt(mark.from);
+  const indent = parentLine.text
+    .slice(0, mark.from - parentLine.from)
+    .replace(/[-*+]|\d{1,9}[.)]/g, (found) => ' '.repeat(found.length));
+  const outdent = { from: line.from, to: line.from + marker, insert: indent };
+  const outdented = ChangeSet.of(outdent, doc.length);
+  const rejected = reject(outdented.apply(doc).toString(), id);
+  return outdented.compose(ChangeSet.of(rejected, outdented.newLength));
 }
 
 /**
