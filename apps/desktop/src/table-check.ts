@@ -472,6 +472,13 @@ const ghostGrid = (ghost: HTMLElement): HTMLElement[][] =>
     ...row.querySelectorAll<HTMLElement>(':scope > .rl-tc'),
   ]);
 
+/** What a ghost table says of its size, as it carries it: the columns, the rows, and those not drawn. */
+const ghostData = (ghost: HTMLElement) => ({
+  columns: ghost.dataset['columns'],
+  rows: ghost.dataset['rows'],
+  more: ghost.dataset['more'],
+});
+
 /** The text of each row of a grid as a person reads it, the cells apart by `|` (a filler is no text). */
 const gridTexts = (grid: HTMLElement[][]): string[] =>
   grid.map((row) => row.map((cell) => (cell.textContent ?? '').replace(/\u200b/g, '')).join('|'));
@@ -2480,11 +2487,7 @@ const CHECKS: Check[] = [
       const lefts = (grid[0] ?? []).map((cell) => cell.getBoundingClientRect().left);
       if (!lefts.every((left, i) => i === 0 || left > (lefts[i - 1] ?? Infinity)))
         problems['columns'] = lefts;
-      const data = {
-        columns: ghost.dataset['columns'],
-        rows: ghost.dataset['rows'],
-        more: ghost.dataset['more'],
-      };
+      const data = ghostData(ghost);
       if (!same(data, { columns: '3', rows: '3', more: '0' })) problems['data'] = data;
       if (ghost.querySelector('.rl-ghost-fold')) problems['fold'] = 'a fold line under three rows';
       // Struck, on the author's tint, with the bar.
@@ -2574,11 +2577,7 @@ const CHECKS: Check[] = [
         }
         const grid = ghostGrid(ghost);
         const folds = [...ghost.querySelectorAll<HTMLElement>('.rl-ghost-fold')];
-        const data = {
-          columns: ghost.dataset['columns'],
-          rows: ghost.dataset['rows'],
-          more: ghost.dataset['more'],
-        };
+        const data = ghostData(ghost);
         const want = { columns: '3', rows: String(rows), more: String(Math.max(0, rows - 8)) };
         if (!same(data, want)) problems[`${rows}-data`] = data;
         if (grid.length !== 8 || grid.some((row) => row.length !== 3))
@@ -2599,9 +2598,10 @@ const CHECKS: Check[] = [
             problems[`${rows}-fold-width`] = [line.left, line.width, held.left, held.width];
         }
         if (rows !== 20) continue;
-        // A row past the eighth is not drawn; a press opens the card of the whole table.
+        // A row past the eighth is not drawn (`Apples 10` is the eleventh: the header, then ten rows of
+        // the body); a press opens the card of the whole table.
         if (ghost.textContent?.includes('Apples 10'))
-          problems['20-ninth'] = 'a row past the eighth is drawn';
+          problems['20-eleventh'] = 'a row past the eighth is drawn';
         const pressed = await pressGhost(editor, ghost);
         if (!pressed.hit || !pressed.taken || pressed.moved) problems['20-press'] = pressed;
         if (pressed.card !== 'Deleted table (3 columns, 20 rows)')
@@ -2678,7 +2678,8 @@ const CHECKS: Check[] = [
     name: 'typing-in-a-missing-cell-writes-its-pipes-first',
     async run(editor) {
       const problems: Record<string, unknown> = {};
-      const start = around('| a | b | c |\n| - | - | - |\n| 1 |');
+      // (a row of text below, for the row typed in to be as tall as)
+      const start = around('| a | b | c |\n| - | - | - |\n| 1 |\n| 2 | 3 | 4 |');
       for (const tracking of [false, true]) {
         const label = tracking ? 'tracked' : 'plain';
         await load(editor, start, tracking);
@@ -2716,6 +2717,17 @@ const CHECKS: Check[] = [
           problems[`${label}-cells`] = cells;
         if (written.slice(head(editor) - 1, head(editor)) !== 'x')
           problems[`${label}-caret-after`] = written.slice(head(editor) - 3, head(editor) + 3);
+        // The row is drawn as any row of text is, empty cell between and all: as tall as the row below,
+        // and the text of its cells at one height. (A pass must mean it draws right.)
+        const lines = lineElements(editor);
+        const heights = [lines[1], lines[2]].map((line) => line?.getBoundingClientRect().height);
+        if (!(Math.abs((heights[0] ?? NaN) - (heights[1] ?? NaN)) <= 0.5))
+          problems[`${label}-height`] = heights;
+        const tops = (cellElements(editor)[1] ?? [])
+          .map(textTop)
+          .filter((top): top is number => top !== null);
+        if (tops.length !== 2 || Math.max(...tops) - Math.min(...tops) > 0.5)
+          problems[`${label}-tops`] = tops;
         if (!undo(editor.view) || doc(editor) !== start)
           problems[`${label}-undo`] = doc(editor).replaceAll('\n', '⏎').slice(0, 200);
       }

@@ -513,15 +513,15 @@ mode has no counterpart in the desktop app.
 - **Deleted blocks show as blocks.** In Redlines, a paragraph, heading, list item, quote or other
   block that was deleted whole is drawn where it was, as a block of its own, its text struck in its
   author's color, with the look of what it was (a heading at its level, an item with its bullet, a
-  quote with its bar) and its own change bar. A block rewritten whole, by an agent or by typing over
-  it, is not deleted: the old text is struck above the new, in the same block (a rewritten heading
-  at the heading's size, an item beside its one bullet), and a rewritten table cell shows its old
-  text struck above the new inside the cell. Words deleted inside a block, a substitution of part of
-  one, and a deletion that runs from one block into another stay inline. The caret steps over a
-  struck block, as over deleted text, and its card opens on hover and pins on a click; a click on
-  its bar switches to the simple look, which doesn't draw it, and the block below keeps the place.
-  The simple look and Clean show the newest text only. A table deleted whole is drawn as a ghost
-  table (§5.8).
+  quote with its bar) and its own change bar. A table deleted whole is one of these, drawn as a
+  ghost table (§5.8). A block rewritten whole, by an agent or by typing over it, is not deleted: the
+  old text is struck above the new, in the same block (a rewritten heading at the heading's size, an
+  item beside its one bullet), and a rewritten table cell shows its old text struck above the new
+  inside the cell. Words deleted inside a block, a substitution of part of one, and a deletion that
+  runs from one block into another stay inline. The caret steps over a struck block, as over deleted
+  text, and its card opens on hover and pins on a click; a click on its bar switches to the simple
+  look, which doesn't draw it, and the block below keeps the place. The simple look and Clean show
+  the newest text only.
 - **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
   new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
   paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
@@ -765,12 +765,14 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
   cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
   staying selected). Pressed again, with whole rows, whole columns or the whole table selected and
-  every cell of them empty (as the page shows it), they delete the rows, columns or table, as
-  Delete Row, Delete Column and Delete Table do, and the notice says what refuses it. A row with
-  text is never deleted by one keystroke: the first press clears it. Typing clears the cells and
-  types into the top-left one; ⌘B, ⌘I and the Format menu format each cell's text as one change;
-  ⌘K is unavailable; a new comment is on the selected cells' text in one row and on the whole rows
-  across rows.
+  every cell of them empty, they delete the rows, columns or table, as Delete Row, Delete Column and
+  Delete Table do, and the notice says what refuses it. A cell is empty when it holds no text the
+  caret can stand in (`cellIsEmpty`, `cells.ts`): deleted text counts as gone, a line break as text,
+  and an author's own HTML comment as empty in Clean and Simple, where it is hidden, and not in
+  Redlines, which draws it as a note. A row with text is never deleted by one keystroke: the first
+  press clears it. Typing clears the cells and types into the top-left one; ⌘B, ⌘I and the Format
+  menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
+  cells' text in one row and on the whole rows across rows.
 - **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
   that holds a tab, a line break or a quote in quotes) and an HTML table of the cells' newest text
   on the clipboard, the header row as `th` when it is the table's, and never markers; cut also
@@ -843,22 +845,24 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   but not deleted until those are decided; an agent that replaces a table with the table it wants
   changes rows and columns as these commands do (format §3.7, "Agents").
 - **A table deleted whole** (Delete Table, ⌫ again on a selected table whose cells are empty, or a
-  selection that covers it) is one deletion of the block (format §3.4, §3.7 rule 6). In Redlines
-  it is drawn where the table was, as a **ghost table**: its first eight rows, the header's among
-  them, in the table's own layout and alignments, the text struck in the author's color on the
-  author's tint, with a bar. Past eight rows the rest are one line, "and 12 more rows". It is not
-  editable: the caret and ↑ ↓ skip it, and a press on it opens its card and puts no caret there. The
-  card says "Deleted table (3 columns, 20 rows)"; accepting makes the deletion final and rejecting
-  writes the table back. Simple draws the bar and no table, and Clean shows the text without it.
-  Your own pending changes in the table fold into the deletion, as rejecting them would. With
-  Track Changes on, another person's pending change in it refuses the deletion, naming them ("Bo
-  Chen's pending change is in this table. Decide it first."), and so does a comment that runs out
-  of the table, or that no text next to the table can keep (it is the only block), naming its
-  author; the other comments become point comments where the table was. It is also refused where
-  its marker has no place: a code block follows it with no text between, it ends the text right
-  after a code block or a rule, or it starts right under a line of text and something follows it.
-  The words say what to do: put a paragraph or a blank line between, or turn off Track Changes,
-  which deletes the table's text.
+  selection that covers it) is, with Track Changes on, one deletion of the block (format §3.4, §3.7
+  rule 6); with it off the table goes as text. In Redlines the deletion is drawn where the table
+  was, as a **ghost table**: its first eight rows, the header's among them, as a table with its
+  alignments, the text struck in the author's color on the author's tint, with a bar. Past eight
+  rows the rest are one line, "and 12 more rows". It is not editable: the caret and ↑ ↓ skip it, and
+  a press on it opens its card and puts no caret there. The card says "Deleted table (3 columns, 20
+  rows)"; accepting makes the deletion final and rejecting writes the table back. Simple draws the
+  bar and no table, and Clean shows the text without it. Your own pending changes in the table fold
+  into the deletion, as rejecting them would. With Track Changes on, another person's pending change
+  in it refuses the deletion, naming them ("Bo Chen's pending change is in this table. Decide it
+  first."), and so does a comment that runs out of the table, or that no text next to the table can
+  keep (it is the only block), naming its author; the other comments become point comments where the
+  table was. It is also refused where its marker has no place: a code block follows it with no text
+  between, it ends the text right after a code block or a rule, or it starts right under a line of
+  text and something follows it. The words say what to do: put a paragraph or a blank line between,
+  or turn off Track Changes, which deletes the table's text. (A table next to a heading with closing
+  `#`s or attributes is refused in the words of any edit there, which don't say; format §3.7 rule 6
+  says what works.)
 
 ### 5.9 Command palette and shortcuts
 
