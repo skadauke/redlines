@@ -15,6 +15,11 @@ use serde::Deserialize;
 // Markdown's type, the one Redlines opens Markdown files by and can be made their default app for.
 use crate::default_app::MARKDOWN;
 
+/// The type that other apps declare for Markdown (Word does, as a type that conforms to nothing),
+/// which the bundle claims as well, so that Open With offers Redlines for a file typed that way
+/// (#347). It is not Redlines' to declare, so the bundle only claims it.
+const PUBLIC_MARKDOWN: &str = "public.markdown";
+
 /// The parts of an Info.plist that say which documents an app opens.
 #[derive(Debug, Deserialize)]
 struct Declared {
@@ -76,7 +81,8 @@ fn read<T: serde::de::DeserializeOwned>(plist: &Path) -> T {
 }
 
 /// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
-/// app for, at the rank of an app that opens it. R Markdown and Quarto by their extensions, which
+/// app for, and by `public.markdown`, which other apps declare (#347), at the rank of an app that
+/// opens it. R Markdown and Quarto by their extensions, which
 /// macOS has no type for, and plain text by `.txt` alone, each at the rank of an alternative, so
 /// that Redlines is offered for those files and takes none of them, even on a Mac where no other
 /// app owns them: people who write R Markdown or Quarto have an editor of their choice. Plain
@@ -91,14 +97,20 @@ fn expected() -> Vec<Document> {
         extensions: extensions.iter().map(|&each| each.to_owned()).collect(),
     };
     vec![
-        editor("Markdown Document", "Default", &[MARKDOWN], &[]),
+        editor(
+            "Markdown Document",
+            "Default",
+            &[MARKDOWN, PUBLIC_MARKDOWN],
+            &[],
+        ),
         editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
         editor("Quarto Document", "Alternate", &[], &["qmd"]),
         editor("Plain Text Document", "Alternate", &[], &["txt"]),
     ]
 }
 
-/// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type.
+/// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type,
+/// and imports none that others declare: `PUBLIC_MARKDOWN` is only claimed.
 fn markdown_type() -> Type {
     Type {
         identifier: MARKDOWN.to_owned(),
@@ -125,6 +137,12 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
     for document in &declared.documents {
         offered.extend(document.extensions.iter().map(|each| each.to_lowercase()));
         for name in &document.types {
+            // Other apps declare this type, for the same two extensions, and a type that others
+            // declare is not ours to import.
+            if name == PUBLIC_MARKDOWN {
+                offered.extend(markdown_type().tags.extensions);
+                continue;
+            }
             // A type is declared with its extensions, so that every macOS knows it.
             let imported = declared
                 .imported
@@ -145,6 +163,25 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
         .map(|&each| each.to_owned())
         .collect();
     assert_eq!(offered, opened);
+}
+
+#[test]
+fn the_quick_look_preview_is_built_for_the_markdown_types_the_bundle_claims() {
+    // The preview extension (apps/desktop/quicklook) lists the types of the files it previews in
+    // scripts/build-quicklook: a file the app is offered for is previewed as well.
+    let script = include_str!("../../scripts/build-quicklook");
+    let list = script
+        .lines()
+        .find(|line| line.starts_with("MARKDOWN_TYPES = "))
+        .expect("scripts/build-quicklook lists MARKDOWN_TYPES");
+    let listed: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    let declared: Declared = read(&source());
+    let markdown = declared
+        .documents
+        .iter()
+        .find(|each| each.name == "Markdown Document")
+        .expect("the bundle declares Markdown");
+    assert_eq!(listed, markdown.types);
 }
 
 #[test]
