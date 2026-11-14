@@ -71,6 +71,25 @@ describe('images', () => {
     expect([...new Set(asked)]).toEqual(['img/a b.png']);
   });
 
+  it('decodes every percent code of a path, also those of the characters a URL reserves', () => {
+    // What the paste and drop of images write (`imageLink`): `#` and `?` would end a path as a URL.
+    const asked: string[] = [];
+    const editor = editorWith(
+      'Hi\n\n![](img/Photo%20%232%3F%20100%25.png)',
+      (src) => (asked.push(src), 'x://a'),
+      0,
+    );
+    drawn(editor);
+    expect([...new Set(asked)]).toEqual(['img/Photo #2? 100%.png']);
+  });
+
+  it('takes a path whose percent codes are broken as it is written', () => {
+    const asked: string[] = [];
+    const editor = editorWith('Hi\n\n![](img/100%.png)', (src) => (asked.push(src), 'x://a'), 0);
+    drawn(editor);
+    expect([...new Set(asked)]).toEqual(['img/100%.png']);
+  });
+
   it('shows a missing image’s alt text quietly', () => {
     const none = editorWith('Hi\n\n![Gone](gone.png)', () => null, 0);
     const [image] = drawn(none);

@@ -22,6 +22,9 @@ const ICONS = {
   /** The Redlines view: the page with a change bar in its margin and one mark of markup on it, a line struck through. */
   redlines:
     '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4"/><path d="M7 10.5h4"/><path d="M6.3 12l5.4-3.1" stroke-width="1.1"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
+  /** The simple look: the page of the Redlines view with its change bar and no markup on it. */
+  simple:
+    '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4M7 10.5h4"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
   /** The Raw view: angle brackets. */
   raw: '<path d="M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"/>',
   /** A list of changes. */

@@ -25,6 +25,7 @@ function commands() {
     print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
@@ -152,6 +153,23 @@ describe('Open Recent', () => {
   });
 });
 
+describe('Simple Look (#330)', () => {
+  const row = () => actionRow(appMenuModel(commands(), registryOf()), 'View', 'Simple Look');
+
+  it('is on while Redlines shows its simple look, and off in the full markup', () => {
+    expect(row().checked?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().checked?.(state({ view: 'redlines' }))).toBe(false);
+  });
+
+  it('can be chosen only while Redlines shows: Clean and Raw have no look to switch', () => {
+    expect(row().enabled?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'redlines' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'clean' }))).toBe(false);
+    expect(row().enabled?.(state({ view: 'raw' }))).toBe(false);
+    expect(row().checked?.(state({ view: 'clean' }))).toBe(false);
+  });
+});
+
 describe('the menu model', () => {
   it('keeps every item the v0.1 menu had', () => {
     const model = appMenuModel(commands(), registryOf());
@@ -188,11 +206,13 @@ describe('the menu model', () => {
       ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
-    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
+    // Simple Look is Redlines' simple look, a switch below the three views (#330).
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
       ['Redlines', 'Alt+CmdOrCtrl+2'],
       ['Raw', 'Alt+CmdOrCtrl+3'],
+      '---',
+      ['Simple Look', 'Alt+CmdOrCtrl+4'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -254,9 +274,14 @@ describe('the menu model', () => {
     expect(c.print).toHaveBeenCalledOnce();
     click('View', 'Raw');
     expect(c.setView).toHaveBeenLastCalledWith('raw');
-    // Redlines, which the editor shows in the look last chosen with a click on a change bar.
+    // Redlines, which the editor shows in the look last chosen with a click on a change bar or the
+    // Simple Look switch.
     click('View', 'Redlines');
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledTimes(2);
+    // The simple look is no view: its row switches the look, and shows no other view.
+    click('View', 'Simple Look');
+    expect(c.switchLook).toHaveBeenCalledOnce();
     expect(c.setView).toHaveBeenCalledTimes(2);
     click('View', 'Larger Text');
     expect(c.biggerText).toHaveBeenCalledOnce();

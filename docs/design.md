@@ -244,8 +244,8 @@ The window, on the desktop:
   default app for Markdown, the Quick Look preview of Markdown files, and installing the
   `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and text
   size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
-  starts on, whether line breaks show their marks, §5.5, and whether the word count shows) and
-  Agents (§8.6). Changes apply at once.
+  starts on, whether line breaks show their marks, §5.5, whether the word count shows, and
+  where images are saved, §5.10) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -395,20 +395,26 @@ last; Raw is for the menu.
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there, with its shortcut, whatever the document holds and whether Track Changes is on or
   off, so the View menu always offers the same three views. A document without redlines looks
-  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
-  the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
-  short), the same text as Clean with a change bar beside each screen line that has a pending
-  change (§5.5), in its author's color, and the comments with their notes: deletions are hidden,
-  and inserted and reformatted text is plain (Word's Simple Markup). The click switches from the
-  one to the other, with the line where it was. The simple look is no view of its own: the View
-  menu has no entry for it and no key shows it, so the menu says "Redlines" in both looks.
+  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
+  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
+  line that has a pending change (§5.5), in its author's color, and the comments with their notes:
+  deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
+  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  click's line is the one under the pointer; the switch's, the one with the caret when it is on the
+  screen, else the first on it), and the look becomes the one remembered. The simple look is no view
+  of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
+  checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
+  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
+  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
 Raw shows them.
 
-Redlines remembers its look, the one a click on a change bar chose last, the full markup at first.
+Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
+the full markup at first.
 A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
@@ -490,8 +496,8 @@ mode has no counterpart in the desktop app.
   zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
   the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
   their own. In Redlines a click on a bar switches between its two looks, the full markup and the
-  simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
-  lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  simple look, as the View menu's Simple Look switch does: the bar is a target 24 px wide, only
+  beside the lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
   prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
   the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -836,6 +842,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
 | Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
+| Simple Look (switch)           | ⌥⌘4                                                                                           | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Subscript, superscript         | ⌥⌘, and ⌥⌘. (Word's ⌘= and ⇧⌘= are Zoom In here)                                              | Ctrl+Alt+, and Ctrl+Alt+. |
@@ -879,6 +886,38 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
+  in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
+  asks for files in the system's panel) all do the same. The file is copied into the folder for
+  images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
+  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
+  over the sidebar, the title bar or the ground below the text goes where the caret is. The image
+  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
+  draws an image only while the caret is off its link, draws one just added all the same until the
+  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
+  data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
+  name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
+  folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
+  insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
+  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
+  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  person may go on writing while the images are saved: the links go in where the paste or drop was,
+  ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
+  all of it is still there; what was typed in it stays, and the links go after it. A document that
+  was replaced meanwhile gets none of the links, and the person is told, the files being where they
+  were saved.
+- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
+  `images` (the name can be changed), a folder named for the document (`plan.assets` for
+  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
+  preview loads images from, and the setting can't name another place on the disk. A document in
+  the home folder, whose project is too broad to load images from but for its own folder, takes
+  images in that folder alone, and says so for the other two. Only image files go in, by their
+  names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
+  or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
+  pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
+  browser, is left to the HTML.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
@@ -1202,10 +1241,20 @@ Asking for a document's project is what shows it, once the person has opened or 
 by a path with no `..` in it, as a dialog gives it. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
-dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and
-lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
-scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
-and builds Tauri without that protocol.
+dragged, dropped back on that window, which opens nothing). Image files dropped alone, every file of
+the drop an image, are the window's to add to its document (§5.10), and are the one exception: the
+app, which has them from the system's drop, keeps them for that window and tells it how many there
+are, where they landed, and an id to ask for them by. The panel that Format › Image… shows is the
+app's too, so the window can raise a panel for image files and is given no path by it, only an id.
+The app copies the files into the folder for the document's images when the window asks, so the
+window never names a file to copy and reads none of them, and a pasted image's bytes, which the
+window has, are written the same way. What is copied is an image by its name and its first bytes, no
+larger than the preview shows, and goes inside the folder of a document the window may use and says
+it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one folder
+named in the settings, never one that is a link out of it, and never replacing a file. A folder or
+any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
+adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
+holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
 ### 6.6 Styling
 
@@ -1804,7 +1853,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   has one line over the text that says so and points to the app ("4 changes and 2 comments by
   Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
-  line over its code. Raw HTML in the document is text, never live, and an image is its alt text.
+  line over its code. Raw HTML in the document is text, never live. An image that is a file in the
+  document's project is drawn; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
     It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
@@ -1829,8 +1879,20 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is
     read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
     end, isn't read.
-  - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
-    thumbnails in Finder, which are a separate extension.
+  - **Images.** An image is drawn when it is a file inside the document's project, its repository
+    or else its own folder (the rule that the app's own preview loads images by, §6.5; a project
+    that is too broad, the home folder, a folder above it or the disk's root, is its document's own
+    folder alone, with no subfolder): no hidden file's or folder's, with no link leading out of the
+    project to it, and whose name and first bytes both say it is an image the preview shows (PNG,
+    JPEG, GIF, WebP, AVIF, HEIC, JPEG XL, BMP, ICO, TIFF or SVG). It loads at most 40 images, 16 MB
+    each and 48 MB in all; any other image, and any
+    that isn't there, is its alt text. An image from a server, or in a `data:` address, is never
+    loaded, so that a preview never tells a server that a file was opened. A sandboxed extension
+    can't read the files beside its document, so the extension has the sandbox's read-only
+    exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
+    Quick Look as the attachments of its answer, which the page names by `cid:` and which its
+    Content-Security-Policy allows and nothing else (`img-src cid:`).
+  - **Not yet:** thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1844,14 +1906,19 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
-- **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
-  entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
-  so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
-  JavaScriptCore's compiler, without which the renderer is 5 to 8 times as slow, which a long
-  document turns from a moment into a wait
+- **The Quick Look preview reads the file it is asked to preview, and the images that file links
+  to,** in a sandbox with no network entitlement, and draws a page with no script that loads
+  nothing but the images it was given (its Content-Security-Policy says so): a preview never tells
+  a server that a file was opened. Its two exceptions to the sandbox are JavaScriptCore's
+  compiler, without which the renderer is 5 to 8 times as slow, which a long document turns from a
+  moment into a wait, and a read-only exception for files, which the images need and nothing else
+  uses: it loads a file only inside the document's project, that is no hidden file's or folder's
+  and that no link leads out of it to, whose name and first bytes both say it is an image. What it
+  reads goes nowhere but into the page that Quick Look draws, since it has no network
   ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
-  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
+  beside its document, §5.10, which it cannot read back), and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
 - **Per-person state stays out of the file:** mode, zoom and text size, the markup view each
@@ -1899,5 +1966,6 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
-6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order. Word for Mac gives ⌥⌘1 to
-   ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real.
+6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order, and ⌥⌘4 for the Simple Look
+   switch below them. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to
+   ⌘6; kept unless the clash proves real.

@@ -129,6 +129,7 @@ function commands() {
     print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
@@ -231,6 +232,20 @@ describe('the menu bar', () => {
     expect(views.map((item) => item.checked)).toEqual([false, true, false]);
     menu.update(documentState({ hasRedlines: true, view: 'raw' }));
     expect(views.map((item) => item.checked)).toEqual([false, false, true]);
+  });
+
+  it('has a Simple Look switch with ⌥⌘4, on in the simple look and there to choose only in Redlines', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const look = made.items.find((item) => item.kind === 'check' && item.text === 'Simple Look');
+    expect(look?.accelerator).toBe('Alt+CmdOrCtrl+4');
+    menu.update(documentState({ view: 'redlines' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, true]);
+    menu.update(documentState({ view: 'simple' }));
+    expect([look?.checked, look?.enabled]).toEqual([true, true]);
+    menu.update(documentState({ view: 'clean' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
+    menu.update(documentState({ view: 'raw' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
   });
 
   it('keeps reviewing for documents with redlines', async () => {
@@ -525,8 +540,9 @@ describe('browser shortcuts', () => {
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
     press('Digit1', { metaKey: true, altKey: true, key: '¡' });
     expect(c.setView).toHaveBeenLastCalledWith('clean');
-    // Simple is no view of the menu: no key shows it, and the fourth key is free.
-    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(false);
+    // The fourth key is Simple Look, which switches the look and shows no view.
+    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(true);
+    expect(c.switchLook).toHaveBeenCalledOnce();
     expect(c.setView).toHaveBeenCalledTimes(3);
     press('KeyS', { metaKey: true, ctrlKey: true });
     expect(c.toggleSidebar).toHaveBeenCalledOnce();

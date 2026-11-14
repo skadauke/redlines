@@ -54,6 +54,9 @@ mod project;
 // The images the preview loads: those of the project folders the sidebars show.
 mod images;
 
+// Images added to a document: dropped on its window, chosen in a panel or pasted, saved beside it.
+mod image_files;
+
 // What a window may do with files: read and write those the person opened or saved.
 mod file_scope;
 
@@ -344,6 +347,7 @@ pub fn run() {
         .manage(windows::Windows::default())
         .manage(zoom::Zoom::default())
         .manage(project::Projects::default())
+        .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())
         .setup(|app| {
             // The appearance first, light, dark or the system's: every window opens in it.
@@ -417,6 +421,9 @@ pub fn run() {
             links::open_link,
             project::show_images,
             project::allow_document,
+            image_files::pick_images,
+            image_files::add_images,
+            image_files::add_pasted_image,
             file_scope::forget_documents,
             updates::update_state,
             updates::update_set_automatic,
@@ -494,6 +501,8 @@ pub fn run() {
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.
                 spelling::window_closed(window.label());
+                // The images dropped on it or chosen for it that it never took.
+                image_files::window_closed(window.app_handle(), window.label());
                 // A closed window's runs have nowhere left to report, and no document to act on.
                 #[cfg(unix)]
                 agents::window_closed(window.app_handle(), window.label());
@@ -506,15 +515,19 @@ pub fn run() {
                 windows::on_window_event(app, label, event);
             }
             // A file dropped on a document window opens as one from Finder does, with that window
-            // in front: in it while it is untouched, and otherwise in a window of its own.
+            // in front: in it while it is untouched, and otherwise in a window of its own. Image
+            // files alone, though, are the window's to add to its document, wherever they landed
+            // (image_files.rs), and open nothing.
             if let tauri::RunEvent::WindowEvent {
                 label,
-                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }),
                 ..
             } = &event
             {
                 let dropped = dropped_paths(paths.iter().cloned());
-                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped) {
+                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped)
+                    && !image_files::dropped(app, label, &dropped, *position)
+                {
                     offer(app, dropped);
                 }
             }

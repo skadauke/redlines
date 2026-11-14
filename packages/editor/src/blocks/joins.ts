@@ -14,7 +14,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import { EditError, type FormatOp, OUTDENT_NUMBERED_CHILD } from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
-import { parsedField } from '../tracked/field.ts';
+import { authorFacet, parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
@@ -29,6 +29,7 @@ import {
   textEnd,
   textStart,
 } from './edits.ts';
+import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock } from './open.ts';
 import {
@@ -329,13 +330,29 @@ function removeEmpty(
   const { prev, next } = neighbours(state, block);
   if (userEvent === 'delete.forward.block' && next) {
     // Delete: the next block keeps its kind, the caret at its start.
-    return edit(
+    const forward = edit(
       state,
       [{ from: block.lines.from, to: next.lines.from }],
       block.lines.from,
       userEvent,
       next.text.from,
     );
+    // The format has no place for the marker of that deletion in front of an item nested under
+    // another one (`  - ` alone on the line, at the start of it), tracked: the same text goes as
+    // the break above it and the item, as Backspace takes it, one edit that is a substitution
+    // (#204). Untracked the first form is refused only where a change of someone else's is next to
+    // it, which the break above it would decide: that refusal stands.
+    if (!prev || !state.field(trackingField, false)) return forward;
+    return {
+      ...forward,
+      fallback: edit(
+        state,
+        [{ from: prev.lines.to, to: block.lines.to }],
+        prev.lines.to,
+        userEvent,
+        next.text.from,
+      ),
+    };
   }
   if (prev)
     return edit(state, [{ from: prev.lines.to, to: block.lines.to }], prev.lines.to, userEvent);
@@ -810,6 +827,90 @@ function inNoText(
   return null;
 }
 
+/** Whether the text from `from` to `to` is inside a pending insertion of the author's own. */
+function inOwnInsertion(state: EditorState, from: number, to: number): boolean {
+  const me = state.facet(authorFacet)?.handle;
+  return !!state
+    .field(parsedField, false)
+    ?.marks.some(
+      (mark) =>
+        mark.kind === 'ins' &&
+        mark.entry.by === me &&
+        mark.segments.some(({ open, close }) => open.to <= from && close && close.from >= to),
+    );
+}
+
+/**
+ * Backspace (or Delete) over the only character of an item's text, where the item left empty is no
+ * item in Markdown: an empty bullet under a line of text is the underline of a heading, and an empty
+ * numbered item is more of the text (`empty-item.ts`). The file must not hold it (#204: it held the
+ * item's marker alone, which read the text above it as a heading, though the editor drew an empty
+ * item), so the item does not stay in it:
+ *
+ * - Track Changes off, nothing of a pending change on the item's line or at the end of the line
+ *   above: the character goes and the empty item is open, as it was when Return and Tab made it,
+ *   drawn, out of the file, written when text is typed in it, gone with the next Backspace or when
+ *   the caret leaves. An item with a marker on it can't be taken back plainly (`itemRemoval`), and
+ *   a split of someone else's at the end of the line above would be decided by it: those keep the
+ *   plain key.
+ * - Track Changes on, text of the author's own insertion that holds the item's break: the item goes
+ *   whole with the character, as the author's own pending text does.
+ * - Track Changes on, text that isn't the author's own: the format deletes the whole item itself.
+ *
+ * Null where the item holds more, where the text is more than one code point (the key then goes
+ * the way CodeMirror's does, one cluster at a time, and comes here at the last), and where the empty
+ * item would be sound.
+ */
+function onlyCharOfItem(
+  state: EditorState,
+  block: Block,
+  head: number,
+  forward: boolean,
+): KeyEdit | null {
+  if (block.kind !== 'paragraph' || block.containers.at(-1)?.kind !== 'item') return null;
+  // One character and the closer of the insertion that holds it, at most: the rest is a key inside
+  // the text, which costs nothing here.
+  if (block.text.to - block.text.from > 64) return null;
+  const start = textStart(state, block);
+  const end = textEnd(state, block);
+  if (forward ? head !== start : head !== end) return null;
+  if ([...state.sliceDoc(start, end)].length !== 1) return null;
+  const { doc } = state;
+  const item = itemsAround(state, block)[0];
+  const line = doc.lineAt(block.lines.from);
+  if (
+    !item ||
+    line.number < 2 ||
+    item.line.number !== line.number ||
+    doc.lineAt(item.node.to).number !== line.number
+  ) {
+    return null;
+  }
+  // What the item is once the character is gone.
+  const rest = (doc.sliceString(line.from, start) + doc.sliceString(end, line.to)).replace(
+    MARKER,
+    '',
+  );
+  const found = EMPTY_ITEM.exec(rest);
+  if (!found || !unsoundEmptyItem(doc, line.number, found[1]!, found[2]!.length, found[3]!)) {
+    return null;
+  }
+  const userEvent = forward ? 'delete.forward.block' : 'delete.backward.block';
+  const above = doc.line(line.number - 1);
+  if (state.field(trackingField, false)) {
+    // Text that isn't the author's own is deleted whole by the format; the author's own goes with
+    // the break that it made, and the item.
+    if (!inOwnInsertion(state, start, end)) return null;
+    return edit(state, [{ from: above.to, to: end }], above.to, userEvent);
+  }
+  // Nothing of a change on the line, or ending the line above, which the take-back would meet.
+  if (line.text.includes('<!--') || /-->$/.test(above.text)) return null;
+  return {
+    ...edit(state, [{ from: start, to: end }], start, userEvent),
+    open: { at: start, assoc: 1, item: true },
+  };
+}
+
 /**
  * Backspace or Delete over the only character of the first line of a paragraph that goes on: the
  * line goes with its break and the next line's prefix, as the format deletes a whole line, so that
@@ -866,6 +967,7 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   const start = textStart(state, block);
   if (head > start) {
     return (
+      onlyCharOfItem(state, block, head, false) ??
       onlyCharOfFirstLine(state, block, head, false) ??
       lastCharOfLine(state, block, head) ??
       afterHardBreak(state, block, head)
@@ -928,7 +1030,11 @@ export function planDelete(state: EditorState): KeyEdit | null {
   if (block.kind === 'rule') return null;
   if (isEmpty(state, block) && head >= block.text.from) return removeEmpty(state, block, userEvent);
   const end = textEnd(state, block);
-  if (head < end || head < block.text.from) return onlyCharOfFirstLine(state, block, head, true);
+  if (head < end || head < block.text.from) {
+    return (
+      onlyCharOfItem(state, block, head, true) ?? onlyCharOfFirstLine(state, block, head, true)
+    );
+  }
   const { next } = neighbours(state, block);
   const deleted = next && onlyDeletedText(state, next);
   if (deleted) return { ...nothing(state), refusal: deleted };
