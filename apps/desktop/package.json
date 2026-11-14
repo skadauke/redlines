@@ -20,6 +20,7 @@
     "@redlines/agents": "workspace:*",
     "@redlines/code": "workspace:*",
     "@redlines/editor": "workspace:*",
+    "@redlines/emoji": "workspace:*",
     "@redlines/find": "workspace:*",
     "@redlines/format": "workspace:*",
     "@redlines/formatting": "workspace:*",

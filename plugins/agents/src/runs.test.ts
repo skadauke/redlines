@@ -7,8 +7,15 @@ import {
   redo,
   undo,
 } from '@redlines/editor';
+import { foldComment } from '@redlines/agent-tools';
 import { isId, parse } from '@redlines/format';
-import type { AgentScope, AgentState, ProjectRoot } from '@redlines/plugin-api';
+import type {
+  AgentEvent,
+  AgentRequest,
+  AgentScope,
+  AgentState,
+  ProjectRoot,
+} from '@redlines/plugin-api';
 import { createReview, type PostedComment, type ReviewController } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -40,6 +47,8 @@ interface Options {
   consent?: Record<string, AgentScope | 'no'>;
   claude?: FakeScript;
   codex?: FakeScript;
+  /** An agent that answers in text and has no toolbox, as an OpenClaw agent: absent unless given. */
+  moby?: FakeScript;
   claudeReads?: 'folder' | 'machine';
   /** The folders of the home folder the host lists; none where the host can't, or fails to. */
   homeRoots?: readonly string[] | Error;
@@ -68,6 +77,8 @@ interface Setup {
   relay: FakeRelay;
   claude: FakeProvider;
   codex: FakeProvider;
+  /** The agent with no toolbox, when the test asked for one. */
+  moby?: FakeProvider;
   posted: PostedComment[];
   /** What the document was asked to do, and what the test makes it answer. */
   doc: {
@@ -124,6 +135,16 @@ function setup(options: Options = {}): Setup {
     name: 'Codex',
     script: options.codex ?? replies('Done.'),
   });
+  const moby = options.moby
+    ? fakeProvider({
+        relay,
+        id: 'moby',
+        name: 'Moby',
+        readLimit: 'machine',
+        toolbox: false,
+        script: options.moby,
+      })
+    : undefined;
   const doc: Setup['doc'] = {
     path: options.path === undefined ? '/repo/plan.md' : options.path,
     generation: 0,
@@ -137,7 +158,7 @@ function setup(options: Options = {}): Setup {
   let lookups = 0;
   const blocked: BlockedNotice[] = [];
   const runs = createRuns({
-    agents: createMacAgents([claude, codex], relay),
+    agents: createMacAgents(moby ? [claude, codex, moby] : [claude, codex], relay),
     author: me,
     document: {
       path: () => doc.path,
@@ -198,6 +219,7 @@ function setup(options: Options = {}): Setup {
     relay,
     claude,
     codex,
+    ...(moby ? { moby } : {}),
     posted,
     doc,
     consent,
@@ -2027,5 +2049,116 @@ describe('a run whose comment is gone, found by the run itself', () => {
     expect(s.editor.getDoc()).not.toContain('May');
     expect(s.runs.isLive()).toBe(false);
     expect(s.runs.line(thread)).toBeNull();
+  });
+});
+
+describe('an agent with no toolbox', () => {
+  const answering = (text: string, seen: { request?: AgentRequest } = {}): FakeScript =>
+    async function* ({ request }) {
+      seen.request = request;
+      // One at a time, as a program's lines arrive.
+      yield await Promise.resolve<AgentEvent>({ type: 'status', text: 'Thinking…' });
+      yield { type: 'done', finalText: text };
+    };
+
+  it('is sent the thread and the document, and its last message is the reply', async () => {
+    const seen: { request?: AgentRequest } = {};
+    const s = setup({
+      moby: answering('Cut it by 12 words.', seen),
+      consent: { 'moby|/repo': 'folder' },
+    });
+    const thread = ask(s, '@Moby is the importer fine?');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(entries(s.editor, thread).at(-1)).toEqual({
+      by: 'moby-ada',
+      text: 'Cut it by 12 words.',
+    });
+    const request = seen.request!;
+    // What the tools would have shown, in the prompt: the thread, the document, the request.
+    expect(request.prompt).toContain('----- thread -----');
+    expect(request.prompt).toContain('[the request] by');
+    expect(request.prompt).toContain('> @Moby is the importer fine?');
+    expect(request.prompt).toContain('----- document -----');
+    expect(request.prompt).toContain('importer');
+    expect(
+      request.prompt.endsWith("The request, which is the person's:\n@Moby is the importer fine?"),
+    ).toBe(true);
+    // And it is told it has no tools, not how to use them.
+    expect(request.systemPrompt).toContain("You have no tools of Redlines'");
+    expect(request.systemPrompt).not.toContain('`str_replace`');
+    expect(request).toMatchObject({ thread, documentPath: '/repo/plan.md', scope: 'folder' });
+    // No relay was opened for it, and the only thing written is its reply: no tracked change.
+    expect(s.relay.counts()).toEqual({ opened: 0, closed: 0 });
+    expect(s.doc.edits).toHaveLength(1);
+    expect(s.editor.getDoc()).not.toMatch(/<!--(?:ins|del|sub) /);
+    expect(s.claude.requests).toHaveLength(0);
+  });
+
+  it('has its longer answer folded behind More, as an agent that never called reply has', async () => {
+    const long = `Shorter: "The importer ships Friday."\n\n${'More detail. '.repeat(30)}`;
+    const s = setup({ moby: answering(long), consent: { 'moby|/repo': 'folder' } });
+    const thread = ask(s, '@Moby rewrite the importer line');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    const text = entries(s.editor, thread).at(-1)?.text ?? '';
+    // The first paragraph shows in the margin, and the rest is what the card folds behind More.
+    const { shown, more } = foldComment(text);
+    expect(shown).toBe('Shorter: "The importer ships Friday."');
+    expect(more?.startsWith('More detail. More detail.')).toBe(true);
+    // Nothing is lost, up to what a reply keeps (`fitReply`): the details are cut at 2000 characters.
+    expect(more?.length).toBeLessThanOrEqual(2000);
+    expect(more?.length).toBeGreaterThan(300);
+  });
+
+  it('asks first, in words that say what is sent and where, and then goes on', async () => {
+    const seen: { request?: AgentRequest } = {};
+    const s = setup({ moby: answering('Fine.', seen), consent: {} });
+    const thread = ask(s, '@Moby is this fine?');
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toEqual({
+        kind: 'asking',
+        agent: 'moby',
+        agentName: 'Moby',
+        folder: '/repo',
+        readLimit: 'machine',
+        toolbox: false,
+      }),
+    );
+    expect(seen.request).toBeUndefined();
+    s.runs.answerConsent(thread, 'folder');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.consent).toEqual({ 'moby|/repo': 'folder' });
+    expect(entries(s.editor, thread).at(-1)?.text).toBe('Fine.');
+  });
+
+  it('fails with the agent’s own words when it can’t be reached', async () => {
+    const s = setup({
+      moby: async function* () {
+        yield await Promise.resolve<AgentEvent>({
+          type: 'error',
+          message: 'Moby stopped: Gateway connect failed.',
+        });
+      },
+      consent: { 'moby|/repo': 'folder' },
+    });
+    const thread = ask(s, '@Moby are you there?');
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toMatchObject({
+        kind: 'failed',
+        message: 'Moby stopped: Gateway connect failed.',
+      }),
+    );
+  });
+
+  it('says nothing of a folder at any scope: it is sent only the document and the thread', async () => {
+    const seen: { request?: AgentRequest } = {};
+    const s = setup({
+      moby: answering('Fine.', seen),
+      consent: { 'moby|/repo': 'folder' },
+      scope: 'everything',
+    });
+    ask(s, '@Moby look around');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(seen.request).not.toHaveProperty('homeRoots');
+    expect(seen.request?.systemPrompt).not.toContain('home folder');
   });
 });

@@ -14,6 +14,7 @@ import {
   agentSkills,
   createDetectionProcesses,
   homeAccess,
+  openClawEdits,
   openFilesAndFoldersSettings,
 } from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
@@ -113,6 +114,12 @@ const installCommandLine = <T>(command: string) =>
 const defaultAppCommand = <T>(command: string) =>
   appCommand<T>(command, 'The default app is set from the app.');
 
+/**
+ * Whether there is a Quick Look preview to turn off: only the app can say (quick_look.rs: it runs
+ * from a bundle that holds the extension, on a macOS that loads it), and a plain browser has none.
+ */
+const hasQuickLook = isTauri && (await invoke<boolean>('quick_look_available').catch(() => false));
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -133,6 +140,10 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  // The app's refusal is a string, which the row shows as it is.
+  ...(hasQuickLook
+    ? { openQuickLookSettings: () => invoke<void>('open_quick_look_settings') }
+    : {}),
   // The app shows the panel, a sheet of this window, and hands back only the folder's path.
   chooseFolder: (start) =>
     appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', { start }),
@@ -177,6 +188,19 @@ const deps: PaneDeps = {
       showGeneral: () => show('general'),
       // What macOS holds back from Redlines, asked when the person picks the home folder.
       ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
+      // The agents of an OpenClaw Gateway, added here (the Other agents row stays off), and the
+      // skill for an OpenClaw on this Mac.
+      ...(isTauri
+        ? {
+            openclaw: {
+              ...openClawEdits,
+              skill: {
+                status: () => agentSkills.status('openclaw'),
+                install: () => agentSkills.install('openclaw'),
+              },
+            },
+          }
+        : {}),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),

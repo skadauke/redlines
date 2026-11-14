@@ -32,9 +32,10 @@ export interface Settings {
   /**
    * The look of Redlines chosen last with a click on a change bar, the full markup or Simple (the
    * simple look), which a window shows wherever it picks Redlines for the person, and when the
-   * View menu shows Redlines (design: Which look, when). A document opens in Redlines' simple look
-   * when this is `'simple'`. Every window follows it for the documents it opens next and for its
-   * own switches, and none changes the view it shows for it.
+   * View menu shows Redlines (design: Which look, when). A document that records no view in its
+   * ledger, and has redlines, opens in Redlines' simple look when this is `'simple'`. Every window
+   * follows it for the documents it opens next and for its own switches, and none changes the view
+   * it shows for it.
    */
   markupView: MarkupView;
   /**
@@ -64,6 +65,9 @@ export interface Settings {
   smartPunctuation: boolean;
   /** Closing brackets and Markdown pairs as you type. */
   closePairs: boolean;
+  /** A list of matching emoji after a colon and two letters (`:te`), which a choice writes as the
+   * character itself. The shortcodes already in a file are drawn as their emoji either way. */
+  emojiSuggestions: boolean;
   /** Whether a new document starts with Track Changes on. */
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
@@ -106,6 +110,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   spellCheck: true,
   smartPunctuation: true,
   closePairs: true,
+  emojiSuggestions: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
   showWordCount: true,
@@ -135,8 +140,10 @@ export function loadSettings(): Settings {
       | 'showLineBreakMarks'
       | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
-  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
-    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
+  const typing = (
+    key:
+      'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions' | 'trackNewDocuments',
+  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   return {
     theme: themeOf(value),
     appearance: isAppearanceChoice(value['appearance'])
@@ -159,6 +166,7 @@ export function loadSettings(): Settings {
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
+    emojiSuggestions: typing('emojiSuggestions'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),

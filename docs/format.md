@@ -935,7 +935,16 @@ at the outer edge of a whole inline construct. A marker never goes:
 
 1. inside a code span, autolink, bare URL, `www.` or email link, entity, backslash escape,
    footnote reference, emoji shortcode, math, inline HTML tag, task checkbox, list marker or
-   heading `#` sequence;
+   heading `#` sequence. An emoji is one character, which no marker parts, though it may be several
+   code points (a flag, a keycap, a skin tone, a family and any other ZWJ sequence, a heart with
+   its variation selector) and is two UTF-16 units outside the first plane: a position inside one
+   is on the whole of it, as inside an entity, so that a change that starts inside one takes all of
+   it as a substitution (`<!--sub k3x9 👨‍👩‍👧-->👨<!--/k3x9-->`). A change that starts or ends between
+   the two units of one character, or inserts half of one, is refused, in words that say so: it
+   would leave half a character in the file, which no tool reads back (the editor never makes one;
+   a program that counts in code units can). A shortcode is `:name:` of gemoji's kind: lowercase
+   letters, digits, `_` and `-` with a letter among them, `+1`, `-1`, `100` and `1234`, and the
+   six names of one letter (`:x:`), whichever of them GitHub knows;
 2. inside a link destination, title or reference label, between `]` and `(`, or inside the text of
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
@@ -1010,7 +1019,17 @@ at the outer edge of a whole inline construct. A marker never goes:
    (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
    attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
+   or a digit and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`. GitHub shows a
+   shortcode as its emoji at the start of a text or after a space, and as written with a letter or
+   a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
+   where it shows as the emoji. A change whose end would stand there, as when text is typed or a
+   word is replaced in front of a shortcode, takes the shortcode into the change, as a substitution
+   of it (`Camp <!--sub k3x9 :tent:-->x:tent:<!--/k3x9--> here`), which reads alike in every order
+   of decisions; a change whose start or edge would stand there, such as deleting the letter or
+   formatting the shortcode alone, is refused, in words that say so. The letter after a shortcode,
+   where GitHub shows the emoji too, is no place of this rule, and nor is punctuation before one
+   (not built, #388). The rule is held where a marker is placed: text that an author types or
+   edits inside their own pending insertion keeps the markers it has.
 
 A change that would put a marker in one of these places is widened instead, so that the newest and
 the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
@@ -2565,7 +2584,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
-| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
+| `view`        | `clean`, `redlines` or `simple`: the view the file opens in, as last saved (§5.6)                  |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2666,12 +2685,13 @@ same values.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
-- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
-  it was last saved. Redlines opens the file in it, in place of the markup view that the person
-  has remembered, which opens the files that have none.
-  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
-    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
-    markup views, is written as `redlines`.
+- **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
+  it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
+  text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
+  Redlines opens the file in it, in place of the markup view that the person has remembered, which
+  opens the files that record none.
+  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
+    source, and a save made in Raw leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
@@ -2680,8 +2700,9 @@ same values.
     whatever tool or version wrote it.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
-    file with no changes or comments, Clean and Redlines look the same anyway.
-  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+    file with no changes or comments, Clean, Redlines and Simple look the same anyway, except that
+    only the full markup draws ordinary HTML comments (design §5.3).
+  - A value other than these three is dropped with a warning, as an unknown `tracking` is.
   - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
     of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
     `w:view` is the page layout (Print, Web, Draft), not how markup is shown.
@@ -3053,6 +3074,10 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
   strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
   would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
+- Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
+  Quarto or VS Code, so Redlines never writes one: choosing an emoji after a colon writes the
+  character. A shortcode that a file already has is kept as written, and is one character for a
+  change (§3.1, rules 1 and 9).
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and

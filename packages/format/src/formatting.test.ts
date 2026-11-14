@@ -1947,6 +1947,12 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       '</sub>',
       '<sup>',
       '\\<sub>',
+      ':tent:',
+      'a:smile:',
+      ':+1:',
+      '👨‍👩‍👧',
+      '🇩🇪',
+      '👍🏽',
     ];
     const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
     // Blocks whose lines read as they do only with the rest of the block: nested items indented
