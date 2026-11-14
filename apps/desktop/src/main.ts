@@ -19,6 +19,7 @@ import {
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
 import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
@@ -144,7 +145,18 @@ let menuState: MenuState | null = null;
 let draftsPending = false;
 
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
-const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+const windows = isTauri
+  ? await connectWindow(tauriWindowLink(), askAboutThisWindow, {
+      // A window opened for text can't be asked about it in its first moments, and its text would go
+      // with a quit or a close: the app holds both, and the person tries again.
+      held: (what) =>
+        notice.flash(
+          what === 'quit'
+            ? 'A window is still opening. Try again in a moment.'
+            : 'This window is still opening. Try closing it again in a moment.',
+        ),
+    })
+  : null;
 
 /**
  * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
@@ -320,6 +332,9 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor);
+// Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
+// matching emoji, as Preferences allow (asked each time).
+createEmoji(editor, { enabled: () => settings.emojiSuggestions });
 
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
@@ -381,7 +396,16 @@ const palette = createPalette(editor, {
   container: main,
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
-  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
+  // and the clipboard's text otherwise.
+  clipboard: pageClipboard(
+    editor,
+    () => host.readClipboardText(),
+    // A tab has none, and reads the clipboard in the click that asked, as it did.
+    'pasteInDocument' in host
+      ? () => host.pasteInDocument?.() ?? Promise.resolve(false)
+      : undefined,
+  ),
   ...(isTauri
     ? {
         spelling: systemSpelling({
@@ -969,6 +993,13 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // A window opened for text is held in its first moments: its page can't be asked about the
+    // text yet, and Tauri destroys the window when this handler lets it close, whatever the app
+    // prevented, so this is what holds it (the app tells the person: `close-held`).
+    if (await windows?.starting().catch(() => false)) {
+      event.preventDefault();
+      return;
+    }
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();

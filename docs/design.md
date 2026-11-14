@@ -188,8 +188,10 @@ The window, on the desktop:
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
-  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
-  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
+  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
+  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
+  source code. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
   for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
@@ -205,7 +207,10 @@ The window, on the desktop:
   image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
-  to save them. Cancel stops there and keeps every window open. Closing the last window quits.
+  to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
+  window opened for text (Ask's Open in New Window) can't be asked in its first moment, before its
+  page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
+  notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
   Print. Printing holds the whole document in light ink and prints the view as it shows, without
@@ -267,8 +272,11 @@ The window, on the desktop:
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
   available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste reads the clipboard through the app and goes in the way ⇧⌘V does, so with Track
-  Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
+  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
+  and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
+  nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
+  when there is none. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left
@@ -344,6 +352,18 @@ Redlines covers everything in the Markdown Guide's
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
+- **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
+  Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
+  list) start with them under the caret; Return or Tab writes the character, ↑ and ↓ move and Esc
+  puts the list away. It stays out of the way of `10:30` and `Note:` (it opens only for a colon that
+  has no letter, digit or colon before it, and two characters of a name after it, one of them a
+  letter), of code, front matter and Raw, and Redlines ›
+  Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
+  not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
+  emoji in every view but Raw, as an entity is drawn as its character, and shows as written while
+  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  it. An emoji and a shortcode are one character for a change: no marker parts either
+  ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
 - **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
   lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
@@ -1091,7 +1111,7 @@ the same identity and the sandbox entitlement that an app extension must have
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu),
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu), `emoji`,
 `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
@@ -1115,6 +1135,7 @@ written.
 | `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
+| `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -1463,8 +1484,13 @@ Agent edits are animated, like a streaming chat answer.
     first question is the person's comment, its answer the agent's reply in the agent's name, and
     each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
     reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
-    goes once the window is open: if it can't be, a notice says so and the bubble stays. Copy puts
-    the answer's text on the clipboard. Nothing is kept unless asked.
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. The text
+    is unsaved there as in any new document, and in the window's first moment, before its page has
+    said what it holds and can be asked about it, a quit, a restart or a logout, and the window's
+    own close, are refused, as a Cancel would be: the app says the window is still opening, and the
+    person tries again. The hold lasts ten seconds at most, so that a page that never loads can't
+    keep the app from quitting. Copy puts the answer's text on the clipboard. Nothing is kept
+    unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and

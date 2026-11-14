@@ -151,7 +151,10 @@ an `hl` into a tracked highlight.
   - on a link-reference definition line;
   - between definition-list items;
   - right after `[^n]: `; before or inside `[!NOTE]`; before a task checkbox;
-  - between a letter and an emoji shortcode;
+  - between a letter and an emoji shortcode (GitHub's own renderer, asked through its `/markdown`
+    endpoint: `:tent:` alone or after a space is ⛺, `a:tent:` and `(:tent:` stay text, and a comment
+    between the `a` and the `:tent:`, as a marker is, makes it ⛺; what follows it, as in
+    `:tent:abc`, changes nothing);
   - around a backslash line break;
   - inside alt text.
 
