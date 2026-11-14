@@ -824,14 +824,16 @@ function onlyCharOfFirstLine(
   forward: boolean,
 ): KeyEdit | null {
   if (block.kind !== 'paragraph') return null;
+  const start = block.text.from;
   const { doc } = state;
   const first = doc.lineAt(block.lines.from);
-  if (first.number >= doc.lineAt(block.lines.to).number) return null;
-  const start = block.text.from;
+  // Where the caret is on the line, and how long the line is, decide before anything is read: a key
+  // inside the text costs nothing here.
+  if (forward ? head !== start : head !== first.to) return null;
+  if (first.to - start > 32 || first.number >= doc.lineAt(block.lines.to).number) return null;
   const line = state.sliceDoc(start, first.to);
   if (line.includes('<!--')) return null;
-  const char = /^\P{M}\p{M}*$/u.exec(line)?.[0];
-  if (!char || (forward ? head !== start : head !== first.to)) return null;
+  if (!/^\P{M}\p{M}*$/u.test(line)) return null;
   // The next line's text, after its quote markers and indentation.
   const next = doc.line(first.number + 1);
   const to = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
