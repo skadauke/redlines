@@ -2,7 +2,7 @@
 // The walks' findings (`walk.test.ts`, `REDLINES_FUZZ=200`), each as the smallest script that
 // shows it. The invariants of the suite are held after every script.
 import { describe } from 'vitest';
-import { scriptRows, type Step } from './script.ts';
+import { type Script, scriptRows, type Step } from './script.ts';
 
 describe('walk seed 29: an agent’s edit at the very start while the empty paragraph is open', () => {
   scriptRows([
@@ -130,6 +130,44 @@ describe('walk seed 23 (lists side by side): Return at the start of a nested fir
   ]);
 });
 
+describe('walk-248 seed 1027: Return on the empty line Shift-Return opened, in a file with a ledger', () => {
+  // Return on the empty line takes the Shift-Return back (a step of its own) and opens an empty
+  // paragraph, and the history joins the Return's step to that one. With Track Changes on, the
+  // tracked layer writes the file's ledger again at each of these (here a short one: no note, no
+  // people), so the Return replaces it, and its inverse puts it back. Leaving the paragraph takes
+  // the Return back outside the history, and the joined step must stay exactly what the take-back
+  // of the Shift-Return left: mapped through the Return's inverse, which had put the ledger back,
+  // its inverse inserted the new ledger beside the old one, not over it, and Undo ended in a file
+  // with two. The heading is what lets the harness leave the paragraph (its caret goes to the
+  // file's start, which the block the Return was pressed in doesn't reach).
+  const doc = '## café⏎⏎beta ship<del a>⏎x delta‸';
+  scriptRows([
+    {
+      name: 'Shift-Return, then Return, Track Changes on (the seed)',
+      doc,
+      keys: ['Shift-Enter', 'Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'the same, Track Changes off',
+      doc,
+      keys: ['Shift-Enter', 'Enter'],
+      tc: false,
+      expect: {},
+    },
+    {
+      // Up out of the block the Return was pressed in takes the Return back, as leaving does; ⌘Z
+      // then gives back the Shift-Return, with one ledger, and ⌘Z again the file as it was.
+      name: 'left with ↑, then ⌘Z twice',
+      doc,
+      keys: ['Shift-Enter', 'Enter', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'Mod-z', 'Mod-z'],
+      tc: true,
+      expect: { file: '## café⏎⏎beta ship<del a>⏎x delta' },
+    },
+  ]);
+});
+
 const FM = '---⏎title: Notes⏎---⏎';
 const HEAD = '⏎⏎<!-- redlines⏎version: 1⏎';
 const mark = (by: string) => `marks:⏎  k6hg: {by: ${by}, at: 2026-11-01T10:00Z}⏎-->⏎`;
@@ -163,4 +201,96 @@ describe('walk seed 7 (#257): Return over a selection, with a closer between it 
       expect: { file: `${FM}x <!--hl k6hg-->abc<!--/k6hg-->` },
     },
   ]);
+});
+
+describe('walk seed 1326 (#292): Return in front of a pending deletion that starts an item’s text, tracked', () => {
+  // Delete at the start of an item's text writes the deletion of its first character as the marker
+  // alone after the item's marker, the rest of the text on the next line (format §3.3), which the
+  // block reading takes for an HTML block that holds only a marker. Return there opened an empty
+  // paragraph inside the item, a blank line in front of the marker, which the file reads as a
+  // paragraph of the item and the newest view as text after the list: the newest view read
+  // `<li></li>` and a paragraph outside, the file `<li><p>…</p></li>`. It is Return at the start of
+  // the item's text: an empty item above, the item keeping its pending deletion.
+  scriptRows([
+    {
+      name: 'the walk: Delete, ←, Return at the start of a numbered item (seed 1326)',
+      doc: '1) ship⏎2) ‸alpha delta plan',
+      keys: ['Delete', 'ArrowLeft', 'Enter'],
+      tc: true,
+      expect: { file: '1) ship⏎2) <split>⏎3) <del a>⏎   lpha delta plan' },
+    },
+    {
+      name: 'a bullet item',
+      doc: '- ship⏎- ‸alpha delta plan',
+      keys: ['Delete', 'ArrowLeft', 'Enter'],
+      tc: true,
+      expect: { file: '- ship⏎- <split>⏎- <del a>⏎  lpha delta plan' },
+    },
+    {
+      name: 'the item is the first of its list, under text',
+      doc: 'Text.⏎⏎- ‸alpha delta plan⏎- beta',
+      keys: ['Delete', 'ArrowLeft', 'Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'a nested item',
+      doc: '- ship⏎  - ‸alpha delta plan',
+      keys: ['Delete', 'ArrowLeft', 'Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'another person’s deletion starts the text',
+      doc: '- ship⏎- ‸<del a>lpha delta plan',
+      keys: ['Enter'],
+      tc: true,
+      others: 'bo',
+      expect: {},
+    },
+  ]);
+});
+
+describe('walk seed 1141 (#292): Delete over the only character of a paragraph’s first line', () => {
+  // The paragraph the Return made starts with `a`, a line of its own, and Delete took the letter and
+  // left an empty first line: two blank lines in a row in the file, a stray blank line. The line goes
+  // with its break, as the format's own deletion of a whole line does (`<del a⏎>`).
+  const rows = (tc: boolean): Script[] => [
+    {
+      name: `the walk: ←, Return in the word, Delete (seed 1141), Track Changes ${tc ? 'on' : 'off'}`,
+      doc: 'note ship⏎===⏎⏎ship ship delta‸⏎ship gamma',
+      keys: ['ArrowLeft', 'Enter', 'Delete'],
+      tc,
+      expect: tc ? {} : { file: 'note ship⏎===⏎⏎ship ship delt⏎⏎ship gamma' },
+    },
+    {
+      name: `Backspace after the letter, Track Changes ${tc ? 'on' : 'off'}`,
+      doc: 'one⏎⏎a‸⏎two',
+      keys: ['Backspace'],
+      tc,
+      expect: tc ? { caret: 'one⏎⏎<del a⏎>⏎⏎‸two' } : { file: 'one⏎⏎two', caret: 'one⏎⏎‸two' },
+    },
+    {
+      name: `in an item, and in a quote, Track Changes ${tc ? 'on' : 'off'}`,
+      doc: '- ‸a⏎  two⏎⏎> a⏎> three',
+      keys: ['Delete'],
+      tc,
+      expect: tc ? {} : { file: '- two⏎⏎> a⏎> three' },
+    },
+    {
+      name: `a letter that isn’t alone on its line stays the plain edit, Track Changes ${tc ? 'on' : 'off'}`,
+      doc: 'one⏎⏎‸ab⏎two',
+      keys: ['Delete'],
+      tc,
+      expect: tc ? {} : { file: 'one⏎⏎b⏎two' },
+    },
+    {
+      name: `⌘Z gives the line back, Track Changes ${tc ? 'on' : 'off'}`,
+      doc: 'one⏎⏎‸a⏎two',
+      keys: ['Delete', 'Mod-z'],
+      tc,
+      expect: { file: 'one⏎⏎a⏎two', caret: 'one⏎⏎‸a⏎two' },
+    },
+  ];
+  scriptRows([...rows(false), ...rows(true)]);
 });

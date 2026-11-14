@@ -68,7 +68,8 @@ const outsideField = StateField.define<boolean>({
   update(outside, tr) {
     if (tr.effects.some((effect) => effect.is(startedOver))) return false;
     // Taking back the Returns that opened an empty paragraph, as the caret leaves it, goes in
-    // outside the history, which maps their steps to nothing: what is left fits the text exactly.
+    // outside the history, which drops their steps (a Return joined to the step before it is
+    // composed out of it, exactly): what is left fits the text exactly.
     if (tr.annotation(takeBackAnnotation)) return outside;
     return outside || (tr.docChanged && tr.annotation(Transaction.addToHistory) === false);
   },

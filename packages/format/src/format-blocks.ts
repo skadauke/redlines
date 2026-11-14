@@ -86,7 +86,9 @@ const OWN_FIRST = 'Accept or reject your other change to this block first.';
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
-const NUMBERED_CHILD =
+/** Why an item can't be outdented: the numbered item after it would become text of its own. The
+ * editor's Backspace says it in the same words (it reads the refusal, not its text). */
+export const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
 const QUOTE_TIGHT =
   "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";

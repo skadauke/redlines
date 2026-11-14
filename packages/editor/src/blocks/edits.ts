@@ -15,7 +15,14 @@ import { trackingField } from '../tracked/typing.ts';
 import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
-import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
+import {
+  type Block,
+  blockAt,
+  holdsMarkersOnly,
+  isGapLine,
+  neighbours,
+  openConstructs,
+} from './structure.ts';
 
 /** A key's edit: plain changes, where the caret goes, and what it is, for the history. */
 export interface KeyEdit {
@@ -927,6 +934,22 @@ export function planReturn(state: EditorState): KeyEdit | null {
   if (inOpen) return inOpen;
   const block = blockAt(state, head);
   if (!block) return null;
+  // An item whose text starts with the marker of a pending deletion, alone after the item's marker
+  // with the rest of the text on the next line (format §3.3), which the parse reads as an HTML
+  // block: Return in front of it is Return at the start of the item's text, the empty item above
+  // and the pending deletion staying with the text, not an empty paragraph above an HTML block
+  // inside the item (#292, walk seed 1326).
+  if (block.kind === 'html' && block.containers.at(-1)?.kind === 'item') {
+    const item = itemsAround(state, block)[0];
+    if (
+      item &&
+      item.line.number === state.doc.lineAt(block.lines.from).number &&
+      holdsMarkersOnly(state, block) &&
+      head <= textStart(state, block)
+    ) {
+      return returnInItem(state, block, head);
+    }
+  }
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
     // The very start of front matter: nothing goes before it.
     if (block.kind === 'front-matter' && head === block.text.from) return nothing(state);
