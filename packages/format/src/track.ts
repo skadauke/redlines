@@ -5187,12 +5187,16 @@ function editsOnce(
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
-  // plain one first, and make the edit after it.
+  // plain one first, and make the edit after it. A row has one leading pipe: where `leadingPipeAt`
+  // writes it (at the start of the text, after the row's indent), the one that an emptied first cell
+  // needs (`outerPipeWrites`, at the start of the line) is the same pipe, and an indented row would
+  // be given a second, two cells where its delimiter row has one.
   const pipes: PipeWrite[] = edits.flatMap((edit) => {
     const at = leadingPipeAt(text, edit, plan.parsed);
+    const outer = outerPipeWrites(text, edit, plan.parsed);
     return [
       ...(at === null ? [] : [{ at, insert: '| ', leading: true }]),
-      ...outerPipeWrites(text, edit, plan.parsed),
+      ...(at === null ? outer : outer.filter((write) => !write.leading)),
     ];
   });
   const unique = pipes.filter(

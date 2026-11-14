@@ -2923,6 +2923,91 @@ describe('a point alignment change beside other marks and edits', () => {
       }
     });
 
+    it('writes one pipe, not two, when a deletion empties the first cell of an indented header that has no leading pipe', () => {
+      // `  11<mark> |`: a table of one column whose header is indented by one to three spaces and ends in a pipe alone, and
+      // the two cells of `  a | b |`. A marker can't start a row that has no leading pipe, so a tracked deletion of all the
+      // text of the first cell writes a plain `| ` where the text starts, after the indent (`leadingPipeAt`), and the emptied
+      // cell needs the pipe at the start of the row (`outerPipeWrites`, where the line starts): the two were both written, `|
+      // | <del>…`, two cells over a delimiter row of one, and no table. A row has one leading pipe: the one that stands where
+      // the marker goes, and with Track Changes off the one at the start of the line, which a plain deletion writes alone.
+      // The deletion is Bo's, the mark Ada's, in a file with LF and with CRLF.
+      const pipesOf = (line: string) => line.replace(/<!--[^>]*-->/g, '').match(/\|/g)?.length ?? 0;
+      const first = (text: string) => bodyOf(text).split(/\r?\n/)[0] ?? '';
+      const shapes: { name: string; lines: string[]; pipes: number; widths: number[] }[] = [];
+      for (const indent of [1, 2, 3]) {
+        const pad = ' '.repeat(indent);
+        shapes.push(
+          {
+            name: `one column, the header indented by ${indent}`,
+            lines: [`${pad}11 |`, '--: |', 'z |', 'z |'],
+            pipes: 2,
+            widths: [1, 1, 1],
+          },
+          {
+            name: `one column, every line indented by ${indent}`,
+            lines: [`${pad}11 |`, `${pad}--: |`, `${pad}z |`, `${pad}z |`],
+            pipes: 2,
+            widths: [1, 1, 1],
+          },
+          {
+            name: `two columns, the header indented by ${indent}`,
+            lines: [`${pad}a | b |`, '--- | --- |', 'c | d |'],
+            pipes: 3,
+            widths: [2, 2],
+          },
+        );
+      }
+      let tracked = 0;
+      for (const { name, lines, pipes, widths } of shapes) {
+        for (const crlf of [false, true]) {
+          // The mark ends the header's last cell, in the one column and in the two.
+          const body = file(lines.join('\n'));
+          const base = crlf ? body.replace(/\n/g, '\r\n') : body;
+          const text = align(base, [0], 'left', ada, ['k3x9']).after;
+          const table = readTables(text, parse(text))[0];
+          const cell = table?.rows[0]?.cells[0];
+          if (!cell) throw new Error(`${name}: no cell`);
+          for (const isTracked of [false, true]) {
+            const label = `${name}, ${crlf ? 'CRLF' : 'LF'}, ${isTracked ? 'tracked' : 'plain'}`;
+            const edit = { from: cell.textFrom, to: cell.textTo, insert: '' };
+            const after = applyChanges(
+              text,
+              isTracked
+                ? trackedEdit(text, edit, context(bo, ['c2dd', 'f3gg']))
+                : untrackedEdit(text, edit),
+            );
+            expect(pipesOf(first(after)), `${label}: ${JSON.stringify(first(after))}`).toBe(pipes);
+            expect(tableLeaves(after), label).toHaveLength(1);
+            expectDecided(label, after, widths);
+            if (isTracked) tracked++;
+          }
+        }
+      }
+      expect(tracked).toBe(shapes.length * 2);
+      // The same two cells with no mark in the file: older than the mark, and the same fix.
+      for (const crlf of [false, true]) {
+        for (const isTracked of [false, true]) {
+          const body = file(['  a | b |', '--- | --- |', 'c | d |'].join('\n'));
+          const text = crlf ? body.replace(/\n/g, '\r\n') : body;
+          const cell = readTables(text, parse(text))[0]?.rows[0]?.cells[0];
+          if (!cell) throw new Error('no cell');
+          const edit = { from: cell.textFrom, to: cell.textTo, insert: '' };
+          const label = `no mark, ${crlf ? 'CRLF' : 'LF'}, ${isTracked ? 'tracked' : 'plain'}`;
+          const after = applyChanges(
+            text,
+            isTracked
+              ? trackedEdit(text, edit, context(bo, ['c2dd', 'f3gg']))
+              : untrackedEdit(text, edit),
+          );
+          expect(pipesOf(first(after)), `${label}: ${JSON.stringify(first(after))}`).toBe(3);
+          expect(tableLeaves(after), label).toHaveLength(1);
+          expectEveryOrderAlike(label, after, exactly);
+          expectEveryOrderRead(label, after);
+          expectNoDecisionRefused(label, after);
+        }
+      }
+    });
+
     it('is in front of a comment over the text of the cell, whose closer stands before it', () => {
       for (const [who, text] of FILES) {
         const commented = applyChanges(
