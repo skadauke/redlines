@@ -33,6 +33,10 @@ interface Options {
   scope?: 'folder' | 'document';
   consent?: Record<string, AgentScope | 'no'>;
   noAgents?: boolean;
+  /** An agent with no toolbox is found too, as an OpenClaw agent the person added. */
+  moby?: boolean;
+  /** With `moby`, the agents with a toolbox aren't there. */
+  onlyMoby?: boolean;
   defaultAgent?: string;
   doc?: string;
   /** The document's generation, which a test bumps when another document takes its place. */
@@ -53,7 +57,19 @@ function setup(options: Options = {}) {
     name: 'Codex',
     script: options.codex ?? answers('Codex says.'),
   });
-  const agents = createMacAgents(options.noAgents ? [] : [claude, codex], relay);
+  const moby = fakeProvider({
+    relay,
+    id: 'moby',
+    name: 'Moby',
+    readLimit: 'machine',
+    toolbox: false,
+    script: async function* () {
+      await Promise.resolve();
+      yield { type: 'done', finalText: 'Moby says.' } as const;
+    },
+  });
+  const withToolbox = options.noAgents || options.onlyMoby ? [] : [claude, codex];
+  const agents = createMacAgents(options.moby ? [...withToolbox, moby] : withToolbox, relay);
   const doc = { text: options.doc ?? PLAN, reads: 0 };
   const generation = options.generation ?? { value: 0 };
   const consent: Record<string, AgentScope | 'no'> = { ...options.consent };
@@ -89,7 +105,7 @@ function setup(options: Options = {}) {
   );
   const states: AskState[] = [];
   session.subscribe((state) => states.push(state));
-  return { session, claude, codex, doc, consent, states, asked };
+  return { session, claude, codex, moby, doc, consent, states, asked };
 }
 
 const done = (session: AskSession) =>
@@ -101,6 +117,41 @@ const CLAUDE = { id: 'claude', name: 'Claude' };
 const CODEX = { id: 'codex', name: 'Codex' };
 
 describe('an Ask', () => {
+  it('never picks an agent with no toolbox, which has no view to read the selection with', async () => {
+    // Moby is found and signed in, and so is Claude; the question names neither.
+    const { session, claude, moby } = setup({ moby: true });
+    session.ask('What does this mean?');
+    await done(session);
+    expect(session.state.turns[0]?.agent).toEqual(CLAUDE);
+    expect(moby.requests).toHaveLength(0);
+    expect(claude.requests).toHaveLength(1);
+  });
+
+  it('says so, and asks no one, when the question names an agent with no toolbox', async () => {
+    const { session, claude, codex, moby } = setup({ moby: true });
+    session.ask('@moby what does this mean?');
+    await done(session);
+    expect(session.state.line).toMatchObject({
+      kind: 'failed',
+      agent: 'moby',
+      agentName: 'Moby',
+      message: 'Moby answers in a comment’s thread, not in Ask: write the question as a comment.',
+    });
+    expect(session.state.turns).toEqual([]);
+    for (const provider of [claude, codex, moby]) expect(provider.requests).toHaveLength(0);
+  });
+
+  it('has no agent to ask when the only one found has no toolbox', async () => {
+    const { session, moby } = setup({ moby: true, onlyMoby: true });
+    session.ask('What does this mean?');
+    await done(session);
+    expect(session.state.line).toMatchObject({
+      kind: 'failed',
+      message: 'No agent is set up. Install Claude Code or Codex, and sign in, to ask.',
+    });
+    expect(moby.requests).toHaveLength(0);
+  });
+
   it('asks the default agent, and holds the answer from its last message', async () => {
     const { session, claude } = setup();
     session.ask('What does this mean?');

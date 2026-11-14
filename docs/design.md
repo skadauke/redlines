@@ -1477,7 +1477,8 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 | ------ | ----------- | ------------- | ----- |
 | **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
 | **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
-| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written; Preferences doesn't offer adding one yet |
+| **Other agents,** such as GitHub Copilot and Gemini | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written; Preferences doesn't offer adding one yet |
+| **OpenClaw** agents, such as Moby | The same provider, for `openclaw acp`, which forwards each prompt to an OpenClaw Gateway, on this Mac or elsewhere; no toolbox, it answers in text (below) | The Gateway's: a token in a file Redlines never reads | Written; Preferences › Agents › OpenClaw |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
@@ -1533,6 +1534,67 @@ in a repository of dotfiles is one), and a newer copy are left as they are, and 
 The Claude Code skill is also a plugin, and this repository a marketplace for it
 (`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
+
+**OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
+that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
+takes its name (what is written after an @), the Gateway's address and the path of the file that
+holds its token, and the app asks the person to allow `openclaw acp --url <address> --token-file
+<file>`, with `--session agent:<id>:main` after them when they name the agent in OpenClaw (an agent
+that isn't the Gateway's default needs it). It is an Agent Client Protocol agent, with these
+differences:
+
+- **It has no toolbox.** OpenClaw's bridge rejects an MCP server in `session/new` and never calls
+  the client's files or terminal, and a Gateway elsewhere couldn't reach the toolbox, a program on
+  this Mac, anyway. So the prompt carries what the tools would have shown: the thread as
+  `read_thread` shows it and the document as `view` does, each marked as text that others wrote
+  and never instructions (a document over 120,000 characters is cut, and says so), and the
+  agent's last message is the reply, as for an agent that never calls `reply`: the first paragraph
+  shows, and the rest folds behind More. It can't change the document; when asked for a change, it
+  gives the wording in its reply. The first run in a folder asks "Send this document and this
+  thread to Moby?", with the folder it keeps the answer for, and says that where it runs and what
+  else it reads is up to its own settings; the answer is kept for the folder, as for any agent, and
+  Remove in Preferences takes it with the agent.
+- **Slash directives in what others wrote don't reach the Gateway.** The Gateway reads `/exec`,
+  `/elevated`, `/model`, `/think`, `/queue` and the rest from the body of a message, wherever a `/`
+  follows whitespace, and acts on them for whoever sent it. The prompt puts the thread, the
+  document and the quoted text between that agent and this app in the same message as the
+  request, so a `/` that starts a word in them is written `\/` (`withoutDirectives`, in
+  `packages/agent-tools`), which the Gateway doesn't read as one. The person's own words are sent
+  as they wrote them.
+- **One session for each thread.** The key is `redlines-` and sixteen hex digits of a hash of the
+  document's path and the thread's id, after `agent:<id>:` when the person named the agent, so that
+  the agent keeps the thread and nothing else's, and a Gateway elsewhere is never given the path.
+  A prompt to a session ends the run in it, so two threads must not share one. It is the key only:
+  the bridge reads `_meta.sessionLabel` as the name of a session that is there already, and looks it
+  up before the key, so a label fails the first run of every thread. The prompt asks the bridge not
+  to put this Mac's folder at its head (`_meta.prefixCwd`). The host holds the session's `_meta` to
+  exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
+  to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
+  than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
+  line the run fails with: name the agent then.
+- **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
+  that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
+  provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
+- **Redlines never holds the token.** It passes the file's path to `openclaw`, which reads it. The
+  command is held to exactly that shape: no `--token`, `--password` or other flag; an address with
+  a user name, a password, a query, a fragment or a port that isn't a number, where a token could
+  ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
+  shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
+  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
+  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
+  goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
+  people on the Mac can read.
+- **Commands the Gateway asks to run** (its exec approvals, relayed as `session/request_permission`)
+  are refused, as for any agent of this kind; the Gateway's default mode asks nothing.
+- **Skill.** The section offers Install Skill for OpenClaw when an agent's Gateway is on this Mac
+  (`ws://127.0.0.1`, `localhost`, `[::1]`): one elsewhere reads that machine's folders, where the
+  skill goes. An address on this Mac may also be the end of a tunnel to a Gateway elsewhere, which
+  can't be told, so the section says what the skill is for, beside the button.
+
+Not done: tracked changes by an OpenClaw agent through this connection. They need a way for the
+bridge to call tools that live in the client (an upstream change to OpenClaw), or the agent working
+on the file with the `redlines` command on the same Mac, which the skill (above) teaches it.
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:

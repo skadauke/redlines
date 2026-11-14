@@ -501,6 +501,16 @@ pub mod tests {
         pub folder: String,
         pub session_id: String,
         pub messages: std::collections::BTreeMap<String, serde_json::Value>,
+        /// What OpenClaw's bridge is sent, with an agent named and with none.
+        pub bridge: BridgeMessages,
+        pub bridge_default: BridgeMessages,
+    }
+
+    #[derive(Deserialize)]
+    pub struct BridgeMessages {
+        #[serde(default)]
+        pub agent: Option<String>,
+        pub messages: std::collections::BTreeMap<String, serde_json::Value>,
     }
 
     pub fn provider_lines() -> ProviderLines {

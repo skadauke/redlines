@@ -29,6 +29,8 @@ export interface AcpAgent {
   name: string;
   program: string;
   args: string[];
+  /** Set for OpenClaw's bridge, which has no toolbox: the OpenClaw agent, if one was named. */
+  bridge?: { agent?: string };
 }
 
 /** A program and its arguments as the person allowed them: a word with a space in it is quoted. */

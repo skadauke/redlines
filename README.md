@@ -195,7 +195,8 @@ cp integrations/openclaw/skills/redlines/SKILL.md ~/.openclaw/skills/redlines/SK
 
 An agent with a name of its own writes in it: an OpenClaw agent called Moby writes as `moby-ada`,
 where Claude writes as `claude-ada`. The [integrations README](integrations/README.md) has the
-rest: the plugin, changing the skill and publishing it on ClawHub.
+rest: the plugin, changing the skill, publishing it on ClawHub, and asking an OpenClaw agent from a
+comment (Preferences › Agents › OpenClaw), which answers in a reply through its Gateway.
 
 Install the command line from the app (Redlines › Preferences › General › Command line), then:
 
