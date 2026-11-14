@@ -19,16 +19,19 @@ import { fuzzCount, seeded } from './random-docs.ts';
 import {
   alignLabel,
   alignMarkOf,
+  alignWas,
   closerRange,
   headerSlice,
   isAlignPoint,
+  keepAlignInStep,
   placeHolds,
 } from './table-align.ts';
+import type { ColItem } from './table-cols.ts';
 import { ALIGN_FIRST, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import { outerPipeWrites } from './table-rules.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
-import type { TableAlign } from './table.ts';
+import type { TableAlign, TableRead } from './table.ts';
 import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import {
@@ -50,7 +53,7 @@ import {
 } from './test-helpers.ts';
 import type { Leaf } from './test-helpers.ts';
 import type { Person, Range, TextChange } from './types.ts';
-import { expectEveryOrderRead, readAs } from './oracle.ts';
+import { expectEveryOrderRead, expectSound, readAs } from './oracle.ts';
 import { newestView, originalView, originalViewOfText, reviewView } from './views.ts';
 
 const FRUIT =
@@ -658,9 +661,11 @@ describe('aligning a column, tracked (format §3.7)', () => {
     expectNoDecisionRefused('an agent’s row', below);
   });
 
-  it('still refuses every column operation while it is pending, tracked and plain', () => {
+  // A tracked column operation would leave the old row a cell short or long in some order of decisions
+  // (rule 5, and Call 6). With Track Changes off the old row is kept in step: see the plain operations below.
+  it('still refuses every tracked column operation while it is pending, by Bo and by Ada', () => {
     const done = align(start, [1], 'center').after;
-    for (const who of [bo, null]) {
+    for (const who of [bo, ada]) {
       for (const shape of [
         { kind: 'insertCols', after: 1 },
         { kind: 'deleteCols', cols: [1] },
@@ -668,7 +673,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       ] satisfies Shape[]) {
         expect(
           said(() => edit(done, shape, who, ['c2dd', 'f3gg'])),
-          `${who?.handle} ${shape.kind}`,
+          `${who.handle} ${shape.kind}`,
         ).toBe(ALIGN_FIRST);
       }
     }
@@ -1212,6 +1217,980 @@ describe('aligning a column with Track Changes off (format §3.10)', () => {
   });
 });
 
+// With Track Changes off a column operation is allowed beside an alignment change that is pending, and keeps it in
+// step (format §3.7, rule 5; §3.10). The change's `SPEC`, the old delimiter row, gets the same columns done to it as
+// the table's own rows do (a deleted column's cell goes, a new column's cell is its delimiter cell, a moved column's
+// cell moves), and its mark ends the header's last cell wherever that is afterwards. A change whose old and new
+// alignments are then the same is gone, with its entry in the ledger. Every order of decisions reads alike, no
+// decision is refused, and each view changes as the plain edit says: the original view is the plain operation done
+// to the original, the newest view the plain operation done to the newest.
+describe('a plain column operation beside a pending alignment change (format §3.7, §3.10, #281)', () => {
+  const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+  const plain = (text: string, shape: Shape) => edit(text, shape, null).after;
+  /** The alignments that the old row of the table's pending change has, or null where it has not the table's columns. */
+  const oldRow = (text: string): TableAlign[] | null => {
+    const parsed = parse(text);
+    const table = readTables(text, parsed)[0];
+    const mark = table && alignMarkOf(parsed, table);
+    return table && mark ? alignWas(mark, table.aligns.length) : null;
+  };
+  /** Whether the table's alignment change is pending with its mark at the end of the header's last cell. */
+  const endsHeader = (text: string): boolean => {
+    const parsed = parse(text);
+    const table = readTables(text, parsed)[0];
+    const open = table ? alignMarkOf(parsed, table)?.segments[0]?.open : undefined;
+    return open !== undefined && open.from === table?.rows[0]?.cells.at(-1)?.textTo;
+  };
+  /** What a file reads as. */
+  const reads = (text: string) => JSON.stringify(blockLeaves(text));
+  /** Every operation on one column at every place of a table of `columns` columns. */
+  const everywhere = (columns: number): Shape[] => {
+    const shapes: Shape[] = [];
+    for (let after = 0; after <= columns; after++) shapes.push({ kind: 'insertCols', after });
+    if (columns > 1) {
+      for (let c = 0; c < columns; c++) shapes.push({ kind: 'deleteCols', cols: [c] });
+    }
+    for (let c = 0; c < columns; c++) {
+      for (let to = 0; to <= columns; to++) {
+        if (to !== c && to !== c + 1) shapes.push({ kind: 'moveCols', cols: [c], to });
+      }
+    }
+    return shapes;
+  };
+
+  /**
+   * `shape` done with Track Changes off to `text`, whose table has an alignment change pending: the file it makes (`made`
+   * when the caller has it), checked against the plain operation done to the two tables the file stands for. Each view of
+   * the file reads as that operation says (`exact`: byte for byte; a table whose delimiter cells are one dash wide is
+   * unpadded once the colons are in, and the new column's cells are as wide as the marked file's style says). The change
+   * is still pending, with its mark at the end of the header's last cell and its old row in step, or it is gone, with its
+   * entry in the ledger, where the old and the new alignments are then the same. Every order of decisions reads alike
+   * and as micromark reads it, and no decision is refused, with no option: nothing is excused.
+   */
+  function expectPlain(
+    label: string,
+    text: string,
+    shape: Shape,
+    exact = true,
+    made = plain(text, shape),
+  ): string {
+    const original = plain(originalView(text).text, shape);
+    const newest = plain(newestView(text).text, shape);
+    expect(problemsOf(parse(made)), label).toEqual([]);
+    for (const [name, view, shadow] of [
+      ['original', originalView(made).text, original],
+      ['newest', newestView(made).text, newest],
+    ] as const) {
+      if (exact) expect(trim(view), `${label}: ${name} view`).toBe(trim(shadow));
+      expect(reads(view), `${label}: ${name} view, as read`).toBe(reads(shadow));
+      expect(aligns(view), `${label}: ${name} view, alignments`).toEqual(aligns(shadow));
+    }
+    const was = aligns(original);
+    const now = aligns(newest);
+    const marks = parse(made).marks.filter(isAlignPoint);
+    if (JSON.stringify(was) === JSON.stringify(now)) {
+      expect(marks, `${label}: nothing is left to decide`).toEqual([]);
+      expect(parse(made).ledger.marks['k3x9'], `${label}: its entry`).toBeUndefined();
+    } else {
+      expect(
+        marks.map((mark) => mark.id),
+        `${label}: the mark`,
+      ).toEqual(['k3x9']);
+      expect(endsHeader(made), `${label}: the mark ends the header`).toBe(true);
+      expect(oldRow(made), `${label}: its old row`).toEqual(was);
+      expect(aligns(made), `${label}: the alignments`).toEqual(now);
+      expect(parse(made).ledger.marks['k3x9'], `${label}: its entry`).toEqual(
+        parse(text).ledger.marks['k3x9'],
+      );
+    }
+    expectSound(label, made);
+    expectNoDecisionRefused(label, made);
+    if (parse(made).marks.every((mark) => mark.kind !== 'cmt')) {
+      expect(trim(applyChanges(made, rejectAll(made))), `${label}: reject all`).toBe(
+        trim(originalView(made).text),
+      );
+      expect(trim(applyChanges(made, acceptAll(made))), `${label}: accept all`).toBe(
+        trim(newestView(made).text),
+      );
+    }
+    return made;
+  }
+
+  describe('the Fruit table, Count centered by Bo', () => {
+    /** What each operation makes of the old row of the change (`SPEC`: left, default, right) and of the table. */
+    const NAMED: { name: string; shape: Shape; old: TableAlign[]; now: TableAlign[] }[] = [
+      {
+        name: 'a column inserted at the start',
+        shape: { kind: 'insertCols', after: 0 },
+        old: ['', 'left', '', 'right'],
+        now: ['', 'left', 'center', 'right'],
+      },
+      {
+        name: 'a column inserted after the first',
+        shape: { kind: 'insertCols', after: 1 },
+        old: ['left', '', '', 'right'],
+        now: ['left', '', 'center', 'right'],
+      },
+      {
+        name: 'a column inserted at the end',
+        shape: { kind: 'insertCols', after: 3 },
+        old: ['left', '', 'right', ''],
+        now: ['left', 'center', 'right', ''],
+      },
+      {
+        name: 'the first column deleted',
+        shape: { kind: 'deleteCols', cols: [0] },
+        old: ['', 'right'],
+        now: ['center', 'right'],
+      },
+      {
+        name: 'the last column deleted',
+        shape: { kind: 'deleteCols', cols: [2] },
+        old: ['left', ''],
+        now: ['left', 'center'],
+      },
+      {
+        name: 'the first column moved to the end',
+        shape: { kind: 'moveCols', cols: [0], to: 3 },
+        old: ['', 'right', 'left'],
+        now: ['center', 'right', 'left'],
+      },
+      {
+        name: 'the last column moved to the start',
+        shape: { kind: 'moveCols', cols: [2], to: 0 },
+        old: ['right', 'left', ''],
+        now: ['right', 'left', 'center'],
+      },
+      {
+        name: 'the middle column moved to the end',
+        shape: { kind: 'moveCols', cols: [1], to: 3 },
+        old: ['left', 'right', ''],
+        now: ['left', 'right', 'center'],
+      },
+    ];
+
+    for (const { name, shape, old, now } of NAMED) {
+      it(`${name}: the mark ends the header, its old row has the columns done to it, and the file reads alike in every order`, () => {
+        const after = expectPlain(name, POINT, shape);
+        expect(aligns(after)).toEqual(now);
+        expect(oldRow(after)).toEqual(old);
+        expect(endsHeader(after)).toBe(true);
+        expect(parse(after).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+        // The ledger is as it was, byte for byte: the change is the same change, with its entry.
+        const ledgerOf = (text: string) => text.slice(parse(text).ledgerRange?.from ?? text.length);
+        expect(ledgerOf(after)).toBe(ledgerOf(POINT));
+        expect(expectNoDecisionRefused(name, after)).toBeGreaterThan(1);
+        // The original view is the plain operation done to the original, byte for byte.
+        const was = trim(originalView(POINT).text);
+        expect(was).toBe(FRUIT);
+        expect(trim(originalView(after).text)).toBe(trim(plain(originalView(POINT).text, shape)));
+        expect(trim(applyChanges(after, reject(after, 'k3x9')))).toBe(
+          trim(plain(originalView(POINT).text, shape)),
+        );
+        expect(trim(applyChanges(after, accept(after, 'k3x9')))).toBe(
+          trim(plain(newestView(POINT).text, shape)),
+        );
+      });
+    }
+
+    it('every operation at every place, the way the table of pairs asks them', () => {
+      let operations = 0;
+      for (const shape of everywhere(3)) {
+        expectPlain(JSON.stringify(shape), POINT, shape);
+        operations++;
+      }
+      expect(operations).toBe(13);
+    });
+
+    it('writes a new column after the first into the old row too, in the table’s padding', () => {
+      expect(trim(plain(POINT, { kind: 'insertCols', after: 1 }))).toBe(
+        [
+          `| Fruit  |     | Count | Price${markFor('| :----- | --- | ----- | ----: |')} |`,
+          '| :----- | --- | :---: | ----: |',
+          '| Apples |     | 3     | 1.20  |',
+          '| Pears  |     | 5     | 0.90  |',
+        ].join('\n'),
+      );
+    });
+
+    it('moves the mark into a new last column, after the first space of its empty cell', () => {
+      expect(trim(plain(POINT, { kind: 'insertCols', after: 3 }))).toBe(
+        [
+          `| Fruit  | Count | Price | ${markFor('| :----- | ----- | ----: | --- |')}    |`,
+          '| :----- | :---: | ----: | --- |',
+          '| Apples | 3     | 1.20  |     |',
+          '| Pears  | 5     | 0.90  |     |',
+        ].join('\n'),
+      );
+    });
+
+    it('moves the mark to the cell that is last when the last column goes, and takes its cell out of the old row', () => {
+      expect(trim(plain(POINT, { kind: 'deleteCols', cols: [2] }))).toBe(
+        [
+          `| Fruit  | Count${markFor('| :----- | ----- |')} |`,
+          '| :----- | :---: |',
+          '| Apples | 3     |',
+          '| Pears  | 5     |',
+        ].join('\n'),
+      );
+    });
+
+    it('moves the mark with the last column when it is moved away, and writes it at the end of the cell that is last', () => {
+      expect(trim(plain(POINT, { kind: 'moveCols', cols: [0], to: 3 }))).toBe(
+        [
+          `| Count | Price | Fruit${markFor('| ----- | ----: | :----- |')}  |`,
+          '| :---: | ----: | :----- |',
+          '| 3     | 1.20  | Apples |',
+          '| 5     | 0.90  | Pears  |',
+        ].join('\n'),
+      );
+    });
+
+    it('is gone with the column it was about, and nothing is left to decide', () => {
+      const after = plain(POINT, { kind: 'deleteCols', cols: [1] });
+      expect(parse(after).marks).toEqual([]);
+      expect(parse(after).ledger.marks).toEqual({});
+      expect(trim(after)).toBe(
+        '| Fruit  | Price |\n| :----- | ----: |\n| Apples | 1.20  |\n| Pears  | 0.90  |',
+      );
+      // It reads as the plain deletion of either table, which are the same table now.
+      expect(trim(after)).toBe(
+        trim(plain(originalView(POINT).text, { kind: 'deleteCols', cols: [1] })),
+      );
+      expect(trim(after)).toBe(
+        trim(plain(newestView(POINT).text, { kind: 'deleteCols', cols: [1] })),
+      );
+      expect(problemsOf(parse(after))).toEqual([]);
+      expectPlain('delete the column it was about', POINT, { kind: 'deleteCols', cols: [1] });
+    });
+
+    it('is gone with the last column when that is the one it was about, and stays pending until the last of two columns it changed goes', () => {
+      const table = file(
+        '| Fruit  | Count | Price |\n| ------ | ----- | ----- |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |',
+      );
+      // The mark stands in the cell of Price, the column it is about: that cell goes, and the mark with it.
+      const last = align(table, [2], 'right').after;
+      expect(headerLine(last)).toContain('Price<!--fmt k3x9 ');
+      const gone = plain(last, { kind: 'deleteCols', cols: [2] });
+      expect(parse(gone).marks).toEqual([]);
+      expect(parse(gone).ledger.marks).toEqual({});
+      expectPlain('the last column, the one it was about', last, { kind: 'deleteCols', cols: [2] });
+      // Two columns aligned: deleting one leaves the other pending, deleting both leaves nothing.
+      const two = align(table, [0, 1], 'center').after;
+      const rest = plain(two, { kind: 'deleteCols', cols: [0] });
+      expect(oldRow(rest)).toEqual(['', '']);
+      expect(aligns(rest)).toEqual(['center', '']);
+      expect(parse(rest).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      const none = plain(rest, { kind: 'deleteCols', cols: [0] });
+      expect(parse(none).marks).toEqual([]);
+      expectPlain('two columns, one deleted', two, { kind: 'deleteCols', cols: [0] });
+      expectPlain('two columns, one deleted, then the other', rest, {
+        kind: 'deleteCols',
+        cols: [0],
+      });
+    });
+
+    it('is undone by a plain Align back to the old alignments after the columns moved, which the old row stayed in step with', () => {
+      // The columns are moved, and then Count is made the default again: the change is undone, and the old row
+      // is written as it is by then, which is the original's order of columns.
+      const moved = plain(POINT, { kind: 'moveCols', cols: [0], to: 3 });
+      expect(aligns(moved)).toEqual(['center', 'right', 'left']);
+      const back = edit(moved, { kind: 'align', cols: [0], align: '' }, null).after;
+      expect(parse(back).marks).toEqual([]);
+      expect(aligns(back)).toEqual(['', 'right', 'left']);
+      same(
+        back,
+        file(
+          '| Count | Price | Fruit  |\n| ----- | ----: | :----- |\n| 3     | 1.20  | Apples |\n| 5     | 0.90  | Pears  |',
+        ),
+      );
+    });
+
+    it('is kept in step for what its author does to it afterwards: aligned again in place, and back to the old alignments', () => {
+      const own = align(file(FRUIT), [1], 'center').after;
+      const moved = plain(own, { kind: 'moveCols', cols: [0], to: 3 });
+      expect(aligns(moved)).toEqual(['center', 'right', 'left']);
+      // Aligned again with Track Changes on: the same change, changed in place, with the old row as moved.
+      const more = align(moved, [1], 'center', ada, ['w8nn']).after;
+      expect(parse(more).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      expect(oldRow(more)).toEqual(['', 'right', 'left']);
+      expect(aligns(more)).toEqual(['center', 'center', 'left']);
+      expect(endsHeader(more)).toBe(true);
+      expectSound('aligned again', more);
+      expectNoDecisionRefused('aligned again', more);
+      same(
+        applyChanges(more, reject(more, 'k3x9')),
+        file(
+          '| Count | Price | Fruit  |\n| ----- | ----: | :----- |\n| 3     | 1.20  | Apples |\n| 5     | 0.90  | Pears  |',
+        ),
+      );
+      // Back to the old alignments: the change is undone, and the old row, as moved, is the delimiter row.
+      const back = align(moved, [0], '', ada, ['w8nn']).after;
+      expect(parse(back).marks).toEqual([]);
+      same(
+        back,
+        file(
+          '| Count | Price | Fruit  |\n| ----- | ----: | :----- |\n| 3     | 1.20  | Apples |\n| 5     | 0.90  | Pears  |',
+        ),
+      );
+    });
+
+    it('rejects and accepts the change in the new columns, and the file is the original or the newest', () => {
+      const after = plain(POINT, { kind: 'moveCols', cols: [2], to: 0 });
+      same(
+        applyChanges(after, reject(after, 'k3x9')),
+        file(
+          '| Price | Fruit  | Count |\n| ----: | :----- | ----- |\n| 1.20  | Apples | 3     |\n| 0.90  | Pears  | 5     |',
+        ),
+      );
+      expect(trim(applyChanges(after, accept(after, 'k3x9')))).toBe(
+        '| Price | Fruit  | Count |\n| ----: | :----- | :---: |\n| 1.20  | Apples | 3     |\n| 0.90  | Pears  | 5     |',
+      );
+    });
+  });
+
+  describe('in the shapes of table that differ', () => {
+    it('a header with no trailing pipe: the mark is the line’s end, and the closing pipe a new cell needs comes after it', () => {
+      const bare = align(file('a | b\n--|--\nc | d'), [1], 'right').after;
+      expect(headerLine(bare)).toBe(`a | b${markFor('--|--')}`);
+      for (const shape of everywhere(2)) expectPlain(JSON.stringify(shape), bare, shape);
+    });
+
+    it('a table with one dash in each delimiter cell, whose delimiter row the colons made unpadded', () => {
+      const narrow = align(file('| a | b |\n| - | - |\n| c | d |'), [1], 'center').after;
+      expect(trim(narrow)).toContain('| - | :-: |');
+      for (const shape of everywhere(2)) expectPlain(JSON.stringify(shape), narrow, shape, false);
+      // Three columns, the middle one aligned.
+      const three = align(file('| a | b | c |\n| - | - | - |\n| d | e | f |'), [1], 'right').after;
+      for (const shape of everywhere(3)) expectPlain(JSON.stringify(shape), three, shape, false);
+    });
+
+    it('an old row written without pipes at its edges, or with only the first, as a merge or another tool may have it', () => {
+      for (const row of [
+        ':----- | ----- | ----:',
+        '| :----- | ----- | ----:',
+        ':----- | ----- | ----: |',
+      ]) {
+        const text = POINT.replace(SPEC, encodeValue(row));
+        expect(problemsOf(parse(text)), row).toEqual([]);
+        expect(oldRow(text), row).toEqual(['left', '', 'right']);
+        for (const shape of everywhere(3))
+          expectPlain(`${row} ${JSON.stringify(shape)}`, text, shape, false);
+      }
+    });
+
+    it('a table of one column', () => {
+      const one = align(file('| a |\n| - |\n| b |'), [0], 'center').after;
+      expect(headerLine(one)).toMatch(/^\| a<!--fmt k3x9 align=.*--> \|$/);
+      for (const shape of everywhere(1)) expectPlain(JSON.stringify(shape), one, shape, false);
+      expect(said(() => plain(one, { kind: 'deleteCols', cols: [0] }))).toBe(
+        'Delete the table instead.',
+      );
+    });
+
+    it('a table with no padding at all', () => {
+      const compact = align(file('|a|b|c|\n|-|-|-|\n|d|e|f|'), [2], 'left').after;
+      for (const shape of everywhere(3)) expectPlain(JSON.stringify(shape), compact, shape, false);
+    });
+
+    it('a CRLF file: no line break is touched', () => {
+      const text = crlf(POINT);
+      for (const shape of everywhere(3)) {
+        const after = expectPlain(JSON.stringify(shape), text, shape);
+        expect(after.replace(/\r\n/g, '')).not.toContain('\n');
+      }
+      const bare = align(crlf(file('a | b\n--|--\nc | d')), [1], 'right').after;
+      for (const shape of everywhere(2)) {
+        const after = expectPlain(JSON.stringify(shape), bare, shape);
+        expect(after.replace(/\r\n/g, '')).not.toContain('\n');
+      }
+    });
+
+    it('a header whose last cell is empty: the mark stands after the first space of its padding, and goes to the cell that is last', () => {
+      const empty = align(file('| a |  |\n| --- | --- |\n| c | d |'), [0], 'center').after;
+      expect(headerLine(empty)).toBe(`| a | ${markFor('| --- | --- |')} |`);
+      // The colons made the dashes of Count's delimiter cell fewer, which the new column's cell goes by.
+      for (const shape of everywhere(2)) expectPlain(JSON.stringify(shape), empty, shape, false);
+    });
+  });
+
+  describe('beside other changes in the table', () => {
+    it('Bo’s inserted row: its marker goes with the row when the first column goes or one is put in front', () => {
+      const rows = edit(file(FRUIT), { kind: 'insertRows', after: 1 }, bo, ['c2dd']).after;
+      const text = align(rows, [1], 'center', ada, ['k3x9']).after;
+      // In the order of the document: the mark ends the header, the row's marker is below it.
+      expect(parse(text).marks.map((mark) => mark.id)).toEqual(['k3x9', 'c2dd']);
+      for (const shape of everywhere(3)) expectPlain(JSON.stringify(shape), text, shape);
+    });
+
+    it('text Bo typed at the end of the last cell moves with its column, in front of the mark', () => {
+      const at = readTables(POINT, parse(POINT))[0]?.rows[0]?.cells.at(-1)?.textTo ?? 0;
+      const typed = applyChanges(
+        POINT,
+        trackedEdit(POINT, { from: at, to: at, insert: 'Q' }, context(bo, ['b7cd'])),
+      );
+      expect(trim(typed)).toContain('Price<!--ins b7cd-->Q<!--/b7cd--><!--fmt k3x9 ');
+      // The header with the marker of Bo's insertion in it does not line up with the rows, so a new column's cells
+      // are as narrow as the file's own style asks, which the original view, with no marker, does not have.
+      for (const shape of everywhere(3)) expectPlain(JSON.stringify(shape), typed, shape, false);
+    });
+
+    it('a comment in the last column becomes a point in front of the mark that ends the cell before', () => {
+      const plainFruit = file(FRUIT);
+      const from = plainFruit.indexOf('Price');
+      const commented = applyChanges(
+        plainFruit,
+        addComment(plainFruit, { from, to: from + 5 }, 'A note.', context(ada, ['c9qf'])).changes,
+      );
+      const text = align(commented, [1], 'center', ada, ['k3x9']).after;
+      expect(headerLine(text)).toContain('<!--cmt c9qf-->Price<!--/c9qf--><!--fmt k3x9 ');
+      const after = expectPlain(
+        'delete the last column',
+        text,
+        { kind: 'deleteCols', cols: [2] },
+        false,
+      );
+      expect(headerLine(after)).toBe(
+        `| Fruit  | Count<!--cmt c9qf-->${markFor('| :----- | ----- |')} |`,
+      );
+      for (const shape of everywhere(3)) expectPlain(JSON.stringify(shape), text, shape, false);
+    });
+
+    it('two tables, each with its own mark: an operation on one leaves the other, and its mark, as it was', () => {
+      const veg = CENTERED.replace('Fruit ', 'Veg   ').replace(
+        'Price |',
+        `Price${markFor('| :----- | ----- | ----: |', 'w8nn')} |`,
+      );
+      const both = file(`${POINT_BODY}\n\n${veg}`, { k3x9: 'bo', w8nn: 'ada' });
+      const tables = readTables(both, parse(both));
+      expect(tables).toHaveLength(2);
+      const lines = (text: string) => trim(text).split('\n');
+      for (const [which, table] of tables.entries()) {
+        for (const op of [
+          { kind: 'insertCols', after: 1 },
+          { kind: 'deleteCols', cols: [2] },
+          { kind: 'moveCols', cols: [0], to: 3 },
+        ] satisfies Shape[]) {
+          const label = `table ${which}: ${op.kind}`;
+          const after = applyChanges(
+            both,
+            untrackedTableEdit(both, { count: 1, ...op, table: table.from } as TableOp).changes,
+          );
+          expect(problemsOf(parse(after)), label).toEqual([]);
+          expect(
+            parse(after).marks.map((mark) => mark.id),
+            label,
+          ).toEqual(['k3x9', 'w8nn']);
+          // The four lines of the table that was not asked are as they were, mark and all.
+          const [from, to] = which === 0 ? [5, 9] : [0, 4];
+          expect(lines(after).slice(from, to), label).toEqual(lines(both).slice(from, to));
+          expectSound(label, after);
+          expectNoDecisionRefused(label, after);
+        }
+      }
+    });
+
+    it('does not lift the rest of rule 2: a row deleted or moved still makes it refuse, in its words', () => {
+      const deleted = edit(POINT, { kind: 'deleteRows', rows: [2] }, bo, ['c2dd']).after;
+      expect(
+        parse(deleted)
+          .marks.map((mark) => mark.id)
+          .sort(),
+      ).toEqual(['c2dd', 'k3x9']);
+      for (const shape of [
+        { kind: 'insertCols', after: 1 },
+        { kind: 'deleteCols', cols: [1] },
+        { kind: 'moveCols', cols: [0], to: 2 },
+      ] satisfies Shape[]) {
+        expect(
+          said(() => plain(deleted, shape)),
+          shape.kind,
+        ).toBe(ROWS_FIRST);
+      }
+    });
+  });
+
+  describe('refusals', () => {
+    const SHAPES = [
+      { kind: 'insertCols', after: 1 },
+      { kind: 'deleteCols', cols: [1] },
+      { kind: 'moveCols', cols: [0], to: 2 },
+    ] satisfies Shape[];
+
+    it('tracked, by Ada or by Bo, with the words that say what to do', () => {
+      for (const text of [POINT, align(file(FRUIT), [1], 'center').after]) {
+        for (const who of [ada, bo]) {
+          for (const shape of SHAPES) {
+            expect(
+              said(() => edit(text, shape, who, ['c2dd', 'f3gg'])),
+              `${who.handle} ${shape.kind}`,
+            ).toBe(ALIGN_FIRST);
+          }
+        }
+      }
+    });
+
+    it('with a column pending too, which a merge can leave: the change would be a cell short or long', () => {
+      const made = edit(file(FRUIT), { kind: 'insertCols', after: 3 }, bo, ['c2dd']).after;
+      const last = readTables(made, parse(made))[0]?.rows[0]?.cells.at(-1);
+      const at = last?.textTo ?? 0;
+      // Its old row has the four columns that the table has, as the second change will have them: only rule 2's
+      // refusal is left to keep it from being kept in step.
+      const merged = (text: string) =>
+        text
+          .slice(0, at)
+          .concat(markFor('| :----- | ----- | ----: | ----- |'), text.slice(at))
+          .replace(/marks:\n/, `marks:\n  k3x9: {by: ada, at: ${TIME}}\n`);
+      const text = merged(made);
+      expect(
+        parse(text)
+          .marks.map((mark) => mark.id)
+          .sort(),
+      ).toEqual(['c2dd', 'k3x9']);
+      expect(problemsOf(parse(text))).toEqual([]);
+      for (const shape of SHAPES) {
+        expect(
+          said(() => plain(text, shape)),
+          shape.kind,
+        ).toBe(ALIGN_FIRST);
+      }
+      // A column deleted, as well.
+      const deleted = edit(file(FRUIT), { kind: 'deleteCols', cols: [2] }, bo, ['m2bd']).after;
+      const cell = readTables(deleted, parse(deleted))[0]?.rows[0]?.cells.at(-1);
+      const to = cell?.textTo ?? 0;
+      const both = deleted
+        .slice(0, to)
+        .concat(markFor('| :----- | ----- |'), deleted.slice(to))
+        .replace(/marks:\n/, `marks:\n  k3x9: {by: ada, at: ${TIME}}\n`);
+      expect(problemsOf(parse(both))).toEqual([]);
+      for (const shape of [
+        { kind: 'insertCols', after: 1 },
+        { kind: 'deleteCols', cols: [0] },
+        { kind: 'moveCols', cols: [0], to: 2 },
+      ] satisfies Shape[]) {
+        expect(
+          said(() => plain(both, shape)),
+          shape.kind,
+        ).toBe(ALIGN_FIRST);
+      }
+    });
+
+    it('where the mark would stand after a backslash, which Markdown would read otherwise, as every edit beside it is held', () => {
+      const text = align(
+        file('| a | b\\ | c |\n| - | - | - |\n| 1 | 2 | 3 |'),
+        [0],
+        'center',
+      ).after;
+      expect(headerLine(text)).toContain('| b\\ |');
+      const WORDS =
+        "Ada Lovelace's alignment change is at the end of this cell, where this edit would make Markdown read it, or the text before it, otherwise. Decide it first.";
+      // The cell that ends in the backslash would end the header.
+      for (const shape of [
+        { kind: 'deleteCols', cols: [2] },
+        { kind: 'moveCols', cols: [2], to: 0 },
+        { kind: 'moveCols', cols: [1], to: 3 },
+      ] satisfies Shape[]) {
+        expect(
+          said(() => plain(text, shape)),
+          shape.kind,
+        ).toBe(WORDS);
+      }
+      // The others leave the mark at the end of a cell that reads as it did, and are made.
+      for (const shape of [
+        { kind: 'insertCols', after: 0 },
+        { kind: 'insertCols', after: 3 },
+        { kind: 'deleteCols', cols: [1] },
+        { kind: 'moveCols', cols: [0], to: 2 },
+      ] satisfies Shape[]) {
+        expectPlain(JSON.stringify(shape), text, shape, false);
+      }
+    });
+
+    it('where the cell the mark would end has a pending change that brings a backslash back in front of it when decided', () => {
+      // Bo deleted the backslash that ends the cell of b, tracked: rejecting the deletion puts it back, and a mark right
+      // after it would be read as text, which no order of decisions may do. The mark is at the end of c.
+      let text = file('| a | b\\ | c |\n| - | - | - |\n| 1 | 2 | 3 |');
+      const at = text.indexOf('\\ |');
+      text = applyChanges(
+        text,
+        trackedEdit(text, { from: at, to: at + 1, insert: '' }, context(bo, ['c2dd'])),
+      );
+      text = align(text, [0], 'center', ada, ['k3x9']).after;
+      expect(headerLine(text)).toContain('| b<!--del c2dd \\--> |');
+      const WORDS =
+        "Ada Lovelace's alignment change is at the end of this cell, where this edit would make Markdown read it, or the text before it, otherwise. Decide it first.";
+      // The mark would end the cell of b: the last column goes, or b is moved to the end, or c is moved away.
+      for (const shape of [
+        { kind: 'deleteCols', cols: [2] },
+        { kind: 'moveCols', cols: [2], to: 0 },
+        { kind: 'moveCols', cols: [1], to: 3 },
+      ] satisfies Shape[]) {
+        expect(
+          said(() => plain(text, shape)),
+          shape.kind,
+        ).toBe(WORDS);
+      }
+      // The mark stays at the end of c, or goes to a cell that has no such change, or is gone: made, and read alike.
+      for (const shape of [
+        { kind: 'insertCols', after: 0 },
+        { kind: 'insertCols', after: 3 },
+        { kind: 'deleteCols', cols: [0] },
+        { kind: 'deleteCols', cols: [1] },
+        { kind: 'moveCols', cols: [0], to: 2 },
+      ] satisfies Shape[]) {
+        expectPlain(JSON.stringify(shape), text, shape, false);
+      }
+      // Once the deletion is accepted, nothing comes back in front of the mark, and rejected, the backslash is in the
+      // text: the operation is made in the first, and refused in the words of every edit beside the mark in the second.
+      const accepted = applyChanges(text, accept(text, 'c2dd'));
+      expectPlain('deletion accepted', accepted, { kind: 'deleteCols', cols: [2] }, false);
+      const rejected = applyChanges(text, reject(text, 'c2dd'));
+      expect(said(() => plain(rejected, { kind: 'deleteCols', cols: [2] }))).toBe(WORDS);
+      // A change in that cell that brings nothing back in front of the mark does not keep the column from going.
+      const typed = applyChanges(
+        file('| a | b | c |\n| - | - | - |\n| 1 | 2 | 3 |'),
+        trackedEdit(
+          file('| a | b | c |\n| - | - | - |\n| 1 | 2 | 3 |'),
+          { from: 7, to: 7, insert: 'z' },
+          context(bo, ['c2dd']),
+        ),
+      );
+      const harmless = align(typed, [0], 'center', ada, ['k3x9']).after;
+      expect(headerLine(harmless)).toContain('| b<!--ins c2dd-->z<!--/c2dd--> |');
+      expectPlain('typed', harmless, { kind: 'deleteCols', cols: [2] }, false);
+    });
+
+    it('every ending of up to two characters that a pending deletion takes off the cell the mark would end: refused, or every order reads as its newest view', () => {
+      const alphabet = ['\\', '*', '_', '~', '.'];
+      const endings = [...alphabet, ...alphabet.flatMap((a) => alphabet.map((b) => a + b))];
+      const sound = (text: string) => {
+        try {
+          expectEveryOrderRead('an ending', text);
+          expectNoDecisionRefused('an ending', text);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      let cases = 0;
+      let refused = 0;
+      let allowed = 0;
+      const unsound: string[] = [];
+      for (const begin of ['x', '**x', '_x', '~~x', 'x.']) {
+        for (const end of endings) {
+          const cell = begin + end;
+          const typed = file(`| a | ${cell} | c |\n| - | - | - |\n| 1 | 2 | 3 |`);
+          const from = typed.indexOf(`${cell} |`) + begin.length;
+          const deleted = applyChanges(
+            typed,
+            trackedEdit(typed, { from, to: from + end.length, insert: '' }, context(bo, ['c2dd'])),
+          );
+          const table = readTables(deleted, parse(deleted))[0]?.from ?? 0;
+          const aligned = applyChanges(
+            deleted,
+            tableEdit(
+              deleted,
+              { kind: 'align', table, cols: [0], align: 'center' },
+              context(ada, ['k3x9']),
+            ).changes,
+          );
+          cases++;
+          // The last column goes. The same file without the alignment change is the control: an ending that is
+          // unsound without the mark too is older than it (#265, #299), and not looked at.
+          const shape: Shape = { kind: 'deleteCols', cols: [2] };
+          const control = plain(deleted, shape);
+          let made: string;
+          try {
+            made = plain(aligned, shape);
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+            refused++;
+            continue;
+          }
+          if (!sound(control)) continue;
+          allowed++;
+          if (!sound(made)) unsound.push(`${JSON.stringify(cell)}: ${headerLine(made)}`);
+        }
+      }
+      expect(unsound).toEqual([]);
+      // The endings that bring a backslash back in front of the mark are refused, and the others are made.
+      expect(cases).toBe(150);
+      expect(refused).toBeGreaterThan(25);
+      expect(allowed).toBeGreaterThan(100);
+    });
+
+    it('a change whose old row is the table’s own, which a merge can leave, is gone with any column operation', () => {
+      const same = POINT.replace(SPEC, encodeValue('| :----- | :---: | ----: |'));
+      expect(problemsOf(parse(same))).toEqual([]);
+      for (const shape of everywhere(3)) {
+        const after = expectPlain(JSON.stringify(shape), same, shape);
+        expect(parse(after).marks).toEqual([]);
+        expect(parse(after).ledger.marks).toEqual({});
+      }
+    });
+
+    it('with a second alignment change in the table, which a merge can leave: its old row would be left as it was', () => {
+      const two = file(
+        POINT_BODY.replace('Count |', `Count${markFor('| :----- | ----- | ----: |', 'w8nn')} |`),
+        { w8nn: 'ada', k3x9: 'bo' },
+      );
+      expect(problemsOf(parse(two))).toEqual([]);
+      expect(parse(two).marks.filter(isAlignPoint)).toHaveLength(2);
+      for (const shape of SHAPES)
+        expect(
+          said(() => plain(two, shape)),
+          shape.kind,
+        ).toBe(ALIGN_FIRST);
+      // The change of another table is no such change: its table is made.
+      const other = file(`${POINT_BODY}\n\n${FRUIT.replace('Fruit ', 'Veg   ')}`, { k3x9: 'bo' });
+      const second = readTables(other, parse(other))[1]?.from ?? 0;
+      expect(
+        said(() => untrackedTableEdit(other, { kind: 'deleteCols', table: second, cols: [1] })),
+      ).toBe('no error');
+    });
+
+    it('when the old row has not the table’s columns: it could not be kept in step', () => {
+      for (const row of ['| ----- | ----- |', '| ----- | ----- | ----- | ----- |']) {
+        const text = POINT.replace(SPEC, encodeValue(row));
+        expect(text).not.toBe(POINT);
+        expect(problemsOf(parse(text))).toEqual([]);
+        for (const shape of SHAPES) {
+          expect(
+            said(() => plain(text, shape)),
+            `${row} ${shape.kind}`,
+          ).toBe(ALIGN_FIRST);
+        }
+      }
+    });
+  });
+
+  it('keeps the change in step through random plain column operations: every order alike, none refused, the views as the plain edits say', () => {
+    const random = seeded(Number(process.env['REDLINES_SEED'] ?? 281));
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+    const styles: Record<string, (cells: string[]) => string> = {
+      padded: (cells) => `| ${cells.join(' | ')} |`,
+      compact: (cells) => `|${cells.join('|')}|`,
+      bare: (cells) => cells.join(' | '),
+      open: (cells) => `| ${cells.join(' | ')}`,
+      lead: (cells) => `${cells.join(' | ')} |`,
+    };
+    let built = 0;
+    let operations = 0;
+    let gone = 0;
+    let beside = 0;
+    const kinds: Record<string, number> = {};
+    const refused: string[] = [];
+    for (let n = 0; n < fuzzCount(60); n++) {
+      const style = pick(Object.keys(styles));
+      const line = styles[style] as (cells: string[]) => string;
+      const width = 2 + Math.floor(random() * 3);
+      const eol = random() < 0.25 ? '\r\n' : '\n';
+      // A bare delimiter row of one dash is a list item, not a delimiter row.
+      const dash = () =>
+        pick(
+          ['padded', 'compact', 'open'].includes(style)
+            ? ['-', '--', '-----']
+            : ['--', '---', '-----'],
+        );
+      const body = [
+        line(Array.from({ length: width }, (_, c) => `hdr${'abcd'[c]}`)),
+        line(Array.from({ length: width }, dash)),
+        ...Array.from({ length: 1 + Math.floor(random() * 3) }, (_, r) =>
+          line(Array.from({ length: width }, (_, c) => `r${r}c${c}`)),
+        ),
+      ].join(eol);
+      let text = file(body);
+      const steps: string[] = [];
+      let others = false;
+      // The changes that stand beside the alignment change: Bo's row, typing, deleting or replacing in a cell, and a
+      // comment of Ada's in a cell; and after it, Bo's typing at the end of the last header cell, in front of it.
+      const table = () => readTables(text, parse(text))[0];
+      try {
+        if (random() < 0.4) {
+          const cell = pick(pick(table()?.rows ?? []).cells);
+          const size = cell.textTo - cell.textFrom;
+          const from = cell.textFrom + Math.floor(random() * (size + 1));
+          const to = size === 0 ? from : Math.min(cell.textTo, from + Math.floor(random() * 3));
+          const insert = to > from && random() < 0.4 ? '' : pick(['q', 'é', 'ab']);
+          text = applyChanges(text, trackedEdit(text, { from, to, insert }, context(bo, ['b7cd'])));
+          steps.push(`type ${from}-${to} ${insert}`);
+          others = true;
+        }
+        if (random() < 0.4) {
+          const rows = table()?.rows.length ?? 0;
+          const op: Shape = { kind: 'insertRows', after: Math.floor(random() * rows) };
+          text = edit(text, op, bo, ['c2dd']).after;
+          steps.push(JSON.stringify(op));
+          others = true;
+        }
+        if (random() < 0.4) {
+          const row = pick(table()?.rows ?? []);
+          const cell = pick(row.cells);
+          if (cell.textTo > cell.textFrom) {
+            const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom));
+            const to = Math.min(cell.textTo, from + 1 + Math.floor(random() * 2));
+            text = applyChanges(
+              text,
+              addComment(text, { from, to }, 'A note.', context(ada, ['c9qf'])).changes,
+            );
+            steps.push(`comment ${from}-${to}`);
+            others = true;
+          }
+        }
+        const cols = Array.from({ length: width }, (_, c) => c).filter(() => random() < 0.5);
+        const target = pick(['left', 'center', 'right', ''] as const);
+        const aligned = cols.length > 0 ? cols : [0];
+        text = align(text, aligned, target, ada, ['k3x9']).after;
+        steps.push(`align ${aligned.join(',')} ${target}`);
+        const last = table()?.rows[0]?.cells.at(-1);
+        if (last && random() < 0.3) {
+          const at = last.textTo;
+          text = applyChanges(
+            text,
+            trackedEdit(text, { from: at, to: at, insert: 'z' }, context(bo, ['d8fg'])),
+          );
+          steps.push('type at the end of the last header cell');
+          others = true;
+        }
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        continue;
+      }
+      if (!parse(text).marks.some(isAlignPoint)) continue;
+      built++;
+      for (let step = 0; step < 1 + Math.floor(random() * 3); step++) {
+        const read = table();
+        if (!read || !parse(text).marks.some(isAlignPoint)) break;
+        const shape = pick(everywhere(read.aligns.length));
+        const label = `${JSON.stringify(body)} ${steps.join(' / ')} / ${JSON.stringify(shape)}\n${bodyOf(text)}`;
+        let made: string;
+        try {
+          made = plain(text, shape);
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          refused.push(`${error.message}: ${label}`);
+          continue;
+        }
+        text = expectPlain(label, text, shape, false, made);
+        steps.push(JSON.stringify(shape));
+        operations++;
+        kinds[shape.kind] = (kinds[shape.kind] ?? 0) + 1;
+        if (others) beside++;
+        if (!parse(text).marks.some(isAlignPoint)) gone++;
+      }
+    }
+    if (process.env['REDLINES_FUZZ_STATS']) {
+      process.stderr.write(
+        `tables ${built} of ${fuzzCount(60)}, operations ${operations} (${Object.entries(kinds)
+          .map(([kind, count]) => `${kind} ${count}`)
+          .join(', ')}), beside other changes ${beside}, gone ${gone}, refused ${refused.length}\n`,
+      );
+    }
+    expect(refused).toEqual([]);
+    expect(operations).toBeGreaterThan(fuzzCount(60));
+    // A run of the default size or more draws tables with other changes, and changes that the columns undo.
+    if (fuzzCount(60) >= 60) {
+      expect(beside).toBeGreaterThan(0);
+      expect(gone).toBeGreaterThan(0);
+    }
+  }, 120_000);
+});
+
+// What a plain column operation does to the old row of a pending alignment change: its opener after the columns
+// `final` are made, or null when the old and the new alignments are then the same, so that the change goes.
+describe('keepAlignInStep (format §3.7, §3.10, #281)', () => {
+  const read = (text: string) => {
+    const parsed = parse(text);
+    return { parsed, table: readTables(text, parsed)[0] as TableRead };
+  };
+  const keep = (...cols: number[]): ColItem[] => cols.map((src) => ({ src }));
+  const stepped = (text: string, final: ColItem[]) => {
+    const { parsed, table } = read(text);
+    return keepAlignInStep(text, parsed, table, final);
+  };
+  /** A new column whose cell in the delimiter row is `cell`, and which has no other line. */
+  const fresh = (cell = ' --- '): ColItem => ({
+    text: (line) => {
+      if (line !== 1) throw new Error(`the old row has no line ${line}`);
+      return cell;
+    },
+  });
+
+  it('gives the opener the old row has after the columns are made, which is the old one when none changes', () => {
+    expect(stepped(POINT, keep(0, 1, 2))).toEqual({ opener: MARK });
+    // A cell taken out, a new cell as the delimiter row's, a moved cell.
+    expect(stepped(POINT, keep(1, 2))).toEqual({ opener: markFor('| ----- | ----: |') });
+    expect(stepped(POINT, keep(0, 1))).toEqual({ opener: markFor('| :----- | ----- |') });
+    expect(stepped(POINT, [...keep(0), fresh(), ...keep(1, 2)])).toEqual({
+      opener: markFor('| :----- | --- | ----- | ----: |'),
+    });
+    expect(stepped(POINT, [...keep(0, 1, 2), fresh(' - ')])).toEqual({
+      opener: markFor('| :----- | ----- | ----: | - |'),
+    });
+    expect(stepped(POINT, [...keep(1, 2), { src: 0, moving: true }])).toEqual({
+      opener: markFor('| ----- | ----: | :----- |'),
+    });
+    expect(stepped(POINT, [{ src: 2, moving: true }, ...keep(0, 1)])).toEqual({
+      opener: markFor('| ----: | :----- | ----- |'),
+    });
+  });
+
+  it('keeps the opener’s id, and its form but for the value', () => {
+    const other = POINT.replace('k3x9', 'w8nn');
+    expect(stepped(other, keep(1, 2))).toEqual({ opener: markFor('| ----- | ----: |', 'w8nn') });
+  });
+
+  it('is null when the change is the same as the old row after the columns it was about are gone', () => {
+    // Count was the only column it changed.
+    expect(stepped(POINT, keep(0, 2))).toEqual({ opener: null });
+    expect(stepped(POINT, keep(2, 0))).toEqual({ opener: null });
+    // Two columns changed, one is left.
+    const bare = file('| a | b | c |\n| - | - | - |\n| d | e | f |');
+    const two = applyChanges(
+      bare,
+      tableEdit(
+        bare,
+        { kind: 'align', table: 0, cols: [0, 1], align: 'center' },
+        context(ada, ['k3x9']),
+      ).changes,
+    );
+    expect(stepped(two, keep(0, 2))).toEqual({ opener: markFor('| - | - |') });
+    expect(stepped(two, keep(2))).toEqual({ opener: null });
+  });
+
+  it('is undefined where none is pending, where the old row has not the table’s columns, and for the span form', () => {
+    expect(stepped(file(FRUIT), keep(0, 1))).toBeUndefined();
+    expect(
+      stepped(POINT.replace(SPEC, encodeValue('| ----- | ----- |')), keep(0, 1)),
+    ).toBeUndefined();
+    expect(
+      stepped(POINT.replace(SPEC, encodeValue('| ----- | ----- | ----- | ----- |')), keep(0, 1)),
+    ).toBeUndefined();
+    const span = file(`${MARK}\n\n${CENTERED}\n\n<!--/k3x9-->`, { k3x9: 'ada' });
+    expect(alignMarkOf(read(span).parsed, read(span).table)).toBeDefined();
+    expect(stepped(span, keep(0, 1))).toBeUndefined();
+    // And where the table has a second alignment change, whose old row would be left as it was.
+    const two = file(
+      POINT_BODY.replace('Count |', `Count${markFor('| :----- | ----- | ----: |', 'w8nn')} |`),
+      { w8nn: 'ada', k3x9: 'bo' },
+    );
+    expect(stepped(two, keep(0, 1))).toBeUndefined();
+  });
+
+  it('asks a new column for its cell in the delimiter row only', () => {
+    // `fresh` throws for any other line: the old row is the one line, and its new cell is `text(1)`.
+    expect(stepped(POINT, [...keep(0, 1, 2), fresh('--')])).toEqual({
+      opener: markFor('| :----- | ----- | ----: |--|'),
+    });
+  });
+
+  it('works on a delimiter row with no pipes at its edges', () => {
+    const bare = align(file('a | b\n--|--\nc | d'), [1], 'right').after;
+    expect(stepped(bare, keep(1))).toEqual({ opener: markFor('|--') });
+    expect(stepped(bare, [...keep(0, 1), fresh()])).toEqual({ opener: markFor('--|--| --- |') });
+  });
+});
+
 describe('rule 5 in ruleTwo', () => {
   const COLUMNS = COLUMNS_FIRST;
   const ALIGN = ALIGN_FIRST;
@@ -1243,15 +2222,43 @@ describe('rule 5 in ruleTwo', () => {
     }
   });
 
-  it('refuses every column operation, and no row operation, while it is pending', () => {
+  it('refuses every tracked column operation while it is pending, and no row operation', () => {
     for (const op of ['insertCols', 'deleteCols', 'moveCols'] as const) {
-      for (const tracked of [true, false]) {
-        expect(ruleTwo(op, { ...none, align: true }, tracked)).toBe(ALIGN);
-      }
+      expect(ruleTwo(op, { ...none, align: true }, true)).toBe(ALIGN);
     }
     for (const op of ['insertRows', 'deleteRows', 'moveRows'] as const) {
       expect(ruleTwo(op, { ...none, align: true }, true)).toBeNull();
     }
+  });
+
+  it('allows a column operation with Track Changes off, which keeps the old row in step, unless a column is pending too', () => {
+    for (const op of ['insertCols', 'deleteCols', 'moveCols'] as const) {
+      expect(ruleTwo(op, { ...none, align: true }, false)).toBeNull();
+      // A column pending as well (a merge can leave both) would leave the old row a cell short or long.
+      for (const key of ['colsInserted', 'colsChanged'] as const) {
+        for (const tracked of [true, false]) {
+          expect(ruleTwo(op, { ...none, align: true, [key]: true }, tracked), `${op} ${key}`).toBe(
+            ALIGN,
+          );
+        }
+      }
+    }
+    for (const op of ['insertRows', 'deleteRows', 'moveRows'] as const) {
+      expect(ruleTwo(op, { ...none, align: true }, false)).toBeNull();
+    }
+  });
+
+  it('is rule 2’s as before once the alignment change lets a plain column operation through', () => {
+    // The rest of the rule is as it was: a row deleted or moved, and a row inserted for a tracked operation.
+    for (const op of ['insertCols', 'deleteCols', 'moveCols'] as const) {
+      expect(ruleTwo(op, { ...none, align: true, rowsChanged: true }, false), op).toBe(ROWS_FIRST);
+      expect(ruleTwo(op, { ...none, rowsChanged: true }, false), op).toBe(ROWS_FIRST);
+    }
+    for (const op of ['deleteCols', 'moveCols'] as const) {
+      expect(ruleTwo(op, { ...none, align: true, rowsInserted: true }, false), op).toBeNull();
+      expect(ruleTwo(op, { ...none, rowsInserted: true }, true), op).toBe(ROWS_FIRST);
+    }
+    expect(ruleTwo('insertCols', { ...none, align: true, rowsInserted: true }, false)).toBeNull();
   });
 });
 

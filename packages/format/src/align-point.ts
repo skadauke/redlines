@@ -122,6 +122,14 @@ function misread(text: string, parsed: Parsed, mark: MarkRange): boolean {
   return !placeReads(text, parsed, cell.textFrom, open.from, false);
 }
 
+/** The words of a refusal of an edit that would leave the point alignment change `mark` where it is read otherwise,
+ * in some state or as written: they name the person whose change it is, and say what to do. */
+export function pointsReadWords(parsed: Parsed, mark: MarkRange): string {
+  const { by } = mark.entry;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s alignment change is at the end of this cell, where this edit would make Markdown read it, or the text before it, otherwise. Decide it first.`;
+}
+
 /**
  * Throws when an edit leaves a point alignment change where it is read otherwise than it was before the
  * edit (`text` and `after` are the file before and after it, `parsed` and `parsedAfter` their readings,
@@ -152,11 +160,6 @@ export function assertPointsRead(
       if (!changes.some((change) => change.from <= to && from <= change.to)) continue;
     }
     if ((was && misread(text, parsed, was)) || !misread(after, parsedAfter, mark)) continue;
-    const { by } = mark.entry;
-    const name = parsedAfter.ledger.people.find((person) => person.handle === by)?.name ?? by;
-    throw new EditError(
-      `${name}'s alignment change is at the end of this cell, where this edit would make Markdown read it, or the text before it, otherwise. Decide it first.`,
-      'no-legal-placement',
-    );
+    throw new EditError(pointsReadWords(parsedAfter, mark), 'no-legal-placement');
   }
 }

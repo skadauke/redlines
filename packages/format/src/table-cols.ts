@@ -40,8 +40,10 @@ export interface Grid {
   /** The columns the header has. */
   columns: number;
   /** The point mark of an alignment change that ends the header's last cell: its range, and the text
-   * written at the end of the last cell the columns leave (the old marker, unless a caller changes it).
-   * Null when there is none, or when the reader of the grid keeps its own handling of it. */
+   * written at the end of the last cell the columns leave (the old marker, unless a caller changes it: a
+   * plain operation writes the opener with its old row in step, `keepAlignInStep`). An empty text takes
+   * the mark away and writes it nowhere: the change is gone. Null when there is none, or when the reader
+   * of the grid keeps its own handling of it. */
   alignMark: { range: Range; text: string } | null;
 }
 
@@ -154,7 +156,8 @@ const isStaying = (item: ColItem): item is { src: number; moving?: false } =>
  * `alignMark.text` says (a caller that changes the text has it replaced in place). Otherwise it goes: with
  * the unit of a cell that is taken out, out of the content of one that moves, off a cell that stays and
  * is not the last now, and it is written once, at the end of the text of the cell that is last, whether it
- * stays, moves or is new, after the marks that end the text and in front of its padding. A caller joins
+ * stays, moves or is new, after the marks that end the text and in front of its padding. With an empty
+ * `alignMark.text` it goes in every case and is written nowhere. A caller joins
  * the changes with `joinPoints`: the mark is written where another change may start. One that writes the
  * comment points of the columns that leave as well puts them in with `withCommentPoints`.
  */
@@ -198,8 +201,9 @@ export function columnChanges(
         ? { ...mark, cell: home.cell }
         : null;
     const keeps = held !== null && last !== undefined && isStaying(last) && last.src === held.cell;
-    // What is written at the end of the text of the last cell: the mark, unless it stays where it stands.
-    const carried = held !== null && !keeps ? held.text : null;
+    // What is written at the end of the text of the last cell: the mark, unless it stays where it stands, or
+    // its text is empty and it is gone.
+    const carried = held !== null && !keeps && held.text !== '' ? held.text : null;
     for (let c = 0; c < limit; c++) {
       const cell = line.cells[c];
       if (!staying.has(c) && cell) changes.push({ from: cell.open, to: cell.close, insert: '' });

@@ -603,7 +603,11 @@ describe('rule 2 for columns', () => {
         expect(ruleTwo(op, { ...base, colsInserted: true }, tracked)).toBeNull();
         expect(ruleTwo(op, { ...base, colsChanged: true }, tracked)).toBeNull();
         expect(ruleTwo(op, { ...base, rowsChanged: true }, tracked)).toBe(ROWS);
-        expect(ruleTwo(op, { ...base, align: true }, tracked)).toBe(ALIGN);
+        // An alignment change keeps the old delimiter row: tracked, one more change of the columns would leave it
+        // a cell short or long in some order. With Track Changes off the old row is kept in step.
+        expect(ruleTwo(op, { ...base, align: true }, tracked)).toBe(tracked ? ALIGN : null);
+        expect(ruleTwo(op, { ...base, align: true, colsInserted: true }, tracked)).toBe(ALIGN);
+        expect(ruleTwo(op, { ...base, align: true, colsChanged: true }, tracked)).toBe(ALIGN);
       }
       expect(ruleTwo('insertCols', { ...base, rowsInserted: true }, tracked)).toBeNull();
     }
@@ -837,6 +841,27 @@ describe('the mark of an alignment change, through a rewrite of the columns (for
     expect(rewrite(SIMPLE, keep(0, 1), NEW).after).toBe(
       T('| a | b@@ |', '| - | - |', '| 1 | 2 |').replace(MARK, NEW),
     );
+  });
+
+  it('is taken away and written nowhere when the text a caller gives is empty: the change is gone', () => {
+    // Where it stands, where its cell leaves, where it stops being the last, in a cell that moves and in a new one.
+    for (const final of [
+      keep(0, 1, 2),
+      keep(0, 1),
+      keep(0),
+      keep(1),
+      keep(1, 2),
+      [...keep(1, 2), moving(0)],
+      [moving(2), ...keep(0, 1)],
+      [...keep(0, 1, 2), fresh(' x ')],
+      [...keep(0, 1), fresh(' x ')],
+    ]) {
+      const done = rewrite(SIMPLE, final, '');
+      expect(done.after).toBe(rewrite(CLEAN, final).after);
+      expect(done.after).not.toContain('<!--');
+      // No empty change is written for it.
+      expect(done.changes.filter((c) => c.from === c.to && c.insert === '')).toEqual([]);
+    }
   });
 
   it('goes to the cell that is last when the last column goes, whichever cells are left', () => {

@@ -4,7 +4,8 @@
 // table can share a line with it, so no edit beside the table has to be refused for it. Accepting takes the
 // mark away; rejecting writes the old delimiter row back and takes the mark away; neither decision
 // changes a byte outside the table's first two lines. With Track Changes off the delimiter row is
-// changed as it says, in the change's `align=` too, so that both views have it.
+// changed as it says, in the change's `align=` too, so that both views have it; and a plain operation on
+// columns does to the change's old row what it does to the table's own (`keepAlignInStep`).
 //
 // The span form is still read, drawn, carded and decided, and never written: an opener alone on the line
 // before the table, as any mark that starts a block does (§3.3), and a closer after one blank line below
@@ -12,23 +13,32 @@
 // `checkAlignGap`, the closer in `alignHide`, `alignMarkOf` and `tableOfSegment`) is for that form alone.
 
 import { lineEnd, lineStart, openerRange } from './blocks.ts';
-import { changesRun, isAlignPoint, placeReads, readsOtherwise } from './align-point.ts';
+import {
+  changesRun,
+  isAlignPoint,
+  placeReads,
+  pointsReadWords,
+  readsOtherwise,
+} from './align-point.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
-import { encodeValue, isAlignOps, opsOf } from './format-ops.ts';
+import { encodeValue, isAlignOps, isAlignPayload, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { idsIn, newId } from './ids.ts';
 import { paragraphRange, visible } from './inline.ts';
-import { serializeLedger } from './ledger-write.ts';
+import { normalizeLedger } from './ledger-order.ts';
+import { serializeLedger, setLedger } from './ledger-write.ts';
 import { markerRanges } from './markers.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
-import { readDelimiterRow, readRowCells, tablesOfText } from './table.ts';
+import { readDelimiterRow, readLine, readRowCells, tablesOfText } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
-import { deletedColCells } from './table-cols.ts';
+import { columnChanges, deletedColCells } from './table-cols.ts';
+import type { ColItem, Grid } from './table-cols.ts';
+import { joinPoints } from './table-rows.ts';
 import { newestView, originalView } from './views.ts';
 import type {
   EditContext,
@@ -645,6 +655,106 @@ export function alignEdit(
   });
   placeHolds(text, applyChanges(text, edit.changes), id, table.from);
   return edit;
+}
+
+/**
+ * With Track Changes off and an alignment change pending, what its mark is after the columns `final` are made
+ * (format §3.7, §3.10): its opener with `align=` holding the old delimiter row with the same columns done to it
+ * as the table's own rows have done (a deleted column's cell gone, a new column's cell its cell in the delimiter
+ * row, `item.text(1)`, a moved column's cell moved), or `null` when the old and the new alignments are then the
+ * same, so that the change goes. The old row is positional: its cell for a column is where the column's was in
+ * the table, and a plain operation does to it what it does to the delimiter row, so that rejecting the change
+ * writes the original's row, and the original view is the plain operation done to the original.
+ *
+ * Undefined where it can't be kept in step: none is pending, its old row has not the table's columns (it could
+ * not be rejected, and would not be a row for the columns the table has), it is the span form that another
+ * tool wrote, whose opener stands outside the table's lines where no column operation of ours reaches it, or
+ * the table has another alignment change as well (a merge can leave two), whose old row would be left as it is.
+ * The operation is refused then, with `ALIGN_FIRST`.
+ */
+export function keepAlignInStep(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  final: readonly ColItem[],
+): { opener: string | null } | undefined {
+  const mark = alignMarkOf(parsed, table);
+  const segment = mark?.segments[0];
+  if (!mark || !segment || !isAlignPoint(mark)) return undefined;
+  const second = parsed.marks.some(
+    (other) =>
+      other !== mark &&
+      isAlignMark(other) &&
+      other.segments.some((s) => tableOfSegment(parsed, s)?.from === table.from),
+  );
+  if (second) return undefined;
+  const kept = specOf(mark, segment);
+  const columns = table.aligns.length;
+  const was = kept ? alignsOf(kept.spec, columns) : null;
+  if (!kept || !was) return undefined;
+  // The old row goes through the same rewrite as every line of the table, as a line of its own: a column that is
+  // new asks for its cell of the delimiter row, the table's second line, and a moved one is the same cell moved.
+  const line: Grid = {
+    table,
+    lines: [readLine(kept.spec, 0, kept.spec.length)],
+    rowMarkers: [null],
+    columns,
+    alignMark: null,
+  };
+  const items = final.map((item): ColItem => {
+    if ('text' in item) {
+      const { text: cellOf } = item;
+      return { text: () => cellOf(1) };
+    }
+    if (item.moving && item.edit) {
+      const { edit } = item;
+      return { ...item, edit: (_line, content) => edit(1, content) };
+    }
+    return item;
+  });
+  const row = applyChanges(kept.spec, joinPoints(columnChanges(kept.spec, line, items)));
+  if (alignsOf(row, final.length) === null) return undefined;
+  const value = `align=${encodeValue(row)}`;
+  if (!isAlignPayload(value)) return undefined;
+  // Every column that was in the table keeps its alignment, and a new one has the same in both rows.
+  if (final.every((item) => !('src' in item) || was[item.src] === table.aligns[item.src])) {
+    return { opener: null };
+  }
+  const { open } = segment;
+  const head = text.slice(open.from, open.to);
+  const at = head.indexOf(kept.source);
+  if (at === -1) return undefined;
+  return { opener: head.slice(0, at) + value + head.slice(at + kept.source.length) };
+}
+
+/**
+ * Throws when a plain operation on columns that wrote the mark `id` of an alignment change at the end of another
+ * cell than it stood in (format §3.7, §3.10) leaves it read otherwise, or its change impossible to decide, in some
+ * order of deciding the changes that are pending in that cell: the deletion of a backslash that comes back in front
+ * of it when rejected, say. `after` is the file the operation makes, with the mark, and `tableFrom` where its table
+ * starts. It is the walk of the orders that writing the mark makes (`placeHolds`), with the same file with nothing
+ * where the mark is as its control. The operation looks only where the mark moved: a mark that stays at the end of
+ * its cell, which the operation does not touch, reads as it did. The refusal is in the words of every edit beside
+ * the mark (`pointsReadWords`), which say to decide the change first.
+ *
+ * @throws EditError naming the person whose alignment change it is.
+ */
+export function assertMarkHolds(after: string, id: string, tableFrom: number): void {
+  const parsed = parse(after);
+  const mark = parsed.marks.find((candidate) => candidate.id === id);
+  const open = mark?.segments[0]?.open;
+  if (!mark || !open) return;
+  // The same file with nothing where the mark is, and no entry for it.
+  const body = after.slice(0, open.from) + after.slice(open.to);
+  const ledger = workingLedger(parsed.ledger);
+  delete ledger.marks[id];
+  const without = applyChanges(body, setLedger(body, normalizeLedger(body, ledger)));
+  try {
+    placeHolds(without, after, id, tableFrom);
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+    throw refused(pointsReadWords(parsed, mark));
+  }
 }
 
 /** `line` (which starts at `base` in the text) with `changes` of the text made in it. */

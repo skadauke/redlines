@@ -185,6 +185,37 @@ describe('rule 2: rows and columns don’t change together', () => {
     }
   });
 
+  // Rule 5: an alignment change keeps the old delimiter row, so one more change of the columns would leave it a cell
+  // short or long in some order of decisions. With Track Changes off nothing is added to the pending changes: the
+  // operation does the same columns to the old row (`keepAlignInStep`), unless a column is pending as well.
+  it('lets a column operation through beside an alignment change only with Track Changes off and no column pending', () => {
+    const ALIGN = 'Accept or reject the alignment change in this table first.';
+    for (const op of ['insertCols', 'deleteCols', 'moveCols'] as const) {
+      for (const tracked of [true, false]) {
+        for (const colsInserted of [false, true]) {
+          for (const colsChanged of [false, true]) {
+            const pending = { ...base, align: true, colsInserted, colsChanged };
+            const label = `${op} ${tracked ? 'tracked' : 'plain'} ${JSON.stringify({ colsInserted, colsChanged })}`;
+            expect(ruleTwo(op, pending, tracked), label).toBe(
+              tracked || colsInserted || colsChanged ? ALIGN : null,
+            );
+            // Without the alignment change the rule is what it was.
+            expect(ruleTwo(op, { ...pending, align: false }, tracked), label).toBeNull();
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves the row operations as they were beside an alignment change', () => {
+    for (const tracked of [true, false]) {
+      for (const op of ['insertRows', 'deleteRows', 'moveRows'] as const) {
+        expect(ruleTwo(op, { ...base, align: true }, tracked), op).toBeNull();
+        expect(ruleTwo(op, { ...base, align: true, colsChanged: true }, tracked), op).toBe(COLUMNS);
+      }
+    }
+  });
+
   it('reads what is pending in a table', () => {
     const body =
       '| a | <!--ins k3x9 col--> b |\n| - | - |\n| <!--ins w8nn row--> x | y |\n\n' +
