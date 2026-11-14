@@ -1250,13 +1250,24 @@ an item with text in the file and as an empty item in the view, and is refused, 
 those lines in front of such an item. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
 list in its list while a line below it would read as text of it, and says so. The editor's Backspace
-at a first item does not rely on that rule alone: wherever the item is in the file, with Track
-Changes on or off, and for the first item of a nested list going up a level as for one at the top
-level going out of its list, it waits when the line right below the item holds a marker and reads
-otherwise without it (an item whose only text is a deletion, which the file reads as an item and the
-newest view as an underline of the item's text): taking the marker out then writes a file that reads
-as a heading once the change is accepted, in every order, which no reading of the file shows. The
-words ask for the change below to be decided first (#292).
+at a first item does not rely on that rule alone. Wherever the item is in the file, with Track Changes
+on or off, taking its marker away (the first item of a list at the top level going out of its list,
+the first item of a nested list going up a level, and Delete at the end of the paragraph above a
+list, which takes the first item's marker into it) waits when the line right below the item holds a
+marker of a change and is text of the paragraph above it (an item with no text, a number other than
+1, an underline) in some of the ways the file reads and not in all: as it is, as the newest view
+reads it and as the original view reads it (an item whose only text is a deletion, which the file
+reads as an item and the newest view as an underline of the item's text; an item whose only text is
+an insertion, which the original view reads so). Taking the marker out then writes a file that reads
+as a heading in some order of deciding, which no reading of the file shows. The words ask for the
+change below to be decided first (#292). A nested first item going up a level is also kept where the
+line after it and its nested items, which stays where it is, would come to stand under the text of
+the last paragraph of them: it is indented far enough to continue the item that holds that paragraph
+once the item has moved, and was not where it stood, and it is a number other than 1, an empty item
+or an underline (a numbered item, the first of another list in the parent item, one column less
+indented than the item, or as deep as the text of its child). The format's own refusal reads the next
+item at the item's indentation only, and is not made where it refuses first (tabs, a pending break):
+the key says so in the format's words for a numbered item, and in its own for the others.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the

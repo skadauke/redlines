@@ -121,8 +121,10 @@ the history. A refusal is allowed in a walk, and a break of one of those is not,
 that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
 and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
 own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
-with Track Changes off (`editedMarker`, seed 1140 of #292): that is the person editing the syntax, the
-next numbered item reads as text of the line as Markdown reads it, and the tracked key is refused. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
+with the caret inside the marker and Track Changes off (`editedMarker`, seed 1140 of #292, `3.‸ ship`
+and Backspace): that is the person editing the syntax, the next numbered item reads as text of the
+line as Markdown reads it, and the tracked key is refused. A key that takes a marker away from the
+caret at an item's text, or an outdent, is held to it. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
 held further: to no refusal that it does not name, and to the rule that a skipped invariant that now
 holds fails; and a script of a single Return must be taken back by Backspace. `REDLINES_FUZZ=200`
 plays 200 walks of each kind; they run in Node's default heap since #286 was fixed (they had run out
@@ -192,6 +194,9 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
+- The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
+  as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
+  its list leaves that line as text, and the editor sees no change (#446).
 - Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
   reads as a heading in some order of decisions: the format refuses a numbered sibling that would
   become the item's first child, not an item with no text (#433; Backspace at a nested first item

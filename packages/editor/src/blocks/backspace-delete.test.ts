@@ -55,10 +55,6 @@ const FIRST_NUMBERED =
 const UNTRACKED_TEXT =
   'The untracked key leaves the line below as text of the paragraph, as it reads.';
 
-/** The format's words for lines below a first prefix that a pending change makes read otherwise. */
-const BELOW_PENDING =
-  'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
-
 /** Words for a marker inside another container on the file's first line. */
 const DEEP_AT_START =
   "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
@@ -612,15 +608,14 @@ describe('At the start of the document, Track Changes on', () => {
         on: { caret: 'Text.⏎⏎- ‸one⏎- <del two><del three>', refusal: BELOW_CHANGES },
       },
       {
-        // Another person's insertion fills the item below: it reads alike in the file and the newest
-        // view, and the format (which reads the original view too, where the item is empty) keeps
-        // its own refusal at the start of the file for Track Changes on.
+        // Another person's insertion is all of the item below: an item with text in the file and the
+        // newest view, and empty in the original view, which rejecting it gives: the heading again.
         name: "a bullet above an item that another person's insertion fills",
         doc: '- ‸one⏎- <ins>two</ins>',
         keys: BS,
         others: 'bo',
-        off: { caret: '‸one⏎- <ins>two</ins>' },
-        on: { caret: '- ‸one⏎- <ins>two</ins>', refusal: BELOW_PENDING },
+        off: { caret: '- ‸one⏎- <ins>two</ins>', refusal: BELOW_CHANGES },
+        on: { caret: '- ‸one⏎- <ins>two</ins>', refusal: BELOW_CHANGES },
       },
       {
         name: 'a deletion that leaves text in the item below: the bullet goes',
@@ -832,7 +827,10 @@ const OUTDENT_NUMBERED =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
 /** The key's words where a pending change below would make the lines after it read otherwise. */
 const BELOW_CHANGES =
-  "A pending change in the line below would make it read differently once this item has moved: an item that a deletion empties can't follow text, and would turn it into a heading. Accept or reject that change first.";
+  "A pending change in the line below would make it read differently once this item has moved: an item that the change leaves empty can't follow text, and would turn it into a heading. Accept or reject that change first.";
+/** The key's words where the line below would become text of the item, and the format refuses nothing. */
+const ABSORBED =
+  "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
 const NUMBERED_IN_CONTAINER =
   "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
 
@@ -902,6 +900,107 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
         off: { caret: '> 1. a⏎>    - ‸plan⏎>    2. ship', refusal: OUTDENT_NUMBERED },
         on: { caret: '> 1. a⏎>    - ‸plan⏎>    2. ship', refusal: OUTDENT_NUMBERED },
       },
+      // The review of #292: the format refuses for other reasons first (tabs, a pending break, an
+      // insertion or deletion on the item's line), and the key then wrote the plain edit that gets
+      // around the numbered guard main had; and the format's own check is not exact (a child of the
+      // item hides the sibling; the sibling one column less indented is as much under the text).
+      {
+        name: 'tabs for the indentation (the format refuses tabs, the key must not write it)',
+        doc: '1. a⏎\t1. ‸plan⏎\t2. ship',
+        keys: BS,
+        off: { caret: '1. a⏎\t1. ‸plan⏎\t2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎\t1. ‸plan⏎\t2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'a bullet, tabs for the indentation',
+        doc: '1. a⏎\t- ‸plan⏎\t2. ship',
+        keys: BS,
+        off: { caret: '1. a⏎\t- ‸plan⏎\t2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎\t- ‸plan⏎\t2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: "another person's pending break ends the item's line",
+        doc: '1. a⏎   - ‸plan<split>⏎   2. ship',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '1. a⏎   - ‸plan<split>⏎   2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎   - ‸plan<split>⏎   2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: "another person's insertion is the item's text",
+        doc: '1. a⏎   1. <ins>‸plan</ins>⏎   2. ship',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '1. a⏎   1. <ins>‸plan</ins>⏎   2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎   1. <ins>‸plan</ins>⏎   2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: "another person's deletion starts the item's text",
+        doc: '1. a⏎   1. <del p>‸lan⏎   2. ship',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '1. a⏎   1. <del p>‸lan⏎   2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎   1. <del p>‸lan⏎   2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'a child of the item, and the numbered item as deep as the child’s text',
+        doc: '10. a⏎    - ‸plan⏎      - x⏎    2. ship',
+        keys: BS,
+        off: { caret: '10. a⏎    - ‸plan⏎      - x⏎    2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '10. a⏎    - ‸plan⏎      - x⏎    2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'the numbered item one column less indented than the outdented one',
+        doc: '1. a⏎   - ‸plan⏎  2. ship',
+        keys: BS,
+        off: { caret: '1. a⏎   - ‸plan⏎  2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎   - ‸plan⏎  2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'an empty item after it, which the item would be the underline of',
+        doc: '1. a⏎   - ‸plan⏎   -',
+        keys: BS,
+        off: { caret: '1. a⏎   - ‸plan⏎   -', refusal: ABSORBED },
+        on: { caret: '1. a⏎   - ‸plan⏎   -', refusal: ABSORBED },
+      },
+      {
+        name: 'a numbered item that is no sibling of the outdented one: it stays an item (a rule of the format, kept)',
+        doc: '- a⏎  1. ‸plan⏎  2) ship',
+        keys: BS,
+        off: { caret: '- a⏎  1. ‸plan⏎  2) ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '- a⏎  1. ‸plan⏎  2) ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'a sibling at another indentation, which a pending deletion empties',
+        doc: '1. a⏎   - ‸one⏎    - <del two>',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '1. a⏎   - ‸one⏎    - <del two>', refusal: BELOW_CHANGES },
+        on: { caret: '1. a⏎   - ‸one⏎    - <del two>', refusal: BELOW_CHANGES },
+      },
+      {
+        name: 'a sibling one column less indented, which a pending deletion empties (tracked as well)',
+        doc: '1. a⏎     - ‸one⏎    - <del two>',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '1. a⏎     - ‸one⏎    - <del two>', refusal: BELOW_CHANGES },
+        on: { caret: '1. a⏎     - ‸one⏎    - <del two>', refusal: BELOW_CHANGES },
+      },
+      {
+        name: "a nested item, and another person's insertion that is all of the next item",
+        doc: '- a⏎  - ‸one⏎  - <ins>two</ins>',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '- a⏎  - ‸one⏎  - <ins>two</ins>', refusal: BELOW_CHANGES },
+        on: { caret: '- a⏎  - ‸one⏎  - <ins>two</ins>', refusal: BELOW_CHANGES },
+      },
+      {
+        name: 'a line that already continued the paragraph is text of it as it was: the item goes up',
+        doc: '- a⏎  - ‸plan⏎    2. x',
+        keys: BS,
+        off: { caret: '- a⏎- ‸plan⏎  2. x' },
+        on: { caret: '- a⏎- <fmt was=indent=2>⏎  ‸plan⏎  2. x</fmt>' },
+      },
       // The same shapes that are sound go through: a blank line keeps the numbered list apart, a
       // child of the item keeps it from the text, and the parent's own next item isn't under it.
       {
@@ -935,6 +1034,34 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
         others: 'bo',
         off: { caret: '- a⏎  - ‸one⏎  - <del two>', refusal: BELOW_CHANGES },
         on: { caret: '- a⏎  - ‸one⏎  - <del two>', refusal: BELOW_CHANGES },
+      },
+    ]),
+    ...both([
+      // Delete at the end of a paragraph before a list takes the first item's marker, as Backspace
+      // does: the same wait for a pending change that empties the next item (the review of #292).
+      {
+        name: "Delete before a list whose second item holds only another person's deletion",
+        doc: 'Text.‸⏎⏎- one⏎- <del two>',
+        keys: DEL,
+        others: 'bo',
+        off: { caret: 'Text.‸⏎⏎- one⏎- <del two>', refusal: BELOW_CHANGES },
+        on: { caret: 'Text.‸⏎⏎- one⏎- <del two>', refusal: BELOW_CHANGES },
+      },
+      {
+        name: 'a flag (two code points, one character) is the only character of the first line',
+        doc: 'one⏎⏎🇫🇷‸⏎two',
+        keys: BS,
+        off: { file: 'one⏎⏎two', caret: 'one⏎⏎‸two' },
+        on: { caret: 'one⏎⏎<del 🇫🇷⏎>⏎⏎‸two' },
+      },
+      {
+        // The next line as the first line is the start of a block: `2. x` is an item there, where it
+        // was text of the paragraph: the plain key goes, as it did.
+        name: 'the only character of an item’s first line, a numbered line next',
+        doc: '- a‸⏎  2. x',
+        keys: BS,
+        off: {},
+        on: {},
       },
     ]),
     {

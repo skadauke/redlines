@@ -11,8 +11,14 @@
 // a join for the format and not a deletion "together with other text".
 
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
-import { EditError, type FormatOp, OUTDENT_NUMBERED_CHILD } from '@redlines/format';
+import {
+  type ChangeSpec,
+  EditorSelection,
+  type EditorState,
+  findClusterBreak,
+  type Line,
+} from '@codemirror/state';
+import { decodePayload, EditError, type FormatOp, OUTDENT_NUMBERED_CHILD } from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
@@ -21,6 +27,7 @@ import {
   continuation,
   hardBreakAt,
   lastCharOfLine,
+  type Item,
   itemsAround,
   type KeyEdit,
   moveTo,
@@ -141,29 +148,154 @@ const readsAsText = (row: string) =>
   (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
 
 /**
- * Why an item can't move (up a level, or out of its list) while a pending change in the line below
- * it would make that line read otherwise than the file does: an item whose only text is a deletion
- * is an item for a reader of the file, and empty, which can't follow text, for the newest view.
+ * Why an item can't move (up a level, or out of its list, or into the paragraph above it) while a
+ * pending change in the line below it would make that line read otherwise: an item that the change
+ * leaves empty (a deletion of all its text, an insertion that is all of it) is an item with text in
+ * some readings of the file and empty in others, which can't follow text and would turn it into a
+ * heading.
  */
 const BELOW_CHANGES =
-  "A pending change in the line below would make it read differently once this item has moved: an item that a deletion empties can't follow text, and would turn it into a heading. Accept or reject that change first.";
+  "A pending change in the line below would make it read differently once this item has moved: an item that the change leaves empty can't follow text, and would turn it into a heading. Accept or reject that change first.";
+
+/** Why an item can't go up a level where the line after it would become part of its text. */
+const ABSORBED =
+  "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
 
 /** The markers of tracked changes and comments, which the newest view doesn't show. */
 const MARKER = /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
 
 /**
- * Whether the line after `line`, if it holds a marker, would read otherwise without them: it can't
- * follow a paragraph in one reading (an item with no text, a number other than 1, an underline) and
- * can in the other. `indent` is the indentation that makes the line a child of what moves: any, or
- * exactly this many columns after the quote markers.
+ * A line as the original view reads it, every change on it rejected (an insertion's text goes, a
+ * deletion's comes back); null where that can't be told on one line (a split or a format change).
  */
-function readsOtherwiseBelow(state: EditorState, line: Line, indent?: number): boolean {
+function originalRow(row: string): string | null {
+  const text = row
+    .replace(/<!--ins [a-z0-9]+-->[^]*?<!--\/[a-z0-9]+-->/g, '')
+    .replace(/<!--sub [a-z0-9]+ ([^]*?)-->[^]*?<!--\/[a-z0-9]+-->/g, (_all, payload: string) =>
+      decodePayload(payload),
+    )
+    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) => decodePayload(payload))
+    .replace(/<!--\/[a-z0-9]+-->|<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  return /<!--(?:split|fmt) /.test(text) ? null : text;
+}
+
+/**
+ * Whether a line under a paragraph is text of it (or its underline) in each of the ways the file
+ * reads: as it is, as the newest view reads it and as the original view reads it.
+ */
+const readingsOf = (row: string): boolean[] => {
+  const original = originalRow(row);
+  return [row, row.replace(MARKER, ''), ...(original === null ? [] : [original])].map(readsAsText);
+};
+
+/**
+ * Whether the line after `line` holds a marker and is text of a paragraph above it in some of the
+ * ways it reads and not in all: it can't follow text in one reading (an item with no text, a number
+ * other than 1, an underline) and can in another.
+ */
+function readsOtherwiseBelow(state: EditorState, line: Line): boolean {
   if (line.number >= state.doc.lines) return false;
   const row = state.doc.line(line.number + 1).text;
-  const bare = row.replace(MARKER, '');
-  if (bare === row || BLANK.test(row)) return false;
-  if (indent !== undefined && (/^[ \t>]*/.exec(bare)?.[0].length ?? 0) !== indent) return false;
-  return readsAsText(bare) !== readsAsText(row);
+  if (BLANK.test(row) || row.replace(MARKER, '') === row) return false;
+  const reads = readingsOf(row);
+  return reads.some(Boolean) && !reads.every(Boolean);
+}
+
+/** A line's quote markers, each with the space after it. */
+const QUOTE_PREFIX = /^(?:[ \t]{0,3}>[ \t]?)*/;
+
+/** The columns of white space in front of a line's text after its quote markers; null with a tab. */
+function indentOf(text: string): number | null {
+  const white = /^[ \t]*/.exec(text.slice(QUOTE_PREFIX.exec(text)![0].length))![0];
+  return white.includes('\t') ? null : white.length;
+}
+
+/**
+ * The columns an item's marker and its text start at, after the quote markers: the text is the
+ * marker and the spaces after it, one to four, or one where the marker is alone or more follow.
+ * Null where a tab is in the way.
+ */
+function itemColumns(
+  state: EditorState,
+  item: SyntaxNode,
+): { marker: number; text: number } | null {
+  const mark = item.getChild('ListMark');
+  if (!mark) return null;
+  const line = state.doc.lineAt(mark.from);
+  const marker = indentOf(line.text);
+  const after = /^[ \t]*/.exec(line.text.slice(mark.to - line.from))![0];
+  if (marker === null || after.includes('\t')) return null;
+  const alone = line.text.slice(mark.to - line.from).trim() === '';
+  const spaces = alone || after.length > 4 ? 1 : Math.max(after.length, 1);
+  return { marker, text: marker + (mark.to - mark.from) + spaces };
+}
+
+/**
+ * The item that holds the last paragraph of `item` and its nested items (the paragraph a line right
+ * under them follows), or null where they end in anything else. A line that starts with a marker of
+ * a change is an HTML block to the parse and a paragraph to the views: it counts as a paragraph.
+ */
+function lastParagraphItem(state: EditorState, item: SyntaxNode): SyntaxNode | null {
+  let node: SyntaxNode = item;
+  for (;;) {
+    let last: SyntaxNode | null = null;
+    for (let child = node.lastChild; child; child = child.prevSibling) {
+      if (child.name !== 'ListMark' && child.name !== 'Task') {
+        last = child;
+        break;
+      }
+    }
+    if (!last) return null;
+    if (last.name === 'Paragraph') return node;
+    if (last.name === 'CommentBlock' || last.name === 'HTMLBlock') {
+      return /<!--(?:\/|(?:split|ins|del|sub|fmt|cmt|hl) )/.test(state.sliceDoc(last.from, last.to))
+        ? node
+        : null;
+    }
+    if (last.name !== 'BulletList' && last.name !== 'OrderedList') return null;
+    const inner = last.getChildren('ListItem').at(-1);
+    if (!inner) return null;
+    node = inner;
+  }
+}
+
+/**
+ * Why `items[0]` can't go up a level (to the indentation of `items[1]`, the item it is in): the
+ * line right after it and its nested items, which stays where it is, would come to stand under the
+ * text of its last paragraph, where a number other than 1, an empty item or an underline can't
+ * start a block and is text of it. That is so where the line is indented far enough to continue the
+ * item that holds that paragraph once it has moved (its text column, less the columns it moves:
+ * the nested items move with it when the format writes the change, `shifted`; the plain edit moves
+ * the item's own line only), and was not, where it stood: a line that continued the paragraph
+ * before is text of it as it was. The format's own check reads the next item at the item's
+ * indentation only, and is not made at all where it refuses first (tabs, a pending break). Null
+ * where the line reads as an item in every reading, or lands elsewhere.
+ */
+function absorbedBelow(state: EditorState, items: Item[], shifted: boolean): string | null {
+  const [moved, parent] = items;
+  if (!moved || !parent) return null;
+  const { doc } = state;
+  const last = doc.lineAt(moved.node.to);
+  if (last.number >= doc.lines) return null;
+  const row = doc.line(last.number + 1).text;
+  if (BLANK.test(row)) return null;
+  const reads = readingsOf(row);
+  if (!reads.some(Boolean)) return null;
+  const deepest = lastParagraphItem(state, moved.node);
+  if (!deepest) return null;
+  const own = itemColumns(state, moved.node);
+  const inner = itemColumns(state, deepest);
+  const up = itemColumns(state, parent.node);
+  const at = indentOf(row);
+  // A tab in the way (the format refuses it, and the columns can't be told): keep the line apart.
+  if (own && inner && up && at !== null) {
+    const shift = own.marker - up.marker;
+    const after = shifted || deepest === moved.node ? inner.text - shift : inner.text;
+    if (!(at >= after && at < inner.text)) return null;
+  }
+  if (!reads.every(Boolean)) return BELOW_CHANGES;
+  const number = /^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row.replace(MARKER, ''))?.[1];
+  return number !== undefined && number !== '1' ? OUTDENT_NUMBERED_CHILD : ABSORBED;
 }
 
 /** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
@@ -190,6 +322,13 @@ function join(
   userEvent: 'delete.backward.block' | 'delete.forward.block',
 ): KeyEdit {
   const { doc } = state;
+  // The item that `below` is the first block of goes into the text above: its marker is taken, as
+  // when Backspace takes the first item out of its list, and the line after it reads otherwise in
+  // some readings if a pending change empties it (#292).
+  const taken = itemStartedBy(state, below, containerNodes(state, below));
+  if (taken && !itemBefore(taken) && readsOtherwiseBelow(state, doc.lineAt(taken.to))) {
+    return { ...nothing(state), refusal: BELOW_CHANGES };
+  }
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
   if (above.kind === 'heading' && above.setext && state.field(trackingField, false)) {
@@ -488,14 +627,8 @@ function backspaceAtItem(
     const parent = nodes.at(-2);
     if (parent?.name === 'ListItem') {
       // The items after it would become its children, and a numbered one other than 1 can't start a
-      // list under its text: it would be text (#248, walk seed 332; #292). The format knows each
-      // such shape (`outdent` keeps its refusal); a pending change that empties the next item is the
-      // key's to see, for the format reads it as an item.
-      const last = state.doc.lineAt(item.to);
-      const at = state.doc.lineAt(item.from);
-      const lead = /^[ \t>]*/.exec(at.text.slice(0, item.from - at.from))?.[0].length ?? 0;
-      if (readsOtherwiseBelow(state, last, lead))
-        return { ...nothing(state), refusal: BELOW_CHANGES };
+      // list under its text: it would be text (#248, walk seed 332; #292): `outdent` keeps the
+      // format's refusal and checks the rest itself.
       return outdent(state, block);
     }
     return outOfList(state, block, item, prev);
@@ -562,6 +695,10 @@ function outdent(state: EditorState, block: Block): KeyEdit {
     OUTDENT_NUMBERED_CHILD,
   );
   if (change?.refusal) return change;
+  // The format's own check is not exact, and not made at all where it refuses first (tabs, a
+  // pending break), where the plain edit below was written: so the line after is looked at here.
+  const words = absorbedBelow(state, itemsAround(state, block), change !== null);
+  if (words) return { ...nothing(state), userEvent, refusal: words };
   if (change) return { ...change, caretAt: block.text.from };
   // The block doesn't stand alone for the format: its marker line takes its parent's indentation.
   const items = itemsAround(state, block);
@@ -599,7 +736,14 @@ function outOfList(
     return { ...nothing(state), refusal: BELOW_CHANGES };
   }
   const list = item.parent;
-  const alone = (list?.getChildren('ListItem').length ?? 0) <= 1;
+  // A one-item list is the format's block change, which writes nothing for the line below: a number
+  // other than 1 there is text of the paragraph once the item is one (the key writes the blank line
+  // that keeps it apart), so it takes the way of a longer list.
+  const underItem = doc.lineAt(item.to);
+  const below = underItem.number < doc.lines ? doc.line(underItem.number + 1).text : '';
+  const alone =
+    (list?.getChildren('ListItem').length ?? 0) <= 1 &&
+    (BLANK.test(below) || !readingsOf(below).some(Boolean));
   if (alone) {
     const change = formatted(state, block.text.from, { kind: 'block', to: 'p' }, userEvent);
     if (change) return { ...change, caretAt: block.text.from };
@@ -933,11 +1077,15 @@ function onlyCharOfFirstLine(
   if (forward ? head !== start : head !== first.to) return null;
   if (first.to - start > 32 || first.number >= doc.lineAt(block.lines.to).number) return null;
   const line = state.sliceDoc(start, first.to);
-  if (line.includes('<!--')) return null;
-  if (!/^\P{M}\p{M}*$/u.test(line)) return null;
-  // The next line's text, after its quote markers and indentation.
+  if (line.includes('<!--') || line === '' || findClusterBreak(line, 0) !== line.length)
+    return null;
+  // The next line's text, after its quote markers and indentation. As the first line it is the
+  // start of the block: syntax there (a number, a bullet, a `>`, a `#`, an underline) is no longer
+  // the text it was as a wrapped line, so only a line of words takes the place.
   const next = doc.line(first.number + 1);
   const to = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
+  const words = next.text.slice(to - next.from);
+  if (!/^[\p{L}\p{N}]/u.test(words) || /^\d{1,9}[.)](?:[ \t]|$)/.test(words)) return null;
   return edit(
     state,
     [{ from: start, to }],
