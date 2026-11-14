@@ -283,6 +283,23 @@ function lastInItem(state: EditorState, block: Block, item: Item): boolean {
   return true;
 }
 
+/** Whether the line break in front of `line` is the one of a pending split of the author's own. */
+function ownSplitAbove(state: EditorState, line: Line): boolean {
+  if (line.number < 2) return false;
+  const me = state.facet(authorFacet)?.handle;
+  const above = state.doc.line(line.number - 1);
+  return (
+    state
+      .field(parsedField, false)
+      ?.marks.some(
+        (mark) =>
+          mark.kind === 'split' &&
+          mark.entry.by === me &&
+          mark.segments.some((g) => g.open.to === above.to),
+      ) ?? false
+  );
+}
+
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
 function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): KeyEdit {
   const { doc } = state;
@@ -294,10 +311,16 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     // Up one level: the item's syntax as its parent's next item has it.
     const target = `${parent.indent}${nextMarker(state, parent)}${parent.after}${item.task ? '[ ] ' : ''}`;
     const change = retype(line, line.to, target);
+    // The item a Return of the author's own made, with Track Changes on: its line is the syntax of
+    // that Return's pending split, and the new syntax goes over it as it is, as Tab's does, with no
+    // mark. Typed over, the format takes the break with the old marker and writes the new one at
+    // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440).
+    const own = state.field(trackingField, false) && ownSplitAbove(state, line);
     return {
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),
       userEvent: 'input.break',
+      ...(own ? { final: true, caretAt: line.to } : {}),
     };
   }
   // Out of the list: an empty paragraph after it, in the containers around it. With Track Changes
