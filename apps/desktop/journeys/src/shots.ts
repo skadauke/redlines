@@ -17,6 +17,8 @@ export function shotsDir(info: TestInfo): string {
   return join(info.outputDir, 'shots');
 }
 
+const taken = new Map<string, number>();
+
 /** Takes the screenshot, writes it to the run's shots folder and attaches it to the report. */
 export async function writeShot(
   page: Page,
@@ -26,7 +28,12 @@ export async function writeShot(
 ): Promise<string> {
   const dir = shotsDir(info);
   await mkdir(dir, { recursive: true });
-  const path = join(dir, `${name}.png`);
+  // A name is a file's: no path characters in it, and a name used twice gets a number.
+  const base = name.replace(/[^\w.-]+/g, '-');
+  const key = join(dir, base);
+  const used = (taken.get(key) ?? 0) + 1;
+  taken.set(key, used);
+  const path = join(dir, `${used === 1 ? base : `${base}-${used}`}.png`);
   await page.screenshot({ path, ...(options.clip ? { clip: options.clip } : {}) });
   await info.attach(name, { path, contentType: 'image/png' });
   return path;

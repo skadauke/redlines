@@ -31,7 +31,7 @@ test('places the caret, clicks text, and takes a named screenshot', async ({ sta
   const j = await start({ doc: 'alpha beta gamma\n' });
   await j.click('gamma');
   await j.type('X', 'burst');
-  expect(await j.text()).toContain('X');
+  expect(await j.text()).toBe('alpha beta Xgamma\n');
   const path = await j.shot('harness');
   expect(path).toMatch(/harness\.png$/);
 });

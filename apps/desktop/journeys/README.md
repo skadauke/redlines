@@ -42,11 +42,14 @@ look (`scheme` light or dark, `textSize` 1 or 2 for 100% or 200%). Then:
 - reading: `text()`, `drawn()`, `caret()`, `selectedText()`, `uiState()`;
 - placing the caret (setup, not the journey): `caretAfter(text)`, `caretBefore`, `caretAtEnd`,
   `caretAtStart`, `selectText(text)`, `place(from, to)`;
-- keys: `press('Tab', 'Shift+Tab', 'Enter', 'Meta+b')`, `type(text)` at human speed, `burst(text)`
+- keys: `press('Tab', 'Shift+Tab', 'Enter', 'ControlOrMeta+b')`, `type(text)` at human speed, `burst(text)`
   with no wait between keys, `after(key, text)` a key and then a burst, `paste(text, html?)`;
 - the mouse: `click(text | locator, { button })`, `hover`, `drag(from, to)`, `pointOf(text)`,
   `pointAt(offset)`;
 - looking: `settle()`, `shot(name)`.
 
-Keys and the mouse are real browser events. Only setup and reading go through the page's hook
-(`window.__redlines`, `src/journey-hook.ts`, set only in development in a plain tab).
+Keys and the mouse are real browser events. A paste is the browser's `paste` event, made up and
+sent to the editor (it reaches the editor's paste handling, not the browser's own); the journey
+fails if the editor didn't take it. Only setup and reading go through the page's hook
+(`window.__redlines`, `src/journey-hook.ts`, set only in development in a plain tab). A script
+error in the page fails the journey. Not in CI yet: a later PR adds the job.

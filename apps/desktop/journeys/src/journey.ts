@@ -110,6 +110,14 @@ export class Journey {
     return this.page.evaluate(() => window.__redlines!.editor.getDoc());
   }
 
+  /**
+   * The text as CodeMirror holds it, with LF line breaks, which is what offsets (`place`,
+   * `caret`) count. It differs from `text()` only in a file with CRLF line breaks.
+   */
+  private cmText(): Promise<string> {
+    return this.page.evaluate(() => window.__redlines!.editor.view.state.doc.toString());
+  }
+
   /** What the editor draws, as text: what a person reads, with the markup the view hides gone. */
   drawn(): Promise<string> {
     return this.page.evaluate(() => window.__redlines!.editor.view.contentDOM.innerText);
@@ -128,7 +136,7 @@ export class Journey {
   /** The text under the selection. */
   async selectedText(): Promise<string> {
     const { anchor, head } = await this.caret();
-    return (await this.text()).slice(Math.min(anchor, head), Math.max(anchor, head));
+    return (await this.cmText()).slice(Math.min(anchor, head), Math.max(anchor, head));
   }
 
   /** The editor's UI state: the view, Track Changes and so on. */
@@ -155,7 +163,7 @@ export class Journey {
 
   /** The offset just after the first `needle` at or after `from`; fails the journey when absent. */
   async offsetAfter(needle: string, from = 0): Promise<number> {
-    const at = (await this.text()).indexOf(needle, from);
+    const at = (await this.cmText()).indexOf(needle, from);
     expect(at, `"${needle}" is in the document`).toBeGreaterThanOrEqual(0);
     return at + needle.length;
   }
@@ -169,7 +177,7 @@ export class Journey {
   }
 
   async caretAtEnd(): Promise<void> {
-    await this.place((await this.text()).length);
+    await this.place((await this.cmText()).length);
   }
 
   async caretAtStart(): Promise<void> {
@@ -184,7 +192,10 @@ export class Journey {
 
   // ----- Keys and typing -----
 
-  /** Presses keys one after another: 'Tab', 'Shift+Tab', 'Enter', 'ArrowDown', 'Meta+b'. */
+  /**
+   * Presses keys one after another: 'Tab', 'Shift+Tab', 'Enter', 'ArrowDown'. A shortcut is
+   * 'ControlOrMeta+b', which is ⌘B on a Mac and Ctrl-B elsewhere, as the editor's `Mod` is.
+   */
   async press(...keys: string[]): Promise<void> {
     for (const key of keys) await this.page.keyboard.press(key);
   }
@@ -211,9 +222,15 @@ export class Journey {
     await humanType(this.page, text, 'burst');
   }
 
-  /** Pastes plain text, and HTML too when given, as the browser's paste does. */
+  /**
+   * Pastes plain text, and HTML too when given. The event is synthesized (a `paste` ClipboardEvent
+   * with the data, sent to the editor, as the browser sends the one a ⌘V makes), so it reaches the
+   * editor's paste handling and nothing of the browser's own: there is no `beforeinput`, and a
+   * handler that doesn't take the event leaves the document as it was. The journey fails when
+   * the editor didn't handle it at all.
+   */
   async paste(text: string, html?: string): Promise<void> {
-    await this.page.evaluate(
+    const handled = await this.page.evaluate(
       ([plain, rich]) => {
         const { view } = window.__redlines!.editor;
         view.focus();
@@ -226,9 +243,11 @@ export class Journey {
           cancelable: true,
         });
         view.contentDOM.dispatchEvent(event);
+        return event.defaultPrevented;
       },
       [text, html ?? ''],
     );
+    expect(handled, 'the editor took the paste').toBe(true);
   }
 
   // ----- The mouse -----
@@ -295,8 +314,7 @@ export class Journey {
 
   /**
    * Takes a named screenshot of the window, for the look review: it is written to the run's shots
-   * folder (see `shots.ts`) and attached to the report. It is never compared with anything: a
-   * journey that guards a look against change uses `baseline` too.
+   * folder (see `shots.ts`) and attached to the report. It is never compared with anything.
    */
   async shot(
     name: string,
@@ -310,7 +328,8 @@ export class Journey {
 /**
  * The journeys' test. `start` opens the page with a document in a state and gives a `Journey`; the
  * `scheme` and `textSize` options are the run's look, which a project of the config can change
- * (`use: { scheme: 'dark', textSize: 2 }`) and `start` can override.
+ * (`defineConfig<JourneyOptions>` and `use: { scheme: 'dark', textSize: 2 }`) and `start` can
+ * override. A script error in the page fails the journey.
  */
 export const test = base.extend<
   JourneyOptions & { start: (options?: StartOptions) => Promise<Journey> }
@@ -318,6 +337,8 @@ export const test = base.extend<
   scheme: ['light', { option: true }],
   textSize: [1, { option: true }],
   start: async ({ page, scheme, textSize }, use, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
     await use(async (options = {}) => {
       const journey = new Journey(page, testInfo, {
         scheme: options.scheme ?? scheme,
@@ -326,6 +347,7 @@ export const test = base.extend<
       await openPage(page, journey.options, options);
       return journey;
     });
+    expect(errors, 'no script error in the page').toEqual([]);
   },
 });
 
@@ -346,21 +368,33 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
     },
     [look.scheme, look.textSize] as const,
   );
-  await page.goto('/');
-  await page.waitForFunction(() => window.__redlines !== undefined, undefined, { timeout: 60_000 });
-  await page.evaluate(() => document.fonts.ready);
-  // Nothing moves on its own: no blinking caret, no transitions, so a screenshot is the same twice.
+  // A dev server that has not seen a dependency before reloads the page once when it finds it, which
+  // destroys the context under a wait: a start is tried again.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto('/');
+      await page.waitForFunction(() => window.__redlines !== undefined, undefined, {
+        timeout: 60_000,
+      });
+      await page.evaluate(() => document.fonts.ready);
+      break;
+    } catch (error) {
+      if (attempt === 3) throw error;
+    }
+  }
+  // Nothing moves on its own: no blinking caret and no transitions, so a screenshot is the same twice.
   await page.addStyleTag({
-    content: `*, *::before, *::after { transition: none !important; animation: none !important; caret-color: auto; }`,
+    content: `*, *::before, *::after { transition: none !important; animation: none !important; }`,
   });
   if (options.doc !== undefined) {
     await page.evaluate((text) => window.__redlines!.controller.createWith(text), options.doc);
   }
   if (options.tracking !== undefined) {
-    await page.evaluate(
+    const switched = await page.evaluate(
       (on) => window.__redlines!.editor.setTracking(on, { inFile: false }),
       options.tracking,
     );
+    expect(switched, `Track Changes switched ${options.tracking ? 'on' : 'off'}`).toBe(true);
   }
   if (options.view !== undefined) {
     await page.evaluate((view) => window.__redlines!.editor.setViewMode(view), options.view);

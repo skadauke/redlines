@@ -24,7 +24,7 @@ apps/desktop/quicklook/build/
 # Vitest output a reporter or a crashed run can leave behind.
 .vitest/
 
-# What a journeys run leaves behind (apps/desktop/journeys): the report, the traces, the diffs and
-# the screenshots of the run, which are never the approved baselines.
+# What a journeys run leaves behind (apps/desktop/journeys): the report, the traces and the
+# screenshots of the run.
 apps/desktop/journeys/test-results/
 apps/desktop/journeys/playwright-report/

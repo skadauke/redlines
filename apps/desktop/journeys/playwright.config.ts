@@ -4,8 +4,10 @@ import { defineConfig, devices } from '@playwright/test';
 // its saves in memory, and has a scripted agent in place of the agent programs), in WebKit, the
 // engine the app draws with. The server is started for the run, on JOURNEYS_PORT (1482 unless a
 // lane has its own port), and one that is already running there is reused when not in CI.
-// `JOURNEYS_BASE_URL` points the run at a server you started yourself, and then none is started.
+// A server already running on that port is driven as it is, whatever code it serves: in your own
+// worktree, use your own port. `JOURNEYS_BASE_URL` points the run at a server you started yourself, and then none is started.
 const port = Number(process.env['JOURNEYS_PORT'] ?? 1482);
+if (!Number.isInteger(port) || port < 1) throw new Error('JOURNEYS_PORT is not a port number');
 const baseURL = process.env['JOURNEYS_BASE_URL'] ?? `http://localhost:${port}`;
 
 export default defineConfig({
@@ -20,12 +22,19 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL,
-    // One size and one pixel density, so that a screenshot is the same on every run.
-    viewport: { width: 1280, height: 800 },
-    deviceScaleFactor: 1,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'webkit', use: { ...devices['Desktop Safari'], deviceScaleFactor: 1 } }],
+  projects: [
+    {
+      name: 'webkit',
+      // One size and one pixel density, so that a screenshot is the same on every run.
+      use: {
+        ...devices['Desktop Safari'],
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+      },
+    },
+  ],
   webServer: process.env['JOURNEYS_BASE_URL']
     ? undefined
     : {

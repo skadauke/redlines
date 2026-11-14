@@ -5,7 +5,8 @@ import type { Page } from '@playwright/test';
 
 /**
  * 'human' is a key every 70 ms, a steady typist; 'fast' is every 25 ms; 'burst' waits for nothing,
- * and sends the next key as soon as the page has taken the last, which is faster than any hand.
+ * and sends the next key as soon as the page has taken the last (each is still a round trip to the
+ * browser, so it is a rush of keys, not keys inside one turn of the page's event loop).
  * A number is a delay in milliseconds.
  */
 export type TypingSpeed = 'human' | 'fast' | 'burst' | number;
@@ -26,7 +27,8 @@ export async function humanType(page: Page, text: string, speed: TypingSpeed): P
   for (const char of text) {
     if (char === '\n' || char === '\t') {
       await flush();
-      await page.keyboard.press(char === '\n' ? 'Enter' : 'Tab', { delay });
+      await page.keyboard.press(char === '\n' ? 'Enter' : 'Tab');
+      if (delay) await page.waitForTimeout(delay);
     } else run += char;
   }
   await flush();
