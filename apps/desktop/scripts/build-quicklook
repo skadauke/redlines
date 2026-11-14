@@ -478,6 +478,10 @@ def image_checks(checks: Checks) -> None:
         (project / "images" / "logo.svg").write_text(SVG, encoding="utf-8")
         (project / "images" / "fake.png").write_text("This is text, whatever its name says.\n", encoding="utf-8")
         (project / "images" / "mismatch.jpg").write_bytes(png())
+        # A document type whose subset holds `]>` in a quoted value: the second is an SVG whatever it holds,
+        # the first is an HTML page that only starts as one would, and has a script.
+        (project / "images" / "entity.svg").write_text('<!DOCTYPE svg [ <!ENTITY e "]>"> ]>\n' + SVG.split("\n", 2)[2], encoding="utf-8")
+        (project / "images" / "evil.svg").write_text('<!DOCTYPE html [ <!ENTITY e "]><svg "> ]><html><body><script>alert(1)</script></body></html>\n', encoding="utf-8")
         (project / "images" / ".h.png").write_bytes(png())
         (project / ".hidden" / "h.png").write_bytes(png())
         with open(project / "images" / "big.png", "wb") as big:
@@ -492,10 +496,11 @@ def image_checks(checks: Checks) -> None:
             "# Pictures\n\n"
             "![ok](../images/ok.png) ![local](local.png) ![spaced](my%20pics/a%20b.png) "
             "![svg](../images/logo.svg) ![gif](../images/dot.gif) ![link in](../link-in.png) "
+            "![mismatch](../images/mismatch.jpg) ![entity](../images/entity.svg) ![windows](..\\images\\ok.png) "
             f"![absolute]({absolute_inside}) ![again](../images/ok.png)\n\n"
             "Refused: ![link out](../link-out.png) ![outside](../../outside.png) "
             f"![absolute outside]({base / 'outside.png'}) ![hidden folder](../.hidden/h.png) "
-            "![hidden file](../images/.h.png) ![fake](../images/fake.png) ![mismatch](../images/mismatch.jpg) "
+            "![hidden file](../images/.h.png) ![fake](../images/fake.png) ![evil](../images/evil.svg) "
             "![big](../images/big.png) ![missing](../images/missing.png) ![folder](../images) "
             "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n",
             encoding="utf-8",
@@ -504,7 +509,7 @@ def image_checks(checks: Checks) -> None:
         listed = subprocess.run([HARNESS, "--list-images", script, document], capture_output=True, text=True)
         checks.ok(listed.returncode == 0, "the images of a document are listed", listed.stderr.strip())
         found = json.loads(listed.stdout) if listed.returncode == 0 else {"asked": [], "loaded": [], "root": ""}
-        checks.ok(found["root"] == str(project), "the project is the repository the document is in", f"{found['root']} vs {project}")
+        checks.ok(found["root"] == str(project) and found["whole"] is True, "the project is the repository the document is in, with its subfolders", f"{found['root']} vs {project}")
         loaded = {row["source"]: row for row in found["loaded"]}
         wanted = {
             "../images/ok.png": "image/png",
@@ -513,13 +518,17 @@ def image_checks(checks: Checks) -> None:
             "../images/logo.svg": "image/svg+xml",
             "../images/dot.gif": "image/gif",
             "../link-in.png": "image/png",
+            # Named as one raster image and holding another, it is the one it holds: as the app serves it.
+            "../images/mismatch.jpg": "image/png",
+            "../images/entity.svg": "image/svg+xml",
+            "..\\images\\ok.png": "image/png",
             str(absolute_inside): "image/png",
         }
         for source, kind in wanted.items():
             checks.ok(loaded.get(source, {}).get("type") == kind, f"the image {Path(source).name} is loaded as {kind}", str(loaded.get(source)))
         refused = [
             "../link-out.png", "../../outside.png", str(base / "outside.png"), "../.hidden/h.png", "../images/.h.png",
-            "../images/fake.png", "../images/mismatch.jpg", "../images/big.png", "../images/missing.png", "../images",
+            "../images/fake.png", "../images/evil.svg", "../images/big.png", "../images/missing.png", "../images",
         ]  # fmt: skip
         for source in refused:
             checks.ok(source in found["asked"] and source not in loaded, f"the image {Path(source).name} is asked for and not loaded")
@@ -530,7 +539,7 @@ def image_checks(checks: Checks) -> None:
         page = subprocess.run([HARNESS, script, document, "--images"], capture_output=True, text=True).stdout
         for row in found["loaded"]:
             checks.ok(f'src="cid:{row["name"]}"' in page, f"the page draws {row['source']!r} as cid:{row['name']}")
-        for alt in ["link out", "outside", "absolute outside", "hidden folder", "hidden file", "fake", "mismatch", "big", "missing", "folder", "remote", "data"]:
+        for alt in ["link out", "outside", "absolute outside", "hidden folder", "hidden file", "fake", "evil", "big", "missing", "folder", "remote", "data"]:
             checks.ok(f'<span class="rl-image">{alt}</span>' in page, f"the page shows {alt!r} as its alt text")
         checks.ok(re.search(r'<img[^>]*src="(?!cid:)', page) is None, "the page draws no image from anywhere but its attachments")
         checks.ok("img-src cid:" in page, "the page's policy allows images from its attachments")
@@ -549,6 +558,37 @@ def image_checks(checks: Checks) -> None:
         found = json.loads(listed.stdout) if listed.returncode == 0 else {"loaded": [], "root": ""}
         checks.ok(found["root"] == str(loose), "a document with no repository is its own project", found["root"])
         checks.ok(sorted(row["source"] for row in found["loaded"]) == ["pic.png", "sub/p.png"], "it loads its own folder's images, and not those above it", str(found["loaded"]))
+
+        # A project that is too broad, the home folder, a folder above it or the disk's root, is its
+        # document's own folder alone, with no subfolder: the app treats it so, and a repository in a
+        # person's home folder (dotfiles) or a document at the top of it must not let a document
+        # reach the pictures of the whole account.
+        def broad(label: str, home: Path, note: Path, wanted: List[str], root: Path, whole: bool) -> None:
+            listed = subprocess.run([HARNESS, "--list-images", "--home", home, script, note], capture_output=True, text=True)
+            seen = json.loads(listed.stdout) if listed.returncode == 0 else {"loaded": [], "root": "", "whole": None}
+            checks.ok(sorted(row["source"] for row in seen["loaded"]) == sorted(wanted), f"{label}: loads {wanted}", str(seen["loaded"]))
+            checks.ok(seen["root"] == str(root) and seen["whole"] is whole, f"{label}: the project is {root.name}, {'with' if whole else 'without'} its subfolders", f"{seen['root']} {seen['whole']}")
+
+        account = base / "account"
+        (account / ".git").mkdir(parents=True)
+        for folder_name in ("Downloads/sub", "Pictures", "code/.git", "code/docs", "code/img"):
+            (account / folder_name).mkdir(parents=True, exist_ok=True)
+        for picture in ("Downloads/pic.png", "Downloads/sub/s.png", "Pictures/private.png", "code/img/ok.png", "top.png"):
+            (account / picture).write_bytes(png())
+        pictures = "![d](pic.png) ![s](sub/s.png) ![p](../Pictures/private.png) ![t](../top.png)\n"
+        (account / "Downloads" / "x.md").write_text(pictures, encoding="utf-8")
+        broad("a repository in the home folder", account, account / "Downloads" / "x.md", ["pic.png"], account / "Downloads", False)
+        (account / "top.md").write_text("![a](top.png) ![p](Pictures/private.png) ![s](Downloads/sub/s.png)\n", encoding="utf-8")
+        broad("a document in the home folder", account, account / "top.md", ["top.png"], account, False)
+        (account / "code" / "docs" / "page.md").write_text("![ok](../img/ok.png) ![up](../../top.png)\n", encoding="utf-8")
+        broad("a repository below the home folder", account, account / "code" / "docs" / "page.md", ["../img/ok.png"], account / "code", True)
+
+        def too_broad(folder: str, home: str) -> str:
+            return subprocess.run([HARNESS, "--too-broad", folder, home], capture_output=True, text=True).stdout.strip()
+
+        for folder, home, expected in [("/", "/Users/ada", "true"), ("/Users", "/Users/ada", "true"), ("/Users/ada", "/Users/ada", "true"),
+                                       ("/Users/ada/code", "/Users/ada", "false"), ("/Users/grace", "/Users/ada", "false"), ("/Volumes/Backup", "/Users/ada", "false")]:  # fmt: skip
+            checks.ok(too_broad(folder, home) == expected, f"{folder} is {'too broad' if expected == 'true' else 'not too broad'} a project for {home}", too_broad(folder, home))
 
 
 def check() -> None:

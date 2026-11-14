@@ -2,13 +2,16 @@
 // JavaScriptCore, for the checks of scripts/build-quicklook and for timing it by hand.
 //
 //     preview-render <preview.js> <file> [--name NAME] [--cut] [--max-bytes N] [--repeat N] [--images]
-//     preview-render --list-images <preview.js> <file>
+//     preview-render --list-images [--home FOLDER] <preview.js> <file>
+//     preview-render --too-broad <folder> <home>
 //     preview-render --fallback <file>
 //     preview-render --dynamic-type <extension>
 //
 // The first prints the page on standard output and says on standard error how long it took; with
 // --images it loads the document's local images as the extension does, and the page draws them. What
-// was asked for and what was loaded, as JSON, is --list-images. The
+// was asked for and what was loaded, as JSON, is --list-images; --home names the home folder that a
+// project is not to contain (the person's own, by default). --too-broad says whether a folder is too
+// broad to be a project, given a home folder. The
 // second prints the page that the extension shows when the renderer fails. The third prints the type
 // that this Mac gives files with that extension, which is how the extension's dynamic types are
 // checked (scripts/build-quicklook).
@@ -38,17 +41,36 @@ if arguments.first == "--fallback" {
     exit(0)
 }
 
+if arguments.first == "--too-broad" {
+    guard arguments.count == 3 else { fail("usage: preview-render --too-broad <folder> <home>") }
+    print(PreviewImages.isTooBroad(arguments[1], home: arguments[2]))
+    exit(0)
+}
+
+/// The home folder that `--home` names, taken out of the arguments, and none when it isn't there.
+func takeHome(_ arguments: inout [String]) -> String?? {
+    guard let at = arguments.firstIndex(of: "--home") else { return nil }
+    guard at + 1 < arguments.count else { fail("--home needs a folder") }
+    let home = arguments[at + 1]
+    arguments.removeSubrange(at...at + 1)
+    return .some(home)
+}
+
 if arguments.first == "--list-images" {
-    guard arguments.count == 3 else { fail("usage: preview-render --list-images <preview.js> <file>") }
+    var rest = Array(arguments.dropFirst())
+    let home = takeHome(&rest)
+    guard rest.count == 2 else { fail("usage: preview-render --list-images [--home FOLDER] <preview.js> <file>") }
     do {
-        let script = try String(contentsOfFile: arguments[1], encoding: .utf8)
-        let file = URL(fileURLWithPath: arguments[2])
+        let script = try String(contentsOfFile: rest[0], encoding: .utf8)
+        let file = URL(fileURLWithPath: rest[1])
         let text = try PreviewText.read(file).text
         let renderer = try PreviewRenderer(script: script)
         let asked = try renderer.imageSources(text: text, cut: false)
-        let loaded = PreviewImages.load(asked, from: file)
+        let homeFolder: String? = home ?? PreviewImages.homeFolder()
+        let loaded = PreviewImages.load(asked, from: file, home: homeFolder)
         let rows = loaded.map { ["source": $0.source, "name": $0.image.name, "type": $0.image.mimeType, "bytes": String($0.image.data.count)] }
-        let listing: [String: Any] = ["asked": asked, "loaded": rows, "root": PreviewImages.projectRoot(of: file)]
+        let project = PreviewImages.project(of: file, home: homeFolder)
+        let listing: [String: Any] = ["asked": asked, "loaded": rows, "root": project.root, "whole": project.whole]
         FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: listing, options: [.sortedKeys]))
         exit(0)
     } catch { fail("\(error)") }

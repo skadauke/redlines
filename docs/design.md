@@ -1807,10 +1807,12 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
     end, isn't read.
   - **Images.** An image is drawn when it is a file inside the document's project, its repository
-    or else its own folder (the rule that the app's own preview loads images by, §6.5): no hidden
-    file's or folder's, with no link leading out of the project to it, and whose name and first
-    bytes both say it is an image the preview shows (PNG, JPEG, GIF, WebP, AVIF, HEIC, BMP, ICO,
-    TIFF or SVG). It loads at most 40 images, 16 MB each and 48 MB in all; any other image, and any
+    or else its own folder (the rule that the app's own preview loads images by, §6.5; a project
+    that is too broad, the home folder, a folder above it or the disk's root, is its document's own
+    folder alone, with no subfolder): no hidden file's or folder's, with no link leading out of the
+    project to it, and whose name and first bytes both say it is an image the preview shows (PNG,
+    JPEG, GIF, WebP, AVIF, HEIC, JPEG XL, BMP, ICO, TIFF or SVG). It loads at most 40 images, 16 MB
+    each and 48 MB in all; any other image, and any
     that isn't there, is its alt text. An image from a server, or in a `data:` address, is never
     loaded, so that a preview never tells a server that a file was opened. A sandboxed extension
     can't read the files beside its document, so the extension has the sandbox's read-only
