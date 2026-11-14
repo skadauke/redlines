@@ -272,8 +272,9 @@ applies its inverse:
 | `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above (§3.7)      |
 
-- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
-  `md-image`, which restores Markdown image syntax when an image resize is rejected.
+- Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE` (an alert's
+  old type, below), and `md-image`, which restores Markdown image syntax when an image resize is
+  rejected.
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
@@ -882,6 +883,43 @@ away.
   or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
+**Alerts.** A quote whose first line is a type in brackets, `> [!NOTE]`, is a GitHub alert, and
+the editor draws it as a box with an icon and a title. The type is syntax, not words, as bold's
+stars are: GitHub's five types (`NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`) are written in
+capitals, and any other type that a file has, as `[!info]`, in lowercase, and all are read in any
+case. A change of the type is one mark on the whole alert, `was=callout-TYPE`, with the old type in
+lowercase, and `was=callout-TYPE=WORD` with the old word as written where the serializer would
+write it otherwise (`was=callout-note=note` for `[!note]`). The opener stands alone on the line
+before the alert, with a blank line after it, and the closer at the end of the alert's last line,
+so that every line of the alert is as it was and every renderer reads an alert (§3.3); the word in
+the brackets is the new type.
+
+```markdown
+<!--fmt q2hw was=callout-note-->
+
+> [!TIP]
+> Useful information.<!--/q2hw-->
+```
+
+- Rejecting writes the old word back and takes the markers away, and accepting takes the markers
+  away. The new type is any word of lowercase letters, digits and hyphens that starts with a
+  letter. A title or a fold mark after the type, which GitHub shows as text, is kept as written.
+- Only an alert at the left edge changes type: a quote that every line of starts with `>`, whose
+  first line is the type, with a blank line before it (or the start of the file, the end of front
+  matter, a heading, a thematic break or a closing fence) and after it (or the end of the file). A quote in a list item
+  or in another quote, a quote whose first line is anything else, and a quote with a line of text
+  that goes on from it are refused, in words that say what they are. The caret may be in any line
+  of the alert.
+- It works with the pending changes of the author's own in the alert, and with comments and
+  highlights. Another person's pending change in it, and one that adds or takes away a line break in
+  or around it, is decided first, as for every block change.
+- The author's own change of the type is changed in place: turned back to the old type it goes,
+  and changed again it stays one mark, with the first old type. In an alert of the author's own
+  pending insertion the type is written plainly, with no mark. With Track Changes off the new type
+  is written plainly.
+- A change of the type changes no words (the readings that decisions are held to leave the type
+  out), so every order of decisions reads alike.
+
 ## 3. Where markers go
 
 Markers sit in Markdown that other programs parse, so they may only go where no renderer changes
@@ -897,7 +935,16 @@ at the outer edge of a whole inline construct. A marker never goes:
 
 1. inside a code span, autolink, bare URL, `www.` or email link, entity, backslash escape,
    footnote reference, emoji shortcode, math, inline HTML tag, task checkbox, list marker or
-   heading `#` sequence;
+   heading `#` sequence. An emoji is one character, which no marker parts, though it may be several
+   code points (a flag, a keycap, a skin tone, a family and any other ZWJ sequence, a heart with
+   its variation selector) and is two UTF-16 units outside the first plane: a position inside one
+   is on the whole of it, as inside an entity, so that a change that starts inside one takes all of
+   it as a substitution (`<!--sub k3x9 👨‍👩‍👧-->👨<!--/k3x9-->`). A change that starts or ends between
+   the two units of one character, or inserts half of one, is refused, in words that say so: it
+   would leave half a character in the file, which no tool reads back (the editor never makes one;
+   a program that counts in code units can). A shortcode is `:name:` of gemoji's kind: lowercase
+   letters, digits, `_` and `-` with a letter among them, `+1`, `-1`, `100` and `1234`, and the
+   six names of one letter (`:x:`), whichever of them GitHub knows;
 2. inside a link destination, title or reference label, between `]` and `(`, or inside the text of
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
@@ -972,7 +1019,17 @@ at the outer edge of a whole inline construct. A marker never goes:
    (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
    attributes; on `:::` lines; before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
+   or a digit and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`. GitHub shows a
+   shortcode as its emoji at the start of a text or after a space, and as written with a letter or
+   a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
+   where it shows as the emoji. A change whose end would stand there, as when text is typed or a
+   word is replaced in front of a shortcode, takes the shortcode into the change, as a substitution
+   of it (`Camp <!--sub k3x9 :tent:-->x:tent:<!--/k3x9--> here`), which reads alike in every order
+   of decisions; a change whose start or edge would stand there, such as deleting the letter or
+   formatting the shortcode alone, is refused, in words that say so. The letter after a shortcode,
+   where GitHub shows the emoji too, is no place of this rule, and nor is punctuation before one
+   (not built, #388). The rule is held where a marker is placed: text that an author types or
+   edits inside their own pending insertion keeps the markers it has.
 
 A change that would put a marker in one of these places is widened instead, so that the newest and
 the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
@@ -1050,8 +1107,11 @@ The importer ships in April.
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
   line at the item's content column.
-- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark at the start of the
-  alert's body uses a blank `>` line after `[!TYPE]`.
+- In a GitHub alert, the opener is appended to the `[!NOTE]` line. A mark that starts at the start
+  of the alert's body is written as any mark at the start of a wrapped line is (§3.2): its opener
+  goes at the end of the `[!TYPE]` line and the line break is in the change, so that no marker
+  starts the body's line and the alert stays one. The blank `>` line that the research found as a
+  workaround for the renderers that lose the alert is never written.
 - An image alone in its paragraph gets own-line markers with blank lines around them. Any marker
   inside that paragraph stops pandoc from making the image a figure.
 - An own-line marker never sits between two lines of one paragraph, heading or table, between
@@ -2531,7 +2591,7 @@ frontmatter:
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
 | `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
-| `view`        | `clean` or `redlines`: the view the file opens in, as it was when it was last saved (§5.6)         |
+| `view`        | `clean`, `redlines` or `simple`: the view the file opens in, as last saved (§5.6)                  |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -2632,12 +2692,13 @@ same values.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
-- **`view: clean` or `view: redlines`** is the view the document opens in, the one it was in when
-  it was last saved. Redlines opens the file in it, in place of the markup view that the person
-  has remembered, which opens the files that have none.
-  - Only Clean and Redlines are written. Raw never is: nobody wants a document to open as source,
-    and a save made in Raw leaves the view the file had. Simple, which the app shows as one of its
-    markup views, is written as `redlines`.
+- **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
+  it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
+  text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
+  Redlines opens the file in it, in place of the markup view that the person has remembered, which
+  opens the files that record none.
+  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
+    source, and a save made in Raw leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave
@@ -2646,8 +2707,9 @@ same values.
     whatever tool or version wrote it.
   - A view alone is no reason for a ledger. A plain file gets none for it, a ledger that holds
     nothing else doesn't take it, and one left with nothing but a view is removed (§5.1). In a
-    file with no changes or comments, Clean and Redlines look the same anyway.
-  - A value other than these two is dropped with a warning, as an unknown `tracking` is.
+    file with no changes or comments, Clean, Redlines and Simple look the same anyway, except that
+    only the full markup draws ordinary HTML comments (design §5.3).
+  - A value other than these three is dropped with a warning, as an unknown `tracking` is.
   - Other readers keep their own rules: an agent's run in a comment always suggests, and a preview
     of the file, such as Quick Look's, always shows it Clean. Word has no setting for it: its
     `w:view` is the page layout (Print, Web, Draft), not how markup is shown.
@@ -3019,6 +3081,10 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
   strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
   would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
+- Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
+  Quarto or VS Code, so Redlines never writes one: choosing an emoji after a colon writes the
+  character. A shortcode that a file already has is kept as written, and is one character for a
+  change (§3.1, rules 1 and 9).
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
 - `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
   file is a document like any other, and its tracked changes and comments are the same markers and

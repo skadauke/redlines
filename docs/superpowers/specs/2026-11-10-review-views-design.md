@@ -268,7 +268,7 @@ The setting reaches every window, for the documents each opens next and for its 
 
 ### What the file gets
 
-Nothing. The view and the markup view are the person's, kept in the app's settings and never in the file (format §5.6): opening a document in the simple look, a switch, or a click on a bar changes no byte.
+Nothing from a switch. The markup view the person remembers is theirs, kept in the app's settings and never in the file: opening a document in the simple look, a switch, or a click on a bar changes no byte. Since #327 and #392 the file records the view it was last saved in (`view: clean`, `redlines` or `simple`, format §5.6), written when it is saved for another reason, never by a switch.
 
 ### Printing, Copy and Copy for Word
 

@@ -28,13 +28,14 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
 | `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
-| `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |
+| `plugins/agent-acp`     | `@redlines/agent-acp`: Agent Client Protocol agents, and OpenClaw's bridge |
 | `plugins/code`          | `@redlines/code`: syntax colors in code blocks                            |
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
 | `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
@@ -54,7 +55,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it on pushes to main; pull requests skip them while Epic #329 runs), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
