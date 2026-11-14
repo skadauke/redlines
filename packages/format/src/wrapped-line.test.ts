@@ -622,19 +622,19 @@ describe('what the rule takes more of, and what it leaves alone (the review of #
     const body = 'line one\nline two\nline three';
     const text = file(body);
     const from = body.indexOf('line two');
-    let words = '';
+    let outcome: string;
     try {
       const result = trackedEdits(text, [{ from, to: from + 'line two\n'.length, insert: '\n' }], {
         author: ada,
         time: TIME,
         random: constant,
       });
-      words = `written: ${bodyText(applyChanges(text, result.changes))}`;
+      outcome = `written: ${bodyText(applyChanges(text, result.changes))}`;
     } catch (error) {
-      words = (error as Error).message;
+      outcome = (error as Error).message;
     }
-    expect(words).not.toMatch(/^written:/);
-    expect(words).not.toBe('');
+    expect(outcome).not.toMatch(/^written:/);
+    expect(outcome).not.toBe('');
   });
 });
 
@@ -859,8 +859,8 @@ describe('deleting the text of each wrapped line of random documents', () => {
             // Each change the edit wrote can be rejected and accepted, whatever else is pending.
             if (realistic) {
               for (const id of fresh) {
-                expect(() => reject(after as string, id), `${label}: reject ${id}`).not.toThrow();
-                expect(() => accept(after as string, id), `${label}: accept ${id}`).not.toThrow();
+                expect(() => reject(after, id), `${label}: reject ${id}`).not.toThrow();
+                expect(() => accept(after, id), `${label}: accept ${id}`).not.toThrow();
               }
             }
           } else {
