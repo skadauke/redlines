@@ -1,6 +1,7 @@
 //! Agents' own programs: finding them (`which.rs`), starting and stopping them (`process.rs`) and
 //! logging every run (`log.rs`); updating them and signing them in, each with its own command, from
-//! Preferences (`setup.rs`); and the private line from a run back to the document (`relay.rs`).
+//! Preferences (`setup.rs`); installing the Redlines skill in the folder each reads skills from
+//! (`skills.rs`); and the private line from a run back to the document (`relay.rs`).
 //!
 //! The window may start only an agent that `agent_which` found this session, and only as a provider
 //! starts it (`allowed.rs`), or an Agent Client Protocol agent that the person added and allowed
@@ -21,6 +22,7 @@ mod question;
 mod reach;
 pub mod relay;
 mod setup;
+mod skills;
 mod which;
 
 use std::path::{Path, PathBuf};
@@ -307,6 +309,33 @@ pub fn agent_terminal_sign_in(app: AppHandle, agent: String) -> Result<(), Strin
     setup::open_in_terminal(&path).inspect_err(|_| {
         let _ = std::fs::remove_file(&path);
     })
+}
+
+/// Where an agent's copy of the Redlines skill is, and whether it is this app's, an older one, a
+/// newer one, or something that isn't the skill's to replace (`skills.rs`). It only looks. Only
+/// Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn skill_status(agent: String) -> Result<skills::Status, String> {
+    let kind = skills::Kind::named(&agent)
+        .ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    Ok(skills::status(kind, &skills::home()?))
+}
+
+/// Installs, or brings up to date, the copy of the Redlines skill for an agent, in the folder the
+/// agent reads skills from, and says where the `redlines` command is, which the skill needs: the
+/// page says what is left to do (`skills.rs`). The text is the app's own; nothing of the page's is
+/// written. Only Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn skill_install(app: AppHandle, agent: String) -> Result<skills::Installed, String> {
+    let kind = skills::Kind::named(&agent)
+        .ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    let home = skills::home()?;
+    let written = skills::install(kind, &home)?;
+    let on_path = app.state::<Programs>().on_login_path("redlines");
+    Ok(skills::installed(
+        written,
+        skills::command_line(on_path.as_deref(), &home),
+    ))
 }
 
 /// Where System Settings shows which apps may read the folders macOS protects (Privacy & Security,

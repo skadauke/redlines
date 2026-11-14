@@ -6,13 +6,24 @@ import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 
-/** How the document is shown (design §5.3). */
+/**
+ * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
+ * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
+ * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
+ * change bar switches the two looks, and nothing else does, so a View menu lists three views
+ * (`MenuView`).
+ */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
- * The two views that show a review: Simple (deletions hidden, insertions plain, change bars and
- * comments) and Redlines. The one chosen last is the one the editor switches to when it picks a
- * view for you.
+ * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
+ * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
+ */
+export type MenuView = 'clean' | 'redlines' | 'raw';
+
+/**
+ * The look of Redlines that a click on a change bar chose last, the full markup (`'redlines'`) or
+ * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
 
@@ -28,7 +39,7 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
-  /** The markup view chosen last, which an automatic switch shows. */
+  /** The look of Redlines chosen last, with a click on a change bar, which an automatic switch shows. */
   markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
@@ -160,15 +171,17 @@ export interface EditorOptions {
   /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
   /**
-   * The keys that show Simple and Redlines, as the host writes them (⌥⌘2 and ⌥⌘3 in the desktop
-   * app), which the hint on a change bar names. Default: none, and the hint names no keys, as in
-   * an embed with no such shortcuts.
+   * The keys that show the two looks of Redlines, as the host writes them, which the hint on a
+   * change bar names. Default: none, and the hint names no keys. The desktop app gives none: only
+   * a click on a change bar switches the looks.
    */
   viewKeys?: { simple?: string; redlines?: string };
   /**
-   * The markup view the editor shows where it picks one for you: when a document with redlines
-   * opens, and when a tracked change or a comment is made in Clean. Default: 'redlines'. The host
-   * is told when the person chooses another (`EditorUiState.markupView`).
+   * The look of Redlines the editor shows where it picks Redlines for you: when a document with
+   * redlines opens, and when a tracked change or a comment is made in Clean. Default: 'redlines',
+   * the full markup; a document whose saved look is 'simple' opens in Redlines' simple look. The
+   * host is told when the person chooses another, with a click on a change bar
+   * (`EditorUiState.markupView`).
    */
   markupView?: MarkupView;
   /**
@@ -337,11 +350,23 @@ export interface Editor {
    */
   getParsed(): Parsed;
   getUiState(): EditorUiState;
-  /** Shows a view. Choosing Simple or Redlines also makes it the markup view. */
+  /**
+   * Shows a view in exactly the look named. Choosing 'simple' or 'redlines' also makes it the
+   * markup view (the look chosen last). A host with a View menu shows its entries with `showView`.
+   */
   setViewMode(mode: ViewMode): void;
   /**
-   * Changes the markup view that an automatic switch shows, such as when the person chose another
-   * in another window. It never changes the view that is shown: only a choice made here does.
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
+   * shown in the look that was shown last: the one a click on a change bar chose
+   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: only a
+   * click on a change bar chooses a look.
+   */
+  showView(view: MenuView): void;
+  /**
+   * Changes the look of Redlines that an automatic switch shows, such as when the person chose
+   * another in another window. It never changes the view that is shown: only a choice made here
+   * does.
    */
   setMarkupView(mode: MarkupView): void;
   /**

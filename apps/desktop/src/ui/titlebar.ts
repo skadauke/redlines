@@ -4,7 +4,8 @@
 // saved, on hover, and a double-click on it renames the document. A small document icon beside it
 // drags the file, as a native title bar's proxy icon does.
 
-import type { ViewMode } from '@redlines/editor';
+import { menuViewOf } from '@redlines/editor';
+import type { MenuView, ViewMode } from '@redlines/editor';
 import { icon } from './icons.ts';
 import { createMenu, type Menu } from './menu.ts';
 
@@ -25,7 +26,8 @@ export interface TitleBarState {
 }
 
 export interface TitleBarActions {
-  setView(mode: ViewMode): void;
+  /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
+  setView(view: MenuView): void;
   toggleTracking(): void;
   openReview(): void;
   toggleResolved(): void;
@@ -308,26 +310,26 @@ export function createTitleBar(
     },
   });
 
-  // All four views are there for any document (design §5.3): Redlines too, with or without
-  // redlines, whether Track Changes is on or off.
-  const viewItem = (mode: ViewMode, label: string, shortcut: string) => ({
+  // All three views are there for any document (design §5.3): Redlines too, with or without
+  // redlines, whether Track Changes is on or off. Redlines is checked in both its looks: Simple is
+  // its simple look, switched by a click on a change bar and by nothing in this menu.
+  const viewItem = (view: MenuView, label: string, shortcut: string) => ({
     role: 'menuitemradio' as const,
     label,
-    icon: mode,
+    icon: view,
     shortcut,
-    checked: state.view === mode,
-    select: () => actions.setView(mode),
+    checked: menuViewOf(state.view) === view,
+    select: () => actions.setView(view),
   });
   const viewMenu: Menu = createMenu({
     label: 'View',
     container: viewControl,
     button: viewButton,
-    // ⌥⌘1 to ⌥⌘4, as in menu-model.ts.
+    // ⌥⌘1 to ⌥⌘3, as in menu-model.ts.
     entries: () => [
       viewItem('clean', 'Clean', '⌥⌘1'),
-      viewItem('simple', 'Simple', '⌥⌘2'),
-      viewItem('redlines', 'Redlines', '⌥⌘3'),
-      viewItem('raw', 'Raw', '⌥⌘4'),
+      viewItem('redlines', 'Redlines', '⌥⌘2'),
+      viewItem('raw', 'Raw', '⌥⌘3'),
     ],
     ...neighbors(() => viewMenu),
   });

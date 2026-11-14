@@ -191,6 +191,22 @@ impl Programs {
         found.to_str().map(str::to_owned)
     }
 
+    /// Where a login shell finds a plain name, as an agent's shell finds the `redlines` command.
+    /// Unlike `find_program`, the places this app keeps programs in aren't looked in first, so a
+    /// command in a folder that isn't on a shell's `PATH` isn't found.
+    pub fn on_login_path(&self, name: &str) -> Option<String> {
+        if !is_plain_name(name) {
+            return None;
+        }
+        let answer = self.ask_login_shell(name);
+        let mut remembered = self.remembered();
+        remembered.asked_for_path = true;
+        if remembered.login_path.is_none() {
+            remembered.login_path = answer.path;
+        }
+        answer.found?.to_str().map(str::to_owned)
+    }
+
     /// The `redlines` program in the app, or `None` if the app can't find its own.
     pub fn bundled(&self) -> Option<&str> {
         self.bundled.to_str().filter(|path| !path.is_empty())
@@ -474,6 +490,28 @@ mod tests {
         let programs = programs(vec![], shell, environment);
         assert_eq!(programs.which("codex").as_deref(), program.to_str());
         assert_eq!(programs.which("claude"), None);
+    }
+
+    #[test]
+    fn a_login_shell_finds_a_name_only_on_its_own_path() {
+        let temp = TempFolder::new("which-on-path");
+        let on_path = temp.path().join("on-path");
+        let program = with_program(&on_path, "redlines");
+        // A known place of the app's has one too, which a shell that doesn't look there doesn't see.
+        let known = temp.path().join("known");
+        with_program(&known, "other");
+        let path_line = format!("{}:/usr/bin:/bin", on_path.display());
+        let (shell, environment) = login_shell(temp.path(), &path_line);
+        let programs = programs(vec![known], shell, environment);
+        assert_eq!(
+            programs.on_login_path("redlines").as_deref(),
+            program.to_str()
+        );
+        assert_eq!(programs.on_login_path("other"), None);
+        // Only a plain name goes into what the shell is asked.
+        assert_eq!(programs.on_login_path("redlines; echo hi"), None);
+        assert_eq!(programs.on_login_path("../redlines"), None);
+        assert_eq!(programs.on_login_path(""), None);
     }
 
     #[test]

@@ -19,10 +19,12 @@ interface, find, code blocks, agents, the command line and the desktop app.
 
 ## What a Redlines file looks like
 
-The editor shows a document four ways. This is one short document in three of them.
+The editor shows a document three ways. This is one short document in all three.
 
 **Redlines** shows who changed what. Ada added "new". Claude, working for Ada, replaced "March"
 with "April". Bo deleted a sentence and asked a question. Each change can be accepted or rejected.
+A click on a change bar in the margin switches to Redlines' simple look, which reads like Clean, with
+a bar beside each changed line and the comments kept; a click on a bar switches back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-redlines-dark.png">
@@ -36,9 +38,6 @@ show the same, because they hide HTML comments.
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-clean-dark.png">
   <img src="docs/img/view-clean-light.png" width="760" alt="The Clean view: 'We will ship the new importer in April, after the security review.'">
 </picture>
-
-**Simple** reads like Clean, with a bar in the margin beside each changed line and the comments
-kept. A click on a bar switches to Redlines and back.
 
 **Raw** shows the file itself. Each change is a short HTML comment with an id. Who made each change
 and when, and the comment threads, are in a block at the end of the file.
@@ -171,16 +170,32 @@ published, and installed copies update themselves quietly: [docs/releasing.md](d
 
 **Check your changes** as CI does: `pnpm typecheck && pnpm lint && pnpm test && pnpm format:check`.
 
-## Claude Code
+## Claude Code, Codex and OpenClaw
 
-Inside the app, @Claude does this for you. From a terminal, Claude Code edits a Redlines file
-through the `redlines` command line, so that each edit is a tracked suggestion in its own name, for
-you to accept or reject. Give Claude the skill:
+Inside the app, @Claude and @Codex do this for you. From a terminal, or a chat of an agent's own,
+an agent edits a Redlines file through the `redlines` command line, so that each edit is a tracked
+suggestion in its own name, for you to accept or reject. A skill teaches it that, and what a
+Redlines file is. In the app, Redlines › Preferences › Agents has Install Skill on the rows of Claude
+and Codex. Without it, or for OpenClaw, copy the skill for the agent:
 
 ```sh
+# Claude Code, in ~/.claude/skills (or as a plugin: claude plugin marketplace add skadauke/redlines
+# and claude plugin install redlines@redlines)
 mkdir -p ~/.claude/skills/redlines
-cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
+cp integrations/claude-code/skills/redlines/SKILL.md ~/.claude/skills/redlines/SKILL.md
+
+# Codex, in ~/.agents/skills, which OpenClaw reads too
+mkdir -p ~/.agents/skills/redlines
+cp integrations/codex/skills/redlines/SKILL.md ~/.agents/skills/redlines/SKILL.md
+
+# OpenClaw, in ~/.openclaw/skills
+mkdir -p ~/.openclaw/skills/redlines
+cp integrations/openclaw/skills/redlines/SKILL.md ~/.openclaw/skills/redlines/SKILL.md
 ```
+
+An agent with a name of its own writes in it: an OpenClaw agent called Moby writes as `moby-ada`,
+where Claude writes as `claude-ada`. The [integrations README](integrations/README.md) has the
+rest: the plugin, changing the skill and publishing it on ClawHub.
 
 Install the command line from the app (Redlines › Preferences › General › Command line), then:
 
@@ -195,13 +210,15 @@ path, because pnpm runs from the root.
 
 With the file open in Redlines, the suggestion shows up as soon as the command writes the file:
 the app reloads a file that changed on disk, and keeps your unsaved edits if you have any. The
-[integrations README](integrations/README.md) has an alias for running `redlines` from any folder.
+[integrations README](integrations/README.md) says more of the command line.
 
 ## Read this first
 
 - **[Design](docs/design.md):** what Redlines does and how it is built.
 - **[Format](docs/format.md):** how tracked changes, comments and history are stored in a Markdown
   file.
+- **[Hardening](docs/hardening.md):** what the format is built to hold, what holds it, what is known
+  not to hold, and how to add a rule without loosening one.
 - **[Releasing](docs/releasing.md):** how a release is built, signed and published, and how the app
   updates itself.
 

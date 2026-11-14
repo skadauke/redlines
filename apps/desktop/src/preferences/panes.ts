@@ -641,6 +641,10 @@ function editing(deps: PaneDeps): HTMLElement[] {
       'Show line break marks (¶)',
       toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
     ),
+    row(
+      'Show word count',
+      toggle(current.showWordCount, (value) => update({ showWordCount: value })),
+    ),
     imagesRow(deps),
   ];
 }

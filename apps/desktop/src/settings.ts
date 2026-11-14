@@ -64,9 +64,11 @@ export interface Settings {
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
-   * The markup view chosen last, Simple or Redlines, which a window shows wherever it picks one
-   * for the person (design: Which markup view, when). Every window follows it for the documents it
-   * opens next and for its own switches, and none changes the view it shows for it.
+   * The look of Redlines chosen last with a click on a change bar, the full markup or Simple (the
+   * simple look), which a window shows wherever it picks Redlines for the person, and when the
+   * View menu shows Redlines (design: Which look, when). A document opens in Redlines' simple look
+   * when this is `'simple'`. Every window follows it for the documents it opens next and for its
+   * own switches, and none changes the view it shows for it.
    */
   markupView: MarkupView;
   /**
@@ -100,6 +102,8 @@ export interface Settings {
   trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
+  /** Whether the word count shows in the window's lower right corner (design §5.1). */
+  showWordCount: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -142,6 +146,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   closePairs: true,
   trackNewDocuments: false,
   showLineBreakMarks: false,
+  showWordCount: true,
   agentScope: 'folder',
   consent: {},
   people: [],
@@ -162,7 +167,13 @@ export function loadSettings(): Settings {
   }
   const value = (stored ?? {}) as Record<string, unknown>;
   const flag = (
-    key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates' | 'showLineBreakMarks',
+    key:
+      | 'sidebarOpen'
+      | 'showResolved'
+      | 'rotateIcon'
+      | 'checkForUpdates'
+      | 'showLineBreakMarks'
+      | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -190,6 +201,7 @@ export function loadSettings(): Settings {
     closePairs: typing('closePairs'),
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
+    showWordCount: flag('showWordCount'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,

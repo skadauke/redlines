@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { meetPeople } from '@redlines/editor';
+import { createEditor, meetPeople, menuViewOf } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
@@ -68,6 +68,7 @@ describe('settings', () => {
       closePairs: true,
       trackNewDocuments: false,
       showLineBreakMarks: false,
+      showWordCount: true,
       agentScope: 'folder',
       consent: {},
       people: [],
@@ -96,6 +97,7 @@ describe('settings', () => {
       closePairs: false,
       trackNewDocuments: true,
       showLineBreakMarks: true,
+      showWordCount: false,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [
@@ -115,6 +117,23 @@ describe('settings', () => {
     });
     expect(SETTINGS_KEY).toBe('redlines.settings');
     expect(loadSettings()).toEqual(changed);
+  });
+
+  it('opens a document with redlines in Redlines’ simple look when the saved look is Simple', () => {
+    // Stored by a build that listed Simple in the View menu: the value stays what it was.
+    localStorage.setItem(SETTINGS_KEY, '{"markupView":"simple"}');
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: 'We ship in <!--ins b2b2-->April<!--/b2b2-->.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      markupView: loadSettings().markupView,
+    });
+    // The simple look is the Redlines view as the View menu lists it.
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+    expect(menuViewOf(editor.getUiState().view)).toBe('redlines');
+    editor.destroy();
+    parent.remove();
   });
 
   it('keeps the markup view like the other settings, reaching the other windows but setting no view', () => {
@@ -279,6 +298,15 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
+  it('shows the word count unless the person hides it, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().showWordCount).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showWordCount: false });
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":true}');
+    expect(loadSettings().showWordCount).toBe(true);
+  });
+
   it('keeps a text size of any whole percent from 80 to 400, and takes the default for any other', () => {
     for (const kept of [1.5, 1.37, 2.01, 2.5, 3, 4]) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${kept}}`);
@@ -439,6 +467,7 @@ describe('settings', () => {
         closePairs: null,
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
+        showWordCount: 'no',
         agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),

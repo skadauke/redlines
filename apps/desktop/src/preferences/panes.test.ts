@@ -110,6 +110,7 @@ describe('the panes', () => {
       'Close brackets and Markdown pairs',
       'Track Changes on for new documents',
       'Show line break marks (¶)',
+      'Show word count',
       'Images',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
@@ -140,6 +141,14 @@ describe('the panes', () => {
     marks.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenLastCalledWith({ showLineBreakMarks: true });
     expect(now().showLineBreakMarks).toBe(true);
+
+    // The word count in the corner starts shown, and hides at once.
+    const count = control<HTMLInputElement>(container, 'Show word count', 'input');
+    expect(count.checked).toBe(true);
+    count.checked = false;
+    count.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ showWordCount: false });
+    expect(now().showWordCount).toBe(false);
   });
 
   it('starts each control at the stored setting', () => {

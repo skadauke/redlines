@@ -6,8 +6,11 @@ import {
   type AgentsPaneDeps,
   type AgentsPaneSettings,
   type OtherAgent,
+  type PaneSkill,
   type SetupResult,
   type SetupUnderWay,
+  type SkillInstalled,
+  type SkillState,
 } from './settings-pane.ts';
 
 afterEach(() => document.body.replaceChildren());
@@ -20,6 +23,7 @@ const done: SetupResult = { ok: true, message: '' };
 function setup(
   states: Record<string, AgentState | Error | Promise<AgentState>>,
   start: Partial<AgentsPaneSettings> = {},
+  skills: Record<string, PaneSkill> = {},
 ) {
   let settings: AgentsPaneSettings = { agentScope: 'folder', consent: {}, ...start };
   const detect = vi.fn<(id: string, fresh?: boolean) => Promise<AgentState>>((id) => {
@@ -40,6 +44,7 @@ function setup(
     Promise.resolve([]),
   );
   const openSettings = vi.fn<() => Promise<void>>(() => Promise.resolve());
+  const showGeneral = vi.fn<() => void>();
   /** What the host says is under way, by agent. */
   const under: Record<string, SetupUnderWay | undefined> = {};
   const deps: AgentsPaneDeps = {
@@ -52,8 +57,10 @@ function setup(
       signInInTerminal: () => terminal(id),
       stop: () => stopper(id),
       running: () => under[id],
+      ...(skills[id] ? { skill: skills[id] } : {}),
     })),
     copy,
+    showGeneral,
     homeAccess,
     openFilesAndFoldersSettings: openSettings,
     settings: () => settings,
@@ -75,6 +82,7 @@ function setup(
     stopper,
     homeAccess,
     openSettings,
+    showGeneral,
     under,
     now: () => settings,
   };
@@ -1059,5 +1067,454 @@ describe('the Agents pane', () => {
       expect(others.list).toHaveBeenCalled();
       expect(row(container, 'Other agents').textContent).not.toContain('Gemini');
     });
+  });
+});
+
+describe('the Redlines skill', () => {
+  const claudeState: AgentState = {
+    found: true,
+    signedIn: true,
+    version: '2.1.400',
+    path: '/Users/me/.local/bin/claude',
+  };
+  const folder = '~/.claude/skills/redlines';
+  const skillState = (state: SkillState['state'], message: string | null = null): SkillState => ({
+    folder,
+    state,
+    message,
+  });
+  const onPath: SkillInstalled = { folder, commandLine: { found: 'onPath' } };
+
+  /** A host that looks at the skill and installs it. */
+  function host(initial: SkillState, installed: SkillInstalled = onPath, alsoReadBy?: string) {
+    const status = vi.fn<() => Promise<SkillState>>(() => Promise.resolve(initial));
+    const install = vi.fn<() => Promise<SkillInstalled>>(() => Promise.resolve(installed));
+    const skill: PaneSkill = { status, install, ...(alsoReadBy ? { alsoReadBy } : {}) };
+    return { status, install, skill };
+  }
+
+  const words = (container: HTMLElement, label = 'Claude') => row(container, label).textContent;
+  const buttons = (container: HTMLElement, label = 'Claude') =>
+    [...row(container, label).querySelectorAll('button')].map((button) => button.textContent);
+  const press = (container: HTMLElement, text: string, label = 'Claude') => {
+    const found = [...row(container, label).querySelectorAll('button')].find(
+      (button) => button.textContent === text,
+    );
+    if (!found) throw new Error(`no button ${text} in ${label}`);
+    found.click();
+  };
+
+  it('says nothing of a skill where the host has none', async () => {
+    const { deps, container } = setup({ claude: claudeState, codex: claudeState });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(words(container)).not.toMatch(/skill/i);
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
+  it('offers to install it for an agent that is found, and for no other', async () => {
+    const claude = host(skillState('missing'));
+    const codex = host(skillState('missing'));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: { found: false, help: 'Install Codex.' } },
+      {},
+      { claude: claude.skill, codex: codex.skill },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(words(container)).toContain('Redlines skill: not installed.');
+    expect(buttons(container)).toEqual(['Check Again', 'Install Skill']);
+    expect(
+      row(container, 'Claude').querySelector(
+        'button[aria-label="Install the Redlines skill for Claude"]',
+      ),
+    ).not.toBeNull();
+    expect(words(container, 'Codex')).not.toMatch(/skill/i);
+    expect(codex.status).not.toHaveBeenCalled();
+    // Looking changes nothing.
+    expect(claude.install).not.toHaveBeenCalled();
+  });
+
+  it('installs it, says where it went, and shows it as installed', async () => {
+    const claude = host(skillState('missing'));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    expect(claude.install).toHaveBeenCalledTimes(1);
+    // While it writes: said so, and the button waits.
+    expect(words(container)).toContain('Installing the Redlines skill…');
+    const waiting = row(container, 'Claude').querySelector(
+      'button[aria-label^="Install the Redlines"]',
+    );
+    expect((waiting as HTMLButtonElement).disabled).toBe(true);
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+    expect(words(container)).not.toContain('Installing');
+    // Nothing more to say: where it went is said once.
+    expect(words(container)?.match(/~\/\.claude\/skills\/redlines/g)).toHaveLength(1);
+    expect(buttons(container)).toEqual(['Check Again']);
+    // Nothing else is asked of the host: the app knows what it wrote.
+    expect(claude.status).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates an older copy, and says it did', async () => {
+    const claude = host(skillState('older'));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(words(container)).toContain(
+      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one.',
+    );
+    expect(buttons(container)).toEqual(['Check Again', 'Update Skill']);
+    press(container, 'Update Skill');
+    await settle();
+    expect(claude.install).toHaveBeenCalledTimes(1);
+    expect(words(container)).toContain('Redlines skill updated in ~/.claude/skills/redlines.');
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
+  it('leaves a copy that is current, newer or somebody else’s, and says why', async () => {
+    const cases: [SkillState, string][] = [
+      [skillState('current'), 'Redlines skill installed in ~/.claude/skills/redlines.'],
+      [
+        skillState(
+          'newer',
+          'The skill in ~/.claude/skills/redlines is newer than this app’s, so it stays as it is.',
+        ),
+        'is newer than this app’s, so it stays as it is.',
+      ],
+      [
+        skillState(
+          'other',
+          '~/.claude/skills/redlines is a link, and Redlines leaves links as they are.',
+        ),
+        'is a link, and Redlines leaves links as they are.',
+      ],
+    ];
+    for (const [state, said] of cases) {
+      const claude = host(state);
+      const { deps, container } = setup(
+        { claude: claudeState, codex: claudeState },
+        {},
+        {
+          claude: claude.skill,
+        },
+      );
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(words(container), state.state).toContain(said);
+      expect(buttons(container), state.state).toEqual(['Check Again']);
+      expect(claude.install).not.toHaveBeenCalled();
+      container.remove();
+    }
+  });
+
+  it('says why installing failed, and offers it again', async () => {
+    const claude = host(skillState('missing'));
+    claude.install.mockImplementationOnce(() =>
+      Promise.reject(
+        new Error('Couldn’t write ~/.claude/skills/redlines/SKILL.md: Permission denied.'),
+      ),
+    );
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain('Permission denied.');
+    expect(words(container)).toContain('Redlines skill: not installed.');
+    expect(buttons(container)).toEqual(['Check Again', 'Install Skill']);
+    // Again, and it works: the failure is gone.
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).not.toContain('Permission denied.');
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+  });
+
+  it('says when it could not even start', async () => {
+    const claude = host(skillState('missing'));
+    claude.install.mockImplementationOnce(() => {
+      throw new Error('Not in the app.');
+    });
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain('Not in the app.');
+    expect(buttons(container)).toEqual(['Check Again', 'Install Skill']);
+  });
+
+  it('says the redlines command is missing, and opens General for it', async () => {
+    const claude = host(skillState('missing'), { folder, commandLine: { found: 'missing' } });
+    const { deps, container, showGeneral } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain(
+      'The skill runs the redlines command, which isn’t installed yet. Install it in General › Command line.',
+    );
+    expect(buttons(container)).toEqual(['Check Again', 'Open General']);
+    press(container, 'Open General');
+    expect(showGeneral).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the redlines command is off the PATH, and names where it is', async () => {
+    const claude = host(skillState('missing'), {
+      folder,
+      commandLine: { found: 'offPath', linked: '~/.local/bin/redlines' },
+    });
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain(
+      'which is linked at ~/.local/bin/redlines, but that folder isn’t on your PATH.',
+    );
+    expect(buttons(container)).toContain('Open General');
+  });
+
+  it('offers no way to General where the host has none', async () => {
+    const claude = host(skillState('missing'), { folder, commandLine: { found: 'missing' } });
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    const without: AgentsPaneDeps = { ...deps };
+    delete without.showGeneral;
+    renderAgentsPane(container, without);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain('Install it in General › Command line.');
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
+  it('names another agent that reads the same folder', async () => {
+    const codex = host(
+      { folder: '~/.agents/skills/redlines', state: 'missing', message: null },
+      { folder: '~/.agents/skills/redlines', commandLine: { found: 'onPath' } },
+      'OpenClaw',
+    );
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        codex: codex.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill', 'Codex');
+    await settle();
+    expect(words(container, 'Codex')).toContain(
+      'Redlines skill installed in ~/.agents/skills/redlines.',
+    );
+    expect(words(container, 'Codex')).toContain('OpenClaw reads that folder too.');
+  });
+
+  it('installs once, however often the button is pressed while it writes', async () => {
+    const claude = host(skillState('missing'));
+    let finish: (done: SkillInstalled) => void = () => {};
+    claude.install.mockImplementationOnce(
+      () =>
+        new Promise<SkillInstalled>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const install = [...row(container, 'Claude').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Install Skill',
+    )!;
+    install.click();
+    install.click();
+    expect(claude.install).toHaveBeenCalledTimes(1);
+    finish(onPath);
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+  });
+
+  it('keeps the focus in the row when the button that was pressed goes', async () => {
+    const claude = host(skillState('missing'));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const install = [...row(container, 'Claude').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Install Skill',
+    )!;
+    install.focus();
+    install.click();
+    await settle();
+    expect(row(container, 'Claude').contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.textContent).toBe('Check Again');
+  });
+
+  it('forgets what installing said when the agent is gone, with its button to General', async () => {
+    const claude = host(skillState('missing'), { folder, commandLine: { found: 'missing' } });
+    const { deps, container, detect } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(buttons(container)).toContain('Open General');
+    detect.mockImplementation((id) =>
+      Promise.resolve(
+        id === 'claude' ? { found: false, help: 'Install Claude Code.' } : claudeState,
+      ),
+    );
+    press(container, 'Check Again');
+    await settle();
+    expect(words(container)).not.toMatch(/skill|redlines command/i);
+    expect(buttons(container)).not.toContain('Open General');
+  });
+
+  it('is not drawn over by a look that was asked before the install and answers after it', async () => {
+    const claude = host(skillState('missing'));
+    let slow: (state: SkillState) => void = () => {};
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    // The next look is a slow one, asked while the Install button still shows.
+    claude.status.mockImplementationOnce(
+      () =>
+        new Promise<SkillState>((resolve) => {
+          slow = resolve;
+        }),
+    );
+    press(container, 'Check Again');
+    await settle();
+    press(container, 'Install Skill');
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+    // It answers now, and says what was true before the install: not what draws.
+    slow(skillState('missing'));
+    await settle();
+    expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
+    expect(words(container)).not.toContain('not installed');
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
+  it('says so when the skill folder could not be looked at, and offers nothing', async () => {
+    const claude = host(skillState('missing'));
+    claude.status.mockImplementation(() => Promise.reject(new Error('no home')));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(words(container)).toContain('Couldn’t look at the Redlines skill.');
+    expect(buttons(container)).toEqual(['Check Again']);
+  });
+
+  it('looks again with Check Again, and forgets it when the agent goes', async () => {
+    const claude = host(skillState('missing'));
+    const { deps, container, detect } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    press(container, 'Check Again');
+    await settle();
+    expect(claude.status).toHaveBeenCalledTimes(2);
+    // The agent is gone from the machine: nothing of its skill is shown.
+    detect.mockImplementation((id) =>
+      Promise.resolve(
+        id === 'claude' ? { found: false, help: 'Install Claude Code.' } : claudeState,
+      ),
+    );
+    press(container, 'Check Again');
+    await settle();
+    expect(words(container)).not.toMatch(/skill/i);
+  });
+
+  it('draws nothing late once it is tidied up', async () => {
+    const claude = host(skillState('missing'));
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      {
+        claude: claude.skill,
+      },
+    );
+    const tidy = renderAgentsPane(container, deps);
+    tidy();
+    await settle();
+    expect(words(container)).not.toMatch(/skill/i);
   });
 });
