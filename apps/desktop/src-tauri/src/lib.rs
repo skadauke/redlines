@@ -396,6 +396,7 @@ pub fn run() {
             spelling::spelling_suggestions,
             spelling::spelling_learn,
             edit_menu::undo_in_field,
+            edit_menu::paste_in_field,
             open_preferences,
             open_about,
             dock_icon::app_icon_mark,

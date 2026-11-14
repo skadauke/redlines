@@ -272,8 +272,11 @@ The window, on the desktop:
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
   available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste reads the clipboard through the app and goes in the way ⇧⌘V does, so with Track
-  Changes on it is the paster's insertion. The palette replaces the selection toolbar of §5.12.
+  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
+  and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
+  nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
+  when there is none. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left

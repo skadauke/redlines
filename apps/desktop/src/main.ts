@@ -396,7 +396,16 @@ const palette = createPalette(editor, {
   container: main,
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
-  clipboard: pageClipboard(editor, () => host.readClipboardText()),
+  // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
+  // and the clipboard's text otherwise.
+  clipboard: pageClipboard(
+    editor,
+    () => host.readClipboardText(),
+    // A tab has none, and reads the clipboard in the click that asked, as it did.
+    'pasteInDocument' in host
+      ? () => host.pasteInDocument?.() ?? Promise.resolve(false)
+      : undefined,
+  ),
   ...(isTauri
     ? {
         spelling: systemSpelling({
