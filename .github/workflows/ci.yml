@@ -61,9 +61,9 @@ jobs:
       - name: Test
         run: pnpm test
         env:
-          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main, on a
-          # runner that does nothing else. Pull requests skip them while Epic #329's lanes merge a dozen
-          # PRs a day; main's runs and the Epic's Sunday sweep still run them.
+          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main. Pull
+          # requests skip them until the ten tests of #432 are re-bound and the timing files get a job
+          # of their own on pull requests.
           REDLINES_COST: ${{ github.event_name == 'push' && 'check' || '' }}
 
       - name: Check formatting
