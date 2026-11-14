@@ -58,6 +58,78 @@ describe('createMacAgents', () => {
     ]);
   });
 
+  it('lists an agent that answers in text as one with no toolbox', async () => {
+    const relay = fakeRelay();
+    const agents = createMacAgents(
+      [
+        fakeProvider({ relay, script: replies('Hi.') }),
+        fakeProvider({
+          relay,
+          id: 'moby',
+          name: 'Moby',
+          readLimit: 'machine',
+          toolbox: false,
+          script: only({ type: 'done', finalText: 'Hi.' }),
+        }),
+      ],
+      relay,
+    );
+    const [claude, moby] = await agents.list();
+    expect(claude).not.toHaveProperty('toolbox');
+    expect(moby).toEqual({
+      id: 'moby',
+      name: 'Moby',
+      readLimit: 'machine',
+      toolbox: false,
+      state: { found: true, signedIn: true },
+    });
+  });
+
+  it('opens no relay for an agent with no toolbox, and does not fail it for tools that never started', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({
+      relay,
+      id: 'moby',
+      name: 'Moby',
+      readLimit: 'machine',
+      toolbox: false,
+      script: only(
+        { type: 'status', text: 'Thinking…' },
+        { type: 'done', finalText: 'Two words shorter.' },
+      ),
+    });
+    const events = await collect(
+      createMacAgents([provider], relay).run('moby', request, tools, new AbortController().signal),
+    );
+    expect(events).toEqual([
+      { type: 'status', text: 'Thinking…' },
+      { type: 'done', finalText: 'Two words shorter.' },
+    ]);
+    expect(relay.counts()).toEqual({ opened: 0, closed: 0 });
+    // What it was asked is as the run asked it: no endpoint of a toolbox anywhere.
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it('passes on a failure of an agent with no toolbox, and looks again at the agents', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({
+      relay,
+      id: 'moby',
+      name: 'Moby',
+      toolbox: false,
+      script: only({ type: 'error', message: 'Moby couldn’t be reached.' }),
+    });
+    const agents = createMacAgents([provider], relay);
+    const detect = vi.spyOn(provider, 'detect');
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(1);
+    const events = await collect(agents.run('moby', request, tools, new AbortController().signal));
+    expect(events).toEqual([{ type: 'error', message: 'Moby couldn’t be reached.' }]);
+    // A failed run may have failed for sign-in: the next list asks again.
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(2);
+  });
+
   it('lists an agent whose detection threw as not found', async () => {
     const relay = fakeRelay();
     const broken: AgentProvider = {

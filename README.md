@@ -75,9 +75,9 @@ and when, and the comment threads, are in a block at the end of the file.
   what is waiting in the file ("3 changes and 1 comment by Ada, Claude and Bo. Open in Redlines to
   review them."). R Markdown and Quarto files preview the same way, unless another app on the Mac
   declares those extensions as its own type, in which case macOS asks that app. It comes with the
-  app and needs nothing installed (macOS 13.3 or later; System Settings › General › Login Items &
-  Extensions › Quick Look turns it off); it draws no script, loads nothing and shows an image as
-  its alt text.
+  app and needs nothing installed (macOS 13.3 or later; System Settings turns it off, with the
+  other Quick Look extensions, and Preferences › General has a button that opens System Settings
+  there); it draws no script, loads nothing and shows an image as its alt text.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
   Terminal window. macOS asks for an administrator's password if that folder needs one; without
@@ -195,7 +195,8 @@ cp integrations/openclaw/skills/redlines/SKILL.md ~/.openclaw/skills/redlines/SK
 
 An agent with a name of its own writes in it: an OpenClaw agent called Moby writes as `moby-ada`,
 where Claude writes as `claude-ada`. The [integrations README](integrations/README.md) has the
-rest: the plugin, changing the skill and publishing it on ClawHub.
+rest: the plugin, changing the skill, publishing it on ClawHub, and asking an OpenClaw agent from a
+comment (Preferences › Agents › OpenClaw), which answers in a reply through its Gateway.
 
 Install the command line from the app (Redlines › Preferences › General › Command line), then:
 

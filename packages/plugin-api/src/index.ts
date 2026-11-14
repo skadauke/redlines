@@ -293,6 +293,13 @@ export interface AgentProvider {
   name: string;
   /** Whether reads can be held to the folder. */
   readLimit: 'folder' | 'machine';
+  /**
+   * `false` for an agent that can't use the toolbox, such as an OpenClaw agent through its
+   * Gateway, whose bridge takes no MCP server of the client's, and which may run on another machine:
+   * it is given the thread and the document in its prompt, and its last message is the reply. It
+   * changes nothing in the document. Without it, the agent has the toolbox.
+   */
+  toolbox?: false;
   detect(): Promise<AgentState>;
   run(request: AgentRequest, tools: McpEndpoint, signal: AbortSignal): AsyncIterable<AgentEvent>;
 }
@@ -302,6 +309,8 @@ export interface AgentInfo {
   id: string;
   name: string;
   readLimit: 'folder' | 'machine';
+  /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
+  toolbox?: false;
   state: AgentState;
 }
 

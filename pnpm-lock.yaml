@@ -59,6 +59,9 @@ importers:
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@redlines/emoji':
+        specifier: workspace:*
+        version: link:../../plugins/emoji
       '@redlines/find':
         specifier: workspace:*
         version: link:../../plugins/find
@@ -344,6 +347,24 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.1
         version: 1.2.5
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/emoji:
+    dependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor

@@ -6,13 +6,17 @@
 // off the syntax is written directly, and what a block adds is an insertion like typing.
 
 import { isolateHistory } from '@codemirror/commands';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { ChangeSet, type EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
   type Author,
   boxChange,
+  calloutMenuEffect,
+  calloutName,
+  calloutOf,
+  type CalloutMenuRequest,
   checkBoxEffect,
   type Editor,
   markupViewFacet,
@@ -31,6 +35,7 @@ import {
 import {
   type BlockType,
   EditError,
+  GITHUB_TYPES,
   applyChanges,
   type FormatOp,
   idsIn,
@@ -44,6 +49,7 @@ import {
   untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
+import { calloutMenuTheme, closeCalloutMenu, openCalloutMenu } from './callout-menu.ts';
 import { closeLinkPopover, linkTheme, openLinkPopover } from './link-popover.ts';
 
 export interface FormattingOptions {
@@ -76,6 +82,10 @@ const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or s
  * longer stretch of items is checked by sixes, as one change. */
 const CHECK_AT_A_TIME = 6;
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
+/** What Alert writes: the type line, and a body whose text is selected, so that typing writes it
+ * (a tracked insertion can't end with an empty quote line, which would take the block after it). */
+const ALERT = '> [!NOTE]\n> Text';
+const ALERT_BODY = 'Text';
 const NO_TRACKED_HEADING_CODE =
   "A heading can't become a code block while Track Changes is on. Make it body text first.";
 
@@ -473,6 +483,26 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     };
 
   /**
+   * Where `count` characters that a reader sees stand after `from` in the document: the markers of
+   * tracked changes in between are not counted, so that a place in a block that was inserted as a
+   * tracked change is the one its text asks for.
+   */
+  const afterVisible = (from: number, count: number): number => {
+    const text = view.state.doc.toString();
+    let at = from;
+    for (let seen = 0; seen < count && at < text.length;) {
+      if (text.startsWith('<!--', at)) {
+        const end = text.indexOf('-->', at);
+        at = end === -1 ? text.length : end + 3;
+      } else {
+        at++;
+        seen++;
+      }
+    }
+    return at;
+  };
+
+  /**
    * Whether the caret is on an empty line, as Return leaves one. A line of a list item's or a
    * quote's marker only isn't: the block would go in front of it.
    */
@@ -503,7 +533,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (done) {
       const start = view.state.doc.toString().indexOf(find, line.from);
       if (start >= 0) {
-        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+        const anchor = afterVisible(start, caret);
+        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
       }
     }
     return done;
@@ -521,7 +552,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (done && selected > 0) {
       const start = view.state.doc.toString().indexOf(find, at);
       if (start >= 0) {
-        view.dispatch({ selection: { anchor: start + caret, head: start + caret + selected } });
+        const anchor = afterVisible(start, caret);
+        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
       }
     }
     return done;
@@ -801,6 +833,54 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     );
   }
 
+  /**
+   * The menu in an alert's title asks for the types (`calloutMenuEffect`): the menu hangs from the
+   * button, and choosing a type is a block format change of the alert, tracked or plain.
+   */
+  function listenForCalloutMenu(): () => void {
+    const ask = ({ pos, type, anchor }: CalloutMenuRequest) => {
+      const { doc } = view.state;
+      // The place is the alert's, if it still is: the text may have changed since the press.
+      if (!Number.isInteger(pos) || pos < 0 || pos > doc.length) return;
+      if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
+      // GitHub's types, and any other that a file has already: it is the file's to offer.
+      const others: string[] = [];
+      // An alert is a quote at the left edge, which the editor reads as it draws it: a type in code,
+      // or in a later line of a quote, is no alert's.
+      ensureSyntaxTree(view.state, doc.length, 100)?.iterate({
+        enter: (node) => {
+          if (node.name !== 'Blockquote')
+            return node.name !== 'FencedCode' && node.name !== 'CodeBlock';
+          const found = calloutOf(view.state, node.node);
+          if (found && !GITHUB_TYPES.includes(found.type) && !others.includes(found.type)) {
+            others.push(found.type);
+          }
+          return false;
+        },
+      });
+      openCalloutMenu(view, {
+        anchor,
+        types: [...GITHUB_TYPES, ...others].map((each) => ({
+          type: each,
+          name: calloutName(each),
+        })),
+        current: type,
+        choose: (to) =>
+          void format({ from: pos, to: pos }, { kind: 'callout', type: to }, 'format.callout'),
+      });
+    };
+    return editor.addExtension([
+      calloutMenuTheme,
+      EditorView.updateListener.of(({ transactions, docChanged }) => {
+        // A menu is for the text it was opened on.
+        if (docChanged) closeCalloutMenu(view);
+        for (const tr of transactions) {
+          for (const effect of tr.effects) if (effect.is(calloutMenuEffect)) ask(effect.value);
+        }
+      }),
+    ]);
+  }
+
   const commands: EditorCommand[] = [
     inlineCommand('format.bold', 'Bold', 'Mod-b', 'bold'),
     inlineCommand('format.italic', 'Italic', 'Mod-i', 'italic'),
@@ -859,6 +939,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
     }),
     command('paragraph', 'insert', {
+      id: 'block.alert',
+      title: 'Alert',
+      // A new alert after the block the caret is in, or on the empty paragraph it is in, with its
+      // body's text selected: the type is changed from the menu in its title.
+      run: () =>
+        insertBlock(ALERT, '> [!NOTE]', ALERT.length - ALERT_BODY.length, ALERT_BODY.length),
+    }),
+    command('paragraph', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
       run: () => insertBlock('---', '---', 3),
@@ -889,10 +977,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
 
   const removeCommands = editor.commands.register(commands);
   const removeBoxes = listenForBoxes();
+  const removeCalloutMenu = listenForCalloutMenu();
   return () => {
     closeLinkPopover(view);
+    closeCalloutMenu(view);
     removeCommands();
     removeBoxes();
+    removeCalloutMenu();
     removeTheme();
   };
 }
@@ -927,6 +1018,7 @@ export const plugin: Plugin = {
         { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
+        { id: 'block.alert', title: 'Alert' },
         { id: 'block.rule', title: 'Horizontal Rule' },
         { id: 'block.indent', title: 'Indent', shortcut: 'Mod-]' },
         { id: 'block.outdent', title: 'Outdent', shortcut: 'Mod-[' },

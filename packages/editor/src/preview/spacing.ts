@@ -9,6 +9,7 @@ import { type Tree, TreeFragment } from '@lezer/common';
 import type { Range as TextRange } from '@redlines/format';
 import { openBlock } from '../blocks/open.ts';
 import { isGapLine, leafKind, loose } from '../blocks/structure.ts';
+import { calloutOf } from './callout.ts';
 import { parsedField } from '../tracked/field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -170,6 +171,14 @@ function isGap(state: Reading, node: SyntaxNode): boolean {
  */
 const BOXED = new Set(['FencedCode', 'CodeBlock', 'FrontMatter', 'Table']);
 
+/** Whether `leaf` is the first block of an alert (#311): the paragraph that its title starts, drawn
+ * as the box's first line, which can't take the space above it either. */
+function startsCallout(state: Reading, leaf: SyntaxNode): boolean {
+  const quote = leaf.parent;
+  if (quote?.name !== 'Blockquote' || !calloutOf(state, quote)) return false;
+  return state.doc.lineAt(leaf.from).number === state.doc.lineAt(quote.from).number;
+}
+
 /** Where the space between two blocks goes: a line, by its number, and which side of it. */
 export interface Space {
   line: number;
@@ -193,7 +202,8 @@ export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[]
     if (isGap(state, leaf)) continue;
     if (above) {
       const spacing = spacingOf(state, above, leaf, looseness);
-      const below = BOXED.has(leaf.name) && !BOXED.has(above.name);
+      const boxed = (node: SyntaxNode) => BOXED.has(node.name) || startsCallout(state, node);
+      const below = boxed(leaf) && !boxed(above);
       found.push({ line: doc.lineAt(below ? above.to : leaf.from).number, spacing, below });
     }
     above = leaf;

@@ -13,6 +13,7 @@
 // What has no legal form is refused. The result is checked against the plain edit of both views,
 // and an edit that would come out otherwise is refused too, so the file is never damaged.
 
+import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
@@ -433,6 +434,7 @@ function edited(
       `The edit ${edit.from}-${edit.to} is out of order or outside the text (${text.length} characters)`,
     );
   }
+  assertWholeCharacters(text, edit);
   const typed = inEol(edit.insert, eolOf(text));
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
