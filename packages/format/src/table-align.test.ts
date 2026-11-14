@@ -51,7 +51,7 @@ import {
 import type { Leaf } from './test-helpers.ts';
 import type { Person, Range, TextChange } from './types.ts';
 import { expectEveryOrderRead, readAs } from './oracle.ts';
-import { newestView, originalView, reviewView } from './views.ts';
+import { newestView, originalView, originalViewOfText, reviewView } from './views.ts';
 
 const FRUIT =
   '| Fruit  | Count | Price |\n| :----- | ----- | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |';
@@ -2490,5 +2490,633 @@ describe('the walk that writes the mark, on the header alone and on the whole fi
     ).toBeUndefined();
     // No table starts there.
     expect(headerSlice(plain, 3)).toBeUndefined();
+  });
+});
+
+// A merge can leave a column change and the mark of an alignment change in one table (format §7): two people
+// changed it on branches and the text was joined. No operation writes both (each refuses while the other is
+// pending), so these files are made by hand, or by an operation and a hand. The mark ends the header's last
+// cell, and a decision that rewrites the columns keeps it there: where it stands when its cell stays the last,
+// at the new last cell when its cell goes or stops being the last, its `SPEC` untouched. The one decision of such
+// a file that can be refused is rejecting the mark while the table has columns that its old row doesn't (the
+// words of `LOST`).
+describe('a point alignment change beside a column change, as a merge leaves them (#281)', () => {
+  const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+  const lines = (...rows: string[]) => rows.join('\n');
+  const TWO = '| ----- | ----- |';
+  const ORIGINAL_TWO = lines(
+    '| Fruit | Count |',
+    '| ----- | ----- |',
+    '| Apples | 3 |',
+    '| Pears | 5 |',
+  );
+  /** Three columns whose delimiter cells differ in width, and three whose cells don't. The old row that
+   * the mark holds is positional, and the delimiter cell of a moved column travels with its column: with cells
+   * of different widths, rejecting the mark before the move would change the original text, which the views'
+   * check refuses, so the files of moves use the second, in which no decision of the pair is refused. */
+  const PLAIN3 = lines(
+    '| Fruit  | Count | Price |',
+    '| ------ | ----- | ----- |',
+    '| Apples | 3     | 1.20  |',
+    '| Pears  | 5     | 0.90  |',
+  );
+  const OLD3 = '| ------ | ----- | ----- |';
+  const FLAT3 = lines(
+    '| Fruit | Count | Price |',
+    '| ----- | ----- | ----- |',
+    '| Apples | 3 | 1.20 |',
+    '| Pears | 5 | 0.90 |',
+  );
+  const FLAT_OLD = '| ----- | ----- | ----- |';
+  /** The ledger of a file of the operations with an entry more, in the file's own line breaks. */
+  const entry = (text: string, id: string, by: string) =>
+    text.replace(
+      /marks:(\r?\n)/,
+      (_, eol: string) => `marks:${eol}  ${id}: {by: ${by}, at: ${TIME}}${eol}`,
+    );
+  /** A file of the operations with Ada's change joined into it by hand: the text of its body replaced as
+   * given (each must be there), and the entry of her mark. */
+  const joined = (made: string, ...replaced: [string, string][]) => {
+    let text = made;
+    for (const [from, to] of replaced) {
+      expect(text, from).toContain(from);
+      text = text.replace(from, to);
+    }
+    return entry(text, 'k3x9', 'ada');
+  };
+  const decide = (text: string, how: typeof accept, id: string) =>
+    applyChanges(text, how(text, id));
+  /** What the views say of a file: the original, with the old row, and no marker in any of them, the
+   * review view with one note of the mark. */
+  const viewed = (text: string, original: string) => {
+    expect(trim(originalView(text).text)).toBe(original);
+    expect(originalView(text).text).not.toContain('<!--');
+    expect(newestView(text).text).not.toContain('<!--');
+    expect(originalViewOfText(text).text).not.toContain('<!--');
+    expect(reviewView(text)).not.toContain('<!--');
+    expect(reviewView(text).match(/\{>>\[k3x9 ada\]/g)).toHaveLength(1);
+  };
+  /** Only the rejection of the mark is refused, and only for its words. */
+  const onlyTheMark = (refused: string[]) => {
+    expect(refused.length).toBeGreaterThan(0);
+    expect(refused.every((step) => step.endsWith(' rk3x9'))).toBe(true);
+  };
+
+  describe('Bo’s column inserted after the last, Ada’s mark at the end of the new last cell', () => {
+    const INSERTED = file(
+      lines(
+        `| Fruit | Count | <!--ins c2dd col--> New${markFor(TWO)} |`,
+        '| ----- | :---: | --- |',
+        '| Apples | 3 |  |',
+        '| Pears | 5 |  |',
+      ),
+      { c2dd: 'bo', k3x9: 'ada' },
+    );
+    const NARROW = lines(
+      `| Fruit | Count${markFor(TWO)} |`,
+      '| ----- | :---: |',
+      '| Apples | 3 |',
+      '| Pears | 5 |',
+    );
+    const CENTERED_TWO = ORIGINAL_TWO.replace('| ----- | ----- |', '| ----- | :---: |');
+
+    it('keeps the mark when the column it ends is rejected, and rejecting it then gives the original byte for byte', () => {
+      const rejected = decide(INSERTED, reject, 'c2dd');
+      expect(trim(rejected)).toBe(NARROW);
+      // The mark and its entry are there, once, and nothing of the column.
+      expect(parse(rejected).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      expect(Object.keys(parse(rejected).ledger.marks)).toEqual(['k3x9']);
+      expect(problemsOf(parse(rejected))).toEqual([]);
+      same(decide(rejected, reject, 'k3x9'), file(ORIGINAL_TWO));
+      expect(trim(decide(rejected, accept, 'k3x9'))).toBe(CENTERED_TWO);
+      expect(tableLeaves(rejected)).toEqual(tableLeaves(file(CENTERED_TWO)));
+    });
+
+    it('leaves the mark where it is when the column is accepted, and then it can only be accepted', () => {
+      const accepted = decide(INSERTED, accept, 'c2dd');
+      expect(trim(accepted)).toBe(trim(INSERTED).replace('<!--ins c2dd col--> ', ''));
+      expect(parse(accepted).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      expect(said(() => reject(accepted, 'k3x9'))).toBe(LOST);
+      expect(trim(decide(accepted, accept, 'k3x9'))).toBe(
+        lines(
+          '| Fruit | Count | New |',
+          '| ----- | :---: | --- |',
+          '| Apples | 3 |  |',
+          '| Pears | 5 |  |',
+        ),
+      );
+    });
+
+    it('refuses to reject the mark first, in the words that say it needs its columns, which is the one refusal', () => {
+      expect(said(() => reject(INSERTED, 'k3x9'))).toBe(LOST);
+      // Accepting it first takes the mark away, and the column is decided as it is.
+      const first = decide(INSERTED, accept, 'k3x9');
+      expect(trim(first)).toContain('| Fruit | Count | <!--ins c2dd col--> New |');
+      expect(trim(decide(first, reject, 'c2dd'))).toBe(CENTERED_TWO);
+    });
+
+    it('is decided in every order: all alike, none stuck, each file read as its newest view', () => {
+      expectEveryOrderAlike('inserted last', INSERTED, exactly);
+      onlyTheMark(expectEveryOrderRead('inserted last', INSERTED));
+      expect(trim(applyChanges(INSERTED, rejectAll(INSERTED)))).toBe(ORIGINAL_TWO);
+      expect(trim(applyChanges(INSERTED, acceptAll(INSERTED)))).toBe(
+        trim(newestView(INSERTED).text),
+      );
+    });
+
+    it('is shown by the views once: the old row in the original, the new in the newest, no marker left', () => {
+      viewed(INSERTED, ORIGINAL_TWO);
+      expect(trim(newestView(INSERTED).text)).toBe(
+        lines(
+          '| Fruit | Count | New |',
+          '| ----- | :---: | --- |',
+          '| Apples | 3 |  |',
+          '| Pears | 5 |  |',
+        ),
+      );
+      // What a plain edit compares with has the markers hidden and nothing undone: no second mark.
+      expect(trim(originalViewOfText(INSERTED).text)).toBe(CENTERED_TWO);
+    });
+
+    it('is the same in a CRLF file', () => {
+      const text = crlf(INSERTED);
+      const rejected = decide(text, reject, 'c2dd');
+      expect(trim(rejected)).toBe(crlf(NARROW));
+      same(decide(rejected, reject, 'k3x9'), crlf(file(ORIGINAL_TWO)));
+      viewed(text, crlf(ORIGINAL_TWO));
+      expectEveryOrderAlike('CRLF', text, exactly);
+    });
+
+    it('writes the point comment of a rejected column in front of the mark, where both end the cell', () => {
+      const commented = file(
+        lines(
+          `| Fruit | Count | <!--ins c2dd col--> <!--cmt c9qf-->New<!--/c9qf-->${markFor(TWO)} |`,
+          '| ----- | :---: | --- |',
+          '| Apples | 3 |  |',
+        ),
+        { c2dd: 'bo', k3x9: 'ada' },
+        thread('c9qf'),
+      );
+      const rejected = decide(commented, reject, 'c2dd');
+      expect(trim(rejected).split('\n')[0]).toBe(`| Fruit | Count<!--cmt c9qf-->${markFor(TWO)} |`);
+      expect(parse(rejected).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
+      // The mark still ends the cell: it is read as the change, and rejecting it gives the old row back.
+      const table = readTables(rejected, parse(rejected))[0];
+      expect(table && alignMarkOf(parse(rejected), table)?.id).toBe('k3x9');
+      expect(
+        trim(decide(rejected, reject, 'k3x9'))
+          .split('\n')
+          .slice(0, 2),
+      ).toEqual(['| Fruit | Count<!--cmt c9qf--> |', TWO]);
+      expectEveryOrderAlike('a comment in the column', commented, exactly);
+    });
+
+    it('is typed in with Track Changes off without a second mark', () => {
+      const at = INSERTED.indexOf('Apples') + 6;
+      const typed = applyChanges(
+        INSERTED,
+        untrackedEdit(INSERTED, { from: at, to: at, insert: 'Q' }),
+      );
+      expect(typed).toContain('ApplesQ');
+      expect(typed.match(/<!--fmt k3x9/g)).toHaveLength(1);
+      expect(typed.match(/<!--ins c2dd col-->/g)).toHaveLength(1);
+      expect(trim(decide(typed, reject, 'c2dd'))).toBe(NARROW.replace('Apples', 'ApplesQ'));
+    });
+  });
+
+  describe('Bo’s last column deleted, Ada’s mark at the end of the new last cell', () => {
+    const made = (table: string) =>
+      edit(file(table), { kind: 'deleteCols', cols: [2] }, bo, ['m2bd']).after;
+    const DELETED = joined(
+      made(PLAIN3),
+      ['| Count |', `| Count${markFor(OLD3)} |`],
+      ['| ----- |\n', '| :---: |\n'],
+    );
+    const BACK = lines(
+      `| Fruit  | Count | Price${markFor(OLD3)} |`,
+      '| ------ | :---: | ----- |',
+      '| Apples | 3     | 1.20  |',
+      '| Pears  | 5     | 0.90  |',
+    );
+
+    it('writes the column back with the mark at the end of its header cell, and rejecting the mark then gives the original', () => {
+      expect(parse(DELETED).marks.map((mark) => mark.id)).toEqual(['k3x9', 'm2bd']);
+      const rejected = decide(DELETED, reject, 'm2bd');
+      expect(trim(rejected)).toBe(BACK);
+      expect(Object.keys(parse(rejected).ledger.marks)).toEqual(['k3x9']);
+      same(decide(rejected, reject, 'k3x9'), file(PLAIN3));
+    });
+
+    it('removes the deletion line and leaves the mark where it is when the deletion is accepted', () => {
+      const accepted = decide(DELETED, accept, 'm2bd');
+      expect(trim(accepted)).toBe(
+        lines(
+          `| Fruit  | Count${markFor(OLD3)} |`,
+          '| ------ | :---: |',
+          '| Apples | 3     |',
+          '| Pears  | 5     |',
+        ),
+      );
+      expect(said(() => reject(accepted, 'k3x9'))).toBe(LOST);
+      expect(said(() => reject(DELETED, 'k3x9'))).toBe(LOST);
+    });
+
+    it('is decided in every order, and shown by the views once', () => {
+      expectEveryOrderAlike('deleted last', DELETED, exactly);
+      onlyTheMark(expectEveryOrderRead('deleted last', DELETED));
+      viewed(DELETED, PLAIN3);
+      expect(trim(applyChanges(DELETED, rejectAll(DELETED)))).toBe(PLAIN3);
+      expect(reviewView(DELETED)).toContain('{--Price--}{>>[m2bd bo] Deleted column<<}');
+    });
+
+    it('writes an empty header cell back with the mark after the first space of its padding', () => {
+      const EMPTY3 = lines('| Fruit | Count |  |', '| ----- | ----- | --- |', '| Apples | 3 | x |');
+      const old = '| ----- | ----- | --- |';
+      const text = joined(
+        made(EMPTY3),
+        ['| Count |', `| Count${markFor(old)} |`],
+        ['| ----- | ----- |\n', '| ----- | :---: |\n'],
+      );
+      const rejected = decide(text, reject, 'm2bd');
+      expect(trim(rejected)).toBe(
+        lines(
+          `| Fruit | Count | ${markFor(old)} |`,
+          '| ----- | :---: | --- |',
+          '| Apples | 3 | x |',
+        ),
+      );
+      same(decide(rejected, reject, 'k3x9'), file(EMPTY3));
+      expectEveryOrderAlike('an empty cell back', text, exactly);
+      expect(tableLeaves(rejected)).toEqual(tableLeaves(file(EMPTY3.replace('-----', ':---:'))));
+    });
+  });
+
+  describe('Bo’s column moved to the end or from it, Ada’s mark at the end of the last cell', () => {
+    const moved = (cols: number[], to: number) =>
+      edit(file(FLAT3), { kind: 'moveCols', cols, to }, bo, ['c2dd', 'f3gg']).after;
+    // Fruit moved after Price: the mark ends the moved column, and the delimiter cell of Count is the first.
+    const TO_END = joined(
+      moved([0], 3),
+      ['Fruit |', `Fruit${markFor(FLAT_OLD)} |`],
+      ['| ----- | ----- | ----- |', '| :---: | ----- | ----- |'],
+    );
+    // Price moved before Fruit: the mark ends Count, which stays the last.
+    const FROM_END = joined(
+      moved([2], 0),
+      ['Count |', `Count${markFor(FLAT_OLD)} |`],
+      ['| ----- | ----- | ----- |', '| ----- | ----- | :---: |'],
+    );
+    const BACK = lines(
+      `| Fruit | Count | Price${markFor(FLAT_OLD)} |`,
+      '| ----- | :---: | ----- |',
+      '| Apples | 3 | 1.20 |',
+      '| Pears | 5 | 0.90 |',
+    );
+
+    it('moves the mark from the moved column to the one that is last when the move is rejected', () => {
+      for (const id of ['c2dd', 'f3gg']) {
+        const rejected = decide(TO_END, reject, id);
+        expect(trim(rejected), id).toBe(BACK);
+        same(decide(rejected, reject, 'k3x9'), file(FLAT3));
+      }
+    });
+
+    it('moves the mark to the column that goes back to the end, and leaves it when the move is accepted', () => {
+      for (const id of ['c2dd', 'f3gg']) {
+        const rejected = decide(FROM_END, reject, id);
+        expect(trim(rejected), id).toBe(BACK);
+        same(decide(rejected, reject, 'k3x9'), file(FLAT3));
+      }
+      const accepted = decide(FROM_END, accept, 'c2dd');
+      expect(trim(accepted)).toContain(`| Fruit | Count${markFor(FLAT_OLD)} |`);
+      expect(parse(accepted).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      const kept = decide(TO_END, accept, 'f3gg');
+      expect(trim(kept)).toContain(`| Count | Price | Fruit${markFor(FLAT_OLD)} |`);
+      expect(parse(kept).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+    });
+
+    it('keeps the mark when text typed with Track Changes off in the moved copy is written into both halves', () => {
+      const at = TO_END.indexOf('Apples') + 3;
+      const typed = applyChanges(TO_END, untrackedEdit(TO_END, { from: at, to: at, insert: 'QQ' }));
+      expect(typed).toContain('AppQQles');
+      expect(typed.match(/<!--fmt k3x9/g)).toHaveLength(1);
+      const rejected = decide(typed, reject, 'c2dd');
+      expect(trim(rejected)).toBe(BACK.replace('Apples', 'AppQQles'));
+      same(decide(rejected, reject, 'k3x9'), file(FLAT3.replace('Apples', 'AppQQles')));
+      expect(trim(decide(typed, accept, 'c2dd'))).toContain(`Fruit${markFor(FLAT_OLD)} |`);
+      expectEveryOrderAlike('typed in the copy', typed, exactly);
+    });
+
+    it('is decided in every order with no decision refused, and shown by the views once', () => {
+      for (const [name, text] of [
+        ['to the end', TO_END],
+        ['from the end', FROM_END],
+      ] as const) {
+        expectEveryOrderAlike(name, text, exactly);
+        expect(expectNoDecisionRefused(name, text), name).toBeGreaterThan(4);
+        expect(expectEveryOrderRead(name, text), name).toEqual([]);
+        viewed(text, FLAT3);
+        expect(trim(applyChanges(text, rejectAll(text))), name).toBe(FLAT3);
+        expect(trim(applyChanges(text, acceptAll(text))), name).toBe(trim(newestView(text).text));
+      }
+    });
+  });
+
+  describe('two of Bo’s columns inserted together, Ada’s mark at the end of the last', () => {
+    /** The mark ends the last cell of the header, as the reader of the table finds it. */
+    const endsHeader = (text: string) => {
+      const parsed = parse(text);
+      const table = readTables(text, parsed)[0];
+      const mark = table && alignMarkOf(parsed, table);
+      expect(mark?.segments[0]?.open.from).toBe(table?.rows[0]?.cells.at(-1)?.textTo);
+    };
+
+    it('writes the mark after the text of the column before it, or after the marker of an empty one', () => {
+      const original = lines('| Fruit | Count |', '| ----- | ----- |', '| Apples | 3 |');
+      for (const [what, first, kept] of [
+        ['text', '<!--ins c2dd col--> N1', `<!--ins c2dd col--> N1${markFor(TWO)}`],
+        ['no text', '<!--ins c2dd col-->   ', `<!--ins c2dd col--> ${markFor(TWO)}  `],
+      ] as const) {
+        const text = file(
+          lines(
+            `| Fruit | Count | ${first} | <!--ins f4gg col--> N2${markFor(TWO)} |`,
+            '| ----- | :---: | --- | --- |',
+            '| Apples | 3 | a | b |',
+          ),
+          { c2dd: 'bo', k3x9: 'ada', f4gg: 'bo' },
+        );
+        const rejected = decide(text, reject, 'f4gg');
+        expect(trim(rejected), what).toBe(
+          lines(`| Fruit | Count | ${kept} |`, '| ----- | :---: | --- |', '| Apples | 3 | a |'),
+        );
+        endsHeader(rejected);
+        // The other column goes, and the mark stays at the end of the last cell it ends.
+        const other = decide(text, reject, 'c2dd');
+        expect(trim(other).split('\n')[0], what).toBe(
+          `| Fruit | Count | <!--ins f4gg col--> N2${markFor(TWO)} |`,
+        );
+        endsHeader(other);
+        expect(trim(applyChanges(text, rejectAll(text))), what).toBe(original);
+        expectEveryOrderAlike(what, text, exactly);
+        viewed(text, original);
+      }
+    });
+  });
+
+  describe('Bo’s column inserted before the first, Ada’s mark at the end of the last cell', () => {
+    const FIRST = joined(
+      edit(file(PLAIN3), { kind: 'insertCols', after: 0 }, bo, ['c2dd']).after,
+      ['Price |', `Price${markFor(OLD3)} |`],
+      ['| --- | ------ | ----- | ----- |', '| --- | ------ | :---: | ----- |'],
+    );
+
+    it('leaves the mark at the end of the last cell, not at the first, whichever way the column is decided', () => {
+      const rejected = decide(FIRST, reject, 'c2dd');
+      expect(trim(rejected)).toBe(
+        lines(
+          `| Fruit  | Count | Price${markFor(OLD3)} |`,
+          '| ------ | :---: | ----- |',
+          '| Apples | 3     | 1.20  |',
+          '| Pears  | 5     | 0.90  |',
+        ),
+      );
+      same(decide(rejected, reject, 'k3x9'), file(PLAIN3));
+      const accepted = decide(FIRST, accept, 'c2dd');
+      expect(trim(accepted).split('\n')[0]).toBe(
+        `|     | Fruit  | Count | Price${markFor(OLD3)} |`,
+      );
+      expect(said(() => reject(accepted, 'k3x9'))).toBe(LOST);
+    });
+
+    it('is decided in every order, and shown by the views once', () => {
+      expectEveryOrderAlike('inserted first', FIRST, exactly);
+      onlyTheMark(expectEveryOrderRead('inserted first', FIRST));
+      viewed(FIRST, PLAIN3);
+    });
+  });
+
+  describe('a header with no pipes at its edges', () => {
+    const OLD = '----- | -----';
+    const BARE = file(
+      lines(
+        `Fruit | Count | <!--ins c2dd col--> New${markFor(OLD)}`,
+        '----- | :---: | ---',
+        'Apples | 3 | a',
+        'Pears | 5 | b',
+      ),
+      { c2dd: 'bo', k3x9: 'ada' },
+    );
+
+    it('puts the closing pipe that the row needs after the mark', () => {
+      const rejected = decide(BARE, reject, 'c2dd');
+      expect(trim(rejected)).toBe(
+        lines(`Fruit | Count${markFor(OLD)} |`, '----- | :---: |', 'Apples | 3 |', 'Pears | 5 |'),
+      );
+      expect(problemsOf(parse(rejected))).toEqual([]);
+      const both = decide(rejected, reject, 'k3x9');
+      expect(tableLeaves(both)).toEqual(
+        tableLeaves(file(lines('Fruit | Count', OLD, 'Apples | 3', 'Pears | 5'))),
+      );
+      // The mark ends the line where the column that goes had it, in the file that keeps it.
+      const kept = decide(BARE, accept, 'c2dd');
+      expect(trim(kept).split('\n')[0]).toBe(`Fruit | Count | New${markFor(OLD)}`);
+    });
+
+    it('is decided in every order', () => {
+      expectEveryOrderAlike('a bare header', BARE, exactly);
+      onlyTheMark(expectEveryOrderRead('a bare header', BARE));
+      // The closing pipe that the rewrite of the columns wrote stays in both versions.
+      viewed(BARE, lines('Fruit | Count |', OLD, 'Apples | 3 |', 'Pears | 5 |'));
+    });
+  });
+
+  describe('a mark that a merge left in a row below the header', () => {
+    const BELOW = file(
+      lines(
+        '| Fruit | Count | <!--ins c2dd col--> New |',
+        '| ----- | :---: | --- |',
+        `| Apples | 3 | a${markFor(TWO)} |`,
+        '| Pears | 5 | b |',
+      ),
+      { c2dd: 'bo', k3x9: 'ada' },
+    );
+
+    it('stays in its own row when its column goes, and never moves into the header', () => {
+      const rejected = decide(BELOW, reject, 'c2dd');
+      expect(trim(rejected)).toBe(
+        lines(
+          '| Fruit | Count |',
+          '| ----- | :---: |',
+          `| Apples | 3${markFor(TWO)} |`,
+          '| Pears | 5 |',
+        ),
+      );
+      expect(parse(rejected).marks.map((mark) => mark.id)).toEqual(['k3x9']);
+      same(
+        decide(rejected, reject, 'k3x9'),
+        file(lines('| Fruit | Count |', '| ----- | ----- |', '| Apples | 3 |', '| Pears | 5 |')),
+      );
+    });
+  });
+
+  describe('two tables, each with its own column and mark', () => {
+    const first = lines(
+      `| Fruit | Count | <!--ins c2dd col--> New${markFor(TWO)} |`,
+      '| ----- | :---: | --- |',
+      '| Apples | 3 |  |',
+    );
+    const second = lines(
+      `| Veg | Qty | <!--ins m5nn col--> New${markFor(TWO).replace('k3x9', 'w8nn')} |`,
+      '| --- | :-: | --- |',
+      '| Leeks | 4 |  |',
+    );
+    const both = file(`${first}\n\nBetween the tables.\n\n${second}`, {
+      c2dd: 'bo',
+      k3x9: 'ada',
+      m5nn: 'bo',
+      w8nn: 'ada',
+    });
+
+    it('decides the columns of one and leaves the other as it was', () => {
+      const one = decide(both, reject, 'c2dd');
+      expect(trim(one)).toContain(`\n\nBetween the tables.\n\n${second}`);
+      expect(trim(one)).toContain(`| Fruit | Count${markFor(TWO)} |`);
+      const other = decide(both, reject, 'm5nn');
+      expect(trim(other)).toContain(`${first}\n\nBetween the tables.\n\n`);
+      expect(trim(other)).toContain(`| Veg | Qty${markFor(TWO).replace('k3x9', 'w8nn')} |`);
+      expect(parse(applyChanges(both, rejectAll(both))).marks).toEqual([]);
+    });
+  });
+  describe('joined by hand into random column changes', () => {
+    it('is kept at the end of the header through every decision, which reads alike in every order', () => {
+      const random = seeded(Number(process.env['REDLINES_SEED'] ?? 281));
+      const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+      const POOL = ['c2dd', 'f3gg', 'h4jj', 'm5nn', 'b7cd', 'd8fg', 'g9hj', 'j2kl'];
+      const styles: Record<string, (cells: string[]) => string> = {
+        padded: (cells) => `| ${cells.join(' | ')} |`,
+        compact: (cells) => `|${cells.join('|')}|`,
+        bare: (cells) => cells.join(' | '),
+        open: (cells) => `| ${cells.join(' | ')}`,
+        lead: (cells) => `${cells.join(' | ')} |`,
+      };
+      let used = 0;
+      for (let n = 0; n < fuzzCount(60); n++) {
+        const width = 2 + Math.floor(random() * 3);
+        const line = styles[pick(Object.keys(styles))] as (cells: string[]) => string;
+        const eol = random() < 0.25 ? '\r\n' : '\n';
+        // The delimiter cells are alike, so that a moved column's cell is no other's, whatever the order.
+        const spec = line(Array.from({ length: width }, () => '-----'));
+        const original = [
+          line(Array.from({ length: width }, (_, c) => `hdr${'abcd'[c]}`)),
+          spec,
+          ...Array.from({ length: 1 + Math.floor(random() * 3) }, (_, r) =>
+            line(Array.from({ length: width }, (_, c) => `r${r}c${c}`)),
+          ),
+        ].join(eol);
+        // Bo changes the columns, tracked, once or twice.
+        let text = file(original);
+        const steps: string[] = [];
+        for (let step = 0; step < 1 + Math.floor(random() * 2); step++) {
+          const table = readTables(text, parse(text))[0];
+          if (!table) break;
+          const columns = table.aligns.length;
+          const kind = pick([
+            'insertCols',
+            'insertCols',
+            'deleteCols',
+            'moveCols',
+            'moveCols',
+          ] as const);
+          const op: TableOp =
+            kind === 'insertCols'
+              ? {
+                  kind,
+                  table: table.from,
+                  after: Math.floor(random() * (columns + 1)),
+                  count: 1 + Math.floor(random() * 2),
+                }
+              : kind === 'deleteCols'
+                ? { kind, table: table.from, cols: [Math.floor(random() * columns)] }
+                : {
+                    kind,
+                    table: table.from,
+                    cols: [Math.floor(random() * columns)],
+                    to: Math.floor(random() * (columns + 1)),
+                  };
+          try {
+            const ids = [...POOL].sort(() => random() - 0.5);
+            text = applyChanges(text, tableEdit(text, op, context(bo, ids)).changes);
+            steps.push(JSON.stringify(op));
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+          }
+        }
+        const last = readTables(text, parse(text))[0]?.rows[0]?.cells.at(-1);
+        // Bo's own inserted column that he deleted again is gone, and a file of no column change has no marks.
+        if (!/col-->|col=\d/.test(text) || !last) continue;
+        // Ada's change is joined in: her mark at the end of the header's last cell, its `SPEC` the old row.
+        const merged = entry(
+          text.slice(0, last.textTo) + markFor(spec) + text.slice(last.textTo),
+          'k3x9',
+          'ada',
+        );
+        const label = `${JSON.stringify(original)} ${steps.join(' ')}\n${bodyOf(merged)}`;
+        used++;
+        // After each decision of a column the mark is there once, with its entry, and ends the last cell.
+        const seen = new Set<string>();
+        const walk = (state: string, path: string) => {
+          if (seen.has(state)) return;
+          seen.add(state);
+          const parsed = parse(state);
+          const table = readTables(state, parsed)[0];
+          const mark = table && alignMarkOf(parsed, table);
+          expect(
+            parsed.marks.filter((m) => m.id === 'k3x9'),
+            `${label}${path}`,
+          ).toHaveLength(1);
+          expect(parsed.ledger.marks['k3x9'], `${label}${path}`).toBeDefined();
+          expect(mark?.segments[0]?.open.from, `${label}${path}`).toBe(
+            table?.rows[0]?.cells.at(-1)?.textTo,
+          );
+          for (const { id, kind, payload } of parsed.marks) {
+            if (
+              !(kind === 'ins' ? payload === 'col' : kind === 'del' && /^col=/.test(payload ?? ''))
+            ) {
+              continue;
+            }
+            for (const [how, decideIt] of [
+              ['accept', accept],
+              ['reject', reject],
+            ] as const) {
+              try {
+                walk(applyChanges(state, decideIt(state, id)), `${path} ${how} ${id}`);
+              } catch (error) {
+                if (!(error instanceof EditError)) throw error;
+              }
+            }
+          }
+        };
+        walk(merged, '');
+        expectEveryOrderAlike(label, merged, exactly);
+        // Each file on the way reads as its newest view, and the only decision refused is the mark's.
+        for (const step of expectEveryOrderRead(label, merged)) {
+          expect(step, label).toMatch(/ rk3x9$/);
+        }
+        const rejected = applyChanges(merged, rejectAll(merged));
+        const tidy = (view: string) => view.replace(/\s+$/, '');
+        expect(
+          parse(rejected).marks.filter((mark) => mark.kind !== 'cmt'),
+          label,
+        ).toEqual([]);
+        expect(tidy(originalView(rejected).text), label).toBe(tidy(originalView(merged).text));
+        expect(JSON.stringify(blockLeaves(rejected)), label).toBe(
+          JSON.stringify(blockLeaves(file(original))),
+        );
+        const accepted = applyChanges(merged, acceptAll(merged));
+        expect(parse(accepted).marks, label).toEqual([]);
+        expect(tidy(newestView(accepted).text), label).toBe(tidy(newestView(merged).text));
+      }
+      expect(used).toBeGreaterThan(fuzzCount(60) / 2);
+    }, 120_000);
   });
 });

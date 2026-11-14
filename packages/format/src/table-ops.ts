@@ -877,7 +877,7 @@ function insertCols(
   if (!Number.isInteger(op.after) || op.after < 0 || op.after > columns) {
     throw new EditError('There is no such place in this table.');
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   const shape = newColumnShape(text, grid);
   const ledger = workingLedger(parsed.ledger);
   const taken = idsIn(text);
@@ -947,7 +947,7 @@ function deleteCols(
       throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
     }
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   if (ctx && grid.lines.some((line) => cols.some((col) => !line.cells[col] || line.lone))) {
     throw new EditError(SHORT_ROW, 'no-legal-placement');
   }
@@ -1055,7 +1055,7 @@ function moveCols(
   if (order.every((index, i) => index === i)) {
     throw new EditError('The columns are already there.', 'no-legal-placement');
   }
-  const grid = gridOf(text, table);
+  const grid = gridOf(text, table, parsed);
   if (isShort(grid)) throw new EditError(SHORT_ROW, 'no-legal-placement');
   const ledger = workingLedger(parsed.ledger);
   const taken = idsIn(text);

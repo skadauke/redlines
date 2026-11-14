@@ -272,7 +272,9 @@ export function originalChanges(
     for (const table of tablesOfText(text, parsed)) {
       const ids = colMarkIds(table);
       if (ids.size === 0) continue;
-      const done = decideCols(text, parsed, table, ids, 'reject', true);
+      // The mark of an alignment change is kept at the end of the header's last cell for the second step of
+      // the original view, which undoes it there; a view that hides it here hides it where it stands.
+      const done = decideCols(text, parsed, table, ids, 'reject', true, !formats);
       changes.push(...done.changes);
       for (const id of ids) handled.add(id);
     }
