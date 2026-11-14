@@ -153,6 +153,18 @@ class FakeHost implements Host {
     this.draftAsked++;
     return Promise.resolve(this.discardDraft);
   }
+  askToSaveForImage() {
+    return Promise.resolve(false);
+  }
+  chooseImages() {
+    return Promise.resolve(null);
+  }
+  addImages() {
+    return Promise.resolve({ paths: [], refused: [] });
+  }
+  listenForImageDrops() {
+    return Promise.resolve(() => {});
+  }
   listenForFiles() {
     return Promise.resolve();
   }

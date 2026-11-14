@@ -36,6 +36,9 @@ export function localImageUrl(
   const path = resolve(src, documentPath);
   if (path === null) return null;
   const folder = project.replace(/[\\/]+$/, '');
+  // A project with no path is a browser tab's one folder in memory: any path in it is inside, which
+  // is every path that names no place of its own.
+  if (project === '') return /^([\\/]|[A-Za-z]:)/.test(path) ? null : toUrl(path);
   const inside = path.startsWith(folder + '/') || path.startsWith(folder + '\\');
   return inside ? toUrl(path) : null;
 }

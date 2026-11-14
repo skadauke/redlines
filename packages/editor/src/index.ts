@@ -41,6 +41,7 @@ import {
 } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -253,6 +254,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
+    // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
+    images(options.onImageFiles, options.onNotice),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -598,6 +601,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     wordAt: (pos) => wordAt(view, pos),
     pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
+    imageSpot: (at) => imageSpot(view, at, options.onNotice),
     focus: () => view.focus(),
     destroy: () => {
       destroyed = true;

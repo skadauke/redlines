@@ -23,6 +23,14 @@ pub struct ProjectRoot {
     too_broad: bool,
 }
 
+impl ProjectRoot {
+    /// Whether the project is the home folder or the disk's root, which shows its document's own
+    /// folder alone (`sidebar_folder`).
+    pub fn is_too_broad(&self) -> bool {
+        self.too_broad
+    }
+}
+
 /// A file or folder in the sidebar. The window reads the fields by name.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
