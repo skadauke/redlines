@@ -2685,6 +2685,10 @@ same values.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
+  - A window that reloads the file because it changed on disk reads the setting again: a file that
+    newly carries `tracking: everyone` turns Track Changes on, under the same notice, and the
+    switch writes nothing, since the file asks already. One that no longer carries it leaves
+    Track Changes as the window has it, so that nobody's tracking is switched off under them.
 - **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
   it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
   text of Clean with a change bar beside each changed line and the comments kept (design §5.3).

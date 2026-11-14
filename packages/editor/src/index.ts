@@ -402,6 +402,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     reloadDoc: (doc) => {
       const next = loadFile(doc);
       const { state } = view;
+      const asked = state.field(parsedField).ledger.tracking === 'everyone';
       const { changes, selection, effects } = newVersion(state, next.doc);
       // A change to the line breaks alone leaves the document's text as it was, but not the file's.
       const changed = !changes.empty || next.text !== fileText(state);
@@ -415,6 +416,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
       });
+      // A file that newly asks everyone to track changes is read as one that is opened: Track
+      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364). One
+      // that stops asking leaves it as it is, so that nobody's tracking is switched off under them.
+      if (
+        !asked &&
+        view.state.field(parsedField).ledger.tracking === 'everyone' &&
+        !view.state.field(trackingField)
+      ) {
+        view.dispatch({ effects: setTrackingEffect.of(true) });
+      }
     },
     applyAgentEdit: (doc, step) => {
       if (doc === fileText(view.state)) return;
