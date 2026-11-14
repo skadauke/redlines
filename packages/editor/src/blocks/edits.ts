@@ -283,22 +283,29 @@ function lastInItem(state: EditorState, block: Block, item: Item): boolean {
   return true;
 }
 
-/** Whether the line break in front of `line` is the one of a pending split of the author's own. */
-function ownSplitAbove(state: EditorState, line: Line): boolean {
-  if (line.number < 2) return false;
-  const me = state.facet(authorFacet)?.handle;
-  const above = state.doc.line(line.number - 1);
-  return (
-    state
-      .field(parsedField, false)
-      ?.marks.some(
-        (mark) =>
-          mark.kind === 'split' &&
-          mark.entry.by === me &&
-          mark.segments.some((g) => g.open.to === above.to),
-      ) ?? false
-  );
+/**
+ * The pending split whose break stands right above `line`: of the author's own, or another person's.
+ * The blank lines between are the split's own (the break of a loose list holds its blank line:
+ * `b<split>⏎⏎   - `). Null where the line above is no split's.
+ */
+function splitAbove(state: EditorState, line: Line): 'own' | 'theirs' | null {
+  const { doc } = state;
+  let n = line.number - 1;
+  while (n > 1 && /^[ \t>]*$/.test(doc.line(n).text)) n--;
+  if (n < 1) return null;
+  const above = doc.line(n);
+  const found = state
+    .field(parsedField, false)
+    ?.marks.find(
+      (mark) => mark.kind === 'split' && mark.segments.some((g) => g.open.to === above.to),
+    );
+  if (!found) return null;
+  return found.entry.by === state.facet(authorFacet)?.handle ? 'own' : 'theirs';
 }
+
+/** Why Return is refused in the empty item of another person's pending split. */
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
 
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
 function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): KeyEdit {
@@ -314,13 +321,15 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     // The item a Return of the author's own made, with Track Changes on: its line is the syntax of
     // that Return's pending split, and the new syntax goes over it as it is, as Tab's does, with no
     // mark. Typed over, the format takes the break with the old marker and writes the new one at
-    // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440).
-    const own = state.field(trackingField, false) && ownSplitAbove(state, line);
+    // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440). Another
+    // person's split is theirs to decide first, as for Tab.
+    const split = state.field(trackingField, false) ? splitAbove(state, line) : null;
+    if (split === 'theirs') return { ...nothing(state), refusal: THEIR_SPLIT };
     return {
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),
       userEvent: 'input.break',
-      ...(own ? { final: true, caretAt: line.to } : {}),
+      ...(split === 'own' ? { final: true, caretAt: line.to } : {}),
     };
   }
   // Out of the list: an empty paragraph after it, in the containers around it. With Track Changes

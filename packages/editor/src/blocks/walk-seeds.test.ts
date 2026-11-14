@@ -302,13 +302,15 @@ describe('#440: Return twice at the end of a nested item whose marker is another
   // one at the end of the text above (`1. a⏎   - b<ins>2. </ins>`), one item with the number in
   // its text. Now the edit of the item's line is final, as Tab's is: the split stays, the new
   // syntax is its line.
-  const ON =
-    "A line break that someone inserted can't be deleted together with other text until that change is decided.";
+  const THEIRS =
+    "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
   const OFF =
     "This edit can't be made with Track Changes off without changing other text or the changes around it. Accept or reject those changes first, or turn on Track Changes.";
   const rows = (tc: boolean): Script[] => {
     const mode = `Track Changes ${tc ? 'on' : 'off'}`;
     const brk = tc ? '<split>⏎' : '⏎';
+    // A loose list's break holds its blank line.
+    const loose = tc ? '<split>⏎⏎' : '⏎⏎';
     return [
       {
         name: `a bullet under a numbered step (the issue), ${mode}`,
@@ -365,6 +367,79 @@ describe('#440: Return twice at the end of a nested item whose marker is another
         expect: { file: '1. a⏎   - b', caret: '1. a⏎   - b‸' },
       },
       {
+        name: `a loose nested list, the last item: the break holds the blank line, ${mode}`,
+        doc: '1. a⏎   - b⏎⏎   - c‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: {
+          file: `1. a⏎   - b⏎⏎   - c${loose}2. `,
+          caret: `1. a⏎   - b⏎⏎   - c${loose}2. ‸`,
+        },
+      },
+      {
+        name: `a loose nested list, an item after the blank line, ${mode}`,
+        doc: '1. a⏎   - b‸⏎⏎   - c',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `1. a⏎   - b${loose}2. ⏎⏎   - c` },
+      },
+      {
+        name: `a numbered item under a bullet, loose, ${mode}`,
+        doc: '- a⏎  1. b⏎⏎  2. c‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `- a⏎  1. b⏎⏎  2. c${loose}- ` },
+      },
+      {
+        name: `an item of two paragraphs, a tight item after it, ${mode}`,
+        doc: '1. S⏎   - a⏎⏎     more⏎   - b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `1. S⏎   - a⏎⏎     more⏎   - b${loose}2. ` },
+      },
+      {
+        name: `a number that differs from its parent's, ${mode}`,
+        doc: '3. a⏎   1. b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `3. a⏎   1. b${brk}4. ` },
+      },
+      {
+        name: `three levels, up one, ${mode}`,
+        doc: '1. a⏎   - b⏎     1. c‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `1. a⏎   - b⏎     1. c${brk}   - ` },
+      },
+      {
+        name: `in a quote, ${mode}`,
+        doc: '> 1. a⏎>    - b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `> 1. a⏎>    - b${brk}> 2. ` },
+      },
+      {
+        name: `a parent of two digits, ${mode}`,
+        doc: '10. a⏎    - b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `10. a⏎    - b${brk}11. ` },
+      },
+      {
+        name: `a parent with a parenthesis, ${mode}`,
+        doc: '1) a⏎   - b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `1) a⏎   - b${brk}2) ` },
+      },
+      {
+        name: `a parent with two spaces after its marker, ${mode}`,
+        doc: '1.  a⏎    - b‸',
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: { file: `1.  a⏎    - b${brk}2.  ` },
+      },
+      {
         name: `typing in the new item, ${mode}`,
         doc: '1. a⏎   - b‸',
         keys: ['Enter', 'Enter', { type: 'c' }],
@@ -378,6 +453,20 @@ describe('#440: Return twice at the end of a nested item whose marker is another
   scriptRows([
     ...rows(false),
     ...rows(true),
+    // The caret anywhere in the item's line (a click puts it there): the line ends the same, the caret
+    // at its end.
+    ...[
+      ['‸   - ', 'at the start of the line'],
+      [' ‸  - ', 'in the indentation'],
+      ['   ‸- ', 'in front of the marker'],
+      ['   -‸ ', 'after the marker'],
+    ].map(([line, where]): Script => ({
+      name: `the caret ${where} of the empty item: Track Changes on`,
+      doc: `1. a⏎   - b<split>⏎${line}`,
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '1. a⏎   - b<split>⏎2. ', caret: '1. a⏎   - b<split>⏎2. ‸' },
+    })),
     {
       name: 'a file reopened with the split pending, the caret in its item: the same, Track Changes on',
       doc: '1. a⏎   - b<split>⏎   - ‸',
@@ -398,7 +487,7 @@ describe('#440: Return twice at the end of a nested item whose marker is another
       others: 'bo',
       keys: ['Enter'],
       tc: true,
-      expect: { refusal: ON },
+      expect: { refusal: THEIRS },
     },
   ]);
 });
