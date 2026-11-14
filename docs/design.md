@@ -740,7 +740,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   pipes are no change (format §3.7, "A cell a row lacks"). An input method that starts to compose
   there writes the pipes first, so that it composes in a real cell. A row with more cells than the
   header has its extra cells hidden and kept: no key puts the caret in one, selecting a row, a
-  column or the table leaves them out, and no text is lost.
+  column or the table leaves them out, and no text is lost while the row stays (a deleted row takes
+  its hidden extra cells with it).
 - **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
   above or below at the same x (an empty cell too), and out of the table at its first and last
   row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
@@ -846,25 +847,31 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
   but not deleted until those are decided; an agent that replaces a table with the table it wants
   changes rows and columns as these commands do (format §3.7, "Agents").
-- **A table deleted whole** (Delete Table, ⌫ again on a selected table whose cells are empty, or a
-  selection that covers it) is, with Track Changes on, one deletion of the block (format §3.4, §3.7
-  rule 6); with it off the table goes as text. In Redlines the deletion is drawn where the table
-  was, as a **ghost table**: its first eight rows, the header's among them, as a table with its
-  alignments, the text struck in the author's color on the author's tint, with a bar. Past eight
-  rows the rest are one line, "and 12 more rows". It is not editable: the caret and ↑ ↓ skip it, and
-  a press on it opens its card and puts no caret there. The card says "Deleted table (3 columns, 20
-  rows)"; accepting makes the deletion final and rejecting writes the table back. Simple draws the
-  bar and no table, and Clean shows the text without it. Your own pending changes in the table fold
-  into the deletion, as rejecting them would. With Track Changes on, another person's pending change
-  in it refuses the deletion, naming them ("Bo Chen's pending change is in this table. Decide it
-  first."), and so does a comment that runs out of the table, or that no text next to the table can
-  keep (it is the only block), naming its author; the other comments become point comments where the
-  table was. It is also refused where its marker has no place: a code block follows it with no text
+- **A table deleted whole** (Delete Table, or ⌫ again on a selected table whose cells are empty) is,
+  with Track Changes on, one deletion of the block (format §3.4, §3.7 rule 6); with it off the table
+  goes as text. In Redlines the deletion is drawn where the table was, as a **ghost table**: its
+  first eight rows, the header's among them, as a table with its alignments, the text struck in the
+  author's color on the author's tint, with a bar. Past eight rows the rest are one line, "and 12
+  more rows". It is not editable: the caret and ↑ ↓ skip it, and a press on it opens its card and
+  puts no caret there. The ghost table of a table that is all the text of the file is drawn only on
+  the file's first line and only while nothing follows it (typing near its marker draws it as one
+  struck source line; issue #470). The card says "Deleted table (3 columns, 20 rows)"; accepting
+  makes the deletion final and rejecting writes the table back. Simple draws the bar and no table,
+  and Clean shows the text without it. Your own pending changes in the table fold into the
+  deletion, as rejecting them would. With Track Changes on, another person's pending change in it
+  refuses the deletion, naming them ("Bo Chen's pending change is in this table. Decide it first."),
+  and so does a comment that runs out of the table, or that no text next to the table can keep (it
+  is the only block), naming its author; the other comments become point comments where the table
+  was. It is also refused where its marker has no place: a code block follows it with no text
   between, it ends the text right after a code block or a rule, or it starts right under a line of
-  text and something follows it. The words say what to do: put a paragraph or a blank line between,
-  or turn off Track Changes, which deletes the table's text. (A table next to a heading with closing
-  `#`s or attributes is refused in the words of any edit there, which don't say; format §3.7 rule 6
-  says what works.)
+  text and something follows it. The words, except for a table before a never-closed fence (issue
+  #454), say what to do: put a paragraph or a blank line between, or turn off Track Changes, which
+  deletes the table's text. (A table next to a heading with closing `#`s or attributes is refused in
+  the words of any edit there, which don't say; format §3.7 rule 6 says what works.) A selection
+  that covers the table, a cut and an agent's replacement are the ordinary deletion of a block
+  (format §3.4) instead: they don't fold your changes in, don't name the person whose change is in
+  the way, and refuse in the ordinary words (issue #471 asks for the selection to use Delete Table's
+  rules).
 
 ### 5.9 Command palette and shortcuts
 

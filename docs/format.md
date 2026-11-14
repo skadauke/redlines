@@ -2152,11 +2152,12 @@ it, one per line:
   the table instead."). With Track Changes off the columns go from the original as well, so the last
   column that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
-- **Rule 6, deleting the table.** A table that goes whole is a deletion of a block (§3.4): one
-  deletion, in front of the block after the table, or behind the block before it when the table
-  ends the text. Its payload is the table as it reads with your own pending changes rejected, and
-  its comments are left out. The rule that a table keeps a row is for deleting rows: the whole
-  table may go.
+- **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
+  table is §3.4's ordinary deletion and is held to none of these bullets. A table that goes whole
+  is a deletion of a block (§3.4): one deletion, in front of the block after the table, or behind
+  the block before it when the table ends the text. Its payload is the table as it reads with your
+  own pending changes rejected, and its comments are left out. The rule that a table keeps a row is
+  for deleting rows: the whole table may go.
   - **Another person's pending changes stay theirs.** With Track Changes on, a table that holds one
     can't be deleted until it is decided ("Bo Chen's pending change is in this table. Decide it
     first."). That is a change in a cell, an inserted or moved row or column, a row or column
@@ -2182,18 +2183,18 @@ it, one per line:
     stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
     a table that ends the text right after one is refused too. A table that starts right under the
     line above it, with no blank line between, and is followed by something, is refused as well,
-    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals
-    says which it is and what to do: put a paragraph between the table and the code block or the
-    rule (a pending insertion counts), or a blank line above the table, or turn off Track Changes,
-    which takes the table as text ("This table can't be deleted with Track Changes on while a code
-    block follows it with no text between. Put a paragraph between them first, or turn off Track
-    Changes."). A heading that has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`)
-    takes no change at its end. A table right under one is refused, whether something follows it or
-    not, and so is a table that ends the text right after one, with a blank line between or not.
-    Those refusals are in the words of any edit at the end of such a heading ("A heading's closing
-    #s and attributes take no change."), which don't say what to do. A blank line between them
-    gives a table that has text after it its place, and a paragraph between them gives one that
-    ends the text its place.
+    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals,
+    except that of a table before a never-closed fence (issue #454), says which it is and what to
+    do: put a paragraph between the table and the code block or the rule (a pending insertion
+    counts), or a blank line above the table, or turn off Track Changes, which takes the table as
+    text ("This table can't be deleted with Track Changes on while a code block follows it with no
+    text between. Put a paragraph between them first, or turn off Track Changes."). A heading that
+    has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`) takes no change at its end. A
+    table right under one is refused, whether something follows it or not, and so is a table that
+    ends the text right after one, with a blank line between or not. Those refusals are in the
+    words of any edit at the end of such a heading ("A heading's closing #s and attributes take no
+    change."), which don't say what to do. A blank line between them gives a table that has text
+    after it its place, and a paragraph between them gives one that ends the text its place.
   - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
     and their ledger entries, and the blank lines after it (the break before it, when nothing
     follows). Its comments become points as above. A comment that has no place so, or runs out of
