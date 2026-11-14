@@ -2024,11 +2024,18 @@ it, one per line:
     stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
     a table that ends the text right after one is refused too. A table that starts right under the
     line above it, with no blank line between, and is followed by something, is refused as well,
-    unless that line is a `#` heading. Each refusal says which it is and what to do: put a paragraph
-    between the table and the code block or the rule (a pending insertion counts), or a blank line
-    above the table, or turn off Track Changes, which takes the table as text ("This table can't be
-    deleted with Track Changes on while a code block follows it with no text between. Put a
-    paragraph between them first, or turn off Track Changes.").
+    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals
+    says which it is and what to do: put a paragraph between the table and the code block or the
+    rule (a pending insertion counts), or a blank line above the table, or turn off Track Changes,
+    which takes the table as text ("This table can't be deleted with Track Changes on while a code
+    block follows it with no text between. Put a paragraph between them first, or turn off Track
+    Changes."). A heading that has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`)
+    takes no change at its end. A table right under one is refused, whether something follows it or
+    not, and so is a table that ends the text right after one, with a blank line between or not.
+    Those refusals are in the words of any edit at the end of such a heading ("A heading's closing
+    #s and attributes take no change."), which don't say what to do. A blank line between them
+    gives a table that has text after it its place, and a paragraph between them gives one that
+    ends the text its place.
   - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
     and their ledger entries, and the blank lines after it (the break before it, when nothing
     follows). Its comments become points as above. A comment that has no place so, or runs out of
@@ -2123,11 +2130,11 @@ it, one per line:
 
 **Other table rules:**
 
-- Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
-  that has none, because a change begins in its first cell, the editor writes a plain `| ` in
-  front of it first, in both versions, so that nothing reads differently. This holds for a row with
-  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
-  is still refused.
+- **Rule 7, a row's outer pipes.** Rows that hold markers have a leading `|`. When a marker has to
+  stand at the start of a row that has none, because a change begins in its first cell, the editor
+  writes a plain `| ` in front of it first, in both versions, so that nothing reads differently.
+  This holds for a row with no pipe at all too (the first under the delimiter row, say). A format
+  change in a row without one is still refused.
   The same is written when an edit takes all the text of the first cell of a row that has no leading
   pipe, or of the last cell of one that has no trailing pipe (a deletion, tracked or not): the pipe
   beside the cell would become the row's outer pipe, the row would have a cell less, a header one
@@ -2146,18 +2153,31 @@ it, one per line:
   of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
   can unmake the table, as an edit of any line can unmake what it is).
 - **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
-  after its last. Typing into one writes the pipes it needs first, plain, in both versions (the rule
-  above: the pipes are no change), and then the text, as typing in any cell is written: an insertion
-  with Track Changes on, plain text with it off. Under a header of three columns `| 1 |` becomes
-  `| 1 | | x |` for an `x` in the third. With Track Changes on `x` is the insertion, and rejecting it
-  leaves `| 1 | |  |`, which reads as the row did, in every order of decisions. A row with no closing
-  pipe is given none, only the pipes between its cells: `| 1 | 2` becomes `| 1 | 2 | x`. A row that
-  is one `|` is a row with an empty first cell. The operation `fillCells` (a row, a column and the
-  text) writes it; with no text it writes the pipes alone, which the editor does when an input
-  method starts to compose there. A row that is the copy of a move still pending takes it only with
-  Track Changes off, which writes it in both halves as any plain edit there is; with it on, and for
-  the pipes alone, it is refused ("Bo Chen's move of this row is pending. Decide it first."). A pipe
-  or a line break in the text is refused as in any cell.
+  after its last. The file has no text for them, so there is no place in it to type. Typing into one
+  writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
+  differently. It then writes the text as typing in any cell is written, an insertion with Track
+  Changes on and plain text with it off. The operation `fillCells` (a row, a column and the text)
+  writes both.
+  - **The pipes and the text** go after the row's last character. A row with a closing pipe gets
+    ` |` for each cell in between and then ` text |`: under a header of three columns, `| 1 |`
+    becomes `| 1 | | x |` for an `x` in the third. A row with no closing pipe gets the pipes between
+    its cells and none at the end: `| 1 | 2` becomes `| 1 | 2 | x`. A row that is one `|` has one
+    empty cell, and an `x` in its first missing cell makes it `| | x`.
+  - **With Track Changes on** the `x` is the insertion. Rejecting it leaves `| 1 | |  |`, which
+    reads as the row did, in every order of decisions.
+  - **With no text** the operation writes the pipes alone, so that the cell is there to put a caret
+    in, and every row then ends in a closing pipe: `| 1 | 2` becomes `| 1 | 2 |  |`. The editor
+    does this when an input method starts to compose in the cell.
+  - **Refused:** a pipe or a line break in the text, as in any cell; a cell the row has, and a
+    column the table lacks ("That cell is not one its row lacks."); the header, and a row the
+    table lacks ("There is no such row in this table.").
+  - **A row at the new place of a move that is not yet decided** (the row with the
+    `<!--ins ID row-->` mark, whose old place is kept below the table) would get the pipes in that
+    half of the move only, and rejecting the move would give back a row that reads otherwise. With
+    Track Changes off the typing is a plain edit, written in both halves of the move as any plain
+    edit there is (Moving columns, above). With Track Changes on it is refused, and so are the
+    pipes alone, with it on or off. The refusal names the person who made the move ("Bo Chen's
+    move of this row is pending. Decide it first."), and says "Your move" to that person.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
@@ -2167,7 +2187,7 @@ it, one per line:
   with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
   below the last row goes above all of them, at the end of that row.
 - A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
-  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  otherwise, with as many empty cells as the header and a leading pipe (rule 7). Nothing else is
   re-padded.
 - **Aligning columns (rule 5).** A column's alignment is the colons in its cell of the delimiter row.
   **Redlines writes alignment changes with Track Changes off only** (the Align commands are refused with
