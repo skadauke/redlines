@@ -210,7 +210,7 @@ describe('the host in a browser tab', () => {
   });
 
   it('has no Paste of its own to give: a tab reads the clipboard’s text', () => {
-    expect(createHost().pasteInDocument).toBeUndefined();
+    expect(createHost()).not.toHaveProperty('pasteInDocument');
   });
 });
 
