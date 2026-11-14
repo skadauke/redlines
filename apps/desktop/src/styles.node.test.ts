@@ -223,6 +223,21 @@ describe('styles.css', () => {
     expect(printed).toMatch(/\.rl-scroller\s*\{[^}]*padding-top: 0/);
   });
 
+  it('keeps the hints of the right-hand icons inside the window, aligned with the icon’s right edge', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The Files icon's hint starts at its left edge, under the window buttons' side of the bar;
+    // View and Review are at the other end, where a hint that started at the icon's left would run
+    // out of the window.
+    expect(declared('.rl-tip')).toContain('left: 0');
+    expect(declared('.rl-tip-end')).toContain('right: 0');
+    expect(declared('.rl-tip-end')).toContain('left: auto');
+    // Both have the same weight, so the later wins: `left: auto` must come after `left: 0`, or a
+    // hint at the bar's end would span from the icon's left edge to its right.
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css.indexOf('.rl-tip-end {')).toBeGreaterThan(css.indexOf('.rl-tip {'));
+  });
+
   it('draws the word count small and gray in the lower right, on a fade that takes no pointer', () => {
     const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const declared = (selector: string) =>
