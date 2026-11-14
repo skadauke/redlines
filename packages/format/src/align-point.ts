@@ -48,7 +48,7 @@ export function readsOtherwise(
 
 /**
  * Whether a mark written right after `before`, the text of a cell as it stands in the file with its
- * markers, changes how the run of `*` or `_` that ends `before` reads. The mark starts with `<`, which
+ * markers, may change how the run of `*` or `_` that ends `before` reads. The mark starts with `<`, which
  * Markdown counts as punctuation: a run that closes an emphasis, with punctuation in front of it (a full
  * stop, or the `>` that ends a marker), can open one as well once `<` follows it, and the rule of three
  * then keeps it from closing an earlier run of the same character whose size and its own add up to a
@@ -57,6 +57,11 @@ export function readsOtherwise(
  * strikethrough closes the earlier run whether the run can open too or not. The text is the file's,
  * markers included, because that is what other Markdown readers read, and the views leave out the
  * markers that make the difference.
+ *
+ * It is conservative, not exact. It pairs no runs, so it does not know which earlier runs are still open:
+ * an earlier run that a later one has closed already counts as well, and after a completed pair, as in
+ * `**a** (b)*`, it answers true where Markdown reads the file as it reads the view. That false alarm costs
+ * a refusal. It leans towards refusing, since a miss would cost a misread.
  */
 export function changesRun(before: string): boolean {
   const char = before.at(-1);

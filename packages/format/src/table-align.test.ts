@@ -2065,15 +2065,21 @@ describe('a point alignment change beside other marks and edits', () => {
       expectDecided('ada closes _a', closing, [2, 2]);
     });
 
-    it('refuses only what the mark makes unsound: a key or a backspace that leaves the text in front of it read otherwise', () => {
+    it('refuses, of the endings it lists, only what the mark makes unsound: a key or a backspace that leaves the text in front of it read otherwise', () => {
       // The same cell with the mark and with nothing at its end, under every key (`x _ ~ * \`) and a backspace, plain
       // and tracked. What the file with the mark refuses and the other writes is each of the shapes below, each
-      // with its reason, and nothing else: not an `_`, a `~` or a `*` after a word, which reads as it did.
+      // with its reason, and nothing else: not an `_`, a `~` or a `*` after a word, which reads as it did. That
+      // holds of the endings listed here, and of no others. `changesRun` pairs no runs, so it refuses a run after
+      // a completed pair as well (`**a** (b)` and a typed `*`), though Markdown reads that file as it reads the
+      // view: a false alarm, which costs a refusal. And a key that lengthens a run that has closed an emphasis
+      // already (`*a .*` and a typed `*`, `_a ._` and a typed `_`) is refused rightly, in none of the shapes below.
+      // No ending listed is one of these, and the list would not pass with one in it.
       type Key = 'x' | '_' | '~' | '*' | '\\' | 'BACKSPACE';
       const KEYS: Key[] = ['x', '_', '~', '*', '\\', 'BACKSPACE'];
       const alphabet = ['b', ' ', '.', '*', '_', '~', '\\', ')'];
       const ends = new Set([
-        ...['**a .', '*a .', '_a', '_a_', 'a b', 'x y', 'unit', 'unit_x', 'Price', '*b*', '**b**'],
+        ...['**a .', '__a .', '*a .', '_a', '_a_', 'a b', 'x y', 'unit', 'unit_x', 'Price', '*b*'],
+        ...['**b**'],
         ...[
           'a\\\\',
           '`b`',
@@ -2141,8 +2147,9 @@ describe('a point alignment change beside other marks and edits', () => {
           seen: 0,
         },
         {
-          why: 'a plain `*` that closes a `**` after punctuation opens as well once `<` follows it, and the rule of three keeps it from closing',
-          holds: ({ tracked, cell }) => !tracked && /^\*\*[^*]*[^\w\s*]\*$/.test(cell),
+          why: 'a plain `*` that closes a `**`, or an `_` that closes a `__`, after punctuation opens as well once `<` follows it, and the rule of three keeps it from closing',
+          holds: ({ tracked, cell }) =>
+            !tracked && /^(?:\*\*[^*]*[^\w\s*]\*|__[^_]*[^\w\s_]_)$/.test(cell),
           oracle: true,
           comment: false,
           seen: 0,

@@ -13,13 +13,14 @@
 // `OLDER`, each with its issue: a bare header's last cell emptied under a marker, by an edit or a decision
 // (#428), typing over a delimiter of a pending bold (#299), a delimiter run typed next to another person's
 // marks (#265), a comment over a backtick, which makes decisions refused as hiding changes in code (#376),
-// and an entity that pending changes cut (no issue yet). A state of a shape that none of them says fails
-// the suite, and so does one where the mark makes another check fail first, but for `GAPS`, the open
-// defects. A tracked `_` or `*` typed at the start of a bare header makes no valid change (#429), and a key that
-// the mark shapes into a write over a row's pipe is refused (#449): the first leaves the walk (counted:
-// "unwritable"), and the file has no such state for the second. All that is left out stays under a twentieth
-// of the states. `REDLINES_FUZZ` sets how many tables (6000 before a stage merges), `REDLINES_SEED` the
-// seed, and `REDLINES_FUZZ_STATS` prints the counts by issue.
+// and an entity or a tag that deletions cut beside a comment (#467). A state of a shape that none of them
+// says fails the suite, and so does one where the mark makes another check fail first, but for `GAPS`: the
+// one open defect (#466), which only a file of its one shape is allowed, within a bound of its own. A
+// tracked `_` or `*` typed at the start of a bare header makes no valid change (#429), and a key that the
+// mark shapes into a write over a row's pipe is refused (#449): the first leaves the walk (counted:
+// "unwritable"), and the file has no such state for the second. What is left out as older, with the walks
+// that leave, stays under a twentieth of the states. `REDLINES_FUZZ` sets how many tables (6000 before a
+// stage merges), `REDLINES_SEED` the seed, and `REDLINES_FUZZ_STATS` prints the counts by issue.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
@@ -46,6 +47,7 @@ import {
   expectInOrder,
   expectNoDecisionRefused,
   file,
+  thread,
 } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import type { TextChange } from './types.ts';
@@ -216,10 +218,14 @@ interface Found {
   control: string;
   /** The checks that the file fails, the first to fail first. */
   failed: string[];
+  /** The first line of how each of them failed, by name. */
+  said: ReadonlyMap<string, string>;
   /** The checks that the file without its mark fails. */
   checks: string[];
   /** Whether the mark was written before the other changes. */
   markFirst: boolean;
+  /** How many edits changed the file after the mark was written (none where it was written last). */
+  editsAfterMark: number;
 }
 
 /** The delimiters of emphasis, next to the end or the start of a marker, or in the old text that a marker keeps. */
@@ -229,6 +235,9 @@ const READS_OTHERWISE = [
   'the file reads otherwise than its newest view',
   'an order reads otherwise than its view',
 ];
+/** The start of an HTML tag (a `<` and a letter, or a `/`) in the old text that a pending deletion or replacement
+ * keeps, up to the end of its marker. */
+const TAG_IN_OLD_TEXT = /<!--(?:del|sub) \w{4} (?:(?!-->).)*<[a-z/]/i;
 
 const DELIMITER_ROW = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 
@@ -279,7 +288,6 @@ function anyState(text: string, test: (state: string) => boolean): boolean {
  * file that is not sound without it is older than the mark, and is left out of the check: but only a shape
  * that is known, with the issue that it is, and only where the file without the mark fails the same check
  * first. A shape that none of these says is new, and fails the suite: file an issue for it, and add it here.
- * A shape with no number is one that no issue says yet.
  */
 const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] = [
   {
@@ -318,29 +326,45 @@ const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] 
       (DELIMITER_BY_MARKER.test(control) || /<!--(?:del|sub) \w{4} [^>]*\\/.test(control)),
   },
   {
-    issue: 'no issue yet: an entity',
-    why: 'an HTML entity that pending changes cut, or put a backslash in front of, reads otherwise in some order of decisions',
+    issue: '#467',
+    why: 'rejecting deletions that cut an HTML entity (an `&` and a letter), beside a comment, leaves a marker inside the entity, and the same holds of the start of an HTML tag (a `<` and a letter) that a pending deletion or replacement keeps: the file reads otherwise in some order of decisions',
     shape: ({ control, checks }) =>
-      READS_OTHERWISE.includes(checks[0] ?? '') && /&[a-z]/i.test(control),
+      READS_OTHERWISE.includes(checks[0] ?? '') &&
+      /<!--cmt /.test(control) &&
+      (/&[a-z]/i.test(control) || TAG_IN_OLD_TEXT.test(control)),
   },
 ];
 
 /**
- * Failures that the mark adds, which are open defects and not older ones. Where the writer of the mark is the
- * last, its walk has looked at every order of decisions, and nothing is allowed. Where it was written first,
- * the edits after it are looked at as the file reads, and not in every order (the cost of a keystroke, and
- * the walk is the writer's): a tracked key written again around the mark can leave a mixed order in which a
- * decision is refused. The file is sound without the mark, and not with it; it is one state in about 8,000.
- * The shape is named so that it can be found again, and it is bounded like the rest.
+ * The one open defect that the mark causes, #466: an edit written after a tracked alignment change can leave a
+ * mixed order of decisions in which a decision is refused. The gap is the one file that shows it, and nothing
+ * near it. A state is allowed as the gap only if all of these hold:
+ * - the mark was written before the other changes, and at least two edits changed the file after it (where it
+ *   was written last, the writer's walk has looked at every order of decisions, and nothing is allowed);
+ * - the file with the mark cut out passes every check;
+ * - the checks that fail with the mark are these two, in this order, and no other: "a decision is refused",
+ *   in words that say "would change the newest text", and "an order reads otherwise than its view".
+ * The two are matched as a pair, and neither alone is allowed: in the file that shows it, the state in which
+ * the decisions are refused is one of those that read otherwise. A tracked `\` written after the mark leaves
+ * a mixed order in which a deletion that holds a typed `_` is rejected alone, and the `_` stands between
+ * another change's closer and the mark. Markdown reads it as the opener of an emphasis that the view lacks
+ * (the misread). The newest view of that state writes the pair with `*` while a format change is pending
+ * (format §2.6), and no accept leaves that view, so each accept is refused. The misread is any point mark's:
+ * with a comment point in the mark's place the same orders read otherwise, and nothing is refused. Only the
+ * refusal is the alignment point's. The count has a bound of its own: a thousandth of the states, rounded up.
  */
 const GAPS: { issue: string; why: string; shape: (found: Found) => boolean }[] = [
   {
-    issue: 'no issue yet: edits after the mark',
-    why: 'an edit written after the mark leaves a decision of another change refused in a mixed order of decisions, which the file without the mark allows',
-    shape: ({ failed, checks, markFirst }) =>
+    issue: '#466',
+    why: 'an edit written after a tracked alignment change leaves a mixed order of decisions in which a decision is refused ("would change the newest text"), and an order reads otherwise than its view, in a file that passes every check without the mark',
+    shape: ({ failed, said, checks, markFirst, editsAfterMark }) =>
       markFirst &&
+      editsAfterMark >= 2 &&
+      checks.length === 0 &&
+      failed.length === 2 &&
       failed[0] === 'a decision is refused' &&
-      !checks.includes('a decision is refused'),
+      failed[1] === 'an order reads otherwise than its view' &&
+      /would change the newest text/.test(said.get('a decision is refused') ?? ''),
   },
 ];
 
@@ -401,6 +425,7 @@ describe('a point alignment change with changes beside it, random', () => {
       if (random() < 0.2) text = text.replace(/\n/g, '\r\n');
       if (tablesOf(text).length !== 1) continue;
       const steps: string[] = [];
+      let editsAfterMark = 0;
       const ids = () => [...POOL].sort(() => random() - 0.5);
       const first = random() < 0.5;
       /** Somebody aligns columns with Track Changes on: false when it is refused. */
@@ -527,6 +552,7 @@ describe('a point alignment change with changes beside it, random', () => {
           }
           try {
             text = applyChanges(text, changes ?? []);
+            if (first && changes !== undefined && changes.length > 0) editsAfterMark++;
           } catch (error) {
             // A tracked `_` or `*` typed at the start of a header with no pipe at its row starts makes no
             // valid change (#429): the walk goes no further with it. Nothing else may throw.
@@ -554,8 +580,10 @@ describe('a point alignment change with changes beside it, random', () => {
         text,
         control: cut,
         failed: [...failed.keys()],
+        said: failed,
         checks: [...control.keys()],
         markFirst: first,
+        editsAfterMark,
       };
       // The first check that fails says what went wrong first, and the later ones follow from it.
       if (found.failed[0] === found.checks[0]) {
@@ -583,7 +611,7 @@ describe('a point alignment change with changes beside it, random', () => {
         .join(', ');
     if (process.env['REDLINES_FUZZ_STATS']) {
       process.stderr.write(
-        `tables ${checked} (mark first ${before}, last ${after}), older than the mark ${total(older)} (${by(older)}), gaps ${total(gaps)} (${by(gaps)}), unwritable ${unwritable}, caused by it ${failures.length}, in no known shape ${unmapped.length}\n`,
+        `tables ${checked} (mark first ${before}, last ${after}), older than the mark ${total(older)} (${by(older)}), gaps ${total(gaps)} of at most ${Math.ceil(checked / 1000)} (${by(gaps)}), unwritable ${unwritable}, caused by it ${failures.length}, in no known shape ${unmapped.length}\n`,
       );
       for (const state of unmapped)
         process.stderr.write(`NO KNOWN SHAPE ${JSON.stringify(state)}\n`);
@@ -594,7 +622,127 @@ describe('a point alignment change with changes beside it, random', () => {
       'a file that is not sound without its mark, in a shape that no issue says',
     ).toEqual([]);
     expect(checked).toBeGreaterThan(10);
-    // The states left out are few, whatever they are: the walk goes on drawing.
-    expect(total(older) + total(gaps) + unwritable).toBeLessThan((checked + unwritable) / 20);
+    // The states left out as older, and the walks that go no further, are few: the walk goes on drawing.
+    expect(total(older) + unwritable).toBeLessThan((checked + unwritable) / 20);
+    // The open defect, #466, is about one state in 7,000, and has a bound of its own that the older ones do
+    // not share: a thousandth of the states, rounded up (one, in a run of fewer than a thousand).
+    expect(total(gaps)).toBeLessThanOrEqual(Math.ceil(checked / 1000));
   }, 3_600_000);
+
+  /** What a state that the suite found looks like to a shape, with what is not looked at left empty. */
+  const found = (over: Partial<Found>): Found => ({
+    text: '',
+    control: '',
+    failed: [],
+    said: new Map(),
+    checks: [],
+    markFirst: false,
+    editsAfterMark: 0,
+    ...over,
+  });
+
+  it('allows the file of #466 as its one gap, and nothing near it', () => {
+    // `REDLINES_FUZZ=1500 REDLINES_SEED=7` draws it: the mark first, then a tracked replacement of `b*` by `é`, a
+    // plain `_` typed at the end of the cell, and a tracked `\` after it, which is written again around the mark.
+    const body =
+      '| <!--sub g9hj b*-->é<!--/g9hj--><!--del q6rs _-->MARK<!--del q6rs  --><!--ins w8nn-->_\\ <!--/w8nn-->|\n| :---- |\n|  |\n| x y |';
+    const marks = { g9hj: 'ada', q6rs: 'ada', w8nn: 'ada' };
+    const mark = '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|-->';
+    const marked = file(body.replace('MARK', mark), { ...marks, k3x9: 'ada' });
+    const failed = failedChecks('#466', marked);
+    const control = failedChecks('#466', withoutPoints(marked));
+    const instance = found({
+      text: marked,
+      control: withoutPoints(marked),
+      failed: [...failed.keys()],
+      said: failed,
+      checks: [...control.keys()],
+      markFirst: true,
+      editsAfterMark: 3,
+    });
+    // Without the mark nothing fails. With a comment point where the mark is, the same file misreads, and nothing is
+    // refused: the misread is any point mark's, and only the refusal is the alignment point's.
+    expect(instance.failed, 'fixed? then this gap and this test go (#466)').toEqual([
+      'a decision is refused',
+      'an order reads otherwise than its view',
+    ]);
+    expect(instance.checks, 'the file without the mark passes every check').toEqual([]);
+    const comment = file(body.replace('MARK', '<!--cmt c9qf-->'), marks, thread('c9qf', 'ada'));
+    expect([...failedChecks('#466', comment).keys()]).toEqual([
+      'an order reads otherwise than its view',
+    ]);
+    expect([...failedChecks('#466', file(body.replace('MARK', ''), marks)).keys()]).toEqual([]);
+    const gap = GAPS.find(({ issue }) => issue === '#466');
+    expect(gap?.shape(instance)).toBe(true);
+    // Each condition of the shape is needed.
+    const near: Record<string, Partial<Found>> = {
+      'the mark written last': { markFirst: false },
+      'one edit after the mark': { editsAfterMark: 1 },
+      'a file that fails without the mark': { checks: ['a state is not a table'] },
+      'another check that fails with it': {
+        failed: [...instance.failed, 'a state is not a table'],
+      },
+      'the refusal alone': { failed: ['a decision is refused'] },
+      'a misread alone': { failed: ['an order reads otherwise than its view'] },
+      'the two the other way round': { failed: [...instance.failed].reverse() },
+      'a refusal in other words': {
+        said: new Map([
+          ...instance.said,
+          ['a decision is refused', 'accept g9hj is refused: Decide the changes next to it first.'],
+        ]),
+      },
+    };
+    for (const [what, over] of Object.entries(near)) {
+      expect(gap?.shape({ ...instance, ...over }), what).toBe(false);
+    }
+  });
+
+  it('names an entity or a tag that deletions cut beside a comment as #467, and not any other reading', () => {
+    const shape = OLDER.find(({ issue }) => issue === '#467')?.shape;
+    const misread = ['an order reads otherwise than its view'];
+    const entity = '| café | <!--del m5nn &a-->m<!--cmt q6rs-->p<!--del c2dd ;--><!--/q6rs--> ';
+    const tag = 'b|<!--del f3gg <b--><!--cmt p5qm-->><!--/p5qm-->|';
+    expect(shape?.(found({ control: entity, checks: misread }))).toBe(true);
+    expect(shape?.(found({ control: tag, checks: misread }))).toBe(true);
+    expect(
+      shape?.(found({ control: tag, checks: ['the file reads otherwise than its newest view'] })),
+    ).toBe(true);
+    // No comment, a first check that is not a misread, a comment with plain words, and a tag that no pending
+    // deletion or replacement keeps are other things.
+    expect(shape?.(found({ control: entity.replace('cmt', 'ins'), checks: misread }))).toBe(false);
+    expect(shape?.(found({ control: tag, checks: ['a view is not a table'] }))).toBe(false);
+    expect(
+      shape?.(
+        found({ control: '| a | <!--del f3gg b--><!--cmt p5qm-->c<!--/p5qm-->', checks: misread }),
+      ),
+    ).toBe(false);
+    expect(shape?.(found({ control: 'b|<b<!--cmt p5qm-->>c<!--/p5qm-->|', checks: misread }))).toBe(
+      false,
+    );
+  });
+
+  it('finds the tag of #467 older than the mark: the file without it misreads first, and so does the file with it', () => {
+    // `REDLINES_FUZZ=1500 REDLINES_SEED=9` draws it: a header with no pipe at its start, a deletion of `<b` and a
+    // comment over the `>`, and the mark written last. Rejecting the deletion leaves the comment's marker inside the
+    // tag, which Markdown reads otherwise than the view does.
+    const header = (end: string) =>
+      `Intro words.\n\nb|<!--del f3gg <b--><!--cmt p5qm-->><!--/p5qm-->${end}|\n :-: | :-: |\nx|b|\nb|b|\n\nOutro words.`;
+    const mark = '<!--fmt t5vw align=\\x20:-:\\x20\\|\\x20-\\-:\\x20\\|-->';
+    const marked = file(header(mark), { f3gg: 'ada', t5vw: 'ada' }, thread('p5qm', 'bo'));
+    const control = withoutPoints(marked);
+    const failed = failedChecks('#467', marked);
+    const checks = failedChecks('#467', control);
+    const instance = found({
+      text: marked,
+      control,
+      failed: [...failed.keys()],
+      said: failed,
+      checks: [...checks.keys()],
+      markFirst: false,
+    });
+    expect(READS_OTHERWISE).toContain(instance.checks[0]);
+    expect(instance.failed[0]).toBe(instance.checks[0]);
+    // The first shape that says it is #467's: no earlier one claims it.
+    expect(OLDER.find(({ shape }) => shape(instance))?.issue).toBe('#467');
+  });
 });
