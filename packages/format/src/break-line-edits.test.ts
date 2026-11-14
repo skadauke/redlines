@@ -173,6 +173,44 @@ describe('an edit of the blank line of a quote, between two paragraphs (#358)', 
   });
 });
 
+describe('a change inside the underline of a setext heading, which is a line of the break', () => {
+  it('writes all of it replaced as typed, the heading staying one', () => {
+    for (const [body, underline, insert] of [
+      ['Title\n---\n\nLast', '---', '==='],
+      ['Title\n===\n\nLast', '===', '---'],
+      ['Title\n---\n\nLast', '---', 'x'],
+    ] as const) {
+      const text = file(body);
+      const at = newestView(text).text.indexOf(underline);
+      const result = edited(text, at, at + underline.length, insert);
+      expect(newestView(result.after).text, body).toBe(result.typed);
+      expect(bodyText(applyChanges(result.after, reject(result.after, 'ffff'))), body).toBe(body);
+      expect(
+        flat(newestView(applyChanges(result.after, accept(result.after, 'ffff'))).text),
+        body,
+      ).toBe(flat(result.typed));
+      expect(parse(result.after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, result.after);
+    }
+  });
+
+  it('refuses a change of a part of it, as a change in a line that is only syntax', () => {
+    // In a quote the underline's text starts after the `> `: a range that starts there is a part
+    // of the line, as the rule for a setext underline reads it.
+    const words = 'A line that is only Markdown syntax takes no change.';
+    for (const [body, at, length, insert] of [
+      ['Title\n---\n\nLast', '--', 1, 'x'],
+      ['Title\n---\n\nLast', '-\n', 1, '=\n'],
+      ['Title\n---\n\nLast', '---', 3, ''],
+      ['> Title\n> ---\n>\n> Last', '---', 3, '==='],
+    ] as const) {
+      const from = body.indexOf(at) + (at === '---' && insert === '' ? 1 : 0);
+      const to = at === '---' && insert === '' ? from + 2 : from + length;
+      expect(() => edited(file(body), from, to, insert), `${body} ${from}-${to}`).toThrow(words);
+    }
+  });
+});
+
 /** The documents of the enumeration below: a break whose middle lines hold quote markers or white
  * space, with and without pending changes around it. */
 const SHAPES: [string, string, Record<string, string>][] = [

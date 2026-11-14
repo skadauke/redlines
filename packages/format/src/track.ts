@@ -55,6 +55,7 @@ import {
   openerRange,
   prefixLength,
   scaffold,
+  underlineOfBreak,
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
@@ -1123,6 +1124,11 @@ function typingOf(tokens: readonly Token[]): Typing {
  * `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which holds
  * them, is not typed as breaks; `kept`, the rest of a prefix, never holds one. A deletion there is
  * not this: it takes the break, or is `blankLineCut`'s.
+ *
+ * The break after the text of a setext heading holds its underline (`breakLength`), but a change
+ * that starts inside the underline or behind it, and does not take all of it, does not touch the
+ * heading's own text: it starts behind the underline, where no marker may stand, and is refused. A
+ * replacement that takes all of the underline is the rule above, with the underline typed again.
  */
 function coverBreaks(
   plan: Plan,
@@ -1160,11 +1166,19 @@ function coverBreaks(
         to = found.end;
         continue;
       }
+      // A range that starts inside the underline of a setext heading that the break holds, or
+      // behind it, and does not take all of it, starts behind it: the underline is the heading's
+      // own, and a deletion that took it would leave a paragraph (#372). No marker may stand
+      // there, so the change is refused.
+      const under =
+        from > found.start && from < prefix ? underlineOfBreak(plan.text, found.start) : undefined;
+      const partly = under !== undefined && !(from <= lineStart(plan.text, under) && to >= under);
       // Replaced text inside one line of the break between its first line break and the line of the
       // next block, with no line break in the range: the break stays, all of it, with what is typed
       // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
       if (
         replaces &&
+        !partly &&
         from > found.start &&
         lineStart(plan.text, from) < prefix &&
         to <= lineEnd(plan.text, from) &&
@@ -1176,10 +1190,11 @@ function coverBreaks(
         to = found.end;
         continue;
       }
-      from =
-        from > found.start && (from > prefix || (insidePrefix && to > found.end))
-          ? found.end
-          : Math.min(from, found.start);
+      if (from > found.start && (from > prefix || (insidePrefix && to > found.end))) {
+        from = found.end;
+      } else {
+        from = under !== undefined && partly ? under : Math.min(from, found.start);
+      }
       // The rest of a prefix that the range ends in is written again after what replaces it.
       if (to > prefix && to < found.end) kept = plan.text.slice(to, found.end);
       to = Math.max(to, found.end);
@@ -1286,11 +1301,27 @@ interface Cover extends Range {
  * the same list or quote: then the prefix stays in front of the deletion and takes the place of
  * the prefix of the next item, which the deletion takes, because a marker can not stand between
  * two items (`- one`, `- two`, `- three` without `two` leaves `- one`, `- three`).
+ *
+ * The break after the text of a setext heading holds its underline (`breakLength`), which is the
+ * heading's own, and no marker may stand behind it (#372). So the blocks at the end of the text,
+ * under a heading, go without the break in front of them, as the only block of a text does (the
+ * opener stands where the first of them was, and the blank lines above it stay: the deletion is
+ * written as that block's alone, with no break at either end of its payload); a range that starts
+ * behind the underline starts at the first of the blocks; and a deleted setext heading takes its
+ * own underline, with the break after it.
  */
 function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   const { text, markers } = plan;
   const breaks = breaksOfBody(plan, 0, text.length);
   const blocks = breaks.filter((found) => found.block);
+  // A range that starts behind a setext heading's underline, in the blank lines under it, and goes
+  // on into the block after them starts where that block does: the blank lines stay, as they do in
+  // front of the first block of the body, and the underline is not the range's to take (#372).
+  const through = breaks.find((found) => found.start < from && from < lineStart(text, found.end));
+  if (through && to > through.end) {
+    const under = underlineOfBreak(text, through.start);
+    if (under !== undefined && under <= from) from = lineStart(text, through.end);
+  }
   // The text of the first block starts after its prefix, where a range that starts in front of it,
   // or in it, starts too.
   const start = prefixEnd(plan, from) ?? from;
@@ -1310,6 +1341,11 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   if (!starts || !ends) return undefined;
   const first = lead === '' ? start : line;
   const newlines = (a: number, b: number) => text.slice(a, b).split('\n').length - 1;
+  // The break in front of the deleted blocks holds the underline of a setext heading above them
+  // (`breakLength`), which is the heading's own: no marker may stand behind it, and a deletion that
+  // took it would leave the heading's text a paragraph. That break stays, and does not go with the
+  // blocks, as no break does in front of the first block of the body.
+  const underlined = before !== undefined && underlineOfBreak(text, before.start) !== undefined;
   if (firstAfter) {
     // The blank lines that follow the first break are part of it: the block starts after them.
     let after = firstAfter;
@@ -1329,16 +1365,21 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
     // The blocks around the deleted ones stay as far apart as the break that is left between them
     // keeps them. When the one after the deleted blocks is the stronger, it stays, and the one in
     // front of them goes: the last item of a list and a paragraph after it. The blank lines at the
-    // start of the body are no break between blocks: the break after the deleted ones goes.
+    // start of the body are no break between blocks: the break after the deleted ones goes. Not
+    // where the break in front of them holds an underline (above), nor where the break after them
+    // does, because the deleted block is a setext heading: the deletion would end in front of its
+    // underline, and leave it under the block in front, to make a heading of that.
     const keepsAfter =
       before &&
+      !underlined &&
+      underlineOfBreak(text, firstAfter.start) === undefined &&
       visibleText(text, markers, plan.bodyStart, before.start).trim() !== '' &&
       newlines(before.start, lineStart(text, before.end)) < newlines(firstAfter.start, next);
     if (keepsAfter) return { from: before.start, to: Math.max(firstAfter.start, start) };
     if (sibling) return { from: start, to: after.end };
     return lead === '' ? { from: first, to: next } : { from: first, to: next, at: start };
   }
-  if (before) return { from: before.start, to };
+  if (before && !underlined) return { from: before.start, to };
   return lead === '' ? { from: first, to } : { from: first, to, at: start };
 }
 

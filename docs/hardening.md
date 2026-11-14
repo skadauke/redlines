@@ -198,10 +198,8 @@ its case; each is a bug. The list is what has been found, not a count of what is
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
   some orders (#335); typing at the end of a link reference definition with Track Changes on reads
   wrongly (#262).
-- Deleting the last block after a setext heading takes the heading's underline into the payload, so
-  that accepting leaves the text without it (#372); rejecting a row move with a comment in the moved
-  row puts the comment point in the wrong place (#371, found in a table with no pipe at its row
-  starts).
+- Rejecting a row move with a comment in the moved row puts the comment point in the wrong place
+  (#371, found in a table with no pipe at its row starts).
 - A highlight that runs from the text above a table into its header row can make another person's
   pending column change impossible to decide (#396).
 - The format's checks read an indented numbered item or bullet under an item as a new item where

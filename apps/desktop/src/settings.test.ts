@@ -5,6 +5,8 @@ import {
   currentAppearance,
   DEFAULT_SETTINGS,
   authorFrom,
+  imageFolderNameOf,
+  imageFolderNameProblem,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -72,6 +74,8 @@ describe('settings', () => {
       consent: {},
       people: [],
       newDocumentFolder: null,
+      imagePlace: 'folder',
+      imageFolderName: 'images',
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -103,6 +107,8 @@ describe('settings', () => {
         { handle: 'claude-bo', color: 3 },
       ],
       newDocumentFolder: '/Users/ada/Notes',
+      imagePlace: 'assets',
+      imageFolderName: 'pictures',
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
@@ -339,6 +345,80 @@ describe('settings', () => {
     );
     expect(loadSettings().newDocumentFolder).toBe('/Users/ada/Drafts');
     expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
+  });
+
+  it('puts images in a folder named images beside the document, also for settings saved before', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().imagePlace).toBe('folder');
+    expect(loadSettings().imageFolderName).toBe('images');
+    for (const place of ['folder', 'assets', 'same']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":"${place}"}`);
+      expect(loadSettings().imagePlace).toBe(place);
+    }
+    for (const stored of ['"elsewhere"', '3', 'null', 'true', '["same"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":${stored}}`);
+      expect(loadSettings().imagePlace).toBe('folder');
+    }
+  });
+
+  it('keeps the name of the folder for images only if a folder can have it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"imageFolderName":"Bilder 2026"}');
+    expect(loadSettings().imageFolderName).toBe('Bilder 2026');
+    // Inside the project the preview loads from: one name, no slash, and not a hidden one.
+    const refused = [
+      '',
+      ' ',
+      '.images',
+      '..',
+      'a/b',
+      '../images',
+      '/images',
+      'a\\b',
+      'a\u0007b',
+      'a\u0085b',
+    ];
+    for (const name of refused) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: name }));
+      expect(loadSettings().imageFolderName, JSON.stringify(name)).toBe('images');
+    }
+    for (const stored of ['7', 'null', '["images"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imageFolderName":${stored}}`);
+      expect(loadSettings().imageFolderName).toBe('images');
+    }
+    // A name of any length a folder can't have is none, as is a name with a space at its ends.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: 'x'.repeat(200) }));
+    expect(loadSettings().imageFolderName).toBe('images');
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: '  pics  ' }));
+    expect(loadSettings().imageFolderName).toBe('pics');
+  });
+
+  it('says what is wrong with a name for the folder, as the folder’s own rules do', () => {
+    expect(imageFolderNameProblem('images')).toBeNull();
+    expect(imageFolderNameProblem(' Bilder 2026 ')).toBeNull();
+    expect(imageFolderNameProblem('')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('   ')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('x'.repeat(101))).toBe(
+      'A folder’s name can’t be longer than 100 characters.',
+    );
+    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a\u0007b', 'a\u0085b', 'a\u007fb']) {
+      expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
+        'A folder’s name has no slash and doesn’t start with a dot.',
+      );
+    }
+    // The same names the settings take.
+    for (const typed of [
+      'images',
+      ' Bilder 2026 ',
+      '',
+      '.images',
+      'a/b',
+      'a\u0085b',
+      'x'.repeat(101),
+    ]) {
+      expect(imageFolderNameOf(typed) === null, JSON.stringify(typed)).toBe(
+        imageFolderNameProblem(typed) !== null,
+      );
+    }
   });
 
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
