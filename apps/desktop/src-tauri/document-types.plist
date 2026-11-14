@@ -6,15 +6,18 @@
   (src/document_types.rs). The file isn't named Info.plist, so that only the bundle has it, and not
   the program that `tauri dev` runs.
 
-  - Markdown, by its type, the one Redlines can be made the default app for (Preferences ›
-    General), at the rank of an app that opens it.
+  - Markdown, by its types, at the rank of an app that opens it: the one Redlines imports and can
+    be made the default app for (Preferences › General), and public.markdown, which macOS 27
+    declares itself. Which of the two a Mac gives `.md` files is for macOS to say, and Open With
+    offers an app for the types it claims, so it claims both (#347).
   - R Markdown and Quarto, by their extensions, which macOS has no type for, and plain text, by
     .txt alone, each at the rank of an alternative: Redlines is offered for those files and takes
     none of them, even where no other app owns them, since people who write R Markdown or Quarto
     have an editor of their choice. Plain text's type would offer Redlines for every kind of text
     that is plain text to macOS, such as source code, which Redlines doesn't open.
 
-  The import says what Markdown is, for a macOS that doesn't know it.
+  The import says what Markdown is, for a macOS that doesn't know it. public.markdown is macOS's
+  own, so the bundle only claims it, and imports no more than the one type.
 
   The usage descriptions are what macOS's question says when it asks whether Redlines may read a
   folder it protects (Privacy & Security › Files and Folders). It asks for Redlines, whatever
@@ -38,6 +41,7 @@
       <key>LSItemContentTypes</key>
       <array>
         <string>net.daringfireball.markdown</string>
+        <string>public.markdown</string>
       </array>
     </dict>
     <dict>
