@@ -345,6 +345,12 @@ body {
   animation: rl-appear 90ms ease-out;
 }
 
+/* The hints of the icons at the bar's right end end at the icon's right edge, so that they stay in the window. */
+.rl-tip-end {
+  right: 0;
+  left: auto;
+}
+
 .rl-tip-shortcut {
   color: rgb(255 255 255 / 0.62);
   letter-spacing: 0.04em;

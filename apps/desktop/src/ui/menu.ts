@@ -1,7 +1,8 @@
-// A menu that opens from an icon button: on hover after a short pause, or on click, Enter, Space or
-// the down arrow. A hover-opened menu closes soon after the pointer leaves both the button and the
-// menu; a clicked one stays until Esc, a second click or a click elsewhere. Opening on hover
-// never takes the keyboard focus from the document.
+// A menu that opens from an icon button: on hover after a short pause, or from the arrow keys. A
+// hover-opened menu closes soon after the pointer leaves both the button and the menu; a menu that
+// a key opened stays until Esc, a click elsewhere or the button's own click. Opening on hover never
+// takes the keyboard focus from the document. The button acts when it is clicked, or Enter or Space
+// is pressed on it (`activate`), and the click closes the menu if it is open.
 
 import { icon, type IconName } from './icons.ts';
 
@@ -31,6 +32,13 @@ export interface MenuOptions {
   button: HTMLButtonElement;
   /** The entries, read again on every refresh. Their order and number never change. */
   entries(): MenuEntry[];
+  /**
+   * What a click on the button does, as the eye switches the view and the pen turns Track Changes
+   * on and off. A click, or Enter or Space on the focused button, closes the menu if it is open,
+   * whichever way it was opened, and calls this; none of them opens it. The menu opens on hover,
+   * after the pause, and from the arrow keys. Given the click, whose `detail` is 0 for a key's.
+   */
+  activate(event: MouseEvent): void;
   /** Whether a neighboring menu is open, in which case hovering opens this one at once. */
   neighborOpen(): boolean;
   /** Called as the menu opens, so that its neighbors can close. */
@@ -39,7 +47,7 @@ export interface MenuOptions {
 
 export interface Menu {
   readonly isOpen: boolean;
-  open(how: 'hover' | 'click' | 'keyboard'): void;
+  open(how: 'hover' | 'keyboard'): void;
   close(): void;
   /** Redraws the entries from `entries()`, keeping the menu open or closed. */
   refresh(): void;
@@ -88,7 +96,7 @@ export function createMenu(options: MenuOptions): Menu {
   button.setAttribute('aria-controls', id);
 
   let isOpen = false;
-  /** Opened by a click or the keyboard, so leaving doesn't close it. */
+  /** Opened by the keyboard, so leaving doesn't close it. */
   let pinned = false;
   let openTimer: ReturnType<typeof setTimeout> | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -106,7 +114,7 @@ export function createMenu(options: MenuOptions): Menu {
     });
   };
 
-  const open = (how: 'hover' | 'click' | 'keyboard') => {
+  const open = (how: 'hover' | 'keyboard') => {
     clearTimers();
     pinned ||= how !== 'hover';
     if (!isOpen) {
@@ -168,9 +176,10 @@ export function createMenu(options: MenuOptions): Menu {
   };
 
   const onClick = (event: MouseEvent) => {
-    // A click on a menu that hover opened keeps it open; a click on a clicked menu closes it.
-    if (isOpen && pinned) close();
-    else open(event.detail === 0 ? 'keyboard' : 'click');
+    // The button acts. Its menu goes with the click, and the pause that was running does not open
+    // it after: the pointer has to leave and come back.
+    close();
+    options.activate(event);
   };
 
   const onButtonKey = (event: KeyboardEvent) => {

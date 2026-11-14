@@ -7,10 +7,18 @@
 // names and nothing more (agents/setup.rs). Only this window's capability grants those commands
 // (command-permissions.node.test.ts).
 
-import type { SetupResult, SkillInstalled, SkillState } from '@redlines/agents';
+import {
+  openClawAgents,
+  openClawCommand,
+  type OpenClawAgent,
+  type OpenClawInput,
+  type SetupResult,
+  type SkillInstalled,
+  type SkillState,
+} from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
-import { findProgram, homeAccess, runProgram, type AcpAgent } from './agent-programs.ts';
+import { acpAgents, findProgram, homeAccess, runProgram, type AcpAgent } from './agent-programs.ts';
 
 export const acpAgentEdits = {
   add: (name: string, command: string) => invoke<AcpAgent[]>('acp_agent_add', { name, command }),
@@ -18,6 +26,22 @@ export const acpAgentEdits = {
 };
 
 export { homeAccess };
+
+/**
+ * The agents of an OpenClaw Gateway, which are Agent Client Protocol agents whose command is
+ * `openclaw acp --url … --token-file …`: added, listed and removed through the same commands, with
+ * the same question to the person, which says where the document and the thread go and that the
+ * token file is never read (agents/acp.rs).
+ */
+export const openClawEdits = {
+  list: () => acpAgents.list().then(openClawAgents),
+  add: (input: OpenClawInput): Promise<OpenClawAgent[]> =>
+    invoke<AcpAgent[]>('acp_agent_add', {
+      name: input.name,
+      command: openClawCommand(input),
+    }).then(openClawAgents),
+  remove: (id: string) => acpAgentEdits.remove(id).then(openClawAgents),
+};
 
 /** Opens System Settings at Privacy & Security › Files and Folders (agents/mod.rs). */
 export const openFilesAndFoldersSettings = () => invoke<void>('open_files_and_folders_settings');

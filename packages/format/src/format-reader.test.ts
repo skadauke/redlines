@@ -17,6 +17,34 @@ const editorText = (text: string) => [
   plainBody(text, isOlderPunctuation),
 ];
 
+describe('the emphasis reading next to an emoji (#312)', () => {
+  // An emoji of several code points reads as the one character it is, as a single picture does: a
+  // marker's neighbor is the emoji, not a piece of it.
+  it('reads an emoji of several code points as it reads a single picture, on both readings', () => {
+    const templates = (e: string) => [
+      `a *${e}*b`,
+      `a*${e}* b`,
+      `*${e}*`,
+      `a **${e}**b`,
+      `x_${e}_y`,
+      `a ~~${e}~~b`,
+    ];
+    const single = '😀';
+    // Those whose last code point is a symbol, as a single picture is: a keycap, a heart with its
+    // variation selector and the flag of a subdivision end in a mark, which reads as a letter does.
+    for (const emoji of ['👨‍👩‍👧', '🇩🇪', '👍🏽', '🧑🏽‍💻']) {
+      templates(emoji).forEach((text, i) => {
+        const like = templates(single)[i]!;
+        for (const punctuation of [isPunctuation, isOlderPunctuation]) {
+          const read = plainBody(text, punctuation);
+          expect(read, text).not.toContain('\u0001');
+          expect(read.replaceAll(emoji, single), text).toBe(plainBody(like, punctuation));
+        }
+      });
+    }
+  });
+});
+
 describe('the emphasis reading (format §2.6)', () => {
   it('checks the rule of three against what is left of each run, as micromark does (#140)', () => {
     // `**` after `word` takes two of the three `*` before it. One is left, and `x**y` can open and

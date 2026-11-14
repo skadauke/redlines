@@ -14,6 +14,7 @@ import {
   agentSkills,
   createDetectionProcesses,
   homeAccess,
+  openClawEdits,
   openFilesAndFoldersSettings,
 } from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
@@ -187,6 +188,19 @@ const deps: PaneDeps = {
       showGeneral: () => show('general'),
       // What macOS holds back from Redlines, asked when the person picks the home folder.
       ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
+      // The agents of an OpenClaw Gateway, added here (the Other agents row stays off), and the
+      // skill for an OpenClaw on this Mac.
+      ...(isTauri
+        ? {
+            openclaw: {
+              ...openClawEdits,
+              skill: {
+                status: () => agentSkills.status('openclaw'),
+                install: () => agentSkills.install('openclaw'),
+              },
+            },
+          }
+        : {}),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),
