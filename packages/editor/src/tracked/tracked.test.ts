@@ -582,7 +582,7 @@ describe('Deleted blocks', () => {
     expect(blocksOf(several).map((block) => block.mark)).toEqual(['b2b2', 'b2b2', 'b2b2']);
   });
 
-  it('draws a table deleted whole as a block of its source, struck', () => {
+  it('draws a table deleted whole as a ghost table, where it was, and not as its source', () => {
     const doc = withLedger(
       'One.\n\n<!--del b2b2 | a | b |\\n| - | - |\\n| 1 | 2 |\\n\\n-->\n\nAfter.',
       {
@@ -590,7 +590,23 @@ describe('Deleted blocks', () => {
       },
     );
     const editor = load(doc);
-    expect(page(editor)).toEqual(['One.', '~| a | b | | - | - | | 1 | 2 |~', 'After.']);
+    // One block, the table's cells, between the lines above and below: no source line of it.
+    expect(page(editor)).toEqual(['One.', '~ab12~', 'After.']);
+    expect(blocksOf(editor)).toEqual([
+      {
+        classes: ['rl-ghost-table', 'rl-bar', 'rl-author-3', 'rl-space-block'],
+        text: 'ab12',
+        mark: 'b2b2',
+      },
+    ]);
+    const rows = [...editor.view.contentDOM.querySelectorAll('.rl-struck [role="row"]')];
+    expect(
+      rows.map((row) => [...row.querySelectorAll('.rl-tc')].map((cell) => cell.textContent)),
+    ).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(editor.view.contentDOM.textContent).not.toContain('|');
   });
 
   it('draws a deleted fenced code block as code, its fences hidden', () => {

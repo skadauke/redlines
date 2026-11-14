@@ -2,11 +2,12 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { frontMatterEnd, openerRange } from './blocks.ts';
-export { deletedBlocks } from './deleted-blocks.ts';
+export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
   DeletedBlockKind,
   DeletedBlocksContext,
+  DeletedCell,
   DeletedPiece,
 } from './deleted-blocks.ts';
 export { readBlocks } from './block-read.ts';

@@ -9,7 +9,7 @@
 import { wordHunks } from './agent.ts';
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
-import { assertNoMarkup } from './edit-support.ts';
+import { assertNoMarkup, changesBetween } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
@@ -278,29 +278,6 @@ export function diffTables(
     }),
   });
   return { cells, ops };
-}
-
-/** The changes between two texts, in the body and in the ledger, each as one change of what differs. */
-function changesBetween(before: string, after: string): TextChange[] {
-  const split = (text: string) => parse(text).ledgerRange?.from ?? text.length;
-  const [bodyBefore, bodyAfter] = [split(before), split(after)];
-  const part = (a: string, b: string, offset: number): TextChange[] => {
-    let start = 0;
-    while (start < a.length && start < b.length && a[start] === b[start]) start++;
-    let endA = a.length;
-    let endB = b.length;
-    while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
-      endA--;
-      endB--;
-    }
-    return start === endA && start === endB
-      ? []
-      : [{ from: offset + start, to: offset + endA, insert: b.slice(start, endB) }];
-  };
-  return [
-    ...part(before.slice(0, bodyBefore), after.slice(0, bodyAfter), 0),
-    ...part(before.slice(bodyBefore), after.slice(bodyAfter), bodyBefore),
-  ];
 }
 
 /**

@@ -2,11 +2,13 @@
 // tracked as Word tracks them, or plain with Track Changes off (§3.10). An operation gives the
 // changes of the file and where the caret goes. This file has inserting rows; the others join it.
 
-import { lineEnd } from './blocks.ts';
+import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
+import { rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
+import { addPerson, changesBetween, commitEdit, workingLedger } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
+import { SYNTAX_ONLY } from './inline.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
@@ -23,13 +25,24 @@ import {
 } from './table-cols.ts';
 import type { ColItem, Grid } from './table-cols.ts';
 import {
+  annotationsIn,
   commentAcrossRows,
+  commentCrossesTable,
   commentFromAbove,
+  commentHasNoPlace,
   commentsOf,
   commentsOfCols,
+  foldedMarks,
+  neighboursOf,
+  NEXT_TO_WORDS,
+  pendingInTable,
+  pointPlaces,
+  ruleSix,
+  straddlingMarks,
   ruleThree,
   ruleThreeCols,
 } from './table-rules.ts';
+import { fillCells } from './table-fill.ts';
 import {
   addDeletionLines,
   afterRemoval,
@@ -43,8 +56,10 @@ import {
   setPositions,
 } from './table-rows.ts';
 import type { RowItem } from './table-rows.ts';
+import { SELF_CHECK, trackedEdit } from './track.ts';
+import { untrackedEdit } from './untracked.ts';
 import type { UntrackedContext } from './untracked.ts';
-import { originalView } from './views.ts';
+import { newestView, originalView } from './views.ts';
 import type { EditContext, MarkEntry, MarkRange, Parsed, TextChange } from './types.ts';
 
 /**
@@ -77,7 +92,12 @@ export type TableOp =
   /** `to` is the boundary the columns go to: 0 before the first column, up to the number of columns. */
   | { kind: 'moveCols'; table: number; cols: number[]; to: number }
   /** The columns `cols` aligned as `align` (format §3.7, rule 5). */
-  | { kind: 'align'; table: number; cols: number[]; align: TableAlign };
+  | { kind: 'align'; table: number; cols: number[]; align: TableAlign }
+  /** The whole table, as a block (format §3.4, §3.7 rule 6). */
+  | { kind: 'deleteTable'; table: number }
+  /** The cell `col` of body row `row` (0 the header), which the row lacks: its pipes are written, plain,
+   * and `text`, when there is some, is typed into it (format §3.7, "A cell a row lacks"). */
+  | { kind: 'fillCells'; table: number; row: number; col: number; text?: string };
 
 /** What is pending in a table, by axis (format §3.7). */
 export interface TablePending {
@@ -167,6 +187,13 @@ export function ruleTwo(
     case 'deleteRows':
     case 'moveRows':
       return pending.colsChanged || (tracked && pending.colsInserted) ? columns : null;
+    // The table goes whole: your own pending changes in it are folded into the deletion, whatever
+    // axis they are on, and another person's are refused (rule 6), not asked to be decided by axis.
+    case 'deleteTable':
+      return null;
+    // A cell typed in is a cell edit, which any change pending in the table allows.
+    case 'fillCells':
+      return null;
   }
 }
 
@@ -630,6 +657,202 @@ function moveRows(
   return { changes, caret: first?.cells[0]?.textFrom ?? table.from, rows: moved };
 }
 
+/** Why a point comment's place is refused by the edit that writes it, which the next place is tried for. */
+const NO_PLACE = new Set(['no-legal-placement', 'inside-code', 'would-hide-marks', 'unclosed-end']);
+
+/**
+ * The comments and highlights in `table`'s rows taken out of them, and the comments written as point
+ * comments where the table was (format §3.7, rule 6): at the start of the text of the block after the
+ * table, or at the end of the text of the block before it. The text as it is after. With Track
+ * Changes off a comment that can't be written so is left to the edit that takes the table's text out,
+ * which keeps a point where the text was.
+ *
+ * @throws EditError, with Track Changes on, when a comment runs from the table into the text around
+ *   it, or no text next to the table can keep a point.
+ */
+function commentsToPoints(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  tracked: boolean,
+): string {
+  const { removals, points, crossing } = annotationsIn(parsed, table);
+  if (crossing) {
+    if (!tracked) return text;
+    throw new EditError(commentCrossesTable(parsed, crossing.by), 'no-legal-placement');
+  }
+  if (removals.length === 0) return text;
+  const ledger = workingLedger(parsed.ledger);
+  const ids = points.map((point) => point.id);
+  const insert = ids.map((id) => `<!--cmt ${id}-->`).join('');
+  for (const at of ids.length > 0 ? pointPlaces(text, parsed, table) : [null]) {
+    const body = at === null ? removals : [...removals, { from: at, to: at, insert }];
+    try {
+      const changes = commitEdit(text, body, ledger, {
+        parsed,
+        created: ids,
+        removes: true,
+        // A point that no one reads, in code, say, would leave its thread with no anchor.
+        verify: (_after, read) => {
+          if (ids.some((id) => !read.marks.some((mark) => mark.id === id))) {
+            throw new EditError(commentHasNoPlace(parsed, points[0]?.by ?? ''), 'inside-code');
+          }
+        },
+      });
+      return applyChanges(text, changes);
+    } catch (error) {
+      if (!(error instanceof EditError) || !NO_PLACE.has(error.code ?? '')) throw error;
+    }
+  }
+  if (!tracked) return text;
+  throw new EditError(commentHasNoPlace(parsed, points[0]?.by ?? ''), 'no-legal-placement');
+}
+
+/** Whether the line that starts at `start` is blank. */
+const blankLine = (text: string, start: number): boolean =>
+  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+
+/**
+ * What a table's removal takes out as text, with Track Changes off: the table and the blank lines
+ * after it, up to the line of what follows, or when nothing follows, the table and the break before it
+ * (so that the neighbors stay as far apart as they were).
+ */
+function plainRange(text: string, parsed: Parsed, table: TableRead): { from: number; to: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  const first = bodyStart(text);
+  const start = lineStart(text, table.from);
+  // A line of text right above the table (a table can start in a paragraph's next line) is kept apart
+  // from what follows by the blank line after the table, which then stays.
+  const apart = start <= first || blankLine(text, lineStart(text, start - 1));
+  let after = nextLineStart(text, table.to);
+  if (!apart && after < stop) return { from: table.from, to: after };
+  while (after < stop && blankLine(text, after)) after = nextLineStart(text, after);
+  if (after < stop) return { from: table.from, to: after };
+  let above = start;
+  while (above > first) {
+    const line = lineStart(text, above - 1);
+    above = line;
+    if (blankLine(text, line)) continue;
+    return { from: lineEnd(text, line), to: table.to };
+  }
+  return { from: table.from, to: table.to };
+}
+
+/** Where the caret goes after a table is gone: at the start of the text that follows it, or at the end
+ * of the text before it when none follows. `from` is where the table started in `before`. */
+function caretAfterTable(before: string, from: number, after: string): number {
+  const wanted = newestView(before).map.fromSource(from);
+  const view = newestView(after);
+  const end = view.text.replace(/\s+$/, '').length;
+  return wanted >= end ? view.map.toSource(end, -1) : view.map.toSource(wanted, 1);
+}
+
+/**
+ * The words of a refusal of the deletion of the table `table` that say what stands in the way and what
+ * to do (format §3.7, rule 6), or null when the refusal is for another reason. The deletion's marker
+ * can't stand in front of a code fence, nor behind a code block or a rule where the table ends the
+ * text, and the block's deletion needs a break in front of the table's first line.
+ */
+function wordsNextTo(
+  error: EditError,
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): string | null {
+  const next = neighboursOf(text, parsed, table);
+  if (error.code === 'unclosed-end' && next.fenceAfter) return NEXT_TO_WORDS.codeAfter;
+  if (
+    next.endsText &&
+    ((error.code === 'inside-code' && next.indentedAbove) ||
+      (error.message === SYNTAX_ONLY && next.fenceOrRuleAbove))
+  ) {
+    return NEXT_TO_WORDS.codeBefore;
+  }
+  return error.message === SELF_CHECK && next.underText ? NEXT_TO_WORDS.underText : null;
+}
+
+/**
+ * Deleting a table (format §3.4, §3.7 rule 6): a deletion of the block, in the form of §3.4, with the
+ * table as it reads with your own pending changes rejected as its payload. With Track Changes on,
+ * another person's pending change in the table refuses it; your own are folded in, as rejecting them
+ * would (your inserted row is removed outright, a row you deleted is in the payload), its comments
+ * become point comments where it was and its highlights go. With it off the table goes as text, with
+ * what was pending in it. `ctx` is null for plain.
+ */
+function deleteTable(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  ctx: EditContext | null,
+  plain: UntrackedContext = {},
+): TableEdit {
+  if (ctx) {
+    const refusal = ruleSix(text, table, parsed, ctx.author);
+    if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  }
+  const tables = readTables(text, parsed);
+  const index = tables.findIndex((t) => t.from === table.from);
+  const handle = ctx ? ctx.author.handle : null;
+  // A change of yours that runs from the table into the text around it can't be undone with the table.
+  const straddling = ctx ? straddlingMarks(text, table, parsed, ctx.author.handle)[0] : undefined;
+  if (straddling) throw new EditError(pendingInTable(parsed, straddling), 'no-legal-placement');
+  // The changes in it that go with it are undone first, as deciding them would: what is left is a
+  // table with nothing pending, which the ordinary deletion of a block writes (`trackedEdit`).
+  let current = text;
+  const folded = foldedMarks(text, table, parsed, handle);
+  if (folded.length > 0) {
+    const wanted = new Set(folded.map((mark) => mark.id));
+    current = applyChanges(
+      text,
+      rejectAll(text, (mark) => wanted.has(mark.id)),
+    );
+  }
+  let read = current === text ? parsed : parse(current);
+  const left = readTables(current, read);
+  if (left.length < tables.length) {
+    // The table was nothing but your own pending insertion, and undoing it took it away with no trace;
+    // or undoing the changes in it left what the file no longer reads as a table, which is not that.
+    const shown = (view: string) => readTables(view, parse(view)).length;
+    if (shown(newestView(current).text) >= shown(newestView(text).text)) {
+      throw new EditError(pendingInTable(read, folded[0] as MarkRange), 'no-legal-placement');
+    }
+    return {
+      changes: changesBetween(text, current),
+      caret: caretAfterTable(text, table.from, current),
+    };
+  }
+  let here = left[index] as TableRead;
+  if (ctx) {
+    // A change of yours that can't be undone (a format change that a later edit altered) stays.
+    const stuck = foldedMarks(current, here, read, handle)[0];
+    if (stuck) throw new EditError(pendingInTable(read, stuck), 'no-legal-placement');
+  }
+  const pointed = commentsToPoints(current, read, here, ctx !== null);
+  if (pointed !== current) {
+    current = pointed;
+    read = parse(current);
+    here = readTables(current, read)[index] as TableRead;
+  }
+  let asked: TextChange[];
+  try {
+    asked = ctx
+      ? trackedEdit(current, { from: here.from, to: here.to, insert: '' }, ctx)
+      : untrackedEdit(current, { ...plainRange(current, read, here), insert: '' }, plain);
+  } catch (error) {
+    // The ordinary deletion of a block words its refusals for blocks in general, and some are not so of
+    // a table (it speaks of a code block to close, or of a change to make smaller). When what stands
+    // next to the table is in the way, say so.
+    const words =
+      ctx && error instanceof EditError ? wordsNextTo(error, current, read, here) : null;
+    throw words === null ? error : new EditError(words, 'no-legal-placement');
+  }
+  const after = applyChanges(current, asked);
+  return {
+    changes: current === text ? asked : changesBetween(text, after),
+    caret: caretAfterTable(current, here.from, after),
+  };
+}
+
 /**
  * An operation on a table as a tracked change by `ctx.author`: the changes of the text and the
  * ledger, and where the caret goes in the new text. New rows carry `<!--ins ID row-->` at the start
@@ -641,6 +864,8 @@ function moveRows(
 export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   const parsed = parse(text);
   const table = tableOf(text, parsed, op);
+  if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
+  if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
   if (op.kind === 'deleteRows') return deleteRows(text, parsed, table, rowsOf(table, op.rows), ctx);
   if (op.kind === 'moveRows') {
     return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, ctx);
@@ -733,9 +958,10 @@ export function untrackedTableEdit(
   op: TableOp,
   ctx: UntrackedContext = {},
 ): TableEdit {
-  void ctx;
   const parsed = parse(text);
   const table = tableOf(text, parsed, op);
+  if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, null, ctx);
+  if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, null, ctx);
   if (op.kind === 'deleteRows')
     return deleteRows(text, parsed, table, rowsOf(table, op.rows), null);
   if (op.kind === 'moveRows') {

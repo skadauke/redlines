@@ -131,6 +131,24 @@ function singleChange(before: string, after: string): TextChange[] {
   return [{ from: start, to: before.length - end, insert: after.slice(start, after.length - end) }];
 }
 
+/**
+ * The changes between two texts, in offsets of `before`: the body and the ledger each as one change of
+ * what differs. For an operation that works out the text it makes (a table's deletion, an agent's edit
+ * of a table) and gives back what changed, which stays near the table and the ledger.
+ */
+export function changesBetween(before: string, after: string): TextChange[] {
+  const stop = (text: string) => parse(text).ledgerRange?.from ?? text.length;
+  const [a, b] = [stop(before), stop(after)];
+  return [
+    ...singleChange(before.slice(0, a), after.slice(0, b)),
+    ...singleChange(before.slice(a), after.slice(b)).map((change) => ({
+      ...change,
+      from: change.from + a,
+      to: change.to + a,
+    })),
+  ];
+}
+
 /** Where a position of the changed text was in the original, or null when it lay inside text that
  * a change inserted. At the edge of an inserted text it is before or after it, and a change that
  * only removes text leaves two original positions for one: `preferAfter` picks the later one. */

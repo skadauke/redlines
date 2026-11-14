@@ -9,6 +9,9 @@
 // and a view draws it as the deletion of the text that it is.
 
 import { CONTAINER_PREFIX } from './blocks.ts';
+import { parse } from './parse.ts';
+import { readTables } from './table.ts';
+import type { TableAlign, TableRead } from './table.ts';
 import type { Segment } from './types.ts';
 
 export type DeletedBlockKind =
@@ -26,8 +29,30 @@ export type DeletedBlockKind =
   | { kind: 'quote' }
   /** A fenced code block: its lines, without the fences, and the language the opening fence names. */
   | { kind: 'code'; language: string }
-  /** A table, HTML, math, a rule: drawn as its source. */
+  /**
+   * A table (format §3.7), as GFM reads it, whether or not its rows start with a pipe: its rows as
+   * written, the header's first, and the alignments its delimiter row says. The delimiter row is no
+   * row. `rows` holds the cells of the first rows that `DeletedBlocksContext.tableRows` allows, all
+   * by default, and `rowCount` is how many the table has.
+   */
+  | {
+      kind: 'table';
+      aligns: TableAlign[];
+      /** The columns the header has, which GFM shows. */
+      columns: number;
+      rowCount: number;
+      rows: DeletedCell[][];
+    }
+  /** HTML, math, a rule, a pipe-led block that is no table: drawn as its source. */
   | { kind: 'other' };
+
+/** A cell of a deleted table: its text as written, between its pipes, with no padding. */
+export interface DeletedCell {
+  /** A pipe in it is still `\|`, and a line break `<br>`. */
+  text: string;
+  /** Where it starts in the payloads put together, as a piece's `at`. */
+  at: number;
+}
 
 /** A stretch of a block's text, and where it starts in the payloads put together. */
 export interface DeletedPiece {
@@ -53,6 +78,17 @@ export interface DeletedBlocksContext {
   lead?: string;
   /** Whether nothing but blank lines follows the deletion, up to the end of the text. */
   atEnd?: boolean;
+  /**
+   * With `atEnd`, whether the deletion is all the text: nothing but blank lines stands before it
+   * either, so that no block above it holds its marker. The payload is then the blocks alone, with
+   * no break at either end, as a table that is the only block of a file is written. Default: no.
+   */
+  alone?: boolean;
+  /**
+   * How many rows of a table, the header and then the body's, a view draws, so that the cells of no
+   * more are given (the rest are counted). Default: all.
+   */
+  tableRows?: number;
 }
 
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
@@ -102,8 +138,54 @@ function startsBlock(text: string): boolean {
   );
 }
 
+/** A line that may be a table's delimiter row: dashes, colons and spaces, and a pipe. */
+const DELIMITER_LINE = /^(?=.*\|)(?=.*-)[ \t|:-]+$/m;
+
+/** The tables the last payloads held, by payload: a keystroke elsewhere asks about them again. */
+const recent: { text: string; tables: TableRead[] }[] = [];
+
+/**
+ * The tables of a payload, as the rest of the format reads them (`readTables`). A payload is text
+ * with no marks in it, never a file: the old text of the deletion.
+ */
+function tablesIn(text: string): TableRead[] {
+  // A table has a delimiter row under its header row: a payload with no such line has none.
+  if (!DELIMITER_LINE.test(text)) return [];
+  const known = recent.find((entry) => entry.text === text);
+  if (known) return known.tables;
+  const tables = readTables(text, parse(text));
+  recent.unshift({ text, tables });
+  recent.length = Math.min(recent.length, 16);
+  return tables;
+}
+
+/** What the lines of a payload say about its tables. */
+interface Tables {
+  payload: string;
+  /** The tables that start a line, by where the line starts in the payload. */
+  byStart: ReadonlyMap<number, TableRead>;
+  /** How many rows of a table to give the cells of. */
+  rows: number;
+}
+
+/** The kind of the block that a table is: the cells of its first rows. */
+function tableKind({ payload, rows }: Tables, table: TableRead): DeletedBlockKind {
+  return {
+    kind: 'table',
+    aligns: [...table.aligns],
+    columns: table.aligns.length,
+    rowCount: table.rows.length,
+    rows: table.rows.slice(0, rows).map((row) =>
+      row.cells.map((cell) => ({
+        text: payload.slice(cell.textFrom, cell.textTo),
+        at: cell.textFrom,
+      })),
+    ),
+  };
+}
+
 /** The blocks of a text that is whole blocks, one after the other. */
-function blocksOf(lines: readonly Line[]): DeletedBlock[] {
+function blocksOf(lines: readonly Line[], tables: Tables): DeletedBlock[] {
   const blocks: DeletedBlock[] = [];
   let open: Open | null = null;
   const close = () => {
@@ -121,7 +203,8 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
     const lead = body.length - body.trimStart().length;
     return { text: body.trim(), at: line.at + from + lead };
   };
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
     const { text } = line;
     if (open?.other === 'fence') {
       const closing = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(text)?.[1];
@@ -146,6 +229,22 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
       close();
       const language = text.slice(text.indexOf(fence[1]!) + fence[1]!.length).trim();
       open = { kind: { kind: 'code', language }, pieces: [], other: 'fence', fence: fence[1]! };
+      continue;
+    }
+    // A table as GFM reads it, which starts here and ends before the next block (not one a prefix
+    // changed, as a list item's first line, which stays the source it is).
+    const table = tables.byStart.get(line.at);
+    const header = table?.rows[0];
+    if (table && header && text === tables.payload.slice(header.from, header.to)) {
+      close();
+      const pieces = [piece(line)];
+      while (lines[index + 1] && lines[index + 1]!.at <= table.to)
+        pieces.push(piece(lines[++index]!));
+      blocks.push({
+        kind: tableKind(tables, table),
+        text: pieces.map((one) => one.text).join(' '),
+        pieces,
+      });
       continue;
     }
     if (open?.other === 'table' && TABLE_ROW.test(text)) {
@@ -263,8 +362,9 @@ export function deletedBlocks(
     if (!CONTAINER_PREFIX.test(last)) return null;
     while (to > 0 && CONTAINER_PREFIX.test(lines[to - 1]!.text)) to--;
   } else if (context.atEnd) {
-    // After the block above: the payload starts with the break.
-    if (lines.length < 2 || lines[0]!.text !== '') return null;
+    // After the block above: the payload starts with the break. When it is all the text there is no
+    // block above, and it is the blocks alone.
+    if (!context.alone && (lines.length < 2 || lines[0]!.text !== '')) return null;
     while (from < to && CONTAINER_PREFIX.test(lines[from]!.text)) from++;
     while (to > from && CONTAINER_PREFIX.test(lines[to - 1]!.text)) to--;
   } else return null;
@@ -275,11 +375,34 @@ export function deletedBlocks(
     const head = body[0]!;
     body[0] = { text: lead + head.text, at: head.at - lead.length };
   }
-  const blocks = blocksOf(body);
+  const read = tablesIn(payload);
+  const blocks = blocksOf(body, {
+    payload,
+    byStart: new Map(read.map((table) => [table.from, table])),
+    rows: context.tableRows ?? Infinity,
+  });
   // A break and a prefix alone, with no text, are a join.
   // (An empty fence pair is a code block with no lines.)
   return blocks.length > 0 &&
     blocks.every((block) => block.text !== '' || block.kind.kind === 'code')
     ? blocks
     : null;
+}
+
+/** Whether `text` is the lines of a break and a container prefix, which hold none of a block's text. */
+const isBreak = (text: string) =>
+  text.split('\n').every((line) => CONTAINER_PREFIX.test(line.replace(/\r$/, '')));
+
+/**
+ * The columns and rows of the table that a deletion's payload is, when it is one table and nothing
+ * else, as `deleteTable` writes it (format §3.7, rule 6): the table and the break after it, the
+ * break before it at the end of the text, or the table alone when it is all the text. Rows are the
+ * header's and the body's, and the delimiter row is no row. Null for any other payload.
+ */
+export function deletedTable(payload: string): { columns: number; rows: number } | null {
+  const tables = tablesIn(payload);
+  const [table] = tables;
+  if (tables.length !== 1 || !table) return null;
+  if (!isBreak(payload.slice(0, table.from)) || !isBreak(payload.slice(table.to))) return null;
+  return { columns: table.aligns.length, rows: table.rows.length };
 }

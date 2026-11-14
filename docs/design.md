@@ -513,14 +513,15 @@ mode has no counterpart in the desktop app.
 - **Deleted blocks show as blocks.** In Redlines, a paragraph, heading, list item, quote or other
   block that was deleted whole is drawn where it was, as a block of its own, its text struck in its
   author's color, with the look of what it was (a heading at its level, an item with its bullet, a
-  quote with its bar) and its own change bar. A block rewritten whole, by an agent or by typing over
-  it, is not deleted: the old text is struck above the new, in the same block (a rewritten heading
-  at the heading's size, an item beside its one bullet), and a rewritten table cell shows its old
-  text struck above the new inside the cell. Words deleted inside a block, a substitution of part of
-  one, and a deletion that runs from one block into another stay inline. The caret steps over a
-  struck block, as over deleted text, and its card opens on hover and pins on a click; a click on
-  its bar switches to the simple look, which doesn't draw it, and the block below keeps the place.
-  The simple look and Clean show the newest text only.
+  quote with its bar) and its own change bar. A table deleted whole is one of these, drawn as a
+  ghost table (§5.8). A block rewritten whole, by an agent or by typing over it, is not deleted: the
+  old text is struck above the new, in the same block (a rewritten heading at the heading's size, an
+  item beside its one bullet), and a rewritten table cell shows its old text struck above the new
+  inside the cell. Words deleted inside a block, a substitution of part of one, and a deletion that
+  runs from one block into another stay inline. The caret steps over a struck block, as over deleted
+  text, and its card opens on hover and pins on a click; a click on its bar switches to the simple
+  look, which doesn't draw it, and the block below keeps the place. The simple look and Clean show
+  the newest text only.
 - **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
   new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
   paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
@@ -712,7 +713,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **Hover controls:** a grip for each row and column, and a + on each boundary. Clicking a grip
   selects the row or column; dragging moves it to any position, including the last.
 - **Selection:** rectangles of cells, whole rows and whole columns. Delete clears every selected
-  cell, and menus count the selection ("Delete 2 rows").
+  cell, and again deletes the whole rows, columns or table once their cells are empty; menus count
+  the selection ("Delete 2 rows").
 - **Pasting** a spreadsheet range into cells grows the table by rows (§5.8 below, "Cells").
 - **Tracked changes look as in Word:** inserted rows and columns tinted, deleted ones shown as
   struck-through ghosts, and moves with Word's double underline and double strikethrough. Word
@@ -729,6 +731,17 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   merge and the table keeps its shape; a typed `|` is written `\|`, and text pasted or dropped on a
   cell goes in as its text. A cell is one line of the file, and the format refuses an edit that
   adds, takes away or splits a cell (format §3.7).
+- **A row of another width than the header.** A row with fewer cells than the header is drawn with
+  empty cells after its last, each in the column of its header cell, as GFM reads it. The caret can
+  be in one (Tab, ⇧Tab, the arrows and a press go there), and nothing is written until text is
+  typed. Typing in one writes its pipes first, plain, and then the text, as any typing is written:
+  `| 1 |` under a header of three columns becomes `| 1 | | x |` for an `x` in the third. Tracked,
+  only the `x` is the insertion, and rejecting it gives back a table that reads as it did, for the
+  pipes are no change (format §3.7, "A cell a row lacks"). An input method that starts to compose
+  there writes the pipes first, so that it composes in a real cell. A row with more cells than the
+  header has its extra cells hidden and kept: no key puts the caret in one, selecting a row, a
+  column or the table leaves them out, and no text is lost while the row stays (a deleted row takes
+  its hidden extra cells with it).
 - **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
   above or below at the same x (an empty cell too), and out of the table at its first and last
   row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
@@ -736,7 +749,9 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   adds a row; ⌘↩ and ⌥⌘↓ are Insert Row Below, in the Table menu. To leave the table by keyboard, press
   Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
   (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
-  in a cell lands in that cell, also in an empty one.
+  in a cell lands in that cell, also in an empty one, whatever its padding: `| |` and `||` have a
+  place for the caret as `|  |` has, and so does the end of text with no padding after it (`| y|`,
+  which is what typing a letter into `| |` writes).
 - **A selection that reaches into a table** from outside it clears the cells of the rows it reaches
   and deletes the text outside the table as a selection is deleted, never joining across the
   table; one that covers a whole table deletes it as a block. Delete, Backspace, Return and typing
@@ -752,7 +767,13 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
   rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
   cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
-  staying selected); typing clears them and types into the top-left one; ⌘B, ⌘I and the Format
+  staying selected). Pressed again, with whole rows, whole columns or the whole table selected and
+  every cell of them empty, they delete the rows, columns or table, as Delete Row, Delete Column and
+  Delete Table do, and the notice says what refuses it. A cell is empty when it holds no text the
+  caret can stand in (`cellIsEmpty`, `cells.ts`): deleted text counts as gone, a line break as text,
+  and an author's own HTML comment as empty in Clean and Simple, where it is hidden, and not in
+  Redlines, which draws it as a note. A row with text is never deleted by one keystroke: the first
+  press clears it. Typing clears the cells and types into the top-left one; ⌘B, ⌘I and the Format
   menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
   cells' text in one row and on the whole rows across rows.
 - **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
@@ -775,23 +796,24 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
   the row under the pointer, left of the change bars and inside the window, in a layer over the
   editor that assistive technology does not see (the menu bar has every command); a press selects
-  the row (⇧ extends) and opens its menu (Insert Above and Below, Delete, Move Up and Down, Clear
-  Contents), Esc closes it and keeps the selection; a drag moves the rows, and the others selected
-  with it, to any boundary, the last included: they dim, a copy follows the pointer, a 2 px line
-  marks the drop, the page scrolls near its edges, Esc cancels. A + shows within 8 px of a row
-  boundary in the strip beside the table, with a thin line across it, and a press inserts a row
-  there.
+  the row (⇧ extends) and opens its menu (Insert Above and Below, Delete, Delete Table, Move Up and
+  Down, Clear Contents), Esc closes it and keeps the selection; a drag moves the rows, and the
+  others selected with it, to any boundary, the last included: they dim, a copy follows the
+  pointer, a 2 px line marks the drop, the page scrolls near its edges, Esc cancels. A + shows
+  within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
+  press inserts a row there.
 - **Columns, the same.** Insert Column Left and Right (⌥⌘← and ⌥⌘→), Delete Column (⌃⌘⌫) and Move
   Column Left and Right (no default key) count the columns the selection touches ("Insert 2 Columns
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
-  new column, in its row. A column's grip (⋯) stands above the column in the strip above the table,
-  and never leaves it; a press selects the column (⇧ extends) and opens its menu (Insert Left and
-  Right, Delete, Move Left and Right, the four alignments with the caret's column checked, Clear
-  Contents); a drag moves the columns, and the others
-  selected with them, to any boundary, the last included, with a vertical drop line and the page's
-  table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the strip
-  above the table and a press inserts a column there. **An inserted column** has its cells in the
-  author's tint and underlined with a bar on every row; a **deleted column** is a ghost cell in
+  new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
+  deletes the whole table the caret or the selection is in. A column's grip (⋯) stands above the
+  column in the strip above the table, and never leaves it; a press selects the column (⇧ extends)
+  and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
+  alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
+  others selected with them, to any boundary, the last included, with a vertical drop line and the
+  page's table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the
+  strip above the table and a press inserts a column there. **An inserted column** has its cells in
+  the author's tint and underlined with a bar on every row; a **deleted column** is a ghost cell in
   every row at its place, struck, counted among the columns when the widths are found, and skipped by
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
@@ -824,8 +846,32 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
   Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
   but not deleted until those are decided; an agent that replaces a table with the table it wants
-  changes rows and columns as these commands do (format §3.7, "Agents"). The rest of the list above
-  arrives in the later stages.
+  changes rows and columns as these commands do (format §3.7, "Agents").
+- **A table deleted whole** (Delete Table, or ⌫ again on a selected table whose cells are empty) is,
+  with Track Changes on, one deletion of the block (format §3.4, §3.7 rule 6); with it off the table
+  goes as text. In Redlines the deletion is drawn where the table was, as a **ghost table**: its
+  first eight rows, the header's among them, as a table with its alignments, the text struck in the
+  author's color on the author's tint, with a bar. Past eight rows the rest are one line, "and 12
+  more rows". It is not editable: the caret and ↑ ↓ skip it, and a press on it opens its card and
+  puts no caret there. The ghost table of a table that is all the text of the file is drawn only on
+  the file's first line and only while nothing follows it (typing near its marker draws it as one
+  struck source line; issue #470). The card says "Deleted table (3 columns, 20 rows)"; accepting
+  makes the deletion final and rejecting writes the table back. Simple draws the bar and no table,
+  and Clean shows the text without it. Your own pending changes in the table fold into the
+  deletion, as rejecting them would. With Track Changes on, another person's pending change in it
+  refuses the deletion, naming them ("Bo Chen's pending change is in this table. Decide it first."),
+  and so does a comment that runs out of the table, or that no text next to the table can keep (it
+  is the only block), naming its author; the other comments become point comments where the table
+  was. It is also refused where its marker has no place: a code block follows it with no text
+  between, it ends the text right after a code block or a rule, or it starts right under a line of
+  text and something follows it. The words, except for a table before a never-closed fence (issue
+  #454), say what to do: put a paragraph or a blank line between, or turn off Track Changes, which
+  deletes the table's text. (A table next to a heading with closing `#`s or attributes is refused in
+  the words of any edit there, which don't say; format §3.7 rule 6 says what works.) A selection
+  that covers the table, a cut and an agent's replacement are the ordinary deletion of a block
+  (format §3.4) instead: they don't fold your changes in, don't name the person whose change is in
+  the way, and refuse in the ordinary words (issue #471 asks for the selection to use Delete Table's
+  rules).
 
 ### 5.9 Command palette and shortcuts
 
@@ -862,6 +908,7 @@ menus, shortcuts, the palette, plugins and agents.
 | In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
 | In a table: insert column left, right; delete column | ⌥⌘← and ⌥⌘→; ⌃⌘⌫                                                                 | Ctrl+Alt+Left and Right; Ctrl+Win+Backspace |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
+| In a table: clear cells; delete emptied rows, columns, the table | ⌫ or ⌦; again once whole rows, columns or the table are selected and empty                  | Backspace or Delete; again       |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
@@ -1161,14 +1208,14 @@ the same identity and the sandbox entitlement that an app extension must have
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu), `emoji`,
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
 `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
 | `review`     | The review bar, change cards, the comment rail and the Changes tab           | Document data, for drafts  |
-| `tables`     | Table editing: the Table menu now; grips, selection, moves, pasting ranges to come | —                    |
+| `tables`     | Table editing: the Table menu, the grips, the + and dragging rows and columns (the core draws tables, selects cells and pastes ranges) | — |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
 | `code`       | Syntax colors in code blocks                                                 | —                          |

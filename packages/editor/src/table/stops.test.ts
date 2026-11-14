@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { Transaction } from '@codemirror/state';
+import { EditorSelection, Transaction } from '@codemirror/state';
 import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
@@ -28,6 +28,10 @@ function load(doc: string, caret?: number, tracking = false): Editor {
 const press = (editor: Editor, key: string, init: KeyboardEventInit = {}) =>
   runScopeHandlers(editor.view, new KeyboardEvent('keydown', { key, ...init }), 'editor');
 const head = (editor: Editor) => editor.view.state.selection.main.head;
+const sel = (editor: Editor) => {
+  const { from, to } = editor.view.state.selection.main;
+  return [from, to];
+};
 const T = 'Intro.\n\n| a | b |\n| - | - |\n| cc | d |\n\nAfter.';
 const at = (doc: string, find: string, offset = 0) => doc.indexOf(find) + offset;
 
@@ -71,6 +75,82 @@ describe('the caret in a table', () => {
     expect(isStop(editor.view.state, empty - 1)).toBe(false);
     press(editor, 'ArrowRight');
     expect(head(editor)).toBe(at(doc, 'd |'));
+  });
+
+  describe('at the end of a cell whose text ends where the next cell begins', () => {
+    // An empty cell with one space of padding or none (`| |`, `||`), and text with none after it
+    // (`| y|`, `|a|b|`): the cell's last stop is the end of its own mark, and the next cell's first
+    // stop is after its own pipe, so the two never share one.
+    const row = (doc: string) => doc.indexOf('\n| 1') + 1;
+
+    it('has the one stop of an empty cell with one space of padding', () => {
+      const doc = '| a | b | c |\n| - | - | - |\n| 1 | | x |';
+      const editor = load(doc);
+      const start = row(doc);
+      const empty = start + '| 1 | '.length;
+      const { state } = editor.view;
+      expect(isStop(state, empty)).toBe(true);
+      expect(isStop(state, empty - 1)).toBe(false);
+      expect(isStop(state, empty + 1)).toBe(false);
+      expect(nearestStop(state, empty)).toBe(empty);
+      // Around it: the pipe and space before move in, the pipe after it goes to the next cell.
+      expect(nearestStop(state, empty - 2)).toBe(empty);
+      expect(nearestStop(state, empty + 1)).toBe(empty + 2);
+      // The stops of the next cell are where they were: after its own pipe and padding.
+      expect(isStop(state, empty + 2)).toBe(true);
+      expect(isStop(state, empty + 3)).toBe(true);
+      editor.view.dispatch({ selection: { anchor: empty } });
+      expect(head(editor)).toBe(empty);
+    });
+
+    it('has the one stop of an empty cell with no padding', () => {
+      const doc = '| a | b | c |\n| - | - | - |\n| 1 || x |';
+      const editor = load(doc);
+      const empty = row(doc) + '| 1 |'.length;
+      expect(isStop(editor.view.state, empty)).toBe(true);
+      editor.view.dispatch({ selection: { anchor: empty } });
+      expect(head(editor)).toBe(empty);
+    });
+
+    it('has a stop at the end of text that has no padding after it', () => {
+      const doc = '|a|b|c|\n|-|-|-|\n|1|2|3|';
+      const editor = load(doc);
+      const start = doc.lastIndexOf('|1|');
+      const stops = [1, 2, 3, 4, 5, 6].map((n) => start + n);
+      for (const stop of stops) {
+        expect(isStop(editor.view.state, stop), `at ${stop - start}`).toBe(true);
+        editor.view.dispatch({ selection: { anchor: stop } });
+        expect(head(editor), `a caret set at ${stop - start}`).toBe(stop);
+      }
+      // A selection of a cell's text, and of text from one cell to the next.
+      editor.view.dispatch({ selection: { anchor: start + 1, head: start + 2 } });
+      expect(sel(editor)).toEqual([start + 1, start + 2]);
+      editor.view.dispatch({ selection: { anchor: start + 1, head: start + 4 } });
+      expect(sel(editor)).toEqual([start + 1, start + 4]);
+    });
+
+    it('draws the caret in that cell: its side leans to the text before the position', () => {
+      const doc = '| a | b | c |\n| - | - | - |\n| 1 | | x |';
+      const editor = load(doc);
+      const empty = row(doc) + '| 1 | '.length;
+      // The editor gives a caret the side after a position, which here is the next cell's mark; the
+      // caret is attached to the cell it is the end of, wherever it came from.
+      editor.view.dispatch({ selection: { anchor: empty } });
+      expect(editor.view.state.selection.main.assoc).toBe(-1);
+      editor.view.dispatch({ selection: EditorSelection.cursor(empty, 1) });
+      expect(editor.view.state.selection.main.assoc).toBe(-1);
+      // ← from the start of the next cell's text lands there with the side after it, which is corrected.
+      editor.view.dispatch({ selection: { anchor: empty + 2 } });
+      press(editor, 'ArrowLeft');
+      expect(head(editor)).toBe(empty);
+      expect(editor.view.state.selection.main.assoc).toBe(-1);
+      // A stop inside a cell, and the last cell's, do not lean: no side is set there.
+      editor.view.dispatch({ selection: EditorSelection.cursor(row(doc) + 2, 1) });
+      expect(editor.view.state.selection.main.assoc).not.toBe(-1);
+      const end = doc.length;
+      editor.view.dispatch({ selection: EditorSelection.cursor(end - 2, 1) });
+      expect(editor.view.state.selection.main.assoc).not.toBe(-1);
+    });
   });
 
   it('has no stop in a cell GFM does not show', () => {
