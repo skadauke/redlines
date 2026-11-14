@@ -1249,13 +1249,18 @@ hidden, none that git ignores); the real path of a file, links followed, only fo
 opened or saved and for what is inside a project folder a sidebar shows, with no hidden name below
 the folder; and the project of a document, the repository that holds it or else its own folder,
 only for a document the person opened or saved, by a path with no `..` in it, as a dialog gives it:
-asking for it is what shows the project. The same limits decide what the app opens for a window in
-another app: an image or a PDF, in Preview, only when it is inside a project folder a sidebar shows
-and below no hidden name, so a window can't open one by naming the folder that holds it as its own
-project. A link in a project that leads out of it is no more known than the file it leads to, and
-anything else asked of gets one refusal, which says nothing of whether the path is there. No window
-goes to an `asset:` URL itself. A drop on a window adds nothing of
-itself: a document dropped opens as one from Finder does, and is the window's, with its project's
+asking for it is what shows the project. The scope knows a document by the file it really is, so a
+path that reaches it through a link, which a window can spell too, is not told apart from the one
+the person went through, and shows the project the path goes through (#458). The same limits decide
+what the app opens for a window in another app: an image or a PDF, in Preview, only when it is
+inside a project folder a sidebar shows and below no hidden name, so a window can't open one by
+naming the folder that holds it as its own project. Where a document sits directly in the home
+folder, that is the folder shown, and these limits reach as far down as it goes, though the images
+the preview loads stop at the document's own folder (#451). A link in a project that leads out of
+it is no more known than the file it leads to, and anything else asked of gets one refusal, which
+says nothing of whether the path is there. No window goes to an `asset:` URL itself. A drop on a
+window adds nothing of itself: a document dropped opens as one from Finder does, and is the
+window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
 dragged, dropped back on that window, which opens nothing). Image files dropped alone, every file of
 the drop an image, are the window's to add to its document (§5.10), and are the one exception: the
