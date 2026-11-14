@@ -2,11 +2,12 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { frontMatterEnd, openerRange } from './blocks.ts';
-export { deletedBlocks } from './deleted-blocks.ts';
+export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
   DeletedBlockKind,
   DeletedBlocksContext,
+  DeletedCell,
   DeletedPiece,
 } from './deleted-blocks.ts';
 export { readBlocks } from './block-read.ts';
@@ -68,5 +69,5 @@ export type {
 } from './table.ts';
 export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
-export { alignLabel, alignWas, isAlignMark } from './table-align.ts';
+export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

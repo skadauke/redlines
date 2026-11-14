@@ -1,24 +1,45 @@
-// Aligning a table's columns (format §3.7): a block format change around the table, `align=SPEC`,
-// with the old delimiter row as its value. The opener stands alone on the line before the table, as
-// any mark that starts a block does (§3.3), and the closer after one blank line below the table and
-// its deletion lines. Accepting takes the markers away; rejecting writes the old delimiter row back.
-// With Track Changes off the delimiter row is changed as it says, in the change's `align=` too, so
-// that both views have it.
+// Aligning a table's columns (format §3.7): a block format change, `align=SPEC`, with the old
+// delimiter row as its value. Redlines writes it as a point: one mark with no closer, at the end of the
+// text of the header row's last cell (#281), `<!--fmt k3x9 align=SPEC-->`. Nothing below or above the
+// table can share a line with it, so no edit beside the table has to be refused for it. Accepting takes the
+// mark away; rejecting writes the old delimiter row back and takes the mark away; neither decision
+// changes a byte outside the table's first two lines. With Track Changes off the delimiter row is
+// changed as it says, in the change's `align=` too, so that both views have it; and a plain operation on
+// columns does to the change's old row what it does to the table's own (`keepAlignInStep`).
+//
+// The span form is still read, drawn, carded and decided, and never written: an opener alone on the line
+// before the table, as any mark that starts a block does (§3.3), and a closer after one blank line below
+// the table and its deletion lines. Other tools wrote it, and the code for it (`closerRange`,
+// `checkAlignGap`, the closer in `alignHide`, `alignMarkOf` and `tableOfSegment`) is for that form alone.
 
 import { lineEnd, lineStart, openerRange } from './blocks.ts';
-import { eolOf } from './changes.ts';
+import {
+  changesRun,
+  isAlignPoint,
+  placeReads,
+  pointsReadWords,
+  readsOtherwise,
+} from './align-point.ts';
+import { applyChanges, eolOf } from './changes.ts';
+import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
-import { encodeValue, isAlignOps, opsOf } from './format-ops.ts';
+import { addPerson, commitEdit, hiddenError, workingLedger } from './edit-support.ts';
+import { encodeValue, isAlignOps, isAlignPayload, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { idsIn, newId } from './ids.ts';
+import { paragraphRange, visible } from './inline.ts';
+import { normalizeLedger } from './ledger-order.ts';
+import { serializeLedger, setLedger } from './ledger-write.ts';
+import { markerRanges } from './markers.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
-import { readDelimiterRow, readRowCells, tablesOfText } from './table.ts';
+import { readDelimiterRow, readLine, readRowCells, tablesOfText } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
-import { deletedColCells } from './table-cols.ts';
-import { closersBelow, deletionLine, tableEnd } from './table-rows.ts';
+import { columnChanges, deletedColCells } from './table-cols.ts';
+import type { ColItem, Grid } from './table-cols.ts';
+import { joinPoints } from './table-rows.ts';
+import { newestView, originalView } from './views.ts';
 import type {
   EditContext,
   MarkEntry,
@@ -28,6 +49,8 @@ import type {
   Segment,
   TextChange,
 } from './types.ts';
+
+export { isAlignPoint };
 
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
@@ -88,11 +111,19 @@ function specOf(mark: MarkRange, segment: Segment): { spec: string; source: stri
   return op?.value === undefined ? undefined : { spec: op.value, source: op.source };
 }
 
-/** An alignment change of `table`, as it stands around it: a format change whose one operation is
- * `align=`, its opener on the line before the table and its closer below the table and its
- * deletion lines, with nothing but markers and white space between. */
+/** An alignment change of `table`: the point form, a mark with no closer in a row of the table (a
+ * merge can leave it in any row; the writer puts it at the end of the header's last cell), or the
+ * span form that other tools wrote, a format change whose one operation is `align=`, its opener on the
+ * line before the table and its closer below the table and its deletion lines, with nothing but
+ * markers and white space between. */
 export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undefined {
   const { text } = parsed;
+  const point = parsed.marks.find((mark) => {
+    const open = isAlignPoint(mark) ? mark.segments[0]?.open : undefined;
+    return open !== undefined && table.from <= open.from && open.to <= table.to;
+  });
+  if (point) return point;
+  // The span form, which Redlines no longer writes.
   return parsed.marks.find((mark) => {
     if (mark.kind !== 'fmt' || mark.segments.length !== 1) return false;
     const segment = mark.segments[0];
@@ -107,7 +138,8 @@ export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undef
 /** The range that the closer of an alignment change takes with it: the line break and the blank line
  * before it, back to the end of the table or its last deletion line, when it is alone on its line. A
  * closer with others after it on its line leaves them their line, and one with text on the next
- * line takes its own line only, so that the text is not read as a row. */
+ * line takes its own line only, so that the text is not read as a row. Only the span form that other
+ * tools wrote has a closer: Redlines writes the point form, which has none. */
 export function closerRange(text: string, close: Range): Range {
   const start = lineStart(text, close.from);
   const end = lineEnd(text, close.to);
@@ -130,18 +162,28 @@ export function closerRange(text: string, close: Range): Range {
   return { from: at, to: close.to };
 }
 
-/** The changes that take an alignment change's markers away, with what goes with them. */
+/** The changes that take an alignment change's markers away, with what goes with them: the opener
+ * alone for a point, which has no carrier and no closer; for the span form that other tools wrote, the
+ * opener with its carrier, and the closer with the blank line before it. */
 export function alignHide(text: string, segment: Segment): TextChange[] {
   const changes: TextChange[] = [{ ...openerRange(segment), insert: '' }];
   if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: '' });
   return changes;
 }
 
-/** The table that an alignment change's segment is around, in the text of `parsed`. */
+/** The table that an alignment change's segment belongs to, in the text of `parsed`: the one around
+ * which its range form stands, or the one whose rows hold the opener of its point form. A point that
+ * no table holds, as the opener of a range whose closer is gone, belongs to none. */
 function tableOfSegment(parsed: Parsed, segment: Segment): TableRead | undefined {
+  const tables = tablesOfText(parsed.text, parsed);
+  const { close } = segment;
+  if (!close) {
+    const { open } = segment;
+    return tables.find((table) => table.from <= open.from && open.to <= table.to);
+  }
+  // The span form that other tools wrote: the table between the opener's carrier and the closer.
   const head = segment.carrier?.to ?? segment.open.to;
-  const to = segment.close?.from ?? head;
-  return tablesOfText(parsed.text, parsed).find((table) => table.from >= head && table.to <= to);
+  return tables.find((table) => table.from >= head && table.to <= close.from);
 }
 
 /** The alignments of a delimiter row `line` for `columns` columns, or null when it is none. */
@@ -202,16 +244,6 @@ export function alignLabel(columns: readonly AlignedColumn[]): string {
     .join(', ');
 }
 
-/** Where a closer for a table goes, and what is written there: after one blank line below the
- * table and its deletion lines, in front of the closers that are there already. */
-function closerSlot(text: string, table: TableRead, eol: string, marker: string): TextChange {
-  const last = table.deletions.at(-1);
-  const base = last ? deletionLine(text, last).to : tableEnd(table);
-  const closers = closersBelow(text, base);
-  if (closers !== -1) return { from: closers, to: closers, insert: marker };
-  return { from: base, to: base, insert: eol + eol + marker };
-}
-
 /**
  * The changes that give the kept copy of a moved column its new delimiter cell: with Track Changes off
  * an edit in a pending move's copy is written in both halves of the move (format §3.7, §3.10), and the
@@ -262,22 +294,287 @@ export interface AlignOp {
   align: TableAlign;
 }
 
-/** `pos` after `changes` that lie before it. */
+/** `pos` after `changes` that lie before it. Text written at `pos` itself stays after it: a caret in
+ * front of the mark of an alignment change stays in front of it. */
 function mapped(changes: readonly TextChange[], pos: number): number {
-  return changes.reduce(
-    (at, change) => (change.to <= pos ? at + change.insert.length - (change.to - change.from) : at),
-    pos,
+  return changes.reduce((at, change) => {
+    const before = change.from < change.to ? change.to <= pos : change.to < pos;
+    return before ? at + change.insert.length - (change.to - change.from) : at;
+  }, pos);
+}
+
+/** The words of a refusal to write the mark of an alignment change where the header's last cell ends. */
+const MARK_PLACE =
+  "A marker can't go at the end of this table's header, where Markdown would read it otherwise. Change the end of its last cell first, then align.";
+
+/**
+ * Where the mark of an alignment change goes (format §3.7, #281): the end of the text of the header's
+ * last cell, after any marks that end that text and before the cell's padding and its closing pipe; the
+ * line's end in a header with no trailing pipe, with any spaces left after it; the stop after the first
+ * space of an empty cell. Never added space: a space between the text and the mark would not come back
+ * when the mark is decided.
+ *
+ * @throws EditError when a marker can't stand there: in the text as it reads now, or in the text as it
+ * reads with every other change of the file rejected, which brings back what a deletion or a replacement
+ * at the end of the cell took out, in front of the mark (a backslash that is deleted, say, would escape it
+ * once the deletion is rejected). `placeHolds` looks at the orders of decisions between those two.
+ */
+function markPlace(text: string, parsed: Parsed, table: TableRead): number {
+  const last = table.rows[0]?.cells.at(-1);
+  if (!last) throw new EditError('There is no such column in this table.');
+  const at = last.textTo;
+  if (!placeReads(text, parsed, last.textFrom, at)) throw refused(MARK_PLACE);
+  const original = originalView(text);
+  const to = original.map.fromSource(at);
+  const from = original.map.fromSource(last.textFrom);
+  if (readsOtherwise(original.text, [], to) || changesRun(original.text.slice(from, to))) {
+    throw refused(MARK_PLACE);
+  }
+  return at;
+}
+
+/** How many changes in the header's last cell are decided in every order before the mark is written. More
+ * than that are too many to try, and the mark is refused. */
+const CELL_CHANGES = 2;
+
+/** The words of a refusal to write the mark where more than `CELL_CHANGES` changes are pending in the
+ * header's last cell. */
+const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
+
+/** The words of a refusal to write the mark where more than `CELL_CHANGES` changes are pending in the cell that a
+ * column operation would end the header with. */
+const TOO_MANY_COLUMNS =
+  "Decide the changes in the cell that would end this table's header first, then change its columns.";
+
+/** Where the lines above a table that hold only markers start. A marker can't start the header of a table
+ * that has no leading pipe, so the opener of a change that begins in its first cell stands on a line of its
+ * own above it, with a blank line after it (format §3.3, §3.7). */
+function carriersFrom(text: string, tableFrom: number): number {
+  let at = tableFrom;
+  while (at > 0) {
+    const end = text[at - 2] === '\r' ? at - 2 : at - 1;
+    const previous = lineStart(text, end);
+    const line = text.slice(previous, end);
+    if (line.trim() !== '' && !/^\s*(?:<!--[\s\S]*?-->\s*)+$/.test(line)) break;
+    at = previous;
+  }
+  return at;
+}
+
+/** The decidable changes with a marker in the header's last cell of `table`, but the mark `id`: in a header
+ * of one cell, whose first cell it is too, those that start on the lines above it count as well. */
+function changesIn(text: string, parsed: Parsed, table: TableRead, id: string): MarkRange[] {
+  const cell = table.rows[0]?.cells.at(-1);
+  if (!cell) return [];
+  const from = table.rows[0]?.cells.length === 1 ? carriersFrom(text, table.from) : cell.from;
+  return parsed.marks.filter(
+    (mark) =>
+      mark.id !== id &&
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      mark.segments.some((segment) =>
+        [openerRange(segment), segment.close].some(
+          (range) => range !== undefined && from <= range.from && range.to <= cell.to,
+        ),
+      ),
   );
+}
+
+/** Whether the text of a header slice reads as it does in its file whatever stands below it: nothing in it
+ * can go on past its last line, in the newest view or in the original one (a deletion's text is in the
+ * original view alone, and a backtick it brings back could be paired with one of the rows). A code span, a
+ * link or a comment that is begun and not finished in it could be finished by a row of the table, which
+ * the file has and the slice does not. */
+function closedSlice(slice: string): boolean {
+  return [newestView(slice), originalView(slice)].every((view) => !/[`[]|<!--|-->/.test(view.text));
+}
+
+/**
+ * The header of the table that starts at `tableFrom`, as a small file of its own: the lines of its paragraph
+ * above it (none when a blank line is), the lines above that hold only markers, the header and its
+ * delimiter row, and a ledger with the entries of the marks in them. A decision of a change in the header's
+ * last cell reads and writes those lines and the ledger, and `placeHolds` walks the orders of decisions in
+ * this, where a decision of a whole file costs what the file costs: parsing it, and reading its views, for
+ * each of the decisions of every order.
+ *
+ * It is the header as the whole file reads it, or it is nothing: undefined where a mark stands partly in
+ * the lines and partly outside them, where a code span, a link or a comment is left open in them (what the
+ * rows below hold could finish it), and where the slice reads any differently than the file does, in its
+ * marks and in its table.
+ */
+export function headerSlice(text: string, tableFrom: number): string | undefined {
+  const parsed = parse(text);
+  const table = tablesOfText(text, parsed).find((candidate) => candidate.from === tableFrom);
+  const header = table?.rows[0];
+  if (!table || !header) return undefined;
+  const hidden = markerRanges(parsed);
+  const to = lineEnd(text, table.delimiter.to);
+  const first = lineStart(text, table.from);
+  // The lines of the header's paragraph above it: none when a blank line is. The line above the paragraph
+  // says nothing of a header, whose line is no underline.
+  let start = first;
+  if (first > 0) {
+    const end = text[first - 2] === '\r' ? first - 2 : first - 1;
+    if (!/^[ \t>]*$/.test(visible(text, hidden, lineStart(text, end), end).text)) {
+      start = paragraphRange(text.slice(0, to), hidden, table.from).from;
+    }
+  }
+  const from = Math.min(start, carriersFrom(text, table.from));
+  const ids = new Set<string>();
+  for (const mark of parsed.marks) {
+    let inside = 0;
+    let outside = 0;
+    for (const segment of mark.segments) {
+      const lo = segment.open.from;
+      const hi = (segment.close ?? segment.content).to;
+      if (hi <= from || lo >= to) outside++;
+      else if (from <= lo && hi <= to) inside++;
+      else return undefined;
+    }
+    if (inside > 0 && outside > 0) return undefined;
+    if (inside > 0) ids.add(mark.id);
+  }
+  const { ledger } = parsed;
+  const kept = {
+    ...ledger,
+    marks: Object.fromEntries(Object.entries(ledger.marks).filter(([id]) => ids.has(id))),
+    comments: ledger.comments.filter((thread) => ids.has(thread.id) || ids.has(thread.about ?? '')),
+  };
+  delete kept.extra;
+  const eol = eolOf(text, parsed.ledgerRange);
+  const slice = `${text.slice(from, to)}${eol}${eol}${serializeLedger(kept).replaceAll('\n', eol)}${eol}`;
+  const read = parse(slice);
+  const again = tablesOfText(slice, read).find((candidate) => candidate.from === table.from - from);
+  const same =
+    read.marks.length === ids.size &&
+    read.marks.every((mark) => ids.has(mark.id)) &&
+    again?.rows[0]?.cells.length === header.cells.length &&
+    slice.slice(again.delimiter.from, again.delimiter.to) ===
+      text.slice(table.delimiter.from, table.delimiter.to);
+  return same && closedSlice(slice) ? slice : undefined;
+}
+
+/** A state of the walk that the header slice does not stand for: the walk is done on the whole file. */
+class LeftSlice extends Error {}
+
+/**
+ * Throws unless the mark `id` of `after` is read where it stands in every state that deciding the
+ * changes in its cell, one at a time in any order, leaves (`before` is the file without the mark and its
+ * change of the delimiter row: the decisions are made in it too), and can be accepted and rejected in each.
+ * Rejecting a deletion of the cell's last characters, or accepting a replacement of them, can leave a
+ * backslash or a delimiter run right in front of the mark, which reads otherwise there than it does in the
+ * two states `markPlace` looks at, with everything accepted or everything rejected; and deciding the
+ * changes that are all the text of the cell of a header with no closing pipe can leave no table, where the
+ * mark could only be accepted. A decision of another change that the file with the mark refuses and the file
+ * without it allows is the mark's doing, and refuses it as well: no decision may be refused (format §3.9).
+ *
+ * The walk is done on the header slice of each file (`headerSlice`), where a decision costs what a header
+ * does and not what a file does, and on the whole files where a slice is not what they read as. `whole`
+ * walks the whole files, for a test. The decisions of `before` are made when they are looked at, which is
+ * when the file with the mark refuses one.
+ *
+ * `flank` is `placeReads`'s: the writer keeps its mark off an underscore (Call 9), and an edit that is written
+ * beside a mark that is there already is held to the exact checks only (`assertPointHolds`).
+ *
+ * @returns where the walk was done: on the `header` slices, or on the whole `file` (a state of the walk
+ * that a slice does not stand for sends it there).
+ * @throws EditError when the mark would be read otherwise in some state, or a decision would be refused
+ * for it or for the mark, or the cell holds more than `CELL_CHANGES` changes.
+ */
+export function placeHolds(
+  before: string,
+  after: string,
+  id: string,
+  tableFrom: number,
+  whole = false,
+  flank = true,
+): 'header' | 'file' {
+  const slices = whole
+    ? undefined
+    : { before: headerSlice(before, tableFrom), after: headerSlice(after, tableFrom) };
+  if (slices?.before !== undefined && slices.after !== undefined) {
+    try {
+      walkDecisions(slices.before, slices.after, id, true, flank);
+      return 'header';
+    } catch (error) {
+      if (!(error instanceof LeftSlice)) throw error;
+    }
+  }
+  walkDecisions(before, after, id, false, flank);
+  return 'file';
+}
+
+/** The walk of `placeHolds` over `before` and `after`, which are slices when `sliced`. */
+function walkDecisions(
+  before: string,
+  after: string,
+  id: string,
+  sliced: boolean,
+  flank: boolean,
+): void {
+  const seen = new Set<string>();
+  const decided = (text: string | undefined, other: string, how: typeof accept) => {
+    if (text === undefined) return undefined;
+    try {
+      return applyChanges(text, how(text, other));
+    } catch (error) {
+      if (error instanceof EditError) return null;
+      throw error;
+    }
+  };
+  /** The file without the mark in the state that `walk` is in, made when it is looked at. */
+  const walk = (base: () => string | undefined, current: string): void => {
+    if (seen.has(current)) return;
+    seen.add(current);
+    const parsed = parse(current);
+    if (sliced && !closedSlice(current)) throw new LeftSlice();
+    const open = parsed.marks.find((mark) => mark.id === id)?.segments[0]?.open;
+    if (!open) return;
+    const table = tablesOfText(current, parsed).find(
+      (candidate) => candidate.from <= open.from && open.to <= candidate.to,
+    );
+    const cell = table?.rows[0]?.cells.at(-1);
+    // Where the table is gone (the cell emptied of its text, and the header with it), the old row has no
+    // table to be written back into, and the change could only be accepted.
+    if (!table || !cell) throw refused(MARK_PLACE);
+    if (!placeReads(current, parsed, cell.textFrom, open.from, flank)) throw refused(MARK_PLACE);
+    // Neither decision of the mark is refused in any state.
+    for (const how of [accept, reject])
+      if (decided(current, id, how) === null) throw refused(MARK_PLACE);
+    const others = changesIn(current, parsed, table, id);
+    if (seen.size === 1 && others.length > CELL_CHANGES) throw refused(TOO_MANY);
+    for (const other of others) {
+      for (const how of [accept, reject]) {
+        const next = decided(current, other.id, how);
+        // Allowed without the mark, refused with it: the mark makes the decision impossible.
+        if (next === null && typeof decided(base(), other.id, how) === 'string') {
+          throw refused(MARK_PLACE);
+        }
+        if (typeof next !== 'string') continue;
+        let without: string | undefined | null = null;
+        walk(() => {
+          if (without === null) {
+            const done = decided(base(), other.id, how);
+            without = typeof done === 'string' ? done : undefined;
+          }
+          return without;
+        }, next);
+      }
+    }
+  };
+  walk(() => before, after);
 }
 
 /**
  * Aligning columns of a table (format §3.7, rule 5). With `ctx` it is a format change by its author:
- * the delimiter row gets the new alignment and an `align=` keeps the old row around the table; the
- * author's own pending change is changed in place, and goes when the old alignments are back.
- * Without it the delimiter row is changed as it says, and so is the old row of a change that is
- * pending, so that rejecting it keeps what was done.
+ * the delimiter row gets the new alignment, and one mark with no closer, at the end of the text of
+ * the header's last cell, keeps the old row; the author's own pending change is changed in place, and
+ * goes, with the old row written back as it was, when the old alignments are back. Without `ctx` the
+ * delimiter row is changed as it says, and so is the old row of a change that is pending (the span
+ * form that another tool wrote included), so that rejecting it keeps what was done.
  *
- * @throws EditError when another person's alignment change is pending, or the columns are as asked.
+ * @throws EditError when another person's alignment change is pending, the columns are as asked, or a
+ * marker can't stand at the end of the header's last cell.
  */
 export function alignEdit(
   text: string,
@@ -294,7 +591,6 @@ export function alignEdit(
   const mark = alignMarkOf(parsed, table);
   const segment = mark?.segments[0];
   const kept = mark && segment ? specOf(mark, segment) : undefined;
-  const eol = eolOf(text, parsed.ledgerRange);
   const ledger = workingLedger(parsed.ledger);
   const caretAt = (changes: readonly TextChange[]) =>
     mapped(changes, table.rows[0]?.cells[cols[0] ?? 0]?.textFrom ?? table.from);
@@ -352,6 +648,8 @@ export function alignEdit(
     });
   }
 
+  // The point form: one mark, no closer, and nothing written outside the table's first two lines.
+  const at = markPlace(text, parsed, table);
   addPerson(ledger, ctx.author);
   const taken = idsIn(text);
   const id = newId(taken, ctx.random);
@@ -359,15 +657,261 @@ export function alignEdit(
   if (ctx.group !== undefined) entry.group = ctx.group;
   if (ctx.note !== undefined) entry.note = ctx.note;
   ledger.marks[id] = entry;
-  const opener = `<!--fmt ${id} align=${encodeValue(delimiter)}-->${eol}${eol}`;
-  return done(
-    [
-      { from: table.from, to: table.from, insert: opener },
-      ...row,
-      closerSlot(text, table, eol, `<!--/${id}-->`),
-    ],
-    { parsed, created: [id], keeps: 'original' },
+  const opener = `<!--fmt ${id} align=${encodeValue(delimiter)}-->`;
+  const edit = done([...row, { from: at, to: at, insert: opener }], {
+    parsed,
+    created: [id],
+    keeps: 'original',
+    // A mark that is not read is no change: an unclosed `<!--` or a code span that the scan pairs across
+    // the cells of the table takes it in (format §2.1).
+    verify: (_after, written) => {
+      if (!written.marks.some((mark) => mark.id === id)) throw refused(MARK_PLACE);
+    },
+  });
+  placeHolds(text, applyChanges(text, edit.changes), id, table.from);
+  return edit;
+}
+
+/**
+ * With Track Changes off and an alignment change pending, what its mark is after the columns `final` are made
+ * (format §3.7, §3.10): its opener with `align=` holding the old delimiter row with the same columns done to it
+ * as the table's own rows have done (a deleted column's cell gone, a new column's cell its cell in the delimiter
+ * row, `item.text(1)`, a moved column's cell moved), or `null` when the old and the new alignments are then the
+ * same, so that the change goes. The old row is positional: its cell for a column is where the column's was in
+ * the table, and a plain operation does to it what it does to the delimiter row, so that rejecting the change
+ * writes the original's row, and the original view is the plain operation done to the original.
+ *
+ * Undefined where it can't be kept in step: none is pending, its old row has not the table's columns (it could
+ * not be rejected, and would not be a row for the columns the table has), it is the span form that another
+ * tool wrote, whose opener stands outside the table's lines where no column operation of ours reaches it, or
+ * the table has another alignment change as well (a merge can leave two), whose old row would be left as it is.
+ * The operation is refused then, with `ALIGN_FIRST`.
+ */
+export function keepAlignInStep(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  final: readonly ColItem[],
+): { opener: string | null } | undefined {
+  const mark = alignMarkOf(parsed, table);
+  const segment = mark?.segments[0];
+  if (!mark || !segment || !isAlignPoint(mark)) return undefined;
+  const second = parsed.marks.some(
+    (other) =>
+      other !== mark &&
+      isAlignMark(other) &&
+      other.segments.some((s) => tableOfSegment(parsed, s)?.from === table.from),
   );
+  if (second) return undefined;
+  const kept = specOf(mark, segment);
+  const columns = table.aligns.length;
+  const was = kept ? alignsOf(kept.spec, columns) : null;
+  if (!kept || !was) return undefined;
+  // The old row goes through the same rewrite as every line of the table, as a line of its own: a column that is
+  // new asks for its cell of the delimiter row, the table's second line, and a moved one is the same cell moved.
+  const line: Grid = {
+    table,
+    lines: [readLine(kept.spec, 0, kept.spec.length)],
+    rowMarkers: [null],
+    columns,
+    alignMark: null,
+  };
+  const items = final.map((item): ColItem => {
+    if ('text' in item) {
+      const { text: cellOf } = item;
+      return { text: () => cellOf(1) };
+    }
+    if (item.moving && item.edit) {
+      const { edit } = item;
+      return { ...item, edit: (_line, content) => edit(1, content) };
+    }
+    return item;
+  });
+  const row = applyChanges(kept.spec, joinPoints(columnChanges(kept.spec, line, items)));
+  if (alignsOf(row, final.length) === null) return undefined;
+  const value = `align=${encodeValue(row)}`;
+  if (!isAlignPayload(value)) return undefined;
+  // Every column that was in the table keeps its alignment, and a new one has the same in both rows.
+  if (final.every((item) => !('src' in item) || was[item.src] === table.aligns[item.src])) {
+    return { opener: null };
+  }
+  const { open } = segment;
+  const head = text.slice(open.from, open.to);
+  const at = head.indexOf(kept.source);
+  if (at === -1) return undefined;
+  return { opener: head.slice(0, at) + value + head.slice(at + kept.source.length) };
+}
+
+/** The point alignment change `id` as `parsed` reads it, or undefined where the scan reads none. */
+const readPoint = (parsed: Parsed, id: string): MarkRange | undefined =>
+  parsed.marks.find((mark) => mark.id === id && isAlignPoint(mark));
+
+/**
+ * Throws when the mark `id` of an alignment change is not read in `parsedAfter`, the reading of the file that a plain
+ * operation on columns made, or its entry in the ledger is not. The scan pairs the backticks of a paragraph, and the
+ * halves of a raw comment, across the cells and the rows of a table, as Markdown readers do not, so an operation that
+ * moves the mark, or writes it again with its old row in step, can leave it inside a code span or a comment: its marker
+ * would stay in the file as text, and its entry in the ledger would be lost or left over, with nothing said. A comment
+ * half that an operation leaves open can as well take in the ledger's own opening. An operation that keeps the ledger as
+ * it is, unread (inserting and moving columns), then loses every entry, the mark's among them; one that writes the
+ * ledger again (deleting columns) writes a second one after the first, which the comment hides, and a later edit that
+ * closes the comment brings the first back, a copy that still has the entries of marks decided since. The edit's own
+ * check of the marks that stay (`assertMarksKept`) sees none of this: the operation took the opener away itself, and
+ * wrote it again. `removing` is the operation's own, as `commitEdit` has it: deleting columns passes `removes`.
+ *
+ * @throws EditError in the words of every change that an edit would hide in code or an HTML comment.
+ */
+export function assertMarkRead(parsedAfter: Parsed, id: string, removing: boolean): void {
+  if (!readPoint(parsedAfter, id) || parsedAfter.ledger.marks[id] === undefined) {
+    throw hiddenError(removing);
+  }
+}
+
+/**
+ * Throws when a plain operation on columns that wrote the mark `id` of an alignment change at the end of another
+ * cell than it stood in (format §3.7, §3.10) leaves it read otherwise, or its change impossible to decide, in some
+ * order of deciding the changes that are pending in that cell: the deletion of a backslash that comes back in front
+ * of it when rejected, say. `after` is the file the operation makes, with the mark, and `tableFrom` where its table
+ * starts. It is the walk of the orders that writing the mark makes (`placeHolds`), with the same file with nothing
+ * where the mark is as its control. The operation looks only where the mark moved: a mark that stays at the end of
+ * its cell, which the operation does not touch, reads as it did. The refusal is in the words of every edit beside
+ * the mark (`pointsReadWords`), which say to decide the change first, or, where more than the walk can take are
+ * pending in the cell, in words that name them. A mark that the scan does not read is refused as well, in the words
+ * of what an edit hides (`assertMarkRead`, which the operation makes as soon as the file is read; this is the same
+ * check for a caller that has not).
+ *
+ * @throws EditError naming the person whose alignment change it is.
+ */
+export function assertMarkHolds(
+  after: string,
+  id: string,
+  tableFrom: number,
+  removing = false,
+): void {
+  const parsed = parse(after);
+  const mark = readPoint(parsed, id);
+  if (!mark) throw hiddenError(removing);
+  try {
+    placeHolds(withoutMark(after, parsed, mark), after, id, tableFrom);
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+    throw refused(error.message === TOO_MANY ? TOO_MANY_COLUMNS : pointsReadWords(parsed, mark));
+  }
+}
+
+/** The file `text` (read as `parsed`) with nothing where the point alignment change `mark` is, and no entry for it
+ * in the ledger: what its decisions are compared with. */
+function withoutMark(text: string, parsed: Parsed, mark: MarkRange): string {
+  const open = mark.segments[0]?.open;
+  if (!open) return text;
+  const body = text.slice(0, open.from) + text.slice(open.to);
+  const ledger = workingLedger(parsed.ledger);
+  delete ledger.marks[mark.id];
+  return applyChanges(body, setLedger(body, normalizeLedger(body, ledger)));
+}
+
+/** The words of a refusal of an edit that would leave more changes pending in the cell that a point alignment
+ * change ends than the walk of every order of decisions takes (`CELL_CHANGES`). */
+function pointsManyWords(parsed: Parsed, mark: MarkRange): string {
+  const { by } = mark.entry;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s alignment change is at the end of this cell, and this edit would leave more changes pending in it than can be looked at together. Decide some of them first.`;
+}
+
+/**
+ * Where the point alignment change `mark` stands in `text` (read as `parsed`) when it is in the header's last cell
+ * of a table: that table, and how many changes besides it are pending in the cell (`changesIn`). Undefined where
+ * it is not (a merge can leave it in a body row, or in no table at all), which the walk does not look at.
+ */
+function standingOf(
+  text: string,
+  parsed: Parsed,
+  mark: MarkRange,
+): { table: TableRead; others: number } | undefined {
+  const open = mark.segments[0]?.open;
+  if (!open) return undefined;
+  const table = tablesOfText(text, parsed).find(
+    (candidate) => candidate.from <= open.from && open.to <= candidate.to,
+  );
+  const cell = table?.rows[0]?.cells.at(-1);
+  if (!table || !cell || open.from < cell.from || cell.to < open.to) return undefined;
+  return { table, others: changesIn(text, parsed, table, mark.id).length };
+}
+
+/** Whether the orders of decisions of the changes in the cell that the point alignment change `mark` ends in
+ * `text` hold, as an edit is held to them: the mark is read where it stands in every state, no decision is refused
+ * for it, and each of its own decisions can be made. */
+function holdsIn(text: string, parsed: Parsed, mark: MarkRange, tableFrom: number): boolean {
+  try {
+    placeHolds(withoutMark(text, parsed, mark), text, mark.id, tableFrom, false, false);
+    return true;
+  } catch (error) {
+    if (error instanceof EditError) return false;
+    throw error;
+  }
+}
+
+/**
+ * Throws when an edit written in the cell that a pending alignment change ends leaves a state, among those that
+ * deciding the changes in that cell one at a time in any order leaves, in which the mark is read otherwise, or a
+ * decision is refused, which the file did not have before it (#466). The writer of the mark walks every one of
+ * those orders (`placeHolds`); the edits written after it were held to the file as it is written and to the
+ * backslash rule alone (`assertPointsRead`), which is what a key can afford for each of its keystrokes, and a mixed
+ * order could slip through: typing after the mark leaves `_` between another change's closer and the mark, and
+ * rejecting the one and accepting the other reads the file otherwise. The walk is the writer's, on the header
+ * as a small file of its own (`headerSlice`), with the edit's exactness (`flank` off): a few milliseconds, paid by
+ * an edit that touches that one cell while the cell holds a change besides the mark, and by no other. A cell with
+ * none has one state, which `assertPointsRead` has looked at.
+ *
+ * The walk is the writer's bound: a cell that this edit would leave with more than `CELL_CHANGES` changes besides the
+ * mark is refused, in words that say to decide some first. A cell that held more already (a merge leaves such a file)
+ * is not refused for it, and an edit that does not make a state worse is not refused for what was there: where the
+ * walk fails after the edit and failed before it, the file was unsound already.
+ *
+ * `changes` are the edit's, ledger included, in offsets of `text`, which `parsed` reads. An edit that rewrites the
+ * mark itself is the operation's own to look at (a plain column operation, `assertMarkHolds`).
+ *
+ * @throws EditError naming the person whose alignment change it is.
+ */
+export function assertPointHolds(
+  text: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): void {
+  if (changes.length === 0) return;
+  for (const was of parsed.marks) {
+    if (!isAlignPoint(was)) continue;
+    const open = was.segments[0]?.open;
+    if (!open) continue;
+    if (changes.some((change) => change.from < open.to && open.from < change.to)) continue;
+    // The edit is in the cell that the mark ends, or, in a header of one cell, in the lines of its changes above.
+    const start = lineStart(text, open.from);
+    const { cells } = readRowCells(text, start, lineEnd(text, open.to));
+    const cell = cells.find(
+      (candidate) => candidate.from <= open.from && open.from <= candidate.to,
+    );
+    if (!cell) continue;
+    const from = cells.length === 1 ? carriersFrom(text, start) : cell.from;
+    if (!changes.some((change) => change.from <= cell.to && from <= change.to)) continue;
+    const after = applyChanges(text, changes);
+    const read = parse(after);
+    const mark = readPoint(read, was.id);
+    const now = mark ? standingOf(after, read, mark) : undefined;
+    if (!mark || !now || now.others === 0) continue;
+    // Where the mark stood before the edit, looked at only where the answer needs it.
+    const standing = () => standingOf(text, parsed, was);
+    if (now.others > CELL_CHANGES) {
+      const before = standing();
+      if (before && before.others <= CELL_CHANGES) throw refused(pointsManyWords(read, mark));
+      continue;
+    }
+    if (holdsIn(after, read, mark, now.table.from)) continue;
+    // A file that no order of decisions reads soundly already is not made so by this edit.
+    const before = standing();
+    if (before && holdsIn(text, parsed, was, before.table.from)) {
+      throw refused(pointsReadWords(read, mark));
+    }
+  }
 }
 
 /** `line` (which starts at `base` in the text) with `changes` of the text made in it. */
@@ -383,9 +927,10 @@ function applyLine(line: string, changes: readonly TextChange[], base: number): 
 
 /**
  * Refuses a tracked edit on the lines between a table's last line and the next block's first character
- * while an alignment change of the table is pending (format §3.7, #281): its closer stands there, on a
- * line of its own, and a mark of the edit would share the line, which some order of decisions reads
- * otherwise. An edit at the end of the last row is the cell's, and is not refused.
+ * while an alignment change of the table is pending that is the span form another tool wrote (format
+ * §3.7, #281): its closer stands there, on a line of its own, and a mark of the edit would share the
+ * line, which some order of decisions reads otherwise. An edit at the end of the last row is the cell's,
+ * and is not refused. The point form has no closer, no gap and no refusal.
  *
  * @throws EditError naming the person whose change is pending.
  */
@@ -394,9 +939,12 @@ export function checkAlignGap(text: string, edits: readonly TextChange[], parsed
   if (marks.length === 0) return;
   const end = parsed.ledgerRange?.from ?? text.length;
   for (const mark of marks) {
+    // The point form has no closer on a line below its table, so it has no gap, and no table is read.
+    // What is left is the span form of another tool.
     const segment = mark.segments[0];
-    const table = segment ? tableOfSegment(parsed, segment) : undefined;
-    if (!segment?.close || !table) continue;
+    if (!segment?.close) continue;
+    const table = tableOfSegment(parsed, segment);
+    if (!table) continue;
     let gapEnd = segment.close.to;
     while (gapEnd < end && /\s/.test(text.charAt(gapEnd))) gapEnd++;
     for (const edit of edits) {

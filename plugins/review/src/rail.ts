@@ -72,6 +72,7 @@ import {
   readable,
   type ReviewContext,
   segmentSpan,
+  tableDeleted,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
@@ -1583,7 +1584,7 @@ interface ChangeShown {
 }
 
 function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
-  const row = rowsDone([change]);
+  const row = rowsDone([change]) ?? tableDeleted(change);
   if (row !== null) return { old: '', added: row };
   const { old, added, label } = changeTexts(parsed, change);
   // A format change names what it did: `Bold`.

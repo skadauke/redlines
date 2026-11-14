@@ -73,6 +73,7 @@ import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
+import { tableFill } from './table/fill.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
@@ -133,6 +134,7 @@ export {
   colTitles,
   deleteCols,
   deleteRows,
+  deleteTable,
   insertColsAt,
   insertCols,
   insertRowBelow,
@@ -263,6 +265,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableLayout(),
     tableGhosts(),
     tableStops(),
+    // After the stops, whose guard it runs ahead of.
+    tableFill(),
     tableMouse(),
     tableReach(),
     tableWidths(),

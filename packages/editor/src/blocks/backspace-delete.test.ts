@@ -278,11 +278,61 @@ describe('Backspace in an empty block', () => {
         on: { caret: '- one⏎  - two‸<sub ⏎    - > </sub>' },
       },
       {
-        name: 'an empty nested item with a paragraph after the list (#204)',
+        name: 'an empty nested item with a paragraph after the list: the blank line stays (#204, #441)',
         doc: '- one⏎  - ‸⏎⏎Next.',
         keys: BS,
         off: { caret: '- one‸⏎⏎Next.' },
-        on: { caret: '- one‸<del ⏎  - ⏎⏎>Next.' },
+        on: { caret: '- one‸<del ⏎  - >⏎⏎Next.', newest: '- one⏎⏎Next.' },
+      },
+      {
+        name: 'an empty nested item with an item after the list (#441)',
+        doc: '- one⏎  - ‸⏎⏎- two',
+        keys: BS,
+        off: { caret: '- one‸⏎⏎- two' },
+        on: { caret: '- one‸<del ⏎  - >⏎⏎- two', newest: '- one⏎⏎- two' },
+      },
+      {
+        name: 'an empty nested item with a heading after the list (#441)',
+        doc: '- one⏎  - ‸⏎⏎# Head',
+        keys: BS,
+        off: { caret: '- one‸⏎⏎# Head' },
+        on: { caret: '- one‸<del ⏎  - >⏎⏎# Head', newest: '- one⏎⏎# Head' },
+      },
+      {
+        name: 'an empty nested item with a quote after the list (#441)',
+        doc: '- one⏎  - ‸⏎⏎> quoted',
+        keys: BS,
+        off: { caret: '- one‸⏎⏎> quoted' },
+        on: { caret: '- one‸<del ⏎  - >⏎⏎> quoted', newest: '- one⏎⏎> quoted' },
+      },
+      {
+        name: 'an empty numbered item under a step, a paragraph after (#441)',
+        doc: '1. one⏎   1. ‸⏎⏎Next.',
+        keys: BS,
+        off: { caret: '1. one‸⏎⏎Next.' },
+        on: { caret: '1. one‸<del ⏎   1. >⏎⏎Next.', newest: '1. one⏎⏎Next.' },
+      },
+      {
+        name: 'in a quote, a paragraph of the quote after the list (#441)',
+        doc: '> - one⏎>   - ‸⏎>⏎> Next.',
+        keys: BS,
+        off: { caret: '> - one‸⏎>⏎> Next.' },
+        on: { caret: '> - one‸<del ⏎>   - >⏎>⏎> Next.', newest: '> - one⏎>⏎> Next.' },
+      },
+      {
+        name: 'with another person’s change after the paragraph (#441)',
+        doc: '- one⏎  - ‸⏎⏎Next <ins>x</ins>',
+        others: 'bo',
+        keys: BS,
+        off: { caret: '- one‸⏎⏎Next <ins>x</ins>' },
+        on: { caret: '- one‸<del ⏎  - >⏎⏎Next <ins>x</ins>' },
+      },
+      {
+        name: 'the item goes and ⌘Z gives it back (#441)',
+        doc: '- one⏎  - ‸⏎⏎Next.',
+        keys: [...BS, 'Mod-z'],
+        off: { file: '- one⏎  - ⏎⏎Next.', caret: '- one⏎  - ‸⏎⏎Next.' },
+        on: { file: '- one⏎  - ⏎⏎Next.', caret: '- one⏎  - ‸⏎⏎Next.' },
       },
       {
         name: 'an empty heading: it goes, the caret at the start of the next block',
@@ -303,6 +353,97 @@ describe('Backspace in an empty block', () => {
         doc: 'One.‸⏎⏎Two.',
         keys: ['Enter', { type: 'x' }, 'Backspace', 'Backspace'],
         ...same('One.‸⏎⏎Two.'),
+      },
+    ]),
+  );
+});
+
+describe('Delete in an empty item that a blank line separates from the block below (#441)', () => {
+  // With no blank line above the item and one below it, the forward edit took the blank line below
+  // and kept the break above, which left the block below right under the text above: a line of the
+  // item above (a lazy line), and, under an empty nested bullet, the underline of `one`. The item
+  // goes with the break above it, as Backspace takes it, and the blank line stays, with Track
+  // Changes on and off. With a blank line above it, or front matter or a table in the way, the
+  // forward edit as before.
+  scriptRows(
+    both([
+      {
+        name: 'a nested item, a paragraph below',
+        doc: '- one⏎  - ‸⏎⏎Next.',
+        keys: DEL,
+        off: { caret: '- one⏎⏎‸Next.' },
+        on: { caret: '- one<del ⏎  - >⏎⏎‸Next.', newest: '- one⏎⏎Next.' },
+      },
+      {
+        name: 'a nested item, an item below',
+        doc: '- one⏎  - ‸⏎⏎- two',
+        keys: DEL,
+        off: { caret: '- one⏎⏎- ‸two' },
+        on: { caret: '- one<del ⏎  - >⏎⏎- ‸two', newest: '- one⏎⏎- two' },
+      },
+      {
+        name: 'the last item of a list at the top level, a paragraph below',
+        doc: '- one⏎- ‸⏎⏎Next.',
+        keys: DEL,
+        off: { caret: '- one⏎⏎‸Next.' },
+        on: { caret: '- one<del ⏎- >⏎⏎‸Next.', newest: '- one⏎⏎Next.' },
+      },
+      {
+        name: 'a numbered step, a paragraph below',
+        doc: '1. one⏎   1. ‸⏎⏎Next.',
+        keys: DEL,
+        off: { caret: '1. one⏎⏎‸Next.' },
+        on: { caret: '1. one<del ⏎   1. >⏎⏎‸Next.', newest: '1. one⏎⏎Next.' },
+      },
+      {
+        name: 'in a quote',
+        doc: '> - one⏎>   - ‸⏎>⏎> Next.',
+        keys: DEL,
+        off: { caret: '> - one⏎>⏎> ‸Next.' },
+        on: { caret: '> - one<del ⏎>   - >⏎>⏎> ‸Next.', newest: '> - one⏎>⏎> Next.' },
+      },
+      {
+        name: 'with another person’s change after the paragraph',
+        doc: '- one⏎  - ‸⏎⏎Next <ins>x</ins>',
+        others: 'bo',
+        keys: DEL,
+        off: { caret: '- one⏎⏎‸Next <ins>x</ins>' },
+        on: { caret: '- one<del ⏎  - >⏎⏎‸Next <ins>x</ins>' },
+      },
+      {
+        name: 'a line right below the item (no blank line): the forward edit, as before',
+        doc: '- one⏎  - ‸⏎- two',
+        keys: DEL,
+        off: { caret: '- one⏎- ‸two' },
+        on: { caret: '- one<del ⏎  - >⏎- ‸two' },
+      },
+      {
+        name: 'a blank line above the item as well: the forward edit, as before',
+        doc: 'One.⏎⏎## ‸⏎⏎Two.',
+        keys: DEL,
+        off: { caret: 'One.⏎⏎‸Two.' },
+        on: { caret: 'One.⏎⏎<del ## ⏎⏎>⏎⏎‸Two.' },
+      },
+      {
+        name: 'front matter above the item: the forward edit, as before (Backspace is refused there)',
+        doc: '---⏎a: 1⏎---⏎- ‸⏎⏎After.',
+        keys: DEL,
+        off: { file: '---⏎a: 1⏎---⏎After.' },
+        on: { file: '---⏎a: 1⏎---⏎<del - ⏎⏎>⏎⏎After.' },
+      },
+      {
+        name: 'a blank line above the item and two below it: the forward edit, as before',
+        doc: 'One.⏎⏎- ‸⏎⏎⏎After.',
+        keys: DEL,
+        off: { file: 'One.⏎⏎After.' },
+        on: { file: 'One.⏎⏎<del - ⏎⏎⏎>⏎⏎After.' },
+      },
+      {
+        name: 'Delete, then ⌘Z',
+        doc: '- one⏎  - ‸⏎⏎Next.',
+        keys: [...DEL, 'Mod-z'],
+        off: { file: '- one⏎  - ⏎⏎Next.', caret: '- one⏎  - ‸⏎⏎Next.' },
+        on: { file: '- one⏎  - ⏎⏎Next.', caret: '- one⏎  - ‸⏎⏎Next.' },
       },
     ]),
   );

@@ -5,7 +5,7 @@
 import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
-import { cellsOfRect, rectOf, selectedCells, whole } from './cells.ts';
+import { cellsOfRect, rectOf, rectSelection, selectedCells, whole } from './cells.ts';
 import { tablesOf } from './model.ts';
 
 const open: Editor[] = [];
@@ -157,5 +157,107 @@ describe('a rectangle of cells', () => {
     expect(rect).not.toBeNull();
     expect(rect?.cols).toEqual([0, 1]);
     expect(rect?.rows).toEqual([1, 1]);
+  });
+});
+
+describe('the selection of a rectangle some rows lack cells of', () => {
+  const HEAD = '| a | b | c | d |\n| - | - | - | - |\n';
+
+  /** What `rectSelection` makes of the corners: the cells it selects (none where it is the text of one
+   * cell), and what the rectangle is. */
+  function made(doc: string, from: [number, number], to: [number, number]) {
+    const editor = load(doc);
+    const table = tablesOf(editor.view.state)[0]!;
+    const selection = rectSelection(
+      table,
+      { row: from[0], col: from[1] },
+      { row: to[0], col: to[1] },
+    );
+    editor.view.dispatch({ selection: selection! });
+    const rect = rectOf(editor.view.state);
+    const { from: a, to: b } = editor.view.state.selection.main;
+    return {
+      text: editor.view.state.sliceDoc(a, b),
+      cells: rect
+        ? cellsOfRect(rect).map((c) => editor.view.state.sliceDoc(c.textFrom, c.textTo))
+        : null,
+      rows: rect?.rows,
+      cols: rect?.cols,
+      kind: rect ? whole(rect) : null,
+    };
+  }
+
+  it('is a column down to the last row that has it, whichever rows lack it', () => {
+    const doc = `${HEAD}| 1 |\n| 2 | 3 | 4 |\n| 5 |`;
+    for (const [from, to] of [
+      [
+        [0, 2],
+        [3, 2],
+      ],
+      // The same read from the bottom.
+      [
+        [3, 2],
+        [0, 2],
+      ],
+    ] as [[number, number], [number, number]][]) {
+      const got = made(doc, from, to);
+      expect([got.rows, got.cols, got.kind, got.cells]).toEqual([
+        [0, 2],
+        [2, 2],
+        'column',
+        ['c', '4'],
+      ]);
+    }
+  });
+
+  it('is the header’s cell, as the text of one cell, for a column no body row has', () => {
+    const doc = `${HEAD}| 1 | 2 |\n| 4 | 5 |`;
+    const got = made(doc, [0, 2], [2, 2]);
+    expect([got.text, got.cells, got.kind]).toEqual(['c', null, null]);
+    const last = made(doc, [0, 3], [2, 3]);
+    expect([last.text, last.cells, last.kind]).toEqual(['d', null, null]);
+  });
+
+  it('is the header’s cells, a column, for several columns no body row has', () => {
+    const doc = `${HEAD}| 1 | 2 |\n| 4 | 5 |`;
+    const got = made(doc, [0, 2], [2, 3]);
+    expect([got.rows, got.cols, got.kind, got.cells]).toEqual([
+      [0, 0],
+      [2, 3],
+      'column',
+      ['c', 'd'],
+    ]);
+    // One of the columns is had by a row: the rows down to it, and the columns as far as it goes.
+    const some = made(`${HEAD}| 1 | 2 | 3 |\n| 4 | 5 |`, [0, 2], [2, 3]);
+    expect([some.rows, some.cols, some.kind, some.cells]).toEqual([
+      [0, 1],
+      [2, 3],
+      'column',
+      ['c', 'd', '3'],
+    ]);
+  });
+
+  it('is a short row as its cells, a row, and the whole table with its short last row', () => {
+    const doc = `${HEAD}| 1 | 2 | 3 | 4 |\n| 4 | 5 |`;
+    const row = made(doc, [2, 0], [2, 3]);
+    expect([row.rows, row.cols, row.kind, row.cells]).toEqual([[2, 2], [0, 1], 'row', ['4', '5']]);
+    const all = made(doc, [0, 0], [2, 3]);
+    expect([all.rows, all.cols, all.kind, all.cells?.length]).toEqual([
+      [0, 2],
+      [0, 3],
+      'table',
+      10,
+    ]);
+  });
+
+  it('keeps the corners it was given where both are cells', () => {
+    const doc = `${HEAD}| 1 | 2 | 3 | 4 |\n| 4 | 5 | 6 | 7 |`;
+    const got = made(doc, [2, 1], [1, 2]);
+    expect([got.rows, got.cols, got.kind]).toEqual([[1, 2], [1, 2], null]);
+    // The selection runs from the first corner to the second, as it was asked.
+    const editor = load(doc);
+    const table = tablesOf(editor.view.state)[0]!;
+    const selection = rectSelection(table, { row: 2, col: 1 }, { row: 1, col: 2 })!;
+    expect(selection.main.anchor).toBeGreaterThan(selection.main.head);
   });
 });

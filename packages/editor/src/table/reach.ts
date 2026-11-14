@@ -27,7 +27,7 @@ import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { cellsOfRect, clearedCells, rectOf, rectSpec } from './cells.ts';
 import { composeOverCells } from './compose.ts';
-import { type Cell, type Table, tablesField, tablesOf } from './model.ts';
+import { type Cell, endsBeforeNextCell, type Table, tablesField, tablesOf } from './model.ts';
 
 /** What a selection reaches in the tables of a state. */
 export interface Reach {
@@ -148,13 +148,19 @@ export function reachChanges(
   let caret = range.from;
   const start = reach.partial.find((p) => p.table.from <= range.from && range.from <= p.table.to);
   if (start) {
+    const lastCell = start.table.rows.at(-1)?.cells.at(-1);
     const cell = start.table.rows
-      .flatMap((row) => shown(start.table, row.cells))
+      .flatMap((row) => shown(start.table, row.cells).map((c) => ({ c, row })))
       .find(
-        (c) =>
+        ({ c, row }) =>
           c.from <= range.from &&
-          (range.from < c.to || c === start.table.rows.at(-1)?.cells.at(-1)),
-      );
+          (range.from < c.to ||
+            c === lastCell ||
+            // Where the next cell's mark begins is this cell's when its text ends there (`holds`): the
+            // selection starts in an empty cell with one space of padding or none, or at the end of text
+            // with none after it.
+            (range.from === c.to && endsBeforeNextCell(row, c))),
+      )?.c;
     caret = cell ? cell.textFrom : range.from;
   }
   if (insert !== '') {

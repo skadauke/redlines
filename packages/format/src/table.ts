@@ -6,6 +6,7 @@
 
 import { bodyStart, lineEnd } from './blocks.ts';
 import { HTML_STARTS, indentColumns } from './block-read.ts';
+import { isAlignPayload } from './format-ops.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
 
 export type TableAlign = '' | 'left' | 'center' | 'right';
@@ -14,8 +15,10 @@ export type TableAlign = '' | 'left' | 'center' | 'right';
  * A cell: from the pipe in front of it (the start of the line for the first cell) to the next pipe
  * (the end of the line for the last, so a row's closing pipe is in its last cell). `textFrom` and
  * `textTo` leave out the padding and, in a cell that starts with one, the marker of an inserted row
- * or column and the space after it. In an empty cell they are one position: after the first space
- * of its padding, where typing reads well, or the marker's space.
+ * or column and the space after it, and, in a cell that ends with one, the mark of an alignment
+ * change (`alignPointIn`): the text stops in front of it. In an empty cell they are one position:
+ * after the first space of its padding, where typing reads well, or the marker's space, or in front
+ * of the mark that is all the cell holds.
  */
 export interface TableCellRead {
   from: number;
@@ -180,6 +183,45 @@ function trimmed(text: string, from: number, to: number): Range {
   return { from: a, to: b };
 }
 
+/** An alignment change written as a point (format §3.7): `<!--fmt ID align=SPEC-->`, an id of four
+ * characters, a payload that starts with `align=` and stays on its line, up to its first `-->`. */
+const ALIGN_POINT =
+  /<!--fmt [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3} align=[^\r\n]*?-->/y;
+
+/** What a mark is at least: its opener and `-->`, with nothing in its payload but `align=`. */
+const SHORTEST_POINT = '<!--fmt k3x9 align=-->'.length;
+
+/** What an opener has in front of its payload: `<!--fmt `, the id and a space. */
+const POINT_HEAD = '<!--fmt k3x9 '.length;
+
+/**
+ * The mark of an alignment change that ends `text[from, to)`, white space after it aside: one whole
+ * `<!--fmt ID align=…-->` that starts in the range and has its first `-->` for its end, as the scan
+ * reads a marker, and whose value is a delimiter row, as the parse reads a point (`isAlignPayload`).
+ * It is a point (no closer), and it stands at the end of the text of the header row's last cell
+ * (format §3.7). Null when the range ends otherwise, or in an `align=` that is no alignment change,
+ * which the parse leaves as the text it is. It reads the text alone, so that `readTables` and
+ * `readRowCells`, which the editor's model calls with no parse of the file, find the same mark in the
+ * same cell.
+ */
+export function alignPointIn(text: string, from: number, to: number): Range | null {
+  let end = to;
+  while (end > from && isSpace(text[end - 1])) end--;
+  // Nearly every cell ends in some other way, and is answered at once.
+  if (end - from < SHORTEST_POINT || !text.startsWith('-->', end - 3)) return null;
+  // The range alone: a long text is not searched past the cell.
+  const cell = text.slice(from, end);
+  for (let at = cell.indexOf('<!--fmt '); at !== -1; at = cell.indexOf('<!--fmt ', at + 1)) {
+    ALIGN_POINT.lastIndex = at;
+    const found = ALIGN_POINT.exec(cell);
+    // The first opener whose first `-->` is the end is the marker: an opener after it is in its payload.
+    if (found && at + found[0].length === cell.length) {
+      return isAlignPayload(found[0].slice(POINT_HEAD, -3)) ? { from: from + at, to: end } : null;
+    }
+  }
+  return null;
+}
+
 /** The marker of an inserted row or column at a position: where it ends, and its mark when known. */
 type MarkerAt = (at: number) => { end: number; mark: MarkRange | null } | null;
 
@@ -190,7 +232,12 @@ function cellOf(
 ): { cell: TableCellRead; marker: MarkRange | null } {
   const contentFrom = cell.open === -1 ? cell.from : cell.open + 1;
   const contentTo = Math.max(contentFrom, cell.close);
-  const { from, to } = trimmed(text, contentFrom, contentTo);
+  const content = trimmed(text, contentFrom, contentTo);
+  const from = content.from;
+  // The mark of an alignment change that ends the text is no part of it: the text stops in front of
+  // it. A marker of an inserted row or column at its start and this mark at its end can be in one cell.
+  const point = from < content.to ? alignPointIn(text, from, content.to) : null;
+  const to = point ? point.from : content.to;
   let textFrom = from;
   let textTo = to;
   let marker: MarkRange | null = null;
@@ -200,13 +247,16 @@ function cellOf(
     const end = found.end;
     textFrom = end;
     while (textFrom < to && isSpace(text[textFrom])) textFrom++;
-    // A marker alone: the cell is empty, and its stop is after the space that follows the marker.
+    // A marker alone: the cell is empty, and its stop is after the space that follows the marker,
+    // and never past the mark that ends the cell.
     if (textFrom >= to) {
-      textFrom = Math.min(end + 1, contentTo);
+      textFrom = Math.min(end + 1, point ? point.from : contentTo);
       textTo = textFrom;
     }
   } else if (from === to) {
-    textFrom = Math.min(contentFrom + 1, contentTo);
+    // No text: one stop, in front of the mark that is all the cell holds, or after the first space of
+    // its padding.
+    textFrom = point ? point.from : Math.min(contentFrom + 1, contentTo);
     textTo = textFrom;
   }
   return {
@@ -477,19 +527,30 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
   return tables;
 }
 
+/** `line` without the marks of alignment changes that end its cells (`alignPointIn`). */
+function withoutPoints(line: string): string {
+  let out = '';
+  let at = 0;
+  for (const cell of split(line, 0, line.length).cells) {
+    const contentFrom = cell.open === -1 ? cell.from : cell.open + 1;
+    const { from, to } = trimmed(line, contentFrom, Math.max(contentFrom, cell.close));
+    const point = from < to ? alignPointIn(line, from, to) : null;
+    if (!point) continue;
+    out += line.slice(at, point.from);
+    at = point.to;
+  }
+  return out + line.slice(at);
+}
+
 /** The pipes of every row without a marker are where the others' are. */
 function isPadded(text: string, rows: readonly TableRowRead[], delimiter: Line): boolean {
-  // The marker of an inserted column and its space are not part of the row's shape: when they go the
-  // row is as wide as the others.
+  // The marker of an inserted column and its space, and the mark of an alignment change, are not part
+  // of the row's shape: when they go the row is as wide as the others.
   const shape = (start: number, end: number) => {
-    const line = text.slice(start, end);
-    if (!line.includes('col-->')) {
-      return pipesOf(text, start, end)
-        .map((pipe) => pipe - start)
-        .join(',');
-    }
-    const bare = line.replace(/<!--ins [a-z0-9]{4} col--> /g, '');
-    return pipesOf(bare, 0, bare.length).join(',');
+    let line = text.slice(start, end);
+    if (line.includes('align=')) line = withoutPoints(line);
+    if (line.includes('col-->')) line = line.replace(/<!--ins [a-z0-9]{4} col--> /g, '');
+    return pipesOf(line, 0, line.length).join(',');
   };
   const wanted = shape(delimiter.start, delimiter.end);
   return rows.every((row) => row.insertion !== null || shape(row.from, row.to) === wanted);

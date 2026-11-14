@@ -1,6 +1,7 @@
 // What the editing functions share (format §3.6, §4, §5): where the markers are, moving a position
 // out of one, the file's line breaks, and writing the ledger once the body has changed.
 
+import { assertPointsRead } from './align-point.ts';
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import {
@@ -17,6 +18,7 @@ import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
+import { assertPointHolds } from './table-align.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
@@ -131,6 +133,24 @@ function singleChange(before: string, after: string): TextChange[] {
   return [{ from: start, to: before.length - end, insert: after.slice(start, after.length - end) }];
 }
 
+/**
+ * The changes between two texts, in offsets of `before`: the body and the ledger each as one change of
+ * what differs. For an operation that works out the text it makes (a table's deletion, an agent's edit
+ * of a table) and gives back what changed, which stays near the table and the ledger.
+ */
+export function changesBetween(before: string, after: string): TextChange[] {
+  const stop = (text: string) => parse(text).ledgerRange?.from ?? text.length;
+  const [a, b] = [stop(before), stop(after)];
+  return [
+    ...singleChange(before.slice(0, a), after.slice(0, b)),
+    ...singleChange(before.slice(a), after.slice(b)).map((change) => ({
+      ...change,
+      from: change.from + a,
+      to: change.to + a,
+    })),
+  ];
+}
+
 /** Where a position of the changed text was in the original, or null when it lay inside text that
  * a change inserted. At the edge of an inserted text it is before or after it, and a change that
  * only removes text leaves two original positions for one: `preferAfter` picks the later one. */
@@ -187,7 +207,7 @@ function joinChanges(
 /** The refusal of a change that would hide other changes in code or an HTML comment: in the words
  * of a decision, or of an edit, which can be made in Raw instead. A decision that would hide the
  * markers of a comment, which no decision takes away, says to delete the comment (`comment`). */
-function hiddenError(removing: boolean, comment = false): EditError {
+export function hiddenError(removing: boolean, comment = false): EditError {
   if (removing && comment) {
     return new EditError(
       'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.',
@@ -664,6 +684,8 @@ export function commitEdit(
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
+    // An alignment change at the end of its cell is read where it stands after the edit as it was before it.
+    if (!removing) assertPointsRead(text, before, after, parsedAfter, changes);
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps) assertViewsKept(text, after, options.keeps);
@@ -675,7 +697,26 @@ export function commitEdit(
       options.exempt ?? [],
     );
   }
-  if (ledgerChanges === undefined) return changes;
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
-  return joinChanges(text, changes, after, ledgerChanges);
+  const done =
+    ledgerChanges === undefined ? changes : joinChanges(text, changes, after, ledgerChanges);
+  // An edit in the cell that a pending alignment change ends is held to every order of decisions of the changes
+  // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
+  if (before && !removing) assertPointHolds(text, before, done);
+  return done;
+}
+
+/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
+ * (format §3.1). */
+export function escapedMarkers(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
+}
+
+/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
+export function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  let at: number | undefined;
+  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
+  return at;
 }

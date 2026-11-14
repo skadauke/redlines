@@ -61,6 +61,7 @@ import {
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
 import {
+  assertRowsStay,
   checkTableEdits,
   inOwnInsertedCol,
   inOwnInsertedRow,
@@ -78,6 +79,8 @@ import {
   assertNoMarkup,
   commitEdit,
   eolOf,
+  escapedMarkerAt,
+  escapedMarkers,
   inEol,
   markerRanges,
   nameOf,
@@ -95,7 +98,14 @@ import {
 } from './list-run.ts';
 import { sameEmphasis, sameReading } from './format-reader.ts';
 import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
-import { codeSpanAt, inspectPlace, stepLeft, stepRight, underliningBullet } from './inline.ts';
+import {
+  codeSpanAt,
+  inspectPlace,
+  stepLeft,
+  stepRight,
+  textLike,
+  underliningBullet,
+} from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -113,6 +123,7 @@ import {
 } from './code-edit.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
+import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
 import type {
   DocView,
   EditContext,
@@ -1178,6 +1189,23 @@ function coverBreaks(
         to = from;
       }
     } else if (found.end > from && found.start < to) {
+      // A range that takes a setext underline whole, with the line break in front of it, and ends
+      // where the underline does, takes the break after it no further: the blank lines that follow
+      // stay, as they keep the text above and the block below apart, and the text above is a
+      // paragraph without its underline (#441). The marker of the deletion stands after text, on
+      // the line above (not at the start of one: a range that starts a line, as the second line of
+      // a heading does, is written as before), and what is above is words, not another block's
+      // line (a comment, a fence, a definition, a rule, front matter).
+      const underEnd = from <= found.start ? underlineOfBreak(plan.text, found.start) : undefined;
+      if (
+        underEnd !== undefined &&
+        to === underEnd &&
+        underEnd < found.end &&
+        from > lineStart(plan.text, from) &&
+        textLike(plan.text.slice(lineStart(plan.text, found.start), found.start))
+      ) {
+        continue;
+      }
       // From the very start of a line with a prefix, past the prefix, is a change of the block's
       // text, and does not touch the break in front of it.
       const insidePrefix = from >= prefix && prefix < found.end;
@@ -1516,6 +1544,14 @@ function coverLine(plan: Plan, from: number, to: number): Range {
   }
   return { from, to: next.end };
 }
+
+/** The refusal of a marker that would start a line of a paragraph (format §3.2). */
+const MARKER_STARTS_LINE = 'A marker here would start a line.';
+
+/** Why a deletion that starts at the beginning of a wrapped line, and is not all the text of lines
+ * of one paragraph (`wrappedLineStart`), is refused: what to do instead. */
+const WRAPPED_LINE_START =
+  'This deletion starts at the beginning of a line that goes on a paragraph, where its marker would start the line, and Markdown would read the start of a block there. Start the selection at the end of the line above, so that the line break goes with the deleted text, or leave the first word of the line out of it.';
 
 /** The message of a replacement that would leave a line with no text, which can't be written. */
 const BLANK_LINE =
@@ -2068,13 +2104,6 @@ function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): 
   return true;
 }
 
-/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
- * (format §3.1). */
-function escapedMarkers(text: string, parsed: Parsed): number {
-  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
-  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
-}
-
 const AFTER_BRING =
   "A line break can't be typed here while Track Changes is on: the change would leave a marker at the start of a line after a backslash, in a list, where other Markdown readers would read the list otherwise. Type something after the backslash first, or turn off Track Changes.";
 
@@ -2116,14 +2145,6 @@ function bringsBroken(text: string, parsed: Parsed): number {
     if (bullet || ((!alone || more) && item(above))) count++;
   }
   return count;
-}
-
-/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
-function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
-  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
-  let at: number | undefined;
-  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
-  return at;
 }
 
 /**
@@ -2421,7 +2442,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           refuse(open.reason);
         } else if (endsInPrefix(`\n${visibleBefore(plan, backslash)}`)) {
           // The backslash starts its line's text: the opener in front of it would start the line.
-          refuse('A marker here would start a line.');
+          refuse(MARKER_STARTS_LINE);
         } else {
           grew = true;
           grow(backslash, to);
@@ -2571,7 +2592,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           typing.plain === true && p === to && p < text.length
             ? nextWordEnd(plan, nextLineStart(text, p))
             : undefined;
-        if (end === undefined) refuse('A marker here would start a line.');
+        if (end === undefined) refuse(MARKER_STARTS_LINE);
         grow(from, end ?? p);
         continue;
       }
@@ -2579,7 +2600,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       grow(from, p);
     }
     if (state === `${from} ${to} ${left} ${right}`) {
-      if (right !== '' && typing.trail !== '') refuse('A marker here would start a line.');
+      if (right !== '' && typing.trail !== '') refuse(MARKER_STARTS_LINE);
       // A change that took in the backslash in front of it is one substitution, or nothing: with
       // other changes in its range, deciding them in another order could read it otherwise.
       if (grew && !soleReplace(plan, from, to, { ...typing, inner: left + typing.inner + right })) {
@@ -4007,6 +4028,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     tail = covered.tail;
   }
   const covers = { from, to };
+  // Whether the range starts at the text of a line that goes on a paragraph, and no marker may stand
+  // there: a refusal of that is told in the words of what to do instead.
+  let startsWrapped = false;
   if (from === to && typed === '') return;
   // A range that starts in the prefix of a block keeps the prefix; what is typed in place of it
   // does not write it again.
@@ -4021,7 +4045,14 @@ function planEdit(plan: Plan, edit: TextChange): void {
     from = to = pastBlockOpener(plan, from);
   }
   if (!past && !blocks && from < to && typed === '') {
-    ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
+    // All the text of a wrapped line goes with the line break in front of it, where a marker would
+    // start the line (#427); a replacement that keeps a break asks for the line to stay.
+    const wrapped = keepsBreak ? undefined : wrappedLineStart(text, plan.parsed, markers, from, to);
+    if (wrapped !== undefined && !ownTextOnly(plan, from, to)) from = wrapped;
+    else {
+      startsWrapped = !keepsBreak && atWrappedLine(text, markers, from);
+      ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
+    }
   }
   // The break of a split stays with its marker (format §3.4).
   if (!past) {
@@ -4105,9 +4136,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
     ({ from, to } = settled.range);
     typing = { ...typingOf(settled.tokens), ...(plain ? { plain: true } : {}) };
   }
-  const placed = past
-    ? { from, to, left: '', right: '' }
-    : legalize(plan, { from, to }, typing, blocks?.at);
+  let placed: Placed;
+  try {
+    placed = past
+      ? { from, to, left: '', right: '' }
+      : legalize(plan, { from, to }, typing, blocks?.at);
+  } catch (error) {
+    if (startsWrapped && error instanceof EditError && error.message === MARKER_STARTS_LINE) {
+      throw new EditError(WRAPPED_LINE_START, error.code);
+    }
+    throw error;
+  }
   // The old text ends in a backslash that a marker follows right after it: only a substitution
   // keeps that text in its marker, where deciding the changes in another order would give it back
   // in front of the marker of the new text (format §3.1).
@@ -5148,12 +5187,16 @@ function editsOnce(
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
-  // plain one first, and make the edit after it.
+  // plain one first, and make the edit after it. A row has one leading pipe: where `leadingPipeAt`
+  // writes it (at the start of the text, after the row's indent), the one that an emptied first cell
+  // needs (`outerPipeWrites`, at the start of the line) is the same pipe, and an indented row would
+  // be given a second, two cells where its delimiter row has one.
   const pipes: PipeWrite[] = edits.flatMap((edit) => {
     const at = leadingPipeAt(text, edit, plan.parsed);
+    const outer = outerPipeWrites(text, edit, plan.parsed);
     return [
       ...(at === null ? [] : [{ at, insert: '| ', leading: true }]),
-      ...outerPipeWrites(text, edit, plan.parsed),
+      ...(at === null ? outer : outer.filter((write) => !write.leading)),
     ];
   });
   const unique = pipes.filter(
@@ -5206,6 +5249,8 @@ function editsOnce(
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
+      // No key is written with a pipe of a row in a change of its own (format §3.7, rule 7).
+      assertRowsStay(text, edits, changes, plan.parsed);
       // A change that stands against another mark reads as typed in every order of decisions, or
       // is written again by a character, or is refused (format §3.1, rule 5).
       if (plan.emphasis.touched) {

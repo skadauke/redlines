@@ -185,6 +185,22 @@ describe('a selection that ends inside a table', () => {
         on: { newest: `${body('| a | b |', ['|  | x |', '|  |  |'])}⏎⏎ter.` },
       },
       {
+        // The selection starts at the stop of an empty cell with one space of padding, which is where
+        // the next cell's mark begins: the empty cell is the first cleared cell, and the caret is in it.
+        name: 'from an empty cell with one space of padding into the paragraph below: its row is cleared, the caret in that cell',
+        doc: '| a | b | c |⏎| - | - | - |⏎| 1 | ⟦| x |⏎⏎Af⟧ter.',
+        keys: ['Delete'],
+        off: { caret: '| a | b | c |⏎| - | - | - |⏎|  | ‸|  |⏎⏎ter.' },
+        on: { newest: '| a | b | c |⏎| - | - | - |⏎|  | |  |⏎⏎ter.' },
+      },
+      {
+        name: 'a typed letter lands in that empty cell, and not in the cell after it',
+        doc: '| a | b | c |⏎| - | - | - |⏎| 1 | ⟦| x |⏎⏎Af⟧ter.',
+        keys: [{ type: 'y' }],
+        off: { caret: '| a | b | c |⏎| - | - | - |⏎|  | y‸|  |⏎⏎ter.' },
+        on: { newest: '| a | b | c |⏎| - | - | - |⏎|  | y|  |⏎⏎ter.' },
+      },
+      {
         name: 'from table A into table B: rows below the start cleared in A, rows above the end in B',
         doc: `${T.replace('| 3 | 4 |', '| 3 | ⟦4 |')}⏎⏎Middle.⏎⏎${T2.replace('| 5 | 6 |', '| 5⟧ | 6 |')}`,
         keys: ['Delete'],

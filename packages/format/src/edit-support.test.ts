@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import {
   assertNoMarkup,
+  changesBetween,
   commitEdit,
   eolOf,
   inEol,
@@ -13,7 +14,7 @@ import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { file, fixture } from './test-helpers.ts';
+import { file, fixture, thread } from './test-helpers.ts';
 import type { Ledger, TextChange } from './types.ts';
 
 const ADA_AT = '2026-10-31T09:00Z';
@@ -279,5 +280,27 @@ describe('assertNoMarkup', () => {
     expect(() => assertNoMarkup('a <!--ins k3x9-->b')).toThrow(EditError);
     expect(() => assertNoMarkup('a<!--/k3x9-->')).toThrow(EditError);
     expect(() => assertNoMarkup('\n<!-- redlines\nversion: 1\n-->')).toThrow(EditError);
+  });
+});
+
+describe('changesBetween', () => {
+  it('gives the body and the ledger each as one change of what differs, and none for the same text', () => {
+    const before = file('One.\n\nTwo.\n\nThree.');
+    const after = file('One.\n\nZwei.\n\nThree.', {}, thread('c9qf'));
+    const changes = changesBetween(before, after);
+    expect(applyChanges(before, changes)).toBe(after);
+    expect(changes).toHaveLength(2);
+    // The body's change stops where the ledger starts, and the ledger's starts there or after it.
+    const ledger = parse(before).ledgerRange?.from ?? 0;
+    expect(changes[0]).toEqual({ from: 6, to: 9, insert: 'Zwei' });
+    expect(changes[1]?.from).toBeGreaterThanOrEqual(ledger);
+    expect(changesBetween(before, before)).toEqual([]);
+    // A body change alone, and a file that gains its ledger.
+    expect(changesBetween(before, file('One.\n\nTwo.\n\nThree!'))).toHaveLength(1);
+    const bare = changesBetween(
+      'One.\n',
+      applyChanges('One.\n', [{ from: 5, to: 5, insert: 'x' }]),
+    );
+    expect(bare).toEqual([{ from: 5, to: 5, insert: 'x' }]);
   });
 });

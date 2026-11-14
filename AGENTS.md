@@ -23,6 +23,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
+| `apps/embed-smoke`      | `@redlines/embed-smoke`: the smallest embed of the core and review, which holds the core's size (not shipped) |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
@@ -34,7 +35,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
-| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands, the grips and the +  |
 | `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
 | `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
@@ -92,8 +93,12 @@ repo root.
   dev` (the formatting palette's handle, right-click and hints, and Ask's bubble, answered by the
   page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
   results to the console and ends with a `... done <n> passed, <n> failed` line
-  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They
-  read nothing in a release build, and are no part of CI
+  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
+  `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
+  zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
+  (`src/print-check.ts`) shows that printing holds the whole document. They read nothing in a
+  release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

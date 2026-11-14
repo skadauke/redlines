@@ -28,8 +28,13 @@ import {
 } from '../tracked/typing.ts';
 import type { Align, Row, Table } from './model.ts';
 import { rectOf, rectSelection } from './cells.ts';
+import { missingCaret } from './missing.ts';
 import { shownCellAt } from './stops.ts';
 import { tablesField } from './model.ts';
+
+/** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
+export type Planned =
+  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string };
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
 export function planned(
@@ -38,9 +43,17 @@ export function planned(
   group?: string,
   /** The text to work on, when it is not the state's (a paste that does several things in a row). */
   onText?: string,
-):
-  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string } {
-  const { state } = view;
+): Planned {
+  return plannedIn(view.state, op, group, onText);
+}
+
+/** `planned` for a state, where there is no view (a transaction filter's). */
+export function plannedIn(
+  state: EditorState,
+  op: TableOp,
+  group?: string,
+  onText?: string,
+): Planned {
   const text = onText ?? state.doc.toString();
   try {
     if (state.field(trackingField))
@@ -201,6 +214,18 @@ export function deleteRows(view: EditorView): boolean {
   return perform(view, { kind: 'deleteRows', table: touched.table.from, rows }, 'table.delete.row');
 }
 
+/**
+ * Deletes the table the selection is in, whole: a block deletion with Track Changes on, the text of
+ * the table taken out with it off. The caret goes to the start of the text that follows it, or to the
+ * end of the text before it when none does. The format refuses it where another person's pending
+ * change is in the table (rule 6), and the refusal is told.
+ */
+export function deleteTable(view: EditorView): boolean {
+  const touched = touchedRows(view.state);
+  if (!touched) return false;
+  return perform(view, { kind: 'deleteTable', table: touched.table.from }, 'table.delete.table');
+}
+
 /** Moves rows `first` to `last` of `table` to the boundary `to` (0 above the header, the number of
  * rows below the last), and keeps them selected as they were. A boundary that is where they are is
  * no move: it says so. */
@@ -273,6 +298,18 @@ export function touchedCols(state: EditorState): {
       last: rect.cols[1],
       rectangle: true,
       row: rect.head.row,
+    };
+  }
+  // A caret in a cell its row lacks is in the column it was put in.
+  const lacking = missingCaret(state);
+  if (lacking) {
+    const { col } = lacking.cell;
+    return {
+      table: lacking.table,
+      first: col,
+      last: col,
+      rectangle: false,
+      row: lacking.row.index,
     };
   }
   const found = shownCellAt(state, state.selection.main.head);
@@ -436,8 +473,8 @@ export function moveCols(view: EditorView, left: boolean): boolean {
 export function caretAlign(state: EditorState): Align | null {
   const touched = touchedCols(state);
   if (!touched) return null;
-  const found = shownCellAt(state, state.selection.main.head);
-  const col = found?.cell.col ?? touched.first;
+  const found = missingCaret(state)?.cell ?? shownCellAt(state, state.selection.main.head)?.cell;
+  const col = found?.col ?? touched.first;
   return touched.table.aligns[col] ?? null;
 }
 

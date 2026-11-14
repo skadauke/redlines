@@ -22,6 +22,8 @@ import {
   assertNoMarkup,
   commitEdit,
   eolOf,
+  escapedMarkerAt,
+  escapedMarkers,
   inEol,
   markerRanges,
   nameOf,
@@ -37,6 +39,8 @@ import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts'
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
+import { assertPointsRead } from './align-point.ts';
+import { assertPointHolds } from './table-align.ts';
 import { editMoveCopy } from './table-move-edit.ts';
 import {
   checkTableEdits,
@@ -47,6 +51,7 @@ import {
 } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
+import { wrappedLineStart } from './wrapped-line.ts';
 
 /**
  * What an untracked edit needs besides the text: the random bytes of the ids of the marks that it
@@ -269,6 +274,32 @@ function warningCounts(parsed: Parsed): Map<string, number> {
 }
 
 /**
+ * Throws when the edit leaves a marker read otherwise than it was (`text` and `parsed` are the file before
+ * the edit, `body` and `read` after it): an alignment change at the end of its cell, which the text typed in
+ * front of it can make Markdown read otherwise (`assertPointsRead`), or any marker right after an
+ * unescaped backslash that the edit wrote or left, which escapes it (format §3.1), as with Track Changes on.
+ * These are checked outside the edit's own checks, whose refusals are put in other words.
+ */
+function markersStayRead(
+  text: string,
+  parsed: Parsed,
+  body: string,
+  read: Parsed,
+  changes: readonly TextChange[],
+  author: Person | undefined,
+): void {
+  assertPointsRead(text, parsed, body, read, changes);
+  if (escapedMarkers(body, read) <= escapedMarkers(text, parsed)) return;
+  const at = escapedMarkerAt(body, read) ?? -1;
+  const mark = markerRanges(read).find((m) => m.from === at && m.mark)?.mark;
+  const name = mark ? nameOf(read, mark, author) : 'a change';
+  throw new EditError(
+    `A backslash can't stand right in front of the marker of ${name} while Track Changes is off: other Markdown readers would show the marker as text. Decide ${name} first, or turn on Track Changes.`,
+    'no-legal-placement',
+  );
+}
+
+/**
  * Throws when the changes do not make the edit (format §3.10): the newest text is the plain edit of
  * the newest text; the original text loses what the edit deleted of the text both views had and the
  * old text whose marker it deleted, and has the typed text where it was typed; and the file has no
@@ -469,6 +500,9 @@ function edited(
     to = Math.max(from, snapOut(markers, edit.to, false));
   }
   if (from === to && typed === '') return [];
+  // All the text of a wrapped line goes with the line break in front of it, as it does with Track
+  // Changes on (`wrappedLineStart`): the line left empty would part the paragraph (#427).
+  if (typed === '' && !half) from = wrappedLineStart(text, parsed, markers, from, to) ?? from;
   // A file without marks and ledger takes the edit as it is, unless the edit makes one.
   if (markers.length === 0) {
     const plain = [{ from, to, insert: typed }];
@@ -787,6 +821,7 @@ function edited(
   let result: TextChange[];
   let depends: ReturnType<typeof breakComesToDepend>;
   let read: Parsed | undefined;
+  let written: string | undefined;
   const inCode = `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`;
   try {
     result = commitEdit(text, changes, ledger, {
@@ -796,6 +831,7 @@ function edited(
       keepLedger: created.length === 0 && !gone,
       verify: (after, parsedAfter) => {
         read = parsedAfter;
+        written = after;
         if (created.some((id) => !parsedAfter.marks.some((mark) => mark.id === id))) {
           throw new EditError(inCode, 'inside-code');
         }
@@ -806,6 +842,11 @@ function edited(
   } catch (error) {
     if (error instanceof EditError) throw untrackedError(error, named, name);
     throw error;
+  }
+  if (read && written !== undefined) {
+    markersStayRead(text, parsed, written, read, changes, ctx.author);
+    // An edit in the cell that a pending alignment change ends is held to every order of decisions (#466).
+    assertPointHolds(text, parsed, result);
   }
   // No break of a split may come to depend on the decisions of the changes next to it (format
   // §3.4), as when the blank line between two splits' breaks is taken out.
