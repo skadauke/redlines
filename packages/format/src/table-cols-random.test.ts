@@ -55,6 +55,7 @@ import { addComment } from './comments.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
+import type { MarkRange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
 const THREAD = [
@@ -93,12 +94,19 @@ const HALVES = ['`', '<!--', '-->'];
 /** The words of a decision that would hide other changes in code or an HTML comment. */
 const HIDES =
   /^This decision would hide other changes in code or an HTML comment, where they would no longer be read\./;
-/** The refusals of rejecting an alignment change whose table has not the columns of its old row, or whose
- * original text the decision would change: the one decision of a merge that may be refused. */
-const REJECT_REFUSALS = [
-  /^This alignment change can't be rejected, because its table no longer has the columns it had\./,
-  /^This decision would change the (?:newest|original) text, because a marker that goes lets the text next to it be read otherwise\./,
-];
+/** The refusal of rejecting an alignment change whose table has not the columns of its old row. */
+const LOST =
+  /^This alignment change can't be rejected, because its table no longer has the columns it had\./;
+/** The refusal of a decision that would change the original text, which a rejection keeps: the words of the views
+ * check that every decision is held to. Rejecting an alignment change may be refused in them, with a column change
+ * pending, and in no other state (the one decision of a merge that may be refused, with `LOST`). */
+const KEPT =
+  /^This decision would change the original text, because a marker that goes lets the text next to it be read otherwise\./;
+
+/** Whether a mark is a column change: an inserted column or a deleted one. */
+const isColumnMark = (mark: MarkRange) =>
+  (mark.kind === 'ins' && mark.payload === 'col') ||
+  (mark.kind === 'del' && /^col=/.test(mark.payload ?? ''));
 
 function tablesOf(text: string) {
   return blockLeaves(text).filter((leaf) => leaf.kind === 'table');
@@ -124,11 +132,7 @@ function mergedWithMark(text: string): string | undefined {
   const header = readTables(text, parsed)[0]?.rows[0];
   const last = header?.cells.at(-1);
   if (!header || !last || header.insertion) return undefined;
-  const columns = parsed.marks.filter(
-    (mark) =>
-      (mark.kind === 'ins' && mark.payload === 'col') ||
-      (mark.kind === 'del' && /^col=/.test(mark.payload ?? '')),
-  );
+  const columns = parsed.marks.filter(isColumnMark);
   if (columns.length === 0 || columns.some((mark) => mark.entry.move !== undefined))
     return undefined;
   let old: string;
@@ -167,21 +171,22 @@ function noOriginal(text: string): boolean {
 /**
  * Decides the changes of a merge one at a time in every order. In every state the alignment change is read once, with
  * its entry, and ends the header's last cell, until it is decided, and deciding another change leaves it so; every
- * decision is possible but three sorts, each counted. The rejection of the alignment change is refused while the table
+ * decision is possible but four sorts, each counted. The rejection of the alignment change is refused while the table
  * has columns that its old row has not (never excused by the file without it, whose rules the alignment change does
- * not share). A decision of another change that the same state has without the alignment change is older than it (a
- * table keeps at least one column, so the last column that is not deleted is not rejected with the rest of them gone).
- * A decision that brings a backtick or the half of a comment back, and would hide the alignment change between it and
- * another (the one it is paired with) in code or a comment, is refused in the words of every change that a decision
- * would hide (#376), and is possible once the alignment change is accepted: the mark is never written where it is not
- * read. A state with no original view to read is left out (#477).
+ * not share), and, in the words of the views check, where the old row written back would change the original text: the
+ * row has the cells of the columns the table had when the merge was made, and a column change pending (or decided
+ * since) leaves the original view with other columns than the file's, so the decision is refused only in a state that
+ * has a column change pending, as the same words are in no other. A decision of another change that the same state has
+ * without the alignment change is older than it (a table keeps at least one column, so the last column that is not
+ * deleted is not rejected with the rest of them gone). A decision that brings a backtick or the half of a comment back,
+ * and would hide the alignment change between it and another (the one it is paired with) in code or a comment, is
+ * refused in the words of every change that a decision would hide (#376), and is possible once the alignment change is
+ * accepted: the mark is never written where it is not read. A state with no original view to read is left out (#477).
  */
-function expectMergeDecided(
-  label: string,
-  text: string,
-): { states: number; rejected: number; hidden: number; without: number; noOriginals: number } {
+function expectMergeDecided(label: string, text: string) {
   const seen = new Set<string>();
-  let rejected = 0;
+  let lost = 0;
+  let kept = 0;
   let hidden = 0;
   let without = 0;
   let noOriginals = 0;
@@ -203,12 +208,19 @@ function expectMergeDecided(
           next = applyChanges(current, decide(current, id));
         } catch (error) {
           if (!(error instanceof EditError)) throw error;
+          if (id === point && how === 'reject' && LOST.test(error.message)) {
+            lost++;
+            continue;
+          }
+          // The views check's words excuse the rejection of the mark only beside a column change: the old row and the
+          // original view differ in their columns there, and nowhere else.
           if (
             id === point &&
             how === 'reject' &&
-            REJECT_REFUSALS.some((r) => r.test(error.message))
+            KEPT.test(error.message) &&
+            parse(current).marks.some(isColumnMark)
           ) {
-            rejected++;
+            kept++;
             continue;
           }
           // A state with no alignment change left (it was accepted, which writes what cutting the mark out does) or
@@ -273,7 +285,7 @@ function expectMergeDecided(
     }
   };
   walk(text, '');
-  return { states: seen.size, rejected, hidden, without, noOriginals };
+  return { states: seen.size, lost, kept, hidden, without, noOriginals };
 }
 
 describe('rows and columns, random', () => {
@@ -302,7 +314,8 @@ describe('rows and columns, random', () => {
     };
     let merges = 0;
     let mergeStates = 0;
-    let mergeRefusals = 0;
+    let mergeLost = 0;
+    let mergeKept = 0;
     let mergeHidden = 0;
     let mergeWithout = 0;
     let mergeNoOriginals = 0;
@@ -679,7 +692,8 @@ describe('rows and columns, random', () => {
             merges++;
             if (halves) mergesWithHalves++;
             mergeStates += walked.states;
-            mergeRefusals += walked.rejected;
+            mergeLost += walked.lost;
+            mergeKept += walked.kept;
             mergeHidden += walked.hidden;
             mergeWithout += walked.without;
             mergeNoOriginals += walked.noOriginals;
@@ -797,7 +811,7 @@ describe('rows and columns, random', () => {
     if (process.env['REDLINES_FUZZ_STATS']) {
       const byCheck = [...olderBy].map(([check, count]) => `${check} ${count}`).join(', ');
       console.log(
-        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}), merges left out the same way ${olderMerges}, merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeRefusals} rejections of the mark refused, ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
+        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}), merges left out the same way ${olderMerges}, merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeLost + mergeKept} rejections of the mark refused (${mergeLost} for columns that its old row has not, ${mergeKept} for the original text beside a column change pending), ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
       );
     }
     expect(used).toBeGreaterThan(10);
