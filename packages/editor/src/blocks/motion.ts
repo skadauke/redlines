@@ -257,7 +257,11 @@ const gapClicks = EditorView.domEventHandlers({
     const rect = target.getBoundingClientRect();
     const padding = Number.parseFloat(getComputedStyle(target).paddingTop) || 0;
     if (gapSide(event.clientY, rect.top, padding) !== 'above') return false;
-    const pos = view.posAtCoords({ x: event.clientX, y: rect.top - 1 }, false);
+    // The end of the block above rests in front of the closers that end its text (#434).
+    const pos = restingPlace(
+      view.state,
+      view.posAtCoords({ x: event.clientX, y: rect.top - 1 }, false),
+    );
     view.dispatch({
       selection: EditorSelection.cursor(pos),
       userEvent: 'select.pointer',

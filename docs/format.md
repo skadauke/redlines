@@ -371,8 +371,8 @@ Your own pending changes don't count:
     left as it is, with no refusal. Code Block, Table and Horizontal Rule are no block changes: the
     editor writes their syntax as typing, which in your own insertion is typed text too.
   - *Where the caret stands.* Anywhere in the block, on either side of the hidden markers at its
-    ends: the End key and a click past the end of the line leave the caret after the closer of your
-    insertion, and a selection may end there. The block is read by its text, not by the side of a
+    ends: a selection may end after the closer of your insertion (the End key and a click past the
+    end of the line rest in front of it, #434). The block is read by its text, not by the side of a
     marker.
   - *What is all your own.* Every character of the line or lines the change reads or writes is inside
     insertions of yours, the syntax of the block included. A paragraph you typed qualifies, and so

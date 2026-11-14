@@ -32,6 +32,8 @@ type Step =
   | { click: number }
   /** A click to the right of the caret's line, past the end of its text. */
   | { clickPastEnd: true }
+  /** A click in the upper half of the space above the line that holds this text. */
+  | { clickAbove: string }
   /** Space on the task box with this index, focused first: the keyboard's way to change it. */
   | { space: number }
   /** Waits until the line of notices under the title bar is empty. */
@@ -70,6 +72,21 @@ function inLine(editor: Editor, text: string): unknown {
   const { state } = editor.view;
   const line = state.doc.lineAt(state.selection.main.head).text;
   return line.includes(text) ? null : { caretLine: line };
+}
+
+/**
+ * null where the caret is on the visual row of `start` (not at the end of the text), or, with
+ * `last`, at the end of the document, on the last row; what it is otherwise.
+ */
+function onRow(editor: Editor, start: number, last: boolean): unknown {
+  const { view } = editor;
+  const { head, assoc } = view.state.selection.main;
+  const end = view.state.doc.length;
+  // The caret is drawn on the row its side (`assoc`) says: at the end of a row, the row it ends.
+  const caret = view.coordsAtPos(head, assoc < 0 ? -1 : 1)?.top;
+  const was = view.coordsAtPos(start, 1)?.top;
+  if (last) return head === end && caret !== was ? null : { head, end, caret, was };
+  return head < end && caret === was ? null : { head, end, caret, was };
 }
 
 /** The ids of eight pending inline changes (a word inserted, deleted or replaced, inside an item's
@@ -1185,6 +1202,28 @@ const CHECKS: Check[] = [
     newest: 'One.⏎⏎## Para one.⏎⏎Next.',
     test: (editor) => inLine(editor, 'Para one.'),
   },
+  {
+    name: 'tracked-click-in-the-gap-above-the-next-block-then-heading-keeps-the-caret',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: 'Para one.' }, { clickAbove: 'Next.' }, { command: 'block.h2' }],
+    tracking: true,
+    newest: 'One.⏎⏎## Para one.⏎⏎Next.',
+    test: (editor) => inLine(editor, 'Para one.'),
+  },
+  // End on a wrapped paragraph goes to the end of the visual row the caret is on (a layout is
+  // needed: happy-dom has none), and on its last row to the end of the text: the second press.
+  {
+    name: 'end-in-the-first-row-of-a-wrapped-paragraph-stays-on-the-row',
+    doc: `One.⏎⏎The quick brown fox ‸jumps over the lazy dog. ${'The quick brown fox jumps over the lazy dog. '.repeat(14)}`,
+    steps: ['End'],
+    test: (editor, start) => onRow(editor, start.head, false),
+  },
+  {
+    name: 'end-twice-in-a-wrapped-paragraph-goes-to-the-end-of-its-text',
+    doc: `One.⏎⏎The quick brown fox ‸jumps over the lazy dog. ${'The quick brown fox jumps over the lazy dog. '.repeat(14)}`,
+    steps: ['End', 'End'],
+    test: (editor, start) => onRow(editor, start.head, true),
+  },
 ];
 
 const frames = async () => {
@@ -1254,6 +1293,25 @@ async function clickPastEnd(view: EditorView): Promise<void> {
   await frames();
 }
 
+/**
+ * A click in the upper half of the space above the line that holds `text`, which is the padding of
+ * that line: the caret goes to the end of the block above, at the click's column.
+ */
+async function clickAbove(view: EditorView, text: string): Promise<void> {
+  const line = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')].find((el) =>
+    el.textContent?.includes(text),
+  );
+  if (!line) throw new Error(`no line has ${text}`);
+  const rect = line.getBoundingClientRect();
+  const padding = Number.parseFloat(getComputedStyle(line).paddingTop) || 0;
+  const x = rect.right - 4;
+  const y = rect.top + padding / 4;
+  const init = { clientX: x, clientY: y, detail: 1, button: 0, bubbles: true, cancelable: true };
+  line.dispatchEvent(new MouseEvent('mousedown', init));
+  document.dispatchEvent(new MouseEvent('mouseup', init));
+  await frames();
+}
+
 /** A click on the drawing of a task box, as the `mousedown` the box listens to. */
 function clickBox(editor: Editor, index: number): void {
   const box = boxesOf(editor)[index];
@@ -1313,6 +1371,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
     if (typeof step === 'string') press(editor, step);
     else if ('triple' in step) await tripleClick(view);
     else if ('clickPastEnd' in step) await clickPastEnd(view);
+    else if ('clickAbove' in step) await clickAbove(view, step.clickAbove);
     else if ('click' in step) clickBox(editor, step.click);
     else if ('space' in step) spaceOnBox(editor, step.space);
     else if ('quiet' in step) await quiet();

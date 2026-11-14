@@ -187,18 +187,12 @@ describe('End rests in front of the hidden closers at the end of a block’s tex
       expect: { caret: 'One.⏎⏎Two <ins>three‸</ins>⏎⏎Next.' },
     },
     {
-      name: 'End, then typing: the text goes into the insertion',
-      doc: 'One.⏎⏎Two <ins>th‸ree</ins>⏎⏎Next.',
-      keys: ['End', { type: 'x' }],
-      tc: true,
-      expect: { caret: 'One.⏎⏎Two <ins>threex‸</ins>⏎⏎Next.' },
-    },
-    {
-      name: 'End at the end of a comment’s range: in front of its closer',
-      doc: 'One <!--cmt c1-->t‸wo<!--/c1-->',
+      name: 'End in another person’s insertion that ends its block: in front of the closer',
+      doc: 'One <ins>t‸wo</ins>',
       keys: ['End'],
       tc: false,
-      expect: { caret: 'One <!--cmt c1-->two‸<!--/c1-->' },
+      others: 'bo',
+      expect: { caret: 'One <ins>two‸</ins>' },
     },
     {
       name: 'End at the end of a block with no closer: its end, as ever',
@@ -227,12 +221,40 @@ describe('a click past the end of a block’s text (#434)', () => {
   const body = 'One.\n\nTwo <!--ins k3x9-->three<!--/k3x9-->\n\nNext.\n\n```\ncode\n```';
   const closer = '<!--/k3x9-->';
 
-  function mountFile(): Editor {
+  function mountFile(text = body): Editor {
     const parent = document.createElement('div');
     document.body.append(parent);
-    const editor = createEditor(parent, { doc: body + LEDGER, author: ada, tracking: true });
+    const editor = createEditor(parent, { doc: text + LEDGER, author: ada, tracking: true });
     mounted.push(editor);
     return editor;
+  }
+
+  /** What the mouse selection styles make of a click that hits `pos` (the layout is stubbed). */
+  function clickAt(
+    editor: Editor,
+    pos: number,
+    options: { detail?: number; modifier?: boolean; drag?: number } = {},
+  ): EditorSelection | null {
+    const { view } = editor;
+    view.posAtCoords = (coords) =>
+      coords.y === 1 && options.drag !== undefined ? options.drag : pos;
+    const event = new MouseEvent('mousedown', {
+      button: 0,
+      detail: options.detail ?? 1,
+      shiftKey: options.modifier ?? false,
+      clientX: 0,
+      clientY: 0,
+    });
+    for (const make of view.state.facet(EditorView.mouseSelectionStyle)) {
+      const style = make(view, event);
+      if (!style) continue;
+      const moved =
+        options.drag === undefined
+          ? event
+          : new MouseEvent('mousemove', { button: 0, clientX: 0, clientY: 1 });
+      return style.get(moved, false, false);
+    }
+    return null;
   }
 
   it('rests in front of the closers that end the text', () => {
@@ -255,6 +277,41 @@ describe('a click past the end of a block’s text (#434)', () => {
       doc.indexOf('code') + 4,
     ];
     for (const place of places) expect(restingPlace(state, place), String(place)).toBe(place);
+  });
+
+  it('is the end of the text, not of the line: a heading with closing hashes, a blank line, the ledger', () => {
+    const { state } = mountFile('One.\n\n## Two <!--ins k3x9-->three<!--/k3x9--> ##\n\nNext.').view;
+    const doc = state.doc.toString();
+    const closer = '<!--/k3x9-->';
+    // The end of the heading's text, in front of its closing hashes, rests in front of the closer;
+    // the end of the line, past the hashes, is where it is.
+    expect(restingPlace(state, doc.indexOf(closer) + closer.length)).toBe(doc.indexOf(closer));
+    const lineEnd = doc.indexOf(' ##') + 3;
+    expect(restingPlace(state, lineEnd)).toBe(lineEnd);
+    // Where no block is: a blank line, the ledger.
+    for (const place of [doc.indexOf('\n\nNext') + 1, doc.indexOf('<!-- redlines') + 5]) {
+      expect(restingPlace(state, place), String(place)).toBe(place);
+    }
+  });
+
+  it('claims a click at the end of the text past the closers, with its drag, and no other', () => {
+    const editor = mountFile();
+    const doc = editor.view.state.doc.toString();
+    const before = doc.indexOf(closer);
+    const end = before + closer.length;
+    // The click rests in front of the closers; a drag from there starts there.
+    const click = clickAt(editor, end);
+    expect(click?.main.anchor).toBe(before);
+    expect(click?.main.head).toBe(before);
+    const drag = clickAt(editor, end, { drag: doc.indexOf('One.') + 2 });
+    expect(drag?.main.anchor).toBe(before);
+    expect(drag?.main.head).toBe(doc.indexOf('One.') + 2);
+    // Every other click is CodeMirror's: inside the text, a double click, a shift click, Raw.
+    expect(clickAt(editor, doc.indexOf('thr') + 2)).toBeNull();
+    expect(clickAt(editor, end, { detail: 2 })).toBeNull();
+    expect(clickAt(editor, end, { modifier: true })).toBeNull();
+    editor.setViewMode('raw');
+    expect(clickAt(editor, end)).toBeNull();
   });
 });
 

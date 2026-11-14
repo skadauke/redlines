@@ -416,8 +416,16 @@ const lineBoundaryKey = (forward: boolean) =>
   blockKey((view) => {
     const { main } = view.state.selection;
     if (view.state.selection.ranges.length > 1) return false;
-    // The layout's answer; with none (or one on the wrong side of the caret), the line's own end.
-    let boundary = view.moveToLineBoundary(main, forward, true).head;
+    // As CodeMirror's own line boundary keys: the layout's answer, or, where that is where the caret
+    // is already (the end of a wrapped row), the end of the whole line; and the side the answer has
+    // (`assoc`), which keeps the caret on the row it was moved to, not the start of the next one.
+    const visual = view.lineBlockAt(main.head);
+    let moved = view.moveToLineBoundary(main, forward, true);
+    if (moved.head === main.head && moved.head !== (forward ? visual.to : visual.from)) {
+      moved = view.moveToLineBoundary(main, forward, false);
+    }
+    // With no layout, or one that answers on the wrong side of the caret, the line's own end.
+    let boundary = moved.head;
     const line = view.state.doc.lineAt(main.head);
     if (forward ? boundary < main.head : boundary > main.head) {
       boundary = forward ? line.to : line.from;
@@ -425,8 +433,9 @@ const lineBoundaryKey = (forward: boolean) =>
     const pos = forward
       ? lineEndIn(view.state, main.head, boundary)
       : lineStartIn(view.state, main.head, boundary);
+    const assoc = pos === moved.head ? moved.assoc : forward ? -1 : 1;
     view.dispatch({
-      selection: EditorSelection.cursor(pos),
+      selection: EditorSelection.create([EditorSelection.cursor(pos, assoc)]),
       userEvent: 'select',
       scrollIntoView: true,
     });

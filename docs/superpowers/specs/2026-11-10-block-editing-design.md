@@ -806,16 +806,19 @@ goes. Markdown renders the first four, and can't hold the last.
   its end. A click on a bullet, number or box shows its source as today. A click below the last
   block puts the caret at the end of its text. A click past the end of a block's text, past the
   hidden closers that end it, puts the caret in front of them, as End does (#434), where
-  CodeMirror would step it on to the start of the next block. (↓ onto a line that ends in closers,
+  CodeMirror would step it on to the start of the next block; so does a click in the upper half of
+  the space above the next block, which carries on at the end of the block above. (↓ onto a line that ends in closers,
   from a longer line, still lands at the start of the next block, which skips the line: #491.)
 - **A thematic break** is skipped by the caret; Shift-arrows select across it.
 - **Triple-click** selects a block's text, not its line break. **Call:** CodeMirror selects the source
   line with its line break, and typing over that would join two blocks.
 - **End** goes to the end of the visual line, as ⌘→ does: on a block's last row, the end of its
-  text, in front of the hidden closers that end it (#434), where typing leaves the caret. CodeMirror's
-  End goes past them, to the end of the line, which is inside the range of the closers and the break
-  after them: the caret is stepped on to the start of the next block, or, where it rests, a command
-  that changes the text (⌘2) takes it there. **Home** is CodeMirror's; this design doesn't change the
+  text, in front of the hidden closers that end it (#434), where typing leaves the caret, and on any
+  other row the end of the row, with the caret on that row. CodeMirror's End goes past the closers,
+  to the end of the line: where the closers and the hidden break after them are one range (a
+  paragraph whose insertion starts on a line of its own, as typing after Return writes it) that is
+  inside the range, and the caret is stepped on to the start of the next block, or, where it rests,
+  a command that changes the text (⌘2) takes it there. **Home** is CodeMirror's; this design doesn't change the
   rest of research/editor.md, risk 8.
 
 ### Other keys and input that edit line breaks
