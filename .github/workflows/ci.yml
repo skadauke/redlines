@@ -1,14 +1,29 @@
-# Checks the workspace (type checks, lint, tests, formatting) and that the desktop app's Rust code
-# and the `redlines` program compile cleanly and pass their tests. Changes that touch only docs, the
-# website or Markdown files skip it; the website has its own workflow, website.yml.
+# Checks the workspace (type checks, lint, tests, formatting), that the desktop app's Rust code
+# and the `redlines` program compile cleanly and pass their tests, and that the Mac app's Quick Look
+# extension builds and runs. Changes that touch only docs, the website or Markdown files skip it,
+# except the skill's files, which are Markdown that a test checks against its source
+# (apps/desktop/src/skills.node.test.ts); the website has its own workflow, website.yml. A later
+# pattern of `paths` brings a file back that an earlier `!` pattern left out.
 name: CI
 
 on:
   pull_request:
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
   push:
     branches: [main]
-    paths-ignore: ['docs/**', 'website/**', '**/*.md']
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!website/**'
+      - '!**/*.md'
+      - 'integrations/skill/**'
+      - 'integrations/*/skills/**'
 
 permissions:
   contents: read
@@ -46,8 +61,10 @@ jobs:
       - name: Test
         run: pnpm test
         env:
-          # The block keys' cost test runs here, on a runner that does nothing else (see blocks/cost.test.ts).
-          REDLINES_COST: check
+          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main, on a
+          # runner that does nothing else. Pull requests skip them while Epic #329's lanes merge a dozen
+          # PRs a day; main's runs and the Epic's Sunday sweep still run them.
+          REDLINES_COST: ${{ github.event_name == 'push' && 'check' || '' }}
 
       - name: Check formatting
         run: pnpm format:check
@@ -60,6 +77,30 @@ jobs:
       # fonts) grows past apps/website-embed/size-budget.json.
       - name: Website embed size budget
         run: pnpm --filter @redlines/website-embed size
+
+  # The Mac app's Quick Look extension is Swift, which no other job compiles: it is built here for
+  # both architectures, and its renderer is run in the system's JavaScriptCore on the fixtures of
+  # apps/desktop/quicklook (apps/desktop/scripts/build-quicklook).
+  quicklook:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the Quick Look extension and check it
+        run: apps/desktop/scripts/build-quicklook --check
 
   desktop:
     runs-on: ubuntu-latest

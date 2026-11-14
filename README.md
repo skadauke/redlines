@@ -19,10 +19,13 @@ interface, find, code blocks, agents, the command line and the desktop app.
 
 ## What a Redlines file looks like
 
-The editor shows a document four ways. This is one short document in three of them.
+The editor shows a document three ways. This is one short document in all three.
 
 **Redlines** shows who changed what. Ada added "new". Claude, working for Ada, replaced "March"
 with "April". Bo deleted a sentence and asked a question. Each change can be accepted or rejected.
+A click on a change bar in the margin, or View › Simple Look (⌥⌘4), switches Redlines to its simple
+look, which reads like Clean, with a bar beside each changed screen line and the comments kept; the
+same click or key switches back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-redlines-dark.png">
@@ -36,9 +39,6 @@ show the same, because they hide HTML comments.
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-clean-dark.png">
   <img src="docs/img/view-clean-light.png" width="760" alt="The Clean view: 'We will ship the new importer in April, after the security review.'">
 </picture>
-
-**Simple** reads like Clean, with a bar in the margin beside each changed line and the comments
-kept. A click on a bar switches to Redlines and back.
 
 **Raw** shows the file itself. Each change is a short HTML comment with an id. Who made each change
 and when, and the comment threads, are in a block at the end of the file.
@@ -58,15 +58,28 @@ and when, and the comment threads, are in a block at the end of the file.
   images inside the project show in the document.
 - **Preferences** (⌘,): your name and handle, themes, zoom and text size, the editor's habits, and the
   agents.
-- **Agents.** Write `@Claude`, `@Codex` or the name of an agent you added in a comment and post
-  it, and that agent works on the thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
+- **Agents.** Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
+  thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
   thread, and any change it makes is a tracked change in its name, for you to accept or reject. An
-  agent is your own Claude Code or Codex, or another agent you add in Preferences that speaks the
-  Agent Client Protocol, signed in the way you signed it in; Redlines never
-  handles those credentials. The first time an agent runs in a folder it asks whether it may read
-  the folder, or only the document. A document it cites, such as `plan.md:42`, opens at that
-  line, and an image or a PDF in its default app.
+  agent is your own Claude Code or Codex, signed in the way you signed it in; Redlines never
+  handles those credentials. Preferences › Agents shows each one's state, its version and where it
+  is installed, and offers the next step: Update when it is too old, Sign In when it is signed out
+  (each runs the agent's own command), or the command that installs it. A run that fails for one of
+  those reasons says so in its line, which offers to open Preferences. The first time an agent runs
+  in a folder it asks whether it may read the folder, or only the document, or, if Preferences
+  allow it, the folder and your home folder (never hidden files and folders, or `~/Library` but
+  its cloud folders). A document it cites,
+  such as `plan.md:42`, opens at that line, and an image or a PDF in its default app.
   Every run writes a log, which Help › Show Agent Logs opens.
+- **Quick Look.** Space on a Markdown file in Finder, Mail, Spotlight or the Open dialog shows it
+  as the Clean view does: every change accepted, in the Default theme, under one line that says
+  what is waiting in the file ("3 changes and 1 comment by Ada, Claude and Bo. Open in Redlines to
+  review them."). R Markdown and Quarto files preview the same way, unless another app on the Mac
+  declares those extensions as its own type, in which case macOS asks that app. It comes with the
+  app and needs nothing installed (macOS 13.3 or later; System Settings turns it off, with the
+  other Quick Look extensions, and Preferences › General has a button that opens System Settings
+  there); it draws no script and loads nothing from a server. An image that is a file in the
+  document's project is drawn, and any other is its alt text.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
   Terminal window. macOS asks for an administrator's password if that folder needs one; without
@@ -159,16 +172,33 @@ published, and installed copies update themselves quietly: [docs/releasing.md](d
 
 **Check your changes** as CI does: `pnpm typecheck && pnpm lint && pnpm test && pnpm format:check`.
 
-## Claude Code
+## Claude Code, Codex and OpenClaw
 
-Inside the app, @Claude does this for you. From a terminal, Claude Code edits a Redlines file
-through the `redlines` command line, so that each edit is a tracked suggestion in its own name, for
-you to accept or reject. Give Claude the skill:
+Inside the app, @Claude and @Codex do this for you. From a terminal, or a chat of an agent's own,
+an agent edits a Redlines file through the `redlines` command line, so that each edit is a tracked
+suggestion in its own name, for you to accept or reject. A skill teaches it that, and what a
+Redlines file is. In the app, Redlines › Preferences › Agents has Install Skill on the rows of Claude
+and Codex. Without it, or for OpenClaw, copy the skill for the agent:
 
 ```sh
+# Claude Code, in ~/.claude/skills (or as a plugin: claude plugin marketplace add skadauke/redlines
+# and claude plugin install redlines@redlines)
 mkdir -p ~/.claude/skills/redlines
-cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
+cp integrations/claude-code/skills/redlines/SKILL.md ~/.claude/skills/redlines/SKILL.md
+
+# Codex, in ~/.agents/skills, which OpenClaw reads too
+mkdir -p ~/.agents/skills/redlines
+cp integrations/codex/skills/redlines/SKILL.md ~/.agents/skills/redlines/SKILL.md
+
+# OpenClaw, in ~/.openclaw/skills
+mkdir -p ~/.openclaw/skills/redlines
+cp integrations/openclaw/skills/redlines/SKILL.md ~/.openclaw/skills/redlines/SKILL.md
 ```
+
+An agent with a name of its own writes in it: an OpenClaw agent called Moby writes as `moby-ada`,
+where Claude writes as `claude-ada`. The [integrations README](integrations/README.md) has the
+rest: the plugin, changing the skill, publishing it on ClawHub, and asking an OpenClaw agent from a
+comment (Preferences › Agents › OpenClaw), which answers in a reply through its Gateway.
 
 Install the command line from the app (Redlines › Preferences › General › Command line), then:
 
@@ -183,13 +213,15 @@ path, because pnpm runs from the root.
 
 With the file open in Redlines, the suggestion shows up as soon as the command writes the file:
 the app reloads a file that changed on disk, and keeps your unsaved edits if you have any. The
-[integrations README](integrations/README.md) has an alias for running `redlines` from any folder.
+[integrations README](integrations/README.md) says more of the command line.
 
 ## Read this first
 
 - **[Design](docs/design.md):** what Redlines does and how it is built.
 - **[Format](docs/format.md):** how tracked changes, comments and history are stored in a Markdown
   file.
+- **[Hardening](docs/hardening.md):** what the format is built to hold, what holds it, what is known
+  not to hold, and how to add a rule without loosening one.
 - **[Releasing](docs/releasing.md):** how a release is built, signed and published, and how the app
   updates itself.
 

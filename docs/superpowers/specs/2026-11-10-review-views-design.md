@@ -2,6 +2,8 @@
 
 *Design, Nov 10, 2026, for the epic "reading a review" (#181): a Simple view (#182), deletions in a rewrite (#183) and one change for a rewrite (#184). It builds on [design.md](../../design.md) and [format.md](../../format.md), and says where it departs from them.*
 
+*Revised Nov 13, 2026 (#303): Simple is no longer a fourth view. It is Redlines' **simple look**, a second look of the one view, chosen by a click on a change bar or by the View menu's Simple Look switch (⌥⌘4, since #330), and the View menus list Clean, Redlines and Raw (⌥⌘1 to ⌥⌘3). Where this design says "a fourth view", read "a second look of Redlines"; the sections below say what changed.*
+
 ## Why
 
 The epic comes from Stephan's review of build 10: "How changes read when you go through a document under review: a quieter view, deletions that don't drown a rewrite, and changes grouped the way a person thinks of them." Its three issues:
@@ -20,7 +22,7 @@ The epic comes from Stephan's review of build 10: "How changes read when you go 
 
 - **A rewrite is one change** (#184). An agent's edit is still compared word by word, and then changes close together become one, and a paragraph (a heading, an item, a cell) that keeps fewer than half of its words becomes one substitution of the paragraph: the old paragraph out, the new one in, one Accept. A light edit keeps a mark for each word or phrase it changed. The file format doesn't change: a substitution is a substitution. A person's typing is recorded as it is typed, never joined.
 - **Deletions don't drown a rewrite** (#183). Newer Word for Mac moves deletions out of the text into balloons in the margin. Redlines doesn't: its margin is the comments' and notes', and balloons there would crowd out and push away the notes. It answers with the three parts of this design: a rewrite is one struck run and one underlined run instead of a struck word in front of every new one; a deleted or replaced paragraph is drawn as a paragraph of its own, struck, where it was or above its new text; and Simple reads with no deletions at all.
-- **Simple** (#182), a fourth view between Clean and Redlines (⌥⌘2; Clean ⌥⌘1, Redlines ⌥⌘3, Raw ⌥⌘4). It shows the newest text as Clean does, with a change bar in its author's color beside every line that has a pending change, and the comments, their tints and the rail as in Redlines. A click on a change bar switches Simple to Redlines and Redlines to Simple, with the line under the pointer where it was. The markup view you chose last, Simple or Redlines, is remembered, and Redlines uses it wherever it picks one for you; at first it is Redlines.
+- **Simple** (#182), first a fourth view between Clean and Redlines, and since #303 Redlines' simple look (Clean ⌥⌘1, Redlines ⌥⌘2, Raw ⌥⌘3; the look is a switch below them, Simple Look ⌥⌘4, since #330). It shows the newest text as Clean does, with a change bar in its author's color beside every line that has a pending change, and the comments, their tints and the rail as in Redlines. A click on a change bar, or the Simple Look switch, switches the simple look to the full markup and back, with the line under the pointer (or the caret's) where it was. The look you chose last is remembered, and Redlines uses it wherever it picks one for you; choosing Redlines in the View menu from Clean or Raw brings back the look that was shown last; at first the look is the full markup.
 
 ## Goals
 
@@ -48,7 +50,7 @@ These would make it a failure even if it technically works:
 - **Another person's words credited to an agent:** a join that takes in someone else's pending text, or a comment's anchor, and writes it again as the agent's.
 - **A change hidden without a trace.** Simple hides how a line changed, never that it did.
 - **A click in the margin that moves the text under the pointer,** or the caret or the selection.
-- **Deciding blind:** the review bar stepping through changes that the page doesn't show.
+- **Deciding blind:** the review bar stepping through changes that the page doesn't show, or a note's Accept that doesn't say what it accepts.
 - **New chrome:** a toolbar, a mode switch, a badge, a second margin.
 - **Slower typing.**
 
@@ -58,7 +60,7 @@ These would make it a failure even if it technically works:
 - **A keystroke costs what it does on main.** The tracked layer's `analyze` runs on every change of the text; Simple and Part 3 add a condition or two per mark to it, and nothing per keystroke elsewhere. The joining rule runs only on an agent's edit.
 - **The platform.** Tauri v2 on macOS, WKWebView, CodeMirror 6. The views are the core's (`@redlines/editor`, design §6.4), and so are the change bars and their click; the rail, cards and review bar are `@redlines/review`'s; menus, icons and settings are `apps/desktop`'s.
 - **Color means a person** (design §6.6). Bars keep their author's color, gray for several people.
-- **Accessibility.** A view switch is a menu item and a key, so nobody needs the bar to switch. The bar's target is 24 px wide. Struck text keeps the author colors' 4.5:1 contrast: it isn't faded. VoiceOver reads the View menu's check marks.
+- **Accessibility.** The bar's target is 24 px wide. A view switch is a menu item and a key, so nobody needs the bar to switch: the simple look has its switch since #330 (A click in the margin). Struck text keeps the author colors' 4.5:1 contrast: it isn't faded. VoiceOver reads the View menu's check marks.
 - **Per-person state stays out of the file** (format §5.6): the view, and the markup view remembered, live in the app's settings.
 
 ## Decided by Stephan
@@ -190,17 +192,19 @@ Fewer and longer marks of the kinds it has now: a substitution, with the old tex
 
 ## Part 2: Simple (#182)
 
-### The four views
+### The views and the looks
 
-**Call:** Simple is a fourth view, not a mode of Redlines, because Word and Pages list it beside the others, the View menu then says exactly what the page shows, and it gets a key of its own. **Call:** it is named Simple, Word's Simple Markup in one word like its neighbors.
+**Revised (#303, Nov 13).** This design made Simple a fourth view, listed beside the others in the View menu with a key of its own, because Word and Pages list it so. It is now a look of Redlines: the View menus list Clean, Redlines and Raw, and Redlines has two looks, the full markup and the **simple look**, switched by a click on a change bar and by nothing else. **Call:** choosing Redlines in a View menu brings back the look that was shown last, which is the one a bar click chose unless the review bar showed the full markup since, and does nothing when Redlines is shown already, in either look: so a trip through Clean or Raw comes back to where it began, and choosing the view never undoes a look. With no change pending there is no bar to click, and the two looks differ only in the ordinary HTML comments that the full markup draws as dimmed notes. **Call:** the look is named Simple, Word's Simple Markup in one word, and is called "the simple look". The columns below are what each look draws.
 
-| | Clean | Simple | Redlines | Raw |
+**Revised (#330, Nov 13).** With #303 a click on a change bar was the only way to choose a look, which left a person who can't point without it, against the constraint above. **Call:** a **Simple Look** item in both View menus (the menu bar's and the title bar's eye menu), below the three views and set apart from them by a divider: a switch, checked while the simple look shows, on **⌥⌘4** (the keys follow the menu's order; the fourth one was Raw in the builds with Simple, which is a gap to mention in the release note). It does what the click does: the full markup to the simple look and back, the look becomes the one remembered (`markupView`), and a line stays where it was, the one with the caret when it is on the screen, else the first on it (`Editor.switchLook`, which shares the click's code, `switchLookAt` in `bar-switch.ts`). **Call:** it is there to choose only while Redlines shows (disabled in Clean and Raw, which have no look to switch; in Clean the key, which a disabled item takes with it, does nothing), and is checked only in the simple look. **Call (the other ways considered):** a command with no key in a Review menu, which hides the choice where the views are chosen; and a change bar that VoiceOver reads and presses, which makes decoration a control: neither is needed with the switch. The View menu keeps its three views (#303), and the menu still says "Redlines" in both looks.
+
+| | Clean | Simple look | Redlines (full markup) | Raw |
 | --- | --- | --- | --- | --- |
 | Inserted text | Plain | Plain | Underlined, in its author's color | Source |
 | Deleted text | Hidden | Hidden | Struck, in its author's color (Part 3) | In its marker |
 | Format change | Plain | Plain | Dotted underline | Source |
 | Inserted or deleted line break | Nothing | Nothing | A ¶ when line break marks are shown | Source |
-| Change bars | None | Beside every changed line | Beside every changed line | None |
+| Change bars | None | Beside every changed screen line | Beside every changed screen line | None |
 | Comment anchors, highlights | Untinted | Tinted | Tinted | Markers |
 | Point comments | Nothing | Their pin | Their pin | Markers |
 | The rail | Hidden | Shown | Shown | Hidden |
@@ -217,25 +221,24 @@ Fewer and longer marks of the kinds it has now: a substitution, with the old tex
 | View | Key | View menu | Eye menu |
 | --- | --- | --- | --- |
 | Clean | ⌥⌘1 | Clean | A page of text |
-| Simple | ⌥⌘2 | Simple | A page with a change bar (today's Redlines icon) |
-| Redlines | ⌥⌘3 | Redlines | Simple's, with one mark of markup on it |
-| Raw | ⌥⌘4 | Raw | Angle brackets |
+| Redlines, in either look | ⌥⌘2 | Redlines | A page with a change bar and one mark of markup on it |
+| Raw | ⌥⌘3 | Raw | Angle brackets |
 
-The View menu and the title bar's eye list the four in this order, as radio items with a check mark. **Call:** the keys follow the menu's order, Redlines moving from ⌥⌘2 to ⌥⌘3 and Raw from ⌥⌘3 to ⌥⌘4, because they were provisional (design §14, question 6) and numbers in menu order are learned at a glance. **Call:** no item in Preferences: the View menu is where the choice is made, and it is remembered (below), as Word remembers Display for Review.
+The View menu and the title bar's eye list the three in this order, as radio items with a check mark; Redlines is checked in both its looks. The simple look is no view, but it has a switch of its own below them (#330, Revised below): a click on a change bar chooses a look as well. **Call:** the keys follow the menu's order, so with Simple gone from the list Redlines is ⌥⌘2 and Raw ⌥⌘3, the keys they had before Simple, because they were provisional (design §14, question 6) and numbers in menu order are learned at a glance; a gap at ⌥⌘2 would look like a mistake, and ⌥⌘2 pressed from habit shows Redlines in the look last chosen. **Call:** no item in Preferences: the View menu is where the view is chosen, and the look is remembered (below), as Word remembers Display for Review.
 
 ### A click in the margin
 
-- **Where.** Beside any line that has a change bar, in Simple and in Redlines: a target 24 px wide, centered on the bar, the full height of the bar, which is the line's, wrapped lines included. A struck block of Part 3 has its own bar, which works the same. Clean and Raw have no bars, and a click in their margin does what it does today.
+- **Where.** Beside any bar, in Simple and in Redlines: a target 24 px wide, centered on the bar, the full height of the bar. Since #320 the bar is the screen lines that hold a change, so a paragraph that wraps over many lines has a target only beside those, and not down the whole paragraph. A struck block of Part 3 has its own bar, which works the same. Clean and Raw have no bars, and a click in their margin does what it does today.
 - **What.** A press and release there that moves less than 4 px switches Simple to Redlines, or Redlines to Simple. The press doesn't start a selection and the release doesn't move the caret, the selection or the keyboard focus. A press that moves farther does nothing. A press with ⌘, ⌥, ⇧ or ⌃ isn't the bar's: it does what a press in the margin does today. The second click of a double-click does nothing, so a double-click, which Word takes in some versions, switches once.
 - **The line stays where it was.** After the switch, the line under the pointer has the same height on the screen, to the pixel, though the lines above it grew or shrank; a line that the new view doesn't draw (a struck block, in Simple) gives its place to the line after it.
-- **Under the pointer.** The pointer is a hand, the bar draws 3 px wide instead of 2, and after the usual hover delay a hint in the interface's hint style names what a click does and its key: "Show Redlines ⌥⌘3" in Simple, "Show Simple ⌥⌘2" in Redlines. **Call:** the hint names the result of the click, because the bar has no label, and every control without one is explained on hover (design §5.1).
-- **For VoiceOver and the keyboard,** the bar is decoration: the View menu and the keys do the same thing.
+- **Under the pointer.** The pointer is a hand and the bar draws 3 px wide instead of 2, so that it is clear it can be clicked. **Call (#320):** no hint. The first version showed one after the usual hover delay, naming what a click does and its key; it looked out of place and isn't needed, and since #303 no key shows a look.
+- **For VoiceOver and the keyboard,** the bar is decoration, and the View menu's Simple Look switch does what a click on it does (#330, Revised below): a view switch is a menu item and a key, so nobody needs the bar to switch.
 
 **Call:** a click switches the whole view, as Word's does and as #182 asks, not just the changes of that line. **Call:** the target is 24 px wide and shows the hand and the wider bar, because a 2 px line can't be aimed at, 24 px is WCAG 2.2's least target, and Word's line gives no sign at all. **Call:** a press there never selects, and a moved press does nothing, so that a switch can't be half a selection and a drag never switches.
 
-### Which markup view, when
+### Which look, when
 
-Simple and Redlines are the markup views. **Call:** Redlines remembers the one you chose last, in the app's settings, and uses it wherever it picks a markup view for you, because Word keeps Display for Review per application and a reader who prefers Simple shouldn't choose it for every document. **Call:** at first it is Redlines, because then nothing changes for anyone who never picks Simple.
+Since #303 the markup view is a look of Redlines, the full markup or the simple look. **Call:** Redlines remembers the look you chose last with a bar click, in the app's settings, and uses it wherever it picks Redlines for you, because Word keeps Display for Review per application and a reader who prefers the simple look shouldn't choose it for every document. A look saved as Simple opens a document with redlines in Redlines' simple look. **Call:** at first it is the full markup, because then nothing changes for anyone who never clicks a bar.
 
 | What happens | Today | With this design |
 | --- | --- | --- |
@@ -244,30 +247,31 @@ Simple and Redlines are the markup views. **Call:** Redlines remembers the one y
 | A document shown Clean gains redlines (an agent's suggestions arrive) | Redlines | The markup view |
 | A tracked change made in Clean | Redlines | The markup view |
 | A comment added in Clean; drafts coming back to a document shown Clean | Redlines | The markup view |
-| The review bar opens, or moves to a change, from Clean, Simple or Raw | Redlines | Redlines |
-| The View menu, the eye, ⌥⌘1 to ⌥⌘4 | That view | That view; Simple or Redlines becomes the markup view |
-| A click on a change bar | — | Simple ⇄ Redlines; that becomes the markup view |
+| The review bar opens, or moves to a change, from Clean, the simple look or Raw | Redlines | The full markup; the look chosen last stays remembered |
+| The View menu, the eye, ⌥⌘1 to ⌥⌘3 | That view | That view; Redlines in the look shown last, or as it is when shown already |
+| Simple Look in the View menu, ⌥⌘4 | Nothing: no look in Clean | The other look, and it becomes the look remembered, with the caret's line (else the first on the screen) where it was |
+| A click on a change bar | — | The simple look ⇄ the full markup; that becomes the look chosen last |
 | The last change decided | The view stays | The view stays |
 
 The setting reaches every window, for the documents each opens next and for its own switches; it never changes the view a window shows. **Call:** because a window's view is what its person is looking at, and only a choice made in it changes it. In an embedded editor, the host gives it (`EditorOptions.markupView`, default `'redlines'`) and is told when the person chooses (`EditorUiState.markupView`).
 
-### Editing and Track Changes in Simple
+### Editing and Track Changes in the simple look
 
 - **The caret and the keys** behave as in Clean: the caret steps over hidden markers and deleted text, and Backspace and Delete act on what shows, never on a marker.
 - **Track Changes on:** typed text is a tracked insertion, drawn plain, and its line gets your bar; a deletion makes the text go, and the bar stays. **Call:** a tracked change made in Simple stays in Simple, unlike one made in Clean, because the bar shows it, and Word's Simple Markup behaves so too. Deleting your own pending insertion removes it, and its bar with it.
 - **Track Changes off:** edits are plain, as in Clean, and make no bar.
 - **Raw** stays read-only while Track Changes is on, as today.
 
-### The rail, cards and the review bar in Simple
+### The rail, cards and the review bar in the simple look
 
 - **The rail** is as in Redlines: threads, the notes of noted suggestions, drafts, resolved threads by the setting, dots in a narrow window. Selecting a suggestion's note tints its changed text, as it does in Redlines, which in Simple is how its new words show.
-- **Cards.** **Call:** none appears on hover in Simple, and a click on the text pins none, because the text reads as accepted, and a card over plain-looking words would surprise; the bar, the note and the review bar are the ways in. A note's Accept and Reject decide as in Redlines.
-- **The review bar** switches to Redlines when it opens or moves, from Simple as from Clean and Raw (today's `opening` in `plugins/review/src/bar.ts`, unchanged). **Call:** because the bar is for deciding change by change, and in Simple a deletion is invisible: nothing is decided blind. Closing the bar leaves Redlines. **Call:** closing it leaves the view as it is, as it does today, because the person may still be reading the changes.
-- **No decision is made in Simple.** **Call:** a note's Accept or Reject, in Simple, switches to Redlines and shows the change, selected and in view, without deciding it; the person then decides it where its old text shows, with the note, the card or the review bar. One function decides for all of them (`decideSuggestion`), so the rule holds for the review bar's buttons too. **Call:** while the review bar is open the view stays Redlines: a click on a change bar then opens that change's card, in place of switching, and choosing Simple from the menu or by key closes the review bar, because a person who chooses to read has stopped deciding. Reason, for all three: the anti-goal "deciding blind", for a one-change rewrite would otherwise be a whole paragraph accepted away unseen.
+- **Cards.** **Call:** none appears on hover in Simple, and a click on the text pins none, because the text reads as accepted, and a card over plain-looking words would surprise; the bar, the note and the review bar are the ways in. A note's Accept and Reject decide as in Redlines, in place (below).
+- **The review bar** shows the full markup when it opens or moves, from the simple look as from Clean and Raw (today's `opening` in `plugins/review/src/bar.ts`, unchanged). **Call:** because the bar is for deciding change by change, and in Simple a deletion is invisible: nothing is decided blind. Closing the bar leaves Redlines. **Call:** closing it leaves the view as it is, as it does today, because the person may still be reading the changes.
+- **A note decides in place (#326).** This design held a rule, "no decision is made in Simple": a note's Accept or Reject switched to Redlines and showed the change, selected and in view, without deciding it, so that nobody decided a change whose old text the page hides. #326 overruled it for the notes. **Call:** in the simple look a note's Accept and Reject decide the suggestion, as in Redlines, in one step to undo (⌘Z), and the view stays as it is, with the selection and the scroll where they were. **Call:** so that the decision isn't blind, the note says what it decides before the click, in the card's words (`Replaced “March” with “April”`, `Deleted “The old exporter stays as it is.”`, shortened as a card's quote is, at 40 characters), where Redlines' notes show the old text struck and an arrow, since there the page strikes the old text too. One function still decides for all of them (`decideSuggestion`), for the notes, the cards and the review bar alike. **Call (the issue's open question):** the review bar keeps showing the full markup when it opens or moves, because it is for deciding change by change, and its Accept and Reject don't say what they decide, as a note's now does; the person who wants to decide from the simple look uses the notes. **Call:** while the review bar is open the view stays Redlines: a click on a change bar then opens that change's card, in place of switching, and showing the simple look any other way closes the review bar, because a person who chooses to read has stopped stepping through changes.
 
 ### What the file gets
 
-Nothing. The view and the markup view are the person's, kept in the app's settings and never in the file (format §5.6): opening a document in Simple, a switch, or a click on a bar changes no byte.
+Nothing from a switch. The markup view the person remembers is theirs, kept in the app's settings and never in the file: opening a document in the simple look, a switch, or a click on a bar changes no byte. Since #327 and #392 the file records the view it was last saved in (`view: clean`, `redlines` or `simple`, format §5.6), written when it is saved for another reason, never by a switch.
 
 ### Printing, Copy and Copy for Word
 
@@ -278,7 +282,7 @@ Nothing. The view and the markup view are the person's, kept in the app's settin
 ### Edge cases
 
 - **A document with comments and no changes:** Simple and Redlines look the same.
-- **A deletion alone on a line:** the bar marks the line where the text was. A paragraph deleted whole: the bar marks the first line of the block after it, or the last line of the block before it at the end of the document.
+- **A deletion alone on a line:** the bar marks the screen line where the text was. A paragraph deleted whole: the bar marks the first line of the block after it, or the last line of the block before it at the end of the document.
 - **A comment on deleted text** ("On deleted text"): its note sits at its point, as in Redlines.
 - **An image in a pending insertion** shows its alt text until the insertion is accepted, in Simple as in every view (design §8.6): Simple isn't acceptance.
 - **A move:** a bar at both ends. **A format change, a block change, a checked box:** a bar.
@@ -338,10 +342,14 @@ Only Redlines draws struck blocks. Simple and Clean show the newest text, and Ra
 - **`packages/editor/src/tracked/field.ts`:** a `markupViewFacet`; `viewModeField.create` starts a document with redlines in the markup view, and a document shown Clean that gains redlines switches to the markup view.
 - **`packages/editor/src/index.ts`:** a `markupViewCompartment`, as `lineBreakMarksCompartment` is, so the choice holds for the documents opened later (`setDoc`); `setViewMode` reconfigures it for Simple and Redlines; `uiFor` reports it. Reporting already follows a change of view.
 - **`packages/editor/src/tracked/decorations.ts`:** `analyze` draws Simple as Redlines with every change's look turned off: deleted text and splits become parts with no class (`className: ''`, `change: true`), which take a bar and draw nothing, the kind the layer already has for a break while marks are hidden; insertions and format changes become layers that only count for bars and add no mark decoration; comments, highlights and pins as in Redlines; ordinary comments hidden as in Clean. `bars()` doesn't change. The view's class is `rl-view-simple`. The caret's atoms are then those of Clean.
-- **A new `packages/editor/src/tracked/bar-switch.ts`:** a `ViewPlugin` with `mousedown`, `mousemove` and `mouseleave` handlers on `view.scrollDOM`, so that presses in the margin outside `.cm-content` reach it. The hit test takes the line at the pointer's height (`view.posAtCoords` at the content's left edge, then the line's element) and checks for `rl-bar`; the struck blocks of Part 3 carry it too. The hovered line gets the class `rl-bar-hot` through a decoration from the plugin (CodeMirror redraws line elements, so a class set by hand would go), and the hint is a CodeMirror tooltip at the line, styled as the review bar's hints. On a release within 4 px it notes the line's distance from the scroller's top, dispatches the new view through `setViewModeEffect` and the markup view, and puts the line back in a `requestMeasure` (read the new distance, write `scrollTop`). The core owns it, because the views and the bars are the core's, so an embedded editor has it with no plugin.
+- **A new `packages/editor/src/tracked/bar-switch.ts`:** a `ViewPlugin` with `mousedown`, `mousemove` and `mouseleave` handlers on `view.scrollDOM`, so that presses in the margin outside `.cm-content` reach it. The hit test takes the line at the pointer's height (`view.posAtCoords` at the content's left edge, then the line's element) and checks for `rl-bar`; the struck blocks of Part 3 carry it too. The bar under the pointer is drawn wider: the layer of Part 2, below, draws a line of text's bars, so the plugin tells it which (`setHotBar`); a table row's line gets the class `rl-bar-hot` through a decoration from the plugin (CodeMirror redraws line elements, so a class set by hand would go), and a struck block's element gets it by hand. On a release within 4 px it notes the line's distance from the scroller's top, dispatches the new view through `setViewModeEffect` and the markup view, and puts the line back in a `requestMeasure` (read the new distance, write `scrollTop`). The core owns it, because the views and the bars are the core's, so an embedded editor has it with no plugin.
+- **A new `packages/editor/src/tracked/bar-layer.ts` (#320):** a CodeMirror `layer()`, as the selection is drawn, that draws the bars of the lines of text beside the screen lines that hold a change, measured from where the changed text is on screen and drawn again when it wraps differently (it asks to be redrawn when the text, the view, the viewport or the geometry changes). `decorations.ts` hands it the changes (`trackedChangeSpans`: the text each change is drawn on, or the point where it stands, with its author's color) and keeps the line classes that say which lines hold one (`rl-bar`, which the click and the tests go by). `segmentsOf` puts the changes on a line's screen lines and joins neighbors of the same colors; the real measure (`barMeasure`, which the tests replace, as happy-dom has no layout) finds the screen lines from the page's own boxes (#404): the rows are where the rectangles of the line's content lie (`rowsOfRects`), and each starts at the position at its left edge (`stopsOf`), with bands that meet halfway between them and reach the line's own top and bottom, so that a bar is as tall as before where every screen line has a change. The first version stepped through positions with `moveToLineBoundary` and `coordsAtPos`, which can't tell a row's end from the start of the next where a hidden marker or a widget is at the wrap (CodeMirror's zero-width buffer nodes stay at the end of the row above), and gave the change a bar down to the end of its paragraph. A line with right-to-left letters is one screen line, a bar down its paragraph, since the positions at the edges of a row of mixed directions don't say where it starts. The struck words that Redlines draws are a widget that wraps as text does, so their pieces are found from the element's rectangles. A table's row and a struck block keep the bar of their own. In print the bars are a border, as for the line classes, down the whole paragraph (the layer is left out).
 - **Automatic switches** take the markup view instead of `'redlines'`: `trackedSpec` and composition in `packages/editor/src/tracked/typing.ts`, `plugins/formatting/src/index.ts`, and the two in `plugins/review/src/rail.ts` (`startComment` and `giveBack`), which today switch any view but Redlines and must switch Clean only. The review bar's `opening` keeps `'redlines'`.
 - **`plugins/review`:** the rail shows in Simple and Redlines (`sync`, `shown`); cards stay Redlines-only, as `redlines(view)` already makes them.
-- **`apps/desktop`:** four rows in `menu-model.ts` (⌥⌘1 to ⌥⌘4) and four items in `ui/titlebar.ts`; a `simple` icon (today's `redlines`) and a new `redlines` icon in `ui/icons.ts`; `markupView` in `settings.ts`, kept like `showResolved`, passed to each editor and saved when `EditorUiState.markupView` changes; in `styles.css`'s print rules, `.rl-bar::before` drawn as a 2 px left border in its color (`--rl-mixed` for several people).
+- **`apps/desktop`:** three rows in `menu-model.ts` (⌥⌘1 to ⌥⌘3) and three items in `ui/titlebar.ts` (first built as four, with Simple; see Revised below); a `redlines` icon in `ui/icons.ts` (first built beside a `simple` icon); `markupView` in `settings.ts`, kept like `showResolved`, passed to each editor and saved when `EditorUiState.markupView` changes; in `styles.css`'s print rules, `.rl-bar::before` drawn as a 2 px left border in its color (`--rl-mixed` for several people).
+
+- **Revised (#303, Nov 13).** `type MenuView = 'clean' | 'redlines' | 'raw'` is what a View menu lists, `menuViewOf(mode)` names Simple as Redlines, and `Editor.showView(view)` shows a listed view: Redlines in the look shown last (kept by `createEditor`, starting from the look chosen, `markupViewFacet`, which it never changes), and not at all when Redlines is shown already, in either look. `ViewMode` keeps `'simple'` inside the editor, as the simple look, and `setViewMode` shows a look exactly. `menu-model.ts`, `ui/titlebar.ts` and `main.ts` list and check three views through `menuViewOf` and call `showView`; `viewKeys` is no longer given, so the hint on a bar names no key (#320 then removed the hint, and with it the `viewKeys` option of `EditorOptions`). The website's embed lists the same three (`apps/website-embed/src/views.ts`, `DemoView` is `MenuView`).
+- **Revised (#330, Nov 13).** `Editor.switchLook()` turns the simple look on or off while Redlines shows (nothing in Clean and Raw), with the click's own code: `switchLookAt(view, pos, geometry)` in `bar-switch.ts` notes the line at `pos`, dispatches the look chosen (`chooseViewEffects`) and puts the line back, at once and again after CodeMirror has measured; the click calls it with the line under the pointer, and the command with `lookedAtLine(view)` (the caret's line when it is on the screen, else the first on it). `MenuCommands.switchLook` and `TitleBarActions.switchLook` call it from a Simple Look row in `menu-model.ts` (⌥⌘4, checked in the simple look, enabled only while Redlines shows) and an item in `ui/titlebar.ts` (a switch, with a `simple` icon in `ui/icons.ts`, the page with its bar and no markup on it).
 
 ### Part 3: blocks
 
@@ -363,18 +371,19 @@ Simple adds to `analyze` one comparison per mark and no new work: it draws less 
 | `packages/format/src/blocks.ts` or a new module | 3 | `deletedBlocks` |
 | `packages/agent-tools/src/tools.ts` | 1 | `str_replace`'s description |
 | `integrations/claude-code/SKILL.md` | 1 | The `str-replace` sentence |
-| `packages/editor/src/api.ts` | 2 | `'simple'`, `MarkupView`, the option and the state |
+| `packages/editor/src/api.ts` | 2 | `'simple'`, `MarkupView`, `MenuView`, `showView`, the option and the state |
 | `packages/editor/src/index.ts` | 2 | The markup view's compartment and report |
 | `packages/editor/src/tracked/field.ts` | 2 | `markupViewFacet`; the view field |
 | `packages/editor/src/tracked/decorations.ts` | 2, 3 | Simple's drawing; struck blocks; the hot bar's style |
 | `packages/editor/src/tracked/bar-switch.ts` (new) | 2 | The click in the margin |
+| `packages/editor/src/tracked/bar-layer.ts` (new) | 2 (#320) | The bars of the text, by screen line |
 | `packages/editor/src/tracked/typing.ts` | 2 | Switch to the markup view |
 | `plugins/formatting/src/index.ts` | 2 | Switch to the markup view |
 | `plugins/review/src/rail.ts` | 2 | The rail in Simple; switch to the markup view |
 | `plugins/review/src/cards.ts` | 3 | Cards on struck blocks |
-| `plugins/review/src/shared.ts`, `bar.ts`, `rail.ts` | 2 | No decision in Simple; the bar's click when the review bar is open |
+| `plugins/review/src/shared.ts`, `bar.ts`, `rail.ts` | 2 | The bar's click when the review bar is open; since #326 a note decides in place in Simple and says what in the card's words (`describeChange`, moved to `shared.ts`) |
 | `packages/editor/src/preview/table.ts` | 3 | A rewritten cell: old above new |
-| `apps/desktop/src/menu-model.ts`, `ui/titlebar.ts`, `ui/icons.ts` | 2 | Four views, keys, icons |
+| `apps/desktop/src/menu-model.ts`, `ui/titlebar.ts`, `ui/icons.ts` | 2 | Three views (Simple is a look, #303), keys, icons |
 | `apps/desktop/src/settings.ts`, `main.ts` | 2 | The markup view kept and passed |
 | `apps/desktop/src/styles.css` | 2 | Bars that print |
 
@@ -397,16 +406,16 @@ A throwaway in the scratch folder, on the tree of Nov 10 (`4de60b1`): the joinin
 
 **design.md:**
 
-- **§5.3,** renamed "Views: Clean, Simple, Redlines, Raw": "**Simple** (⌥⌘2): the same text as Clean, with a change bar beside each line that has a pending change, in its author's color, and the comments with their notes: deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches to Redlines, and in Redlines back to Simple, with the line where it was." The keys of the others (⌥⌘1, ⌥⌘3, ⌥⌘4). "Simple and Redlines are the markup views, and Redlines remembers the one you chose last, Redlines at first. A document with redlines opens in it, … Making a tracked change in Clean, or adding a comment there, switches to it …; so does a document shown Clean that gains redlines. Reviewing switches to Redlines, where each change shows." "The View menu always offers the same four views."
+- **§5.3,** first renamed "Views: Clean, Simple, Redlines, Raw" and, since #303, "Views: Clean, Redlines, Raw": Redlines (⌥⌘2) has two looks, the full markup and the **simple look**: "the same text as Clean, with a change bar beside each line that has a pending change, in its author's color, and the comments with their notes: deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches between the two looks, and nothing else does." The keys of the others (⌥⌘1, ⌥⌘3). "Redlines remembers its look, the one a click on a change bar chose last, the full markup at first. A document with redlines opens in Redlines … Making a tracked change in Clean, or adding a comment there, switches to it …; so does a document shown Clean that gains redlines. Reviewing shows the full markup, where each change shows." "The View menu always offers the same three views."
 - **§5.1,** the File menu: "Printing holds the whole document in light ink and prints the view as it shows, without the rail: Simple prints the newest text with its change bars."
-- **§5.5,** change bars: "In Simple and Redlines a click on a bar switches between them; the bar widens under the pointer, and its hint names the view a click gives." New bullet: "**Deleted blocks show as blocks.** A paragraph, heading, item or quote deleted whole is drawn where it was, struck through, with its look. A block whose whole text was replaced, as an agent's rewritten paragraph is, shows its old text struck on its own line above the new. Words deleted inside a block are struck where they were."
-- **§5.6,** the review bar: "Opening it switches to Redlines from Clean, Simple and Raw, so that each change shows while you decide it."
-- **§5.7:** "The rail shows in the Simple and Redlines views. Adding a comment in Clean switches to your markup view"; drafts coming back the same.
-- **§5.9,** the table: a row "Clean, Simple, Redlines, Raw | ⌥⌘1, ⌥⌘2, ⌥⌘3, ⌥⌘4 | not chosen yet".
-- **§5.10:** "Clean, Simple and Redlines copy the newest text."
-- **§6.3 and §6.4:** "the Clean, Simple, Redlines and Raw views".
+- **§5.5,** change bars: "In Redlines a click on a bar switches between its two looks, and is the only way to choose one; the bar widens under the pointer." New bullet: "**Deleted blocks show as blocks.** A paragraph, heading, item or quote deleted whole is drawn where it was, struck through, with its look. A block whose whole text was replaced, as an agent's rewritten paragraph is, shows its old text struck on its own line above the new. Words deleted inside a block are struck where they were."
+- **§5.6,** the review bar: "Opening it shows the full markup, from Clean, the simple look and Raw, so that each change shows while you decide it."
+- **§5.7:** "The rail shows in Redlines, in both looks. Adding a comment in Clean switches to Redlines"; drafts coming back the same.
+- **§5.9,** the table: a row "Clean, Redlines, Raw | ⌥⌘1, ⌥⌘2, ⌥⌘3 | not chosen yet" (first written with Simple, on ⌥⌘2).
+- **§5.10:** "Clean and Redlines, in either look, copy the newest text."
+- **§6.3 and §6.4:** "the Clean, Redlines (in two looks) and Raw views".
 - **§8.3,** the `str_replace` row: "`old_str` must match the newest view exactly once. The library compares it with `new_str` word by word: words changed close together are one change, and a paragraph mostly rewritten is replaced whole ([format §3.11])". The bullet "Marks are word by word, so a reviewer can accept part of a rewrite." becomes: "A rewrite reads as one change: a paragraph that keeps fewer than half of its words is the old paragraph replaced by the new, decided with one Accept, and a light edit keeps a mark for each word or phrase it changed."
-- **§14, question 6:** "Shortcuts for the views: ⌥⌘1 to ⌥⌘4, in the menu's order. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real."
+- **§14, question 6:** "Shortcuts for the views: ⌥⌘1 to ⌥⌘3, in the menu's order. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real."
 
 ## Tests
 
@@ -423,9 +432,11 @@ A throwaway in the scratch folder, on the tree of Nov 10 (`4de60b1`): the joinin
 
 1. `packages/editor/src/tracked/tracked.test.ts`: Simple draws no `.rl-ins`, `.rl-del`, `.rl-fmt`, `.rl-split` or `.rl-comment`; it draws `.rl-cmt` tints and `.rl-cmt-point` pins, and the same bar classes on the same lines as Redlines, for every kind of change, tables included; its visible text and its atoms are Clean's.
 2. The view field: a document with redlines opens in the markup view; one shown Clean that gains redlines, a tracked edit in Clean, a format change in Clean, a comment in Clean and drafts coming back switch to it; a tracked edit in Simple stays in Simple; `setDoc` keeps the markup view; choosing Simple or Redlines sets it, and the review bar doesn't.
-3. `bar-switch.test.ts` (happy-dom): a press and release on a bar's target switches Simple to Redlines and back; the line under the pointer keeps its top within a pixel; the selection, the caret and the focus stay; a press that moves 5 px, a press with a modifier, a press beside a line with no bar, and any press in Clean or Raw switch nothing; a double-click switches once; the hot class and the hint come and go with the pointer.
+3. `bar-switch.test.ts` (happy-dom): a press and release on a bar's target switches Simple to Redlines and back; the line under the pointer keeps its top within a pixel; the selection, the caret and the focus stay; a press that moves 5 px, a press with a modifier, a press beside a line with no bar, and any press in Clean or Raw switch nothing; a double-click switches once; the bar under the pointer is drawn wider while it is there, and no hint ever shows.
+
+   `bar-layer.test.ts`, with the layout stood in for (`segmentsOf`, and the layer through `barMeasure`): a change on one screen line of a paragraph that wraps over three marks that screen line alone; the screen lines a change runs over are one bar; a point (a hidden deletion) stands on the screen line it is on; each screen line keeps the authors on it; deleted text that wraps marks every screen line it is on; Clean and Raw draw none. `bar-switch.test.ts` also has a press beside the screen lines that don't hold the change switch nothing. The WebKit check `simple-check.ts` has two checks of the real layout: a paragraph that wraps over many screen lines with one changed word gets one short bar, level with the word, and a paragraph with a change at its very end (a hidden closer) or its start has a bar as tall as its line. Print has no layer: it draws each changed line's bar down the whole paragraph (`@media print` in `apps/desktop/src/styles.css`), as the lines did before.
 4. `plugins/review`: the rail shows in Simple (`rail.test.ts`); no card on hover or click in Simple (`cards.test.ts`); the review bar opened in Simple switches to Redlines (`bar.test.ts`).
-5. `apps/desktop`: four views on ⌥⌘1 to ⌥⌘4 in the View menu and the eye (`menu-model.test.ts`, `titlebar.test.ts`); the markup view's default and how it is kept (`settings.test.ts`); the print rules draw bars as borders (`styles.node.test.ts`).
+5. `apps/desktop`: three views on ⌥⌘1 to ⌥⌘3 in the View menu and the eye, Redlines checked in both its looks (`menu-model.test.ts`, `native-menu.test.ts`, `titlebar.test.ts`); `showView` in `field.test.ts`; the markup view's default and how it is kept (`settings.test.ts`); the print rules draw bars as borders (`styles.node.test.ts`).
 6. The long-document test in Simple.
 
 **Part 3:**
@@ -454,12 +465,12 @@ Each stage is one PR, ships on its own and is worth having without the others.
 1. **An agent's rewrite is recorded as one change:** changes close together joined, and a block that keeps fewer than half of its words replaced whole, so a rewrite can no longer be accepted word by word (design §8.3's promise goes).
 2. **People's edits are never joined:** they are recorded as typed, as in Word, Google Docs and Pages.
 3. **No deletion balloons in the margin,** newer Word for Mac's default: #183 is answered by one change for a rewrite, struck blocks, and Simple.
-4. **Simple is a fourth view, and the view keys are renumbered in menu order** (Redlines moves to ⌥⌘3, Raw to ⌥⌘4); a click on a bar switches Simple and Redlines both ways.
-5. **The markup view you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in Simple; and Simple keeps the rail, shows no hover cards, hands the review bar to Redlines, and decides nothing: Accept and Reject there show the change in Redlines.
+4. **Simple is Redlines' simple look, no fourth view (#303), and the view keys follow the menu's order** (Redlines ⌥⌘2, Raw ⌥⌘3); a click on a bar switches the looks both ways, as the Simple Look switch (⌥⌘4, #330) does.
+5. **The look you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in the simple look; and the simple look keeps the rail, shows no hover cards and hands the review bar to Redlines; a note's Accept and Reject there decide in place and say what they decide (#326, which overruled "decides nothing").
 
 ## Left to the builder
 
-The Redlines icon once Simple takes today's, within the icon rules (a line icon on the 16 × 16 grid that reads at 16 px). The exact element that ends a replaced block's old line (Part 3). The hint's delay, which is the title bar's. Whether `deletedBlocks` lives in `blocks.ts` or a module of its own.
+The exact element that ends a replaced block's old line (Part 3). Whether `deletedBlocks` lives in `blocks.ts` or a module of its own.
 
 ## Sources
 

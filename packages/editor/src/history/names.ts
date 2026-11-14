@@ -45,6 +45,7 @@ const is = (event: string, name: string) => event === name || event.startsWith(`
 
 const REVIEW: Readonly<Record<string, string>> = {
   'review.comment': 'Comment',
+  'review.highlight': 'Highlight',
   'review.reply': 'Reply',
   'review.resolve': 'Resolve',
   'review.reopen': 'Reopen',
@@ -58,6 +59,7 @@ function userName(event: string | null): string | null {
   // Return and Shift-Return, which the Mac's own apps name with the typing around them.
   if (is(event, 'input.break')) return 'Typing';
   if (is(event, 'input.paste')) return 'Paste';
+  if (is(event, 'input.image')) return 'Insert Image';
   if (is(event, 'table.insert.row')) return 'Insert Row';
   if (is(event, 'table.delete.row')) return 'Delete Row';
   if (is(event, 'table.move.row')) return 'Move Row';
@@ -67,6 +69,7 @@ function userName(event: string | null): string | null {
   if (is(event, 'table.move.col')) return 'Move Column';
   if (is(event, 'input.drop') || is(event, 'move.drop')) return 'Drag';
   if (is(event, 'format') || is(event, 'input.format')) return 'Formatting';
+  if (event === 'track.switch') return 'Track Changes';
   if (is(event, 'input.replace.all')) return 'Replace All';
   if (is(event, 'input.replace')) return 'Replace';
   if (event === 'accept') return 'Accept';

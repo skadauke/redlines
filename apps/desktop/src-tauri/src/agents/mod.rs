@@ -1,12 +1,16 @@
 //! Agents' own programs: finding them (`which.rs`), starting and stopping them (`process.rs`) and
-//! logging every run (`log.rs`); and the private line from a run back to the document (`relay.rs`).
+//! logging every run (`log.rs`); updating them and signing them in, each with its own command, from
+//! Preferences (`setup.rs`); installing the Redlines skill in the folder each reads skills from
+//! (`skills.rs`); and the private line from a run back to the document (`relay.rs`).
 //!
 //! The window may start only an agent that `agent_which` found this session, and only as a provider
 //! starts it (`allowed.rs`), or an Agent Client Protocol agent that the person added and allowed
 //! in a native question (`acp.rs`), by its id, as exactly its line (`acp_runs.rs`), saying to it
 //! only what `acp_gate.rs` lets through. Redlines never reads, stores or passes a credential: it
-//! runs the agents' own programs, and their own status commands say whether they are signed in.
-//! Runs belong to the window that started them, and there may be any number of windows.
+//! runs the agents' own programs, and their own status commands say whether they are signed in. An
+//! update or a sign-in is a fixed line the app makes (`setup.rs`), for an agent the window names and
+//! nothing more. Runs belong to the window that started them, and there may be any number of
+//! windows.
 
 mod acp;
 mod acp_gate;
@@ -15,12 +19,15 @@ mod allowed;
 mod log;
 mod process;
 mod question;
+mod reach;
 pub mod relay;
+mod setup;
+mod skills;
 mod which;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Webview};
@@ -30,9 +37,11 @@ pub use which::Programs;
 
 use acp::{AcpAgent, AcpAgents, Found};
 use acp_runs::AcpRuns;
+use allowed::Agent;
 use log::RunInfo;
 use process::{ExecOutput, RunMessage, Spec, Started};
 use relay::Relays;
+use setup::{Outcome, Setups};
 
 /// What the windows hear when the list of ACP agents changes, to look for agents again.
 const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
@@ -41,6 +50,7 @@ const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
 pub fn set_up(app: &AppHandle) {
     app.manage(Programs::for_this_machine());
     app.manage(Runs::default());
+    app.manage(Setups::default());
     app.manage(Relays::default());
     // With no folder of its own, the app has no list: nothing is added, and nothing runs.
     let list = app
@@ -55,17 +65,22 @@ pub fn set_up(app: &AppHandle) {
     }
 }
 
-/// A window has closed: its runs stop, and their relays close.
+/// A window has closed: its runs stop, and their relays close. Preferences closing stops the
+/// updates and sign-ins it asked for, which have nowhere left to report.
 pub fn window_closed(app: &AppHandle, window: &str) {
     app.state::<Runs>().stop_owned_by(window);
     app.state::<Relays>().close_owned_by(window);
+    if window == crate::windows::PREFERENCES_WINDOW {
+        app.state::<Setups>().stop_running();
+    }
 }
 
-/// The app is quitting: every status command is killed, and every run stops, which this waits for.
-/// Then every relay closes, which leaves no socket behind.
+/// The app is quitting: every status command is killed, and every run, update and sign-in stops,
+/// which this waits for. Then every relay closes, which leaves no socket behind.
 pub fn quitting(app: &AppHandle) {
     app.state::<Programs>().stop_execs();
     app.state::<Runs>().stop_all();
+    app.state::<Setups>().stop_all();
     app.state::<Relays>().close_all();
 }
 
@@ -201,6 +216,147 @@ pub fn acp_send(app: AppHandle, webview: Webview, id: u32, line: String) -> Resu
     let owner = webview.label();
     let sockets = app.state::<Relays>().sockets_of(owner);
     app.state::<AcpRuns>().send(owner, id, &line, &sockets)
+}
+
+/// How long an update may take: a package manager downloads the program.
+const UPDATE_TIME: Duration = Duration::from_secs(20 * 60);
+
+/// How long a login may wait for the person in their browser.
+const SIGN_IN_TIME: Duration = Duration::from_secs(10 * 60);
+
+/// The agent a window named, and the program `which` finds for it. A window names an agent and
+/// nothing more: no program, no argument.
+fn named_agent(app: &AppHandle, name: &str) -> Result<(Agent, String), String> {
+    let agent = Agent::named(name).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    let program = app
+        .state::<Programs>()
+        .which(name)
+        .ok_or_else(|| format!("Redlines can't find {} on this Mac.", agent.title()))?;
+    Ok((agent, program))
+}
+
+/// What an agent may read at This folder and my home folder (`reach.rs`): the home folder and the
+/// folders of it to grant. The page builds the agent's command line from it, and the app checks
+/// that line against the same when the agent starts. Nothing where there is none to give.
+#[tauri::command(async)]
+pub fn agent_home_reach(app: AppHandle) -> Option<reach::HomeReach> {
+    app.state::<Programs>().home_reach()
+}
+
+/// The protected folders among those an agent may read at This folder and my home folder (Desktop,
+/// Documents, Downloads, iCloud Drive, cloud folders, volumes) that macOS isn't letting Redlines
+/// read: each is listed from here, which is what makes macOS ask the person, once, for Redlines,
+/// which the agents' reads are counted as. A window asks before a run, and Preferences when the
+/// person picks that scope. Nothing is returned for a folder that is allowed.
+#[tauri::command(async)]
+pub fn agent_home_access(app: AppHandle) -> Vec<reach::Protected> {
+    app.state::<Programs>().home_refused()
+}
+
+/// Updates an agent with its own updater, for the way it was installed, which its path says
+/// (`setup.rs`): `brew upgrade` for a Homebrew install, `npm install -g` for a global npm install,
+/// and its own `update` for any other. Waits for it to end. Only Preferences is granted the command
+/// (`capabilities/`).
+#[tauri::command(async)]
+pub fn agent_update(app: AppHandle, agent: String) -> Result<Outcome, String> {
+    let (agent, program) = named_agent(&app, &agent)?;
+    let programs = app.state::<Programs>();
+    let line = setup::update_line_for(&programs, agent, &program)?;
+    let environment = programs.environment_for(Path::new(&line.program));
+    app.state::<Setups>()
+        .run(agent, &line, &environment, UPDATE_TIME)
+}
+
+/// Signs an agent in with its own login (`claude auth login`, `codex login`), which opens the
+/// browser; waits for it to end. Redlines never sees what the login stores. Only Preferences is
+/// granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn agent_sign_in(app: AppHandle, agent: String) -> Result<Outcome, String> {
+    let (agent, program) = named_agent(&app, &agent)?;
+    let line = setup::sign_in_line(agent, &program);
+    let environment = app
+        .state::<Programs>()
+        .environment_for(Path::new(&line.program));
+    app.state::<Setups>()
+        .run(agent, &line, &environment, SIGN_IN_TIME)
+}
+
+/// Stops the update or sign-in under way for an agent: SIGINT, then SIGTERM, then SIGKILL, as
+/// quitting does. It returns at once, and what was under way ends as stopped. Only Preferences is
+/// granted the command (`capabilities/`).
+#[tauri::command]
+pub fn agent_setup_stop(app: AppHandle, agent: String) -> Result<(), String> {
+    let agent =
+        Agent::named(&agent).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    app.state::<Setups>().stop(agent);
+    Ok(())
+}
+
+/// Opens Terminal with an agent's own login command, for a login that needs a terminal. Only
+/// Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn agent_terminal_sign_in(app: AppHandle, agent: String) -> Result<(), String> {
+    let (agent, program) = named_agent(&app, &agent)?;
+    let line = setup::sign_in_line(agent, &program);
+    let folder = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("terminal");
+    let script = setup::terminal_script(&line, agent.title());
+    let path = setup::write_terminal_script(&folder, agent, &script)
+        .map_err(|error| format!("Couldn't make what Terminal runs: {error}"))?;
+    setup::open_in_terminal(&path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&path);
+    })
+}
+
+/// Where an agent's copy of the Redlines skill is, and whether it is this app's, an older one, a
+/// newer one, or something that isn't the skill's to replace (`skills.rs`). It only looks. Only
+/// Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn skill_status(agent: String) -> Result<skills::Status, String> {
+    let kind = skills::Kind::named(&agent)
+        .ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    Ok(skills::status(kind, &skills::home()?))
+}
+
+/// Installs, or brings up to date, the copy of the Redlines skill for an agent, in the folder the
+/// agent reads skills from, and says where the `redlines` command is, which the skill needs: the
+/// page says what is left to do (`skills.rs`). The text is the app's own; nothing of the page's is
+/// written. Only Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn skill_install(app: AppHandle, agent: String) -> Result<skills::Installed, String> {
+    let kind = skills::Kind::named(&agent)
+        .ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    let home = skills::home()?;
+    let written = skills::install(kind, &home)?;
+    let on_path = app.state::<Programs>().on_login_path("redlines");
+    Ok(skills::installed(
+        written,
+        skills::command_line(on_path.as_deref(), &home),
+    ))
+}
+
+/// Where System Settings shows which apps may read the folders macOS protects (Privacy & Security,
+/// Files and Folders), which is where the person lets Redlines read a folder an agent needs.
+const FILES_AND_FOLDERS_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders";
+
+/// Opens System Settings at Privacy & Security › Files and Folders: what a message about a read
+/// macOS refused offers, so that the person can turn Redlines on there. A fixed address; nothing of
+/// the page's goes in it.
+#[tauri::command(async)]
+pub fn open_files_and_folders_settings() -> Result<(), String> {
+    let status = Command::new("open")
+        .arg(FILES_AND_FOLDERS_SETTINGS)
+        .status()
+        .map_err(|error| format!("Couldn't open System Settings: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn't open System Settings.".to_owned())
+    }
 }
 
 /// Opens the folder of agent logs in Finder.

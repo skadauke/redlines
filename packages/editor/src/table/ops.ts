@@ -15,6 +15,7 @@ import {
 } from '@redlines/format';
 import {
   authorFacet,
+  markupViewFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -115,10 +116,10 @@ function perform(
     selection,
     userEvent,
     annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
-    // A tracked change made in Clean shows in Redlines, as typing's do.
+    // A tracked change made in Clean shows in Redlines, in the look chosen last, as typing's do.
     effects:
       tracked && view.state.field(viewModeField) === 'clean'
-        ? [setViewModeEffect.of('redlines')]
+        ? [setViewModeEffect.of(view.state.facet(markupViewFacet))]
         : [],
     scrollIntoView: true,
   });

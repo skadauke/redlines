@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { RunReach } from '@redlines/agent-process';
 import { describe, expect, it } from 'vitest';
 import type {
   AgentEvent,
@@ -9,7 +10,9 @@ import type {
 } from '@redlines/plugin-api';
 import {
   claudeArgs,
+  claudeDenies,
   createClaudeProvider,
+  INSTALL_COMMAND,
   newClaudeState,
   parseClaudeLine,
   plugin,
@@ -111,6 +114,110 @@ async function collect(iterable: AsyncIterable<AgentEvent>): Promise<AgentEvent[
   for await (const event of iterable) events.push(event);
   return events;
 }
+
+describe('claudeArgs at This folder and my home folder', () => {
+  const home = '/Users/ada';
+  const roots = [
+    '/Users/ada/Documents',
+    '/Users/ada/code',
+    '/Users/ada/Library/CloudStorage',
+    '/Volumes/Backup/Notes',
+  ];
+  const wide: AgentRequest = {
+    ...folderRequest,
+    scope: 'everything',
+    homeFolder: home,
+    homeRoots: roots,
+  };
+  const args = claudeArgs(wide, endpoint);
+
+  it('grants each folder the host lists, after --restricted and before anything else', () => {
+    const at = args.indexOf('--restricted');
+    expect(args.slice(at, at + 1 + roots.length * 2 + 1)).toEqual([
+      '--restricted',
+      ...roots.flatMap((root) => ['--add-dir', root]),
+      '--disable-slash-commands',
+    ]);
+    // Nothing else is granted: not the home folder itself, not a hidden one, not Library.
+    const granted = args.flatMap((arg, i) => (args[i - 1] === '--add-dir' ? [arg] : []));
+    expect(granted).toEqual(roots);
+    expect(granted).not.toContain(home);
+    expect(args.filter((arg) => arg === '--add-dir')).toHaveLength(roots.length);
+  });
+
+  it('keeps every other door shut, as at This folder', () => {
+    const folder = claudeArgs(folderRequest, endpoint);
+    const without = (line: string[]) =>
+      line.filter((arg, i) => arg !== '--add-dir' && line[i - 1] !== '--add-dir');
+    // The same line but for the grants, the skills flag and the settings.
+    expect(valueOf(args, '--tools')).toBe('Read,Grep,Glob');
+    expect(valueOf(args, '--allowedTools')).toBe(valueOf(folder, '--allowedTools'));
+    expect(valueOf(args, '--allowedTools')).not.toMatch(/(^|,)(Read|Grep|Glob|Bash)(,|$)/);
+    expect(valueOf(args, '--permission-mode')).toBe('dontAsk');
+    expect(valueOf(args, '--mcp-config')).toBe(valueOf(folder, '--mcp-config'));
+    expect(args).toContain('--strict-mcp-config');
+    expect(without(args).filter((arg) => !folder.includes(arg))).toEqual([
+      '--disable-slash-commands',
+      valueOf(args, '--settings'),
+    ]);
+    expect(args.at(-2)).toBe('--');
+  });
+
+  it('denies .env files anywhere, and hidden files and folders below the home folder', () => {
+    const settings = JSON.parse(valueOf(args, '--settings') ?? '') as {
+      disableAllHooks: boolean;
+      permissions: { deny: string[] };
+    };
+    expect(settings.disableAllHooks).toBe(true);
+    expect(settings.permissions.deny).toEqual(claudeDenies(home, roots));
+    expect(claudeDenies(home, roots)).toEqual([
+      'Read(//**/.env)',
+      'Read(//**/.env.*)',
+      'Read(//**/*.env)',
+      'Read(//Users/ada/**/.*)',
+      'Read(//Users/ada/**/.*/**)',
+      // A folder a link leads to outside the home folder: its hidden names are left out too.
+      'Read(//Volumes/Backup/Notes/**/.*)',
+      'Read(//Volumes/Backup/Notes/**/.*/**)',
+    ]);
+    // Written as the Rust side writes it, with its keys in this order and no spaces.
+    expect(valueOf(args, '--settings')).toBe(
+      '{"disableAllHooks":true,"permissions":{"deny":["Read(//**/.env)","Read(//**/.env.*)","Read(//**/*.env)","Read(//Users/ada/**/.*)","Read(//Users/ada/**/.*/**)","Read(//Volumes/Backup/Notes/**/.*)","Read(//Volumes/Backup/Notes/**/.*/**)"]}}',
+    );
+  });
+
+  it('writes a rule for each base once, and never with a closing slash', () => {
+    // A closing slash would make `///Users/ada//**/.*`, which names nothing.
+    expect(
+      claudeDenies('/Users/ada/', ['/Users/ada/code/', '/Volumes/Backup/', '/Volumes/Backup/x']),
+    ).toEqual([
+      'Read(//**/.env)',
+      'Read(//**/.env.*)',
+      'Read(//**/*.env)',
+      'Read(//Users/ada/**/.*)',
+      'Read(//Users/ada/**/.*/**)',
+      'Read(//Volumes/Backup/**/.*)',
+      'Read(//Volumes/Backup/**/.*/**)',
+    ]);
+    expect(claudeDenies('/Users/ada')).toHaveLength(5);
+  });
+
+  it('is the folder’s line where the request names no home folder, or none to grant', () => {
+    const folder = claudeArgs(folderRequest, endpoint);
+    expect(claudeArgs({ ...folderRequest, scope: 'everything' }, endpoint)).toEqual(folder);
+    expect(
+      claudeArgs(
+        { ...folderRequest, scope: 'everything', homeFolder: home, homeRoots: [] },
+        endpoint,
+      ),
+    ).toEqual(folder);
+    // And a folder at another scope with the home named is not given it.
+    expect(claudeArgs({ ...wide, scope: 'folder' }, endpoint)).toEqual(folder);
+    expect(claudeArgs({ ...wide, scope: 'document' }, endpoint)).toEqual(
+      claudeArgs(documentRequest, endpoint),
+    );
+  });
+});
 
 describe('claudeArgs', () => {
   it('passes the flags that keep a run safe', () => {
@@ -286,6 +393,115 @@ describe('parseClaudeLine', () => {
   });
 });
 
+describe('a read the agent could not make', () => {
+  const home = {
+    scope: 'everything' as const,
+    folder: '/Users/ada/code/redlines',
+    homeRoots: ['/Users/ada/Documents', '/Users/ada/code'],
+  };
+
+  /** The reading call, and what came of it. */
+  function refused(tool: string, input: unknown, words: string, id = 'toolu_9') {
+    const ask = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id, name: tool, input }] },
+    });
+    const answer = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: words }],
+      },
+    });
+    return [ask, answer];
+  }
+
+  const run = (lines: string[], reach: RunReach = home) => {
+    const state = newClaudeState(reach);
+    return lines.map((line) => parseClaudeLine(line, state));
+  };
+
+  it('says macOS privacy for a refused read in a folder macOS asks about', () => {
+    const lines = refused(
+      'Read',
+      { file_path: '/Users/ada/Documents/plan.md' },
+      "EPERM: operation not permitted, open '/Users/ada/Documents/plan.md'",
+    );
+    expect(run(lines)).toEqual([
+      { type: 'status', text: 'Reading plan.md' },
+      {
+        type: 'status',
+        text: 'Couldn’t read plan.md',
+        blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy', place: 'Documents' },
+      },
+    ]);
+  });
+
+  it('names a search of a folder by the folder, and the agent’s settings for a denial inside its reach', () => {
+    const search = refused(
+      'Grep',
+      { pattern: 'ship', path: '/Users/ada/code/other' },
+      "Permission to use Grep has been denied because Claude Code is running in don't ask mode.",
+    );
+    expect(run(search)[1]).toMatchObject({
+      blocked: { path: '/Users/ada/code/other', cause: 'settings' },
+    });
+  });
+
+  it('says nothing for a refusal outside what the agent may read, or of a file at the home scope that is left out', () => {
+    const outside = refused('Read', { file_path: '/Users/ada/.ssh/id_rsa' }, 'denied', 'toolu_1');
+    expect(run(outside)[1]).toBeNull();
+    const hidden = refused(
+      'Read',
+      { file_path: '/Users/ada/code/app/.env' },
+      "Permission to use Read has been denied because Claude Code is running in don't ask mode.",
+    );
+    expect(run(hidden)[1]).toBeNull();
+    // At This folder, nothing is left out on purpose: a hidden file refused there is news.
+    const atFolder = { scope: 'folder' as const, folder: '/Users/ada/code/app' };
+    expect(run(hidden, atFolder)[1]).toMatchObject({ blocked: { cause: 'settings' } });
+  });
+
+  it('says nothing for a call that did not fail, a call it never saw, or a run it knows nothing of', () => {
+    const [ask, answer] = refused('Read', { file_path: '/Users/ada/Documents/a.md' }, 'EPERM');
+    const fine = (answer ?? '').replace('"is_error":true', '"is_error":false');
+    expect(run([ask ?? '', fine])[1]).toBeNull();
+    expect(run([answer ?? ''])[0]).toBeNull();
+    const state = newClaudeState();
+    parseClaudeLine(ask ?? '', state);
+    expect(parseClaudeLine(answer ?? '', state)).toBeNull();
+  });
+
+  it('is told of by the provider, from the request it runs', async () => {
+    const [ask, answer] = refused(
+      'Read',
+      { file_path: '/Users/ada/Documents/plan.md' },
+      'EPERM: operation not permitted, open x',
+    );
+    const done = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'ok',
+    });
+    const fake = fakeProcesses({ lines: [ask ?? '', answer ?? '', done] });
+    const events = await collect(
+      createClaudeProvider(fake.processes, { emptyFolder: () => Promise.resolve('/tmp/e') }).run(
+        {
+          ...folderRequest,
+          scope: 'everything',
+          folder: '/Users/ada/code/redlines',
+          homeRoots: ['/Users/ada/Documents'],
+        },
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(events.find((event) => event.type === 'status' && event.blocked)).toMatchObject({
+      blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy' },
+    });
+  });
+});
+
 describe('detect', () => {
   const version = (stdout = '2.1.318 (Claude Code)\n') => ({ code: 0, stdout });
 
@@ -307,6 +523,7 @@ describe('detect', () => {
       found: true,
       signedIn: true,
       version: '2.1.318',
+      path: '/usr/local/bin/claude',
     });
   });
 
@@ -320,6 +537,7 @@ describe('detect', () => {
       signedIn: false,
       reason: 'signed-out',
       version: '2.1.318',
+      path: '/usr/local/bin/claude',
       help: 'Run `claude auth login`.',
     });
   });
@@ -343,6 +561,24 @@ describe('detect', () => {
       version: '2.1.201',
     });
     expect(state.found && state.help).toMatch(/2\.1\.318/);
+  });
+
+  it('asks a Claude that is too old whether it is signed in, and says where it is', async () => {
+    const signedOut = (stdout: string, code = 1) => ({ code, stdout });
+    const ask = (status: { code: number; stdout: string }) =>
+      createClaudeProvider(
+        fakeProcesses({
+          exec: (_, args) => (args[0] === '--version' ? version('2.1.201 (Claude Code)') : status),
+        }).processes,
+      ).detect();
+    expect(await ask({ code: 0, stdout: '{"loggedIn":true}' })).toMatchObject({
+      reason: 'too-old',
+      path: '/usr/local/bin/claude',
+      account: 'signed-in',
+    });
+    expect(await ask(signedOut('{"loggedIn":false}'))).toMatchObject({ account: 'signed-out' });
+    // An older Claude that doesn't know `auth` fails the question and prints no JSON: no claim.
+    expect(await ask(signedOut(''))).not.toHaveProperty('account');
   });
 });
 
@@ -440,6 +676,29 @@ describe('run', () => {
       { type: 'started', logPath: '/logs/run.jsonl' },
       { type: 'error', message: 'Claude has hit its usage limit. Try again later.' },
     ]);
+  });
+
+  it('marks a failed sign-in as one Preferences can put right, and no other failure', async () => {
+    const run = async (name: string) => {
+      const fake = fakeProcesses({ lines: fixture(name), code: 1 });
+      const events = await collect(
+        createClaudeProvider(fake.processes, { emptyFolder }).run(
+          folderRequest,
+          endpoint,
+          new AbortController().signal,
+        ),
+      );
+      return events.at(-1);
+    };
+    expect(await run('scripted-retry-401.jsonl')).toEqual({
+      type: 'error',
+      message: "Claude isn't signed in. Run `claude auth login`.",
+      setup: true,
+    });
+    expect(await run('scripted-retry-429.jsonl')).toEqual({
+      type: 'error',
+      message: 'Claude has hit its usage limit. Try again later.',
+    });
   });
 
   it('gives one error for a truncated stream whose process was killed', async () => {
@@ -712,8 +971,11 @@ describe('hard lines', () => {
   it('says how to install Claude Code when it is not found', async () => {
     const fake = fakeProcesses({ which: null });
     const state = await createClaudeProvider(fake.processes).detect();
-    expect(state).toMatchObject({ found: false });
-    expect(state.help).toContain('curl -fsSL https://claude.ai/install.sh | bash');
+    expect(state).toMatchObject({ found: false, install: INSTALL_COMMAND });
+    expect(INSTALL_COMMAND).toBe('curl -fsSL https://claude.ai/install.sh | bash');
+    // The command is shown beside the help, with a Copy button: the help doesn't say it twice.
+    expect(state.help).toMatch(/isn't installed/);
+    expect(state.help).not.toContain('curl');
   });
 
   it('survives a detect that throws', async () => {

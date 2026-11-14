@@ -190,17 +190,31 @@ export interface HostPrint {
 
 /**
  * What the host found out about an agent's program on this machine. A program that is found but
- * can't run says why: it isn't signed in, or it is older than the provider was tested with.
+ * can't run says why: it isn't signed in, or it is older than the provider was tested with. A found
+ * program says where it is (`path`), so that a stale second copy earlier on the PATH shows.
  */
 export type AgentState =
-  | { found: false; help: string }
-  | { found: true; signedIn: true; version?: string; help?: string }
+  | {
+      found: false;
+      help: string;
+      /** The command that installs it, to show and copy; never run by Redlines. */
+      install?: string;
+      /** It couldn't be checked, which isn't the same as not being there. */
+      unchecked?: true;
+    }
+  | { found: true; signedIn: true; version?: string; path?: string; help?: string }
   | {
       found: true;
       signedIn: false;
       reason: 'signed-out' | 'too-old';
       version?: string;
+      path?: string;
       help?: string;
+      /**
+       * For `too-old`: what the program said when asked whether it is signed in. Absent when it
+       * didn't say, as an older program that doesn't know the question wouldn't.
+       */
+      account?: 'signed-in' | 'signed-out';
     };
 
 /** How much of the machine an agent is told about: the document, its folder, or anything. */
@@ -216,18 +230,54 @@ export interface AgentRequest {
   documentPath?: string;
   folder?: string;
   scope: AgentScope;
+  /**
+   * At `scope: 'everything'`, the home folder, which the host names, and with it the folders of
+   * it the agent may read besides `folder`: the visible folders of the home folder, never a hidden
+   * one and never `~/Library` but its cloud folders, each by its name and by where a link leads.
+   * The provider holds the agent's reads to them, each in the way the agent can be held, so that
+   * nothing else is readable.
+   */
+  homeFolder?: string;
+  homeRoots?: readonly string[];
   author: { handle: string; name: string; for: string };
+}
+
+/**
+ * A read an agent couldn't make inside what it may read, with the cause as far as the host can
+ * tell, for a message that says which file, why, and what to do (design §8.6, Scope).
+ */
+export interface BlockedRead {
+  /** The file or folder, as the agent named it. */
+  path: string;
+  /**
+   * `privacy`: macOS isn't letting Redlines read the folder (Documents, Desktop, Downloads, iCloud
+   * Drive, cloud folders, removable and network volumes). `permission`: the file's own permissions
+   * refuse it. `settings`: the agent's own settings, or an organization's, refuse it. `other`:
+   * none of those, and `words` is the agent's own.
+   */
+  cause: 'privacy' | 'permission' | 'settings' | 'other';
+  /** For `privacy`: the folder macOS protects, such as `Documents` or `iCloud Drive`. */
+  place?: string;
+  /** For `other`: what the agent said, on one line. */
+  words?: string;
 }
 
 /** What happens during a run. */
 export type AgentEvent =
   /** The program started, and its log is at `logPath`, for a failure to point to. */
   | { type: 'started'; logPath: string }
-  /** From the event stream; the status tool goes straight to the thread. */
-  | { type: 'status'; text: string }
+  /**
+   * From the event stream; the status tool goes straight to the thread. `blocked` is set when the
+   * status tells of a read inside what the agent may read that it couldn't make.
+   */
+  | { type: 'status'; text: string; blocked?: BlockedRead }
   /** `finalText` is the last message, for an agent that never called reply. */
   | { type: 'done'; finalText?: string }
-  | { type: 'error'; message: string };
+  /**
+   * `setup` is true when Preferences › Agents can put it right: the agent is signed out, or too
+   * old to run here.
+   */
+  | { type: 'error'; message: string; setup?: true };
 
 /** How an agent's program reaches Redlines' tools: a command that speaks MCP. */
 export interface McpEndpoint {
@@ -243,6 +293,13 @@ export interface AgentProvider {
   name: string;
   /** Whether reads can be held to the folder. */
   readLimit: 'folder' | 'machine';
+  /**
+   * `false` for an agent that can't use the toolbox, such as an OpenClaw agent through its
+   * Gateway, whose bridge takes no MCP server of the client's, and which may run on another machine:
+   * it is given the thread and the document in its prompt, and its last message is the reply. It
+   * changes nothing in the document. Without it, the agent has the toolbox.
+   */
+  toolbox?: false;
   detect(): Promise<AgentState>;
   run(request: AgentRequest, tools: McpEndpoint, signal: AbortSignal): AsyncIterable<AgentEvent>;
 }
@@ -252,6 +309,8 @@ export interface AgentInfo {
   id: string;
   name: string;
   readLimit: 'folder' | 'machine';
+  /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
+  toolbox?: false;
   state: AgentState;
 }
 

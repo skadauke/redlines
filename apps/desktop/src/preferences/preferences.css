@@ -230,6 +230,39 @@ select:focus-visible {
   padding: 0 12px;
 }
 
+/* A folder's name before the buttons that change it, its whole path in the hint. */
+.rl-pref-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--rl-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rl-pref-path.rl-pref-unset {
+  color: var(--rl-ink-3);
+}
+
+.rl-pref-inline > .rl-pref-button {
+  flex: none;
+}
+
+/* A control of several parts, one under another: a menu, a field that belongs to it, a line. */
+.rl-pref-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.rl-pref-stack .rl-pref-note {
+  margin-top: 0;
+}
+
+.rl-pref-stack .rl-pref-text {
+  width: 190px;
+}
+
 .rl-pref-button:enabled:hover {
   background: var(--rl-pressed);
 }
@@ -258,6 +291,30 @@ select:focus-visible {
 .rl-pref-status {
   color: var(--rl-ink);
   padding-top: 2px;
+}
+
+/* An agent's next step, and the command that installs it, under its state; nothing, no space. */
+.rl-pref-actions {
+  margin-top: 8px;
+}
+
+.rl-pref-actions:empty {
+  display: none;
+}
+
+.rl-pref-actions .rl-pref-button {
+  flex: none;
+}
+
+.rl-pref-code {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--rl-font-mono);
+  font-size: var(--rl-size-ui-small);
+  line-height: 16px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .rl-pref-list {

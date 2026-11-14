@@ -44,7 +44,23 @@
         "url": "preferences.html",
         "title": "Preferences",
         "width": 560,
-        "height": 400,
+        "height": 440,
+        "resizable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 }
+      },
+      {
+        "label": "about",
+        "create": false,
+        "url": "about.html",
+        "title": "About Redlines",
+        "width": 300,
+        "height": 296,
         "resizable": false,
         "minimizable": false,
         "maximizable": false,
@@ -84,7 +100,10 @@
     ],
     "resources": { "icons/family/*.png": "icons/family/" },
     "externalBin": ["binaries/redlines"],
-    "macOS": { "infoPlist": "document-types.plist" }
+    "macOS": {
+      "infoPlist": "document-types.plist",
+      "files": { "PlugIns/RedlinesPreview.appex": "../quicklook/build/RedlinesPreview.appex" }
+    }
   },
   "plugins": {
     "fs": {

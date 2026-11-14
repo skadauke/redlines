@@ -59,7 +59,7 @@ const UNTITLED = 'Untitled';
 /** What the controller needs of the editor. */
 type DocumentEditor = Pick<
   Editor,
-  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit'
+  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit' | 'recordView'
 >;
 
 export interface DocumentOptions {
@@ -84,6 +84,12 @@ export interface DocumentOptions {
    * Without it, none is.
    */
   author?: () => Handle;
+  /**
+   * The folder the save dialog opens in for a document with no file yet (Preferences, General), or
+   * null for none. Asked each time the dialog opens, so a change in Preferences counts at once. A
+   * saved document's Save As starts in its own folder, whatever this says.
+   */
+  newDocumentFolder?: () => string | null;
 }
 
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
@@ -114,6 +120,7 @@ export class DocumentController {
   readonly #hasDraft: () => boolean;
   readonly #onLoading: (path: string | null) => void;
   readonly #author: (() => Handle) | null;
+  readonly #newDocumentFolder: () => string | null;
   /** Counts the document's changes on disk that became steps, for each its own group. */
   #diskSteps = 0;
   /** Counts the documents this window has held: a new one each time another replaces it. */
@@ -136,6 +143,7 @@ export class DocumentController {
     this.#hasDraft = options.hasDraft ?? (() => false);
     this.#onLoading = options.onLoading ?? (() => {});
     this.#author = options.author ?? null;
+    this.#newDocumentFolder = options.newDocumentFolder ?? (() => null);
   }
 
   /**
@@ -227,6 +235,18 @@ export class DocumentController {
   }
 
   /**
+   * Starts an untitled document that holds `text`, as if it had been typed or pasted into an empty
+   * one: it has unsaved edits, so closing it asks whether to save, and Save asks where. Like any
+   * document with edits, it is clean again if the text is all taken away. The text goes in as a
+   * document is loaded: not as an edit, which Track Changes would mark, and with no history to
+   * undo it away. An empty `text` is `create()`.
+   */
+  async createWith(text: string): Promise<void> {
+    if (text === '') return this.create();
+    if (await this.#confirmReplace()) this.#load(null, text, '');
+  }
+
+  /**
    * Saves the unsaved edits, or asks where when there is no file yet. When the file changed on
    * disk since the editor last synced with it, asks first whether to overwrite it. Resolves to
    * whether the edits are saved.
@@ -245,6 +265,8 @@ export class DocumentController {
       if (choice === 'cancel') return false;
       if (choice === 'saveAs') return this.saveAs();
     }
+    // The view the document is in goes into the file with the edits (format §5.6).
+    this.#editor.recordView();
     const text = this.#editor.getDoc();
     try {
       await this.#host.write(path, text);
@@ -258,10 +280,18 @@ export class DocumentController {
 
   /** Asks where to save, then saves there. Resolves to whether it saved. */
   async saveAs(): Promise<boolean> {
+    // As Save does: a document with edits, or no file yet, takes its view into the file. One with
+    // neither isn't made edited by asking where to write a copy.
+    if (this.#state.dirty || this.#state.path === null) this.#editor.recordView();
     const text = this.#editor.getDoc();
     let path: string | null;
     try {
-      path = await this.#host.saveAs(text, this.#state.path ?? `${this.#state.name}.md`);
+      // A document with no file starts in the folder Preferences name; a saved one, in its own.
+      path = await this.#host.saveAs(
+        text,
+        this.#state.path ?? `${this.#state.name}.md`,
+        this.#state.path === null ? this.#newDocumentFolder() : null,
+      );
     } catch (error) {
       // A name that isn't a document's says so, and nothing was written.
       const why =
@@ -361,8 +391,10 @@ export class DocumentController {
       this.#update({ dirty: false, notice: null });
     } else if (!this.#state.dirty) {
       this.#base = text;
-      this.#takeFromDisk(text);
-      this.#update({ dirty: false, notice: null });
+      // A file that newly asks everyone to track changes is read as one that is opened: the editor
+      // turns Track Changes on (`reloadDoc`), and the person is told why (design §5.4, #364).
+      const newlyAsks = this.#takeFromDisk(text);
+      this.#update({ dirty: false, notice: newlyAsks ? TRACKING_FOR_EVERYONE : null });
     } else {
       // A file changed back to the base is no conflict.
       this.#update({ notice: text === this.#base ? null : CHANGED_ON_DISK });
@@ -373,21 +405,24 @@ export class DocumentController {
    * Shows the file's `text` in place of the editor's, which has no unsaved edits. When the change
    * is nothing but the work of the author's agents, it is a step of theirs, one per change on disk,
    * which Undo takes back; any other change is a reload, which starts the history over. Asked once
-   * per change on disk, never per keystroke.
+   * per change on disk, never per keystroke. Says whether the file newly asks everyone to track
+   * changes, which a reload turns Track Changes on for.
    */
-  #takeFromDisk(text: string): void {
+  #takeFromDisk(text: string): boolean {
     const work = this.#agentWorkOn(text);
     if (work) {
       this.#diskSteps++;
       try {
         this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
-        return;
+        return false;
       } catch (error) {
         // The editor must show the file it now counts as saved: a reload, as for any change.
         console.error('Could not take the change on disk as a step', error);
       }
     }
+    const asked = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#editor.reloadDoc(text);
+    return !asked && this.#editor.getParsed().ledger.tracking === 'everyone';
   }
 
   /** Whose work alone turns the editor's text into `text`: the author's agents', or null. */
@@ -553,12 +588,17 @@ export class DocumentController {
     }
   }
 
-  #load(path: string | null, text: string): void {
+  /**
+   * Shows `text` as the document at `path`, the text of the file. `saved` is what the document
+   * counts as saved, which is `text` unless it starts with unsaved edits: an untitled document made
+   * with text starts from an empty one (`createWith`), and the text is its edit.
+   */
+  #load(path: string | null, text: string, saved: string = text): void {
     this.#generation++;
     this.#diskSteps = 0;
     // Set first: replacing the editor's text may report an edit, which compares against it.
-    this.#base = text;
-    this.#disk = text;
+    this.#base = saved;
+    this.#disk = saved;
     this.#savedAt = null;
     this.#onLoading(path);
     this.#editor.setDoc(text);
@@ -566,7 +606,7 @@ export class DocumentController {
     this.#state = {
       path,
       name: path === null ? UNTITLED : basename(path),
-      dirty: false,
+      dirty: text !== saved,
       notice: everyone ? TRACKING_FOR_EVERYONE : null,
       writing: this.#agentPending > 0,
     };

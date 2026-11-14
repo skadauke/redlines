@@ -25,6 +25,7 @@ function commands() {
     print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
@@ -41,6 +42,7 @@ function commands() {
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
+    openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
@@ -90,7 +92,6 @@ const rowsOf = (model: MenuModel, title: string): readonly MenuRow[] => {
 
 /** A row as it reads in the menu: its name and accelerator, or `---` for a separator. */
 const reads = (row: MenuRow): string | [string, string | undefined] => {
-  if ('about' in row) return 'About Redlines';
   if ('item' in row) return row.item === 'Separator' ? '---' : (row.text ?? row.item);
   if ('rows' in row) return `${row.text} ›`;
   return [row.text, row.accelerator];
@@ -152,6 +153,23 @@ describe('Open Recent', () => {
   });
 });
 
+describe('Simple Look (#330)', () => {
+  const row = () => actionRow(appMenuModel(commands(), registryOf()), 'View', 'Simple Look');
+
+  it('is on while Redlines shows its simple look, and off in the full markup', () => {
+    expect(row().checked?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().checked?.(state({ view: 'redlines' }))).toBe(false);
+  });
+
+  it('can be chosen only while Redlines shows: Clean and Raw have no look to switch', () => {
+    expect(row().enabled?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'redlines' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'clean' }))).toBe(false);
+    expect(row().enabled?.(state({ view: 'raw' }))).toBe(false);
+    expect(row().checked?.(state({ view: 'clean' }))).toBe(false);
+  });
+});
+
 describe('the menu model', () => {
   it('keeps every item the v0.1 menu had', () => {
     const model = appMenuModel(commands(), registryOf());
@@ -188,11 +206,13 @@ describe('the menu model', () => {
       ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
+    // Simple Look is Redlines' simple look, a switch below the three views (#330).
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
-      ['Simple', 'Alt+CmdOrCtrl+2'],
-      ['Redlines', 'Alt+CmdOrCtrl+3'],
-      ['Raw', 'Alt+CmdOrCtrl+4'],
+      ['Redlines', 'Alt+CmdOrCtrl+2'],
+      ['Raw', 'Alt+CmdOrCtrl+3'],
+      '---',
+      ['Simple Look', 'Alt+CmdOrCtrl+4'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -215,7 +235,7 @@ describe('the menu model', () => {
       ['Show Resolved Comments', undefined],
     ]);
     expect(readsAll(model, 'Redlines')).toEqual([
-      'About Redlines',
+      ['About Redlines', undefined],
       ['Check for Updates…', undefined],
       '---',
       ['Preferences…', 'CmdOrCtrl+,'],
@@ -253,7 +273,16 @@ describe('the menu model', () => {
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
     click('View', 'Raw');
-    expect(c.setView).toHaveBeenCalledWith('raw');
+    expect(c.setView).toHaveBeenLastCalledWith('raw');
+    // Redlines, which the editor shows in the look last chosen with a click on a change bar or the
+    // Simple Look switch.
+    click('View', 'Redlines');
+    expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledTimes(2);
+    // The simple look is no view: its row switches the look, and shows no other view.
+    click('View', 'Simple Look');
+    expect(c.switchLook).toHaveBeenCalledOnce();
+    expect(c.setView).toHaveBeenCalledTimes(2);
     click('View', 'Larger Text');
     expect(c.biggerText).toHaveBeenCalledOnce();
     click('View', 'Smaller Text');
@@ -292,11 +321,10 @@ describe('the menu model', () => {
     const model = appMenuModel(commands(), registryOf());
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
+    // The simple look is Redlines too: the check stays on the one item.
+    expect(redlines.checked?.(state({ view: 'simple' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
-    const simple = actionRow(model, 'View', 'Simple');
-    expect(simple.checked?.(state({ view: 'simple' }))).toBe(true);
-    expect(simple.checked?.(state({ view: 'redlines' }))).toBe(false);
-    expect(simple.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
+    expect(redlines.checked?.(state({ view: 'clean' }))).toBe(false);
     // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
     expect(redlines.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
 
@@ -329,7 +357,9 @@ describe('the menu model', () => {
     expect(enabledAt('Zoom Out', { zoom: 0.8 })).toBe(false);
     expect(enabledAt('Zoom Out', { zoom: 0.9 })).toBe(true);
     expect(enabledAt('Actual Text Size', { textSize: 1 })).toBe(false);
-    expect(enabledAt('Larger Text', { textSize: 2 })).toBe(false);
+    expect(enabledAt('Larger Text', { textSize: 4 })).toBe(false);
+    // Past 200%, where the window zoom stops: the text goes on to 400%.
+    for (const size of [2, 2.5, 3]) expect(enabledAt('Larger Text', { textSize: size })).toBe(true);
     expect(enabledAt('Smaller Text', { textSize: 0.8 })).toBe(false);
     for (const text of ['Actual Text Size', 'Larger Text', 'Smaller Text']) {
       expect(enabledAt(text, { textSize: 1.37 }), text).toBe(true);

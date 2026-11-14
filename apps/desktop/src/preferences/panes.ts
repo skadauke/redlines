@@ -7,8 +7,14 @@ import type { SettingContribution } from '@redlines/plugin-api';
 import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
-import type { AppearanceChoice, Settings } from '../settings.ts';
-import { stepSize } from '../text-size.ts';
+import {
+  imageFolderNameOf,
+  imageFolderNameProblem,
+  type AppearanceChoice,
+  type ImagePlace,
+  type Settings,
+} from '../settings.ts';
+import { stepSize, ZOOM_LADDER } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
 
@@ -54,7 +60,7 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms every window of the app to a level of the ladder, and keeps it (zoom.ts). */
+  /** Zooms every window of the app to a level of the window zoom's ladder, and keeps it (zoom.ts). */
   setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
@@ -73,6 +79,18 @@ export interface PaneDeps {
    * asked or couldn't, as for a copy of the app on its disk image.
    */
   makeDefaultApp: () => Promise<DefaultAppChange>;
+  /**
+   * Opens the Mac's System Settings at the Quick Look extensions, where Redlines' preview of
+   * Markdown files can be turned off; rejects with a sentence that says why it couldn't. Given only
+   * where there is a Quick Look to turn off: the row is not drawn without it.
+   */
+  openQuickLookSettings?: () => Promise<void>;
+  /**
+   * Asks for a folder with the system's panel, which opens in `start` when there is one: its full
+   * path, or null when the person cancels; rejects with a sentence that says why it couldn't ask,
+   * as in a plain browser.
+   */
+  chooseFolder: (start: string | null) => Promise<string | null>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -289,6 +307,7 @@ function general(deps: PaneDeps): HTMLElement[] {
   return [
     row('Name and handle', identity, line('As they appear on your changes.')),
     row('On launch', onLaunch),
+    newDocumentFolderRow(deps),
     row(
       'Check for updates automatically',
       toggle(current.checkForUpdates, (value) => update({ checkForUpdates: value })),
@@ -298,8 +317,145 @@ function general(deps: PaneDeps): HTMLElement[] {
       toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
     ),
     defaultAppRow(deps),
+    ...(deps.openQuickLookSettings ? [quickLookRow(deps.openQuickLookSettings)] : []),
     row('Command line', command, status),
   ];
+}
+
+/** The line under the default folder's row, which says what Save does, until something fails. */
+const FOLDER_NOTES = {
+  unset: 'Save opens where macOS last saved.',
+  set: 'Save opens in this folder.',
+};
+
+/** A folder's name for the row: the last name in its path, or the whole path for the disk's root. */
+function folderName(folder: string): string {
+  return (
+    folder
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || folder
+  );
+}
+
+/**
+ * Default folder for new documents: where the Save dialog opens for a document that has no file
+ * yet (#309). The row shows the folder by its name, with its whole path as the hint; Choose… asks
+ * for another with the system's panel, and Clear, there only while one is set, goes back to leaving
+ * it to macOS. A folder that is gone by the time Save looks is no problem for the row: Save falls
+ * back to what it did before.
+ */
+function newDocumentFolderRow(deps: PaneDeps): HTMLElement {
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  const path = el('span', 'rl-pref-path');
+  const choose = el('button', 'rl-pref-button', 'Choose…');
+  choose.type = 'button';
+  const clear = el('button', 'rl-pref-button', 'Clear');
+  clear.type = 'button';
+  const control = el('div', 'rl-pref-inline');
+  // Its buttons are named for the row, as a stepper's are (`stepper`).
+  control.setAttribute('role', 'group');
+  control.append(path, choose);
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  /**
+   * Shows the folder, with the line that says what Save does, and a Clear button only while there
+   * is one. Choose… is never moved.
+   */
+  const show = (folder: string | null) => {
+    path.textContent = folder === null ? 'Not set' : folderName(folder);
+    path.title = folder ?? '';
+    path.classList.toggle('rl-pref-unset', folder === null);
+    if (folder === null) clear.remove();
+    else if (!clear.isConnected) control.append(clear);
+    say(folder === null ? FOLDER_NOTES.unset : FOLDER_NOTES.set, false);
+  };
+  show(deps.settings().newDocumentFolder);
+  /**
+   * The wait is over and the button is back: so is the focus, which it lost while it was disabled,
+   * unless the person put it somewhere else meanwhile.
+   */
+  const back = () => {
+    choose.disabled = false;
+    delete control.dataset['waiting'];
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== choose) return;
+    choose.focus();
+  };
+  choose.addEventListener('click', () => {
+    choose.disabled = true;
+    // The panel is a sheet of this window, over the page: another window's change to the settings
+    // meanwhile mustn't draw the pane again (`watchSettings`), which would leave this row to
+    // answer into a row that is gone.
+    control.dataset['waiting'] = '';
+    void deps.chooseFolder(deps.settings().newDocumentFolder).then(
+      (folder) => {
+        if (folder !== null) {
+          deps.update({ newDocumentFolder: folder });
+          show(folder);
+        }
+        back();
+      },
+      (error: unknown) => {
+        say(error instanceof Error ? error.message : String(error), true);
+        back();
+      },
+    );
+  });
+  clear.addEventListener('click', () => {
+    deps.update({ newDocumentFolder: null });
+    show(null);
+    // The button the person pressed is gone: Choose… is the next stop.
+    choose.focus();
+  });
+  return row('Default folder for new documents', control, status);
+}
+
+/**
+ * What the line under the Quick Look button says until it has something to say about the button. It
+ * names no menu: where the list is in System Settings changes from one macOS to the next.
+ */
+const QUICK_LOOK_HINT =
+  'Redlines’ preview is one of the Quick Look extensions in System Settings, where it can be turned off.';
+
+/**
+ * Quick Look previews of Markdown files: the app comes with one, which macOS registers by itself
+ * and lists in System Settings, so that is where it is turned off. The button opens that list. If
+ * it can't, the line under it says why, with the hint still, and goes back to the hint alone on the
+ * next press.
+ */
+function quickLookRow(open: () => Promise<void>): HTMLElement {
+  const status = el('div', 'rl-pref-note', QUICK_LOOK_HINT);
+  status.setAttribute('role', 'status');
+  const button = el('button', 'rl-pref-button', 'Open System Settings');
+  button.type = 'button';
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  // One press at a time: a second while the first is under way would put its answer over the
+  // other's, in whichever order they come.
+  let opening = false;
+  button.addEventListener('click', () => {
+    if (opening) return;
+    opening = true;
+    say(QUICK_LOOK_HINT, false);
+    open().then(
+      () => {
+        opening = false;
+      },
+      (error: unknown) => {
+        opening = false;
+        say(`${error instanceof Error ? error.message : String(error)} ${QUICK_LOOK_HINT}`, true);
+      },
+    );
+  });
+  const control = el('div', 'rl-pref-inline');
+  control.append(button);
+  return row('Quick Look previews of Markdown files', control, status);
 }
 
 /** What the line under the button says of the app that opens Markdown files. */
@@ -387,8 +543,9 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  // Both walk the ladder of text-size.ts: the zoom of every window, and the text alone.
-  const zoom = stepper(current.zoom, (level) => deps.setZoom(level));
+  // They walk the ladders of text-size.ts: the zoom of every window, which stops at 200%, and the
+  // text alone, which goes on to 400%.
+  const zoom = stepper(current.zoom, (level) => deps.setZoom(level), ZOOM_LADDER);
   const text = stepper(current.textSize, (textSize) => update({ textSize }));
 
   return [
@@ -403,7 +560,11 @@ function appearance(deps: PaneDeps): HTMLElement[] {
  * A − 100% + control that steps `start` along the ladder and calls `change` with each size. The
  * value is a live region, so that VoiceOver reads it as it changes.
  */
-function stepper(start: number, change: (size: number) => void): HTMLElement {
+function stepper(
+  start: number,
+  change: (size: number) => void,
+  ladder?: readonly number[],
+): HTMLElement {
   // Another level lands from outside (`showZoom`): shown in place, so that the button pressed
   // keeps the focus and the live region is read.
   let size = start;
@@ -416,11 +577,11 @@ function stepper(start: number, change: (size: number) => void): HTMLElement {
   larger.setAttribute('aria-label', 'Larger');
   const show = () => {
     value.textContent = `${Math.round(size * 100)}%`;
-    smaller.disabled = stepSize(size, -1) === size;
-    larger.disabled = stepSize(size, 1) === size;
+    smaller.disabled = stepSize(size, -1, ladder) === size;
+    larger.disabled = stepSize(size, 1, ladder) === size;
   };
   const move = (by: number) => {
-    size = stepSize(size, by);
+    size = stepSize(size, by, ladder);
     show();
     change(size);
   };
@@ -435,6 +596,76 @@ function stepper(start: number, change: (size: number) => void): HTMLElement {
   });
   group.append(smaller, value, larger);
   return group;
+}
+
+/** Where images can be saved (#308), as the Images row offers them. */
+const IMAGE_PLACES: readonly { value: ImagePlace; label: string }[] = [
+  { value: 'folder', label: 'In a folder beside the document' },
+  { value: 'assets', label: 'In a folder named for the document' },
+  { value: 'same', label: 'In the document’s folder' },
+];
+
+/** What the Images row says of where images go, for the settings as they are. */
+function whereImagesGo(settings: Settings): string {
+  switch (settings.imagePlace) {
+    case 'folder':
+      return `Saved in “${settings.imageFolderName}” next to the document.`;
+    case 'assets':
+      return 'Saved in a folder like “plan.assets” next to the document.';
+    case 'same':
+      return 'Saved next to the document.';
+  }
+}
+
+/**
+ * Images: where an image dropped or pasted into a document is saved (#308), always inside the
+ * document's folder, where the preview loads images from: in a folder beside it, called `images`
+ * unless the name is changed, in one named for the document, or in the document's own folder. The
+ * name is saved as it is typed, as long as a folder can have it; one that it can't is said so under
+ * the row, kept in the field while it is typed, and replaced by the saved name when the field is left.
+ */
+function imagesRow(deps: PaneDeps): HTMLElement {
+  const place = choice(IMAGE_PLACES, deps.settings().imagePlace, (value) => {
+    deps.update({ imagePlace: value });
+    show();
+  });
+  place.setAttribute('aria-label', 'Where images are saved');
+  const name = el('input', 'rl-pref-text');
+  name.type = 'text';
+  name.value = deps.settings().imageFolderName;
+  name.autocomplete = 'off';
+  name.spellcheck = false;
+  name.setAttribute('aria-label', 'Folder name');
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  const stack = el('div', 'rl-pref-stack');
+  stack.setAttribute('role', 'group');
+  stack.append(place, status);
+  /** The line, and the field for the folder's name where one is used, for the settings as they are. */
+  const show = () => {
+    const current = deps.settings();
+    if (current.imagePlace !== 'folder') name.remove();
+    else if (!name.isConnected) stack.insertBefore(name, status);
+    status.classList.remove('rl-pref-failure');
+    status.textContent = whereImagesGo(current);
+  };
+  name.addEventListener('input', () => {
+    const typed = imageFolderNameOf(name.value);
+    if (typed === null) {
+      // What is wrong with it, which is not always a slash.
+      status.classList.add('rl-pref-failure');
+      status.textContent = imageFolderNameProblem(name.value);
+      return;
+    }
+    deps.update({ imageFolderName: typed });
+    show();
+  });
+  name.addEventListener('blur', () => {
+    name.value = deps.settings().imageFolderName;
+    show();
+  });
+  show();
+  return row('Images', stack);
 }
 
 function editing(deps: PaneDeps): HTMLElement[] {
@@ -454,6 +685,11 @@ function editing(deps: PaneDeps): HTMLElement[] {
       toggle(current.closePairs, (value) => update({ closePairs: value })),
     ),
     row(
+      'Suggest emoji after a colon',
+      toggle(current.emojiSuggestions, (value) => update({ emojiSuggestions: value })),
+      line('Type a colon and two letters, as in :te, to choose an emoji.'),
+    ),
+    row(
       'Track Changes on for new documents',
       toggle(current.trackNewDocuments, (value) => update({ trackNewDocuments: value })),
     ),
@@ -461,6 +697,11 @@ function editing(deps: PaneDeps): HTMLElement[] {
       'Show line break marks (¶)',
       toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
     ),
+    row(
+      'Show word count',
+      toggle(current.showWordCount, (value) => update({ showWordCount: value })),
+    ),
+    imagesRow(deps),
   ];
 }
 

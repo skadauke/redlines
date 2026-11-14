@@ -2,18 +2,19 @@
 //! 200%. The app is the only writer of WebKit's page zoom, which on the Mac has no getter, so it
 //! keeps the level itself.
 //!
-//! A level is one of the ladder's rungs (`LADDER` in `src/text-size.ts`). The app keeps it in
+//! A level is one of the ladder's rungs (`ZOOM_LADDER` in `src/text-size.ts`; the text's own ladder
+//! goes further, to 400%, and is the page's alone). The app keeps it in
 //! `zoom.json` in its data folder, read at the start, and none while the file is missing, can't be
 //! read or holds something else. A new document window or Preferences is built with an
 //! initialization script that hands its page the level (`window.__REDLINES_ZOOM__`), and the app
 //! sets the page zoom right after it builds the window, before the page loads. A window asks for a
 //! level with `set_zoom`; the app keeps it and tells each document window and Preferences, with the
 //! `zoom` event and then the page zoom, in that order (`src/zoom.ts` follows the two). The install
-//! window is never zoomed. Each page, once loaded, asks `zoom_level` for the app's level, reporting
+//! window and About are never zoomed. Each page, once loaded, asks `zoom_level` for the app's level, reporting
 //! the one in its settings: the app takes the report only when it has no level yet, and only the
 //! first.
 //!
-//! Preferences can't be resized by hand, so it grows with the zoom: 560 by 400 points times the
+//! Preferences can't be resized by hand, so it grows with the zoom: 560 by 440 points times the
 //! zoom, keeping its top edge and its middle, within the visible area of the screen.
 
 use std::io;
@@ -30,11 +31,11 @@ pub const ZOOM_EVENT: &str = "zoom";
 /// The file in the app's data folder that holds the level.
 const REMEMBERED_FILE: &str = "zoom.json";
 
-/// The zooms a person can have: the ladder of `src/text-size.ts`.
+/// The zooms a person can have: the window zoom's ladder of `src/text-size.ts`, `ZOOM_LADDER`.
 const LADDER: [f64; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 
 /// Preferences' size in points at 100%, which is its size in `tauri.conf.json`.
-const PREFERENCES_SIZE: (f64, f64) = (560.0, 400.0);
+const PREFERENCES_SIZE: (f64, f64) = (560.0, 440.0);
 
 /// The app's level, once it has one.
 #[derive(Default)]
@@ -107,7 +108,8 @@ fn answer(level: &mut Option<f64>, reported: f64) -> (f64, bool) {
     (1.0, false)
 }
 
-/// Only a document window or Preferences may zoom; the install window keeps the system's size.
+/// Only a document window or Preferences may zoom; the install window and About keep the system's
+/// size.
 fn may_zoom(label: &str) -> Result<(), String> {
     if is_document_window(label) || label == PREFERENCES_WINDOW {
         Ok(())
@@ -139,7 +141,7 @@ fn script(level: Option<f64>) -> String {
     }
 }
 
-/// Preferences' size at `zoom`: 560 by 400 points times it, within `area` when that is known.
+/// Preferences' size at `zoom`: 560 by 440 points times it, within `area` when that is known.
 fn zoomed_size(zoom: f64, area: Option<(f64, f64)>) -> (f64, f64) {
     // Whole points, so that 110% is 616 by 440 and not a hair off.
     let (width, height) = (
@@ -360,8 +362,13 @@ mod tests {
         for label in ["main", "doc-3", "preferences"] {
             assert!(may_zoom(label).is_ok(), "{label}");
         }
-        assert!(may_zoom("install").is_err());
-        assert!(may_zoom("").is_err());
+        for label in [
+            crate::install::QUESTION_WINDOW,
+            crate::windows::ABOUT_WINDOW,
+            "",
+        ] {
+            assert!(may_zoom(label).is_err(), "{label}");
+        }
     }
 
     #[test]
@@ -396,22 +403,23 @@ mod tests {
             height,
         };
         let area = frame(0.0, 25.0, 1440.0, 875.0);
-        let current = frame(440.0, 200.0, 560.0, 400.0);
+        let current = frame(440.0, 200.0, 560.0, 440.0);
         assert_eq!(
             preferences_frame(1.25, current, area),
-            frame(370.0, 200.0, 700.0, 500.0)
+            frame(370.0, 200.0, 700.0, 550.0)
         );
+        // Taller than the screen's visible area, which it fills.
         assert_eq!(
             preferences_frame(2.0, current, area),
-            frame(160.0, 100.0, 1120.0, 800.0)
+            frame(160.0, 25.0, 1120.0, 875.0)
         );
-        let low = frame(440.0, 600.0, 560.0, 400.0);
+        let low = frame(440.0, 600.0, 560.0, 440.0);
         let grown = preferences_frame(1.1, low, area);
-        assert_eq!((grown.x, grown.y, grown.height), (412.0, 460.0, 440.0));
+        assert_eq!((grown.x, grown.y, grown.height), (412.0, 416.0, 484.0));
         assert_eq!(grown.width, 616.0);
         let small = frame(0.0, 25.0, 1024.0, 743.0);
         assert_eq!(preferences_frame(2.0, current, small), small);
         assert_eq!(zoomed_size(2.0, Some((1024.0, 743.0))), (1024.0, 743.0));
-        assert_eq!(zoomed_size(1.5, None), (840.0, 600.0));
+        assert_eq!(zoomed_size(1.5, None), (840.0, 660.0));
     }
 }

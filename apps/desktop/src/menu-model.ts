@@ -3,8 +3,9 @@
 // browser, into key handling. Add a row here for what the app does itself; a plugin's commands come
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
-import { baseTitle } from '@redlines/editor';
-import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
+import { baseTitle, menuViewOf } from '@redlines/editor';
+import type { CommandRegistry, EditorCommand, MenuView, ViewMode } from '@redlines/editor';
+import { TEXT_LEAST, TEXT_MOST, ZOOM_LEAST, ZOOM_MOST } from './text-size.ts';
 
 export interface MenuCommands {
   /** Opens a new window, with an empty document. */
@@ -23,7 +24,18 @@ export interface MenuCommands {
   print(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
-  setView(mode: ViewMode): void;
+  /** Opens the About Redlines window, or brings it forward. */
+  openAbout(): void;
+  /**
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
+   * nothing when it is shown already (`Editor.showView`).
+   */
+  setView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`);
+   * only while Redlines shows.
+   */
+  switchLook(): void;
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
@@ -37,7 +49,7 @@ export interface MenuCommands {
    */
   undo(): void;
   redo(): void;
-  /** Zooms every window one step up the ladder (text-size.ts), also from ⌘+ typed as "+". */
+  /** Zooms every window one step up the window zoom's ladder (`ZOOM_LADDER`, text-size.ts), also from ⌘+ typed as "+". */
   zoomIn(): void;
   zoomOut(): void;
   /** Takes the zoom back to 100%. */
@@ -65,9 +77,9 @@ export interface MenuState {
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
-  /** The window zoom (zoom.ts), a rung of the ladder; none until the page follows the app's. */
+  /** The window zoom (zoom.ts), a rung of its ladder (`ZOOM_LADDER`); none until the page follows the app's. */
   zoom: number | null;
-  /** The text size, any whole percent from 80 to 200 as a multiple of the theme's own. */
+  /** The text size, any whole percent from 80 to 400 as a multiple of the theme's own. */
   textSize: number;
   /** Whether the document is a file, which can be shown in Finder. */
   hasFile: boolean;
@@ -117,11 +129,6 @@ export interface StandardRow {
   text?: string;
 }
 
-/** About Redlines. What it shows is known when the menu bar is drawn. */
-export interface AboutRow {
-  about: true;
-}
-
 export interface ActionRow {
   text: string;
   /** In Tauri's notation, such as 'Shift+CmdOrCtrl+E'. */
@@ -155,7 +162,7 @@ export interface SubmenuRow {
   };
 }
 
-export type MenuRow = StandardRow | AboutRow | ActionRow | SubmenuRow;
+export type MenuRow = StandardRow | ActionRow | SubmenuRow;
 
 export interface AppMenu {
   title: string;
@@ -258,11 +265,12 @@ export function appMenuModel(
       ? [...rows, SEPARATOR, ...commandRows]
       : [...rows, ...commandRows];
   };
-  const viewRow = (mode: ViewMode, text: string, key: string): ActionRow => ({
+  // Redlines is checked in both its looks: Simple is its simple look, no view of its own.
+  const viewRow = (view: MenuView, text: string, key: string): ActionRow => ({
     text,
     accelerator: `Alt+CmdOrCtrl+${key}`,
-    action: () => commands.setView(mode),
-    checked: (state) => state.view === mode,
+    action: () => commands.setView(view),
+    checked: (state) => menuViewOf(state.view) === view,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
@@ -272,7 +280,7 @@ export function appMenuModel(
     {
       title: 'Redlines',
       rows: [
-        { about: true },
+        { text: 'About Redlines', action: () => commands.openAbout() },
         { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
         SEPARATOR,
         {
@@ -383,9 +391,19 @@ export function appMenuModel(
         // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
         // the clash proves real (design §14, open question 6).
         viewRow('clean', 'Clean', '1'),
-        viewRow('simple', 'Simple', '2'),
-        viewRow('redlines', 'Redlines', '3'),
-        viewRow('raw', 'Raw', '4'),
+        viewRow('redlines', 'Redlines', '2'),
+        viewRow('raw', 'Raw', '3'),
+        SEPARATOR,
+        // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
+        // while it shows, off in the full markup, and not there to choose in Clean and Raw, which
+        // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
+        {
+          text: 'Simple Look',
+          accelerator: 'Alt+CmdOrCtrl+4',
+          action: () => commands.switchLook(),
+          checked: (state) => state.view === 'simple',
+          enabled: (state) => menuViewOf(state.view) === 'redlines',
+        },
         SEPARATOR,
         // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
         // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
@@ -400,14 +418,14 @@ export function appMenuModel(
           text: 'Zoom In',
           accelerator: 'CmdOrCtrl+=',
           action: () => commands.zoomIn(),
-          enabled: (state) => state.zoom !== null && state.zoom < 2,
+          enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
           ...zoomKey,
         },
         {
           text: 'Zoom Out',
           accelerator: 'CmdOrCtrl+-',
           action: () => commands.zoomOut(),
-          enabled: (state) => state.zoom !== null && state.zoom > 0.8,
+          enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
           ...zoomKey,
         },
         SEPARATOR,
@@ -424,13 +442,13 @@ export function appMenuModel(
           text: 'Larger Text',
           accelerator: 'Ctrl+Cmd+=',
           action: () => commands.biggerText(),
-          enabled: (state) => state.textSize < 2,
+          enabled: (state) => state.textSize < TEXT_MOST,
         },
         {
           text: 'Smaller Text',
           accelerator: 'Ctrl+Cmd+-',
           action: () => commands.smallerText(),
-          enabled: (state) => state.textSize > 0.8,
+          enabled: (state) => state.textSize > TEXT_LEAST,
         },
         SEPARATOR,
         {

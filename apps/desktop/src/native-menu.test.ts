@@ -129,6 +129,7 @@ function commands() {
     print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
@@ -145,6 +146,7 @@ function commands() {
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
+    openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
@@ -201,9 +203,9 @@ describe('the menu bar', () => {
   };
 
   it('offers the Redlines view, and its shortcut, whatever the document holds', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const redlines = itemWith('check', 'Redlines');
-    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+3');
+    expect(redlines.accelerator).toBe('Alt+CmdOrCtrl+2');
     // A disabled item takes its shortcut with it.
     menu.update(documentState({ hasRedlines: false }));
     expect(redlines.enabled).toBe(true);
@@ -215,8 +217,39 @@ describe('the menu bar', () => {
     expect(redlines.checked).toBe(true);
   });
 
+  it('lists Clean, Redlines and Raw, with Redlines checked in its simple look too', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const names = ['Clean', 'Simple', 'Redlines', 'Raw'];
+    const views = made.items.filter(
+      (item) => item.kind === 'check' && item.text !== undefined && names.includes(item.text),
+    );
+    expect(views.map((item) => [item.text, item.accelerator])).toEqual([
+      ['Clean', 'Alt+CmdOrCtrl+1'],
+      ['Redlines', 'Alt+CmdOrCtrl+2'],
+      ['Raw', 'Alt+CmdOrCtrl+3'],
+    ]);
+    menu.update(documentState({ hasRedlines: true, view: 'simple' }));
+    expect(views.map((item) => item.checked)).toEqual([false, true, false]);
+    menu.update(documentState({ hasRedlines: true, view: 'raw' }));
+    expect(views.map((item) => item.checked)).toEqual([false, false, true]);
+  });
+
+  it('has a Simple Look switch with ⌥⌘4, on in the simple look and there to choose only in Redlines', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const look = made.items.find((item) => item.kind === 'check' && item.text === 'Simple Look');
+    expect(look?.accelerator).toBe('Alt+CmdOrCtrl+4');
+    menu.update(documentState({ view: 'redlines' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, true]);
+    menu.update(documentState({ view: 'simple' }));
+    expect([look?.checked, look?.enabled]).toEqual([true, true]);
+    menu.update(documentState({ view: 'clean' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
+    menu.update(documentState({ view: 'raw' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
+  });
+
   it('keeps reviewing for documents with redlines', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const review = ['Review Changes', 'Next Change', 'Previous Change'].map((text) =>
       itemWith('item', text),
     );
@@ -229,30 +262,21 @@ describe('the menu bar', () => {
   /** The items of the application menu, Redlines. */
   const appMenu = () => itemWith('submenu', 'Redlines').options['items'] as unknown[];
 
-  it('shows the build tag in About Redlines, and in no item’s label', async () => {
-    await createNativeMenu(modelOf(commands()), {
-      name: 'Redlines',
-      version: '0.1.0-dev',
-      build: '1a2b3c4-20261101.1430',
-    });
-    // The Mac's panel reads "Version 0.1.0-dev (1a2b3c4-20261101.1430)".
-    expect(appMenu()[0]).toEqual({
-      item: {
-        About: { name: 'Redlines', version: '0.1.0-dev', shortVersion: '1a2b3c4-20261101.1430' },
-      },
-      text: 'About Redlines',
-    });
+  it('opens About Redlines, a window of the app’s own, from its item, which shows no build tag', async () => {
+    const c = commands();
+    await createNativeMenu(modelOf(c));
+    // Not the system's panel, whose icon takes no click: an item like any other.
+    const about = appMenu()[0] as { text: string; action: () => void };
+    expect(about.text).toBe('About Redlines');
+    about.action();
+    expect(c.openAbout).toHaveBeenCalledOnce();
+    // The build tag is in the window, and in no item's label.
     for (const item of made.items) expect(String(item.text)).not.toContain('1a2b3c4');
-  });
-
-  it('leaves About to the bundle when the build tag can’t be read', async () => {
-    await createNativeMenu(modelOf(commands()), null);
-    expect(appMenu()[0]).toEqual({ item: { About: null }, text: 'About Redlines' });
   });
 
   it('checks for updates, and opens Preferences, which hold the settings the menu used to', async () => {
     const c = commands();
-    await createNativeMenu(modelOf(c), null);
+    await createNativeMenu(modelOf(c));
     const checkNow = appMenu()[1] as { text: string; action: () => void };
     expect(checkNow.text).toBe('Check for Updates…');
     checkNow.action();
@@ -270,7 +294,7 @@ describe('the menu bar', () => {
   });
 
   it('puts a clicked check back as the state says', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const redlines = itemWith('check', 'Redlines');
     menu.update(documentState({ view: 'redlines' }));
     // The Mac flips the check of the item that was clicked; the view stays as it was.
@@ -286,7 +310,7 @@ describe('the menu bar', () => {
 
     it('rebuilds Open Recent when the list changes', async () => {
       const c = commands();
-      const menu = await createNativeMenu(modelOf(c), null);
+      const menu = await createNativeMenu(modelOf(c));
       menu.update(documentState({ recent: ['/docs/plan.md', '/notes/old.md'] }));
       await settle();
       expect(labels()).toEqual(['plan.md', 'old.md', undefined, 'Clear Menu']);
@@ -308,7 +332,7 @@ describe('the menu bar', () => {
     });
 
     it('greys out Clear Menu when there is nothing to clear', async () => {
-      const menu = await createNativeMenu(modelOf(commands()), null);
+      const menu = await createNativeMenu(modelOf(commands()));
       menu.update(documentState({ recent: [] }));
       await settle();
       expect(labels()).toEqual(['Clear Menu']);
@@ -316,7 +340,7 @@ describe('the menu bar', () => {
     });
 
     it('follows two quick changes to the last', async () => {
-      const menu = await createNativeMenu(modelOf(commands()), null);
+      const menu = await createNativeMenu(modelOf(commands()));
       menu.update(documentState({ recent: ['/a.md'] }));
       menu.update(documentState({ recent: ['/b.md', '/a.md'] }));
       await settle();
@@ -325,7 +349,7 @@ describe('the menu bar', () => {
   });
 
   it('enables Reveal in Finder only for a document that is a file', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const reveal = itemWith('item', 'Reveal in Finder');
     menu.update(documentState({ hasFile: false }));
     expect(reveal.enabled).toBe(false);
@@ -334,7 +358,7 @@ describe('the menu bar', () => {
   });
 
   it('sends the menu only what changed', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const raw = itemWith('check', 'Raw');
     const setChecked = vi.spyOn(raw as unknown as { setChecked(on: boolean): void }, 'setChecked');
     menu.update(documentState({ view: 'clean' }));
@@ -345,7 +369,7 @@ describe('the menu bar', () => {
   });
 
   it('follows the sidebar in the label of Show Files', async () => {
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     const files = itemWith('item', 'Show Files');
     menu.update(documentState({ sidebarOpen: true }));
     expect(files.text).toBe('Hide Files');
@@ -359,7 +383,7 @@ describe('the menu bar', () => {
     made.onWindowsMenu = setAsWindows;
     const setAsHelp = vi.fn();
     made.onHelpMenu = setAsHelp;
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     expect(made.appMenus).toEqual([]);
     expect(setAsWindows).not.toHaveBeenCalled();
 
@@ -374,13 +398,13 @@ describe('the menu bar', () => {
   it('lets go of the menu that was the app’s, which Tauri hands back each time', async () => {
     const previous = { close: vi.fn(() => Promise.resolve()) };
     made.previousMenu = previous;
-    const menu = await createNativeMenu(modelOf(commands()), null);
+    const menu = await createNativeMenu(modelOf(commands()));
     await menu.activate();
     expect(previous.close).toHaveBeenCalledOnce();
   });
 
   it('draws no empty menus', async () => {
-    await createNativeMenu(modelOf(commands()), null);
+    await createNativeMenu(modelOf(commands()));
     const bar = made.items.find((item) => item.kind === 'menu');
     const titles = (bar?.options['items'] as FakeItem[]).map((item) => item.text);
     expect(titles).toEqual(['Redlines', 'File', 'Edit', 'View', 'Review', 'Window', 'Help']);
@@ -411,7 +435,7 @@ describe('the menu bar', () => {
 
     it('draws a check item that follows activeCommands, with its accelerator', async () => {
       const registry = registered();
-      const menu = await createNativeMenu(modelOf(commands(), registry), null);
+      const menu = await createNativeMenu(modelOf(commands(), registry));
       const bold = itemWith('check', 'Bold');
       expect(bold.accelerator).toBe('CmdOrCtrl+B');
       menu.update(documentState({ activeCommands: ['format.bold'] }));
@@ -428,7 +452,7 @@ describe('the menu bar', () => {
 
     it("retitles and enables Undo and Redo from the history, and runs the app's commands", async () => {
       const c = commands();
-      const menu = await createNativeMenu(modelOf(c, registered()), null);
+      const menu = await createNativeMenu(modelOf(c, registered()));
       const undo = itemWith('item', 'Undo');
       const redo = itemWith('item', 'Redo');
       expect(undo.accelerator).toBe('CmdOrCtrl+Z');
@@ -454,7 +478,7 @@ describe('the menu bar', () => {
           run: () => true,
         },
       ]);
-      const menu = await createNativeMenu(modelOf(commands(), registry), null);
+      const menu = await createNativeMenu(modelOf(commands(), registry));
       const item = itemWith('item', 'Delete Row');
       menu.update(documentState({ commandTitles: { 'table.deleteRow': 'Delete 3 Rows' } }));
       expect(item.text).toBe('Delete 3 Rows');
@@ -463,7 +487,7 @@ describe('the menu bar', () => {
     });
 
     it('disables an item that isn’t in enabledCommands', async () => {
-      const menu = await createNativeMenu(modelOf(commands(), registered()), null);
+      const menu = await createNativeMenu(modelOf(commands(), registered()));
       const link = itemWith('item', 'Link…');
       menu.update(documentState({ enabledCommands: [] }));
       expect(link.enabled).toBe(false);
@@ -473,7 +497,7 @@ describe('the menu bar', () => {
 
     it('draws a command with nothing to follow as a plain item, under its menu', async () => {
       const registry = registered();
-      await createNativeMenu(modelOf(commands(), registry), null);
+      await createNativeMenu(modelOf(commands(), registry));
       const rows = itemWith('submenu', 'Format').options['items'] as unknown[];
       expect(rows[0]).toBe(itemWith('check', 'Bold'));
       expect(rows[1]).toEqual({ item: 'Separator' });
@@ -489,7 +513,7 @@ describe('the menu bar', () => {
     // Tauri deletes the action from the options it is given.
     const c = commands();
     const model = modelOf(c);
-    await createNativeMenu(model, null);
+    await createNativeMenu(model);
     for (const item of made.items) {
       for (const option of (item.options['items'] ?? []) as Record<string, unknown>[]) {
         delete option['action'];
@@ -509,15 +533,17 @@ describe('browser shortcuts', () => {
     expect(press('KeyE', { metaKey: true, shiftKey: true })).toBe(true);
     expect(c.toggleTracking).toHaveBeenCalledOnce();
     // Option changes the character typed, so the key's position decides.
-    press('Digit4', { metaKey: true, altKey: true, key: '¢' });
-    expect(c.setView).toHaveBeenCalledWith('raw');
-    // Redlines and Simple are there for any document, so their keys never wait for redlines.
     press('Digit3', { metaKey: true, altKey: true, key: '£' });
-    expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledWith('raw');
+    // Redlines is there for any document, so its key never waits for redlines.
     press('Digit2', { metaKey: true, altKey: true, key: '™' });
-    expect(c.setView).toHaveBeenLastCalledWith('simple');
+    expect(c.setView).toHaveBeenLastCalledWith('redlines');
     press('Digit1', { metaKey: true, altKey: true, key: '¡' });
     expect(c.setView).toHaveBeenLastCalledWith('clean');
+    // The fourth key is Simple Look, which switches the look and shows no view.
+    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(true);
+    expect(c.switchLook).toHaveBeenCalledOnce();
+    expect(c.setView).toHaveBeenCalledTimes(3);
     press('KeyS', { metaKey: true, ctrlKey: true });
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     expect(c.save).not.toHaveBeenCalled();
@@ -647,7 +673,7 @@ describe('+ typed as a key', () => {
     expect(c.zoomIn).not.toHaveBeenCalled();
     // The text size has its own limit.
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(true);
-    state = documentState({ textSize: 2 });
+    state = documentState({ textSize: 4 });
     expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(false);
     expect(c.biggerText).toHaveBeenCalledOnce();
     stop();

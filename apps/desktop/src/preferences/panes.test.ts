@@ -36,6 +36,7 @@ function setup(extra: Partial<PaneDeps> = {}) {
       Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: true }),
     defaultApp: () => Promise.resolve({ status: 'other', app: 'TextEdit' }),
     makeDefaultApp: () => Promise.resolve({ outcome: 'made' }),
+    chooseFolder: () => Promise.resolve(null),
     ...extra,
   };
   const container = document.createElement('div');
@@ -91,6 +92,7 @@ describe('the panes', () => {
     expect(rowLabels(draw('general').container)).toEqual([
       'Name and handle',
       'On launch',
+      'Default folder for new documents',
       'Check for updates automatically',
       iconRotationLabel(),
       'Default app for Markdown',
@@ -106,8 +108,11 @@ describe('the panes', () => {
       'Spell check',
       'Smart quotes and dashes',
       'Close brackets and Markdown pairs',
+      'Suggest emoji after a colon',
       'Track Changes on for new documents',
       'Show line break marks (¶)',
+      'Show word count',
+      'Images',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
   });
@@ -130,6 +135,14 @@ describe('the panes', () => {
     track.dispatchEvent(new Event('change'));
     expect(now().trackNewDocuments).toBe(true);
 
+    // The list of emoji starts on, and goes off at once.
+    const emoji = control<HTMLInputElement>(container, 'Suggest emoji after a colon', 'input');
+    expect(emoji.checked).toBe(true);
+    emoji.checked = false;
+    emoji.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ emojiSuggestions: false });
+    expect(now().emojiSuggestions).toBe(false);
+
     // Line break marks start hidden, and show at once.
     const marks = control<HTMLInputElement>(container, 'Show line break marks (¶)', 'input');
     expect(marks.checked).toBe(false);
@@ -137,6 +150,14 @@ describe('the panes', () => {
     marks.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenLastCalledWith({ showLineBreakMarks: true });
     expect(now().showLineBreakMarks).toBe(true);
+
+    // The word count in the corner starts shown, and hides at once.
+    const count = control<HTMLInputElement>(container, 'Show word count', 'input');
+    expect(count.checked).toBe(true);
+    count.checked = false;
+    count.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ showWordCount: false });
+    expect(now().showWordCount).toBe(false);
   });
 
   it('starts each control at the stored setting', () => {
@@ -284,9 +305,13 @@ describe('the panes', () => {
     for (let i = 0; i < 10; i++) smaller?.click();
     expect(now().textSize).toBe(0.8);
     expect(smaller?.disabled).toBe(true);
-    for (let i = 0; i < 10; i++) larger?.click();
-    expect(now().textSize).toBe(2);
+    // Past the window zoom's 200%, to 400%: the text goes twice as far.
+    for (let i = 0; i < 20; i++) larger?.click();
+    expect(now().textSize).toBe(4);
+    expect(shown()).toBe('400%');
     expect(larger?.disabled).toBe(true);
+    smaller?.click();
+    expect(now().textSize).toBe(3);
   });
 
   it('shows a text size between rungs and steps from it to the next rung', () => {
@@ -333,6 +358,100 @@ describe('the panes', () => {
     handle!.dispatchEvent(new Event('blur'));
     expect(handle!.value).toBe('ada-lovelace');
     expect(update).toHaveBeenCalled();
+  });
+
+  describe('the Quick Look row', () => {
+    const LABEL = 'Quick Look previews of Markdown files';
+
+    it('is drawn after the default app, where the app can open the settings', () => {
+      const labels = rowLabels(
+        draw('general', { openQuickLookSettings: () => Promise.resolve() }).container,
+      );
+      expect(labels.indexOf(LABEL)).toBe(labels.indexOf('Default app for Markdown') + 1);
+      expect(labels.indexOf('Command line')).toBe(labels.indexOf(LABEL) + 1);
+    });
+
+    it('is not drawn where there is no Quick Look to turn off', () => {
+      expect(rowLabels(draw('general').container)).not.toContain(LABEL);
+    });
+
+    /** What the line says of where the preview is turned off, which names no menu of System Settings. */
+    const HINT =
+      'Redlines’ preview is one of the Quick Look extensions in System Settings, where it can be turned off.';
+
+    it('opens System Settings from its button, and says where to turn the preview off', () => {
+      const open = vi.fn(() => Promise.resolve());
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const row = container.querySelector<HTMLElement>(`[data-row="${LABEL}"]`);
+      const status = row?.querySelector('[role="status"]');
+      expect(status?.textContent).toBe(HINT);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      expect(button.textContent).toBe('Open System Settings');
+      button.click();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+      expect(status?.textContent).toBe(HINT);
+    });
+
+    it('says why when it could not, with the hint still, and the next press starts again', async () => {
+      const open = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error('System Settings didn’t open.'))
+        .mockResolvedValue(undefined);
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      button.click();
+      await vi.waitFor(() =>
+        expect(status?.textContent).toBe(`System Settings didn’t open. ${HINT}`),
+      );
+      expect(status?.classList.contains('rl-pref-failure')).toBe(true);
+      button.click();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(status?.classList.contains('rl-pref-failure')).toBe(false);
+      expect(status?.textContent).toBe(HINT);
+    });
+
+    it('shows a refusal that is not an Error, as the app’s commands give it', async () => {
+      // A command that fails rejects with the string that its Rust function returned.
+      const open = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue('Quick Look previews are the Mac’s.');
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      control<HTMLButtonElement>(container, LABEL, 'button').click();
+      await vi.waitFor(() =>
+        expect(status?.textContent).toBe(`Quick Look previews are the Mac’s. ${HINT}`),
+      );
+    });
+
+    it('takes one press at a time, so that a late answer never lands on another press', async () => {
+      let answer: (outcome: { failed: boolean }) => void = () => {};
+      const open = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            answer = ({ failed }) => (failed ? reject(new Error('Too late.')) : resolve());
+          }),
+      );
+      const { container } = draw('general', { openQuickLookSettings: open });
+      const status = container.querySelector<HTMLElement>(`[data-row="${LABEL}"] [role="status"]`);
+      const button = control<HTMLButtonElement>(container, LABEL, 'button');
+      button.click();
+      button.click();
+      button.click();
+      expect(open).toHaveBeenCalledTimes(1);
+      answer({ failed: true });
+      await vi.waitFor(() => expect(status?.textContent).toBe(`Too late. ${HINT}`));
+      // Once it has answered, the next press goes through.
+      button.click();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(status?.textContent).toBe(HINT);
+      answer({ failed: false });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      button.click();
+      expect(open).toHaveBeenCalledTimes(3);
+      expect(status?.textContent).toBe(HINT);
+    });
   });
 
   describe('the Command line row', () => {
@@ -605,6 +724,344 @@ describe('the panes', () => {
       installing.resolve({ outcome: 'cancelled' });
       await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
       expect(document.activeElement).toBe(name);
+    });
+  });
+
+  describe('the Images row', () => {
+    /** The row's parts: the place's menu, the folder's name, and the line that says where images go. */
+    const imagesRow = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const place = row?.querySelector<HTMLSelectElement>('select');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      if (!row || !place || !status) throw new Error('no Images row');
+      return {
+        place,
+        /** The field for the folder's name, which is there only for a folder beside the document. */
+        name: () => row.querySelector<HTMLInputElement>('input[type="text"]'),
+        said: () => status.textContent,
+        failed: () => status.classList.contains('rl-pref-failure'),
+        choose: (value: string) => {
+          place.value = value;
+          place.dispatchEvent(new Event('change'));
+        },
+        type: (field: HTMLInputElement, text: string) => {
+          field.value = text;
+          field.dispatchEvent(new Event('input'));
+        },
+      };
+    };
+
+    it('offers a folder beside the document, one named for it, and the document’s own, in a folder named images', () => {
+      const row = imagesRow(draw('editor').container);
+      expect([...row.place.options].map((option) => [option.value, option.textContent])).toEqual([
+        ['folder', 'In a folder beside the document'],
+        ['assets', 'In a folder named for the document'],
+        ['same', 'In the document’s folder'],
+      ]);
+      expect(row.place.value).toBe('folder');
+      expect(row.name()?.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('starts at the stored settings, with the folder’s name only where it is used', () => {
+      const { container } = setup();
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        imagePlace: 'assets' as const,
+        imageFolderName: 'pictures',
+      };
+      renderPane('editor', container, { ...setup().deps, settings: () => settings });
+      const row = imagesRow(container);
+      expect(row.place.value).toBe('assets');
+      expect(row.name()).toBeNull();
+      expect(row.said()).toBe('Saved in a folder like “plan.assets” next to the document.');
+    });
+
+    it('saves a place at once, and shows the folder’s name only for a folder beside the document', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      row.choose('same');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'same' });
+      expect(now().imagePlace).toBe('same');
+      expect(row.name()).toBeNull();
+      expect(row.said()).toBe('Saved next to the document.');
+      row.choose('assets');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'assets' });
+      expect(row.name()).toBeNull();
+      row.choose('folder');
+      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'folder' });
+      expect(row.name()?.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+    });
+
+    it('saves the folder’s name as it is typed, without the spaces around it', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      row.type(field, ' Bilder 2026 ');
+      expect(update).toHaveBeenLastCalledWith({ imageFolderName: 'Bilder 2026' });
+      expect(now().imageFolderName).toBe('Bilder 2026');
+      expect(row.said()).toBe('Saved in “Bilder 2026” next to the document.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('saves no name that a folder beside the document can’t have, and says why', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      for (const typed of ['.images', 'a/b', '../images', 'a\\b', 'a\u0085b']) {
+        update.mockClear();
+        row.type(field, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe('A folder’s name has no slash and doesn’t start with a dot.');
+        expect(row.failed()).toBe(true);
+      }
+      // What is wrong is what is said: a name that is missing or too long has no slash to blame.
+      for (const [typed, said] of [
+        ['', 'A folder needs a name.'],
+        ['  ', 'A folder needs a name.'],
+        ['x'.repeat(101), 'A folder’s name can’t be longer than 100 characters.'],
+      ] as const) {
+        update.mockClear();
+        row.type(field, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe(said);
+        expect(row.failed()).toBe(true);
+      }
+      expect(now().imageFolderName).toBe('images');
+    });
+
+    it('goes back to the saved name when the field is left with one that isn’t a name', () => {
+      const { container } = draw('editor');
+      const row = imagesRow(container);
+      const field = row.name()!;
+      row.type(field, 'a/b');
+      // While it is being typed it is left as it is.
+      expect(field.value).toBe('a/b');
+      field.dispatchEvent(new Event('blur'));
+      expect(field.value).toBe('images');
+      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.failed()).toBe(false);
+      // A name that was fine is shown as it was saved, trimmed.
+      row.type(field, ' pics ');
+      field.dispatchEvent(new Event('blur'));
+      expect(field.value).toBe('pics');
+    });
+
+    it('is a group named for the row, whose menu and field have names of their own', () => {
+      const { container } = draw('editor');
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const group = row?.querySelector<HTMLElement>('[role="group"]');
+      const label = row?.querySelector<HTMLElement>('.rl-pref-label');
+      expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
+      // The group's name is not read for what is inside it by every screen reader.
+      expect(group?.querySelector('select')?.getAttribute('aria-label')).toBe(
+        'Where images are saved',
+      );
+      expect(group?.querySelector('input')?.getAttribute('aria-label')).toBe('Folder name');
+    });
+  });
+
+  describe('the Default folder for new documents row', () => {
+    /** The row's parts: the folder's name, the line under it, and its two buttons. */
+    const folderRow = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>(
+        '[data-row="Default folder for new documents"]',
+      );
+      const path = row?.querySelector<HTMLElement>('.rl-pref-path');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      const choose = [...(row?.querySelectorAll('button') ?? [])].find(
+        (button) => button.textContent === 'Choose…',
+      );
+      if (!row || !path || !status || !choose) throw new Error('no Default folder row');
+      return {
+        choose,
+        shown: () => path.textContent,
+        hint: () => path.title,
+        said: () => status.textContent,
+        failed: () => status.classList.contains('rl-pref-failure'),
+        /** The Clear button, which is there only while a folder is set. */
+        clear: () =>
+          [...row.querySelectorAll('button')].find((button) => button.textContent === 'Clear'),
+        /** Presses Choose… as from the keyboard: it has the focus. */
+        press: () => {
+          choose.focus();
+          choose.click();
+        },
+      };
+    };
+
+    it('says that no folder is set, and offers to choose one', () => {
+      const row = folderRow(draw('general').container);
+      expect(row.shown()).toBe('Not set');
+      expect(row.hint()).toBe('');
+      expect(row.clear()).toBeUndefined();
+      expect(row.said()).toBe('Save opens where macOS last saved.');
+      expect(row.failed()).toBe(false);
+    });
+
+    it('is a group named for the row, whose buttons then have a name to be read under', () => {
+      const { container } = draw('general');
+      const row = container.querySelector<HTMLElement>(
+        '[data-row="Default folder for new documents"]',
+      );
+      const group = row?.querySelector<HTMLElement>('[role="group"]');
+      const label = row?.querySelector<HTMLElement>('.rl-pref-label');
+      expect(group?.querySelector('button')?.textContent).toBe('Choose…');
+      expect(label?.textContent).toBe('Default folder for new documents');
+      expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
+    });
+
+    it('shows the folder by its name, with its whole path as the hint, and offers to clear it', () => {
+      const { container } = setup();
+      const settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' };
+      renderPane('general', container, {
+        ...setup().deps,
+        settings: () => settings,
+      });
+      const row = folderRow(container);
+      expect(row.shown()).toBe('Notes');
+      expect(row.hint()).toBe('/Users/ada/Notes');
+      expect(row.clear()).toBeDefined();
+      expect(row.said()).toBe('Save opens in this folder.');
+    });
+
+    it('shows a folder of a Windows path by its last name too', () => {
+      for (const folder of [
+        'C:\\Users\\ada\\Notes',
+        'C:\\Users\\ada\\Notes\\',
+        '/Users/ada/Notes/',
+      ]) {
+        const { container } = setup();
+        const settings = { ...DEFAULT_SETTINGS, newDocumentFolder: folder };
+        renderPane('general', container, { ...setup().deps, settings: () => settings });
+        expect(folderRow(container).shown(), folder).toBe('Notes');
+        expect(folderRow(container).hint(), folder).toBe(folder);
+      }
+    });
+
+    it('shows the disk’s root by its whole path, which has no name', () => {
+      const { container } = setup();
+      const settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/' };
+      renderPane('general', container, { ...setup().deps, settings: () => settings });
+      expect(folderRow(container).shown()).toBe('/');
+    });
+
+    it('keeps the folder the panel picks, which the next panel starts in', async () => {
+      const chooseFolder = vi.fn<PaneDeps['chooseFolder']>(() =>
+        Promise.resolve('/Users/ada/Notes'),
+      );
+      const { container, update, now } = draw('general', { chooseFolder });
+      const row = folderRow(container);
+      row.press();
+      // The first time, there is nowhere to start from.
+      expect(chooseFolder).toHaveBeenLastCalledWith(null);
+      await vi.waitFor(() => expect(row.shown()).toBe('Notes'));
+      expect(update).toHaveBeenCalledWith({ newDocumentFolder: '/Users/ada/Notes' });
+      expect(now().newDocumentFolder).toBe('/Users/ada/Notes');
+      expect(row.hint()).toBe('/Users/ada/Notes');
+      expect(row.clear()).toBeDefined();
+      // The line under the row follows, which a screen reader reads as it changes.
+      expect(row.said()).toBe('Save opens in this folder.');
+      expect(row.failed()).toBe(false);
+      row.press();
+      expect(chooseFolder).toHaveBeenLastCalledWith('/Users/ada/Notes');
+    });
+
+    it('is marked as waiting while the panel is open, so that no redraw of the pane takes the row away', async () => {
+      const answer = later<string | null>();
+      const { container } = draw('general', { chooseFolder: () => answer.promise });
+      const row = folderRow(container);
+      const waiting = () => container.querySelector('[data-waiting]');
+      expect(waiting()).toBeNull();
+      row.press();
+      expect(waiting()).not.toBeNull();
+      answer.resolve('/Users/ada/Notes');
+      await vi.waitFor(() => expect(waiting()).toBeNull());
+      const refused = later<string | null>();
+      const again = draw('general', { chooseFolder: () => refused.promise });
+      folderRow(again.container).press();
+      expect(again.container.querySelector('[data-waiting]')).not.toBeNull();
+      refused.reject(new Error('No panel.'));
+      await vi.waitFor(() => expect(again.container.querySelector('[data-waiting]')).toBeNull());
+    });
+
+    it('changes nothing when the panel is cancelled', async () => {
+      const answer = later<string | null>();
+      const { container, update } = draw('general', { chooseFolder: () => answer.promise });
+      const row = folderRow(container);
+      row.press();
+      answer.resolve(null);
+      await answer.promise;
+      await vi.waitFor(() => expect(row.choose.disabled).toBe(false));
+      expect(update).not.toHaveBeenCalled();
+      expect(row.shown()).toBe('Not set');
+    });
+
+    it('clears the folder, which leaves Save where macOS has it, and puts the focus on Choose…', () => {
+      let settings: Settings = { ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' };
+      const update = vi.fn((change: Partial<Settings>) => {
+        settings = { ...settings, ...change };
+      });
+      const { container } = setup();
+      renderPane('general', container, {
+        ...setup().deps,
+        settings: () => settings,
+        update,
+      });
+      const row = folderRow(container);
+      expect(settings.newDocumentFolder).toBe('/Users/ada/Notes');
+      const clear = row.clear();
+      clear?.focus();
+      clear?.click();
+      expect(update).toHaveBeenCalledWith({ newDocumentFolder: null });
+      expect(settings.newDocumentFolder).toBeNull();
+      expect(row.shown()).toBe('Not set');
+      expect(row.hint()).toBe('');
+      expect(row.said()).toBe('Save opens where macOS last saved.');
+      expect(row.clear()).toBeUndefined();
+      // The button that was pressed is gone: the keyboard goes on from Choose….
+      expect(document.activeElement).toBe(row.choose);
+    });
+
+    it('waits for the panel with the button off, and gives it the focus back', async () => {
+      const answer = later<string | null>();
+      const { container } = draw('general', { chooseFolder: () => answer.promise });
+      const row = folderRow(container);
+      row.press();
+      // The panel is the app's, over this window: a second press would open another.
+      expect(row.choose.disabled).toBe(true);
+      loseFocus();
+      answer.resolve('/Users/ada/Drafts');
+      await vi.waitFor(() => expect(row.choose.disabled).toBe(false));
+      expect(document.activeElement).toBe(row.choose);
+    });
+
+    it('says why when the app can’t ask for a folder, and leaves the setting as it was', async () => {
+      const chooseFolder = vi.fn(() => Promise.reject(new Error('Folders are chosen in the app.')));
+      const { container, update } = draw('general', { chooseFolder });
+      const row = folderRow(container);
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe('Folders are chosen in the app.'));
+      expect(row.failed()).toBe(true);
+      expect(row.choose.disabled).toBe(false);
+      expect(update).not.toHaveBeenCalled();
+      expect(row.shown()).toBe('Not set');
+    });
+
+    it('goes back to its own line once a folder is chosen after a failure', async () => {
+      const chooseFolder = vi
+        .fn<PaneDeps['chooseFolder']>()
+        .mockRejectedValueOnce(new Error('No panel.'))
+        .mockResolvedValueOnce('/Users/ada/Notes');
+      const row = folderRow(draw('general', { chooseFolder }).container);
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe('No panel.'));
+      row.press();
+      await vi.waitFor(() => expect(row.shown()).toBe('Notes'));
+      expect(row.said()).toBe('Save opens in this folder.');
+      expect(row.failed()).toBe(false);
     });
   });
 

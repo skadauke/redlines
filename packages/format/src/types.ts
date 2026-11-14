@@ -110,11 +110,20 @@ export interface MarkEntry extends MarkExtras {
   extra?: ExtraFields;
 }
 
+/** The view a document opens in (format §5.6): Clean, Redlines' full markup, or Redlines' simple
+ * look. Raw is never saved. */
+export type LedgerView = 'clean' | 'redlines' | 'simple';
+
 /** The YAML ledger in the `<!-- redlines` comment at the end of the file. */
 export interface Ledger {
   version: 1;
   /** Everyone who opens the file starts with Track Changes on, like Word's "For Everyone". */
   tracking?: 'everyone';
+  /**
+   * The view the document was in when it was last saved, and opens in (format §5.6). Never the
+   * reason for a ledger: it is kept only in one that holds something else.
+   */
+  view?: LedgerView;
   /** `full` keeps every revision and decision in the file. The default is `current`. */
   history?: 'current' | 'full';
   people: Person[];

@@ -8,8 +8,16 @@ import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { acpAgentEdits, createDetectionProcesses } from '../agent-preferences.ts';
-import { acpAgents, commandLine, type AcpAgent } from '../agent-programs.ts';
+import { announceAgentsChanged } from '../agent-changes.ts';
+import {
+  agentSetup,
+  agentSkills,
+  createDetectionProcesses,
+  homeAccess,
+  openClawEdits,
+  openFilesAndFoldersSettings,
+} from '../agent-preferences.ts';
+import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
@@ -18,6 +26,8 @@ import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
+import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
+import { createSetupRegistry } from './setup-registry.ts';
 import {
   PANES,
   renderPane,
@@ -66,26 +76,34 @@ const git = await currentIdentity()
 
 // The agents are asked about when the Agents pane opens, never at launch (agentsPane below). An
 // answer is kept while the pane stays open, so that redrawing it for a changed setting asks nothing
-// again; leaving the pane forgets it, and coming back asks anew, as after signing in.
+// again; leaving the pane forgets it, and coming back asks anew, as after signing in. Check Again,
+// and the look after an update or a sign-in, ask the program afresh.
 const processes = createDetectionProcesses();
 const providers: AgentProvider[] = [
   createClaudeProvider(processes),
   createCodexProvider(processes),
 ];
 const detections = new Map<string, Promise<AgentState>>();
-
-/** The other agents as the pane shows them. */
-const shownOthers = (list: AcpAgent[]) =>
-  list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
+// The updates and sign-ins asked of the app go on when the pane is drawn again, as it is whenever
+// another window changes a setting: a row drawn then follows what is under way. When one ends, what
+// was found is stale, and the document windows, which keep it for a minute, are told.
+const setups = createSetupRegistry((id) => {
+  detections.delete(id);
+  announceAgentsChanged();
+});
 
 /**
  * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
  * Outside the app, in a plain browser, `outside` is.
  */
-async function appCommand<T>(command: string, outside: string): Promise<T> {
+async function appCommand<T>(
+  command: string,
+  outside: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri) throw new Error(outside);
   try {
-    return await invoke<T>(command);
+    return await invoke<T>(command, args);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
@@ -95,6 +113,12 @@ const installCommandLine = <T>(command: string) =>
   appCommand<T>(command, 'The command line is installed from the app.');
 const defaultAppCommand = <T>(command: string) =>
   appCommand<T>(command, 'The default app is set from the app.');
+
+/**
+ * Whether there is a Quick Look preview to turn off: only the app can say (quick_look.rs: it runs
+ * from a bundle that holds the extension, on a macOS that loads it), and a plain browser has none.
+ */
+const hasQuickLook = isTauri && (await invoke<boolean>('quick_look_available').catch(() => false));
 
 const deps: PaneDeps = {
   settings: () => settings,
@@ -116,29 +140,68 @@ const deps: PaneDeps = {
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
   defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
   makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
+  // The app's refusal is a string, which the row shows as it is.
+  ...(hasQuickLook
+    ? { openQuickLookSettings: () => invoke<void>('open_quick_look_settings') }
+    : {}),
+  // The app shows the panel, a sheet of this window, and hands back only the folder's path.
+  chooseFolder: (start) =>
+    appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', { start }),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
         id: provider.id,
         name: provider.name,
-        detect: () => {
+        detect: (fresh?: boolean) => {
+          if (fresh) detections.delete(provider.id);
           const kept = detections.get(provider.id) ?? provider.detect();
           detections.set(provider.id, kept);
+          // A look the person asked for may have found the agent changed under the documents too.
+          if (fresh)
+            void kept.then(
+              () => announceAgentsChanged(),
+              () => {},
+            );
           return kept;
         },
+        // The app updates and signs in an agent with its own command, for the agent named and
+        // nothing more; in a plain browser there is no app to ask.
+        ...(isTauri
+          ? {
+              update: () => setups.track(provider.id, 'update', agentSetup.update(provider.id)),
+              signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
+              signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
+              stop: () => agentSetup.stop(provider.id),
+              running: () => setups.running(provider.id),
+              // The skill that teaches the agent Redlines files, in the folder it reads skills
+              // from. OpenClaw reads Codex's folder too.
+              skill: {
+                status: () => agentSkills.status(provider.id),
+                install: () => agentSkills.install(provider.id),
+                ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
+              },
+            }
+          : {}),
       })),
-      // The other agents, which the app keeps and asks the person about before any change.
+      copy: copyText,
+      // The command line is installed in General, which the skill needs.
+      showGeneral: () => show('general'),
+      // What macOS holds back from Redlines, asked when the person picks the home folder.
+      ...(isTauri ? { homeAccess, openFilesAndFoldersSettings } : {}),
+      // The agents of an OpenClaw Gateway, added here (the Other agents row stays off), and the
+      // skill for an OpenClaw on this Mac.
       ...(isTauri
         ? {
-            others: {
-              list: () => acpAgents.list().then(shownOthers),
-              // The app's refusal is the line the pane shows.
-              add: (name: string, command: string) =>
-                acpAgentEdits.add(name, command).then(shownOthers),
-              remove: (id: string) => acpAgentEdits.remove(id).then(shownOthers),
+            openclaw: {
+              ...openClawEdits,
+              skill: {
+                status: () => agentSkills.status('openclaw'),
+                install: () => agentSkills.install('openclaw'),
+              },
             },
           }
         : {}),
+      // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),
       openLogs: async () => {
@@ -165,9 +228,11 @@ ignorePinch(window);
 watchSettings((next) => {
   settings = next;
   // The main window saves the last document at every change of its file. Redrawing the pane while
-  // someone types their name would take the caret away, so what is being edited is left alone.
+  // someone types their name would take the caret away, so what is being edited is left alone, and
+  // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) show(current);
+  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');
@@ -225,7 +290,10 @@ for (const { id, label } of PANES) {
   buttons.set(id, button);
   tabs.append(button);
 }
-show('general');
+// A window that asks for a pane (a failed run's line offers Preferences › Agents) is shown it, as
+// it opens and while it is open.
+show(takePaneRequest() ?? 'general');
+watchPaneRequests((id) => show(id));
 
 if (isTauri) {
   // The app zooms this window (and grows it) as the person's zoom changes anywhere; the stepper

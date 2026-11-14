@@ -80,6 +80,16 @@ export const agentStep = Annotation.define<AgentStep>();
 export const joinsStep = Annotation.define<true>();
 
 /**
+ * Marks a transaction that joins the newest step, whatever its owner, the time since it, the
+ * selections after it and what isolated it (Redlines): a change that is no step of its own, such as
+ * the view a Save records in the ledger. Undo gives it back with that step, so that the steps below
+ * still fit the text, as they wouldn't if it were made outside the history (a step that replaced
+ * the ledger would be taken back over the line the change put in it). With no step to join, it is
+ * a step of its own.
+ */
+export const joinsNewestStep = Annotation.define<true>();
+
+/**
  * Takes the steps done back to `depth` of them, and maps the rest through `mapping`, if any
  * (Redlines): a take-back of Returns outside the history carries it, with the depth before the
  * first Return it takes back, so that no step of a Return it took back, nor of what was done and
@@ -605,16 +615,17 @@ class HistoryState {
       lastEvent &&
       lastChanges &&
       event.changes &&
-      (event.owner
-        ? !this.isolated && lastEvent.owner?.group === event.owner.group
-        : !lastEvent.owner &&
-          !lastChanges.empty &&
-          (!userEvent || joinableUserEvent.test(userEvent)) &&
-          ((!lastEvent.selectionsAfter.length &&
-            time - this.prevTime < config.newGroupDelay &&
-            config.joinToEvent(tr, isAdjacent(lastChanges, event.changes))) ||
-            // For compose (but not compose.start) events, always join with previous event
-            userEvent === 'input.type.compose'))
+      (tr.annotation(joinsNewestStep) ||
+        (event.owner
+          ? !this.isolated && lastEvent.owner?.group === event.owner.group
+          : !lastEvent.owner &&
+            !lastChanges.empty &&
+            (!userEvent || joinableUserEvent.test(userEvent)) &&
+            ((!lastEvent.selectionsAfter.length &&
+              time - this.prevTime < config.newGroupDelay &&
+              config.joinToEvent(tr, isAdjacent(lastChanges, event.changes))) ||
+              // For compose (but not compose.start) events, always join with previous event
+              userEvent === 'input.type.compose')))
     ) {
       trimmed += trimmedBy(done.length - 1, config.minDepth);
       done = updateBranch(

@@ -99,7 +99,7 @@ function pressAt(editor: Editor, x: number, y: number, detail = 1): void {
 /** Loads a document in Clean, Track Changes off, with the caret at `‸` if it has one. */
 async function load(editor: Editor, doc: string, tracking = false): Promise<void> {
   editor.setViewMode('clean');
-  editor.setTracking(tracking);
+  editor.setTracking(tracking, { inFile: false });
   editor.reloadDoc(doc.replace('‸', ''));
   editor.view.focus();
   const caret = doc.indexOf('‸');
@@ -2100,7 +2100,7 @@ const CHECKS: Check[] = [
       if (card?.textContent !== 'Formatted: column Count centered (was default)')
         problems['card'] = card?.textContent ?? 'no card';
       // A letter typed on the line under the table, tracked.
-      editor.setTracking(true);
+      editor.setTracking(true, { inFile: false });
       const at = doc(editor).indexOf('Below.');
       const before = doc(editor);
       editor.view.dispatch({
@@ -2319,7 +2319,7 @@ export async function runTableCheck(editor: Editor): Promise<void> {
       console.log(`TABLE-CHECK ${check.name} FAIL ${JSON.stringify({ threw: String(error) })}`);
     }
   }
-  editor.setTracking(false);
+  editor.setTracking(false, { inFile: false });
   editor.reloadDoc(sample);
   console.log(`TABLE-CHECK done ${passed} passed, ${failed} failed`);
 }

@@ -95,91 +95,139 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+/**
+ * Types `typed` at random places of `docs`, in sessions of a few edits each, and checks that the caret
+ * ends right after what was typed. `seed` makes the places, so a failure repeats.
+ */
+function randomTyping(
+  tracking: boolean,
+  docs: readonly string[],
+  typings_: readonly string[],
+  seed: number,
+): { checked: number; excused: number; misses: string[] } {
+  const random = seeded(seed);
+  const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
+  const bytes = (n: number) => Uint8Array.from({ length: n }, () => Math.floor(random() * 256));
+  const misses: string[] = [];
+  let checked = 0;
+  let excused = 0;
+  for (const doc of docs) {
+    for (let session = 0; session < 8; session++) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc,
+        author: { handle: 'ada', name: 'Ada Lovelace' },
+        tracking,
+        extensions: [
+          editSourceFacet.of({ now: () => new Date('2026-11-01T10:00Z'), random: bytes }),
+        ],
+      });
+      open.push(editor);
+      for (let step = 0; step < 6; step++) {
+        const before = newestView(editor.getParsed().text);
+        // A caret or a selection in the newest text, on either side of hidden markers; or now and
+        // then a caret inside a block's marker, such as between a bullet and the space after it.
+        let x = Math.floor(random() * (before.text.length + 1));
+        let y = random() < 0.5 ? x : Math.floor(random() * (before.text.length + 1));
+        const blockMarkers = [...before.text.matchAll(BLOCK_MARKER)];
+        if (blockMarkers.length && random() < 0.2) {
+          const { index, 0: marker } = pick(blockMarkers);
+          x = y = index + 1 + Math.floor(random() * (marker.length - 1));
+        }
+        const anchor = before.map.toSource(Math.min(x, y), random() < 0.5 ? -1 : 1);
+        const head = before.map.toSource(Math.max(x, y), random() < 0.5 ? -1 : 1);
+        const untouched = editor.view.state.doc.toString();
+        editor.view.dispatch({ selection: { anchor, head }, userEvent: 'select' });
+        // The caret left an empty paragraph an earlier step left, which went with it
+        // (blocks/open.ts): the positions picked are the text's before.
+        if (editor.view.state.doc.toString() !== untouched) continue;
+        const { from, to } = editor.view.state.selection.main;
+        const a = before.map.fromSource(from);
+        const b = before.map.fromSource(to);
+        const typed = pick(typings_);
+        const text = editor.view.state.doc.toString();
+        editor.view.dispatch(editor.view.state.replaceSelection(typed), {
+          userEvent: random() < 0.5 ? 'input.type' : 'input.paste',
+        });
+        if (editor.view.state.doc.toString() === text) continue; // Refused: nothing to check.
+        checked++;
+        const after = newestView(editor.getParsed().text);
+        const caret = after.map.fromSource(editor.view.state.selection.main.head);
+        // Right after the typed text, and followed by what followed the edit, though the line
+        // breaks that end the text may differ (the first tracked edit writes the ledger), typed
+        // text that joins two blocks drops the second one's prefix (format §3.4), and text typed
+        // inside a block's marker goes after the marker.
+        const tail = before.text.slice(b).trimEnd();
+        const joined = tail.replace(/^\n*(?:[-*+] |\d{1,9}[.)] |> |#{1,6} )?/, '');
+        const marker = blockMarkers.find(({ index, 0: m }) => index < a && b < index + m.length);
+        const past = marker ? before.text.slice(marker.index + marker[0].length).trimEnd() : null;
+        const rest = after.text.slice(caret).trimEnd();
+        const ok =
+          after.text.slice(0, caret).endsWith(typed) &&
+          (rest === tail || rest === joined || rest === past);
+        // A block that starts with spaces and then a marker gets the marker's own line with
+        // the spaces in front of it, where format §3.3 wants them after it, and the editor hides
+        // that line, so the caret can't stand after spaces typed there. That is how the format
+        // places the marker, not where the caret goes; it is rare.
+        const spaced = (s: string) => (s.match(/^[ \t]+(?:<!--[^\n]*?-->)+[ \t]*$/gm) ?? []).length;
+        if (!ok && spaced(editor.view.state.doc.toString()) > spaced(text)) excused++;
+        else if (!ok) {
+          misses.push(
+            `${JSON.stringify(text)}: ${JSON.stringify(before.text)} [${a}, ${b}) + ${JSON.stringify(typed)} -> ` +
+              `${JSON.stringify(after.text.slice(0, caret))}|${JSON.stringify(after.text.slice(caret))}`,
+          );
+        }
+      }
+    }
+  }
+  return { checked, excused, misses };
+}
+
+// A walk of a few hundred edits: 1.5 s alone and 5.2 s on a Mac busy with other work, where the
+// default timeout is 5 s (#356). It gets the 60 s that other long walks have.
 it.each([
   ['on', true],
   ['off', false],
 ])(
   'puts the caret right after typed and pasted text, in random places, Track Changes %s',
   (_, tracking) => {
-    const random = seeded(tracking ? 20261101 : 20261102);
-    const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
-    const bytes = (n: number) => Uint8Array.from({ length: n }, () => Math.floor(random() * 256));
-    const misses: string[] = [];
-    let checked = 0;
-    let excused = 0;
-    for (const doc of tracking ? documents : untrackedDocuments) {
-      for (let session = 0; session < 8; session++) {
-        const parent = document.createElement('div');
-        document.body.append(parent);
-        const editor = createEditor(parent, {
-          doc,
-          author: { handle: 'ada', name: 'Ada Lovelace' },
-          tracking,
-          extensions: [
-            editSourceFacet.of({ now: () => new Date('2026-11-01T10:00Z'), random: bytes }),
-          ],
-        });
-        open.push(editor);
-        for (let step = 0; step < 6; step++) {
-          const before = newestView(editor.getParsed().text);
-          // A caret or a selection in the newest text, on either side of hidden markers; or now and
-          // then a caret inside a block's marker, such as between a bullet and the space after it.
-          let x = Math.floor(random() * (before.text.length + 1));
-          let y = random() < 0.5 ? x : Math.floor(random() * (before.text.length + 1));
-          const blockMarkers = [...before.text.matchAll(BLOCK_MARKER)];
-          if (blockMarkers.length && random() < 0.2) {
-            const { index, 0: marker } = pick(blockMarkers);
-            x = y = index + 1 + Math.floor(random() * (marker.length - 1));
-          }
-          const anchor = before.map.toSource(Math.min(x, y), random() < 0.5 ? -1 : 1);
-          const head = before.map.toSource(Math.max(x, y), random() < 0.5 ? -1 : 1);
-          const untouched = editor.view.state.doc.toString();
-          editor.view.dispatch({ selection: { anchor, head }, userEvent: 'select' });
-          // The caret left an empty paragraph an earlier step left, which went with it
-          // (blocks/open.ts): the positions picked are the text's before.
-          if (editor.view.state.doc.toString() !== untouched) continue;
-          const { from, to } = editor.view.state.selection.main;
-          const a = before.map.fromSource(from);
-          const b = before.map.fromSource(to);
-          const typed = pick(tracking ? typings : untrackedTypings);
-          const text = editor.view.state.doc.toString();
-          editor.view.dispatch(editor.view.state.replaceSelection(typed), {
-            userEvent: random() < 0.5 ? 'input.type' : 'input.paste',
-          });
-          if (editor.view.state.doc.toString() === text) continue; // Refused: nothing to check.
-          checked++;
-          const after = newestView(editor.getParsed().text);
-          const caret = after.map.fromSource(editor.view.state.selection.main.head);
-          // Right after the typed text, and followed by what followed the edit, though the line
-          // breaks that end the text may differ (the first tracked edit writes the ledger), typed
-          // text that joins two blocks drops the second one's prefix (format §3.4), and text typed
-          // inside a block's marker goes after the marker.
-          const tail = before.text.slice(b).trimEnd();
-          const joined = tail.replace(/^\n*(?:[-*+] |\d{1,9}[.)] |> |#{1,6} )?/, '');
-          const marker = blockMarkers.find(({ index, 0: m }) => index < a && b < index + m.length);
-          const past = marker ? before.text.slice(marker.index + marker[0].length).trimEnd() : null;
-          const rest = after.text.slice(caret).trimEnd();
-          const ok =
-            after.text.slice(0, caret).endsWith(typed) &&
-            (rest === tail || rest === joined || rest === past);
-          // A block that starts with spaces and then a marker gets the marker's own line with
-          // the spaces in front of it, where format §3.3 wants them after it, and the editor hides
-          // that line, so the caret can't stand after spaces typed there. That is how the format
-          // places the marker, not where the caret goes; it is rare.
-          const spaced = (s: string) =>
-            (s.match(/^[ \t]+(?:<!--[^\n]*?-->)+[ \t]*$/gm) ?? []).length;
-          if (!ok && spaced(editor.view.state.doc.toString()) > spaced(text)) excused++;
-          else if (!ok) {
-            misses.push(
-              `${JSON.stringify(text)}: ${JSON.stringify(before.text)} [${a}, ${b}) + ${JSON.stringify(typed)} -> ` +
-                `${JSON.stringify(after.text.slice(0, caret))}|${JSON.stringify(after.text.slice(caret))}`,
-            );
-          }
-        }
-      }
-    }
+    const { checked, excused, misses } = randomTyping(
+      tracking,
+      tracking ? documents : untrackedDocuments,
+      tracking ? typings : untrackedTypings,
+      tracking ? 20261101 : 20261102,
+    );
     expect(checked).toBeGreaterThan(200);
     expect(misses).toEqual([]);
     expect(excused).toBeLessThanOrEqual(Math.ceil(checked / 50));
   },
+  60_000,
+);
+
+/** Subscript and superscript, whose tags the preview hides (#310), and the tags typed whole and in
+ * halves. A test of its own, so that the places of the one above stay as they were. */
+const scriptDocuments = [
+  'Water is H<sub>2</sub>O, and x<sup>2</sup> is a square.\n',
+  'Water is H<sub>2</sub>O, and x<sup>2</sup> is a square.\n\n- a<sub>1</sub>\n- b<sup>n</sup>\n',
+  '**<sub>bold</sub>** and <sup>*em*</sup> and <sub>a <sup>b</sup></sub>.\n',
+];
+const scriptTypings = ['<sub>', '</sub>', '<sup>', '</sup>', 'H<sub>2</sub>O', 'x', ' ', 'ab'];
+
+it.each([
+  ['on', true],
+  ['off', false],
+])(
+  'puts the caret right after text typed next to subscript, Track Changes %s',
+  (_, tracking) => {
+    const { checked, misses } = randomTyping(
+      tracking,
+      scriptDocuments,
+      scriptTypings,
+      tracking ? 20261103 : 20261104,
+    );
+    expect(checked).toBeGreaterThan(40);
+    expect(misses).toEqual([]);
+  },
+  60_000,
 );

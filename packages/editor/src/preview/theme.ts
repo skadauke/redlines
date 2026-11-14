@@ -56,6 +56,10 @@ export const baseThemeSpec: ThemeSpec = {
     // The measure grows with the text size, between margins that grow above 100%.
     maxWidth: 'calc(var(--rl-column) * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
     margin: '0 auto',
+    // Narrower than the widest thing in it, if it comes to that: a table's cells can't fit the
+    // column at 400%, and the table scrolls in its own box, where the column would otherwise grow
+    // to its width and the page scroll sideways.
+    minWidth: '0',
     padding: `${s(32)} var(--rl-margin, 24px) 30vh`,
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
     // The text cursor, also in hosts whose chrome sets the default arrow.
@@ -101,6 +105,16 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-strong': { fontWeight: '700' },
   '.rl-em': { fontStyle: 'italic' },
   '.rl-strike': { textDecoration: 'line-through', color: 'var(--rl-ink-2)' },
+  // Subscript and superscript are smaller, and moved from the baseline without changing the line's
+  // height, so that a line with one is as tall as the others.
+  '.rl-sub, .rl-sup': {
+    fontSize: '0.75em',
+    lineHeight: '0',
+    position: 'relative',
+    verticalAlign: 'baseline',
+  },
+  '.rl-sub': { bottom: '-0.25em' },
+  '.rl-sup': { top: '-0.5em' },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.84em',
@@ -125,6 +139,73 @@ export const baseThemeSpec: ThemeSpec = {
     fontSize: 'var(--rl-quote-size)',
     color: 'var(--rl-quote-color)',
   },
+
+  // Alerts (#311): the lines of the quote are a box, tinted like code and not like a quote, with a
+  // title row on its first line: an icon, the type's name and a menu that shows for the pointer or
+  // the caret and is gone otherwise. Gray: color is for people, and a pending change of the type is
+  // in its author's.
+  '.rl-callout': {
+    backgroundColor: 'var(--rl-tint)',
+    padding: `0 ${s(16)}`,
+  },
+  '.rl-callout-first': {
+    borderTopLeftRadius: '8px',
+    borderTopRightRadius: '8px',
+    paddingTop: s(10),
+  },
+  '.rl-callout-last': {
+    borderBottomLeftRadius: '8px',
+    borderBottomRightRadius: '8px',
+    paddingBottom: s(10),
+  },
+  '.rl-callout-head': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.45em',
+    fontWeight: '600',
+    color: 'var(--rl-ink)',
+    cursor: 'text',
+  },
+  '.rl-callout-text': { fontWeight: '600' },
+  '.rl-callout-icon': {
+    width: '1em',
+    height: '1em',
+    flex: 'none',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.3',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    color: 'var(--rl-ink-2)',
+  },
+  '.rl-callout-menu': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    margin: '0 0 0 0.1em',
+    padding: '0.1em 0.2em',
+    border: 'none',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: 'var(--rl-ink-3)',
+    opacity: '0',
+    cursor: 'pointer',
+    font: 'inherit',
+  },
+  '.rl-callout-menu svg': {
+    width: '0.8em',
+    height: '0.8em',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.5',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.rl-callout-title:hover .rl-callout-menu, .rl-callout-active .rl-callout-menu, .rl-callout-menu:focus-visible':
+    { opacity: '1' },
+  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
+  '.rl-callout-menu:focus': { outline: 'none' },
+  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
   // inline, it sits in the text. A missing one is its alt text, quietly.

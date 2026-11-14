@@ -9,28 +9,39 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  blockedMessage,
+  createAsk,
   createLiveLines,
   createMacAgents,
   createRuns,
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
-import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import {
+  createEditor,
+  type Author,
+  type EditorTyping,
+  type EditorUiState,
+  type ImageSpot,
+} from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
+import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
-import type { AgentInfo } from '@redlines/plugin-api';
+import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { loadAbout } from './about.ts';
-import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
+import { watchAgentsChanged } from './agent-changes.ts';
+import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
+import { addImages, type ImageAdding } from './image-add.ts';
 import { localImageUrl } from './images.ts';
 import {
   appMenuModel,
@@ -45,9 +56,10 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
-import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
+import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -57,17 +69,27 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
-import { applyTextSize, stepSize } from './text-size.ts';
+import { followScrollbar } from './scrollbar.ts';
+import { checkSpellingAgain, systemSpelling } from './system-spelling.ts';
+import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
-import { createTitleBar } from './ui/titlebar.ts';
+import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
+import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from './zoom.ts';
+import {
+  applyZoom,
+  followZoom,
+  initialZoom,
+  nextZoom,
+  tauriZoomLink,
+  type PageZoom,
+} from './zoom.ts';
 import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -130,7 +152,18 @@ let menuState: MenuState | null = null;
 let draftsPending = false;
 
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
-const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+const windows = isTauri
+  ? await connectWindow(tauriWindowLink(), askAboutThisWindow, {
+      // A window opened for text can't be asked about it in its first moments, and its text would go
+      // with a quit or a close: the app holds both, and the person tries again.
+      held: (what) =>
+        notice.flash(
+          what === 'quit'
+            ? 'A window is still opening. Try again in a moment.'
+            : 'This window is still opening. Try closing it again in a moment.',
+        ),
+    })
+  : null;
 
 /**
  * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
@@ -165,9 +198,32 @@ function beep(): void {
   if (isTauri) void invoke('beep').catch(() => {});
 }
 
+/**
+ * Whether the app can hand the document's file to another app by a drag: the Mac's, which draws the
+ * title bar's document icon for it (src-tauri/src/drag.rs). A plain browser has no file to hand
+ * over, and Windows and Linux no drag to hand it by.
+ */
+const canDragFile = isTauri && /Macintosh/.test(navigator.userAgent);
+
+/**
+ * Starts dragging the document's file out of the window, once the title bar's document icon has
+ * been dragged: the app does it, as a native title bar's proxy icon would, and a drop in Finder,
+ * Mail or Terminal hands over the file.
+ */
+function dragFile(): void {
+  const path = doc?.path;
+  if (!path || !canDragFile) return;
+  invoke<boolean>('start_file_drag', { path }).catch((error: unknown) => {
+    console.error('Could not drag the file', error);
+  });
+}
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  // Track Changes is the document's, as Word's is: turning it on or off is written to its ledger
+  // (format §5.6), and the file is edited until it is saved.
+  saveTracking: true,
   people: settings.people,
   // The first time a document shows someone, they are recorded with their color, for every window.
   onNewPeople: (handles) => {
@@ -175,6 +231,18 @@ const editor = createEditor(element('#editor'), {
     editor.setPeople(settings.people);
   },
   codeLanguages,
+  // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
+  // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
+  openLink: (address) => {
+    if (!isTauri) {
+      window.open(address, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    invoke('open_link', { url: address }).catch((error: unknown) => {
+      console.error('Could not open the link', error);
+      notice.flash('Couldn’t open the link.');
+    });
+  },
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
@@ -188,7 +256,6 @@ const editor = createEditor(element('#editor'), {
     : undefined,
   showLineBreakMarks: settings.showLineBreakMarks,
   markupView: settings.markupView,
-  viewKeys: { simple: '⌥⌘2', redlines: '⌥⌘3' },
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -196,6 +263,10 @@ const editor = createEditor(element('#editor'), {
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
+  // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
+  // browser tab): saved beside the document, and linked at the place they came to.
+  onImageFiles: (files, spot, pasted) =>
+    void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -207,23 +278,36 @@ const editor = createEditor(element('#editor'), {
 });
 ui = editor.getUiState();
 // The agents on this Mac, run through their own programs; a plain browser has none. Claude and
-// Codex have providers of their own, and the agents the person added in Preferences, which the
-// app keeps, are each run through the Agent Client Protocol provider.
+// Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
+// doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
-const agents = createMacAgents(
-  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
-  createRelay(),
-  isTauri
-    ? {
-        more: async () =>
-          (await acpAgents.list()).map(({ id, name, program, args }) =>
-            createAcpProvider(processes, { id, name, command: program, args }),
-          ),
-      }
-    : {},
-);
-// An agent added or removed in Preferences is in the next comment box's picker.
+const agents =
+  !isTauri && import.meta.env.DEV
+    ? // A plain page has no agent programs: in development a scripted one stands in, which answers
+      // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+    : createMacAgents(
+        isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+        createRelay(),
+        isTauri
+          ? {
+              more: async () =>
+                (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                  createAcpProvider(processes, {
+                    id,
+                    name,
+                    command: program,
+                    args,
+                    ...(bridge === undefined ? {} : { bridge }),
+                  }),
+                ),
+            }
+          : {},
+      );
+// An agent added or removed by another window, or one that Preferences has updated, signed in or
+// found changed, is looked for again at the next comment box.
 if (isTauri) acpAgents.watch(() => agents.forget());
+watchAgentsChanged(() => agents.forget());
 /**
  * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
  * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
@@ -244,10 +328,73 @@ const documentData = createDocumentData(
   (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
 );
 
+/** The @ picker for a box that asks an agent: a comment's, and the question of an Ask. */
+const attachAgentPicker = (field: HTMLTextAreaElement) => {
+  void lookForAgents();
+  return attachPicker(field, {
+    getParsed: () => editor.getParsed(),
+    getMet: () => settings.people,
+    me: author.handle,
+    agents: () => knownAgents,
+  });
+};
+
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor);
+// Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
+// matching emoji, as Preferences allow (asked each time).
+createEmoji(editor, { enabled: () => settings.emojiSuggestions });
+
+/**
+ * What adding images to this window's document needs of it (image-add.ts): its file, which a
+ * document with no file is saved to first, after asking; where the settings say images go, as
+ * they are when the images arrive; and the host, which saves them (src-tauri/src/image_files.rs).
+ */
+const imageAdding: ImageAdding = {
+  document: () => ({ path: controller.state.path, name: controller.state.name }),
+  place: () => {
+    const { imagePlace, imageFolderName } = loadSettings();
+    return { place: imagePlace, name: imageFolderName };
+  },
+  saveFirst: async () => (await host.askToSaveForImage()) && (await controller.saveAs()),
+  addImages: (path, folder, source) => host.addImages(path, folder, source),
+  notice: (message) => notice.flash(message),
+};
+
+/**
+ * Insert Image… (`image.insert`, #308): chooses image files in the system's panel and adds them as
+ * a drop or a paste does, at the caret. The app's own command, not a plugin's, since the panel is.
+ * A document with no file is saved first, before the panel: there is no folder for them until then.
+ */
+async function insertChosenImages(spot: ImageSpot): Promise<void> {
+  try {
+    if (controller.state.path === null && !(await imageAdding.saveFirst())) return spot.release();
+    const source = await host.chooseImages();
+    if (!source) return spot.release();
+    await addImages(imageAdding, spot, source);
+  } catch (error) {
+    spot.release();
+    notice.flash(error instanceof Error ? error.message : String(error));
+  }
+}
+
+// Registered before the review plugin's Add Comment, which comes last in Format.
+editor.commands.register([
+  {
+    id: 'image.insert',
+    title: 'Image…',
+    menu: 'format',
+    group: 'insert',
+    run: () => {
+      const spot = editor.imageSpot();
+      if (!spot) return false;
+      void insertChosenImages(spot);
+      return true;
+    },
+  },
+]);
 
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
@@ -263,15 +410,7 @@ const review = createReview(editor, {
   },
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
-  attachToField: (field) => {
-    void lookForAgents();
-    return attachPicker(field, {
-      getParsed: () => editor.getParsed(),
-      getMet: () => settings.people,
-      me: author.handle,
-      agents: () => knownAgents,
-    });
-  },
+  attachToField: attachAgentPicker,
   extras: {
     renderText: (entry, person) =>
       renderCommentText(entry, person, {
@@ -309,6 +448,34 @@ const review = createReview(editor, {
   },
 });
 
+// The formatting palette: hidden while writing, it opens from a handle at the bottom center and on
+// right-click, in place of WebKit's own menu. Its items are commands of the registry, so it
+// registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
+// A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
+const palette = createPalette(editor, {
+  container: main,
+  tooltipMs: TOOLTIP_MS,
+  notice: (message) => notice.flash(message),
+  // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
+  // and the clipboard's text otherwise.
+  clipboard: pageClipboard(
+    editor,
+    () => host.readClipboardText(),
+    // A tab has none, and reads the clipboard in the click that asked, as it did.
+    'pasteInDocument' in host
+      ? () => host.pasteInDocument?.() ?? Promise.resolve(false)
+      : undefined,
+  ),
+  ...(isTauri
+    ? {
+        spelling: systemSpelling({
+          enabled: () => settings.spellCheck,
+          learned: () => checkSpellingAgain(editor.view.contentDOM),
+        }),
+      }
+    : {}),
+});
+
 const documentHost: Host = {
   ...host,
   // Drafts discarded to open another document are forgotten, not kept for the next time it opens.
@@ -335,6 +502,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
+  // Save for a document with no file opens its dialog in the folder Preferences name, if any.
+  newDocumentFolder: () => loadSettings().newDocumentFolder,
 });
 
 /** The document the runs were last told of. */
@@ -351,8 +520,10 @@ const focusEditor = () => {
 function showDocument(state: DocumentState): void {
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
-    // Another document took this one's place: the old one's runs have nothing to act on.
+    // Another document took this one's place: the old one's runs have nothing to act on, and its
+    // words are not this one's.
     runs.documentReplaced();
+    wordCount.refresh();
   }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
@@ -447,6 +618,19 @@ async function openHere(path: string): Promise<void> {
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
 
+/** What an agent may read, as Preferences and the person's answers say: a run's and an Ask's. */
+const agentSettings = {
+  defaultScope: () => settings.agentScope,
+  consent: (agent: string, folder: string) => loadSettings().consent[consentKey(agent, folder)],
+  setConsent: (agent: string, folder: string, answer: AgentScope | 'no') =>
+    changeSettings({
+      consent: {
+        ...loadSettings().consent,
+        [consentKey(agent, folder)]: answer,
+      },
+    }),
+};
+
 const runs = createRuns({
   agents,
   author,
@@ -460,17 +644,29 @@ const runs = createRuns({
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
-  settings: {
-    defaultScope: () => settings.agentScope,
-    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
-    setConsent: (agent, folder, answer) =>
-      changeSettings({
-        consent: {
-          ...loadSettings().consent,
-          // Preferences keep no wider answer than the folder yet.
-          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
-        },
-      }),
+  // What an agent may read at This folder and my home folder, and what macOS is holding back of
+  // it; a browser has none.
+  ...(isTauri ? { homeReach, homeAccess } : {}),
+  settings: agentSettings,
+  // An agent that couldn't read a file inside what it may read: which file, why and what to do.
+  onBlocked: (notice) => {
+    const { text, action } = blockedMessage(notice);
+    notifications.show({
+      key: `blocked ${notice.thread} ${notice.cause} ${notice.place ?? ''}`,
+      text,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                if (action.do === 'log') showAgentLogs();
+                else openFilesAndFoldersSettings();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    });
   },
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
@@ -486,6 +682,7 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
   showThread: (thread) => review.showThread(thread),
   focusDocument: () => editor.focus(),
   notify: ({ key, text, action }) =>
@@ -506,6 +703,61 @@ const liveLines = createLiveLines({
     }),
 });
 
+/** Opens System Settings where the person lets Redlines read a folder macOS protects. */
+function openFilesAndFoldersSettings(): void {
+  if (!isTauri) return notice.flash('System Settings are on the Mac.');
+  invoke('open_files_and_folders_settings').catch((error: unknown) => {
+    console.error('Could not open System Settings', error);
+    notice.flash('Couldn’t open System Settings.');
+  });
+}
+
+// Ask: a question about the selection, answered in a bubble beside it, which writes nothing to the
+// file. It runs the agents as a comment's run does, with the tools that read; registered here, after
+// the review interface, it follows Add Comment and Highlight in the Format menu.
+const ask = createAsk(editor, {
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+  },
+  projectRoot: projectOf,
+  settings: agentSettings,
+  notice: (message) => notice.flash(message),
+  attachToField: attachAgentPicker,
+  showThread: (thread) => review.showThread(thread),
+  // Where the rail shows its notes, it lays the bubble out among them, level with the selection,
+  // and the notes make room for it; elsewhere (narrow window, Clean, no comments) Ask hangs the
+  // bubble by the selection itself.
+  pinToRail: (el, anchor, lost) => review.pinToRail(el, anchor, lost),
+  showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
+  // A long answer worth keeping or editing: an Untitled document in a new window. Ask keeps the
+  // bubble until the window is open, and says so in a notice when it can't be (a browser tab is
+  // refused text on purpose); this logs why.
+  openInNewWindow: (text) =>
+    host.openWindow(undefined, undefined, text).catch((error: unknown) => {
+      console.error('Could not open a new window', error);
+      throw error;
+    }),
+});
+
+/**
+ * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed
+ * run's line offers when the agent is too old or signed out. The window can't update or sign in an
+ * agent itself; it asks for the pane, and Preferences shows it.
+ */
+function openAgentPreferences(): void {
+  if (!isTauri) return notice.flash('Preferences are in the app.');
+  requestPane('agents');
+  invoke('open_preferences').catch((error: unknown) => {
+    console.error('Could not open Preferences', error);
+    notice.flash('Couldn’t open Preferences.');
+  });
+}
+
 /** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
 function showAgentLogs(): void {
   if (!isTauri) return notice.flash('The agent logs are in the app.');
@@ -517,7 +769,8 @@ function showAgentLogs(): void {
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
-  editor.setTracking(on);
+  // A file that can't take the setting says why, and Track Changes stays as it was.
+  if (!editor.setTracking(on)) return;
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
   // Every switch says so (design §5.4).
@@ -544,7 +797,7 @@ const percent = (level: number) => `${Math.round(level * 100)}%`;
 const changeZoom = (change: { by: number } | { to: number }) => {
   if (!zoom) return;
   const from = zoom.level();
-  const level = 'to' in change ? change.to : stepSize(from, change.by);
+  const level = nextZoom(from, change);
   if (level === from) return;
   void zoom.ask(level).catch((error: unknown) => {
     console.error('Could not zoom the windows', error);
@@ -582,12 +835,25 @@ const toggleResolved = () => {
   render();
 };
 
+/**
+ * File › Rename, and a double-click on the file name: a document with a file gets a field for its
+ * name, and an Untitled one, which has no name to change, Save As, which asks for one.
+ */
+function renameDocument(): void {
+  if (doc?.path) titleBar.beginRename();
+  else void controller.saveAs();
+}
+
 const titleBar = createTitleBar(element('#titlebar'), {
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleTracking,
   openReview,
   toggleResolved,
   toggleSidebar,
+  renameDocument: () => renameDocument(),
+  dragFile,
+  scrollPage: (dx, dy) => scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' }),
   rename: async (newName) => {
     const from = controller.state.path;
     const renamed = await controller.rename(newName);
@@ -604,6 +870,17 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
+// editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
+// classic scrollbar.
+editor.addExtension(topRoom(() => titleBar.room()));
+followScrollbar(scroller, main);
+
+// The word count in the lower right corner, counted on idle after the text or the selection last
+// changed (a document that opens is counted by `showDocument`), and what the editor scrolls to is
+// kept clear of its fade (word-count.ts).
+const wordCount = createEditorWordCount(main, editor, { visible: settings.showWordCount });
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
@@ -636,8 +913,7 @@ const commands: MenuCommands = {
   },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
-  // A document with no file has no name to change: Save As asks for one.
-  rename: () => (doc?.path ? titleBar.beginRename() : void controller.saveAs()),
+  rename: renameDocument,
   revealInFinder: () => {
     if (doc?.path) {
       void host.reveal(doc.path).catch((error: unknown) => {
@@ -656,7 +932,8 @@ const commands: MenuCommands = {
       notice.flash('Couldn’t print.');
     }),
   quit: () => void windows?.quit(),
-  setView: (mode) => editor.setViewMode(mode),
+  setView: (view) => editor.showView(view),
+  switchLook: () => editor.switchLook(),
   toggleSidebar,
   toggleTracking,
   openReview,
@@ -677,6 +954,10 @@ const commands: MenuCommands = {
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
+  openAbout: () => {
+    if (isTauri) void invoke('open_about');
+    else notice.flash('About is in the app.');
+  },
   openPreferences: () => {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
@@ -744,6 +1025,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
+    fileDraggable: doc.path !== null && canDragFile,
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -775,20 +1057,31 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // A window opened for text is held in its first moments: its page can't be asked about the
+    // text yet, and Tauri destroys the window when this handler lets it close, whatever the app
+    // prevented, so this is what holds it (the app tells the person: `close-held`).
+    if (await windows?.starting().catch(() => false)) {
+      event.preventDefault();
+      return;
+    }
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
-    else runs.stopAll();
+    else {
+      runs.stopAll();
+      ask.close();
+    }
   });
   // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null };
+    return { path: null, line: null, text: null };
   });
   if (start.path === null) {
-    await controller.create();
+    // A window opened for text starts with an Untitled document that holds it, unsaved.
+    await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -811,6 +1104,7 @@ if (isTauri) {
       kept = readingPlace(editor.view, scroller);
       titleBar.closeMenus();
       review.closePopovers();
+      palette.hide();
     },
     after: (level, from) => {
       if (kept) {
@@ -839,6 +1133,15 @@ if (isTauri) {
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
+  // Image files dropped on the window go to its document, not to the files to open. The app keeps
+  // them and says where they landed, in points of the page, which the window zoom scales.
+  await host
+    .listenForImageDrops((drop) => {
+      const level = zoom?.level() ?? 1;
+      const spot = editor.imageSpot({ x: drop.x / level, y: drop.y / level });
+      if (spot) void addImages(imageAdding, spot, { kind: 'given', id: drop.id });
+    })
+    .catch((error: unknown) => console.error('Could not listen for images dropped', error));
   // A launch with no file to open: the document that was open last, when Preferences ask for it.
   // New is always empty, so this is for the first window alone.
   if (controller.untouched && getCurrentWindow().label === 'main') {
@@ -847,14 +1150,14 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, with Track Changes on if Preferences ask for it.
-  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
+  // person's own preference, not the document's, so nothing is written to it. A window opened for
+  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
+  if (controller.state.path === null && settings.trackNewDocuments) {
+    editor.setTracking(true, { inFile: false });
+  }
   windows?.ready();
-  const about = await loadAbout().catch((error: unknown) => {
-    console.error('Could not read the build tag for About Redlines', error);
-    return null;
-  });
-  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
     installShortcuts(menuModel);
@@ -880,6 +1183,7 @@ watchSettings((changed) => {
   // A text size another window saved takes the reading place before it is applied.
   textZoom.follow(settings.textSize);
   review.setShowResolved(settings.showResolved);
+  wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
@@ -910,6 +1214,14 @@ if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
 // Debug only (table-check.ts): tables' layout, pointer, keys and typing, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
+}
+
+// Debug only (palette-check.ts): the formatting palette's right-click, handle and hints, and Ask's
+// bubble with the page's scripted agent, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
+  void import('./palette-check.ts').then(({ runPaletteCheck }) =>
+    runPaletteCheck(editor, { ask: !isTauri }),
+  );
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

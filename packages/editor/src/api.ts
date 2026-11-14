@@ -4,15 +4,26 @@
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 
-/** How the document is shown (design §5.3). */
+/**
+ * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
+ * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
+ * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
+ * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
+ * (`MenuView`) and a switch for the look.
+ */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
- * The two views that show a review: Simple (deletions hidden, insertions plain, change bars and
- * comments) and Redlines. The one chosen last is the one the editor switches to when it picks a
- * view for you.
+ * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
+ * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
+ */
+export type MenuView = 'clean' | 'redlines' | 'raw';
+
+/**
+ * The look of Redlines that a click on a change bar or `switchLook` chose last, the full markup (`'redlines'`) or
+ * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
 
@@ -28,7 +39,7 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
-  /** The markup view chosen last, which an automatic switch shows. */
+  /** The look of Redlines chosen last, with a click on a change bar or `switchLook`, which an automatic switch shows. */
   markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
@@ -129,22 +140,45 @@ export interface MetPerson {
   color: number;
 }
 
+/**
+ * Where the links of images being added will be written, held while the host saves the images
+ * (`EditorOptions.onImageFiles`, `Editor.imageSpot`). The spot follows the text around it, so what
+ * is written in the document meanwhile moves nothing.
+ */
+export interface ImageSpot {
+  /**
+   * Writes a link to each path, `![](path)` with the path as a link destination needs it written,
+   * at the spot: one after another, a space apart, and nothing else. They take the place of the text
+   * the selection held when a paste took the spot, but only while it is all still there: text
+   * written in it meanwhile stays, and the links go after it; text written at its edges stays
+   * outside. For a spot that held no text, the links go before what was written at it meanwhile. It
+   * is the person's own insertion, tracked while Track Changes is on, and one step for Undo, which
+   * the Edit menu calls Insert Image. The caret goes to the end of the links if it is still at the
+   * spot, and stays where the person put it otherwise; the preview draws the image all the same.
+   * Paths are as the document should reach the files, relative to it (`images/shot.png`). A spot is
+   * used once. Returns whether the links went in: when the document refuses them, or was replaced
+   * since, so that the spot is gone, the reason is said through `onNotice`.
+   */
+  insert(paths: readonly string[]): boolean;
+  /** Lets the spot go, when no image will be added. A spot that was used is let go already. */
+  release(): void;
+}
+
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
   author: Author;
-  /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
+  /**
+   * Default: the view the ledger says (`view`, format §5.6), else the markup view when the
+   * document has redlines, else 'clean' (design §5.3).
+   */
   view?: ViewMode;
   /**
-   * The keys that show Simple and Redlines, as the host writes them (⌥⌘2 and ⌥⌘3 in the desktop
-   * app), which the hint on a change bar names. Default: none, and the hint names no keys, as in
-   * an embed with no such shortcuts.
-   */
-  viewKeys?: { simple?: string; redlines?: string };
-  /**
-   * The markup view the editor shows where it picks one for you: when a document with redlines
-   * opens, and when a tracked change or a comment is made in Clean. Default: 'redlines'. The host
-   * is told when the person chooses another (`EditorUiState.markupView`).
+   * The look of Redlines the editor shows where it picks Redlines for you: when a document with
+   * redlines opens (and records no view in its ledger), and when a tracked change or a comment is
+   * made in Clean. Default: 'redlines', the full markup; with 'simple', such a document opens in
+   * Redlines' simple look. The host is told when the person chooses another, with a click on a
+   * change bar (`EditorUiState.markupView`).
    */
   markupView?: MarkupView;
   /**
@@ -152,6 +186,12 @@ export interface EditorOptions {
    * `tracking: everyone` (format §5.6).
    */
   tracking?: boolean;
+  /**
+   * Whether turning Track Changes on or off is written to the document, as `tracking: everyone` in
+   * its ledger (format §5.6), so that the file remembers it, and is edited like by any change.
+   * Default: false, and `setTracking` changes only this editor's state, for a host with no file.
+   */
+  saveTracking?: boolean;
   /**
    * How typing helps. Default: the browser's own spell check and nothing else. The help goes
    * through the normal input path, so Track Changes records it like any typing.
@@ -180,6 +220,13 @@ export interface EditorOptions {
    */
   codeLanguages?: (info: string) => Language | LanguageDescription | null;
   /**
+   * Opens a link's address, for a ⌘-click on a link (Ctrl-click off a Mac): the host decides how, in
+   * the browser or the mail app. Only `http`, `https` and `mailto` addresses reach it (a `www.`
+   * address is the web's), and a hint on the link names the click after the title bar's pause.
+   * Default: none, and a link is text like any other: no click opens it and no hint shows.
+   */
+  openLink?: (address: string) => void;
+  /**
    * Turns the path of a local image, as written in the document and decoded (`img/a b.png`), into
    * a URL the page can load, or null to show the image's alt text. The host knows where the
    * document is and which folders the page may load from. Default: none, and a local image shows
@@ -187,6 +234,17 @@ export interface EditorOptions {
    * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
    */
   resolveImage?: (src: string) => string | null;
+  /**
+   * Called when image files are pasted into the document, or dropped on it, with the files and the
+   * spot their links will go to (`ImageSpot`). The host saves each file where the document can
+   * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells
+   * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
+   * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
+   * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
+   * image where it can't (Raw while Track Changes is on, code) through `onNotice`, and the host is
+   * not called. Default: none, and the browser does what it does with such a paste or a drop.
+   */
+  onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
   /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
@@ -256,8 +314,9 @@ export interface Editor {
   /**
    * Replaces the whole document and clears the undo history, as when a file is opened. The
    * file's line ending is taken from the new string, and the view and Track Changes start over
-   * from their defaults: Redlines when the document has redlines, else Clean, and tracking on
-   * when the file asks for it (`tracking: everyone`).
+   * from their defaults: the view the ledger says (`view: clean`, `view: redlines` or
+   * `view: simple`, format §5.6), or else the markup view when the document has redlines and Clean
+   * when it has none, and tracking on when the file asks for it (`tracking: everyone`).
    */
   setDoc(doc: string): void;
   /**
@@ -270,7 +329,9 @@ export interface Editor {
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
    * from the new string. It is for changes on disk; an agent's edit is `applyAgentEdit`. The view
    * stays, even when the document loses its last redline, except that a document that gains
-   * redlines while shown Clean switches to Redlines.
+   * redlines while shown Clean switches to Redlines. Track Changes stays too, except that a file
+   * that newly asks everyone to track (`tracking: everyone`, format §5.6) turns it on, as opening
+   * such a file does, which writes nothing; a file that stops asking leaves it as it is.
    */
   reloadDoc(doc: string): void;
   /**
@@ -288,11 +349,32 @@ export interface Editor {
    */
   getParsed(): Parsed;
   getUiState(): EditorUiState;
-  /** Shows a view. Choosing Simple or Redlines also makes it the markup view. */
+  /**
+   * Shows a view in exactly the look named. Choosing 'simple' or 'redlines' also makes it the
+   * markup view (the look chosen last). A host with a View menu shows its entries with `showView`.
+   */
   setViewMode(mode: ViewMode): void;
   /**
-   * Changes the markup view that an automatic switch shows, such as when the person chose another
-   * in another window. It never changes the view that is shown: only a choice made here does.
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
+   * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
+   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
+   * on a change bar, or `switchLook`, chooses a look.
+   */
+  showView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does and with the same
+   * effect: the full markup goes to the simple look and the simple look to the full markup, the
+   * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
+   * looking at (the one with the caret when it is on the screen, else the first on it) stays where
+   * it was. It does nothing in Clean and Raw, which have no look. A host's View menu has it as a
+   * switch (design §5.3), so that the looks need no pointer.
+   */
+  switchLook(): void;
+  /**
+   * Changes the look of Redlines that an automatic switch shows, such as when the person chose
+   * another in another window. It never changes the view that is shown: only a choice made here
+   * does.
    */
   setMarkupView(mode: MarkupView): void;
   /**
@@ -303,8 +385,30 @@ export interface Editor {
    * the text itself (format §3.10): what you type joins no pending change, and what you delete is
    * gone, with the marks that have no text left; an edit with no legal form says why through
    * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
+   *
+   * With `saveTracking`, the switch is written to the document (format §5.6): the ledger gains or
+   * loses `tracking: everyone`, in a step of its own that Undo takes back with Track Changes
+   * itself, and `onChange` hears of it. A file that can't take a ledger refuses it, says why
+   * through `onNotice`, and stays as it was.
+   *
+   * `options.inFile` says whether this switch is written to the document: by default as the
+   * `saveTracking` option says, and `false` keeps it to this editor, for a Track Changes that is a
+   * person's own preference and not the file's (new documents that start tracked).
+   *
+   * @returns false when the file refused, and Track Changes is as it was.
    */
-  setTracking(on: boolean): void;
+  setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+  /**
+   * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
+   * `view: simple` (format §5.6): for the host to call when it saves the file, so that the document
+   * opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * file with none gets none, and a ledger that can't be read is left as it is. It is
+   * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
+   * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
+   * for the next save. It is made in no empty paragraph's place, so a save never loses a blank line.
+   * Switching views never calls it: only a save does.
+   */
+  recordView(): void;
   /** Changes how typing helps, in this document and the ones opened later. */
   setTyping(typing: EditorTyping): void;
   /**
@@ -345,6 +449,30 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * The spot an image added now would go, for a host that has the images by other means than a
+   * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
+   * client point `at` is in the text, when given and over some, and otherwise the selection. Null
+   * when the editor takes no image there, which `onNotice` then says.
+   */
+  imageSpot(at?: { x: number; y: number }): ImageSpot | null;
+  /**
+   * The word at a position of the document, as the host's spell checker is asked about it: letters
+   * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
+   * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * formatting palette asks it for the word under a right-click.
+   */
+  wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
+  /**
+   * Makes a spelling suggestion the person picked: the text of `at`, which must read `replaced`, is
+   * made `text`, as the Mac's own corrections are made (design §5.1): as typing, in a step of its
+   * own that Undo takes back, with the caret after it. With Track Changes on, a word of the
+   * person's own pending insertion changes the insertion's text, and other text becomes a tracked
+   * change of the part that differs. Returns false, changing nothing, where the page shows other
+   * text than `replaced`.
+   */
+  pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
    * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or

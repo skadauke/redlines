@@ -38,6 +38,9 @@ mod default_app;
 // Spell checking while typing, which WebKit on the Mac does only when the app's defaults say so.
 mod spelling;
 
+// Opening a link in the default browser, for a ⌘-click on a link in a document.
+mod links;
+
 // The appearance of every window, light, dark or the system's, which the app keeps a copy of.
 mod appearance;
 
@@ -51,6 +54,9 @@ mod project;
 // The images the preview loads: those of the project folders the sidebars show.
 mod images;
 
+// Images added to a document: dropped on its window, chosen in a panel or pasted, saved beside it.
+mod image_files;
+
 // What a window may do with files: read and write those the person opened or saved.
 mod file_scope;
 
@@ -60,6 +66,12 @@ mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
+
+// Dragging the window's file out of it, from the title bar's document icon.
+mod drag;
+
+// The Mac's settings pane for the Quick Look preview of Markdown files, which Preferences opens.
+mod quick_look;
 
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
@@ -89,6 +101,13 @@ fn about(app: AppHandle) -> About {
         version: env!("REDLINES_VERSION"),
         build: env!("REDLINES_BUILD"),
     }
+}
+
+/// Whether a file dropped on the window `label` goes on to the windows (`offer`): when the windows
+/// take it (`Windows::dropped_on`), and it isn't the file this window's own icon dragged out,
+/// which the person let go of on it (`drag.rs`).
+fn drop_is_offered(windows: &windows::Windows, label: &str, dropped: &[PathBuf]) -> bool {
+    !drag::ignores_drop(label, dropped) && windows.dropped_on(label, dropped)
 }
 
 /// The person using the app: the author of their changes and comments.
@@ -246,12 +265,13 @@ fn offer(app: &AppHandle, files: Vec<PathBuf>) {
 
 /// The file a path really is, with every link in it followed. The `redlines` command line follows
 /// links too, so it writes that file, in its folder and under its name, which is where the window
-/// has to look for changes to a file it opened through a link.
+/// has to look for changes to a file it opened through a link. Only for a file the person opened or
+/// saved, and what is inside a project folder a sidebar shows (`file_scope::known_real`).
 #[tauri::command(async)]
-fn real_path(path: String) -> Result<String, String> {
-    std::fs::canonicalize(&path)
+fn real_path(app: AppHandle, path: String) -> Result<String, String> {
+    let shown = app.state::<project::Projects>().folders();
+    file_scope::known_real(&app.fs_scope(), &shown, Path::new(&path))
         .map(|real| real.to_string_lossy().into_owned())
-        .map_err(|error| format!("{path}: {error}"))
 }
 
 /// Opens the Preferences window, or brings it forward: there is only ever one. It is made hidden,
@@ -279,6 +299,33 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Opens the About Redlines window, or brings it forward: there is only ever one. It is a small
+/// window of the app's own, as Preferences is, with the icon, the name, the version and build, and
+/// the copyright; it is made hidden, and shows itself once its page is styled (`src/about/main.ts`).
+/// It takes no zoom: like the install question, it is a fixed size. It runs off the main thread, as
+/// a command that makes a window should, and one call at a time, so that a second click on About
+/// finds the window the first is making.
+#[tauri::command(async)]
+fn open_about(app: AppHandle) -> tauri::Result<()> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(window) = app.get_webview_window(windows::ABOUT_WINDOW) {
+        window.show()?;
+        return window.set_focus();
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == windows::ABOUT_WINDOW)
+        .ok_or(tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(&app, config)?.build()?;
+    Ok(())
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -300,6 +347,7 @@ pub fn run() {
         .manage(windows::Windows::default())
         .manage(zoom::Zoom::default())
         .manage(project::Projects::default())
+        .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())
         .setup(|app| {
             // The appearance first, light, dark or the system's: every window opens in it.
@@ -343,24 +391,39 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            files::folder_exists,
+            files::choose_folder,
+            drag::start_file_drag,
             about,
             appearance::set_appearance,
             edit_menu::beep,
             spelling::correct_word,
+            spelling::spelling_suggestions,
+            spelling::spelling_learn,
             edit_menu::undo_in_field,
+            edit_menu::paste_in_field,
             open_preferences,
+            open_about,
+            dock_icon::app_icon_mark,
+            dock_icon::show_app_icon_mark,
             zoom::set_zoom,
             zoom::zoom_level,
             command_line::install_command_line,
             command_line::install_command_line_at_home,
             default_app::default_app,
             default_app::make_default_app,
+            quick_look::open_quick_look_settings,
+            quick_look::quick_look_available,
             install::answer_install,
             project::project_root,
             project::list_folder,
             project::open_default,
+            links::open_link,
             project::show_images,
             project::allow_document,
+            image_files::pick_images,
+            image_files::add_images,
+            image_files::add_pasted_image,
             file_scope::forget_documents,
             updates::update_state,
             updates::update_set_automatic,
@@ -388,6 +451,24 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_logs_open,
             #[cfg(unix)]
+            agents::agent_home_reach,
+            #[cfg(unix)]
+            agents::agent_home_access,
+            #[cfg(unix)]
+            agents::open_files_and_folders_settings,
+            #[cfg(unix)]
+            agents::agent_update,
+            #[cfg(unix)]
+            agents::agent_sign_in,
+            #[cfg(unix)]
+            agents::agent_setup_stop,
+            #[cfg(unix)]
+            agents::agent_terminal_sign_in,
+            #[cfg(unix)]
+            agents::skill_status,
+            #[cfg(unix)]
+            agents::skill_install,
+            #[cfg(unix)]
             agents::acp_agents,
             #[cfg(unix)]
             agents::acp_agent_add,
@@ -411,11 +492,17 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // A window opened for text can't be asked about it in its first moments: its close waits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                windows::close_requested(window.app_handle(), window.label(), api);
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.
                 spelling::window_closed(window.label());
+                // The images dropped on it or chosen for it that it never took.
+                image_files::window_closed(window.app_handle(), window.label());
                 // A closed window's runs have nowhere left to report, and no document to act on.
                 #[cfg(unix)]
                 agents::window_closed(window.app_handle(), window.label());
@@ -428,15 +515,19 @@ pub fn run() {
                 windows::on_window_event(app, label, event);
             }
             // A file dropped on a document window opens as one from Finder does, with that window
-            // in front: in it while it is untouched, and otherwise in a window of its own.
+            // in front: in it while it is untouched, and otherwise in a window of its own. Image
+            // files alone, though, are the window's to add to its document, wherever they landed
+            // (image_files.rs), and open nothing.
             if let tauri::RunEvent::WindowEvent {
                 label,
-                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }),
                 ..
             } = &event
             {
                 let dropped = dropped_paths(paths.iter().cloned());
-                if app.state::<windows::Windows>().dropped_on(label, &dropped) {
+                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped)
+                    && !image_files::dropped(app, label, &dropped, *position)
+                {
                     offer(app, dropped);
                 }
             }
@@ -510,6 +601,28 @@ mod tests {
     }
 
     #[test]
+    fn the_file_a_window_dragged_out_is_not_offered_when_it_is_dropped_back_on_it() {
+        let _turn = drag::take_turn();
+        let dir = std::env::temp_dir().join(format!("redlines-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plan.md");
+        std::fs::write(&file, "mine").unwrap();
+        let windows = windows::Windows::with_document("doc-1", file.to_str().unwrap());
+        let dropped = vec![file.clone()];
+        drag::forget();
+        // The file dropped on the window, with no drag of it going, is a drop like Finder's.
+        assert!(drop_is_offered(&windows, "doc-1", &dropped));
+        // While the window's own icon drags it, and just after, it is not.
+        drag::remember("doc-1", &file);
+        assert!(!drop_is_offered(&windows, "doc-1", &dropped));
+        // Another window's drop of it is.
+        let other = windows::Windows::with_document("doc-2", file.to_str().unwrap());
+        assert!(drop_is_offered(&other, "doc-2", &dropped));
+        drag::forget();
+        assert!(drop_is_offered(&windows, "doc-1", &dropped));
+    }
+
+    #[test]
     fn about_reaches_the_window_by_name() {
         // src/about.ts reads these fields.
         let about = About {
@@ -545,34 +658,6 @@ mod tests {
             PathBuf::from("-psn_0_12345"),
         ]);
         assert_eq!(found, vec![std::fs::canonicalize(&file).unwrap()]);
-        std::fs::remove_dir_all(&folder).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn real_path_follows_a_link_to_the_file_it_names() {
-        use std::os::unix::fs::symlink;
-
-        let folder =
-            std::env::temp_dir().join(format!("redlines-real-path-{}", std::process::id()));
-        let (notes, work) = (folder.join("notes"), folder.join("work"));
-        std::fs::create_dir_all(&notes).unwrap();
-        std::fs::create_dir_all(&work).unwrap();
-        let real = work.join("real-2026.md");
-        std::fs::write(&real, "# Plan\n").unwrap();
-        let real = std::fs::canonicalize(&real).unwrap();
-        // Links as `ln -s` makes them: one to a file in another folder, one by a relative path.
-        symlink(&real, notes.join("plan.md")).unwrap();
-        symlink("../work/real-2026.md", notes.join("relative.md")).unwrap();
-
-        let real_of = |path: PathBuf| real_path(path.to_string_lossy().into_owned());
-        let expected = Ok(real.to_string_lossy().into_owned());
-        assert_eq!(real_of(notes.join("plan.md")), expected);
-        assert_eq!(real_of(notes.join("relative.md")), expected);
-        // A file that is not a link is itself, as it really is.
-        assert_eq!(real_of(real.clone()), expected);
-        // What isn't there is an error, not the path again.
-        assert!(real_of(notes.join("missing.md")).is_err());
         std::fs::remove_dir_all(&folder).unwrap();
     }
 

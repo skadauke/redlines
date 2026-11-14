@@ -9,10 +9,13 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRequest, McpEndpoint } from '@redlines/plugin-api';
 import {
   answerPermission,
+  bridgePromptMessage,
+  bridgeSessionMessage,
   cancelMessage,
   initializeMessage,
   newSessionMessage,
   promptMessage,
+  sessionOf,
 } from '../../../plugins/agent-acp/src/index.ts';
 import { claudeArgs } from '../../../plugins/agent-claude/src/index.ts';
 import { codexArgs } from '../../../plugins/agent-codex/src/index.ts';
@@ -25,7 +28,15 @@ const fixture = read('provider-lines.json') as {
   socket: string;
   programFolders: string[];
   lines: Record<string, string[]>;
-  acp: { folder: string; sessionId: string; messages: Record<string, unknown> };
+  home: { home: string; roots: string[] };
+  acp: {
+    folder: string;
+    sessionId: string;
+    messages: Record<string, unknown>;
+    /** OpenClaw's bridge: with an agent named, and without. */
+    bridge: { agent: string; messages: Record<string, unknown> };
+    bridgeDefault: { messages: Record<string, unknown> };
+  };
 };
 
 const permissions = read('acp-permissions.json') as {
@@ -46,6 +57,14 @@ const atFolder: AgentRequest = {
   author: { handle: 'claude-ada', name: 'Claude', for: 'ada' },
 };
 const atDocument: AgentRequest = { ...atFolder, scope: 'document' };
+// At This folder and my home folder: what the app makes of the home folder (reach.rs), which the
+// Rust side makes again to check the line.
+const atHome: AgentRequest = {
+  ...atFolder,
+  scope: 'everything',
+  homeFolder: fixture.home.home,
+  homeRoots: fixture.home.roots,
+};
 const tools: McpEndpoint = {
   command: fixture.bundled,
   args: ['mcp', '--relay', fixture.socket],
@@ -62,6 +81,8 @@ describe('the lines the Rust side lets through', () => {
         folder: '/var/folders/06/T/redlines-run.abc',
         programFolders,
       }),
+      'claude at the home folder': claudeArgs(atHome, tools),
+      'codex at the home folder': codexArgs(atHome, tools, { folder, programFolders }),
     });
   });
 });
@@ -75,6 +96,27 @@ describe('the messages the Rust side lets through to an Agent Client Protocol ag
       'session/prompt': promptMessage(sessionId, atFolder),
       'session/cancel': cancelMessage(sessionId),
     });
+  });
+
+  it('are the messages the provider writes for OpenClaw’s bridge, which has no toolbox', () => {
+    const { folder, sessionId } = fixture.acp;
+    const bridged: AgentRequest = {
+      ...atFolder,
+      systemPrompt: 'You have no tools.\n> the dam is dangerously high',
+      author: { handle: 'moby-ada', name: 'Moby', for: 'ada' },
+    };
+    expect(fixture.acp.bridge.messages).toEqual({
+      'session/new': bridgeSessionMessage(folder, sessionOf({ agent: 'moby' }, bridged)),
+      'session/prompt': bridgePromptMessage(sessionId, bridged),
+    });
+    // With no agent named, the key names none, and the Gateway's default agent answers.
+    expect(fixture.acp.bridgeDefault.messages).toEqual({
+      'session/new': bridgeSessionMessage(folder, sessionOf({}, bridged)),
+      'session/prompt': bridgePromptMessage(sessionId, bridged),
+    });
+    expect(JSON.stringify(fixture.acp.bridgeDefault.messages['session/new'])).not.toContain(
+      'agent:',
+    );
   });
 
   it('allow what the provider allows, and nothing else', () => {

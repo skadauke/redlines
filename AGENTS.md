@@ -22,24 +22,30 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
+| `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
-| `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
+| `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
 | `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
-| `plugins/agent-acp`     | `@redlines/agent-acp`: any Agent Client Protocol agent the person added   |
+| `plugins/agent-acp`     | `@redlines/agent-acp`: Agent Client Protocol agents, and OpenClaw's bridge |
 | `plugins/code`          | `@redlines/code`: syntax colors in code blocks                            |
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
+| `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
+| `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
-| `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
+| `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
+| `.claude-plugin/`       | This repository as a Claude Code marketplace (`marketplace.json`)         |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
-Workspace members are `packages/*`, `plugins/*` and `apps/*` (`pnpm-workspace.yaml`). Workspace
-packages export their TypeScript sources; nothing is compiled before use.
+Workspace members are `packages/*`, `plugins/*`, `apps/*` and `apps/desktop/quicklook`
+(`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
+before use.
 
 ## Commands
 
@@ -49,7 +55,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it on pushes to main; pull requests skip them while Epic #329 runs), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
@@ -63,7 +69,8 @@ repo root.
   `src-tauri/binaries/redlines-<triple>` (Python 3; a triple as its argument, or
   `TAURI_ENV_TARGET_TRIPLE`, picks the target, and `universal-apple-darwin` makes three files)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
-  (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
+  (it opens `src/sample.md`, signs in as Ada, keeps saves in memory and has a scripted agent in place of
+  the agent programs, `src/dev-agents.ts`, which answers an Ask); `pnpm tauri dev` runs the
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
   and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
   image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. The image's background,
@@ -80,11 +87,13 @@ repo root.
   replaced is open (nothing else ever quits it)
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
-  cost of a keystroke) and `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
-  over them, their bars and cards, in Redlines and Simple) serve the page, and `pnpm tauri dev` runs
-  it in WKWebView; each writes its results to the console and ends with a `... done <n> passed,
-  <n> failed` line (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`). They read
-  nothing in a release build, and are no part of CI
+  cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
+  over them, their bars and cards, in Redlines and its simple look) and `VITE_PALETTE_CHECK=1 pnpm
+  dev` (the formatting palette's handle, right-click and hints, and Ask's bubble, answered by the
+  page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
+  results to the console and ends with a `... done <n> passed, <n> failed` line
+  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They
+  read nothing in a release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -102,6 +111,29 @@ repo root.
   again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
+- The skill (`integrations/skill/body.md`) is one text, and `scripts/build-skills.ts` makes its copies
+  for Claude Code, Codex and OpenClaw (`integrations/*/skills/redlines/SKILL.md`), the Claude Code
+  plugin's manifest and `integrations/skill/version.json`: after changing the text, or what differs
+  per agent in the script, run `node scripts/build-skills.ts --write` in `apps/desktop` (Node 24)
+  and commit what it wrote. `src/skills.node.test.ts` fails when a copy isn't what the source
+  makes, or shows a command or option that `redlines` doesn't have, and CI runs for these files
+  though they are Markdown. The app embeds the copies (`src-tauri/src/agents/skills.rs`) and
+  installs them from Preferences › Agents
+- The Quick Look extension (macOS only), in `apps/desktop`: `scripts/build-quicklook` bundles the
+  renderer (`apps/desktop/quicklook`, with `rolldown`), compiles the Swift extension for both
+  architectures with `swiftc` (no Xcode project), and writes
+  `apps/desktop/quicklook/build/RedlinesPreview.appex`, signed ad hoc, or with the identity in
+  `APPLE_SIGNING_IDENTITY`. `pnpm build` runs it (on a Mac it needs the Xcode command line tools, and
+  on any other system it does nothing), and
+  `bundle.macOS.files` in `tauri.conf.json` copies it to `Redlines.app/Contents/PlugIns`; Tauri
+  signs the app and its programs but never a plug-in, so the release workflow signs the extension
+  first (`--sign-only`). `scripts/build-quicklook --check` also runs the renderer in the system's
+  JavaScriptCore, through `preview-render`, on `apps/desktop/quicklook/fixtures`, and reads the
+  extension's layout, Info.plist, entitlements and signature; CI's `quicklook` job runs it.
+  `--check-app <Redlines.app> [--signed]` checks the extension inside a built app. To see a
+  preview, register the app (`lsregister -f -R -trusted`, `pluginkit -a <the .appex>`) and run
+  `qlmanage -p file.md`; the steps are in [docs/releasing.md](docs/releasing.md#the-quick-look-extension).
+  The renderer's tests are ordinary Vitest tests (`apps/desktop/quicklook/src`).
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
   `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`
@@ -118,7 +150,10 @@ repo root.
 - `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
   `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
-  changes that touch only `docs/**`, `website/**` or `**/*.md`.
+  changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
+  test checks.
+- The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
+  (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
@@ -191,7 +226,9 @@ repo root.
 
 - Keep PRs small and focused on one change.
 - When you change format behavior, update `docs/format.md` (and `docs/design.md` if it describes
-  the behavior) in the same PR.
+  the behavior) in the same PR. Before you change how an edit is written, read
+  [docs/hardening.md](docs/hardening.md): the four properties the format is built to hold, what
+  holds them, what is known not to hold, and how to add a rule without loosening one.
 - Add or update vitest tests for new or changed behavior, next to the code.
 - Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm format:check` before finishing. Run
   `pnpm format` to fix formatting.

@@ -1,11 +1,14 @@
 // What File › Rename…, Reveal in Finder and Print… need from the app: renaming a file in its folder
 // without losing the window's permission to use it, showing it in the file manager, and printing the
-// window. The window's page asks for these by name (`src/host.ts`).
+// window; and for the default folder of new documents (Preferences, General), asking for a folder
+// and telling whether it is still there. The window's page asks for these by name
+// (`src/host.ts`, `src/preferences/main.ts`).
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::FsExt;
 
 use crate::file_scope::{self, Remembered};
@@ -54,7 +57,7 @@ pub fn rename_file(
 /// `plain`, a plain file: not a folder, and not a link, whose own name a rename would change and not
 /// the file's. A window's document is what it says it is (`window_document`), or the file it was
 /// opened for (`open_window`), which the page names too: only the scope says what it may use.
-fn check_own_file(
+pub(crate) fn check_own_file(
     windows: &Windows,
     label: &str,
     path: &Path,
@@ -187,6 +190,51 @@ pub fn print_window(window: WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
 }
 
+/// Whether `path` is a folder that is there. The save panel starts in the default folder for new
+/// documents only while it is: the folder may have been moved or deleted since Preferences chose
+/// it (`src/host.ts`). It tells nothing of what the folder holds.
+#[tauri::command(async)]
+pub fn folder_exists(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
+/// `start`, where the folder panel opens, if it is a folder that is there.
+fn panel_start(start: Option<String>) -> Option<PathBuf> {
+    start.map(PathBuf::from).filter(|start| start.is_dir())
+}
+
+/// Asks for a folder with the system's panel, as a sheet of the window that asks, opening in
+/// `start` when that is a folder: its full path, or nothing when the person cancels.
+///
+/// The app opens the panel, not the page through the dialog plugin, whose own command allows the
+/// folder it returns in the file scope: this choice only says where Save starts, and gives the
+/// window no right to read or write in it, which Preferences, with no file permission at all,
+/// couldn't be given anyway.
+#[tauri::command(async)]
+pub fn choose_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+    start: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut panel = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_can_create_directories(true);
+    if let Some(start) = panel_start(start) {
+        panel = panel.set_directory(start);
+    }
+    panel
+        .blocking_pick_folder()
+        .map(|folder| {
+            folder
+                .into_path()
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|error| error.to_string())
+        })
+        .transpose()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +245,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_folder_that_is_there_exists_and_a_file_or_a_missing_path_does_not() {
+        let dir = folder("folder-exists");
+        std::fs::write(dir.join("plan.md"), "One").unwrap();
+        assert!(folder_exists(dir.to_string_lossy().into_owned()));
+        assert!(!folder_exists(
+            dir.join("plan.md").to_string_lossy().into_owned()
+        ));
+        assert!(!folder_exists(
+            dir.join("gone").to_string_lossy().into_owned()
+        ));
+        assert!(!folder_exists(String::new()));
+    }
+
+    #[test]
+    fn the_folder_panel_opens_in_the_folder_asked_for_only_while_it_is_there() {
+        let dir = folder("panel-start");
+        std::fs::write(dir.join("plan.md"), "One").unwrap();
+        assert_eq!(
+            panel_start(Some(dir.to_string_lossy().into_owned())),
+            Some(dir.clone())
+        );
+        assert_eq!(
+            panel_start(Some(dir.join("plan.md").to_string_lossy().into_owned())),
+            None
+        );
+        assert_eq!(
+            panel_start(Some(dir.join("gone").to_string_lossy().into_owned())),
+            None
+        );
+        assert_eq!(panel_start(None), None);
     }
 
     #[test]

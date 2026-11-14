@@ -1,9 +1,8 @@
 // What the parts of the review interface share: the editor they work on and its changes, how they
 // write to the ledger, and how a refused action shows.
 
-import { EditorSelection } from '@codemirror/state';
-import { EditorView, type Rect } from '@codemirror/view';
-import { type Author, type Editor, setViewModeEffect, viewModeField } from '@redlines/editor';
+import type { EditorView, Rect } from '@codemirror/view';
+import { calloutName, type Author, type Editor } from '@redlines/editor';
 import {
   type BlockType,
   EditError,
@@ -52,54 +51,18 @@ export function suggestionIn(ctx: ReviewContext, id: string): MarkRange[] {
   return found ?? changesOf(ctx).filter((mark) => mark.id === id);
 }
 
-/** The text of the suggestion that change `id` is in, from the start of its first mark to the end of its last. */
-export function suggestionRange(ctx: ReviewContext, id: string): Range | null {
-  const marks = suggestionIn(ctx, id);
-  const first = marks[0];
-  const last = marks.at(-1);
-  return first && last ? { from: spanOf(first).from, to: spanOf(last).to } : null;
-}
-
 /**
  * Accepts or rejects the whole suggestion that change `id` is in, in one step to undo, or none of
- * it when one mark is refused. A mark alone is decided by its id, as always. Returns whether it
- * decided.
- *
- * Nothing is decided in Simple, where the old text of a change is hidden (design: No decision is
- * made in Simple): the view switches to Redlines and the suggestion is shown, selected and in view,
- * for the person to decide where it can be read. This one function holds the rule, so the notes,
- * the cards and the review bar's buttons all obey it, and it returns false.
+ * it when one mark is refused. A mark alone is decided by its id, as always. It decides in any
+ * view and changes none: in the simple look, where the page doesn't show the old text, the note
+ * says what it decides before the click (#326), and the selection and the scroll stay where they
+ * were. This is the one place that decides, for the notes, the cards and the review bar alike.
  *
  * @throws EditError when the editor refuses.
  */
-export function decideSuggestion(
-  ctx: ReviewContext,
-  how: 'accept' | 'reject',
-  id: string,
-): boolean {
-  const { view } = ctx.editor;
-  if (view.state.field(viewModeField) === 'simple') {
-    const range = suggestionRange(ctx, id);
-    // The switch alone, not a choice: the markup view stays Simple.
-    view.dispatch({
-      ...(range ? { selection: EditorSelection.range(range.from, range.to) } : {}),
-      effects: [
-        setViewModeEffect.of('redlines'),
-        ...(range
-          ? [
-              EditorView.scrollIntoView(EditorSelection.range(range.from, range.to), {
-                y: 'center' as const,
-              }),
-            ]
-          : []),
-      ],
-      userEvent: 'select.review',
-    });
-    return false;
-  }
+export function decideSuggestion(ctx: ReviewContext, how: 'accept' | 'reject', id: string): void {
   const ids = suggestionIn(ctx, id).map((mark) => mark.id);
   ctx.editor[how](ids.length > 1 ? ids : id);
-  return true;
 }
 
 /**
@@ -286,11 +249,52 @@ export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   return { old, added };
 }
 
+/** Text as a card or a note quotes it, in quotation marks (see `readable`). */
+const quote = (text: string) => `“${readable(text)}”`;
+
+/**
+ * Whether deleted text is a break alone: a block break with the next block's prefix (`## `, `- `,
+ * `> `), or a hard line break, which joins what it separated (format §3.4).
+ */
+function isBreak(text: string): boolean {
+  return text.includes('\n') && /^(?:[\s>\\]|#{1,6} |[-*+] |\d{1,9}[.)] )*$/.test(text);
+}
+
+/**
+ * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs`,
+ * `Deleted table (3 columns, 20 rows)` or `Formatted: Bold`: on the card, and in the simple look on
+ * the note. A substitution with no old text, such as the second part of one that untracked typing
+ * split (format §3.10), inserted its text.
+ */
+export function describeChange(parsed: Parsed, change: MarkRange): string {
+  const row = rowsDone([change]) ?? tableDeleted(change);
+  if (row !== null) return row;
+  const { old, added, label } = changeTexts(parsed, change);
+  if (label !== undefined) return `Formatted: ${label}`;
+  if (change.kind === 'split') return 'Inserted paragraph break';
+  if (change.kind === 'ins' || (change.kind === 'sub' && old === '')) {
+    return `Inserted ${quote(added)}`;
+  }
+  if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
+  return `Replaced ${quote(old)} with ${quote(added)}`;
+}
+
+/** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
+ * change's words. */
+export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
+  const rows = changes.length > 1 ? rowsDone(changes) : null;
+  if (rows !== null) return rows;
+  return changes.map((change) => describeChange(parsed, change)).join(' · ');
+}
+
 const INLINE_NAMES: Record<InlineFormat, string> = {
   bold: 'Bold',
   italic: 'Italic',
   strike: 'Strikethrough',
   code: 'Code',
+  sub: 'Subscript',
+  sup: 'Superscript',
 };
 
 const BLOCK_NAMES: Record<BlockType, string> = {
@@ -320,6 +324,8 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return op.url === null ? 'No link' : 'Link';
       case 'block':
         return BLOCK_NAMES[op.to];
+      case 'callout':
+        return `Alert: ${calloutName(op.type)}`;
       case 'indent':
         return op.by > 0 ? 'Indent' : 'Outdent';
       case 'check':
@@ -398,18 +404,20 @@ export function errorLine(className: string): HTMLElement {
 
 /**
  * The part of the window where the editor can be seen: the window, less what its scrolling
- * ancestors hide, such as a title bar above the scrolling page. The editor's own scroller computes
- * `overflow-y: auto` beside its `overflow-x`, while the page may scroll in an ancestor instead, so
- * it counts only while it really scrolls.
+ * ancestors hide, such as a title bar above the scrolling page, or one floating over it, whose
+ * room the page keeps as its top padding: the text starts below the bar and passes under it. The
+ * editor's own scroller computes `overflow-y: auto` beside its `overflow-x`, while the page may
+ * scroll in an ancestor instead, so it counts only while it really scrolls.
  */
 export function visibleSpace(view: EditorView): Rect {
   const win = view.dom.ownerDocument.defaultView ?? window;
   const space = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
   for (let el: HTMLElement | null = view.scrollDOM; el; el = el.parentElement) {
-    if (!/auto|scroll/.test(win.getComputedStyle(el).overflowY)) continue;
+    const style = win.getComputedStyle(el);
+    if (!/auto|scroll/.test(style.overflowY)) continue;
     if (el === view.scrollDOM && el.scrollHeight <= el.clientHeight) continue;
     const rect = el.getBoundingClientRect();
-    space.top = Math.max(space.top, rect.top);
+    space.top = Math.max(space.top, rect.top + (Number.parseFloat(style.paddingTop) || 0));
     space.bottom = Math.min(space.bottom, rect.bottom);
   }
   return space;

@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
-import { meetPeople } from '@redlines/editor';
+import { createEditor, meetPeople, menuViewOf } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
   DEFAULT_SETTINGS,
   authorFrom,
+  imageFolderNameOf,
+  imageFolderNameProblem,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -64,11 +66,16 @@ describe('settings', () => {
       spellCheck: true,
       smartPunctuation: true,
       closePairs: true,
+      emojiSuggestions: true,
       trackNewDocuments: false,
       showLineBreakMarks: false,
+      showWordCount: true,
       agentScope: 'folder',
       consent: {},
       people: [],
+      newDocumentFolder: null,
+      imagePlace: 'folder',
+      imageFolderName: 'images',
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -89,14 +96,19 @@ describe('settings', () => {
       spellCheck: false,
       smartPunctuation: false,
       closePairs: false,
+      emojiSuggestions: false,
       trackNewDocuments: true,
       showLineBreakMarks: true,
+      showWordCount: false,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
       ],
+      newDocumentFolder: '/Users/ada/Notes',
+      imagePlace: 'assets',
+      imageFolderName: 'pictures',
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
@@ -107,6 +119,23 @@ describe('settings', () => {
     });
     expect(SETTINGS_KEY).toBe('redlines.settings');
     expect(loadSettings()).toEqual(changed);
+  });
+
+  it('opens a document with redlines in Redlines’ simple look when the saved look is Simple', () => {
+    // Stored by a build that listed Simple in the View menu: the value stays what it was.
+    localStorage.setItem(SETTINGS_KEY, '{"markupView":"simple"}');
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: 'We ship in <!--ins b2b2-->April<!--/b2b2-->.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-10-31T09:30Z}\n-->\n',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      markupView: loadSettings().markupView,
+    });
+    // The simple look is the Redlines view as the View menu lists it.
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+    expect(menuViewOf(editor.getUiState().view)).toBe('redlines');
+    editor.destroy();
+    parent.remove();
   });
 
   it('keeps the markup view like the other settings, reaching the other windows but setting no view', () => {
@@ -258,6 +287,14 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
   });
 
+  it('suggests emoji unless the person turns it off, also for settings saved before it (#312)', () => {
+    expect(DEFAULT_SETTINGS.emojiSuggestions).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().emojiSuggestions).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"emojiSuggestions":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, emojiSuggestions: false });
+  });
+
   it('hides line break marks unless the person shows them, also for settings saved before it', () => {
     localStorage.setItem(SETTINGS_KEY, '{"theme":"book","spellCheck":false,"closePairs":false}');
     expect(loadSettings()).toEqual({
@@ -271,21 +308,123 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
-  it('keeps a text size of any whole percent from 80 to 200, and takes the default for any other', () => {
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
-    expect(loadSettings().textSize).toBe(1.5);
-    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.37}');
-    expect(loadSettings().textSize).toBe(1.37);
-    for (const stored of ['"1.5"', '3', '0', 'null', '1.375', '0.79', '2.01']) {
+  it('shows the word count unless the person hides it, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().showWordCount).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showWordCount: false });
+    localStorage.setItem(SETTINGS_KEY, '{"showWordCount":true}');
+    expect(loadSettings().showWordCount).toBe(true);
+  });
+
+  it('keeps a text size of any whole percent from 80 to 400, and takes the default for any other', () => {
+    for (const kept of [1.5, 1.37, 2.01, 2.5, 3, 4]) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${kept}}`);
+      expect(loadSettings().textSize).toBe(kept);
+    }
+    for (const stored of ['"1.5"', '4.01', '5', '0', 'null', '1.375', '0.79', '3.999']) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
+    }
+  });
+
+  it('keeps the default folder for new documents, also for settings saved before it, and none for anything else', () => {
+    // Settings saved before the setting: no folder, as Save has always done.
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().newDocumentFolder).toBeNull();
+    localStorage.setItem(SETTINGS_KEY, '{"newDocumentFolder":"/Users/ada/Notes"}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, newDocumentFolder: '/Users/ada/Notes' });
+    // Anything that isn't a folder's path is no folder: an empty name, a number, a list.
+    for (const stored of ['""', '7', 'null', 'true', '["/Users/ada"]', '{"path":"/Users/ada"}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"newDocumentFolder":${stored}}`);
+      expect(loadSettings().newDocumentFolder).toBeNull();
+    }
+    // Chosen in Preferences, it reaches every window like the other settings.
+    expect(updateSettings({ newDocumentFolder: '/Users/ada/Drafts' }).newDocumentFolder).toBe(
+      '/Users/ada/Drafts',
+    );
+    expect(loadSettings().newDocumentFolder).toBe('/Users/ada/Drafts');
+    expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
+  });
+
+  it('puts images in a folder named images beside the document, also for settings saved before', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().imagePlace).toBe('folder');
+    expect(loadSettings().imageFolderName).toBe('images');
+    for (const place of ['folder', 'assets', 'same']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":"${place}"}`);
+      expect(loadSettings().imagePlace).toBe(place);
+    }
+    for (const stored of ['"elsewhere"', '3', 'null', 'true', '["same"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":${stored}}`);
+      expect(loadSettings().imagePlace).toBe('folder');
+    }
+  });
+
+  it('keeps the name of the folder for images only if a folder can have it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"imageFolderName":"Bilder 2026"}');
+    expect(loadSettings().imageFolderName).toBe('Bilder 2026');
+    // Inside the project the preview loads from: one name, no slash, and not a hidden one.
+    const refused = [
+      '',
+      ' ',
+      '.images',
+      '..',
+      'a/b',
+      '../images',
+      '/images',
+      'a\\b',
+      'a\u0007b',
+      'a\u0085b',
+    ];
+    for (const name of refused) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: name }));
+      expect(loadSettings().imageFolderName, JSON.stringify(name)).toBe('images');
+    }
+    for (const stored of ['7', 'null', '["images"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imageFolderName":${stored}}`);
+      expect(loadSettings().imageFolderName).toBe('images');
+    }
+    // A name of any length a folder can't have is none, as is a name with a space at its ends.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: 'x'.repeat(200) }));
+    expect(loadSettings().imageFolderName).toBe('images');
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: '  pics  ' }));
+    expect(loadSettings().imageFolderName).toBe('pics');
+  });
+
+  it('says what is wrong with a name for the folder, as the folder’s own rules do', () => {
+    expect(imageFolderNameProblem('images')).toBeNull();
+    expect(imageFolderNameProblem(' Bilder 2026 ')).toBeNull();
+    expect(imageFolderNameProblem('')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('   ')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('x'.repeat(101))).toBe(
+      'A folder’s name can’t be longer than 100 characters.',
+    );
+    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a\u0007b', 'a\u0085b', 'a\u007fb']) {
+      expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
+        'A folder’s name has no slash and doesn’t start with a dot.',
+      );
+    }
+    // The same names the settings take.
+    for (const typed of [
+      'images',
+      ' Bilder 2026 ',
+      '',
+      '.images',
+      'a/b',
+      'a\u0085b',
+      'x'.repeat(101),
+    ]) {
+      expect(imageFolderNameOf(typed) === null, JSON.stringify(typed)).toBe(
+        imageFolderNameProblem(typed) !== null,
+      );
     }
   });
 
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
     localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
     expect(loadSettings().zoom).toBe(1.25);
-    for (const stored of ['"1.25"', '1.3', '3', '0', 'null']) {
+    for (const stored of ['"1.25"', '1.3', '2.5', '3', '4', '0', 'null']) {
       localStorage.setItem(SETTINGS_KEY, `{"zoom":${stored}}`);
       expect(loadSettings().zoom).toBe(1);
     }
@@ -336,9 +475,11 @@ describe('settings', () => {
         spellCheck: 'yes',
         smartPunctuation: 0,
         closePairs: null,
+        emojiSuggestions: 'sure',
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
-        agentScope: 'everything',
+        showWordCount: 'no',
+        agentScope: 'machine',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
     );
@@ -355,6 +496,33 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
       expect(loadSettings().identity).toBeNull();
     }
+  });
+
+  it('keeps the three scopes an agent may read, and the answers that name them', () => {
+    for (const agentScope of ['document', 'folder', 'everything']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ agentScope }));
+      expect(loadSettings().agentScope).toBe(agentScope);
+    }
+    // The default stays This folder, for a setting that is missing or not a scope.
+    localStorage.setItem(SETTINGS_KEY, '{}');
+    expect(loadSettings().agentScope).toBe('folder');
+    expect(DEFAULT_SETTINGS.agentScope).toBe('folder');
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        consent: {
+          'claude|/notes': 'everything',
+          'codex|/notes': 'document',
+          'claude|/a': 'no',
+          'codex|/b': 'machine',
+        },
+      }),
+    );
+    expect(loadSettings().consent).toEqual({
+      'claude|/notes': 'everything',
+      'codex|/notes': 'document',
+      'claude|/a': 'no',
+    });
   });
 
   it('keeps what other windows saved when one setting changes', () => {

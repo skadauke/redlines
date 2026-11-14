@@ -126,6 +126,13 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
 ];
 
+/**
+ * The tools a question is answered with: `view` to read the document, and `status` to say what is
+ * being done. A question changes nothing, so none that writes is among them, and `read_thread` has
+ * no thread to read.
+ */
+export const ASK_TOOLS: readonly string[] = ['view', 'status'];
+
 /** A problem with what the agent passed, said to it as the tool's error. */
 class ToolError extends Error {}
 

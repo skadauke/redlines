@@ -8,7 +8,14 @@
 // The tools act on the live editor. Each run is bound to the document it was posted in: a tool call
 // that arrives after another document took its place is refused, and stops the run.
 
-import { agentPrompt, answerMcp, callTool, fitReply } from '@redlines/agent-tools';
+import {
+  agentPrompt,
+  answerMcp,
+  callTool,
+  fitReply,
+  replyOnlyPrompt,
+  replyOnlyRequest,
+} from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
 import type { AgentStep, Author } from '@redlines/editor';
 import { parse } from '@redlines/format';
@@ -18,6 +25,7 @@ import type {
   AgentInfo,
   AgentRequest,
   AgentScope,
+  BlockedRead,
   HostAgents,
   ProjectRoot,
   ToolLines,
@@ -33,15 +41,45 @@ export type LiveLine =
       agentName: string;
       folder: string;
       readLimit: 'folder' | 'machine';
+      /** `false` for an agent with no toolbox: it is sent the document and the thread. */
+      toolbox?: false;
+      /**
+       * For a question, which asks only for an answer: the panel says it changes nothing, not that
+       * it changes this document. That is so for an agent held to reading its folder; one that reads
+       * the whole machine (`readLimit` 'machine') can't be held to it, and the panel says so.
+       */
+      readOnly?: boolean;
+      /** The home folder is among the answers: Preferences allow it, and the agent can be held to it. */
+      home?: true;
     }
   | { kind: 'running'; agent: string; agentName: string; status: string }
-  | { kind: 'failed'; agent: string; agentName: string; message: string; logPath?: string };
+  | {
+      kind: 'failed';
+      agent: string;
+      agentName: string;
+      message: string;
+      logPath?: string;
+      /** Preferences › Agents can put it right (the agent is signed out or too old): offered. */
+      setup?: true;
+    };
+
+/** A read an agent couldn't make inside what it may read, and whose run it was. */
+export interface BlockedNotice extends BlockedRead {
+  agent: string;
+  agentName: string;
+  thread: string;
+  /** The run's log, once the program has started. */
+  logPath?: string;
+}
 
 export interface RunController {
   /** The only way a run starts. */
   posted(comment: PostedComment): void;
-  /** The answer to the first-run question: read the folder, just this document, or not at all. */
-  answerConsent(thread: string, answer: 'folder' | 'document' | 'no'): void;
+  /**
+   * The answer to the first-run question: read the folder, the folder and the home folder (only
+   * where the question offered it), just this document, or not at all.
+   */
+  answerConsent(thread: string, answer: AgentScope | 'no'): void;
   /** Stops the thread's run, and drops the runs waiting behind it. */
   stop(thread: string): void;
   /** Puts away a failure on the thread's line. */
@@ -77,11 +115,32 @@ export interface RunDeps {
     applyAgentEdit(next: string, step: AgentStep): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
+  /**
+   * What an agent may read at This folder and my home folder, which the host names: the home
+   * folder, and the folders of it to grant (`AgentRequest.homeFolder` and `homeRoots`). Without it,
+   * or when it gives none, that scope can't be given, and a run at it reads the folder only, and
+   * says so.
+   */
+  homeReach?: () => Promise<{ home: string; roots: readonly string[] } | null | undefined>;
+  /**
+   * The folders among what an agent may read at that scope that macOS isn't letting Redlines read
+   * (Documents, Desktop, Downloads, iCloud Drive, cloud folders, volumes), found by listing each
+   * from the app, which is also what makes macOS ask the person, once. Asked before each run at
+   * that scope: the run goes on, and the person and the agent are both told which folders are out
+   * of reach.
+   */
+  homeAccess?: () => Promise<readonly { name: string; folder: string }[]>;
   settings: {
-    defaultScope(): 'folder' | 'document';
+    /** What Preferences allow agents to read: the most any answer can give. */
+    defaultScope(): AgentScope;
     consent(agent: string, folder: string): AgentScope | 'no' | undefined;
     setConsent(agent: string, folder: string, answer: AgentScope | 'no'): void;
   };
+  /**
+   * An agent couldn't read a file inside what it may read: the window tells the person which file,
+   * why and what to do, in a notification. Called once for each cause and place in a run.
+   */
+  onBlocked?: (notice: BlockedNotice) => void;
   /** A run ended: the sidebar refreshes. */
   onEnded(): void;
 }
@@ -90,6 +149,16 @@ export interface RunDeps {
 const STARTING = 'Starting…';
 /** Said on the line when the folder is the home folder or the disk's root. */
 const TOO_BROAD = 'Folder too broad: this document only';
+/** Said on the line when the home folder was allowed and the host could not list it. */
+const NO_HOME = 'No home folder found: this folder only';
+/** Said on the line while macOS may be asking whether Redlines can read a folder. */
+const CHECKING_MACOS = 'Checking what macOS allows…';
+/**
+ * How long a run waits for macOS to say what it holds back. The listing that finds out waits for
+ * the person to answer macOS's question, and for a network volume that has gone it may not end;
+ * a run that has waited this long goes on, and a read that is then refused is told of as it happens.
+ */
+const MACOS_WAIT = 20_000;
 
 /** One agent named in one post, waiting for its turn in the thread. */
 interface Job {
@@ -116,11 +185,13 @@ interface Run {
   /** The agent called `reply`. */
   replied: boolean;
   /** While the first-run question is up: answers it, or with null when the run stops. */
-  answer?: (answer: 'folder' | 'document' | 'no' | null) => void;
+  answer?: (answer: AgentScope | 'no' | null) => void;
   /** What the agent reports, let go of when the run ends early. */
   events?: AsyncIterator<AgentEvent>;
   /** Where the program's log is, once it has started. */
   logPath?: string;
+  /** The reads already told of, by cause and place, so that each is told once. */
+  told?: Set<string>;
 }
 
 interface ThreadState {
@@ -136,9 +207,17 @@ interface ThreadState {
   failure: { post: number; line: LiveLine } | null;
 }
 
+/** How wide each scope reads, for holding an answer to what Preferences allow. */
+const WIDTH: Record<AgentScope, number> = { document: 0, folder: 1, everything: 2 };
+
+/** The narrower of two scopes. */
+function narrower(one: AgentScope, other: AgentScope): AgentScope {
+  return WIDTH[one] <= WIDTH[other] ? one : other;
+}
+
 /** Where a run may read, once that is settled. */
 interface Reach {
-  scope: 'document' | 'folder';
+  scope: AgentScope;
   folder?: string;
   /** Said on the line as the run starts. */
   note?: string;
@@ -225,11 +304,12 @@ export function createRuns(deps: RunDeps): RunController {
   }
 
   const who = (run: Run) => ({ agent: run.job.agent.id, agentName: run.job.agent.name });
-  const failed = (run: Run, message: string): LiveLine => ({
+  const failed = (run: Run, message: string, setup = false): LiveLine => ({
     kind: 'failed',
     ...who(run),
     message,
     ...(run.logPath === undefined ? {} : { logPath: run.logPath }),
+    ...(setup ? { setup: true as const } : {}),
   });
 
   /** Shows what a run that is still going is doing. */
@@ -366,7 +446,7 @@ export function createRuns(deps: RunDeps): RunController {
         // What detection found is kept for a while: the next post looks again, for a person who
         // has signed in or updated meanwhile.
         deps.agents.forget?.();
-        return finish(run, failed(run, cannotRun(agent, agent.state.reason)));
+        return finish(run, failed(run, cannotRun(agent, agent.state.reason), true));
       }
       const path = deps.document.path();
       // Posting a comment that starts a run saves the document, if it has a file.
@@ -398,9 +478,11 @@ export function createRuns(deps: RunDeps): RunController {
   /**
    * What the run may read: This document for a document with no file, a folder that is too broad
    * or Preferences saying so; otherwise what the person allowed for this agent and folder, asked
-   * until they allow something. An agent that can't be held to less than the machine is always
-   * asked, and has no This document. Null when the person said Not now, which isn't remembered, or
-   * the run stopped meanwhile.
+   * until they allow something, and held to what Preferences allow now (an answer is kept, and
+   * stands again if Preferences allow more later). The home folder is offered only where
+   * Preferences allow it. An agent that can't be held to less than the machine is always asked,
+   * and has no This document and no home folder. Null when the person said Not now, which isn't
+   * remembered, or the run stopped meanwhile.
    */
   async function reachOf(run: Run, path: string | null): Promise<Reach | null> {
     const { agent } = run.job;
@@ -411,24 +493,33 @@ export function createRuns(deps: RunDeps): RunController {
       ? { scope: 'document', note: TOO_BROAD }
       : { scope: 'document' };
     const machine = agent.readLimit === 'machine';
-    if (!machine && (folder === undefined || deps.settings.defaultScope() === 'document')) {
-      return atDocument;
-    }
+    const allowed = deps.settings.defaultScope();
+    if (!machine && (folder === undefined || allowed === 'document')) return atDocument;
     const asked = folder ?? root?.folder ?? '';
     let answer = deps.settings.consent(agent.id, asked);
-    // Only Allow and Just this document are remembered; a no an earlier version stored asks again.
-    if (answer === 'no' || (machine && answer === 'document')) answer = undefined;
+    // Only the answers that allow something are remembered; a no an earlier version stored asks
+    // again. A machine-wide agent has no This document, and no home folder to hold it to.
+    if (answer === 'no' || (machine && answer !== 'folder')) answer = undefined;
     if (answer === undefined) {
-      const given = await ask(run, asked);
+      const home = !machine && allowed === 'everything';
+      const given = await ask(run, asked, home);
       if (given === null || given === 'no' || stopIfGone(run)) return null;
       deps.settings.setConsent(agent.id, asked, given);
       answer = given;
+      // The question is answered: the line says the run goes on, and not the question.
+      running(run, STARTING);
     }
-    return answer === 'document' || folder === undefined ? atDocument : { scope: 'folder', folder };
+    // Preferences may have been narrowed while the question was up: the setting as it is now holds.
+    const scope = machine ? answer : narrower(answer, deps.settings.defaultScope());
+    if (scope === 'document' || folder === undefined) return atDocument;
+    return { scope, folder };
   }
 
-  /** Puts the first-run question on the line, and waits for the answer: null if the run stops. */
-  function ask(run: Run, folder: string): Promise<'folder' | 'document' | 'no' | null> {
+  /**
+   * Puts the first-run question on the line, and waits for the answer: null if the run stops. The
+   * home folder is among the answers if `home`.
+   */
+  function ask(run: Run, folder: string, home: boolean): Promise<AgentScope | 'no' | null> {
     return new Promise((resolve) => {
       if (run.over) return resolve(null);
       run.answer = (answer) => {
@@ -437,18 +528,76 @@ export function createRuns(deps: RunDeps): RunController {
       };
       show(
         run.job.thread,
-        { kind: 'asking', ...who(run), folder, readLimit: run.job.agent.readLimit },
+        {
+          kind: 'asking',
+          ...who(run),
+          folder,
+          readLimit: run.job.agent.readLimit,
+          ...(run.job.agent.toolbox === false ? { toolbox: false as const } : {}),
+          ...(home ? { home: true as const } : {}),
+        },
         run.job.generation,
       );
     });
   }
 
-  async function go(run: Run, path: string | null, reach: Reach): Promise<void> {
+  /**
+   * The home folder and the folders of it for a run at that scope, or none where the host can't
+   * name them, and then the run reads the folder only.
+   */
+  async function withHome(
+    reach: Reach,
+  ): Promise<{ reach: Reach; home?: { home: string; roots: readonly string[] } }> {
+    if (reach.scope !== 'everything') return { reach };
+    const home = await Promise.resolve()
+      .then(() => deps.homeReach?.())
+      .catch((): undefined => undefined);
+    if (home && home.roots.length > 0) return { reach, home };
+    return { reach: { ...reach, scope: 'folder', note: NO_HOME } };
+  }
+
+  /**
+   * The folders macOS isn't letting Redlines read, or none where it can't be asked or where it
+   * doesn't say within `MACOS_WAIT`.
+   */
+  function macOsRefused(): Promise<readonly { name: string; folder: string }[]> {
+    return new Promise((resolve) => {
+      const gone = setTimeout(() => resolve([]), MACOS_WAIT);
+      void Promise.resolve()
+        .then(() => deps.homeAccess?.() ?? [])
+        .catch((): never[] => [])
+        .then((found) => {
+          clearTimeout(gone);
+          resolve(found);
+        });
+    });
+  }
+
+  async function go(run: Run, path: string | null, asked: Reach): Promise<void> {
     const { job } = run;
     const { agent } = job;
+    let { reach, home } = await withHome(asked);
+    if (run.over || stopIfGone(run)) return;
+    // Before the run, not in it: what macOS won't let Redlines read is told to the person and to
+    // the agent, which would otherwise fail to find a file, and guess why. The wait can be as long
+    // as the person takes to answer macOS, so the line says what it is.
+    let refused: readonly { name: string; folder: string }[] = [];
+    if (home !== undefined) {
+      running(run, CHECKING_MACOS);
+      refused = await macOsRefused();
+      if (run.over || stopIfGone(run)) return;
+      // The folders are listed again once macOS has been asked: the app checks the agent's line
+      // against the list it makes when the agent starts, and a folder made while a question was up
+      // belongs in it.
+      ({ reach, home } = await withHome(asked));
+      if (run.over || stopIfGone(run)) return;
+    }
+    for (const { name, folder } of home === undefined ? [] : refused) {
+      tellBlocked(run, { path: folder, cause: 'privacy', place: name });
+    }
     const me = deps.author.handle;
     const text = deps.document.read();
-    const thread = parse(text).ledger.comments.find(({ id }) => id === job.thread);
+    const threadOf = parse(text).ledger.comments.find(({ id }) => id === job.thread);
     const author: Person = {
       handle: agentHandle(agent.id, me),
       name: agent.name,
@@ -466,18 +615,39 @@ export function createRuns(deps: RunDeps): RunController {
         run.replied = true;
       },
     };
-    const request: AgentRequest = {
-      prompt: job.text,
-      systemPrompt: agentPrompt({
-        documentName: path === null ? 'Untitled' : basename(path),
-        quote: thread?.quote,
+    const documentName = path === null ? 'Untitled' : basename(path);
+    // An agent with no toolbox can't ask for the thread or the document, so they are in its prompt,
+    // read as its tools would show them, and it answers in text (`ended` posts the last message).
+    let prompt = job.text;
+    let systemPrompt: string;
+    if (agent.toolbox === false) {
+      const [thread, view] = await Promise.all([
+        callTool(ctx, 'read_thread', {}),
+        callTool(ctx, 'view', {}),
+      ]);
+      if (run.over || stopIfGone(run)) return;
+      const unread = [thread, view].find((read) => read.isError);
+      if (unread) return finish(run, failed(run, `${agent.name} didn't start: ${unread.text}`));
+      prompt = replyOnlyRequest({ thread: thread.text, document: view.text, request: job.text });
+      systemPrompt = replyOnlyPrompt({ documentName, quote: threadOf?.quote });
+    } else {
+      systemPrompt = agentPrompt({
+        documentName,
+        quote: threadOf?.quote,
         scope: reach.scope,
         folder: reach.folder,
-      }),
+        ...(refused.length > 0 ? { outOfReach: refused.map(({ folder }) => folder) } : {}),
+        ...(home === undefined ? {} : { home: { folder: home.home, roots: home.roots } }),
+      });
+    }
+    const request: AgentRequest = {
+      prompt,
+      systemPrompt,
       thread: job.thread,
       ...(path === null ? {} : { documentPath: path }),
       ...(reach.folder === undefined ? {} : { folder: reach.folder }),
       scope: reach.scope,
+      ...(home === undefined ? {} : { homeFolder: home.home, homeRoots: home.roots }),
       author: { handle: author.handle, name: author.name, for: me },
     };
     running(run, reach.note ?? STARTING);
@@ -501,11 +671,32 @@ export function createRuns(deps: RunDeps): RunController {
         run.logPath = event.logPath;
       } else if (event.type === 'status') {
         running(run, event.text);
+        if (event.blocked) tellBlocked(run, event.blocked);
       } else if (event.type === 'error') {
-        return finish(run, failed(run, event.message));
+        return finish(run, failed(run, event.message, event.setup === true));
       } else {
         return ended(run, ctx, event.finalText);
       }
+    }
+  }
+
+  /** Tells the window of a read the agent couldn't make, once for each cause and place. */
+  function tellBlocked(run: Run, read: BlockedRead): void {
+    if (!deps.onBlocked) return;
+    const told = (run.told ??= new Set());
+    const place = read.place ?? read.path.split('/').slice(0, -1).join('/');
+    const key = `${read.cause}|${place}`;
+    if (told.has(key)) return;
+    told.add(key);
+    try {
+      deps.onBlocked({
+        ...who(run),
+        thread: run.job.thread,
+        ...(run.logPath === undefined ? {} : { logPath: run.logPath }),
+        ...read,
+      });
+    } catch (error) {
+      console.error('Could not tell of a read that was refused', error);
     }
   }
 
@@ -576,10 +767,14 @@ export function createRuns(deps: RunDeps): RunController {
     },
 
     answerConsent(thread, answer) {
-      const run = threads.get(thread)?.run;
+      const state = threads.get(thread);
+      const run = state?.run;
       if (!run?.answer) return;
       // An agent that reads the whole machine can't be held to this document.
       if (answer === 'document' && run.job.agent.readLimit === 'machine') return;
+      // The home folder is an answer only where the question offered it.
+      const offered = state?.line?.kind === 'asking' && state.line.home === true;
+      if (answer === 'everything' && !offered) return;
       run.answer(answer);
     },
 

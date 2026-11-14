@@ -60,7 +60,7 @@ class FakeHost implements Host {
     return Promise.resolve();
   }
   windowStart() {
-    return Promise.resolve({ path: null, line: null });
+    return Promise.resolve({ path: null, line: null, text: null });
   }
   readClipboardText() {
     return Promise.resolve('');
@@ -80,10 +80,13 @@ class FakeHost implements Host {
   }
   /** The names the save dialog was asked to start from. */
   suggested: string[] = [];
+  /** The folders it was asked to start in, as the controller gave them (null for none). */
+  startedIn: (string | null | undefined)[] = [];
   /** What Save As fails with, as the real host does for a name that isn't a document's. */
   saveAsError: Error | null = null;
-  async saveAs(text: string, suggestedName: string) {
+  async saveAs(text: string, suggestedName: string, folder?: string | null) {
     this.suggested.push(suggestedName);
+    this.startedIn.push(folder);
     if (this.saveAsError) throw this.saveAsError;
     if (this.saveAsPath) await this.write(this.saveAsPath, text);
     return this.saveAsPath;
@@ -150,6 +153,18 @@ class FakeHost implements Host {
     this.draftAsked++;
     return Promise.resolve(this.discardDraft);
   }
+  askToSaveForImage() {
+    return Promise.resolve(false);
+  }
+  chooseImages() {
+    return Promise.resolve(null);
+  }
+  addImages() {
+    return Promise.resolve({ paths: [], refused: [] });
+  }
+  listenForImageDrops() {
+    return Promise.resolve(() => {});
+  }
   listenForFiles() {
     return Promise.resolve();
   }
@@ -178,6 +193,8 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     }),
+    /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
+    recordView: vi.fn(() => {}),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -193,6 +210,7 @@ function setup(
     onLoading?: (path: string | null) => void;
     hasDraft?: () => boolean;
     author?: () => string;
+    newDocumentFolder?: () => string | null;
   } = {},
 ) {
   const host = new FakeHost();
@@ -351,6 +369,46 @@ describe('DocumentController', () => {
     await controller.open('/docs/notes.txt');
     await controller.saveAs();
     expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.txt']);
+  });
+
+  it('starts the save dialog of a document with no file in the default folder, and a saved one in its own', async () => {
+    const { host, controller } = setup(
+      { '/docs/notes.md': 'One\n' },
+      { newDocumentFolder: () => '/Users/ada/Notes' },
+    );
+    await controller.create();
+    await controller.saveAs();
+    await controller.open('/docs/notes.md');
+    await controller.saveAs();
+    // The folder is for a name alone; a saved document's dialog starts from its full path.
+    expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.md']);
+    expect(host.startedIn).toEqual(['/Users/ada/Notes', null]);
+  });
+
+  it('leaves the save dialog to macOS while no default folder is set', async () => {
+    const { host, controller } = setup();
+    await controller.create();
+    await controller.saveAs();
+    expect(host.startedIn).toEqual([null]);
+  });
+
+  it('reads the default folder each time the dialog opens, so a change in Preferences counts at once', async () => {
+    let folder: string | null = null;
+    const { host, controller } = setup({}, { newDocumentFolder: () => folder });
+    await controller.create();
+    host.saveAsPath = null;
+    await controller.saveAs();
+    folder = '/Users/ada/Drafts';
+    await controller.saveAs();
+    expect(host.startedIn).toEqual([null, '/Users/ada/Drafts']);
+  });
+
+  it('also starts Save for a document with no file in the default folder', async () => {
+    const { host, editor, controller } = setup({}, { newDocumentFolder: () => '/Users/ada/Notes' });
+    await controller.create();
+    editor.type('Hello\n');
+    await controller.save();
+    expect(host.startedIn).toEqual(['/Users/ada/Notes']);
   });
 
   it('says why Save As wrote nothing for a name that isn’t a document’s, and stays as it was', async () => {
@@ -928,6 +986,92 @@ describe('DocumentController', () => {
   });
 });
 
+describe('the view a save records (format §5.6)', () => {
+  /** An editor whose record of the view is a line after the text, as the ledger's is. */
+  function recording(files: Record<string, string>) {
+    const made = setup(files);
+    made.editor.recordView.mockImplementation(() => {
+      const text = made.editor.getDoc();
+      if (!text.endsWith('\nview: clean\n')) made.editor.type(`${text}view: clean\n`);
+    });
+    return made;
+  }
+
+  it('is recorded before the edits are written, so that the file holds what the editor shows', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Two\n');
+    await controller.save();
+    expect(editor.recordView).toHaveBeenCalledTimes(1);
+    expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'Two\nview: clean\n' }]);
+    // The editor holds what was written, so the document is not edited again.
+    expect(state()?.dirty).toBe(false);
+    expect(editor.getDoc()).toBe('Two\nview: clean\n');
+  });
+
+  it('is not recorded, and nothing is written, for a document with no edits', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.save()).toBe(true);
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(host.writes).toEqual([]);
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('is not recorded when the person is asked about a file that changed and says Cancel', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', 'Theirs\n');
+    host.overwriteChoice = 'cancel';
+    expect(await controller.save()).toBe(false);
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('is recorded for a document with no file, in the file that is written', async () => {
+    const { host, editor, controller, state } = recording({});
+    editor.type('Hello\n');
+    await controller.save();
+    expect(host.writes).toEqual([{ path: '/docs/new.md', text: 'Hello\nview: clean\n' }]);
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('is recorded by Save As for a document with edits, and not for one that has none', async () => {
+    const edited = recording({ '/docs/plan.md': 'One\n' });
+    await edited.controller.open('/docs/plan.md');
+    edited.editor.type('Two\n');
+    await edited.controller.saveAs();
+    expect(edited.host.writes).toEqual([{ path: '/docs/new.md', text: 'Two\nview: clean\n' }]);
+
+    // A document with none is not made edited by a Save As that was cancelled, or that wrote a copy.
+    const clean = recording({ '/docs/plan.md': 'One\n' });
+    await clean.controller.open('/docs/plan.md');
+    clean.host.saveAsPath = null;
+    await clean.controller.saveAs();
+    expect(clean.editor.recordView).not.toHaveBeenCalled();
+    expect(clean.state()?.dirty).toBe(false);
+  });
+
+  it('leaves the edits unsaved when the file can not be written', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Two\n');
+    host.write = () => Promise.reject(new Error('disk full'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await controller.save()).toBe(false);
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('is no part of an agent’s edit written to the file, which is no save', async () => {
+    const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    await controller.applyAgentEdit('One agent\n', { group: 'run-1', agent: 'Claude' });
+    expect(editor.recordView).not.toHaveBeenCalled();
+    expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One agent\n' }]);
+  });
+});
+
 describe('a file that asks everyone to track changes', () => {
   // `tracking: everyone` in the ledger (format §5.6): the editor opens it with Track Changes on,
   // and the person is told why (design §5.4).
@@ -966,6 +1110,39 @@ describe('a file that asks everyone to track changes', () => {
     host.files.set('/docs/plan.md', `${asking}More\n`);
     await controller.externalChange();
     expect(state()?.notice).toBeNull();
+  });
+
+  it('says why Track Changes is on when the file on disk newly asks everyone to track (#364)', async () => {
+    // The editor turns Track Changes on when it reloads such a file (`reloadDoc`), as when it opens
+    // one, and the notice is the same.
+    const { host, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()).toMatchObject({ notice: TRACKING_FOR_EVERYONE, dirty: false });
+  });
+
+  it('says nothing when the file on disk stops asking, or asked already', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    host.files.set('/docs/plan.md', 'Plan\n\n<!-- redlines\nversion: 1\n-->\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    // It asks again: that is news, as it is for a file that newly asks.
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+  });
+
+  it('keeps the edits and says nothing of tracking while there are unsaved edits', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
   });
 
   it('is not announced for a file that does not ask, or for a new document', async () => {
@@ -1047,6 +1224,258 @@ describe('asking about unsaved edits', () => {
     await controller.create();
     expect(await controller.confirmDiscard()).toBe(true);
     expect(host.asked).toBe(0);
+  });
+});
+
+describe('an untitled document made with text', () => {
+  // What a window opened for text starts with (Open in New Window): not a file, and not saved.
+  const ANSWER = '# The answer\n\nIt is **42**.\n';
+
+  it('is untitled, holds the text and has unsaved edits', async () => {
+    const { host, editor, controller, state } = setup();
+    await controller.createWith(ANSWER);
+    expect(editor.getDoc()).toBe(ANSWER);
+    expect(state()).toEqual({
+      path: null,
+      name: 'Untitled',
+      dirty: true,
+      notice: null,
+      writing: false,
+    });
+    // Nothing is written, and there is no file to watch.
+    expect(host.writes).toEqual([]);
+    expect(host.watchers.size).toBe(0);
+  });
+
+  it('is not an untouched window, which a file would take the place of', async () => {
+    const { host, controller } = setup();
+    await controller.createWith(ANSWER);
+    expect(controller.untouched).toBe(false);
+    // A file the person opens meanwhile goes to a window of its own, and the text stays.
+    host.picked = { path: '/docs/plan.md', text: '# Plan\n' };
+    await controller.openWithDialog();
+    expect(host.openedWindows).toEqual(['/docs/plan.md']);
+    expect(controller.state.path).toBeNull();
+    expect(host.asked).toBe(0);
+  });
+
+  it('is another document, which says so before the editor draws its text', async () => {
+    const seen: string[] = [];
+    const { editor, controller } = setup(
+      { '/docs/old.md': 'Old\n' },
+      { onLoading: (path) => seen.push(`loading ${path ?? 'untitled'}`) },
+    );
+    const setDoc = editor.setDoc;
+    editor.setDoc = (text) => {
+      seen.push(`draws ${text.trim().split('\n')[0]}`);
+      setDoc(text);
+    };
+    await controller.open('/docs/old.md');
+    const was = controller.generation;
+    await controller.createWith(ANSWER);
+    expect(seen).toEqual([
+      'loading /docs/old.md',
+      'draws Old',
+      'loading untitled',
+      'draws # The answer',
+    ]);
+    expect(controller.generation).toBe(was + 1);
+  });
+
+  it('asks whether to save it when the window closes, and Save asks where', async () => {
+    const { host, controller, state } = setup();
+    await controller.createWith(ANSWER);
+
+    host.choice = 'cancel';
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.asked).toBe(1);
+    expect(host.writes).toEqual([]);
+
+    host.choice = 'save';
+    host.saveAsPath = '/docs/answer.md';
+    expect(await controller.confirmDiscard()).toBe(true);
+    // From the name of a document that has none yet.
+    expect(host.suggested).toEqual(['Untitled.md']);
+    expect(host.writes).toEqual([{ path: '/docs/answer.md', text: ANSWER }]);
+    expect(state()).toMatchObject({ path: '/docs/answer.md', name: 'answer.md', dirty: false });
+  });
+
+  it('lets the text go when the person chooses Discard', async () => {
+    const { host, controller } = setup();
+    await controller.createWith(ANSWER);
+    host.choice = 'discard';
+    expect(await controller.confirmDiscard()).toBe(true);
+    expect(host.asked).toBe(1);
+    expect(host.writes).toEqual([]);
+  });
+
+  it('asks when the app quits, bringing the window forward to ask', async () => {
+    const { host, controller } = setup();
+    await controller.createWith(ANSWER);
+    host.choice = 'cancel';
+    const toFront = vi.fn(() => Promise.resolve());
+    expect(await controller.confirmQuit(toFront)).toBe(false);
+    expect(toFront).toHaveBeenCalledOnce();
+    expect(host.asked).toBe(1);
+  });
+
+  it('asks where on Save, and stays unsaved when the dialog is cancelled', async () => {
+    const { host, controller, state } = setup();
+    await controller.createWith(ANSWER);
+    host.saveAsPath = null;
+    expect(await controller.save()).toBe(false);
+    expect(host.suggested).toEqual(['Untitled.md']);
+    expect(host.writes).toEqual([]);
+    expect(state()).toMatchObject({ path: null, dirty: true });
+
+    host.saveAsPath = '/docs/answer.md';
+    expect(await controller.save()).toBe(true);
+    expect(host.writes).toEqual([{ path: '/docs/answer.md', text: ANSWER }]);
+    expect(state()).toMatchObject({ path: '/docs/answer.md', dirty: false });
+  });
+
+  it('counts its edits from an empty document, as any untitled document does', async () => {
+    const { editor, controller, state } = setup();
+    await controller.createWith(ANSWER);
+    editor.type(`${ANSWER}More.\n`);
+    expect(state()?.dirty).toBe(true);
+    // Edits that bring the document back to the text keep it unsaved: no file ever held it.
+    editor.type(ANSWER);
+    expect(state()?.dirty).toBe(true);
+    // Only taking all of it away leaves nothing to save, as typing and deleting does in a new window.
+    // It stays gone: no file holds the text to bring back.
+    editor.type('');
+    expect(state()?.dirty).toBe(false);
+    expect(editor.getDoc()).toBe('');
+    editor.type('Some of it');
+    expect(state()?.dirty).toBe(true);
+    // There is no file whose text could come to replace the editor's.
+    await controller.externalChange();
+    expect(editor.getDoc()).toBe('Some of it');
+  });
+
+  it('says why Track Changes is on when the text asks everyone to track changes', async () => {
+    const asking = 'Plan\n\n<!-- redlines\nversion: 1\ntracking: everyone\n-->\n';
+    const { controller, state } = setup();
+    await controller.createWith(asking);
+    expect(state()).toMatchObject({ dirty: true, notice: TRACKING_FOR_EVERYONE });
+  });
+
+  it('is New for an empty text', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/old.md': 'Old\n' });
+    await controller.open('/docs/old.md');
+    const was = controller.generation;
+    await controller.createWith('');
+    expect(editor.getDoc()).toBe('');
+    expect(state()).toEqual({
+      path: null,
+      name: 'Untitled',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
+    expect(controller.untouched).toBe(true);
+    expect(controller.generation).toBe(was + 1);
+    expect(host.asked).toBe(0);
+
+    // Which asks before it replaces unsaved edits, as New does, and keeps them on Cancel.
+    editor.type('Mine');
+    host.choice = 'cancel';
+    await controller.createWith('');
+    expect(host.asked).toBe(1);
+    expect(editor.getDoc()).toBe('Mine');
+    host.choice = 'discard';
+    await controller.createWith('');
+    expect(editor.getDoc()).toBe('');
+  });
+
+  it('asks before it replaces unsaved edits, as New does, and keeps them on Cancel', async () => {
+    const { host, editor, controller, state } = setup();
+    await controller.create();
+    editor.type('Mine');
+    host.choice = 'cancel';
+    await controller.createWith(ANSWER);
+    expect(host.asked).toBe(1);
+    expect(editor.getDoc()).toBe('Mine');
+    expect(state()?.dirty).toBe(true);
+
+    host.choice = 'discard';
+    await controller.createWith(ANSWER);
+    expect(host.asked).toBe(2);
+    expect(editor.getDoc()).toBe(ANSWER);
+  });
+
+  it('asks before it drops a comment being written, as New does', async () => {
+    let draft = false;
+    const { host, editor, controller } = setup({ '/docs/a.md': 'A' }, { hasDraft: () => draft });
+    await controller.open('/docs/a.md');
+    draft = true;
+    host.discardDraft = false;
+    await controller.createWith(ANSWER);
+    expect(host.draftAsked).toBe(1);
+    expect(editor.getDoc()).toBe('A');
+
+    host.discardDraft = true;
+    await controller.createWith(ANSWER);
+    expect(host.draftAsked).toBe(2);
+    expect(editor.getDoc()).toBe(ANSWER);
+  });
+
+  describe('in the live editor', () => {
+    // CRLF line breaks, a byte order mark and a table: nothing for the editor to normalize.
+    const TEXT = '\uFEFF# Answer\r\n\r\n| a | b |\r\n| - | - |\r\n| 1 | 2 |\r\n';
+
+    function liveEditor() {
+      const host = new FakeHost();
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: '',
+        author: { handle: 'ada', name: 'Ada Lovelace' },
+        onChange: (text) => controller.markEdited(text),
+      });
+      let state: DocumentState | null = null;
+      const controller = new DocumentController(host, editor, (next) => (state = next));
+      return { host, editor, controller, state: () => state };
+    }
+
+    it('holds the text as it was given though Track Changes was on, with no history to undo it away', async () => {
+      const { editor, controller, state } = liveEditor();
+      // The text is the document, not an edit that Track Changes would mark as an insertion.
+      editor.setTracking(true);
+      await controller.createWith(TEXT);
+      expect(editor.getDoc()).toBe(TEXT);
+      expect(editor.getDoc()).not.toContain('<!--ins');
+      expect(state()).toMatchObject({ path: null, name: 'Untitled', dirty: true });
+      expect(editor.getUiState().canUndo).toBe(false);
+      editor.destroy();
+    });
+
+    it('is saved as it was given, and is clean once it is', async () => {
+      const { host, editor, controller, state } = liveEditor();
+      await controller.createWith(TEXT);
+      host.saveAsPath = '/docs/answer.md';
+      expect(await controller.save()).toBe(true);
+      expect(host.writes).toEqual([{ path: '/docs/answer.md', text: TEXT }]);
+      expect(state()).toMatchObject({ path: '/docs/answer.md', dirty: false });
+      editor.destroy();
+    });
+
+    it('is clean when everything in it is deleted, and unsaved again when it is typed over', async () => {
+      const { editor, controller, state } = liveEditor();
+      await controller.createWith(TEXT);
+      // Select all, then Delete.
+      const length = editor.view.state.doc.length;
+      editor.view.dispatch({
+        changes: { from: 0, to: length, insert: '' },
+        userEvent: 'delete.selection',
+      });
+      expect(editor.getDoc()).toBe('');
+      expect(state()?.dirty).toBe(false);
+      editor.view.dispatch({ changes: { from: 0, insert: 'Typed' }, userEvent: 'input.type' });
+      expect(state()?.dirty).toBe(true);
+      editor.destroy();
+    });
   });
 });
 

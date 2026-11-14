@@ -130,7 +130,10 @@ otherwise.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
   the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
-  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  dictation and input methods. A right-click opens the formatting palette (below) in place of the
+  system's context menu, with the spelling suggestions of a misspelled word at its top and Learn
+  Spelling; ⇧ with the right-click shows the system's own menu, which has Look Up, Services and
+  Writing Tools. A correction is part of your typing, as in
   Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
   it changes the insertion's text, and no other change appears. Only the part of a correction that
   reaches into other text becomes a tracked change of that text; with Track Changes off it is a
@@ -148,8 +151,28 @@ otherwise.
 
 The window, on the desktop:
 
-- **The title bar is the page:** the same color, with no line under it, and the file name centered
-  in small gray type. There is no toolbar and no status bar.
+- **The title bar is the page:** it has no color of its own and no line under it. The page reaches
+  the top of the window and the text scrolls under the bar, fading out as it passes, so that the
+  window reads as one page, with no hard edge below the bar. The file name is centered in small
+  gray type, and the document starts below the bar, so that nothing is hidden at rest. The bar
+  drags the window and a double-click on it zooms it, except on its controls. There is no toolbar,
+  and no status bar: the one line along the bottom is the word count, below.
+- **A small word count** sits in the lower right corner, "1,204 words", and stays visible while you
+  write; with a selection it says how many of the words are selected, "120 of 1,204 words". It is
+  one gray line of small text, not a status bar. It counts what a reader sees, the newest text and
+  never the markers or the ledger, a moment after you stop typing, so that a long document stays
+  fast. It rests on a fade of the page's color, as the title bar does, so that nothing scrolls under
+  it unfaded, and what scrolls into view, the line being typed on included, stops above the fade. It
+  follows the theme and the zoom. Preferences › Editor › Show word count hides it.
+- **The file name is a handle.** A small document icon beside the name drags the file, as the proxy
+  icon of a native title bar does: dropped on Finder, Mail, Terminal or another app's window, it
+  hands over a copy of the file as it is saved. It never moves the file the window has open, and
+  while the document is Untitled, with no file yet, the icon is hidden, as it is on Windows and
+  Linux, where the page has no drag to hand over. A double-click on the name
+  renames the document, as File › Rename does, or opens Save As for an Untitled one; a
+  double-click anywhere else on the bar zooms the window, and a drag anywhere on the bar, the
+  name included, moves it. Hovering over the name shows the words and when the document was last
+  saved.
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
@@ -158,13 +181,17 @@ The window, on the desktop:
   ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
   opens it in a new one, as does a click while an agent is working in the window. A plain text
   file is read as Markdown and saved under its own name, with Track Changes and comments like any
-  document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
+  document (format §9.1). A document dropped on a window opens as one from Finder does, but for
+  the file that the window's own document icon dragged, which opens nothing when it is dropped
+  back on that window. Any other
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
-  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
-  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
+  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
+  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
+  source code. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
   for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
@@ -173,13 +200,24 @@ The window, on the desktop:
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
   did. Finder's Get Info changes the choice again.
+  Preferences › General › Quick Look previews of Markdown files opens System Settings at the list
+  of Quick Look extensions, where the app's preview (§10) is listed and can be turned off; a macOS
+  that doesn't take the link there opens the page nearest to it. The line is drawn only where
+  there is a preview to turn off: in the installed app (not run from the sources, nor from a disk
+  image), on macOS 13.3 or later.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
-  to save them. Cancel stops there and keeps every window open. Closing the last window quits.
+  to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
+  window opened for text (Ask's Open in New Window) can't be asked in its first moment, before its
+  page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
+  notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
-  document in light ink and prints the view as it shows, without the rail: Simple prints the newest
-  text with its change bars.
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
+  Print. Printing holds the whole document in light ink and prints the view as it shows, without
+  the rail: Redlines in its simple look prints the newest text with its change bars. Saving a
+  document that has no file yet opens the Save dialog in the default folder for new documents
+  (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
+  As of a saved document starts in that document's own folder.
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
@@ -191,26 +229,71 @@ The window, on the desktop:
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
   the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
   system's dialogs keep the system's size. Text Zoom changes only the document's text and the
-  notes and cards on it, from 80% to 200%: a pinch follows the fingers and keeps the line under the
-  pointer in place, and Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the
-  same sizes. The notes and cards grow with the text above 100%
-  and never go below their size at 100%. The text column grows with the text until it meets the
-  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
-  launches; neither reaches the file, a print, the clipboard or an export.
+  notes and cards on it, and goes twice as far, from 80% to 400%, so that the text can be made
+  really big: a pinch follows the fingers and keeps the line under the pointer in place, and
+  Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the sizes, which go on past
+  the window zoom's 200% to 250%, 300% and 400%, and Preferences offers them all. The window zoom
+  keeps its own range. The notes and cards grow with the text above 100% and never go below their
+  size at 100%. The text column grows with the text until it meets the margins, and only then do
+  lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
+  and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
+  neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and
-  text size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
-  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
-  once.
+  opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
+  default app for Markdown, the Quick Look preview of Markdown files, and installing the
+  `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  starts on, whether line breaks show their marks, §5.5, whether the word count shows, and
+  where images are saved, §5.10) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
-- **Icons without labels, explained on hover.** Hovering over an icon shows its name and shortcut,
-  or opens its menu straight away, with each item's shortcut. Clicking opens the menu too, for the
-  keyboard and touch.
+- **Icons without labels, explained on hover.** Hovering over Files shows its name and shortcut.
+  Hovering over View or Review opens its menu after a short pause, with each item's shortcut, and
+  the arrow keys open it from the keyboard. A click on either does what is done most often: View
+  switches between Clean and Redlines (from Raw, back to whichever of the two was shown last), and
+  Review turns Track Changes on and off, as ⇧⌘E does. A click while the menu is open closes it and
+  acts. Each icon's hint says what a click will do, with its key ("Show Redlines ⌥⌘2", "Turn off
+  Track Changes ⇧⌘E"): the menu has the pointer's rest, so the hint shows when the keyboard brings
+  the focus to the icon, and after a click on the eye, when the pointer stays (a click on the pen
+  has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
+  time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
+  menu is Review.
+- **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
+  it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
+  which hovering over brings up, and which goes out of sight while you type) and on right-click, at
+  the pointer, where it takes the place of the system's context menu. It is a small card of icons
+  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
+  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
+  act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
+  Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
+  Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
+  Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
+  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
+  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
+  and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
+  nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
+  when there is none. The palette replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
+- **Outline.** In a document with two or more headings, a column of short lines stands in the left
+  margin, one for each heading, longer for the higher levels, with the line of the section you are
+  reading in ink as you scroll. Where the page can go no further, so that the last headings can't
+  reach the top, it is the last one in view, and a heading you clicked stays the one you are
+  reading until the page moves from its end. Hovering over it opens it, with a short animation,
+  into a list of the headings' text with the section you are reading in view, and moving the pointer
+  away closes it; a click on a heading goes to it, the caret on its line and the line at the top of
+  the page. It stands in the pane the text scrolls in, so it moves with the file sidebar, takes no
+  click but its own (the margin beside it holds the change bars), and shows its lines only where the
+  margin has room for them beside the bars; where it has none, View › Show Outline (⌃⌘O) opens the
+  list, and says so when there are fewer than two headings. The list is a navigation landmark of
+  buttons for VoiceOver: ⌃⌘O puts the focus on the heading you are reading, the arrows move between
+  headings, Return goes to one and Escape gives the focus back to the text. Headings read as the
+  text does with every pending change accepted, in every view: a heading deleted whole isn't listed,
+  Redlines included, where its card is. It doesn't print.
 - **Details on hover.** The times and other details of changes and comments appear when you hover
   over or select them, not at rest.
 - **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
@@ -219,7 +302,12 @@ The window, on the desktop:
   mark that says where text goes. While it runs, its Dock icon shows another mark of the same
   family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
   insertion above it), a different one at each launch. Turning off Redlines › Preferences › General
-  › Rotate the Dock Icon keeps the caret.
+  › Rotate the Dock Icon keeps the caret. About Redlines is a small window of the app's own, as
+  Preferences is, on every system: the icon, the name, the version and build, and the copyright,
+  as the system's panel has them. It opens once, and Esc and ⌘W close it. A click on its icon
+  changes it to the next mark of the family, drawn as a tracked change, the old mark struck through
+  with a red line and the new one underlined, in about half a second (a plain crossfade under
+  Reduce Motion); nothing says so, and the Dock icon follows the mark until the next launch.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
   nothing and tries again later. The app holds the download, not a window, so closing a window loses
@@ -250,50 +338,106 @@ Redlines covers everything in the Markdown Guide's
 ([format §9.1](format.md#91-file-types-and-dialects)), and these from its
 [hacks page](https://www.markdownguide.org/hacks/):
 
-- **Admonitions:** GitHub alerts in `.md` and Quarto callouts in `.qmd` and `.Rmd`, shown as boxes
-  with an icon and a menu for the type.
+- **Admonitions:** GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and
+  `[!CAUTION]`), shown as boxes with an icon and the type's name as a title, whose menu changes the
+  type. The box is drawn for a quote at the left edge whose first line is the type; a title and a
+  fold mark after the type (`> [!info]- A title`) are read, kept as written, and shown with it, and
+  a type that GitHub doesn't have is offered in the menu only where the file has it already. The
+  title's menu and Paragraph › Alert, which writes a new alert with its body selected, are the ways
+  to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
+  "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
+  while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
 - **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
   change.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
+- **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
+  Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
+  list) start with them under the caret; Return or Tab writes the character, ↑ and ↓ move and Esc
+  puts the list away. It stays out of the way of `10:30` and `Note:` (it opens only for a colon that
+  has no letter, digit or colon before it, and two characters of a name after it, one of them a
+  letter), of code, front matter and Raw, and Redlines ›
+  Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
+  not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
+  emoji in every view but Raw, as an entity is drawn as its character, and shows as written while
+  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  it. An emoji and a shortcode are one character for a change: no marker parts either
+  ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
+- **Subscript and superscript:** the tags `<sub>` and `<sup>`, in every file type, drawn smaller and
+  lowered or raised with the tags hidden unless the caret is in them, like any inline format. They
+  are in the Format menu and the command palette (and in the formatting palette, §5.12, when it
+  lists inline formats), and are tracked as format changes (`+sub`, `+sup`). They are the first of a short list of inline HTML tags that the editor
+  renders as formats; any other tag shows as written. pandoc's `~x~` and `^x^` in a `.qmd` or
+  `.Rmd` file are kept byte for byte and shown as written.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
-### 5.3 Views: Clean, Simple, Redlines, Raw
+**Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
+address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
+address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
+link is a pointer. Only `http`, `https` and `mailto` addresses open, and `www.` ones, which GitHub's
+autolinks read as the web's: the limit of a copy, which turns `javascript:` and its kin into plain
+text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
+the address again before it runs the system's opener, and the website's demos open a new tab. A
+link that doesn't open is left to the editor like any text, with no hint. A relative link to
+another document doesn't open yet.
 
-The View menu, under the eye at the top right (§5.1), sets how the document is shown:
+### 5.3 Views: Clean, Redlines, Raw
+
+The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
+the eye switches between Clean and Redlines, and from Raw goes back to whichever of the two was shown
+last; Raw is for the menu.
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
-  (Word's No Markup).
-- **Simple** (⌥⌘2): the same text as Clean, with a change bar beside each line that has a pending
-  change, in its author's color, and the comments with their notes: deletions are hidden, and
-  inserted and reformatted text is plain (Word's Simple Markup). A click on a change bar switches
-  to Redlines, and in Redlines back to Simple, with the line where it was.
-- **Redlines** (⌥⌘3): the document with its tracked changes and comments (Word's All Markup). It is
+  (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
+- **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there, with its shortcut, whatever the document holds and whether Track Changes is on or
-  off, so the View menu always offers the same four views. A document without redlines looks nearly
-  the same as in Clean.
-- **Raw** (⌥⌘4): the Markdown source, markers and ledger included, with syntax highlighting. It is
+  off, so the View menu always offers the same three views. A document without redlines looks
+  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
+  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
+  line that has a pending change (§5.5), in its author's color, and the comments with their notes:
+  deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
+  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  click's line is the one under the pointer; the switch's, the one with the caret when it is on the
+  screen, else the first on it), and the look becomes the one remembered. The simple look is no view
+  of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
+  checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
+  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
+  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
+- **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
-Clean, Simple and Redlines draw the blank lines between blocks as the space between them, never as
-lines; Raw shows them.
+Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
+Raw shows them.
 
-Simple and Redlines are the markup views, and Redlines remembers the one you chose last, Redlines at
-first. A document with redlines (pending changes, highlights or comment threads) opens in it; one
-without opens in Clean. Making a tracked change in Clean, or adding a comment there, switches to
-it, so suggestions are never invisible to their author, and so does a document shown Clean that
-gains redlines; a tracked change made in Simple stays in Simple, where its bar shows it. Reviewing
-(§5.6) switches to Redlines, where each change shows. Otherwise the view stays as you chose it:
-deciding the last change doesn't switch it. The view, and the markup view remembered, are each
-person's own and are never saved in the file; the markup view is kept in the app's settings and
-reaches every window for the documents each opens next, without changing the view any of them
-shows. The View menu also previews the original (every change rejected) and one person's changes
-alone (everyone else's rejected). The previews are read-only. Raw can be edited while Track
-Changes is off; while it is on, or locked on, Raw is read-only, because typing there could forge
-or break markers.
+Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
+the full markup at first.
+A document opens in the view it was saved in, which its ledger records
+([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
+full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
+in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
+in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
+Redlines in that look, so suggestions are never invisible to their author, and so does a document
+shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
+bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
+shown last, so that a trip through Clean or Raw comes back to where it began; in Redlines already,
+in either look, the menu leaves the look as it is. Reviewing (§5.6) shows the full markup, where
+each change shows, and what it showed is what comes back. With no change pending there is no bar to
+click, and the two looks differ only in the ordinary HTML comments that the full markup draws as
+dimmed notes. Otherwise the view stays as you chose it: deciding the last change doesn't switch it.
+**Switching views never changes the file,** and so never makes the document edited or causes a
+write: a Save, made for another reason, records the view (Clean, the full markup or the simple look,
+never Raw) in a file that has a ledger, so that reading a document leaves its git history quiet,
+and a view alone never adds a ledger to a plain file. A save made in Raw leaves the view the file
+had. The look remembered is each person's own: it is kept in the app's settings, opens the files
+that record no view, and reaches every window for the documents each opens next, without changing
+the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
+menu also previews the original (every change rejected) and one person's changes alone (everyone
+else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it
+is on, or locked on, Raw is read-only, because typing there could forge or break markers.
 
 ### 5.4 Track Changes
 
@@ -303,17 +447,29 @@ mode has no counterpart in the desktop app.
 
 - **The pen shows it.** The Review icon at the top right is a red pen with an underline while your
   changes are tracked, and a gray pen while they aren't. Red is the app's own color, and your own
-  too: the first author color (§5.5, §6.6). Hovering over the pen opens the Review menu, whose first
-  item switches Track Changes (⌘⇧E, as in Word).
+  too: the first author color (§5.5, §6.6). A click on the pen turns Track Changes on and off, as
+  ⌘⇧E does in Word; hovering over it opens the Review menu, whose first item is the same switch.
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
-- **Your setting is yours,** like Word's "Just Mine" tracking. It isn't saved in the file, so using
-  Redlines without tracking imposes nothing on anyone. A file opens with tracking off unless it
-  asks for tracking.
-- **Track changes for everyone,** like Word's "For Everyone", is a setting of the file
-  (`tracking: everyone`, [format §5.6](format.md#56-settings)). Everyone who opens such a file
-  starts with Track Changes on, under a notice that says so. Without an app that enforces roles,
-  anyone can still turn it off; the notice makes that a deliberate choice.
+- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes).
+  Turning Track Changes on writes `tracking: everyone` into the file's ledger, and turning it off
+  takes it out ([format §5.6](format.md#56-settings)). The switch makes the document edited, like
+  any change to it, so the next Save keeps it, and a step of its own, which Undo takes back.
+  Someone who turns it on, saves, and opens the file again, or sends it to someone else, finds it
+  still on. A file with no ledger gets one for it, and turning it off again leaves the file as it
+  was. A file that can't take a ledger (an unreadable one, or an end inside a code block that is
+  never closed) can't have it turned on, and says why. Preferences' Track Changes for new
+  documents is the person's own start: it writes nothing to the file until they switch it.
+- **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
+  who opens such a file starts with Track Changes on, under a notice that says so. Without an app
+  that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
+  notice makes that a deliberate choice. A file that comes to ask while it is open, when the window
+  reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
+  Track Changes turns on, under the same notice, and nothing is written, since the file asks
+  already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
+  tracking is switched off under them; the next switch they make writes the file's setting again.
+  A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
+  Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
@@ -333,10 +489,17 @@ mode has no counterpart in the desktop app.
   the machine), the later-met takes the next free color in that document only. Agents get colors of
   their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
   colors repeat.
-- **Change bars** in the left margin mark each line with a pending change, in its author's color,
-  or gray when several people changed the line. In Simple and Redlines a click on a bar switches
-  between them: the bar is a target 24 px wide, it widens under the pointer, and its hint names
-  the view a click gives. Printing draws the bars as a left border, which prints.
+- **Change bars** in the left margin mark the screen lines that hold a pending change, in its
+  author's color, or gray when several people changed the same screen line: a paragraph that wraps
+  over many lines gets a bar only beside those that hold part of a change, one word on one line
+  marks that line alone, and the bars are drawn again when the text wraps differently (a resize, a
+  zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
+  the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
+  their own. In Redlines a click on a bar switches between its two looks, the full markup and the
+  simple look, as the View menu's Simple Look switch does: the bar is a target 24 px wide, only
+  beside the lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
+  the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");
@@ -356,8 +519,8 @@ mode has no counterpart in the desktop app.
   text struck above the new inside the cell. Words deleted inside a block, a substitution of part of
   one, and a deletion that runs from one block into another stay inline. The caret steps over a
   struck block, as over deleted text, and its card opens on hover and pins on a click; a click on
-  its bar switches to Simple, which doesn't draw it, and the block below keeps the place. Simple
-  and Clean show the newest text only.
+  its bar switches to the simple look, which doesn't draw it, and the block below keeps the place.
+  The simple look and Clean show the newest text only.
 - **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
   new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
   paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
@@ -369,7 +532,7 @@ mode has no counterpart in the desktop app.
   and hovering over Accept or Reject previews the result. Clicking a change pins its card. Cards
   can be turned off.
 - **Ordinary HTML comments,** such as an author's `<!-- TODO -->`, show as small dimmed notes in
-  the Redlines view, are hidden in Clean and Simple, and are saved as written. The ledger never
+  the full markup, are hidden in Clean and in the simple look, and are saved as written. The ledger never
   shows as text; its contents appear in cards and the rail.
 - **The inspector** shows and edits one mark's raw markup.
 - **Broken markup,** for example after a bad merge, shows a warning badge and is otherwise treated
@@ -379,10 +542,13 @@ mode has no counterpart in the desktop app.
 ### 5.6 Reviewing
 
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
-  next-change shortcut (⌘⌥]). Opening it, or moving it to a change, switches to Redlines from
-  Clean, Simple and Raw, so that each change shows while you decide it; choosing Simple closes it,
-  because a person who chooses to read has stopped deciding. It floats at the bottom of the window and closes with Esc or its
-  close button; without it, a change's card still accepts or rejects that change. It holds:
+  next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
+  Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
+  the simple look closes it, because a person who chooses to read has stopped stepping through
+  changes, and while it is open a click on a change bar opens that change's card in place of
+  switching the look. It floats at the bottom of the window and closes with Esc or its close
+  button; without it, a change's card, or its note in the rail (§5.7, in the simple look too),
+  still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
@@ -420,11 +586,36 @@ mode has no counterpart in the desktop app.
     Reject, like the hover card's of any of its marks, decide every mark in one Undo step, or none
     if one can't be decided. The `redlines str-replace` command gives the marks of one call a
     group, so that the skill route shows the same.
-  - The rail shows in the Simple and Redlines views, the notes of changes among the comments.
-    Adding a comment in Clean switches to your markup view, as a tracked change does. In Simple
+  - The rail shows in Redlines, in both looks, the notes of changes among the comments.
+    Adding a comment in Clean switches to Redlines, as a tracked change does. In the simple look
     a change's card doesn't open on hover or on a click in the text, because the text reads as
     accepted; the bar, the note and the review bar are the ways in. Accept and Reject on a note
-    in Simple show the change in Redlines; nothing is decided where its old text is hidden.
+    decide it in place, in the simple look as in Redlines, in one step to undo, and the view and
+    the scroll stay as they were; so that the decision isn't blind, the note says what it decides
+    in the card's words ("Replaced 'March' with 'April'") where the page shows no old text.
+  - **The notes follow the view.** One note is level with its anchor and the others stack around
+    it: the ones after it go down past it, and the ones before it go up, past the top of the
+    screen if need be, never past the top of the page, where they stack from the top. So where
+    many comments crowd a section, the note level with the top of the screen is the one the text
+    there is about, and not one stacked down from far above. The one level with its anchor is the
+    selected note (clicked, or with the caret in its anchor) while its anchor is in view, else the
+    first note whose anchor is; with no anchor in view, the first note below the view, else the
+    last. An Ask bubble the rail lays out (§8.5) is always the one, and stays where it is while the
+    person scrolls; with none, a comment being written is, and stays where it is while the person
+    types and scrolls. With both open, the bubble stays level and the comment's box is placed
+    around it, as a note is, which may leave it lower than its text. As the page scrolls, the note
+    that is level with its anchor changes with the first anchor in view, and the notes slide into
+    place in a moment, as in Google Docs; they slide only then, and not while a keystroke or a
+    resize moves the text, and not at all under Reduce Motion.
+    Selecting a note brings it level with its anchor and moves the others out of its way. The dots
+    of a narrow window follow the same rule. A scroll places the notes again from what was last
+    measured, only when another note is the one, and writes the notes within a screen of the page,
+    and the rest as the page comes near them, so that it stays cheap in a long document. A
+    resolved note gives way as before: it is never the one that keeps its anchor's height. The
+    page is as long as the notes need when the first is level with its anchor, where they reach
+    their lowest, as it was before the notes followed the view, so that a crowded end of a document
+    leaves room under its text; it doesn't shrink as the page scrolls, which would move the page
+    under the person at its end, and grows only where a resolved note, shown, goes lower.
   - When the rail shows, the text column moves left, so that column and rail together stay
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
@@ -464,7 +655,7 @@ mode has no counterpart in the desktop app.
     where that is the only place it is. A document with no file keeps nothing until it is saved.
   - **Coming back:** when the document opens again, in any window, its drafts come back as they
     were left: the boxes open, the caret at the end of the one last typed in, and a document shown
-    Clean switches to your markup view to show them. A window opened at a line, as from a citation, stays
+    Clean switches to Redlines to show them. A window opened at a line, as from a citation, stays
     at that line, with the keyboard in the text. A new comment is on the same text: where it was, if
     the document is unchanged; else found by its text as a reload finds it; else on what replaced
     it, with its text kept and a line saying that the text it pointed to changed. A comment set
@@ -556,7 +747,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
   in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
   all work. The cells are drawn in the system's selection color with the text highlight hidden;
-  Simple and Redlines draw them the same. Esc puts the caret in the cell where the selection
+  Both looks of Redlines draw them the same. Esc puts the caret in the cell where the selection
   ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
   then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
   rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
@@ -648,18 +839,23 @@ menus, shortcuts, the palette, plugins and agents.
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
+| Highlight                      | ⇧⌘H                                                                                           | Ctrl+Shift+H              |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
-| Clean, Simple, Redlines, Raw   | ⌥⌘1, ⌥⌘2, ⌥⌘3, ⌥⌘4                                                                            | not chosen yet            |
+| Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
+| Simple Look (switch)           | ⌥⌘4                                                                                           | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
+| Subscript, superscript         | ⌥⌘, and ⌥⌘. (Word's ⌘= and ⇧⌘= are Zoom In here)                                              | Ctrl+Alt+, and Ctrl+Alt+. |
 | Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
 | Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
@@ -693,9 +889,41 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
+  in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
+  asks for files in the system's panel) all do the same. The file is copied into the folder for
+  images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
+  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
+  over the sidebar, the title bar or the ground below the text goes where the caret is. The image
+  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
+  draws an image only while the caret is off its link, draws one just added all the same until the
+  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
+  data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
+  name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
+  folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
+  insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
+  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
+  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  person may go on writing while the images are saved: the links go in where the paste or drop was,
+  ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
+  all of it is still there; what was typed in it stays, and the links go after it. A document that
+  was replaced meanwhile gets none of the links, and the person is told, the files being where they
+  were saved.
+- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
+  `images` (the name can be changed), a folder named for the document (`plan.assets` for
+  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
+  preview loads images from, and the setting can't name another place on the disk. A document in
+  the home folder, whose project is too broad to load images from but for its own folder, takes
+  images in that folder alone, and says so for the other two. Only image files go in, by their
+  names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
+  or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
+  pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
+  browser, is left to the HTML.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
-  someone else's change. Copy works the same way: Clean, Simple and Redlines copy the newest text, and Raw
+  someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
   copies the source. With Track Changes on, the pasted text is the paster's own insertion.
 - **Fonts:** each of a theme's fonts has a twin with the same character widths that Word and
   Google Docs both have (§6.6). The PDF embeds Redlines' own fonts, and Copy for Word and exports
@@ -730,17 +958,20 @@ a new email under the same name becomes an alias in the ledger
 
 - the command palette (§5.9);
 - a folder sidebar (written), Quick Open and folder search, which folder chat also needs;
-- links from pasting a URL onto a selection (§5.10);
+- links from pasting a URL onto a selection (§5.10), and ⌘-click to open one (§5.2);
 - R Markdown and Quarto chunk options kept byte for byte.
 
 **Should (v1 if time allows):**
 
-- a selection toolbar: Comment, Suggest, Ask agent, and formatting;
+- a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
+  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- image resizing, alt text and captions; callouts (§5.2); Mermaid editing with a live preview;
+- image resizing, alt text and captions; callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+  are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
@@ -762,7 +993,7 @@ Syrus and GitHub notify); paragraph locking.
 ### 5.13 Undo
 
 Undo goes back in time through what this window did: your edits, decisions, comments and replies,
-and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+turning Track Changes on or off, and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
 between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
@@ -770,7 +1001,9 @@ through the `redlines` command line in its name, are a step each when they are n
 suggestions, comments and replies. Someone is your agent when the file, before the change or after
 it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
 stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
-mark, with Track Changes on or off, and waits for ⌘S like any edit.
+mark, with Track Changes on or off, and waits for ⌘S like any edit. Saving records the view in the
+step before it rather than as a step of its own, so one ⌘Z after ⌘S takes back the last edit,
+as it did before.
 
 ### 5.14 Writing in blocks
 
@@ -778,7 +1011,7 @@ A document is a sequence of blocks: paragraphs, headings, list items, quotes, co
 person writes blocks; the editor writes the breaks between them, the line breaks, blank lines and
 syntax Markdown needs, and never shows them.
 
-- **Blank lines are the space between blocks.** Clean, Simple and Redlines draw no blank line, only the
+- **Blank lines are the space between blocks.** Clean and Redlines draw no blank line, only the
   space, by the kinds of the blocks either side (§6.6), whatever blank lines the file has.
 - **Return makes a block, Shift-Return a line break.** Return in a paragraph's text parts it in two;
   at its end it opens an empty paragraph below; at its start, one above, the caret staying with
@@ -845,7 +1078,7 @@ without the editor.
 | Package                | Contents                                                                                                                                   | Runs in                 |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
 | `@redlines/format`     | Parsing and serializing in each dialect; marks, ledger and history; views; accept and reject; the agent operations (§8.3); the conformance fixtures | Anywhere (no DOM, no Node APIs) |
-| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Simple, Redlines and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
+| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines (in two looks) and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
 | `@redlines/plugin-api` | The plugin interface: manifest, contributions, capabilities. Versioned on its own and kept stable                                         | —                       |
 | `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
 | `@redlines/agent-process` | What the Claude and Codex providers share: finding an agent's program, asking it whether it is signed in, and following a run to its end | Anywhere (no DOM, no Node APIs) |
@@ -858,6 +1091,7 @@ without the editor.
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
+| `apps/desktop/quicklook` | The Mac app's Quick Look preview of Markdown, R Markdown and Quarto files: the Clean view as HTML, made by a bundle of `@redlines/format`, micromark and the Default theme's CSS, and the Swift extension that runs it in JavaScriptCore (§10) | macOS (the system's JavaScriptCore) |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
@@ -896,6 +1130,15 @@ network share), or one translocated by macOS. As for updates, it is refused befo
 asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
 checkout, `pnpm -s redlines` runs the TypeScript directly.
 
+The app carries one more program, the Quick Look extension (§10), as
+`Redlines.app/Contents/PlugIns/RedlinesPreview.appex`. Tauri builds no app extensions, so
+`scripts/build-quicklook` makes it as part of `pnpm build`: it bundles the renderer
+(`apps/desktop/quicklook`), compiles a small Swift extension for both architectures with `swiftc`,
+and signs it, and `bundle.macOS.files` copies the folder into the app. Tauri signs the app and the
+programs it copies and never a plug-in, so the extension is signed before Tauri seals the app, with
+the same identity and the sandbox entitlement that an app extension must have
+([releasing](releasing.md#the-quick-look-extension)).
+
 ### 6.4 Plugins
 
 **The core** (`@redlines/editor`) holds:
@@ -909,8 +1152,8 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `tables` (the Table menu), `agents` and
-the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu), `emoji`,
+`agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
@@ -924,15 +1167,16 @@ written.
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
 | `export`     | HTML, clean Markdown and review-view export                                  | Files                      |
-| `outline`    | The outline panel and dragging sections                                      | —                          |
+| `outline`    | The outline of the headings in the left margin; dragging sections to come    | —                          |
 | `workspace`  | The folder sidebar, Quick Open and folder search                             | Files                      |
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
-| `ai`         | The chat panel, Ask agent, agents in comment threads, agent levels (§8)      | Agents                     |
+| `ai`         | The chat panel, Ask, agents in comment threads, agent levels (§8)            | Agents                     |
 | `agents`     | The @ picker and the runs a posted mention starts (§8.6)                     | Agents                     |
 | `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
+| `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -990,12 +1234,30 @@ without each: a half-written comment is gone with the page, and nothing is saved
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
-nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+nothing in it run. The app tells a window of paths by the same two limits: the names in a folder,
+only for a project folder a sidebar shows and for the folders below it that the sidebar lists (none
+hidden, none that git ignores), and the real path of a file, links followed, only for a file the
+person opened or saved and for what is inside a project folder a sidebar shows, with no hidden name
+below the folder. A link in a project that leads out of it is no more known than the file it leads
+to, and anything else asked of gets one refusal, which says nothing of whether the path is there.
+Asking for a document's project is what shows it, once the person has opened or saved the document,
+by a path with no `..` in it, as a dialog gives it. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
-images, as any document the person opens is; a folder or any other file dropped opens nothing, and
-lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
-scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
-and builds Tauri without that protocol.
+images, as any document the person opens is (but for the file that the window's own document icon
+dragged, dropped back on that window, which opens nothing). Image files dropped alone, every file of
+the drop an image, are the window's to add to its document (§5.10), and are the one exception: the
+app, which has them from the system's drop, keeps them for that window and tells it how many there
+are, where they landed, and an id to ask for them by. The panel that Format › Image… shows is the
+app's too, so the window can raise a panel for image files and is given no path by it, only an id.
+The app copies the files into the folder for the document's images when the window asks, so the
+window never names a file to copy and reads none of them, and a pasted image's bytes, which the
+window has, are written the same way. What is copied is an image by its name and its first bytes, no
+larger than the preview shows, and goes inside the folder of a document the window may use and says
+it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one folder
+named in the settings, never one that is a link out of it, and never replacing a file. A folder or
+any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
+adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
+holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
 ### 6.6 Styling
 
@@ -1010,8 +1272,8 @@ optional rules for document elements. People can add their own themes.
   Light or Dark holds whatever the system's is. A change reaches every window at once, About
   Redlines among them, and the windows opened later: the page, and the window itself, its title
   bar, scroll bars and the system's menus and dialogs. Redlines starts in the appearance chosen,
-  so no window opens in another first. The theme is each person's own, like the view: files store
-  no theme, and Copy for Word, PDF and the exports use the current theme.
+  so no window opens in another first. The theme is each person's own, like the markup view they
+  remembered: files store no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |
@@ -1155,11 +1417,11 @@ Redlines works the same with or without git. Its git support has two parts.
   injection hides.
 - **AI is off in a folder until someone turns it on.**
 
-### 8.2 Agent levels: Ask, Suggest, Auto
+### 8.2 Agent levels: Propose, Suggest, Auto
 
 | Level       | What the agent's edits become                                                                                                                        | Suits                          |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **Ask**     | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
+| **Propose** | Nothing is written. The agent proposes edits in the chat as a diff, and **Apply** or **Suggest** writes them                                         | Exploring; sensitive documents |
 | **Suggest** | Tracked suggestions in the agent's name, for anyone to accept or reject                                                                              | Shared documents and review    |
 | **Auto**    | Direct edits, as when you type with tracking off. They appear as they are written, and the run ends with "Claude changed 3 paragraphs · Review · Undo" | Your own drafts                |
 
@@ -1207,7 +1469,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
   changes by the agent (§7.3), flagging any damaged markers.
 
 **Surfaces:** the MCP server and the `redlines` command line; @mentions in comment threads; the
-chat panel; and Ask agent on a selection.
+chat panel; and Ask, a question about a selection (§8.5).
 
 **Agent runs.** Each request, a chat turn or a mention, is one run. Each edit in it (one `str_replace`) that makes several marks gives them a `group` of their own, so the marks of one edit are one suggestion and two edits of a run never are.
 
@@ -1242,9 +1504,59 @@ Agent edits are animated, like a streaming chat answer.
 - **A chat panel** next to the comment rail. Its scope is the selection, the document, or the
   folder (a project or repository).
 - **Answers cite the text,** with links to ranges in the document. Chat never shows raw markers.
-- **Edits follow the agent's level** (§8.2). In Ask, the panel shows each proposal as a diff with
-  Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
-- **Ask agent** on a selection (fix, shorten, rephrase) works without opening the panel.
+- **Edits follow the agent's level** (§8.2). In Propose, the panel shows each proposal as a diff
+  with Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
+- **Ask** is a question about a selection, answered beside it without opening the panel:
+  - **Starting it.** Select text and choose Ask: ⌥⌘A, Format › Ask…, or the Ask item of the
+    formatting palette (§5.1) beside Add Comment. A small box opens at the selection for the
+    question, and an empty first question means "Explain this in the context of the document." (A
+    Return in an empty follow-up field asks nothing.) The default agent answers, and @ picks
+    another, as in a comment. Not in Raw, where a selection
+    holds markers that no answer could be about. (Fix, shorten and rephrase are not part of it.)
+  - **The same access and guardrails as a comment's run:** the agent reads what the Agents pane
+    allows (the document, or its folder), the first time it is asked in a folder the same question
+    is put in the bubble, and what the document holds is untrusted, as for every run.
+  - **Read-only.** The agent is given the tools that read (`view` and `status`) and nothing that
+    writes, the document it reads refuses a write, and its answer is its last message: nothing is
+    written to the file or its ledger. Each run still writes its log. That guarantee is the
+    Redlines tools'. For the agents Redlines can hold to their reading (Claude Code and Codex) the
+    agent itself is read-only too, while an agent the person added may act on its own, as its own
+    settings allow, which Redlines can't stop: its first-run question says so, and does not say
+    that it changes nothing.
+  - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
+    live line while it works (what it is doing, with Stop), then the answer. The selection stays
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going; a
+    press on one of the rail's notes, which the bubble made room around, closes it once that click
+    is over, and not at the press, so that the notes don't move from under the pointer and the
+    click lands. A failure stays on the line with its log, and with a button that opens
+    Preferences where they can put it right (the agent is signed out or too old), as a comment's
+    run does. Where the rail shows its notes, the rail lays the bubble out among them, level with
+    the start of the selection, as it does a new comment's box (§5.7): the notes around it go up
+    or down to clear it, so that none is hidden, and they go back when it closes. A comment's box
+    open at the same time is placed around the bubble, as a note is. Where the rail shows none (a
+    narrow window, where the notes are dots; Clean; a document with no comment) the bubble hangs
+    over the page, in the margin beside the column or, with no room there, under the selection.
+  - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
+    "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
+    an agent's `comment` finds its quote, and makes the marker a link that selects the passage. A
+    quote links only where its words stand as words ("lien" is not in "alien", and a quote of one
+    character is no link), and where they are in several places the link goes to the one nearest
+    the selection. A quote that is not in the document is plain text with no link, which tells a
+    made-up citation from a real one, and says "not found in the document" to a screen reader.
+  - **A follow-up** has a field of its own, and is answered with the exchange so far as context. It
+    may name another agent: each answer is the reply of the agent that gave it, in the bubble and
+    in Make Comment. The earlier answers go to the agent as quoted data, never as instructions.
+  - **Keeping an answer.** Make Comment makes a thread on the selection, as one step to undo: the
+    first question is the person's comment, its answer the agent's reply in the agent's name, and
+    each follow-up and answer a reply, in turn, each agent reply cut to the limits of any agent's
+    reply (§5.7). Open in New Window opens the exchange as an Untitled document, and the bubble
+    goes once the window is open: if it can't be, a notice says so and the bubble stays. The text
+    is unsaved there as in any new document, and in the window's first moment, before its page has
+    said what it holds and can be asked about it, a quit, a restart or a logout, and the window's
+    own close, are refused, as a Cancel would be: the app says the window is still opening, and the
+    person tries again. The hold lasts ten seconds at most, so that a page that never loads can't
+    keep the app from quitting. Copy puts the answer's text on the clipboard. Nothing is kept
+    unless asked.
 - **Folder chat** works the way coding agents work: the agent lists, searches and reads the files
   in the folder rather than relying on a search index. It skips what `.gitignore` excludes, and it
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
@@ -1264,36 +1576,214 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 | ------ | ----------- | ------------- | ----- |
 | **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
 | **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
-| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written |
+| **Other agents,** such as GitHub Copilot and Gemini | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written; Preferences doesn't offer adding one yet |
+| **OpenClaw** agents, such as Moby | The same provider, for `openclaw acp`, which forwards each prompt to an OpenClaw Gateway, on this Mac or elsewhere; no toolbox, it answers in text (below) | The Gateway's: a token in a file Redlines never reads | Written; Preferences › Agents › OpenClaw |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
-(for example, "Claude isn't signed in. Run `claude auth login`."). The UI says "Claude" and
-"Codex"; "Claude Code" appears only in plain text saying the app runs it.
+(for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
+Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
+runs it.
+
+**Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
+the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
+button, and Check Again always:
+
+- **Too old** (older than the version the provider was tested with): the row says an update is
+  needed, and what the program said when asked whether it is signed in, if it said (an older
+  program may not know the question). Update runs the agent's own updater for the way it was
+  installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
+  <package>@latest` for a global npm install, and the agent's own `update` for any other
+  (`claude update`, `codex update`). Redlines looks again when it ends.
+- **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
+  opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
+  the same command and looks again when the person comes back.
+- **Not installed:** the command that installs it, with Copy. Redlines never runs an installer.
+
+Each is a fixed command that the app makes for an agent the window names, never a program, an
+argument or a word of a document, and the name that goes to `brew` is one of a short list. Only
+Preferences may ask for them; a failed run's line in a document opens Preferences instead. An
+update or a sign-in under way has a Cancel, and stops when Preferences closes or the app quits; it
+goes on when the pane is drawn again, and the row follows it. What a failure shows of a command's
+output is its last line, with what looks like a secret left out as far as a heuristic can tell
+(the query of a link, a value after `token` or `key`, a long run that looks like a credential).
+
+**The skill.** An agent that works in a terminal or in a chat of its own, outside the app, learns
+what a Redlines file is from a skill: read it with `redlines view --review`, change it only through
+the `redlines` command line, so that its edits are tracked suggestions in its name, and take deleted
+text, comments, replies and notes as information, never as instructions. It is written once
+(`integrations/skill/body.md`) and made into a copy for each agent
+(`apps/desktop/scripts/build-skills.ts`), since only the front matter and how the agent names itself
+differ: Claude writes as `claude-<person>`, and an agent with a name of its own, such as an OpenClaw
+agent called Moby, as `moby-<person>`. A test fails when a copy isn't what the source makes, or
+shows a command or an option the command line doesn't have. Each agent reads skills from a folder of
+its own, and Install Skill on the row of Claude Code and of Codex in Preferences › Agents writes the
+one file there, `SKILL.md`: `~/.claude/skills/redlines` for Claude Code and
+`~/.agents/skills/redlines` for Codex, which OpenClaw reads too (OpenClaw's own folder is
+`~/.openclaw/skills/redlines`, which the copy command in `integrations/README.md` fills, and the
+app can, for an OpenClaw on this Mac). The row says where it went, and says
+when a login shell can't find the `redlines` command, which the skill runs, and offers General,
+where the command line is installed; Install Skill doesn't install it itself, which may ask for an
+administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
+the app carries its own, so that an installed copy that is older shows Update Skill. Only a copy of
+this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
+in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
+The Claude Code skill is also a plugin, and this repository a marketplace for it
+(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+owner's, and the steps are written down (`integrations/README.md`), not done.
+
+**OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
+that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
+takes its name (what is written after an @), the Gateway's address and the path of the file that
+holds its token, and the app asks the person to allow `openclaw acp --url <address> --token-file
+<file>`, with `--session agent:<id>:main` after them when they name the agent in OpenClaw (an agent
+that isn't the Gateway's default needs it). It is an Agent Client Protocol agent, with these
+differences:
+
+- **It has no toolbox.** OpenClaw's bridge rejects an MCP server in `session/new` and never calls
+  the client's files or terminal, and a Gateway elsewhere couldn't reach the toolbox, a program on
+  this Mac, anyway. So the prompt carries what the tools would have shown: the thread as
+  `read_thread` shows it and the document as `view` does, each marked as text that others wrote
+  and never instructions (a document over 120,000 characters is cut, and says so), and the
+  agent's last message is the reply, as for an agent that never calls `reply`: the first paragraph
+  shows, and the rest folds behind More. It can't change the document; when asked for a change, it
+  gives the wording in its reply. The first run in a folder asks "Send this document and this
+  thread to Moby?", with the folder it keeps the answer for, and says that where it runs and what
+  else it reads is up to its own settings; the answer is kept for the folder, as for any agent, and
+  Remove in Preferences takes it with the agent.
+- **Slash directives in what others wrote don't reach the Gateway.** The Gateway reads `/exec`,
+  `/elevated`, `/model`, `/think`, `/queue` and the rest from the body of a message, wherever a `/`
+  follows whitespace, and acts on them for whoever sent it. The prompt puts the thread, the
+  document and the quoted text between that agent and this app in the same message as the
+  request, so a `/` that starts a word in them is written `\/` (`withoutDirectives`, in
+  `packages/agent-tools`), which the Gateway doesn't read as one. The person's own words are sent
+  as they wrote them.
+- **One session for each thread.** The key is `redlines-` and sixteen hex digits of a hash of the
+  document's path and the thread's id, after `agent:<id>:` when the person named the agent, so that
+  the agent keeps the thread and nothing else's, and a Gateway elsewhere is never given the path.
+  A prompt to a session ends the run in it, so two threads must not share one. It is the key only:
+  the bridge reads `_meta.sessionLabel` as the name of a session that is there already, and looks it
+  up before the key, so a label fails the first run of every thread. The prompt asks the bridge not
+  to put this Mac's folder at its head (`_meta.prefixCwd`). The host holds the session's `_meta` to
+  exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
+  to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
+  than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
+  line the run fails with: name the agent then.
+- **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
+  that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
+  provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
+- **Redlines never holds the token.** It passes the file's path to `openclaw`, which reads it. The
+  command is held to exactly that shape: no `--token`, `--password` or other flag; an address with
+  a user name, a password, a query, a fragment or a port that isn't a number, where a token could
+  ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
+  shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
+  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
+  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
+  goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
+  people on the Mac can read.
+- **Commands the Gateway asks to run** (its exec approvals, relayed as `session/request_permission`)
+  are refused, as for any agent of this kind; the Gateway's default mode asks nothing.
+- **Skill.** The section offers Install Skill for OpenClaw when an agent's Gateway is on this Mac
+  (`ws://127.0.0.1`, `localhost`, `[::1]`): one elsewhere reads that machine's folders, where the
+  skill goes. An address on this Mac may also be the end of a tunnel to a Gateway elsewhere, which
+  can't be told, so the section says what the skill is for, beside the button.
+
+Not done: tracked changes by an OpenClaw agent through this connection. They need a way for the
+bridge to call tools that live in the client (an upstream change to OpenClaw), or the agent working
+on the file with the `redlines` command on the same Mac, which the skill (above) teaches it.
 
 **Written with the limits that hold.** What an agent may read is what it really can read, not what
 it was asked to:
 
 - Claude runs with `--restricted`, which confines its file tools to the document's folder,
   symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
-  "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+  "Just This Document". Its hooks, and the person's settings, skills and `.mcp.json`, don't run
+  (`--restricted` leaves an installed skill out: its first event lists the built-in skills only).
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
-  hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
+  hooks, its skills (the person's own, Redlines' skill, and Codex's built-in ones such as image
+  generation and the skill installer, are for Codex run by hand) and the person's ChatGPT
+  connectors turned off. `--sandbox read-only` isn't used: it
   blocks writes but reads anywhere.
+- At **This folder and my home folder** the same limits hold with the home folder added, and what
+  is private left out *by the limits*, not by the prompt: Claude is granted each visible folder of
+  the home folder (`--add-dir`, a link by its name and its target), so that a hidden folder and
+  `~/Library` aren't readable at all however it searches, plus the cloud folders in `~/Library`,
+  and its settings deny `.env` files and hidden files and folders below the home folder. Codex's
+  profile grants the home folder whole, denies hidden names and `.env` files by glob wherever they
+  are and `~/Library` but for its cloud folders, and grants a folder a link leads to outside the
+  home folder by its real path. Both are checked against the real programs
+  (`agent-limits.real.node.test.ts`, on request) and the command lines against the rule that lets
+  only them through.
 - Both change the document only through the toolbox's tools, which record tracked changes in the
   agent's name. They can't accept, reject or resolve.
 - A run whose toolbox never connected counts as failed, because both agents otherwise carry on
   without it and exit 0.
 
-**Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
-the repository's root, or else the document's folder) or This document. The first run of an agent
-in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
-in the app's settings, never in the document. Preferences › Agents lists the agents found on this
-Mac with their state (not found, not signed in, signed in, and their version), the remembered
-answers with a Forget button for each, and Show Agent Logs.
+**Scope** is the setting What agents may read, in Preferences › Agents: This document, This folder
+(the default; the repository's root, or else the document's folder) or This folder and my home
+folder. The setting is the most that any answer can give. The first run of an agent in a folder
+asks in its thread (§5.7) what it may read, within the setting (the home folder is an answer only
+while the setting allows it), and the answer is remembered for that agent and folder in the app's
+settings, never in the document: an answer narrower than the setting stands, and one wider than
+it is held to it and kept, and stands again if the setting is widened. A document in the home
+folder itself, or in the disk's root, has no folder to read, and is read as This document.
+Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
+update, signed out, signed in), the remembered answers with a Forget button for each, and Show
+Agent Logs.
+
+**The home folder.** This folder and my home folder lets an agent read related files anywhere
+under the home folder, such as a reference document in another project. The default stays This
+folder, and the pane says plainly what the choice means:
+
+- **Left out even there:** hidden files and folders (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`,
+  `.env` files) and `~/Library` (mail, messages, browser data, keychains), except the cloud
+  folders in it (`~/Library/CloudStorage`: Dropbox, Google Drive, OneDrive, Box; `~/Library/Mobile
+  Documents`: iCloud Drive), where people's documents live, often behind a link in the home
+  folder. The limits name both a link and the folder it leads to, and a link is followed only to
+  where it may be: never to `/`, to the home folder or to a folder above it, to a hidden folder, or
+  into `~/Library` but for its cloud folders, and, where it leaves the home folder, only to a
+  volume or what is in one (`/Volumes/Backup`, not `/Volumes`) or to the shared folder
+  (`/Users/Shared`): the system's own folders are the same files as the home folder's under another
+  name (`/System/Volumes/Data/Users/...`), or not a person's. A link that leads anywhere else gets
+  neither its name nor its target, since the name alone would reach it. The home folder is named as it really
+  is, the agents' limits looking at real paths, and a hidden name is left out below each folder a
+  link leads to outside it too. A home folder whose name holds a character of a glob (or a quote or
+  a backslash), or that holds no folder to read, gives the folder alone, and the line says so.
+- **Writes don't change.** The agent still writes only through Redlines' tools, to the document.
+- **The risk:** text in a document that someone else wrote (a comment, a reply, deleted text)
+  could try to make an agent read a private file and quote it into a comment or a suggestion,
+  which then travels with the document. The note says so, and so does the question's answer.
+- **macOS asks.** Documents, Desktop, Downloads, iCloud Drive, other cloud folders and removable
+  and network volumes are protected, and macOS counts what an agent that Redlines starts reads as
+  Redlines' own, so it asks whether *Redlines* may read the folder, in words the bundle gives
+  (`document-types.plist`, true whenever Redlines itself touches the folder). The app lists each
+  protected folder itself, from its own process, when the person picks the choice, and before each
+  run at it, which is what makes macOS ask, at a moment they expect: the first-run question says
+  so, and the run's line says it is checking what macOS allows, for as long as the person takes to
+  answer, up to twenty seconds (a network volume that has gone never answers), before the folders
+  are listed again for the agent's line. A folder macOS refuses is said in a line with a button to
+  Privacy & Security › Files and Folders; the run goes on, and the agent is told which folders are
+  out of reach, so that its reply doesn't guess.
+- **A read that fails inside the scope** is said in a notification as it happens: which file, the
+  likely cause, and what to do. macOS isn't letting Redlines read a folder (a button to System
+  Settings); the file's own permissions refuse it; the agent's own settings, or an organization's,
+  do; or the agent's own words with Show Log, where they read as a refusal or a failed read. A
+  refusal outside the scope, or of what the scope leaves out (hidden names and `.env` files by any
+  name), is a limit doing its work, and is never told of, nor is a failure that is no refusal: a
+  file that isn't there, a folder, a file too large. It is read from Claude's tool results, and
+  from what Codex's commands print, which is best effort: the newer Codex models run most commands
+  through a tool that makes no event, and a command that prints a refusal's words is taken for
+  refused. The limit holds either way; only the message is missed.
+
+Not done: search that skips files not downloaded from a cloud folder (macOS marks them dataless),
+which the agents' own search tools decide; the agents are not stopped from downloading a file they
+read; and a message of its own for a cloud file that isn't on the Mac, which reads as the agent's
+own words where the agent says it timed out. Search skips links in both agents, and the prompt says
+so, so that the agent names a folder that is a link.
 
 **The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
 agents/`: what was started (the agent, its version, the flags, the folder), each event the agent
@@ -1324,8 +1814,9 @@ Syrus runs agents on its server with API keys or enterprise agreements.
 | Integration                         | What it is                                                                                                                                                                                         | Phase                             |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
 | **VS Code and Positron**            | One extension on Open VSX, which also covers Cursor. First, tracked-change decorations in the normal editor; then a custom editor that hosts the Redlines editor                                  | v1.x                              |
-| **Claude**                          | The command line and MCP server; a skill; a Claude Code plugin whose hooks block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md))        | v1 (server, skill), v1.x (plugin) |
-| **Codex and ChatGPT**               | The same MCP server, skill and plugin folder, plus an `AGENTS.md` snippet                                                                                                                          | v1.x                              |
+| **Claude**                          | The command line and MCP server; a skill, which is also a Claude Code plugin (written); later, the plugin's hooks, which block raw marker edits and turn Claude's ordinary edits into tracked changes ([research](research/llm-hosts.md)) | v1 (server, skill, plugin), v1.x (hooks) |
+| **Codex and ChatGPT**               | The same MCP server, a skill in `~/.agents/skills` (written) and an `AGENTS.md` snippet                                                                                                            | v1 (skill), v1.x                  |
+| **OpenClaw**                        | A skill in `~/.openclaw/skills`, loaded only where the `redlines` program is, for ClawHub too (to be published by its owner); the agent itself through the Agent Client Protocol (§8.6)                                            | v1 (skill)                        |
 | **Other agents**                    | GitHub Copilot, Gemini, OpenCode and others through the Agent Client Protocol                                                                                                                       | v1.x                              |
 | **Review in chat apps**             | A remote MCP server whose review panel (MCP Apps) draws tracked changes inside claude.ai and ChatGPT, with Accept and Reject                                                                       | Later                             |
 | **Syrus**                           | A replacement for Syrus's Design Docs plugin (§9.1)                                                                                                                                                 | v1.x                              |
@@ -1367,6 +1858,52 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
+- **Quick Look (macOS).** Space on a Markdown, R Markdown or Quarto file in Finder, Mail, Spotlight
+  or the Open dialog shows the Clean view (§5.3): every pending change accepted, in the Default
+  theme, as the Mac app draws a document. A file that has changes or open comments waiting in it
+  has one line over the text that says so and points to the app ("4 changes and 2 comments by
+  Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
+  matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
+  line over its code. Raw HTML in the document is text, never live. An image that is a file in the
+  document's project is drawn; any other is its alt text, and one from a server is never loaded.
+  - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
+    `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
+    It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
+    micromark with GitHub's extensions, the Default theme's tokens and its fonts, and runs it in
+    the system's JavaScriptCore, for the HTML that Quick Look draws. It never calls the
+    `redlines` program or anything on the `PATH`, and the app needn't be running.
+  - **Nothing to install.** macOS registers the extension the first time the app runs from
+    Applications and removing the app removes it. It needs macOS 13.3, the first whose
+    JavaScriptCore has the regular-expression lookbehind that the format library's patterns use
+    (its array methods came with 13.0). System Settings lists it with the other Quick Look
+    extensions, on, and turns it off; Preferences › General › Quick Look previews of Markdown
+    files has a button that opens that list (§5.1).
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
+    no type for R Markdown and Quarto: a file of either gets a type made from its extension
+    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
+    extension from the app that declares it. Where another app declares them, the file has that
+    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
+    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
+    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+    turns either off: that is the one extension per type that Quick Look has.
+  - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
+    drawn, to its last paragraph under that, with a line that says so. The count of what waits is
+    read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
+    end, isn't read.
+  - **Images.** An image is drawn when it is a file inside the document's project, its repository
+    or else its own folder (the rule that the app's own preview loads images by, §6.5; a project
+    that is too broad, the home folder, a folder above it or the disk's root, is its document's own
+    folder alone, with no subfolder): no hidden file's or folder's, with no link leading out of the
+    project to it, and whose name and first bytes both say it is an image the preview shows (PNG,
+    JPEG, GIF, WebP, AVIF, HEIC, JPEG XL, BMP, ICO, TIFF or SVG). It loads at most 40 images, 16 MB
+    each and 48 MB in all; any other image, and any
+    that isn't there, is its alt text. An image from a server, or in a `data:` address, is never
+    loaded, so that a preview never tells a server that a file was opened. A sandboxed extension
+    can't read the files beside its document, so the extension has the sandbox's read-only
+    exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
+    Quick Look as the attachments of its answer, which the page names by `cid:` and which its
+    Content-Security-Policy allows and nothing else (`img-src cid:`).
+  - **Not yet:** thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1380,12 +1917,25 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
+- **The Quick Look preview reads the file it is asked to preview, and the images that file links
+  to,** in a sandbox with no network entitlement, and draws a page with no script that loads
+  nothing but the images it was given (its Content-Security-Policy says so): a preview never tells
+  a server that a file was opened. Its two exceptions to the sandbox are JavaScriptCore's
+  compiler, without which the renderer is 5 to 8 times as slow, which a long document turns from a
+  moment into a wait, and a read-only exception for files, which the images need and nothing else
+  uses: it loads a file only inside the document's project, that is no hidden file's or folder's
+  and that no link leads out of it to, whose name and first bytes both say it is an image. What it
+  reads goes nowhere but into the page that Quick Look draws, since it has no network
+  ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
-  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
+  beside its document, §5.10, which it cannot read back), and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
-- **Per-person state stays out of the file:** view, mode, zoom and text size, filters, comment
-  drafts, folds, the last version each person saw, and presence.
+- **Per-person state stays out of the file:** mode, zoom and text size, the markup view each
+  person remembered, filters, comment drafts, folds, the last version each person saw, and
+  presence. The view a document opens in, and whether it tracks changes, are the document's own
+  (format §5.6).
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines
   its writes to the workspace.
 - **AI is opt-in,** with a choice of provider and a local option, and Redlines never reads or
@@ -1415,8 +1965,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 
 ## 14. Open questions
 
-1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Ask, Suggest
-   or Auto for agents, following their person by default.
+1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Propose,
+   Suggest or Auto for agents, following their person by default.
 2. **AI engines** (§8.6), to confirm with the vendors before release:
    - whether an open-source publisher must accept Anthropic's Commercial Terms, and whether its
      legal page supersedes the Agent SDK's note against third-party claude.ai sign-in;
@@ -1427,5 +1977,6 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
-6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘4, in the menu's order. Word for Mac gives ⌥⌘1 to
-   ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real.
+6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order, and ⌥⌘4 for the Simple Look
+   switch below them. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to
+   ⌘6; kept unless the clash proves real.

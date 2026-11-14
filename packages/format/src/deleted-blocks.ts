@@ -3,7 +3,10 @@
 // block after them, the payload ending with the break (and, in front of the next item of a list,
 // that item's prefix), or, at the end of the text, the opener behind the block above, the payload
 // starting with the break. This reads the payload; whether the file is in one of those places is
-// the caller's to say.
+// the caller's to say. Blocks at the end of the text under a setext heading are written as a third
+// form, the opener alone on its line with the blocks alone as its payload, no break at either end
+// (the heading's underline is not a part of a break that goes, #372): this reads no blocks from it,
+// and a view draws it as the deletion of the text that it is.
 
 import { CONTAINER_PREFIX } from './blocks.ts';
 import { parse } from './parse.ts';

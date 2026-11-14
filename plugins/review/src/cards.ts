@@ -18,7 +18,7 @@ import {
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
 import { canReject, isAlignMark } from '@redlines/format';
-import type { MarkRange, Parsed, Range } from '@redlines/format';
+import type { MarkRange, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
 import { startsNewComment } from './rail.ts';
@@ -26,59 +26,21 @@ import {
   attempt,
   button,
   changesOf,
-  changeTexts,
   decideSuggestion,
+  describeChanges,
   element,
   errorLine,
   isRowInsertion,
-  rowsDone,
-  readable,
   type ReviewContext,
   segmentSpan,
   suggestionIn,
-  tableDeleted,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
 
-/** Text as a card quotes it, in quotation marks (see `readable`). */
-const quote = (text: string) => `“${readable(text)}”`;
-
-/**
- * Whether deleted text is a break alone: a block break with the next block's prefix (`## `, `- `,
- * `> `), or a hard line break, which joins what it separated (format §3.4).
- */
-function isBreak(text: string): boolean {
-  return text.includes('\n') && /^(?:[\s>\\]|#{1,6} |[-*+] |\d{1,9}[.)] )*$/.test(text);
-}
-
-/**
- * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs`,
- * `Deleted table (3 columns, 20 rows)` or `Formatted: Bold`. A
- * substitution with no old text, such as the second part of one that untracked typing split
- * (format §3.10), inserted its text.
- */
-export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const row = rowsDone([change]) ?? tableDeleted(change);
-  if (row !== null) return row;
-  const { old, added, label } = changeTexts(parsed, change);
-  if (label !== undefined) return `Formatted: ${label}`;
-  if (change.kind === 'split') return 'Inserted paragraph break';
-  if (change.kind === 'ins' || (change.kind === 'sub' && old === '')) {
-    return `Inserted ${quote(added)}`;
-  }
-  if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
-  return `Replaced ${quote(old)} with ${quote(added)}`;
-}
-
-/** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
- * change's words. */
-export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
-  const rows = changes.length > 1 ? rowsDone(changes) : null;
-  if (rows !== null) return rows;
-  return changes.map((change) => describeChange(parsed, change)).join(' · ');
-}
+// What a card says of a change, in Word's words, is `describeChange` in shared.ts: the notes of the
+// rail say it too.
+export { describeChange, describeChanges } from './shared.ts';
 
 /** A change and the stretch of it under the pointer: one segment, markers included. */
 interface Found {
@@ -357,7 +319,18 @@ export function cards(ctx: ReviewContext): {
     const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
-    return { pos: from, end: to, above: true, create: (view) => new Card(view, ctx, found) };
+    // Not clipped: CodeMirror puts away a tooltip whose anchor is above the top of the editor's own
+    // box, less the room a host keeps over it (`scrollMargins`: the title bar's). The page is what
+    // scrolls, so that box is the whole document, which starts below that room already: the room
+    // would be taken twice, and a change on the first line would have no card. `visibleSpace` keeps
+    // the card where it can be seen.
+    return {
+      pos: from,
+      end: to,
+      above: true,
+      clip: false,
+      create: (view) => new Card(view, ctx, found),
+    };
   };
   const hover = hoverTooltip(cardAt, {
     hoverTime: 300,

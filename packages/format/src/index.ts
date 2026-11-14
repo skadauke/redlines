@@ -1,7 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
-export { openerRange } from './blocks.ts';
+export { frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
@@ -27,6 +27,7 @@ export {
 } from './agent.ts';
 export { agentWorkOf } from './agent-work.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
+export { addHighlight } from './highlights.ts';
 export {
   accept,
   acceptAll,
@@ -40,6 +41,8 @@ export {
 export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
+export { ALERT_LINE, GITHUB_TYPES, calloutWord, typeOfWord } from './callout.ts';
+export { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 export type {
   AlignedColumn,
   BlockType,
@@ -50,6 +53,7 @@ export type {
 export { trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export { setTracking, setView } from './settings.ts';
 export { trackedEdit, trackedEdits } from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';

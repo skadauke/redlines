@@ -2,8 +2,10 @@
 //! for them, and Redlines can be made the default app for Markdown (`default_app.rs`). They are in
 //! `document-types.plist`, which Tauri's bundler merges into the Info.plist it writes for the Mac
 //! (`bundle.macOS.infoPlist`), and nowhere else: the Windows and Linux installers claim no files,
-//! and the program that `tauri dev` runs, outside a bundle, claims none either. These tests read
-//! that file, and, after `pnpm tauri build --debug --bundles app`, the built app's Info.plist.
+//! and the program that `tauri dev` runs, outside a bundle, claims none either. The file also holds
+//! what macOS's question says when it asks whether Redlines may read a protected folder, for an
+//! agent a person lets read their home folder. These tests read that file, and, after
+//! `pnpm tauri build --debug --bundles app`, the built app's Info.plist.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,11 @@ use serde::Deserialize;
 
 // Markdown's type, the one Redlines opens Markdown files by and can be made their default app for.
 use crate::default_app::MARKDOWN;
+
+/// The type that other apps declare for Markdown (Word does, as a type that conforms to nothing),
+/// which the bundle claims as well, so that Open With offers Redlines for a file typed that way
+/// (#347). It is not Redlines' to declare, so the bundle only claims it.
+const PUBLIC_MARKDOWN: &str = "public.markdown";
 
 /// The parts of an Info.plist that say which documents an app opens.
 #[derive(Debug, Deserialize)]
@@ -74,7 +81,8 @@ fn read<T: serde::de::DeserializeOwned>(plist: &Path) -> T {
 }
 
 /// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
-/// app for, at the rank of an app that opens it. R Markdown and Quarto by their extensions, which
+/// app for, and by `public.markdown`, which other apps declare (#347), at the rank of an app that
+/// opens it. R Markdown and Quarto by their extensions, which
 /// macOS has no type for, and plain text by `.txt` alone, each at the rank of an alternative, so
 /// that Redlines is offered for those files and takes none of them, even on a Mac where no other
 /// app owns them: people who write R Markdown or Quarto have an editor of their choice. Plain
@@ -89,14 +97,20 @@ fn expected() -> Vec<Document> {
         extensions: extensions.iter().map(|&each| each.to_owned()).collect(),
     };
     vec![
-        editor("Markdown Document", "Default", &[MARKDOWN], &[]),
+        editor(
+            "Markdown Document",
+            "Default",
+            &[MARKDOWN, PUBLIC_MARKDOWN],
+            &[],
+        ),
         editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
         editor("Quarto Document", "Alternate", &[], &["qmd"]),
         editor("Plain Text Document", "Alternate", &[], &["txt"]),
     ]
 }
 
-/// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type.
+/// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type,
+/// and imports none that others declare: `PUBLIC_MARKDOWN` is only claimed.
 fn markdown_type() -> Type {
     Type {
         identifier: MARKDOWN.to_owned(),
@@ -123,6 +137,12 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
     for document in &declared.documents {
         offered.extend(document.extensions.iter().map(|each| each.to_lowercase()));
         for name in &document.types {
+            // Other apps declare this type, for the same two extensions, and a type that others
+            // declare is not ours to import.
+            if name == PUBLIC_MARKDOWN {
+                offered.extend(markdown_type().tags.extensions);
+                continue;
+            }
             // A type is declared with its extensions, so that every macOS knows it.
             let imported = declared
                 .imported
@@ -146,12 +166,69 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
 }
 
 #[test]
+fn the_quick_look_preview_is_built_for_the_markdown_types_the_bundle_claims() {
+    // The preview extension (apps/desktop/quicklook) lists the types of the files it previews in
+    // scripts/build-quicklook: a file the app is offered for is previewed as well.
+    let script = include_str!("../../scripts/build-quicklook");
+    let list = script
+        .lines()
+        .find(|line| line.starts_with("MARKDOWN_TYPES = "))
+        .expect("scripts/build-quicklook lists MARKDOWN_TYPES");
+    let listed: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    let declared: Declared = read(&source());
+    let markdown = declared
+        .documents
+        .iter()
+        .find(|each| each.name == "Markdown Document")
+        .expect("the bundle declares Markdown");
+    assert_eq!(listed, markdown.types);
+}
+
+#[test]
+fn macos_is_told_why_when_it_asks_to_let_redlines_read_a_folder_it_protects() {
+    // The question macOS puts when an agent Redlines started reads Desktop, Documents, Downloads,
+    // a cloud folder or a volume, which it asks of Redlines, says why in these words.
+    let keys: plist::Dictionary = read(&source());
+    for key in [
+        "NSDesktopFolderUsageDescription",
+        "NSDocumentsFolderUsageDescription",
+        "NSDownloadsFolderUsageDescription",
+        "NSFileProviderDomainUsageDescription",
+        "NSNetworkVolumesUsageDescription",
+        "NSRemovableVolumesUsageDescription",
+    ] {
+        let why = keys
+            .get(key)
+            .and_then(plist::Value::as_string)
+            .unwrap_or("");
+        // True whenever Redlines itself touches the folder (its sidebar, opening and saving a
+        // document there), and not only when an agent reads: macOS shows it for every trigger.
+        assert!(why.contains("agent"), "{key}: {why:?}");
+        assert!(
+            why.contains("opens and saves your documents"),
+            "{key}: {why:?}"
+        );
+        assert!(why.contains("changes only the document"), "{key}: {why:?}");
+        assert!(!why.contains("never changes them"), "{key}: {why:?}");
+    }
+}
+
+#[test]
 fn the_file_holds_only_what_tauri_adds_to_its_own() {
     // Tauri's bundler lets each key of the file replace its own, such as the version.
     let keys: plist::Dictionary = read(&source());
     assert_eq!(
         keys.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["CFBundleDocumentTypes", "UTImportedTypeDeclarations"]
+        [
+            "CFBundleDocumentTypes",
+            "UTImportedTypeDeclarations",
+            "NSDesktopFolderUsageDescription",
+            "NSDocumentsFolderUsageDescription",
+            "NSDownloadsFolderUsageDescription",
+            "NSFileProviderDomainUsageDescription",
+            "NSNetworkVolumesUsageDescription",
+            "NSRemovableVolumesUsageDescription",
+        ]
     );
     // Tauri builds an Info.plist beside its config into the program that `tauri dev` runs too.
     let beside = Path::new(env!("CARGO_MANIFEST_DIR")).join("Info.plist");

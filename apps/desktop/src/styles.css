@@ -51,6 +51,8 @@ body {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  /* How much of the page's lower edge the word count's fade covers (see .rl-footer). */
+  --rl-footer-room: 44px;
 }
 
 .rl-titlebar-host {
@@ -59,10 +61,45 @@ body {
 
 .rl-scroller {
   flex: 1;
+  box-sizing: border-box;
+  /*
+   * The scroller reaches the top of the window, under the title bar that floats over it, and the
+   * document starts below the bar through this padding: it is room that scrolls, so that nothing is
+   * hidden at rest and the text passes under the bar as it scrolls. (The editor keeps what it
+   * scrolls to clear of the bar too: main.ts.)
+   */
+  padding-top: calc(52 * var(--rl-pt));
   overflow-y: auto;
+  scroll-padding-top: calc(52 * var(--rl-pt));
   /* A classic scrollbar that comes when the document grows (a table's row wraps) would move the
      centered text column, and every table in it, by half its width. */
   scrollbar-gutter: stable;
+}
+
+/*
+ * What passes under the title bar thins out into the page's own color over its lower part, so that
+ * the file name and the icons stay legible over it, and the text does not stop at a hard edge. It
+ * is a gradient of the page's color and no mask on the scroller, which would dim the popovers that
+ * hang inside the scroller too. Over the page's text (the editor's own scroller is a stacking
+ * context at 0, and this comes after it), under the bar, the sidebar that covers a narrow page, and
+ * the find bar and the menus. It takes no pointer, and stops short of a classic scrollbar.
+ */
+.rl-main::after {
+  position: absolute;
+  top: 0;
+  /* Stops short of a classic scrollbar, and of the edge where an overlay one is drawn. */
+  right: max(var(--rl-scrollbar, 0px), 12px);
+  left: 0;
+  z-index: 0;
+  height: calc(64 * var(--rl-pt));
+  background: linear-gradient(
+    to bottom,
+    var(--rl-page, Canvas) 0,
+    var(--rl-page, Canvas) 56%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
 }
 
 /*
@@ -79,13 +116,73 @@ body {
   outline: none;
 }
 
-/* The title bar: the page's own color, no line under it, the file name centered. */
+/*
+ * The word count (word-count.ts): a small gray label in the page's lower right corner, on a fade of
+ * the page's color that rises from the window's lower edge as the title bar's falls from the top,
+ * so that the text and the notes that scroll under it are gone before they meet it. Over the page's
+ * text, under the review bar, the notifications and whatever else floats; it takes no pointer, and
+ * stops short of a classic scrollbar, and of the edge where an overlay one is drawn. It follows the
+ * theme and the window zoom as any text does.
+ */
+.rl-footer {
+  position: absolute;
+  right: max(var(--rl-scrollbar, 0px), 12px);
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  height: var(--rl-footer-room);
+  background: linear-gradient(
+    to top,
+    var(--rl-page, Canvas) 0,
+    var(--rl-page, Canvas) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/*
+ * What scrolls into view stops short of the fade, as of the title bar above: a comment box opened
+ * near the bottom, a find match. (The editor keeps its own caret clear of it by a scroll margin.)
+ * The page is marked while the count is shown.
+ */
+.rl-has-footer .rl-scroller {
+  scroll-padding-bottom: var(--rl-footer-room);
+}
+
+/* Level with the notifications' lowest card, which hides it whole when one is shown. */
+.rl-word-count {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+ * The table grips are drawn in a layer of their own above the document's text (the tables plugin's
+ * z-index: 5). It is no stacking context here, so it would be above the title bar the page scrolls
+ * under, and above the fade, and take the pointer: at 0 it is above the text only.
+ */
+#editor .rl-grips {
+  z-index: 0;
+}
+
+/*
+ * The title bar: no color of its own and no line under it, floating over the top of the scroller,
+ * so that the window reads as one page and the text scrolls under it; the file name centered.
+ */
 
 .rl-titlebar {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: var(--rl-scrollbar, 0px);
+  left: 0;
   z-index: 2;
   display: grid;
-  flex: none;
   /* The frame is in points beside the window buttons, and its contents in frame units (zoom.css). */
   grid-template-columns:
     minmax(calc(84 * var(--rl-pt) + 40 * var(--rl-frame)), 1fr) minmax(0, max-content)
@@ -93,13 +190,50 @@ body {
   align-items: center;
   height: calc(52 * var(--rl-pt));
   padding: 0 calc(12 * var(--rl-pt));
-  background: var(--rl-page, Canvas);
   -webkit-user-select: none;
   user-select: none;
 }
 
-.rl-title {
+/* The file name and the document's icon beside it, centered as one. */
+.rl-title-group {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: calc(4 * var(--rl-frame));
+  min-width: 0;
+}
+
+/*
+ * The document's icon, which drags the file as a proxy icon does (the bar's own drag moves the
+ * window, and this is left out of it). Quiet, and a step darker under the pointer.
+ */
+.rl-doc-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(20 * var(--rl-frame));
+  height: calc(28 * var(--rl-frame));
+  color: var(--rl-ink-2);
+}
+
+.rl-doc-icon:hover {
+  color: var(--rl-ink);
+}
+
+.rl-doc-icon svg {
+  width: calc(16 * var(--rl-frame));
+  height: calc(16 * var(--rl-frame));
+}
+
+/*
+ * The file name takes the pointer: a double-click on it renames, and the facts under it show on
+ * hover. Its padding makes a target about as tall as the icons beside it; a drag on it still moves
+ * the window, as the rest of the bar does.
+ */
+.rl-title {
+  min-width: 0;
+  padding: calc(8 * var(--rl-frame)) calc(4 * var(--rl-frame));
   overflow: hidden;
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-frame);
@@ -107,7 +241,6 @@ body {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
 }
 
 .rl-title-field {
@@ -122,7 +255,6 @@ body {
   font: inherit;
   text-align: center;
   outline: none;
-  pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
 }
@@ -211,6 +343,12 @@ body {
   white-space: nowrap;
   pointer-events: none;
   animation: rl-appear 90ms ease-out;
+}
+
+/* The hints of the icons at the bar's right end end at the icon's right edge, so that they stay in the window. */
+.rl-tip-end {
+  right: 0;
+  left: auto;
 }
 
 .rl-tip-shortcut {
@@ -699,6 +837,8 @@ body {
   }
 
   .rl-titlebar,
+  .rl-main::after,
+  .rl-footer,
   .rl-sidebar,
   .rl-rail,
   .rl-review-bar,
@@ -706,6 +846,11 @@ body {
   .rl-notifications,
   .rl-menu-anchor {
     display: none !important;
+  }
+
+  /* The room the title bar's float needs is no part of a page. */
+  .rl-scroller {
+    padding-top: 0;
   }
 
   #editor .cm-editor,
@@ -759,6 +904,44 @@ body {
   }
 
   #editor .rl-bar-mixed::before {
+    border-left-color: var(--rl-mixed);
+  }
+
+  /*
+   * The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the text
+   * differently: the layer is left out, and each line that holds a change prints a bar down its
+   * whole paragraph, as the lines drew it before the layer.
+   */
+  #editor .rl-bar-layer {
+    display: none;
+  }
+
+  #editor .cm-line.rl-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -24px;
+    width: 0;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .cm-line.rl-bar-mixed::before {
+    border-left-color: var(--rl-mixed);
+  }
+
+  #editor .cm-line.rl-quote.rl-bar::before {
+    left: -26px;
+  }
+
+  /* A table row's bar is its first cell's, a background, which a printed page drops. */
+  #editor .rl-trow.rl-bar > .rl-tc:first-child::before {
+    width: 0;
+    background: none;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before {
     border-left-color: var(--rl-mixed);
   }
 }

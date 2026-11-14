@@ -12,13 +12,20 @@
 //! itself. The Dock and a logout go straight to AppKit's `terminate:`, of which Tauri hears nothing
 //! until the app is already going (no `RunEvent::ExitRequested`, only `RunEvent::Exit`), so `macos`
 //! below stops that and starts them, and answers once every window has answered.
+//!
+//! A window opened for text holds it unsaved before its page has loaded far enough to be asked about
+//! it, which a quit or its close button would not wait for. For its first moments (`Entry::starting`,
+//! at most ten seconds) a quit is refused, whatever asks (the pages' asking, AppKit's terminate, and
+//! the answer that every window has said yes: `hold_quit`), and so is the window's own close, and
+//! the person is told to try again.
 
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
-    utils::config::WindowConfig,
+    AppHandle, CloseRequestApi, Emitter, LogicalPosition, Manager, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent, utils::config::WindowConfig,
 };
 
 use crate::{Opened, OpenedFile};
@@ -30,24 +37,79 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 /// The label of the Preferences window, which holds no document.
 pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
 
+/// The label of the About Redlines window, which holds no document either.
+pub(crate) const ABOUT_WINDOW: &str = "about";
+
 /// How the labels of the document windows opened after the main one begin: `doc-1`, `doc-2` and
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
 
-/// Whether `label` is a document window: the main one, or one opened after it. Preferences and the
-/// install question are not.
+/// Whether `label` is a document window: the main one, or one opened after it. Preferences, About
+/// and the install question are not.
 pub(crate) fn is_document_window(label: &str) -> bool {
     label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
+}
+
+/// The windows that hold no document and stay while the app runs: Preferences and About. The app
+/// quits when its last window is gone, so these close with the last document window, or they would
+/// keep it running behind a menu bar that can do nothing.
+const WITHOUT_DOCUMENT: [&str; 2] = [PREFERENCES_WINDOW, ABOUT_WINDOW];
+
+/// The windows to close now that the window `closed` is gone and no document window is left: those
+/// without a document, but for `closed` itself.
+fn left_behind(closed: &str) -> impl Iterator<Item = &'static str> {
+    WITHOUT_DOCUMENT
+        .into_iter()
+        .filter(move |label| *label != closed)
 }
 
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
 
-/// What a window was opened for: a file, and a line in it. The window reads the fields by name.
+/// How long a window opened for text is held to its page's first report (`Entry::starting`). A page
+/// reports as soon as it has loaded, in a second or two; one that hasn't in this long isn't going to,
+/// and a window that can't be closed, or an app that can't quit, is worse than the text it holds.
+const STARTING_GRACE: Duration = Duration::from_secs(10);
+
+/// What a window is told when a quit was refused for a window that is starting. The pages listen for
+/// it (`src/windows.ts`), and a test holds the two to each other.
+const QUIT_HELD: &str = "quit-held";
+
+/// What a window is told when its own close was refused because it is starting (`QUIT_HELD`).
+const CLOSE_HELD: &str = "close-held";
+
+/// What a window was opened for: a file, and a line in it; or text, for an Untitled document that
+/// holds it; or nothing. The window reads the fields by name.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct WindowStart {
     path: Option<String>,
     line: Option<u32>,
+    /// The text of the Untitled document the window starts with, which is unsaved: closing the
+    /// window, or quitting, asks about it as about any edits. Never empty, and never with a file.
+    ///
+    /// The window may ask for it more than once. Its page asks what it was opened for each time it
+    /// starts, and a reload is a start (Vite reloads the page in `pnpm tauri dev`): the page must
+    /// find the text, as it finds the file and the line, and not a blank document. So the text is
+    /// kept, but only while the window has no file. Once the window says its document is one, saved
+    /// or replaced (`Registry::report`), the file holds the text, and the app needn't keep a long
+    /// answer for as long as the window is open, nor bring it back, unsaved, over a saved file.
+    text: Option<String>,
+}
+
+impl WindowStart {
+    /// What `open_window` asks for. A window opens for a file or for text, not both: the file would
+    /// be its document and the text would never show, so that is refused, not guessed at. Text that
+    /// is empty is no text: the window opens for what else it was given, or for nothing, as New
+    /// does.
+    fn new(path: Option<String>, line: Option<u32>, text: Option<String>) -> Result<Self, String> {
+        let text = text.filter(|text| !text.is_empty());
+        if path.is_some() && text.is_some() {
+            return Err(
+                "A window opens for a file or for text, not both. Ask for one of them.".to_owned(),
+            );
+        }
+        Ok(Self { path, line, text })
+    }
 }
 
 /// A window, as the others ask about it. The window reads the fields by name.
@@ -56,6 +118,9 @@ pub struct DocumentWindow {
     label: String,
     path: Option<String>,
     dirty: bool,
+    /// A window opened for text whose page hasn't said what it holds (`Entry::starting`): it can't be
+    /// asked about the text yet, so a quit waits.
+    starting: bool,
 }
 
 /// One open window.
@@ -67,14 +132,33 @@ struct Entry {
     path: Option<String>,
     /// Whether the document has unsaved edits, as the window last said.
     dirty: bool,
+    /// Whether the window has said what it holds. Until it has, the app goes by what it gave the
+    /// window (`start`), for its page has told nothing yet.
+    reported: bool,
     /// The files given to this window that it hasn't taken yet.
     files: Vec<OpenedFile>,
+    /// When the window was opened.
+    opened: Instant,
 }
 
 impl Entry {
-    /// An Untitled document with nothing in it, which a file may take the place of.
+    /// An Untitled document with nothing in it, which a file may take the place of. A window opened
+    /// for text is not, even before its page says so. It isn't marked `dirty` until it does, for
+    /// quitting asks only the windows that are, whose pages are sure to be listening
+    /// (`Registry::begin_terminating`).
     fn untouched(&self) -> bool {
-        self.path.is_none() && !self.dirty
+        self.path.is_none() && !self.dirty && (self.reported || self.start.text.is_none())
+    }
+
+    /// A window opened for text, in the first moments before its page has said what it holds. The
+    /// text is the window's own and exists nowhere else, but the page can't be asked about it yet (it
+    /// may not be listening), and the registry has it clean until the page says: so a quit or a close
+    /// in that moment would lose it without a question. Both are held while a window is starting.
+    /// Only for `STARTING_GRACE`: a page that never reports must not hold the app.
+    fn starting(&self, now: Instant) -> bool {
+        !self.reported
+            && self.start.text.is_some()
+            && now.saturating_duration_since(self.opened) < STARTING_GRACE
     }
 }
 
@@ -108,6 +192,11 @@ impl Registry {
 
     /// Adds a window as the frontmost, which a new window is about to be.
     fn add(&mut self, label: &str, start: WindowStart) {
+        self.add_at(label, start, Instant::now());
+    }
+
+    /// `add`, for a window opened at `opened`.
+    fn add_at(&mut self, label: &str, start: WindowStart, opened: Instant) {
         self.entries.insert(
             0,
             Entry {
@@ -115,7 +204,9 @@ impl Registry {
                 path: start.path.clone(),
                 start,
                 dirty: false,
+                reported: false,
                 files: Vec::new(),
+                opened,
             },
         );
     }
@@ -148,11 +239,16 @@ impl Registry {
         self.entries.iter_mut().find(|entry| entry.label == label)
     }
 
-    /// Notes what a window holds.
+    /// Notes what a window holds. A window whose document is a file has no more use for the text it
+    /// was opened for (`WindowStart::text`).
     fn report(&mut self, label: &str, path: Option<String>, dirty: bool) {
         if let Some(entry) = self.entry_mut(label) {
+            if path.is_some() {
+                entry.start.text = None;
+            }
             entry.path = path;
             entry.dirty = dirty;
+            entry.reported = true;
         }
     }
 
@@ -171,7 +267,7 @@ impl Registry {
         }
     }
 
-    /// What a window was opened for.
+    /// What a window was opened for, as often as it asks (`WindowStart::text` says why).
     fn start(&self, label: &str) -> WindowStart {
         self.entries
             .iter()
@@ -180,16 +276,29 @@ impl Registry {
             .unwrap_or_default()
     }
 
-    /// The windows, the frontmost first.
-    fn list(&self) -> Vec<DocumentWindow> {
+    /// The windows, the frontmost first, as they are at `now`.
+    fn list(&self, now: Instant) -> Vec<DocumentWindow> {
         self.entries
             .iter()
             .map(|entry| DocumentWindow {
                 label: entry.label.clone(),
                 path: entry.path.clone(),
                 dirty: entry.dirty,
+                starting: entry.starting(now),
             })
             .collect()
+    }
+
+    /// Whether any window is starting (`Entry::starting`) at `now`: a quit is refused for it.
+    fn any_starting(&self, now: Instant) -> bool {
+        self.entries.iter().any(|entry| entry.starting(now))
+    }
+
+    /// Whether the window `label` is starting at `now`: its close waits for it.
+    fn is_starting(&self, label: &str, now: Instant) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.label == label && entry.starting(now))
     }
 
     /// Gives out files, when there is a window to give them to: the frontmost window takes the
@@ -432,7 +541,7 @@ pub fn deliver(app: &AppHandle) {
     for path in routed.to_open {
         let start = WindowStart {
             path: Some(path.clone()),
-            line: None,
+            ..WindowStart::default()
         };
         if let Err(error) = open_document_window(app, start) {
             // The file isn't dropped: the frontmost window says so, in one line.
@@ -468,20 +577,25 @@ pub fn opened_files(window: WebviewWindow, windows: tauri::State<'_, Windows>) -
     windows.lock().take_files(window.label())
 }
 
-/// Opens a new window, for a file and a line in it if it is given them, and says its label. It lets
-/// the window use nothing new: a file it may not use says so in the window, as any other does.
+/// Opens a new window, for a file and a line in it, or for text, if it is given them, and says its
+/// label. It lets the window use nothing new: a file it may not use says so in the window, as any
+/// other does, and text is no file, with nothing to allow. A file and text together are refused
+/// (`WindowStart::new`).
 #[tauri::command(async)]
 pub fn open_window(
     app: AppHandle,
     path: Option<String>,
     line: Option<u32>,
+    text: Option<String>,
 ) -> Result<String, String> {
-    open_document_window(&app, WindowStart { path, line })
+    let start = WindowStart::new(path, line, text)?;
+    open_document_window(&app, start)
         .map(|window| window.label().to_owned())
         .map_err(|error| format!("Can't open another window: {error}"))
 }
 
-/// What this window was opened for.
+/// What this window was opened for, as often as its page asks: a page that reloads starts with the
+/// same text as before (`WindowStart::text`).
 #[tauri::command]
 pub fn window_start(window: WebviewWindow, windows: tauri::State<'_, Windows>) -> WindowStart {
     windows.lock().start(window.label())
@@ -520,13 +634,39 @@ fn report_held(
 /// The windows, the frontmost first.
 #[tauri::command]
 pub fn document_windows(windows: tauri::State<'_, Windows>) -> Vec<DocumentWindow> {
-    windows.lock().list()
+    windows.lock().list(Instant::now())
+}
+
+/// Refuses a quit while a window is starting (`Entry::starting`), and tells the window in front. Says
+/// whether it was refused. Every way to a quit comes through here at its last step, since a window
+/// can open, with text that exists nowhere else, between the first question and the last answer.
+fn hold_quit(app: &AppHandle) -> bool {
+    let windows = app.state::<Windows>();
+    let front = {
+        let registry = windows.lock();
+        if !registry.any_starting(Instant::now()) {
+            return false;
+        }
+        registry.frontmost()
+    };
+    if let Some(front) = front {
+        let _ = app.emit_to(front.as_str(), QUIT_HELD, ());
+    }
+    true
 }
 
 /// Every window has answered, and none said Cancel: the app quits. When macOS is waiting to hear,
-/// by telling it; the app is then terminated as it would be from the Dock.
+/// by telling it; the app is then terminated as it would be from the Dock. Not while a window is
+/// starting, which opened after the question was asked: that is a Cancel.
 #[tauri::command]
 pub fn quit_all(app: AppHandle) {
+    if hold_quit(&app) {
+        if app.state::<Windows>().lock().finish_asking() {
+            #[cfg(target_os = "macos")]
+            macos::answer(false);
+        }
+        return;
+    }
     if app.state::<Windows>().lock().finish_asking() {
         #[cfg(target_os = "macos")]
         macos::answer(true);
@@ -541,6 +681,25 @@ pub fn keep_running(windows: tauri::State<'_, Windows>) {
     if windows.lock().finish_asking() {
         #[cfg(target_os = "macos")]
         macos::answer(false);
+    }
+}
+
+/// The close button, ⌘W or File › Close of a window was pressed. A window opened for text that is
+/// still starting can't ask about its text, which would be lost with it: the close is held, and the
+/// window, if its page is listening, tells the person to try again (`CLOSE_HELD`).
+///
+/// This holds a close that no page handler takes. Once the page has registered its own
+/// (`onCloseRequested`, early in its start), Tauri leaves the closing to that handler and destroys
+/// the window when it lets it, whatever is prevented here: the handler asks the app whether the
+/// window is starting (`document_windows`) and prevents the close itself.
+pub fn close_requested(app: &AppHandle, label: &str, api: &CloseRequestApi) {
+    let starting = app
+        .state::<Windows>()
+        .lock()
+        .is_starting(label, Instant::now());
+    if starting {
+        api.prevent_close();
+        let _ = app.emit_to(label, CLOSE_HELD, ());
     }
 }
 
@@ -565,14 +724,15 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
                 Some(front) => {
                     let _ = app.emit_to(front.as_str(), "frontmost", ());
                 }
-                // The last document window has closed, which quits, as long as Preferences don't
-                // stay behind it with a menu bar that can do nothing.
-                None if label != PREFERENCES_WINDOW => {
-                    if let Some(preferences) = app.get_webview_window(PREFERENCES_WINDOW) {
-                        let _ = preferences.close();
+                // The last document window has closed, which quits, as long as Preferences and
+                // About don't stay behind it with a menu bar that can do nothing.
+                None => {
+                    for other in left_behind(label) {
+                        if let Some(window) = app.get_webview_window(other) {
+                            let _ = window.close();
+                        }
                     }
                 }
-                None => {}
             }
         }
         _ => {}
@@ -622,6 +782,11 @@ pub mod macos {
     /// Without unsaved edits, the app may go. With them, the answer comes later: AppKit keeps the app
     /// running, and sheets working, until then.
     fn ask_windows(app: &AppHandle) -> NSApplicationTerminateReply {
+        if super::hold_quit(app) {
+            // A window opened for text can't be asked about it yet, and the text would go with the
+            // app: the app keeps running, and the window in front tells the person to try again.
+            return NSApplicationTerminateReply::TerminateCancel;
+        }
         let asking = app.state::<Windows>().lock().begin_terminating();
         let Some(asking) = asking else {
             return NSApplicationTerminateReply::TerminateNow;
@@ -769,9 +934,90 @@ mod tests {
         }
         assert!(granted(MAIN_WINDOW));
         let question = crate::install::QUESTION_WINDOW;
-        for label in [PREFERENCES_WINDOW, question, "", "doc", "doc1", "main-2"] {
+        for label in [
+            PREFERENCES_WINDOW,
+            ABOUT_WINDOW,
+            question,
+            "",
+            "doc",
+            "doc1",
+            "main-2",
+        ] {
             assert!(!granted(label), "{label}");
+            assert!(!is_document_window(label), "{label}");
         }
+        for label in [MAIN_WINDOW, "doc-1", "doc-12"] {
+            assert!(is_document_window(label), "{label}");
+        }
+    }
+
+    #[test]
+    fn preferences_and_about_close_with_the_last_document_window() {
+        // Tauri ends the app when its window map is empty, and a window left behind keeps it
+        // running with a menu bar that can do nothing (a ⌘Q in a page that is gone).
+        for last in [MAIN_WINDOW, "doc-3"] {
+            let closing: Vec<_> = left_behind(last).collect();
+            assert_eq!(closing, [PREFERENCES_WINDOW, ABOUT_WINDOW], "{last}");
+        }
+        // One of them closing last has nothing more to close but the other.
+        assert_eq!(
+            left_behind(PREFERENCES_WINDOW).collect::<Vec<_>>(),
+            [ABOUT_WINDOW]
+        );
+        assert_eq!(
+            left_behind(ABOUT_WINDOW).collect::<Vec<_>>(),
+            [PREFERENCES_WINDOW]
+        );
+    }
+
+    #[test]
+    fn the_about_window_is_a_small_fixed_window_that_opens_hidden_and_has_a_capability_of_its_own()
+    {
+        // `open_about` builds it from the config, hidden: its page shows it once it is styled
+        // (src/about/main.ts), and a visible window would flash unstyled. The title is the one
+        // the system's tools read out; the page draws none.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["label"] == ABOUT_WINDOW)
+            .expect("About has a window in tauri.conf.json");
+        assert_eq!(window["url"], "about.html");
+        assert_eq!(window["title"], "About Redlines");
+        assert_eq!(window["hiddenTitle"], true);
+        assert_eq!(window["titleBarStyle"], "Overlay");
+        assert_eq!(window["visible"], false);
+        for fixed in ["resizable", "minimizable", "maximizable"] {
+            assert_eq!(window[fixed], false, "{fixed}");
+        }
+        let page = include_str!("../../about.html");
+        assert!(page.contains("<title>About Redlines</title>"), "{page}");
+        // Its commands are granted to it alone, by its label.
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/about.json")).unwrap();
+        assert_eq!(capability["windows"], serde_json::json!([ABOUT_WINDOW]));
+    }
+
+    #[test]
+    fn the_windows_without_a_document_are_the_ones_the_config_names_beside_the_documents() {
+        // A window added to `tauri.conf.json` that holds no document has to be named in
+        // `WITHOUT_DOCUMENT` or it keeps the app running; the install question is shown before
+        // any document window and is its own business (install.rs).
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let mut labels: Vec<&str> = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|window| window["label"].as_str().unwrap())
+            .filter(|label| !is_document_window(label) && *label != crate::install::QUESTION_WINDOW)
+            .collect();
+        labels.sort_unstable();
+        let mut named = WITHOUT_DOCUMENT.to_vec();
+        named.sort_unstable();
+        assert_eq!(labels, named);
     }
 
     #[test]
@@ -913,6 +1159,7 @@ mod tests {
             WindowStart {
                 path: Some("/docs/a.md".to_owned()),
                 line: Some(7),
+                ..WindowStart::default()
             },
         );
         let routed = registry.route(vec![allowed("/docs/b.md")]);
@@ -922,10 +1169,210 @@ mod tests {
             WindowStart {
                 path: Some("/docs/a.md".to_owned()),
                 line: Some(7),
+                ..WindowStart::default()
             }
         );
         // A window the app doesn't know was opened for nothing.
         assert_eq!(registry.start("install"), WindowStart::default());
+    }
+
+    const ANSWER: &str = "# The answer\n\nIt is 42.\n";
+
+    fn opened_for_text(text: &str) -> WindowStart {
+        WindowStart {
+            text: Some(text.to_owned()),
+            ..WindowStart::default()
+        }
+    }
+
+    #[test]
+    fn a_window_opened_for_text_is_told_the_text_each_time_it_asks() {
+        let mut registry = Registry::default();
+        registry.add("doc-1", opened_for_text(ANSWER));
+        // A page that reloads asks again, and must start with the text again.
+        for _ in 0..3 {
+            assert_eq!(registry.start("doc-1"), opened_for_text(ANSWER));
+        }
+        // It stays when the window reports edits. The person's changes are the page's, and a reload
+        // loses them: the page starts again from the text the window was opened for.
+        registry.report("doc-1", None, true);
+        assert_eq!(registry.start("doc-1"), opened_for_text(ANSWER));
+        // Another window was opened for something else, and never hears of it.
+        registry.add("doc-2", WindowStart::default());
+        assert_eq!(registry.start("doc-2"), WindowStart::default());
+    }
+
+    #[test]
+    fn a_window_opened_for_text_is_starting_until_its_page_reports() {
+        let now = Instant::now();
+        let mut registry = Registry::default();
+        registry.add_at("doc-1", opened_for_text(ANSWER), now);
+        // Its page hasn't said what it holds, so it can't be asked about the text, which is the
+        // window's alone. The app has it clean (the page is the one that says otherwise): what holds
+        // a quit and a close is that it is starting.
+        assert!(registry.any_starting(now));
+        assert!(registry.is_starting("doc-1", now));
+        let listed = &registry.list(now)[0];
+        assert!(listed.starting && !listed.dirty);
+        // Once it has reported, whatever it holds, it is asked as any window is.
+        registry.report("doc-1", None, true);
+        assert!(!registry.any_starting(now));
+        assert!(!registry.is_starting("doc-1", now));
+        assert!(!registry.list(now)[0].starting);
+    }
+
+    #[test]
+    fn a_window_opened_for_nothing_or_for_a_file_is_never_starting() {
+        let now = Instant::now();
+        let mut registry = Registry::default();
+        registry.add_at("doc-1", WindowStart::default(), now);
+        registry.add_at(
+            "doc-2",
+            WindowStart {
+                path: Some("/docs/a.md".to_owned()),
+                line: Some(3),
+                ..WindowStart::default()
+            },
+            now,
+        );
+        assert!(!registry.any_starting(now));
+        assert!(!registry.is_starting("doc-1", now));
+        assert!(!registry.is_starting("doc-2", now));
+        // A window the app doesn't know is no window to wait for.
+        assert!(!registry.is_starting("install", now));
+    }
+
+    #[test]
+    fn only_the_window_that_is_starting_is_held() {
+        let now = Instant::now();
+        let mut registry = registry_of(&["main"]);
+        registry.add_at("doc-1", opened_for_text(ANSWER), now);
+        assert!(registry.any_starting(now));
+        assert!(registry.is_starting("doc-1", now));
+        assert!(!registry.is_starting("main", now));
+        let starting: Vec<_> = registry
+            .list(now)
+            .into_iter()
+            .map(|window| (window.label, window.starting))
+            .collect();
+        assert_eq!(
+            starting,
+            [("doc-1".to_owned(), true), ("main".to_owned(), false)]
+        );
+    }
+
+    #[test]
+    fn the_events_the_pages_listen_for_are_the_ones_sent() {
+        let page = include_str!("../../src/windows.ts");
+        for name in [QUIT_HELD, CLOSE_HELD] {
+            assert!(
+                page.contains(&format!("'{name}'")),
+                "{name} is not in windows.ts"
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_that_never_reports_does_not_hold_the_app_for_ever() {
+        let opened = Instant::now();
+        let mut registry = Registry::default();
+        registry.add_at("doc-1", opened_for_text(ANSWER), opened);
+        let almost = opened + STARTING_GRACE - Duration::from_millis(1);
+        assert!(registry.is_starting("doc-1", almost));
+        // A window that can't be closed, or an app that can't quit, is worse than the text.
+        assert!(!registry.is_starting("doc-1", opened + STARTING_GRACE));
+        assert!(!registry.any_starting(opened + STARTING_GRACE));
+        assert!(!registry.list(opened + STARTING_GRACE)[0].starting);
+    }
+
+    #[test]
+    fn the_text_is_let_go_once_the_window_holds_a_file() {
+        let mut registry = Registry::default();
+        registry.add("doc-1", opened_for_text(ANSWER));
+        registry.add("doc-2", opened_for_text(ANSWER));
+        // Saved, as Save As does: the file holds the text now, and the app need not.
+        registry.report("doc-1", Some("/docs/answer.md".to_owned()), false);
+        assert_eq!(registry.start("doc-1"), WindowStart::default());
+        // The other has no file yet, and is clean only because everything was deleted.
+        registry.report("doc-2", None, false);
+        assert_eq!(registry.start("doc-2"), opened_for_text(ANSWER));
+        // A window that is gone has nothing kept for it either.
+        registry.remove("doc-2");
+        assert_eq!(registry.start("doc-2"), WindowStart::default());
+    }
+
+    #[test]
+    fn a_window_opened_for_text_is_not_empty_even_before_it_says_so() {
+        let mut registry = Registry::default();
+        registry.add("doc-1", opened_for_text(ANSWER));
+        // Its page hasn't reported its edits yet, which it does once it holds the text. A file
+        // that comes in meanwhile must not take the window's place, nor does it wait for the page
+        // to send it on to a window of its own.
+        let routed = registry.route(vec![allowed("/docs/plan.md")]);
+        assert!(routed.to_tell.is_empty());
+        assert_eq!(routed.to_open, ["/docs/plan.md"]);
+        assert!(registry.take_files("doc-1").is_empty());
+        // Quitting doesn't ask it either: a page that hasn't said so may not be listening.
+        assert_eq!(registry.begin_terminating(), None);
+
+        // Once it has said what it holds, it is as any other window: with its text deleted, it
+        // is empty and clean, and a file takes its place.
+        registry.report("doc-1", None, true);
+        assert_eq!(registry.begin_terminating().as_deref(), Some("doc-1"));
+        assert!(registry.finish_asking());
+        registry.report("doc-1", None, false);
+        let routed = registry.route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_tell, ["doc-1"]);
+    }
+
+    #[test]
+    fn a_window_is_opened_for_a_file_or_for_text_and_never_for_both() {
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            WindowStart::new(None, None, some(ANSWER)),
+            Ok(opened_for_text(ANSWER))
+        );
+        assert_eq!(
+            WindowStart::new(some("/docs/a.md"), Some(7), None),
+            Ok(WindowStart {
+                path: some("/docs/a.md"),
+                line: Some(7),
+                text: None,
+            })
+        );
+        assert_eq!(
+            WindowStart::new(None, None, None),
+            Ok(WindowStart::default())
+        );
+        // Refused, with what to do about it, not guessed at: no window could show both.
+        let refused = WindowStart::new(some("/docs/a.md"), None, some(ANSWER)).unwrap_err();
+        assert!(
+            refused.contains("a file or for text, not both"),
+            "{refused}"
+        );
+        assert!(refused.contains("Ask for one"), "{refused}");
+    }
+
+    #[test]
+    fn text_that_is_empty_is_no_text() {
+        let empty = || Some(String::new());
+        assert_eq!(
+            WindowStart::new(None, None, empty()),
+            Ok(WindowStart::default())
+        );
+        // So it cannot make a window that is not empty, nor keep a file from having its own.
+        assert_eq!(
+            WindowStart::new(Some("/docs/a.md".to_owned()), None, empty()),
+            Ok(WindowStart {
+                path: Some("/docs/a.md".to_owned()),
+                ..WindowStart::default()
+            })
+        );
+        // Not even whitespace is empty: the person's own text is not for the app to trim.
+        assert_eq!(
+            WindowStart::new(None, None, Some("\n".to_owned())),
+            Ok(opened_for_text("\n"))
+        );
     }
 
     #[test]
@@ -934,25 +1381,27 @@ mod tests {
         registry.report("doc-1", Some("/docs/a.md".to_owned()), true);
         registry.focus("doc-1");
         assert_eq!(
-            registry.list(),
+            registry.list(Instant::now()),
             [
                 DocumentWindow {
                     label: "doc-1".to_owned(),
                     path: Some("/docs/a.md".to_owned()),
-                    dirty: true
+                    dirty: true,
+                    starting: false
                 },
                 DocumentWindow {
                     label: "main".to_owned(),
                     path: None,
-                    dirty: false
+                    dirty: false,
+                    starting: false
                 },
             ]
         );
         // What the app knows nothing of doesn't join the list: the install question's window.
         registry.focus("install");
         registry.report("install", None, true);
-        assert_eq!(registry.list().len(), 2);
-        assert_eq!(registry.list()[0].label, "doc-1");
+        assert_eq!(registry.list(Instant::now()).len(), 2);
+        assert_eq!(registry.list(Instant::now())[0].label, "doc-1");
     }
 
     #[test]
@@ -1038,22 +1487,28 @@ mod tests {
             serde_json::to_value(WindowStart {
                 path: Some("/docs/a.md".to_owned()),
                 line: Some(7),
+                text: None,
             })
             .unwrap(),
-            serde_json::json!({ "path": "/docs/a.md", "line": 7 })
+            serde_json::json!({ "path": "/docs/a.md", "line": 7, "text": null })
+        );
+        assert_eq!(
+            serde_json::to_value(opened_for_text(ANSWER)).unwrap(),
+            serde_json::json!({ "path": null, "line": null, "text": ANSWER })
         );
         assert_eq!(
             serde_json::to_value(WindowStart::default()).unwrap(),
-            serde_json::json!({ "path": null, "line": null })
+            serde_json::json!({ "path": null, "line": null, "text": null })
         );
         assert_eq!(
             serde_json::to_value(DocumentWindow {
                 label: "doc-1".to_owned(),
                 path: None,
                 dirty: true,
+                starting: false,
             })
             .unwrap(),
-            serde_json::json!({ "label": "doc-1", "path": null, "dirty": true })
+            serde_json::json!({ "label": "doc-1", "path": null, "dirty": true, "starting": false })
         );
     }
 

@@ -11,13 +11,28 @@ import type {
   Plugin,
 } from '@redlines/plugin-api';
 import { definePlugin } from '@redlines/plugin-api';
-import type { FolderOptions } from '@redlines/agent-process';
-import { TOOLBOX_STATUS, clip, detectAgent, isRecord, runAgent } from '@redlines/agent-process';
+import type { FolderOptions, RunReach } from '@redlines/agent-process';
+import {
+  TOOLBOX_STATUS,
+  blockedRead,
+  blockedStatus,
+  clip,
+  detectAgent,
+  homeScope,
+  isRecord,
+  runAgent,
+} from '@redlines/agent-process';
 
 /** The oldest Codex tested. `--strict-config` makes an older one fail rather than ignore a key. */
 export const MIN_VERSION = '0.166.0';
 
 export const SIGNED_OUT_HELP = 'Run `codex login`.';
+
+/** How Codex's own page says to install it. Redlines shows it and never runs it. */
+export const INSTALL_COMMAND = 'brew install --cask codex';
+
+/** What Codex says when it isn't signed in: said in `failureFrom`, and asked for here. */
+const NOT_SIGNED_IN = `Codex isn't signed in. ${SIGNED_OUT_HELP}`;
 
 /**
  * What Codex hands the model by default that Redlines turns off: the person's ChatGPT connectors
@@ -37,6 +52,39 @@ const DISABLED_FEATURES = [
   'in_app_browser',
   'hooks',
 ];
+
+/**
+ * What the profile leaves out of a folder it grants whole at the home folder scope: hidden files
+ * and folders, and `.env` files, by name, wherever they are below it (a glob can only deny).
+ * Tested against Codex 0.166.0 (`codex sandbox`) and held to the rule that lets only this line
+ * through (`CODEX_LEFT_OUT` in apps/desktop/src-tauri/src/agents/allowed.rs).
+ */
+const LEFT_OUT =
+  '{"."="read","**/.*"="deny","**/.*/**"="deny","**/.env"="deny","**/.env.*"="deny","**/*.env"="deny"}';
+
+/** Whether `path` is `folder` or inside it, by name. */
+function isUnder(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(`${folder}/`);
+}
+
+/**
+ * What the profile says of the home folder: the folder granted whole but for what is left out,
+ * `~/Library` denied but for its cloud folders (the more specific grant wins), and each folder a
+ * link in the home folder leads to outside it granted as the home folder is.
+ */
+function homeEntries(home: string, roots: readonly string[]): string[] {
+  const cloud = ['Library/CloudStorage', 'Library/Mobile Documents']
+    .map((folder) => `${home}/${folder}`)
+    .filter((folder) => roots.includes(folder));
+  return [
+    `${JSON.stringify(home)}=${LEFT_OUT}`,
+    `${JSON.stringify(`${home}/Library`)}="deny"`,
+    ...cloud.map((folder) => `${JSON.stringify(folder)}="read"`),
+    ...roots
+      .filter((root) => !isUnder(root, home))
+      .map((root) => `${JSON.stringify(root)}=${LEFT_OUT}`),
+  ];
+}
 
 /** Where a run happens and which folders hold Codex's own program. */
 export interface CodexSetup {
@@ -62,11 +110,19 @@ export interface CodexSetup {
  *
  * A repo's or the person's `AGENTS.md` still reaches the model (`-c project_doc_max_bytes=0`
  * should turn that off, but wasn't tried), and it is only words in the prompt.
+ *
+ * At This folder and my home folder the profile grants the home folder whole, but for hidden files
+ * and folders and `.env` files by name, which a glob denies wherever they are, and denies
+ * `~/Library` but for its cloud folders. A grant by folder instead would leave out a `~/Documents`
+ * that is a link, which is common: a link is judged by the folder it leads to, and by its own
+ * name. A folder a link leads to outside the home folder is granted by its real path.
  */
 export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: CodexSetup): string[] {
   const readable = request.scope === 'document' ? [] : ['":project_roots"={"."="read"}'];
   const programs = setup.programFolders.map((folder) => `${JSON.stringify(folder)}="read"`);
-  const filesystem = `{${['":minimal"="read"', ...readable, '":slash_tmp"="deny"', ...programs].join(',')}}`;
+  const wide = homeScope(request);
+  const home = wide ? homeEntries(wide.home, wide.roots) : [];
+  const filesystem = `{${['":minimal"="read"', ...readable, '":slash_tmp"="deny"', ...home, ...programs].join(',')}}`;
   return [
     'exec',
     '--json',
@@ -94,6 +150,11 @@ export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: Code
     ...DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
     '-c',
     'web_search="disabled"',
+    // Skills, the person's own among them (Redlines' skill, installed from Preferences, is one),
+    // are for a Codex run by hand: a run here acts through the toolbox, and a skill's file is
+    // outside what it may read. Tested with `codex debug prompt-input`, which then lists none.
+    '-c',
+    'skills.include_instructions=false',
     '--',
     request.prompt,
   ];
@@ -105,16 +166,40 @@ export interface CodexState {
   lastMessage?: string;
   /** The last top-level error, for a stream that ends without saying why. */
   lastError?: string;
+  /** What the run may read, to tell a refused read in it from a limit doing its work. */
+  reach?: RunReach;
 }
 
-export function newCodexState(): CodexState {
-  return {};
+export function newCodexState(reach?: RunReach): CodexState {
+  return reach === undefined ? {} : { reach };
+}
+
+/**
+ * The files a command's output says it couldn't read: `cat: /path: Operation not permitted`, as the
+ * system's tools say it, `rg: /path: Operation not permitted (os error 1)`, as ripgrep does, and
+ * `zsh: permission denied: /path`, as the shell does. This is best effort: it reads what a command
+ * printed, so a command that prints such a line is taken for one that was refused, and the newer
+ * models run most commands through a tool that makes no `command_execution` event at all, where
+ * nothing is seen. The limit holds either way; only the message is missed.
+ */
+function refusals(output: string): { path: string; words: string }[] {
+  const found: { path: string; words: string }[] = [];
+  for (const match of output.matchAll(
+    /(?:^|\n)(?:[^:\n]+: )?(\/[^\n]*?): (Operation not permitted|Permission denied)(?: \(os error \d+\))?[ \t]*(?=\n|$)/g,
+  )) {
+    const [words, path] = [match[2], match[1]];
+    if (path !== undefined && words !== undefined) found.push({ path, words });
+  }
+  for (const match of output.matchAll(/permission denied: (\/[^\s'"]+)/gi)) {
+    if (match[1] !== undefined) found.push({ path: match[1], words: 'Permission denied' });
+  }
+  return found;
 }
 
 /** One quiet line for a failure message from Codex. */
 function failureFrom(message: string): string {
   if (/\b401\b|unauthorized|not logged in|bearer/i.test(message)) {
-    return `Codex isn't signed in. ${SIGNED_OUT_HELP}`;
+    return NOT_SIGNED_IN;
   }
   if (/usage limit|rate.?limit|\b429\b/i.test(message)) {
     return 'Codex has hit its usage limit. Try again later.';
@@ -181,8 +266,18 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
         }
         case 'collab_tool_call':
           return started ? { type: 'status', text: 'Asking a helper' } : null;
-        case 'command_execution':
-          return started ? { type: 'status', text: 'Running a command' } : null;
+        case 'command_execution': {
+          if (started) return { type: 'status', text: 'Running a command' };
+          // A command that couldn't read a file inside what the agent may read is news, and says
+          // why if it can.
+          const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
+          if (state.reach === undefined || item.exit_code === 0) return null;
+          for (const { path, words } of refusals(output)) {
+            const blocked = blockedRead(path, words, state.reach);
+            if (blocked) return { type: 'status', text: blockedStatus(blocked), blocked };
+          }
+          return null;
+        }
         // An item of type "error" is a warning ("ignoring an unrecognized setting"), not a failure.
         default:
           return null;
@@ -191,6 +286,17 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
     default:
       return null;
   }
+}
+
+/** What the request lets the agent read, for the stream to tell a refused read from a limit. */
+function reachOf(request: AgentRequest): RunReach {
+  const { scope, folder, documentPath, homeRoots } = request;
+  return {
+    scope,
+    ...(folder === undefined ? {} : { folder }),
+    ...(documentPath === undefined ? {} : { documentPath }),
+    ...(homeRoots === undefined ? {} : { homeRoots }),
+  };
 }
 
 export interface CodexProviderOptions extends FolderOptions {
@@ -226,10 +332,12 @@ export function createCodexProvider(
       const state = await detectAgent(processes, {
         name: 'Codex',
         binary: 'codex',
-        notFoundHelp: "Codex isn't installed on this Mac. Install it (brew install --cask codex).",
+        notFoundHelp: "Codex isn't installed on this Mac.",
+        installCommand: INSTALL_COMMAND,
         minVersion: MIN_VERSION,
         signedOutHelp: SIGNED_OUT_HELP,
-        // Prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1.
+        // Prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1, on its
+        // standard error, which the app doesn't read: the exit code is the answer.
         statusArgs: ['login', 'status'],
         isSignedIn: (status) => status.code === 0,
       });
@@ -250,10 +358,12 @@ export function createCodexProvider(
             const programFolders = [...new Set([dirName(program), dirName(real)])];
             return codexArgs(asked, tools, { folder, programFolders });
           },
-          newState: newCodexState,
+          newState: () => newCodexState(reachOf(request)),
           parse: parseCodexLine,
           failure: (state) =>
             state.lastError === undefined ? undefined : failureFrom(state.lastError),
+          // Signing in again is Preferences' to offer; a usage limit or a network error isn't.
+          setup: (message) => message === NOT_SIGNED_IN,
         },
         options,
         request,

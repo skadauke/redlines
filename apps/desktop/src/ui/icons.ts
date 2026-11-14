@@ -4,6 +4,9 @@
 const ICONS = {
   /** Files: a window with a sidebar. */
   files: '<rect x="2" y="3" width="12" height="10" rx="1.8"/><path d="M6 3v10"/>',
+  /** The document's own icon beside its name in the title bar: a page with a turned corner. */
+  document:
+    '<path d="M4.6 1.8h4.2l3.9 3.9v7a1.5 1.5 0 0 1-1.5 1.5H4.6a1.5 1.5 0 0 1-1.5-1.5V3.3a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M8.6 1.9v2.7a1.1 1.1 0 0 0 1.1 1.1h2.9"/>',
   /** View: an eye. */
   eye: '<path d="M1.6 8s2.3-4.3 6.4-4.3S14.4 8 14.4 8s-2.3 4.3-6.4 4.3S1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/>',
   /** Resolved comments: a check mark in a circle. */
@@ -16,12 +19,12 @@ const ICONS = {
   /** The Clean view: a page of text. */
   clean:
     '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/>',
-  /** The Simple view: the page with a change bar in its margin. */
-  simple:
-    '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4M7 10.5h2.5"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
-  /** The Redlines view: Simple's page with one mark of markup on it, a line struck through. */
+  /** The Redlines view: the page with a change bar in its margin and one mark of markup on it, a line struck through. */
   redlines:
     '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4"/><path d="M7 10.5h4"/><path d="M6.3 12l5.4-3.1" stroke-width="1.1"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
+  /** The simple look: the page of the Redlines view with its change bar and no markup on it. */
+  simple:
+    '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4M7 10.5h4"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
   /** The Raw view: angle brackets. */
   raw: '<path d="M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"/>',
   /** A list of changes. */

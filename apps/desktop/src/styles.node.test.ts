@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { BAR_PT, FADE_PT } from './ui/titlebar.ts';
 
 /** The style sheet's rules as selector and declarations (it has no nested rules but @media). */
 function rules(css: string): { selector: string; declarations: string }[] {
@@ -115,8 +116,36 @@ describe('styles.css', () => {
     expect(bar?.declarations).toContain('background: none');
     const mixed = all.find(({ selector }) => selector === '#editor .rl-bar-mixed::before');
     expect(mixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    // The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the
+    // text differently: the layer is left out, and each line that holds a change prints a bar down
+    // its whole paragraph, as the lines drew it before the layer.
+    const layer = all.find(({ selector }) => selector === '#editor .rl-bar-layer');
+    expect(layer?.declarations).toContain('display: none');
+    const line = all.find(({ selector }) => selector === '#editor .cm-line.rl-bar::before');
+    expect(line?.declarations).toContain("content: ''");
+    expect(line?.declarations).toContain('position: absolute');
+    expect(line?.declarations).toContain('left: -24px');
+    expect(line?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    const lineMixed = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-bar-mixed::before',
+    );
+    expect(lineMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
+    const quote = all.find(
+      ({ selector }) => selector === '#editor .cm-line.rl-quote.rl-bar::before',
+    );
+    expect(quote?.declarations).toContain('left: -26px');
+    // A table row's bar is its first cell's, a background, which a printed page drops.
+    const row = all.find(
+      ({ selector }) => selector === '#editor .rl-trow.rl-bar > .rl-tc:first-child::before',
+    );
+    expect(row?.declarations).toContain('border-left: 2px solid var(--rl-color)');
+    expect(row?.declarations).toContain('background: none');
+    const rowMixed = all.find(
+      ({ selector }) => selector === '#editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before',
+    );
+    expect(rowMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
     // Among the print rules, and the bars nothing else draws as a background there.
-    for (const rule of [bar, mixed]) {
+    for (const rule of [bar, mixed, layer, line, lineMixed, quote, row, rowMixed]) {
       expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
     }
   });
@@ -145,6 +174,117 @@ describe('styles.css', () => {
     expect(covering?.declarations).toContain('position: absolute');
     // 240 px of sidebar and 360 of page.
     expect(240 + 360).toBe(600);
+  });
+
+  it('lets the file name take the pointer, for its double-click and the facts shown on hover', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // With `pointer-events: none` the pointer never reaches the name: the bar is under it.
+    expect(declared('.rl-title')).not.toContain('pointer-events');
+    // The name and the document's icon are one group in the bar's middle column, and the icon
+    // does not shrink when a long name is cut short.
+    expect(declared('.rl-title-group')).toContain('grid-column: 2');
+    expect(declared('.rl-title')).toContain('min-width: 0');
+    expect(declared('.rl-doc-icon')).toContain('flex: none');
+    // Its size is in the frame's units, as the other controls' are.
+    expect(declared('.rl-doc-icon')).toContain('width: calc(20 * var(--rl-frame))');
+  });
+
+  it('lets the page scroll under a title bar with no background, and fades what passes under it', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The bar lies over the scroller, which reaches the top of the window: no color of its own,
+    // and as wide as the scroller less its scrollbar, which it must not cover.
+    const bar = declared('.rl-titlebar');
+    expect(bar).toContain('position: absolute');
+    expect(bar).toContain('top: 0');
+    expect(bar).toContain('right: var(--rl-scrollbar, 0px)');
+    expect(bar).not.toContain('background');
+    expect(bar).not.toContain('flex: none');
+    // The document starts below it, through the scroller's own top padding, which is room that
+    // scrolls: the text passes through it and under the bar. Nothing is hidden at rest.
+    expect(declared('.rl-scroller')).toContain('padding-top: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-scroller')).toContain('scroll-padding-top: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-scroller')).toContain('box-sizing: border-box');
+    // What passes under the bar fades into the page's own color, in every theme, and takes no
+    // pointer: the bar's controls and the text under the fade are both reached. It is a gradient
+    // of the page's color, not a mask on the scroller, which would dim the popovers inside it.
+    const fade = declared('.rl-main::after');
+    expect(fade).toMatch(/linear-gradient\(\s*to bottom,\s*var\(--rl-page/);
+    expect(fade).toContain('pointer-events: none');
+    expect(fade).toContain('position: absolute');
+    // It stops short of a classic scrollbar, and of the edge where an overlay one is drawn.
+    expect(fade).toContain('right: max(var(--rl-scrollbar, 0px), 12px)');
+    // The bar's 52 points and its fade's 64 are what the title bar says the page keeps clear
+    // (`BAR_PT`, `FADE_PT`): the text rests below the fade, where it is not faded.
+    expect(fade).toContain(`height: calc(${FADE_PT} * var(--rl-pt))`);
+    expect(declared('.rl-titlebar')).toContain(`height: calc(${BAR_PT} * var(--rl-pt))`);
+    expect(declared('.rl-scroller')).toContain(`padding-top: calc(${BAR_PT} * var(--rl-pt))`);
+    // Over the page's text (the editor's scroller is a stacking context of its own, at 0), under
+    // the bar, the sidebar that covers a narrow page, and the find bar and menus.
+    expect(fade).toContain('z-index: 0');
+    expect(declared('.rl-scroller')).not.toMatch(/mask/);
+    // The table grips' own layer is over a bar only if it is above it: the grips draw under it.
+    expect(declared('#editor .rl-grips')).toContain('z-index: 0');
+    // The fade is no part of a printed page, and neither is the room for the bar.
+    const printed = css.slice(css.indexOf('@media print'));
+    expect(printed).toMatch(/\.rl-main::after[^{}]*\{[^}]*display: none/);
+    expect(printed).toMatch(/\.rl-scroller\s*\{[^}]*padding-top: 0/);
+  });
+
+  it('keeps the hints of the right-hand icons inside the window, aligned with the icon’s right edge', () => {
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The Files icon's hint starts at its left edge, under the window buttons' side of the bar;
+    // View and Review are at the other end, where a hint that started at the icon's left would run
+    // out of the window.
+    expect(declared('.rl-tip')).toContain('left: 0');
+    expect(declared('.rl-tip-end')).toContain('right: 0');
+    expect(declared('.rl-tip-end')).toContain('left: auto');
+    // Both have the same weight, so the later wins: `left: auto` must come after `left: 0`, or a
+    // hint at the bar's end would span from the icon's left edge to its right.
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css.indexOf('.rl-tip-end {')).toBeGreaterThan(css.indexOf('.rl-tip {'));
+  });
+
+  it('draws the word count small and gray in the lower right, on a fade that takes no pointer', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    const declared = (selector: string) =>
+      all.find((rule) => rule.selector === selector)?.declarations ?? '';
+    // The fade rises from the window's lower edge, in the page's color, as the title bar's falls from
+    // the top, so that what scrolls under the label is gone before it meets it. It stops short of a
+    // classic scrollbar, and of the edge where an overlay one is drawn, and is over the page's text
+    // and under everything that floats.
+    const footer = declared('.rl-footer');
+    expect(footer).toContain('position: absolute');
+    expect(footer).toContain('bottom: 0');
+    expect(footer).toContain('right: max(var(--rl-scrollbar, 0px), 12px)');
+    expect(footer).toContain('z-index: 0');
+    // Its height is one number, which what scrolls into view keeps clear of (the editor measures
+    // the fade; the scroller's padding below is the same number): a caret or a comment box scrolled
+    // in from below would otherwise rest where the page is already faded out.
+    expect(footer).toContain('height: var(--rl-footer-room)');
+    expect(declared('.rl-main')).toMatch(/--rl-footer-room: \d+px/);
+    expect(declared('.rl-has-footer .rl-scroller')).toContain(
+      'scroll-padding-bottom: var(--rl-footer-room)',
+    );
+    expect(footer).toContain('pointer-events: none');
+    expect(footer).toMatch(/linear-gradient\(\s*to top,\s*var\(--rl-page/);
+    // The label is the interface's small text, in the theme's gray, which follows the theme and the
+    // window zoom: no size or color of its own.
+    const label = declared('.rl-word-count');
+    expect(label).toContain('font-size: var(--rl-size-ui-small)');
+    expect(label).toContain('color: var(--rl-ink-2)');
+    expect(label).toContain('position: absolute');
+    // Level with the notifications' lowest card (16 px from the window's edge), so that under one
+    // it is hidden whole and none of it shows below the card.
+    expect(label).toContain('bottom: 16px');
+    expect(declared('.rl-notifications')).toContain('bottom: 16px');
+    expect(label).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    // A printed page has neither.
+    const printed = css.slice(css.indexOf('@media print'));
+    expect(printed).toMatch(/\.rl-footer[^{}]*\{[^}]*display: none/);
   });
 
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
