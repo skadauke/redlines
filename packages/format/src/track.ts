@@ -95,7 +95,14 @@ import {
 } from './list-run.ts';
 import { sameEmphasis, sameReading } from './format-reader.ts';
 import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
-import { codeSpanAt, inspectPlace, stepLeft, stepRight, underliningBullet } from './inline.ts';
+import {
+  codeSpanAt,
+  inspectPlace,
+  stepLeft,
+  stepRight,
+  textLike,
+  underliningBullet,
+} from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -1178,6 +1185,23 @@ function coverBreaks(
         to = from;
       }
     } else if (found.end > from && found.start < to) {
+      // A range that takes a setext underline whole, with the line break in front of it, and ends
+      // where the underline does, takes the break after it no further: the blank lines that follow
+      // stay, as they keep the text above and the block below apart, and the text above is a
+      // paragraph without its underline (#441). The marker of the deletion stands after text, on
+      // the line above (not at the start of one: a range that starts a line, as the second line of
+      // a heading does, is written as before), and what is above is words, not another block's
+      // line (a comment, a fence, a definition, a rule, front matter).
+      const underEnd = from <= found.start ? underlineOfBreak(plan.text, found.start) : undefined;
+      if (
+        underEnd !== undefined &&
+        to === underEnd &&
+        underEnd < found.end &&
+        from > lineStart(plan.text, from) &&
+        textLike(plan.text.slice(lineStart(plan.text, found.start), found.start))
+      ) {
+        continue;
+      }
       // From the very start of a line with a prefix, past the prefix, is a change of the block's
       // text, and does not touch the break in front of it.
       const insidePrefix = from >= prefix && prefix < found.end;

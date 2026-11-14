@@ -492,7 +492,7 @@ function lazyUnder(above: string, line: string): boolean {
  * Whether a line can be underlined as the text of a setext heading: words, not a blank line nor the
  * syntax of another block (a heading, a thematic break, a fence, HTML, a table row, a definition).
  */
-function textLike(line: string): boolean {
+export function textLike(line: string): boolean {
   const rest = line.replace(/^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
   return (
     rest !== '' &&
