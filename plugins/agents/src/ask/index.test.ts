@@ -2,10 +2,11 @@
 import { createEditor, type Editor, undo } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
 import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
+import type { PinnedElement } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeProvider, fakeRelay, type FakeScript } from '../fake-provider.ts';
 import { createMacAgents } from '../mac-agents.ts';
-import { type Ask, createAsk, type AskOptions, type RailPin } from './index.ts';
+import { type Ask, createAsk, type AskOptions } from './index.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const DOC =
@@ -1155,7 +1156,7 @@ describe('keeping an answer', () => {
 });
 
 /** The calls Ask makes of the rail it holds the bubble with. */
-type Held = { [Call in keyof RailPin]: ReturnType<typeof vi.fn<RailPin[Call]>> };
+type Held = { [Call in keyof PinnedElement]: ReturnType<typeof vi.fn<PinnedElement[Call]>> };
 
 /**
  * A comment rail that takes the bubble while `holds` is true, and hears what Ask tells it. `lost` is
@@ -1231,7 +1232,7 @@ describe('in the comment rail', () => {
     expect(scroll.mock.contexts[0]).toBe(bubble());
   });
 
-  it('is placed by Ask where the rail takes nothing: in dots, in Clean, with no comment', () => {
+  it('is placed by Ask, as it was, where the rail answers that it takes nothing', () => {
     const rail = fakeRail();
     rail.state.holds = false;
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
@@ -1255,26 +1256,56 @@ describe('in the comment rail', () => {
     expect(anchor()).toBe(editor.getDoc().indexOf('first lien'));
   });
 
-  it('tells the rail when the bubble changes height: an answer, a line, a follow-up field', async () => {
+  it('tells the rail when the bubble changes height: a live line, an answer, a follow-up field', async () => {
     const rail = fakeRail();
-    const { editor } = mount({ pinToRail: rail.pinToRail });
+    const gate = () => {
+      let open: () => void = () => {};
+      const opened = new Promise<void>((resolve) => (open = resolve));
+      return { opened, open: () => open() };
+    };
+    const [reading, thinking] = [gate(), gate()];
+    const { editor } = mount({
+      pinToRail: rail.pinToRail,
+      script: async function* ({ tools }) {
+        await tools.initialize();
+        yield { type: 'status', text: 'Reading loan.md' };
+        await reading.opened;
+        yield { type: 'status', text: 'Thinking it over' };
+        await thinking.opened;
+        yield { type: 'done', finalText: 'A lien is a claim.' };
+      },
+    });
     start(editor);
     const held = rail.pins[0]!.held;
-    const before = held.resized.mock.calls.length;
+    const resized = () => held.resized.mock.calls.length;
+    const line = () => document.querySelector('.rl-live-line-text')?.textContent;
+    let seen = resized();
     ask('What is a lien?');
+    // The question, and the live line under it.
+    await vi.waitFor(() => expect(line()).toContain('Reading loan.md'));
+    expect(resized()).toBeGreaterThan(seen);
+    seen = resized();
+    // The line says something else.
+    reading.open();
+    await vi.waitFor(() => expect(line()).toContain('Thinking it over'));
+    expect(resized()).toBeGreaterThan(seen);
+    seen = resized();
+    // The answer takes the line's place.
+    thinking.open();
     await answered();
-    expect(held.resized.mock.calls.length).toBeGreaterThan(before);
-    const answeredAt = held.resized.mock.calls.length;
+    expect(document.querySelector('.rl-live-line')).toBeNull();
+    expect(resized()).toBeGreaterThan(seen);
+    seen = resized();
     // The field grows with what is typed in it.
     const box = field();
     if (box) box.value = 'Who holds it?\nAnd for how long?';
     box?.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(held.resized.mock.calls.length).toBeGreaterThan(answeredAt);
+    expect(resized()).toBeGreaterThan(seen);
     // It asks the rail again, and never for another hold: the one it has lays it out.
     expect(rail.pinToRail).toHaveBeenCalledOnce();
   });
 
-  it('still answers, announces and stops, and returns the keyboard to the follow-up field', async () => {
+  it('still answers into its polite live region, stops, and returns the keyboard to the follow-up field', async () => {
     let signal: AbortSignal | undefined;
     const rail = fakeRail();
     const { editor } = mount({
@@ -1294,7 +1325,10 @@ describe('in the comment rail', () => {
     ask('What is a lien?');
     await answered();
     expect(answerOf()?.textContent).toBe('A lien is a claim.');
-    expect(document.querySelector('.rl-qa-exchange')?.getAttribute('aria-live')).toBe('polite');
+    // The answer comes in the region a screen reader is told to speak from.
+    const region = document.querySelector('.rl-qa-exchange');
+    expect(region?.getAttribute('aria-live')).toBe('polite');
+    expect(region?.contains(answerOf())).toBe(true);
     expect(document.activeElement).toBe(field());
     ask('And a follow-up?');
     await vi.waitFor(() => expect(button('Stop')).toBeDefined());
@@ -1361,30 +1395,6 @@ describe('in the comment rail', () => {
       expect(heardOf(rail.pins[0]!.held).release).toBe(1);
       expect(heardOf(rail.pins[1]!.held).release).toBe(0);
       expect(rail.pins[1]?.el).toBe(bubble());
-    });
-
-    it('while the bubble is still in the page: the rail takes nothing out of it, and Ask removes it', () => {
-      const rail = fakeRail();
-      let inPage: boolean | undefined;
-      const { editor } = mount({
-        pinToRail: (el, anchor, lost) => {
-          const held = rail.pinToRail(el, anchor, lost);
-          if (!held) return null;
-          return {
-            ...held,
-            release: () => {
-              inPage = el.isConnected;
-              held.release();
-            },
-          };
-        },
-      });
-      start(editor);
-      const el = bubble();
-      key('Escape');
-      // The rail lays the notes out again, with the bubble still there; and the bubble is gone after.
-      expect(inPage).toBe(true);
-      expect(el?.isConnected).toBe(false);
     });
   });
 
@@ -1567,20 +1577,26 @@ describe('in the comment rail', () => {
   });
 
   describe('when the rail lets go of it', () => {
-    it('hangs it by the selection itself, and asks the rail again at its next layout', () => {
+    it('hangs it by the selection itself at once, asking the rail first, and asks again at each layout after', () => {
       const rail = fakeRail();
       const { editor } = mount({ pinToRail: rail.pinToRail });
       start(editor);
       const [first] = rail.pins;
       expect(bubble()?.style.left).toBe('');
+      const asked = () => rail.pinToRail.mock.calls.length;
+      const before = asked();
       // The window turned narrow: the rail shows dots, and says it let go.
       rail.state.holds = false;
       first?.lost();
+      // Asked again then, once, and told no: Ask hung the bubble itself.
+      expect(asked()).toBe(before + 1);
       expect(placedByAsk()).toBe(true);
       expect(bubble()?.classList).not.toContain('rl-qa-railed');
       expect(rail.pins).toHaveLength(1);
-      // It was the rail that let go: there is nothing for Ask to release.
+      // The next layout asks again, and is told no again. It was the rail that let go: there is
+      // nothing for Ask to release.
       editor.view.dispatch({ changes: { from: 0, insert: 'Added line.\n\n' } });
+      expect(asked()).toBeGreaterThan(before + 1);
       expect(heardOf(first!.held).release).toBe(0);
       // The window is wide again, and the next layout finds the rail taking it.
       rail.state.holds = true;

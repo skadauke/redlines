@@ -259,7 +259,7 @@ describe('pinToRail', () => {
     expect(scroll).not.toHaveBeenCalled();
   });
 
-  it('keeps two notes level with the selection, and covers none', async () => {
+  it('clears two notes on the selection’s line, one above it and one below, and covers none', async () => {
     const loaded = await load(SAME_LINE);
     const { editor } = loaded;
     const { el } = pinAt(loaded, 'target', 200);

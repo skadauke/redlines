@@ -9,6 +9,7 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { type Editor, viewModeField } from '@redlines/editor';
 import { EditError } from '@redlines/format';
+import type { PinnedElement } from '@redlines/review';
 import { copyText, exchangeAsMarkdown, keepAsComment } from './actions.ts';
 import { quoteFinder, selectionText } from './answer.ts';
 import { type Bubble, createBubble } from './bubble.ts';
@@ -22,19 +23,6 @@ export { findQuote, parseAnswer, quoteFinder, selectionText } from './answer.ts'
 export { createAskSession, EXPLAIN, askText } from './session.ts';
 export type { AskDeps, AskSession, AskState, AskTurn } from './session.ts';
 
-/**
- * What the comment rail gives Ask for the bubble it lays out among its notes
- * (`AskOptions.pinToRail`): the review interface's `PinnedElement`.
- */
-export interface RailPin {
-  /** The bubble's height changed: the rail lays its notes out again. */
-  resized(): void;
-  /** Scrolls the bubble into view once the rail has placed it, which is a moment from now. */
-  reveal(): void;
-  /** Takes the bubble out of the rail's layout, and the notes go back to their places. */
-  release(): void;
-}
-
 export interface AskOptions extends AskDeps {
   /** Shows a one-line message that doesn't interrupt, for what can't be done. */
   notice(message: string): void;
@@ -46,10 +34,13 @@ export interface AskOptions extends AskDeps {
    * `left` and `top`. Returns null where the rail shows no notes in full (a narrow window, Clean,
    * a document with no comments): Ask places the bubble itself then, beside the column or under the
    * selection, over the page. `lost` is called, once, when a rail that held the bubble stops (the
-   * window turned narrow): Ask places the bubble itself again, and asks the rail again at its next
-   * layout. Without it, Ask always places the bubble itself.
+   * window turned narrow): Ask places the bubble itself again at once, asking the rail first, and
+   * asks it each time it places the bubble after that (when the text, the layout or the window
+   * changes), which is when a rail that is whole again takes the bubble back. Without it, Ask
+   * always places the bubble itself. What the rail returns is the review interface's
+   * `PinnedElement`.
    */
-  pinToRail?: (el: HTMLElement, anchor: () => number, lost: () => void) => RailPin | null;
+  pinToRail?: (el: HTMLElement, anchor: () => number, lost: () => void) => PinnedElement | null;
   /** Gives the question's field the @ picker, as a comment's box has. */
   attachToField?: (field: HTMLTextAreaElement) => () => void;
   /** Shows a comment thread's note, once Make Comment has made one. */
@@ -123,7 +114,7 @@ interface Open {
   /** Whether a new window is being opened for it, so that a second press waits for that. */
   opening: boolean;
   /** The rail's hold on the bubble, while the rail lays it out among its notes. */
-  pin: RailPin | null;
+  pin: PinnedElement | null;
   unsubscribe: () => void;
 }
 
@@ -277,7 +268,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     stopWaiting?.();
     closing.unsubscribe();
     closing.session.close();
-    // The rail lays out the notes again as they were, before the bubble is gone from the page.
+    // The notes go back to their places, if the rail had made room for the bubble.
     closing.pin?.release();
     closing.bubble.destroy();
     doc.removeEventListener('keydown', onKey);

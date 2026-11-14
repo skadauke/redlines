@@ -43,12 +43,4 @@ export {
   keepAsComment,
   parseAnswer,
 } from './ask/index.ts';
-export type {
-  Ask,
-  AskDeps,
-  AskOptions,
-  AskSession,
-  AskState,
-  AskTurn,
-  RailPin,
-} from './ask/index.ts';
+export type { Ask, AskDeps, AskOptions, AskSession, AskState, AskTurn } from './ask/index.ts';
