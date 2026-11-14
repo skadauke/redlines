@@ -130,6 +130,44 @@ describe('walk seed 23 (lists side by side): Return at the start of a nested fir
   ]);
 });
 
+describe('walk-248 seed 1027: Return on the empty line Shift-Return opened, in a file with a ledger', () => {
+  // Return on the empty line takes the Shift-Return back (a step of its own) and opens an empty
+  // paragraph, and the history joins the Return's step to that one. With Track Changes on, the
+  // tracked layer writes the file's ledger again at each of these (here a short one: no note, no
+  // people), so the Return replaces it, and its inverse puts it back. Leaving the paragraph takes
+  // the Return back outside the history, and the joined step must stay exactly what the take-back
+  // of the Shift-Return left: mapped through the Return's inverse, which had put the ledger back,
+  // its inverse inserted the new ledger beside the old one, not over it, and Undo ended in a file
+  // with two. The heading is what lets the harness leave the paragraph (its caret goes to the
+  // file's start, which the block the Return was pressed in doesn't reach).
+  const doc = '## café⏎⏎beta ship<del a>⏎x delta‸';
+  scriptRows([
+    {
+      name: 'Shift-Return, then Return, Track Changes on (the seed)',
+      doc,
+      keys: ['Shift-Enter', 'Enter'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'the same, Track Changes off',
+      doc,
+      keys: ['Shift-Enter', 'Enter'],
+      tc: false,
+      expect: {},
+    },
+    {
+      // Up out of the block the Return was pressed in takes the Return back, as leaving does; ⌘Z
+      // then gives back the Shift-Return, with one ledger, and ⌘Z again the file as it was.
+      name: 'left with ↑, then ⌘Z twice',
+      doc,
+      keys: ['Shift-Enter', 'Enter', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'Mod-z', 'Mod-z'],
+      tc: true,
+      expect: { file: '## café⏎⏎beta ship<del a>⏎x delta' },
+    },
+  ]);
+});
+
 const FM = '---⏎title: Notes⏎---⏎';
 const HEAD = '⏎⏎<!-- redlines⏎version: 1⏎';
 const mark = (by: string) => `marks:⏎  k6hg: {by: ${by}, at: 2026-11-01T10:00Z}⏎-->⏎`;
