@@ -74,6 +74,12 @@ export interface PaneDeps {
    */
   makeDefaultApp: () => Promise<DefaultAppChange>;
   /**
+   * Opens the Mac's System Settings at the Quick Look extensions, where Redlines' preview of
+   * Markdown files can be turned off; rejects with a sentence that says why it couldn't. Given only
+   * where there is a Quick Look to turn off: the row is not drawn without it.
+   */
+  openQuickLookSettings?: () => Promise<void>;
+  /**
    * Asks for a folder with the system's panel, which opens in `start` when there is one: its full
    * path, or null when the person cancels; rejects with a sentence that says why it couldn't ask,
    * as in a plain browser.
@@ -305,6 +311,7 @@ function general(deps: PaneDeps): HTMLElement[] {
       toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
     ),
     defaultAppRow(deps),
+    ...(deps.openQuickLookSettings ? [quickLookRow(deps.openQuickLookSettings)] : []),
     row('Command line', command, status),
   ];
 }
@@ -399,6 +406,50 @@ function newDocumentFolderRow(deps: PaneDeps): HTMLElement {
     choose.focus();
   });
   return row('Default folder for new documents', control, status);
+}
+
+/**
+ * What the line under the Quick Look button says until it has something to say about the button. It
+ * names no menu: where the list is in System Settings changes from one macOS to the next.
+ */
+const QUICK_LOOK_HINT =
+  'Redlines’ preview is one of the Quick Look extensions in System Settings, where it can be turned off.';
+
+/**
+ * Quick Look previews of Markdown files: the app comes with one, which macOS registers by itself
+ * and lists in System Settings, so that is where it is turned off. The button opens that list. If
+ * it can't, the line under it says why, with the hint still, and goes back to the hint alone on the
+ * next press.
+ */
+function quickLookRow(open: () => Promise<void>): HTMLElement {
+  const status = el('div', 'rl-pref-note', QUICK_LOOK_HINT);
+  status.setAttribute('role', 'status');
+  const button = el('button', 'rl-pref-button', 'Open System Settings');
+  button.type = 'button';
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  // One press at a time: a second while the first is under way would put its answer over the
+  // other's, in whichever order they come.
+  let opening = false;
+  button.addEventListener('click', () => {
+    if (opening) return;
+    opening = true;
+    say(QUICK_LOOK_HINT, false);
+    open().then(
+      () => {
+        opening = false;
+      },
+      (error: unknown) => {
+        opening = false;
+        say(`${error instanceof Error ? error.message : String(error)} ${QUICK_LOOK_HINT}`, true);
+      },
+    );
+  });
+  const control = el('div', 'rl-pref-inline');
+  control.append(button);
+  return row('Quick Look previews of Markdown files', control, status);
 }
 
 /** What the line under the button says of the app that opens Markdown files. */
