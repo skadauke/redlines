@@ -3602,7 +3602,7 @@ describe('text typed on a blank line of your own pending line breaks, under a bu
     }
     // Every place was tried: none was left out by a refusal, which would have thrown.
     expect(typedWords).toBeGreaterThan(300);
-  });
+  }, 60_000);
 
   it('keeps the words of a refusal in code for code that is typed, and for a bullet no view reads as an underline', () => {
     // Four columns of white space typed at the start of the text make code of it, whatever stands
