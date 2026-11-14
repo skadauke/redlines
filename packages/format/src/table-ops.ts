@@ -7,12 +7,19 @@ import { lineEnd } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
+import type { CommitOptions } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import type { TableAlign, TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import { alignEdit, alignMarkOf, assertMarkHolds, keepAlignInStep } from './table-align.ts';
+import {
+  alignEdit,
+  alignMarkOf,
+  assertMarkHolds,
+  assertMarkRead,
+  keepAlignInStep,
+} from './table-align.ts';
 import {
   columnChanges,
   deletedColPayload,
@@ -864,14 +871,23 @@ function entryFor(ctx: EditContext, group: string | undefined): MarkEntry {
   return entry;
 }
 
+/** The alignment change that a plain operation on columns keeps in step: its id, whether it is gone (its old and
+ * new alignments are then the same), and whether its mark is written at the end of another cell than the one it
+ * stood in. */
+interface KeptChange {
+  id: string;
+  gone: boolean;
+  placed: boolean;
+}
+
 /**
  * A plain operation on columns beside an alignment change keeps it in step (format §3.7, §3.10): the grid of its
  * table with the text that the change's mark is written with once the columns `final` are made (`keepAlignInStep`),
- * the id of the change when it is gone, because the old and the new alignments are then the same, and its id when
- * the mark is written at the end of another cell than the one it stands in (`placed`), which the caller looks at
- * once the file is made (`assertMarkHolds`): the changes pending in that cell can leave it read otherwise in some
- * order of decisions. `ctx` is null for plain, and is the only one that gets here with a change pending
- * (`ruleTwo`). A grid with no change pending is returned as it is.
+ * and the change: `gone` where the old and the new alignments are then the same, `placed` where the mark is written
+ * at the end of another cell than the one it stands in, which the caller looks at once the file is made
+ * (`assertMarkHolds`): the changes pending in that cell can leave it read otherwise in some order of decisions. A
+ * change that stays is looked at as soon as the file is read (`stillRead`). `ctx` is null for plain, and is the only
+ * one that gets here with a change pending (`ruleTwo`). A grid with no change pending is returned as it is.
  *
  * @throws EditError when it can't be kept in step: the old row has not the table's columns, the table has another
  * alignment change, or the change is the span form that another tool wrote.
@@ -884,13 +900,14 @@ function keptInStep(
   grid: Grid,
   pending: TablePending,
   ctx: EditContext | null,
-): { grid: Grid; gone?: string; placed?: string } {
+): { grid: Grid; change?: KeptChange } {
   if (ctx !== null || !pending.align) return { grid };
   const kept = keepAlignInStep(text, parsed, table, final);
   const mark = alignMarkOf(parsed, table);
   if (!kept || !mark || !grid.alignMark) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
-  const marked = { ...grid, alignMark: { ...grid.alignMark, text: kept.opener ?? '' } };
-  if (kept.opener === null) return { grid: marked, gone: mark.id };
+  const aligned = { ...grid, alignMark: { ...grid.alignMark, text: kept.opener ?? '' } };
+  if (kept.opener === null)
+    return { grid: aligned, change: { id: mark.id, gone: true, placed: false } };
   // The mark stands where it did when its cell stays and is the last; a mark that a merge left below the header is
   // in a row that the walk of the header does not look at.
   const { range } = grid.alignMark;
@@ -902,7 +919,26 @@ function keptInStep(
     home === undefined ||
     home === -1 ||
     (last !== undefined && 'src' in last && !last.moving && last.src === home);
-  return stays ? { grid: marked } : { grid: marked, placed: mark.id };
+  return { grid: aligned, change: { id: mark.id, gone: false, placed: !stays } };
+}
+
+/**
+ * The check that a plain operation makes of the change it keeps, as `commitEdit` reads the file it makes: its mark
+ * and its entry must be read there (`assertMarkRead`). The operation writes the mark again (its old row in step, or at
+ * the end of another cell), which the edit's own check of the marks that stay takes for a removal, so that the scan's
+ * pairing of backticks or comment halves across the cells could take it into code or a comment without a word.
+ * `removing` is the operation's own, in the words of the refusal. `more` is another check of the same file.
+ */
+function stillRead(
+  change: KeptChange | undefined,
+  removing: boolean,
+  more?: CommitOptions['verify'],
+): CommitOptions['verify'] {
+  if (!change || change.gone) return undefined;
+  return (after, parsedAfter, written) => {
+    assertMarkRead(parsedAfter, change.id, removing);
+    more?.(after, parsedAfter, written);
+  };
 }
 
 /** Inserting columns (format §3.7): a cell in every row, the marker in the header's. */
@@ -957,21 +993,25 @@ function insertCols(
   const positions = indexesOf(table).map((p, i) =>
     table.deletions[i]?.axis === 'col' && p > op.after ? p + op.count : p,
   );
-  const { grid: marked, gone, placed } = keptInStep(text, parsed, table, final, grid, pending, ctx);
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const body = joinPoints([
-    ...columnChanges(text, marked, final, true),
+    ...columnChanges(text, aligned, final, true),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
   // A change that is gone leaves the ledger, and the edit takes its mark away.
-  if (gone !== undefined) delete ledger.marks[gone];
+  if (change?.gone) delete ledger.marks[change.id];
   const changes = ctx
     ? commitEdit(text, body, ledger, { parsed, created: ids })
-    : gone !== undefined
+    : change?.gone
       ? commitEdit(text, body, ledger, { parsed, removes: true })
-      : commitEdit(text, body, parsed.ledger, { parsed, keepLedger: true });
+      : commitEdit(text, body, parsed.ledger, {
+          parsed,
+          keepLedger: true,
+          verify: stillRead(change, false),
+        });
   const cols = Array.from({ length: op.count }, (_, i) => op.after + i);
   const after = applyChanges(text, changes);
-  if (placed !== undefined) assertMarkHolds(after, placed, table.from);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from);
   return { changes, caret: colCaret(after, table, op.after), cols };
 }
 
@@ -1012,13 +1052,13 @@ function deleteCols(
   }
   const leaving = new Set(cols);
   const final = staying(0, columns).filter((item) => 'src' in item && !leaving.has(item.src));
-  const { grid: marked, gone, placed } = keptInStep(text, parsed, table, final, grid, pending, ctx);
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const before = indexesOf(table);
   const positions = before.map((p) =>
     [...cols].reverse().reduce((position, index) => afterRemoval(position, index), p),
   );
   const ledger = workingLedger(parsed.ledger);
-  if (gone !== undefined) delete ledger.marks[gone];
+  if (change?.gone) delete ledger.marks[change.id];
   const taken = idsIn(text);
   const added: { order: number; line: string }[] = [];
   const created: string[] = [];
@@ -1059,9 +1099,9 @@ function deleteCols(
   // alignment change, where they are written at one place (`withCommentPoints`, which finds the mark by its text).
   const body = joinPoints([
     ...withCommentPoints(
-      columnChanges(text, marked, final),
+      columnChanges(text, aligned, final),
       commentsOfCols(parsed, table, leaving).writes,
-      marked,
+      aligned,
     ),
     ...addDeletionLines(text, table, before, added, eol),
     ...setPositions(
@@ -1087,17 +1127,19 @@ function deleteCols(
           parsed,
           created,
           removes: true,
-          // Deleting columns passes `removes`, as a decision does, which skips the check that holds the mark of an
-          // alignment change to its reading (`commitEdit`): a plain deletion is an edit, and holds it here. The
-          // mark moves to the cell that is last when the last column goes, which may end in a backslash.
-          verify: marked.alignMark?.text
-            ? (after, parsedAfter, written) =>
-                assertPointsRead(text, parsed, after, parsedAfter, written)
-            : undefined,
+          // Deleting columns passes `removes`, as a decision does, which skips the checks that hold the mark of an
+          // alignment change in `commitEdit`: a plain deletion is an edit, and makes them here. The mark and its entry
+          // must still be read (the scan can pair backticks or comment halves across the cells so that the mark is left
+          // in code or a comment, and the check of the marks that stay takes a mark that is written again for one that
+          // goes), and as written it must read as it did, as beside any other edit. The second is the gate every other
+          // edit passes; no case is known where it refuses what the first and the walk of a mark that moves let through.
+          verify: stillRead(change, true, (after, parsedAfter, written) =>
+            assertPointsRead(text, parsed, after, parsedAfter, written),
+          ),
         },
   );
   const after = applyChanges(text, changes);
-  if (placed !== undefined) assertMarkHolds(after, placed, table.from);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from, true);
   const read = tableAfter(after, table);
   const target = Math.min(cols[0] ?? 0, (read?.aligns.length ?? 1) - 1);
   return { changes, caret: colCaret(after, table, target), cols: [target] };
@@ -1201,27 +1243,27 @@ function moveCols(
     added.push({ order: col, line: `<!--del ${id} ${encodePayload(payload)}-->` });
   }
   const eol = eolOf(text, parsed.ledgerRange);
-  const { grid: marked, gone, placed } = keptInStep(text, parsed, table, final, grid, pending, ctx);
+  const { grid: aligned, change } = keptInStep(text, parsed, table, final, grid, pending, ctx);
   const body = joinPoints([
-    ...columnChanges(text, marked, final),
+    ...columnChanges(text, aligned, final),
     ...addDeletionLines(text, table, before, added, eol),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
   // A change that is gone leaves the ledger, and the edit takes its mark away.
-  if (gone !== undefined) delete ledger.marks[gone];
+  if (change?.gone) delete ledger.marks[change.id];
   const changes = commitEdit(
     text,
     body,
     ledger,
     ctx
       ? { parsed, created }
-      : gone !== undefined
+      : change?.gone
         ? { parsed, removes: true }
-        : { parsed, keepLedger: true },
+        : { parsed, keepLedger: true, verify: stillRead(change, false) },
   );
   const moved = cols.map((index) => order.indexOf(index));
   const after = applyChanges(text, changes);
-  if (placed !== undefined) assertMarkHolds(after, placed, table.from);
+  if (change?.placed) assertMarkHolds(after, change.id, table.from);
   return { changes, caret: colCaret(after, table, moved[0] ?? 0), cols: moved };
 }
 

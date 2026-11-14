@@ -23,7 +23,7 @@ import {
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
+import { addPerson, commitEdit, hiddenError, workingLedger } from './edit-support.ts';
 import { encodeValue, isAlignOps, isAlignPayload, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
@@ -340,6 +340,11 @@ const CELL_CHANGES = 2;
 /** The words of a refusal to write the mark where more than `CELL_CHANGES` changes are pending in the
  * header's last cell. */
 const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
+
+/** The words of a refusal to write the mark where more than `CELL_CHANGES` changes are pending in the cell that a
+ * column operation would end the header with. */
+const TOO_MANY_COLUMNS =
+  "Decide the changes in the cell that would end this table's header first, then change its columns.";
 
 /** Where the lines above a table that hold only markers start. A marker can't start the header of a table
  * that has no leading pipe, so the opener of a change that begins in its first cell stands on a line of its
@@ -727,6 +732,31 @@ export function keepAlignInStep(
   return { opener: head.slice(0, at) + value + head.slice(at + kept.source.length) };
 }
 
+/** The point alignment change `id` as `parsed` reads it, or undefined where the scan reads none. */
+const readPoint = (parsed: Parsed, id: string): MarkRange | undefined =>
+  parsed.marks.find((mark) => mark.id === id && isAlignPoint(mark));
+
+/**
+ * Throws when the mark `id` of an alignment change is not read in `parsedAfter`, the reading of the file that a plain
+ * operation on columns made, or its entry in the ledger is not. The scan pairs the backticks of a paragraph, and the
+ * halves of a raw comment, across the cells and the rows of a table, as Markdown readers do not, so an operation that
+ * moves the mark, or writes it again with its old row in step, can leave it inside a code span or a comment: its marker
+ * would stay in the file as text, and its entry in the ledger would be lost or left over, with nothing said. A comment
+ * half that an operation leaves open can as well take in the ledger's own opening. An operation that keeps the ledger as
+ * it is, unread (inserting and moving columns), then loses every entry, the mark's among them; one that writes the
+ * ledger again (deleting columns) writes a second one after the first, which the comment hides, and a later edit that
+ * closes the comment brings the first back, a copy that still has the entries of marks decided since. The edit's own
+ * check of the marks that stay (`assertMarksKept`) sees none of this: the operation took the opener away itself, and
+ * wrote it again. `removing` is the operation's own, as `commitEdit` has it: deleting columns passes `removes`.
+ *
+ * @throws EditError in the words of every change that an edit would hide in code or an HTML comment.
+ */
+export function assertMarkRead(parsedAfter: Parsed, id: string, removing: boolean): void {
+  if (!readPoint(parsedAfter, id) || parsedAfter.ledger.marks[id] === undefined) {
+    throw hiddenError(removing);
+  }
+}
+
 /**
  * Throws when a plain operation on columns that wrote the mark `id` of an alignment change at the end of another
  * cell than it stood in (format §3.7, §3.10) leaves it read otherwise, or its change impossible to decide, in some
@@ -735,15 +765,23 @@ export function keepAlignInStep(
  * starts. It is the walk of the orders that writing the mark makes (`placeHolds`), with the same file with nothing
  * where the mark is as its control. The operation looks only where the mark moved: a mark that stays at the end of
  * its cell, which the operation does not touch, reads as it did. The refusal is in the words of every edit beside
- * the mark (`pointsReadWords`), which say to decide the change first.
+ * the mark (`pointsReadWords`), which say to decide the change first, or, where more than the walk can take are
+ * pending in the cell, in words that name them. A mark that the scan does not read is refused as well, in the words
+ * of what an edit hides (`assertMarkRead`, which the operation makes as soon as the file is read; this is the same
+ * check for a caller that has not).
  *
  * @throws EditError naming the person whose alignment change it is.
  */
-export function assertMarkHolds(after: string, id: string, tableFrom: number): void {
+export function assertMarkHolds(
+  after: string,
+  id: string,
+  tableFrom: number,
+  removing = false,
+): void {
   const parsed = parse(after);
-  const mark = parsed.marks.find((candidate) => candidate.id === id);
+  const mark = readPoint(parsed, id);
   const open = mark?.segments[0]?.open;
-  if (!mark || !open) return;
+  if (!mark || !open) throw hiddenError(removing);
   // The same file with nothing where the mark is, and no entry for it.
   const body = after.slice(0, open.from) + after.slice(open.to);
   const ledger = workingLedger(parsed.ledger);
@@ -753,7 +791,7 @@ export function assertMarkHolds(after: string, id: string, tableFrom: number): v
     placeHolds(without, after, id, tableFrom);
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
-    throw refused(pointsReadWords(parsed, mark));
+    throw refused(error.message === TOO_MANY ? TOO_MANY_COLUMNS : pointsReadWords(parsed, mark));
   }
 }
 

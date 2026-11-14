@@ -188,7 +188,7 @@ function joinChanges(
 /** The refusal of a change that would hide other changes in code or an HTML comment: in the words
  * of a decision, or of an edit, which can be made in Raw instead. A decision that would hide the
  * markers of a comment, which no decision takes away, says to delete the comment (`comment`). */
-function hiddenError(removing: boolean, comment = false): EditError {
+export function hiddenError(removing: boolean, comment = false): EditError {
   if (removing && comment) {
     return new EditError(
       'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.',
