@@ -3,3 +3,4 @@ packages:
   - plugins/*
   - apps/*
   - apps/desktop/quicklook
+  - apps/desktop/journeys
