@@ -685,6 +685,11 @@ function editing(deps: PaneDeps): HTMLElement[] {
       toggle(current.closePairs, (value) => update({ closePairs: value })),
     ),
     row(
+      'Suggest emoji after a colon',
+      toggle(current.emojiSuggestions, (value) => update({ emojiSuggestions: value })),
+      line('Type a colon and two letters, as in :te, to choose an emoji.'),
+    ),
+    row(
       'Track Changes on for new documents',
       toggle(current.trackNewDocuments, (value) => update({ trackNewDocuments: value })),
     ),

@@ -25,6 +25,7 @@ import {
   type ImageSpot,
 } from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
 import { createPalette, pageClipboard } from '@redlines/palette';
 import { createTables } from '@redlines/tables';
@@ -331,6 +332,9 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor);
+// Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
+// matching emoji, as Preferences allow (asked each time).
+createEmoji(editor, { enabled: () => settings.emojiSuggestions });
 
 /**
  * What adding images to this window's document needs of it (image-add.ts): its file, which a

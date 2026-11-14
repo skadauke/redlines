@@ -108,6 +108,7 @@ describe('the panes', () => {
       'Spell check',
       'Smart quotes and dashes',
       'Close brackets and Markdown pairs',
+      'Suggest emoji after a colon',
       'Track Changes on for new documents',
       'Show line break marks (¶)',
       'Show word count',
@@ -133,6 +134,14 @@ describe('the panes', () => {
     track.checked = true;
     track.dispatchEvent(new Event('change'));
     expect(now().trackNewDocuments).toBe(true);
+
+    // The list of emoji starts on, and goes off at once.
+    const emoji = control<HTMLInputElement>(container, 'Suggest emoji after a colon', 'input');
+    expect(emoji.checked).toBe(true);
+    emoji.checked = false;
+    emoji.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ emojiSuggestions: false });
+    expect(now().emojiSuggestions).toBe(false);
 
     // Line break marks start hidden, and show at once.
     const marks = control<HTMLInputElement>(container, 'Show line break marks (¶)', 'input');

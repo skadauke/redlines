@@ -66,6 +66,7 @@ describe('settings', () => {
       spellCheck: true,
       smartPunctuation: true,
       closePairs: true,
+      emojiSuggestions: true,
       trackNewDocuments: false,
       showLineBreakMarks: false,
       showWordCount: true,
@@ -95,6 +96,7 @@ describe('settings', () => {
       spellCheck: false,
       smartPunctuation: false,
       closePairs: false,
+      emojiSuggestions: false,
       trackNewDocuments: true,
       showLineBreakMarks: true,
       showWordCount: false,
@@ -285,6 +287,14 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
   });
 
+  it('suggests emoji unless the person turns it off, also for settings saved before it (#312)', () => {
+    expect(DEFAULT_SETTINGS.emojiSuggestions).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().emojiSuggestions).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"emojiSuggestions":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, emojiSuggestions: false });
+  });
+
   it('hides line break marks unless the person shows them, also for settings saved before it', () => {
     localStorage.setItem(SETTINGS_KEY, '{"theme":"book","spellCheck":false,"closePairs":false}');
     expect(loadSettings()).toEqual({
@@ -465,6 +475,7 @@ describe('settings', () => {
         spellCheck: 'yes',
         smartPunctuation: 0,
         closePairs: null,
+        emojiSuggestions: 'sure',
         trackNewDocuments: 'no',
         showLineBreakMarks: 'yes',
         showWordCount: 'no',
