@@ -821,18 +821,44 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection
-  where it was. **They work with Track Changes off** and write the delimiter row as it says, in the old
-  row of a pending alignment change and in a pending move's copy too; with Track Changes on they are
-  refused, in words ("Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to
-  align it."), never silently (where the closer of a tracked alignment change should stand is open, #281).
-  A tracked alignment change that another tool wrote (a format change around the table, format §3.7,
-  rule 5) is read, drawn, carded and decided: the new alignment shows in every row of the column in
-  every view, and in Redlines the header text of each column changed has a dotted underline and the
-  header row a bar; Simple draws the bar alone, Clean nothing. Its card says "Formatted: column Count
-  centered (was left)" and is found on the header row; accepting keeps the alignment and rejecting
-  writes the old one back. A tracked edit right under its table is refused while it is pending ("Bo
-  Chen's alignment change to the table above is pending. Decide it first, or turn off Track Changes."),
-  and every column command is refused until it is decided; rows are never in the way.
+  where it was. **They work with Track Changes off and on.** Off, they write the delimiter row as it
+  says, in the old row of a pending alignment change and in a pending move's copy too. On, they write
+  the delimiter row and one mark, at the end of the text of the header's last cell, that keeps the old
+  row (format §3.7, rule 5): one change for the table, whichever columns it changes, with no line or
+  blank line of its own. The mark ends its cell's text, so the caret, and a key typed at the end of
+  that cell, stay in front of it. Your own pending change is changed in place, and goes, with the old
+  row written back as it was, when the old alignments are back; columns that have the alignment
+  already are no change, and no notice. The new alignment shows in every row of the column in every
+  view, and in Redlines the header text of each column changed has a dotted underline and the header
+  row a bar; Simple draws the bar alone, Clean nothing. Its card, on the header row, says "Formatted:
+  column Count centered (was default)", with Accept and Reject: accepting keeps the alignment and
+  rejecting writes the old one back, and neither changes a byte outside the table's first two lines.
+- **An alignment change and what else is pending.** A refusal is told in the notice, in the format's
+  words, and nothing is written. With Track Changes on, a change of alignment is refused while
+  another person's is pending ("Bo Chen's alignment change is pending. Decide it first."), while a
+  column change is pending, and while the header is itself a pending row change, a row inserted
+  above it or moved to the top, or the header deleted or moved ("Accept or reject the column changes
+  in this table first.", or the row changes). It is refused too where Markdown would read the mark
+  otherwise at the end of the header's last cell, a backslash or an underscore ending its text, say
+  ("A marker can't go at the end of this table's header, where Markdown would read it otherwise.
+  Change the end of its last cell first, then align."), and where more than two other changes are
+  pending in that cell ("Decide the changes in the last cell of this table's header first, then
+  align."). With Track Changes off no mark is written, and none of this applies. While an alignment
+  change is pending, a column command with Track Changes on is refused, and so is a row command that
+  touches the header, with it on or off (Insert Row Above on the header, Delete Row on it, Move Row
+  Up on the first row below it): "Accept or reject the alignment change in this table first." The
+  other row commands work, and with Track Changes off so do the column commands, which keep the
+  change in step with the columns. A key typed at the end of the last header cell is refused, naming
+  the change, where it would make Markdown read the mark otherwise or leave more than two other
+  changes pending beside it ("Ada Lovelace's alignment change is at the end of this cell, and this
+  edit would leave more changes pending in it than can be looked at together. Decide some of them
+  first.").
+- **An alignment change from another tool,** a format change around the table (format §3.7, rule 5),
+  is read, drawn, carded and decided like the one in the header, and is never written. While it is
+  pending, a tracked edit right under its table is refused ("Bo Chen's alignment change to the table
+  above is pending. Decide it first, or turn off Track Changes."), and so is every column command,
+  tracked or not, and every row command that touches the header. The one in the header has no
+  closer and no such gap: nothing under the table is refused for it.
 - **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
   take the author's tint and its text is underlined in the author's color, with a change bar on the
   row; Clean shows the plain row. A **deleted row** is kept below the table in the file and drawn in
