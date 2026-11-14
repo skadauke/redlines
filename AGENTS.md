@@ -86,10 +86,10 @@ repo root.
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke) and `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
-  over them, their bars and cards, in Redlines and Simple) serve the page, and `pnpm tauri dev` runs
-  it in WKWebView; each writes its results to the console and ends with a `... done <n> passed,
-  <n> failed` line (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`). They read
-  nothing in a release build, and are no part of CI
+  over them, their bars and cards, in Redlines and its simple look) serve the page, and
+  `pnpm tauri dev` runs it in WKWebView; each writes its results to the console and ends with a
+  `... done <n> passed, <n> failed` line (`src/block-check.ts`, `src/table-check.ts`,
+  `src/struck-check.ts`). They read nothing in a release build, and are no part of CI
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -222,7 +222,9 @@ repo root.
 
 - Keep PRs small and focused on one change.
 - When you change format behavior, update `docs/format.md` (and `docs/design.md` if it describes
-  the behavior) in the same PR.
+  the behavior) in the same PR. Before you change how an edit is written, read
+  [docs/hardening.md](docs/hardening.md): the four properties the format is built to hold, what
+  holds them, what is known not to hold, and how to add a rule without loosening one.
 - Add or update vitest tests for new or changed behavior, next to the code.
 - Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm format:check` before finishing. Run
   `pnpm format` to fix formatting.

@@ -3,8 +3,8 @@
 // browser, into key handling. Add a row here for what the app does itself; a plugin's commands come
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
-import { baseTitle } from '@redlines/editor';
-import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
+import { baseTitle, menuViewOf } from '@redlines/editor';
+import type { CommandRegistry, EditorCommand, MenuView, ViewMode } from '@redlines/editor';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LEAST, ZOOM_MOST } from './text-size.ts';
 
 export interface MenuCommands {
@@ -26,7 +26,11 @@ export interface MenuCommands {
   quit(): void;
   /** Opens the About Redlines window, or brings it forward. */
   openAbout(): void;
-  setView(mode: ViewMode): void;
+  /**
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
+   * nothing when it is shown already (`Editor.showView`).
+   */
+  setView(view: MenuView): void;
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
@@ -256,11 +260,12 @@ export function appMenuModel(
       ? [...rows, SEPARATOR, ...commandRows]
       : [...rows, ...commandRows];
   };
-  const viewRow = (mode: ViewMode, text: string, key: string): ActionRow => ({
+  // Redlines is checked in both its looks: Simple is its simple look, no view of its own.
+  const viewRow = (view: MenuView, text: string, key: string): ActionRow => ({
     text,
     accelerator: `Alt+CmdOrCtrl+${key}`,
-    action: () => commands.setView(mode),
-    checked: (state) => state.view === mode,
+    action: () => commands.setView(view),
+    checked: (state) => menuViewOf(state.view) === view,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
@@ -378,12 +383,12 @@ export function appMenuModel(
     {
       title: 'View',
       rows: withCommands('view', [
-        // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
-        // the clash proves real (design §14, open question 6).
+        // ⌥⌘1 to ⌥⌘3, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
+        // the clash proves real (design §14, open question 6). Simple is Redlines' simple look,
+        // switched by a click on a change bar and by nothing here, so it has no row and no key.
         viewRow('clean', 'Clean', '1'),
-        viewRow('simple', 'Simple', '2'),
-        viewRow('redlines', 'Redlines', '3'),
-        viewRow('raw', 'Raw', '4'),
+        viewRow('redlines', 'Redlines', '2'),
+        viewRow('raw', 'Raw', '3'),
         SEPARATOR,
         // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
         // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).

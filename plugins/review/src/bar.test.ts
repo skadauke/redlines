@@ -170,6 +170,17 @@ describe('review bar', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
   });
 
+  it('stays open, on the full markup, when Redlines is chosen from Clean with the bar open', () => {
+    // The look chosen is the simple one; the bar showed the full markup, which is what comes back.
+    const { editor, review } = mount(doc, { markupView: 'simple' });
+    review.openBar();
+    editor.showView('clean');
+    expect(review.isBarOpen()).toBe(true);
+    editor.showView('redlines');
+    expect(review.isBarOpen()).toBe(true);
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+  });
+
   it('closes the bar when Simple is chosen, and the view stays as chosen', () => {
     const { editor, review, opened } = mount(doc);
     review.openBar();

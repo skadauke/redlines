@@ -543,7 +543,7 @@ describe('title bar', () => {
     const redlines = () => item(menu('View'), 'Redlines');
     expect(shown(redlines())).toBe(true);
     expect(redlines().disabled).toBe(false);
-    expect(redlines().textContent).toContain('⌥⌘3');
+    expect(redlines().textContent).toContain('⌥⌘2');
     redlines().click();
     expect(actions.setView).toHaveBeenCalledWith('redlines');
     // With redlines, or with the last one gone while it is the view that is shown.
@@ -554,26 +554,24 @@ describe('title bar', () => {
     expect(redlines().getAttribute('aria-checked')).toBe('true');
   });
 
-  it('lists the four views in order, with their keys and one check mark', () => {
-    const { actions, menu, button } = setup({ view: 'simple' });
+  it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {
+    const { actions, menu, button } = setup({ view: 'clean' });
     button('View').click();
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
-    expect(rows.map((row) => row.textContent)).toEqual([
-      'Clean⌥⌘1',
-      'Simple⌥⌘2',
-      'Redlines⌥⌘3',
-      'Raw⌥⌘4',
-    ]);
-    expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual([
-      'false',
-      'true',
-      'false',
-      'false',
-    ]);
+    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
+    expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Raw⌥⌘3']);
+    expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     // Each has an icon of its own.
     expect(rows.every((row) => row.querySelector('svg'))).toBe(true);
     (rows[1] as HTMLElement).click();
-    expect(actions.setView).toHaveBeenCalledWith('simple');
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+  });
+
+  it('checks Redlines, and no other view, in its simple look', () => {
+    const { menu, button } = setup({ view: 'simple' });
+    button('View').click();
+    const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
+    expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
   });
 
   it('keeps Review changes for documents with redlines', () => {
@@ -703,8 +701,6 @@ describe('title bar', () => {
     const view = menu('View');
     expect(shown(view)).toBe(true);
     expect(document.activeElement).toBe(item(view, 'Clean'));
-    press(view, 'ArrowDown');
-    expect(document.activeElement).toBe(item(view, 'Simple'));
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Redlines'));
     press(view, 'ArrowDown');

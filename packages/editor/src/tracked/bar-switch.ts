@@ -1,7 +1,7 @@
-// A click on a change bar switches Simple and Redlines (design: A click in the margin). The core
-// owns the click, and it never moves the text under the pointer, the caret, the selection or the
-// focus: the press is taken whole, the release switches, and the line that was under the pointer
-// is put back where it was.
+// A click on a change bar switches Redlines' two looks, the simple look and the full markup, and is
+// the only thing that does (design: A click in the margin). The core owns the click, and it never
+// moves the text under the pointer, the caret, the selection or the focus: the press is taken
+// whole, the release switches, and the line that was under the pointer is put back where it was.
 
 import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
 import {
@@ -170,7 +170,7 @@ interface Hover {
 
 const setHover = StateEffect.define<Hover | null>();
 
-const LABELS = { simple: 'Show Simple', redlines: 'Show Redlines' } as const;
+const LABELS = { simple: 'Show simple look', redlines: 'Show full markup' } as const;
 
 /** The keys that show each view, as the host writes them for the hint (none: the hint names none). */
 export type ViewKeys = Partial<Record<'simple' | 'redlines', string>>;
