@@ -34,8 +34,8 @@ export const ASK_STYLE = `
   cursor: default;
 }
 /*
- * Laid out among the rail's notes, which make room for it, the bubble covers none, so it needs
- * neither to be in front of them nor the page behind it, which it has to hang over the notes.
+ * Laid out among the rail's notes, which make room for it, the bubble covers none: it needs
+ * neither the z-index nor the page color behind it that it has where it hangs over the notes.
  */
 .rl-qa.${RAILED} {
   z-index: auto;

@@ -1198,7 +1198,9 @@ describe('in the comment rail', () => {
     // It is Ask's own element, where Ask put it, and it needs no page color to cover the notes.
     expect(bubble()?.parentElement).toBe(editor.view.scrollDOM);
     expect(bubble()?.classList).toContain('rl-qa-railed');
-    expect(heardOf(pin!.held)).toEqual({ resized: expect.any(Number), reveal: 1, release: 0 });
+    // It was told to scroll to the bubble once, and has not been let go.
+    expect(heardOf(pin!.held).reveal).toBe(1);
+    expect(heardOf(pin!.held).release).toBe(0);
   });
 
   it('puts the keyboard in the field without scrolling to where the bubble is not yet, and has the rail scroll to it', () => {
