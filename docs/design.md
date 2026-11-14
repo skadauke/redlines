@@ -413,7 +413,7 @@ A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
 in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment there, switches to
+in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
@@ -825,6 +825,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
+| Highlight                      | ⇧⌘H                                                                                           | Ctrl+Shift+H              |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |

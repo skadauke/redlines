@@ -26,6 +26,7 @@ export {
 } from './agent.ts';
 export { agentWorkOf } from './agent-work.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
+export { addHighlight } from './highlights.ts';
 export {
   accept,
   acceptAll,
