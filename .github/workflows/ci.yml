@@ -33,6 +33,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # DIAG (never merged): the timing files alone on a runner, one file at a time, to be read beside
+  # the same tests inside `check`, where 400 other test files share the runner's 4 vCPUs.
+  timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Timing tests alone
+        run: pnpm exec vitest run --no-file-parallelism packages/editor/src/blocks/cost.test.ts packages/editor/src/blocks/hidden.test.ts packages/editor/src/preview/long-document.test.ts
+        env:
+          REDLINES_COST: check
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
