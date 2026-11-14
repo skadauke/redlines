@@ -2895,6 +2895,66 @@ describe('a point alignment change beside a column change, as a merge leaves the
     });
   });
 
+  describe('a column inserted before the first, and an inserted row with a comment in the cell that goes', () => {
+    // The row's first cell is in the column that leaves: the marker of the row goes to the new first cell and the
+    // comment becomes a point at the start of that cell's text, where the marker stands: marker, comment, text.
+    const OLD = '| --- | --- | --- |';
+    const body = (mark: string) =>
+      lines(
+        `| <!--ins c2dd col--> | ha | hb | hc${mark} |`,
+        '| --- | --- | :-: | --- |',
+        '|  | a1 | a2 | a3 |',
+        '| <!--ins r5dd row--> n0<!--cmt c9qf--> | n1 | n2 | n3 |',
+      );
+    const WITH_ROW = file(
+      body(markFor(OLD)),
+      { c2dd: 'bo', k3x9: 'ada', r5dd: 'bo' },
+      thread('c9qf'),
+    );
+    const CONTROL = file(body(''), { c2dd: 'bo', r5dd: 'bo' }, thread('c9qf'));
+    const ROW = '| <!--ins r5dd row--> <!--cmt c9qf-->n1 | n2 | n3 |';
+
+    it('writes the comment after the marker of the row and keeps the mark at the end of the header', () => {
+      const rejected = decide(WITH_ROW, reject, 'c2dd');
+      expect(trim(rejected)).toBe(
+        lines(`| ha | hb | hc${markFor(OLD)} |`, '| --- | :-: | --- |', '| a1 | a2 | a3 |', ROW),
+      );
+      // The row is still the inserted one, the comment is one point, and the mark ends the header's last cell.
+      const parsed = parse(rejected);
+      const table = readTables(rejected, parsed)[0];
+      expect(table?.rows[2]?.insertion?.id).toBe('r5dd');
+      expect(parsed.ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
+      expect(table && alignMarkOf(parsed, table)?.segments[0]?.open.from).toBe(
+        table?.rows[0]?.cells.at(-1)?.textTo,
+      );
+      // The file with no mark writes the same row: the mark is no reason for a different line.
+      expect(
+        trim(decide(CONTROL, reject, 'c2dd'))
+          .split('\n')
+          .at(-1),
+      ).toBe(ROW);
+      // Rejecting the mark then writes its old row back, and nothing else changes.
+      expect(trim(decide(rejected, reject, 'k3x9'))).toBe(
+        lines('| ha | hb | hc |', '| --- | --- | --- |', '| a1 | a2 | a3 |', ROW),
+      );
+    });
+
+    it('is decided in every order, with the mark’s rejection the only one refused, and decided all at once', () => {
+      expectEveryOrderAlike('a comment in the row', WITH_ROW, exactly);
+      onlyTheMark(expectEveryOrderRead('a comment in the row', WITH_ROW));
+      const everything = (text: string, how: typeof acceptAll) =>
+        trim(applyChanges(text, how(text)));
+      // The comment stays, as a point at the end of the row above the one that goes.
+      expect(everything(WITH_ROW, rejectAll)).toBe(
+        lines('| ha | hb | hc |', '| --- | --- | --- |', '| a1 | a2 | a3<!--cmt c9qf--> |'),
+      );
+      expect(everything(WITH_ROW, acceptAll).replace('<!--cmt c9qf-->', '')).toBe(
+        trim(newestView(WITH_ROW).text),
+      );
+      viewed(WITH_ROW, lines('| ha | hb | hc |', '| --- | --- | --- |', '| a1 | a2 | a3 |'));
+    });
+  });
+
   describe('a header with no pipes at its edges', () => {
     const OLD = '----- | -----';
     const BARE = file(
@@ -2987,80 +3047,163 @@ describe('a point alignment change beside a column change, as a merge leaves the
       expect(parse(applyChanges(both, rejectAll(both))).marks).toEqual([]);
     });
   });
-  describe('joined by hand into random column changes', () => {
+  describe('joined by hand into random changes', () => {
+    const POOL = ['c2dd', 'f3gg', 'h4jj', 'm5nn', 'b7cd', 'd8fg', 'g9hj', 'j2kl'];
+    /** Ids for more changes: each operation draws the ones that are not in the file yet. */
+    const MORE = [...POOL, 'n3pq', 'r4st', 't5vw', 'v6xz', 'w7zb', 'x8zc', 'z9bd', 'b2cf'];
+    const styles: Record<string, (cells: string[]) => string> = {
+      padded: (cells) => `| ${cells.join(' | ')} |`,
+      compact: (cells) => `|${cells.join('|')}|`,
+      bare: (cells) => cells.join(' | '),
+      open: (cells) => `| ${cells.join(' | ')}`,
+      lead: (cells) => `${cells.join(' | ')} |`,
+    };
+    const tidy = (view: string) => view.replace(/\s+$/, '');
+
+    /**
+     * A random table (five styles, LF or CRLF) changed by Bo, tracked, with Ada's mark joined in by hand at the end
+     * of its header's last cell, `SPEC` the old row: Bo changes the columns once or twice. With `rich` the table
+     * starts as the review's did, a row inserted or moved, a column put in (at the start, mostly) and a comment of
+     * Ada's in the first cell of the pending row, which goes with that column, and more rows, columns and comments
+     * follow. Undefined when no column change is left pending.
+     */
+    const randomMerge = (random: () => number, rich: boolean) => {
+      const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+      const width = 2 + Math.floor(random() * 3);
+      const line = styles[pick(Object.keys(styles))] as (cells: string[]) => string;
+      const eol = random() < 0.25 ? '\r\n' : '\n';
+      // The delimiter cells are alike, so that a moved column's cell is no other's, whatever the order.
+      const spec = line(Array.from({ length: width }, () => '-----'));
+      const original = [
+        line(Array.from({ length: width }, (_, c) => `hdr${'abcd'[c]}`)),
+        spec,
+        ...Array.from({ length: 1 + Math.floor(random() * 3) }, (_, r) =>
+          line(Array.from({ length: width }, (_, c) => `r${r}c${c}`)),
+        ),
+      ].join(eol);
+      let text = file(original);
+      const steps: string[] = [];
+      const ids = () => [...(rich ? MORE : POOL)].sort(() => random() - 0.5);
+      const tableOf = () => readTables(text, parse(text))[0];
+      /** An operation of Bo's, tracked, or nothing where it is refused. */
+      const operate = (op: TableOp) => {
+        try {
+          text = applyChanges(text, tableEdit(text, op, context(bo, ids())).changes);
+          steps.push(JSON.stringify(op));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      };
+      /** A comment of Ada's over `from` to `to`, or nothing where it is refused. */
+      const comment = (from: number, to: number) => {
+        try {
+          text = applyChanges(
+            text,
+            addComment(text, { from, to }, 'A note.', context(ada, ids())).changes,
+          );
+          steps.push(`comment ${from}-${to}`);
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      };
+      if (rich && random() < 0.5) {
+        const first = tableOf();
+        const rows = first?.rows.length ?? 0;
+        if (first && random() < 0.6) {
+          operate({
+            kind: 'insertRows',
+            table: first.from,
+            after: Math.floor(random() * rows),
+            count: 1,
+          });
+        } else if (first && rows > 2) {
+          const moved = 1 + Math.floor(random() * (rows - 1));
+          operate({
+            kind: 'moveRows',
+            table: first.from,
+            rows: [moved],
+            to: 1 + Math.floor(random() * rows),
+          });
+        }
+        const second = tableOf();
+        if (second) {
+          const after = random() < 0.7 ? 0 : Math.floor(random() * (second.aligns.length + 1));
+          operate({ kind: 'insertCols', table: second.from, after, count: 1 });
+        }
+        const cell = tableOf()?.rows.find((row) => row.insertion)?.cells[0];
+        if (cell) {
+          const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom + 1));
+          comment(from, random() < 0.5 ? from : Math.min(cell.textTo, from + 1));
+        }
+      }
+      for (let step = 0; step < (rich ? 1 : 0) + 1 + Math.floor(random() * 2); step++) {
+        const table = tableOf();
+        if (!table) break;
+        const columns = table.aligns.length;
+        const rows = table.rows.length;
+        const kinds = rich
+          ? (['insertRows', 'moveRows', 'deleteRows', 'comment', 'comment'] as const)
+          : ([] as const);
+        const kind = pick([
+          'insertCols',
+          'insertCols',
+          'deleteCols',
+          'moveCols',
+          'moveCols',
+          ...kinds,
+        ] as const);
+        const bodyRow = () => 1 + Math.floor(random() * Math.max(1, rows - 1));
+        if (kind === 'insertCols') {
+          const after = Math.floor(random() * (columns + 1));
+          operate({ kind, table: table.from, after, count: 1 + Math.floor(random() * 2) });
+        } else if (kind === 'deleteCols') {
+          operate({ kind, table: table.from, cols: [Math.floor(random() * columns)] });
+        } else if (kind === 'moveCols') {
+          const cols = [Math.floor(random() * columns)];
+          operate({ kind, table: table.from, cols, to: Math.floor(random() * (columns + 1)) });
+        } else if (kind === 'insertRows') {
+          operate({ kind, table: table.from, after: Math.floor(random() * rows), count: 1 });
+        } else if (kind === 'moveRows') {
+          operate({
+            kind,
+            table: table.from,
+            rows: [bodyRow()],
+            to: 1 + Math.floor(random() * rows),
+          });
+        } else if (kind === 'deleteRows') {
+          operate({ kind, table: table.from, rows: [bodyRow()] });
+        } else {
+          const target = pick(table.rows);
+          const cell = pick(target.cells.slice(0, columns));
+          const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom + 1));
+          comment(
+            from,
+            random() < 0.4 ? from : Math.min(cell.textTo, from + 1 + Math.floor(random() * 2)),
+          );
+        }
+      }
+      const parsed = parse(text);
+      const header = readTables(text, parsed)[0]?.rows[0];
+      const last = header?.cells.at(-1);
+      // Bo's own inserted column that he deleted again is gone, and a file of no column change has no marks.
+      if (!/col-->|col=\d/.test(text) || !last || header?.insertion) return undefined;
+      // Ada's change is joined in: her mark at the end of the header's last cell, its `SPEC` the old row.
+      const merged = entry(
+        text.slice(0, last.textTo) + markFor(spec) + text.slice(last.textTo),
+        'k3x9',
+        'ada',
+      );
+      const label = `${JSON.stringify(original)} ${steps.join(' ')}\n${bodyOf(merged)}`;
+      return { original, merged, label };
+    };
+
     it('is kept at the end of the header through every decision, which reads alike in every order', () => {
       const random = seeded(Number(process.env['REDLINES_SEED'] ?? 281));
-      const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
-      const POOL = ['c2dd', 'f3gg', 'h4jj', 'm5nn', 'b7cd', 'd8fg', 'g9hj', 'j2kl'];
-      const styles: Record<string, (cells: string[]) => string> = {
-        padded: (cells) => `| ${cells.join(' | ')} |`,
-        compact: (cells) => `|${cells.join('|')}|`,
-        bare: (cells) => cells.join(' | '),
-        open: (cells) => `| ${cells.join(' | ')}`,
-        lead: (cells) => `${cells.join(' | ')} |`,
-      };
       let used = 0;
       for (let n = 0; n < fuzzCount(60); n++) {
-        const width = 2 + Math.floor(random() * 3);
-        const line = styles[pick(Object.keys(styles))] as (cells: string[]) => string;
-        const eol = random() < 0.25 ? '\r\n' : '\n';
-        // The delimiter cells are alike, so that a moved column's cell is no other's, whatever the order.
-        const spec = line(Array.from({ length: width }, () => '-----'));
-        const original = [
-          line(Array.from({ length: width }, (_, c) => `hdr${'abcd'[c]}`)),
-          spec,
-          ...Array.from({ length: 1 + Math.floor(random() * 3) }, (_, r) =>
-            line(Array.from({ length: width }, (_, c) => `r${r}c${c}`)),
-          ),
-        ].join(eol);
-        // Bo changes the columns, tracked, once or twice.
-        let text = file(original);
-        const steps: string[] = [];
-        for (let step = 0; step < 1 + Math.floor(random() * 2); step++) {
-          const table = readTables(text, parse(text))[0];
-          if (!table) break;
-          const columns = table.aligns.length;
-          const kind = pick([
-            'insertCols',
-            'insertCols',
-            'deleteCols',
-            'moveCols',
-            'moveCols',
-          ] as const);
-          const op: TableOp =
-            kind === 'insertCols'
-              ? {
-                  kind,
-                  table: table.from,
-                  after: Math.floor(random() * (columns + 1)),
-                  count: 1 + Math.floor(random() * 2),
-                }
-              : kind === 'deleteCols'
-                ? { kind, table: table.from, cols: [Math.floor(random() * columns)] }
-                : {
-                    kind,
-                    table: table.from,
-                    cols: [Math.floor(random() * columns)],
-                    to: Math.floor(random() * (columns + 1)),
-                  };
-          try {
-            const ids = [...POOL].sort(() => random() - 0.5);
-            text = applyChanges(text, tableEdit(text, op, context(bo, ids)).changes);
-            steps.push(JSON.stringify(op));
-          } catch (error) {
-            if (!(error instanceof EditError)) throw error;
-          }
-        }
-        const last = readTables(text, parse(text))[0]?.rows[0]?.cells.at(-1);
-        // Bo's own inserted column that he deleted again is gone, and a file of no column change has no marks.
-        if (!/col-->|col=\d/.test(text) || !last) continue;
-        // Ada's change is joined in: her mark at the end of the header's last cell, its `SPEC` the old row.
-        const merged = entry(
-          text.slice(0, last.textTo) + markFor(spec) + text.slice(last.textTo),
-          'k3x9',
-          'ada',
-        );
-        const label = `${JSON.stringify(original)} ${steps.join(' ')}\n${bodyOf(merged)}`;
+        const made = randomMerge(random, false);
+        if (!made) continue;
+        const { original, merged, label } = made;
         used++;
         // After each decision of a column the mark is there once, with its entry, and ends the last cell.
         const seen = new Set<string>();
@@ -3103,7 +3246,6 @@ describe('a point alignment change beside a column change, as a merge leaves the
           expect(step, label).toMatch(/ rk3x9$/);
         }
         const rejected = applyChanges(merged, rejectAll(merged));
-        const tidy = (view: string) => view.replace(/\s+$/, '');
         expect(
           parse(rejected).marks.filter((mark) => mark.kind !== 'cmt'),
           label,
@@ -3117,6 +3259,83 @@ describe('a point alignment change beside a column change, as a merge leaves the
         expect(tidy(newestView(accepted).text), label).toBe(tidy(newestView(merged).text));
       }
       expect(used).toBeGreaterThan(fuzzCount(60) / 2);
+    }, 120_000);
+
+    it('is decided as the same file without it is, through every state that rows, columns and comments reach', () => {
+      const random = seeded(Number(process.env['REDLINES_SEED'] ?? 281));
+      /** The file without the mark of Ada's change and its entry: what the file reads and decides as but for it. */
+      const without = (state: string) => {
+        const open = parse(state).marks.find((mark) => mark.id === 'k3x9')?.segments[0]?.open;
+        if (!open) return state;
+        const bare = state.slice(0, open.from) + state.slice(open.to);
+        return bare.replace(/ {2}k3x9: \{[^}]*\}\r?\n/, '');
+      };
+      /** Whether the original view of a file can't be read: its table has no column of the original left (an
+       * inserted column pending, every other one deleted and accepted), and `originalView` throws. A file that may
+       * hold indented code reads that view when a decision is made, and refuses it, with or without the mark; the
+       * mark's `\x20` is enough to make the file one (`mayIndent`). */
+      const noOriginal = (text: string) => {
+        try {
+          originalView(text);
+          return false;
+        } catch (error) {
+          if (error instanceof EditError) return true;
+          throw error;
+        }
+      };
+      const attempt = (text: string, how: typeof accept, id: string) => {
+        try {
+          return applyChanges(text, how(text, id));
+        } catch (error) {
+          if (error instanceof EditError) return error;
+          throw error;
+        }
+      };
+      let used = 0;
+      let withRowAndComment = 0;
+      for (let n = 0; n < fuzzCount(60); n++) {
+        const made = randomMerge(random, true);
+        if (!made) continue;
+        used++;
+        const seen = new Set<string>();
+        const walk = (state: string, path: string) => {
+          if (seen.has(state) || noOriginal(state)) return;
+          seen.add(state);
+          const parsed = parse(state);
+          const control = without(state);
+          if (
+            parsed.marks.some((mark) => mark.kind === 'ins' && mark.payload === 'row') &&
+            parsed.ledger.comments.length > 0
+          ) {
+            withRowAndComment++;
+          }
+          for (const { id, kind } of parsed.marks) {
+            if (kind === 'cmt' || kind === 'hl' || id === 'k3x9') continue;
+            for (const [how, decideIt] of [
+              ['accept', accept],
+              ['reject', reject],
+            ] as const) {
+              const label = `${made.label}\nafter [${path}] ${how} ${id}\n${bodyOf(state)}`;
+              const done = attempt(state, decideIt, id);
+              const plain = attempt(control, decideIt, id);
+              // A decision that the file without the mark allows, the file with it allows: no refusal is the mark's.
+              if (done instanceof EditError) {
+                if (typeof plain === 'string' && noOriginal(plain)) continue;
+                expect(plain, `${label}: ${done.message}`).toBeInstanceOf(EditError);
+                continue;
+              }
+              // And it writes what the file without the mark writes, but for the mark.
+              if (typeof plain === 'string') {
+                expect(tidy(bodyOf(without(done))), label).toBe(tidy(bodyOf(plain)));
+              }
+              walk(done, `${path} ${how} ${id}`);
+            }
+          }
+        };
+        walk(made.merged, '');
+      }
+      expect(used).toBeGreaterThan(fuzzCount(60) / 2);
+      expect(withRowAndComment).toBeGreaterThan(0);
     }, 120_000);
   });
 });

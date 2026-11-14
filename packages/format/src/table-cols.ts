@@ -155,7 +155,8 @@ const isStaying = (item: ColItem): item is { src: number; moving?: false } =>
  * the unit of a cell that is taken out, out of the content of one that moves, off a cell that stays and
  * is not the last now, and it is written once, at the end of the text of the cell that is last, whether it
  * stays, moves or is new, after the marks that end the text and in front of its padding. A caller joins
- * the changes with `joinPoints`: the mark is written where another change may start.
+ * the changes with `joinPoints`: the mark is written where another change may start. One that writes the
+ * comment points of the columns that leave as well puts them in with `withCommentPoints`.
  */
 export function columnChanges(
   text: string,
@@ -321,6 +322,31 @@ export function columnChanges(
     }
   });
   return changes;
+}
+
+/**
+ * The changes of a rewrite of the columns (`columnChanges` and what goes with it) with the comment points that
+ * rule 4 writes for the columns that leave (`commentsOfCols(...).writes`), for a caller that joins the two:
+ * `decideCols`, and the operation that deletes columns.
+ *
+ * Points written at one place are applied in the order of the list, and three can meet at the start or the end of
+ * one cell's text: the marker of an inserted row, which starts the text of its row's first cell, the comment
+ * point, and the mark of an alignment change, which ends the text of the header's last cell. They stand in that
+ * order: row marker, comment point, mark. So the comment points go after every change but the point that
+ * writes the mark (a change with no range that inserts `grid.alignMark.text`), which is moved behind them.
+ * Nothing else is moved, and a grid with no mark keeps the order it had, the comment points last. A mark that is
+ * written inside the content of a cell that moves or is new is in that cell's text, and one that is replaced in
+ * place takes text, which `joinPoints` writes after the points at its start.
+ */
+export function withCommentPoints(
+  changes: readonly TextChange[],
+  comments: readonly TextChange[],
+  grid: Grid,
+): TextChange[] {
+  const mark = grid.alignMark;
+  const isMark = (change: TextChange) =>
+    mark !== null && change.from === change.to && change.insert === mark.text;
+  return [...changes.filter((change) => !isMark(change)), ...comments, ...changes.filter(isMark)];
 }
 
 /** The ids of the marks of `table` that are columns or deleted columns, and the twins of moves. */
@@ -506,20 +532,20 @@ export function decideCols(
   }
   const pending = new Set(table.deletions.map((_, k) => k).filter((k) => !decidedLines.has(k)));
   const grid = gridOf(text, table, keepMark ? parsed : undefined);
-  const changes: TextChange[] = [
-    ...columnChanges(text, grid, items),
-    ...removeDeletionLines(text, table, decidedLines),
-    ...setPositions(text, table, positions, pending, 'col'),
-  ];
-  const anchored = new Set<string>();
+  const comments = original ? undefined : commentsOfCols(parsed, table, leaving);
+  // The marker of an inserted row, the comment points of the columns that leave, and the mark of an alignment
+  // change, in that order where they are written at one place.
+  const changes = withCommentPoints(
+    [
+      ...columnChanges(text, grid, items),
+      ...removeDeletionLines(text, table, decidedLines),
+      ...setPositions(text, table, positions, pending, 'col'),
+    ],
+    comments?.writes ?? [],
+    grid,
+  );
+  const anchored = new Set<string>(comments?.anchored);
   const travelling = new Set<string>();
-  if (!original) {
-    const comments = commentsOfCols(parsed, table, leaving);
-    // A comment point that ends a cell stands in front of the mark of an alignment change written there.
-    if (grid.alignMark) changes.unshift(...comments.writes);
-    else changes.push(...comments.writes);
-    for (const id of comments.anchored) anchored.add(id);
-  }
   // The comments and highlights inside the cells that are cut out and written again are written
   // with them.
   for (const mark of parsed.marks) {

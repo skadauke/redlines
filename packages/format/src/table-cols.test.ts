@@ -9,14 +9,16 @@ import { trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { alignMarkOf } from './table-align.ts';
-import { columnChanges, gridOf } from './table-cols.ts';
+import { columnChanges, gridOf, withCommentPoints } from './table-cols.ts';
 import type { ColItem } from './table-cols.ts';
+import { commentsOfCols } from './table-rules.ts';
 import { joinPoints } from './table-rows.ts';
 import { ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readLine, readTables } from './table.ts';
 import type { TableRead } from './table.ts';
 import { trackedEdit } from './track.ts';
+import type { TextChange } from './types.ts';
 import { untrackedEdit } from './untracked.ts';
 import {
   ada,
@@ -977,6 +979,32 @@ describe('the mark of an alignment change, through a rewrite of the columns (for
     const both = T('| <!--ins r2dd row--> a | b@@ |  |', '| - | - | - |', '| 1 | 2 | 3 |');
     expect(rewrite(both, keep(2), undefined, marks).after).toBe(
       T('| <!--ins r2dd row--> @@ |', '| - |', '| 3 |'),
+    );
+  });
+
+  it('is written after the marker of an inserted row and the comment point where the three meet', () => {
+    // Two columns go and one empty cell is left: the marker of the row (carried from the first cell), the
+    // point the first cell's comment becomes (at the start of the next text), and the mark (from the second cell)
+    // are all written after the first space of that cell's padding.
+    const source = doc(
+      T('| <!--ins r2dd row--> a<!--cmt c9qf--> | b@@ |  |', '| - | - | - |', '| 1 | 2 | 3 |'),
+      { r2dd: 'bo' },
+      thread('c9qf'),
+    );
+    const parsed = parse(source);
+    const table = readTables(source, parsed)[0] as TableRead;
+    const grid = gridOf(source, table, parsed);
+    const writes = commentsOfCols(parsed, table, new Set([0, 1])).writes;
+    const changes = columnChanges(source, grid, keep(2));
+    const result = (list: TextChange[]) => trim(applyChanges(source, joinPoints(list)));
+    const wanted = T('| <!--ins r2dd row--> <!--cmt c9qf-->@@ |', '| - |', '| 3 |');
+    expect(result(withCommentPoints(changes, writes, grid))).toBe(wanted);
+    // Whichever order the changes of the columns were written in.
+    expect(result(withCommentPoints(changes.toReversed(), writes, grid))).toBe(wanted);
+    // With no mark in the grid the comment points still come after the marker of the row, as they always did.
+    const bare = gridOf(source, table);
+    expect(result(withCommentPoints(columnChanges(source, bare, keep(2)), writes, bare))).toBe(
+      ['| <!--ins r2dd row--> <!--cmt c9qf--> |', '| - |', '| 3 |'].join('\n'),
     );
   });
 
