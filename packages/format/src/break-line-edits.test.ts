@@ -5,6 +5,7 @@
 // line breaks were lost, and nothing noticed where the lines that were left held no letters (the
 // last check compares the letters of the views, and how the line breaks fall among them).
 
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
@@ -20,8 +21,9 @@ import {
   expectEveryOrderAlike,
   file,
   squash,
+  thread,
 } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { SELF_CHECK, trackedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -30,6 +32,18 @@ const bodyText = (text: string) => bodyOf(text).replace(/\n+$/, '');
 
 /** A text with its white space as one space: the views compare as the same Markdown. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/** What other readers see: micromark reads the file, its markers HTML comments, as it reads the
+ * newest view (no marker shows; white space next to tags is left out). A hard break shows. */
+const reads = (html: string) =>
+  html
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+const readsAsNewest = (text: string) =>
+  reads(micromark(bodyOf(text), { allowDangerousHtml: true })) ===
+  reads(micromark(newestView(text).text, { allowDangerousHtml: true }));
 
 /** A text with each run of blank lines of a quote as one: the format takes a blank line out of such
  * a run as it was put in, and the original text loses one (format §3.4), which renders the same. */
@@ -62,7 +76,10 @@ function edited(
   random: (n: number) => Uint8Array = constant,
 ) {
   const view = newestView(text);
-  const typed = applyChanges(view.text, [{ from, to, insert }]);
+  // The line breaks that are typed are the file's own: LF in a file that ends its lines with CRLF
+  // is written as CRLF.
+  const eol = view.text.includes('\r\n') ? '\r\n' : '\n';
+  const typed = applyChanges(view.text, [{ from, to, insert: insert.replace(/\r?\n/g, eol) }]);
   const edit = { from: view.map.toSource(from, 1), to: view.map.toSource(to, -1), insert };
   const result = trackedEdits(text, [edit], { author: person, time: TIME, random });
   return {
@@ -73,8 +90,9 @@ function edited(
   };
 }
 
-/** The file with the changes that the edit wrote (`ids`) all decided, accepted or rejected;
- * undefined where a decision has no form. */
+/** The file with the changes that the edit wrote (`ids`) all decided, accepted or rejected (one
+ * that a decision took away with another is not decided again); undefined where a decision has no
+ * form. */
 function decidedFresh(
   after: string,
   ids: readonly string[],
@@ -82,6 +100,7 @@ function decidedFresh(
 ): string | undefined {
   let now = after;
   for (const id of ids) {
+    if (!parse(now).marks.some((mark) => mark.id === id)) continue;
     try {
       now = applyChanges(now, how(now, id));
     } catch (error) {
@@ -120,6 +139,9 @@ function expectAsTyped(label: string, text: string, done: ReturnType<typeof edit
   const { after, typed, fresh, extended } = done;
   expect(squash(newestView(after).text), `${label}: as typed`).toBe(squash(typed));
   expect(parse(after).warnings, label).toEqual([]);
+  // Other readers read the file as the newest view: a hard break above the blank line stays one.
+  expect(readsAsNewest(after), `${label}: the file as other readers read it`).toBe(true);
+  if (parse(after).marks.length <= 4) expectEveryOrderAlike(label, after);
   if (fresh.length === 0 || extended.length > 0) return;
   const accepted = decidedFresh(after, fresh, accept);
   if (accepted !== undefined) {
@@ -173,6 +195,81 @@ describe('an edit of the blank line of a quote, between two paragraphs (#358)', 
   });
 });
 
+describe('what the rule leaves as it was', () => {
+  it('tracks a deletion of the `>` line of an HTML block as the deletion of that line (#125)', () => {
+    // A deletion is not a replacement: it takes the break with the line, as it did.
+    const body = '<div>\n> x\n>\n\nNext.';
+    const text = file(body);
+    const at = body.indexOf('>\n\n');
+    const view = newestView(text);
+    const edit = { from: view.map.toSource(at, 1), to: view.map.toSource(at + 1, -1), insert: '' };
+    const result = trackedEdits(text, [edit], { author: ada, time: TIME, random: constant });
+    expect(bodyText(applyChanges(text, result.changes))).toBe(
+      '<div>\n> x<!--del ffff \\n>\\n-->\nNext.',
+    );
+  });
+
+  it('takes all of the break where the range takes a line break away', () => {
+    // From the blank line's `>` on through its line break, replaced by `x`: the break goes.
+    const body = '> One\n>\n> Two';
+    const text = file(body);
+    const view = newestView(text);
+    const at = view.text.indexOf('>\n> Two');
+    for (const [from, to] of [
+      [at, at + 2],
+      [at - 1, at + 1],
+    ] as const) {
+      const edit = { from: view.map.toSource(from, 1), to: view.map.toSource(to, -1), insert: 'x' };
+      const result = trackedEdits(text, [edit], { author: ada, time: TIME, random: constant });
+      expect(bodyText(applyChanges(text, result.changes)), `${from}-${to}`).toBe(
+        '> One<!--sub ffff \\n>\\n> -->x<!--/ffff-->Two',
+      );
+    }
+  });
+
+  it("does not take the break of the author's own pending split (#419)", () => {
+    // A change inside it cancels the split, which the last check refuses where letters differ.
+    const text = file('> One<!--split k3x9-->\n>\n> Two', { k3x9: 'ada' });
+    const at = newestView(text).text.indexOf('>\n> Two');
+    for (const insert of ['x', '> ']) {
+      expect(() => edited(text, at, at + 1, insert), insert).toThrow(SELF_CHECK);
+    }
+  });
+});
+
+describe('a hard break above the blank line', () => {
+  it('stays a hard break for other readers: the spaces go into the change', () => {
+    // The two spaces end the paragraph above, no hard break; a line typed under them makes one.
+    const text = file('> One  \n>\n> Two');
+    const at = newestView(text).text.indexOf('\n>\n') + 1;
+    const { after, typed } = edited(text, at, at + 1, 'x');
+    expect(typed).toBe('> One  \nx\n> Two\n');
+    expect(newestView(after).text).toBe(typed);
+    expect(bodyText(after)).toBe('> One<!--sub ffff   \\n>\\n> Two-->  \nx\n> Two<!--/ffff-->');
+    expect(readsAsNewest(after)).toBe(true);
+    expect(bodyText(applyChanges(after, reject(after, 'ffff')))).toBe('> One  \n>\n> Two');
+    expectEveryOrderAlike('hard break', after);
+    // A blank line stays blank: nothing is a hard break, and the change stays where it was.
+    const blank = edited(text, at, at + 1, '> ');
+    expect(bodyText(blank.after)).toBe(
+      '> One  <!--sub ffff \\n>\\n> Two-->\n> \n> Two<!--/ffff-->',
+    );
+  });
+
+  it('is refused where another change stands between the spaces and the line end', () => {
+    // The spaces are two to the eye, and no marker may stand between them and the line end.
+    const body =
+      '> One <!--ins k3x9--><!--del m2bd x--><!--/k3x9--> <!--ins n8fx--><!--del p7qd y--><!--/n8fx-->\n>\n> Two';
+    const text = file(body, { k3x9: 'bo', m2bd: 'ada', n8fx: 'ada', p7qd: 'bo' });
+    const at = newestView(text).text.indexOf('\n>\n') + 1;
+    expect(() => edited(text, at, at + 1, 'x')).toThrow(/ends in two spaces/);
+    // Typed blank, the paragraph still ends there, and the change is written as it was.
+    const { after, typed } = edited(text, at, at + 1, '> ');
+    expect(newestView(after).text).toBe(typed);
+    expect(readsAsNewest(after)).toBe(true);
+  });
+});
+
 describe('a change inside the underline of a setext heading, which is a line of the break', () => {
   it('writes all of it replaced as typed, the heading staying one', () => {
     for (const [body, underline, insert] of [
@@ -212,8 +309,9 @@ describe('a change inside the underline of a setext heading, which is a line of 
 });
 
 /** The documents of the enumeration below: a break whose middle lines hold quote markers or white
- * space, with and without pending changes around it. */
-const SHAPES: [string, string, Record<string, string>][] = [
+ * space, with and without pending changes around it; the marks (by id) and the threads of the
+ * comments that they hold. */
+const SHAPES: [string, string, Record<string, string>, string[]?][] = [
   ['quote', '> One\n>\n> Two', {}],
   [
     'quote and the pending changes of the issue',
@@ -228,14 +326,17 @@ const SHAPES: [string, string, Record<string, string>][] = [
   ['quote in a list item', '- > One\n  >\n  > Two', {}],
   ['quote of a list', '> - One\n>\n> - 42', {}],
   ['quote, a hard break', '> One  \n>\n> Two', {}],
+  ['quote, a hard break that is a backslash', '> One\\\n>\n> Two', {}],
+  [
+    'quote, a hard break with a change of his between the spaces and the line end',
+    '> One  <!--ins k3x9--><!--/k3x9-->\n>\n> Two',
+    { k3x9: 'bo' },
+  ],
+  ['quote, CRLF', '> One\r\n>\r\n> Two', {}],
+  ['quote after front matter', '---\ntitle: x\n---\n> One\n>\n> Two', {}],
   [
     'quote, a pending insertion after',
     '> One\n>\n> 42 <!--ins hf3q-->x<!--/hf3q-->',
-    { hf3q: 'bo' },
-  ],
-  [
-    'quote, a pending deletion at the start of the next paragraph',
-    '> One\n>\n> <!--del hf3q two--> 42',
     { hf3q: 'bo' },
   ],
   [
@@ -244,13 +345,32 @@ const SHAPES: [string, string, Record<string, string>][] = [
     { k3x9: 'ada' },
   ],
   [
+    'quote, a comment at the end of the paragraph above',
+    '> One <!--cmt c9qf-->two<!--/c9qf-->\n>\n> Two',
+    {},
+    thread('c9qf'),
+  ],
+  // Refused for every edit, in each of its places: no place for the closer, or his change is
+  // there (the next paragraph starts with his deletion, his insertion holds the break, his split).
+  [
+    'quote, a pending deletion at the start of the next paragraph',
+    '> One\n>\n> <!--del hf3q two--> 42',
+    { hf3q: 'bo' },
+  ],
+  [
     'quote, his insertion around both paragraphs',
     '> <!--ins k3x9-->One\n>\n> Two<!--/k3x9-->',
     { k3x9: 'bo' },
   ],
   ['quote, his split', '> One<!--split k3x9-->\n>\n> Two', { k3x9: 'bo' }],
-  ['quote, a comment', '> <!--cmt c1 ada-->One<!--/c1-->\n>\n> Two', {}],
 ];
+
+/** The shapes that every edit is refused in: if one is written some day, this says so. */
+const REFUSED = new Set([
+  'quote, a pending deletion at the start of the next paragraph',
+  'quote, his insertion around both paragraphs',
+  'quote, his split',
+]);
 
 /** What an edit inside the blank line of a break is typed as: markers, numbers, text, white space,
  * and line breaks (which are new line breaks, and the break stays). A deletion is another rule. */
@@ -275,11 +395,13 @@ describe('an edit inside a blank line of a break, in each of its places and as e
   it('is written as typed, or refused: never written with a line break lost', () => {
     let written = 0;
     let refused = 0;
-    for (const [name, body, marks] of SHAPES) {
-      const text = file(body, marks);
+    for (const [name, body, marks, threads] of SHAPES) {
+      const text = file(body, marks, threads);
+      const before = written;
       let start = 0;
-      for (const [n, line] of newestView(text).text.split('\n').entries()) {
+      for (const [n, row] of newestView(text).text.split('\n').entries()) {
         // A blank line of the break: not the first line, and one of quote markers or white space.
+        const line = row.replace(/\r$/, '');
         const blank = n > 0 && /^[ \t>]+$/.test(line);
         for (let a = 0; blank && a < line.length; a++) {
           for (let b = a + 1; b <= line.length; b++) {
@@ -300,8 +422,11 @@ describe('an edit inside a blank line of a break, in each of its places and as e
             }
           }
         }
-        start += line.length + 1;
+        start += row.length + 1;
       }
+      // Each shape is written, or is one of those that every edit is refused in.
+      if (REFUSED.has(name)) expect(written - before, name).toBe(0);
+      else expect(written - before, name).toBeGreaterThan(0);
     }
     // Most are written: the refusals are where the closer of the change has no place, or a change
     // next to it would read the change otherwise.

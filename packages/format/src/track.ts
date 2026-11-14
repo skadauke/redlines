@@ -1106,6 +1106,31 @@ function typingOf(tokens: readonly Token[]): Typing {
 }
 
 /**
+ * The spaces that end the line before `position`, as the text shows them (the markers between them
+ * and in front of `position` are not seen), and whether they stand together in the file, right
+ * behind one another and right in front of `position`, with no marker among or after them.
+ */
+function spacesBefore(plan: Plan, position: number): { spaces: number; together: boolean } {
+  let spaces = 0;
+  let together = true;
+  let p = position;
+  while (spaces < 64) {
+    const q = stepLeft(plan.text, plan.markers, p);
+    if (q >= p || plan.text[q] !== ' ') break;
+    if (q + 1 !== p) together = false;
+    spaces++;
+    p = q;
+  }
+  return { spaces, together };
+}
+
+/** Why a change on the blank line under a line that ends in two spaces is refused when another
+ * change stands between them and the end of the line: what is typed there goes on the paragraph,
+ * which makes the spaces a hard break, and no change may stand between them and the line end. */
+const HARD_BREAK_SEPARATED =
+  'The line above ends in two spaces, which what is typed here makes a hard break, and another change stands between them and the end of that line. Decide the changes at the end of that line first.';
+
+/**
  * A change that touches a break takes all of it, with the prefix of the next block: a deletion
  * never leaves a bullet or a `#` behind a marker, and a join takes the break and the prefix of the
  * second block (format §3.4). A point inside a break moves to its start. A change that starts in
@@ -1123,7 +1148,8 @@ function typingOf(tokens: readonly Token[]): Typing {
  * prefix of the block after it, and what stays of the break is typed again on either side, as text:
  * `lead` before what is typed, `tail` after. Its line breaks are not new, so `tail`, which holds
  * them, is not typed as breaks; `kept`, the rest of a prefix, never holds one. A deletion there is
- * not this: it takes the break, or is `blankLineCut`'s.
+ * not this: it takes the break, or is `blankLineCut`'s, or, in the shapes that rule does not know,
+ * is written as a join (#447).
  *
  * The break after the text of a setext heading holds its underline (`breakLength`), but a change
  * that starts inside the underline or behind it, and does not take all of it, does not touch the
@@ -1134,7 +1160,7 @@ function coverBreaks(
   plan: Plan,
   from: number,
   to: number,
-  replaces = false,
+  typed = '',
 ): Range & { kept: string; lead: string; tail: string } {
   let kept = '';
   let lead = '';
@@ -1177,7 +1203,7 @@ function coverBreaks(
       // next block, with no line break in the range: the break stays, all of it, with what is typed
       // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
       if (
-        replaces &&
+        typed !== '' &&
         !partly &&
         from > found.start &&
         lineStart(plan.text, from) < prefix &&
@@ -1186,7 +1212,20 @@ function coverBreaks(
       ) {
         lead = visibleText(plan.text, plan.markers, found.start, from);
         tail = visibleText(plan.text, plan.markers, to, found.end);
-        from = found.start;
+        // Two spaces or more at the end of the line above are a hard break once the line under it
+        // goes on the paragraph (what is typed is not blank): in front of the opener, and not in the
+        // text that is typed again, they would no longer end their line for a reader that does not
+        // know the markers. They go into the change, where they stand right in front of the break;
+        // where another change stands between them and it, the change is refused.
+        const { spaces, together } = spacesBefore(plan, found.start);
+        const next = (lead + typed + tail).split(/\r?\n/)[1] ?? '';
+        let begin = found.start;
+        if (spaces >= 2 && /[^ \t>]/.test(next)) {
+          if (!together) throw new EditError(HARD_BREAK_SEPARATED, 'no-legal-placement');
+          begin = found.start - spaces;
+          lead = ' '.repeat(spaces) + lead;
+        }
+        from = begin;
         to = found.end;
         continue;
       }
@@ -3961,7 +4000,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   let tail = '';
   if (blocks) ({ from, to } = blocks);
   else if (!past) {
-    const covered = coverBreaks(plan, from, to, typed !== '');
+    const covered = coverBreaks(plan, from, to, typed);
     ({ from, to } = covered);
     typed += covered.kept;
     lead = covered.lead;

@@ -1232,15 +1232,22 @@ as a space typed after it is. A marker can't stand on that line either, so the c
 substitution of the whole break and the prefix of the block after it, and the new text is that
 break as it now is, line breaks and all, so that none of them is lost
 (`> One<!--sub k3x9 \n>\n> Two-->⏎> ⏎> Two<!--/k3x9-->`, the closer after the first word as above,
-however the changes next to the break stand, a pending deletion at the end of the first paragraph
-or an insertion at the start of the second). Accepting gives the text that was typed, and
+with the changes next to the break as they are, a pending deletion at the end of the first
+paragraph, an insertion at the start of the second). Accepting gives the text that was typed, and
 rejecting gives every byte back. It was written as the typed text alone before (#358), which lost
-both line breaks. Where the closer or another change next to the break has no place, the edit is
-refused, as any edit is. The underline of a setext heading is a line of the break: replacing all
-of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading), and a change of a
-part of it is refused (below, under a setext heading). A deletion there is not this: a change that
-takes a line break away takes all of the break (above), and taking the quote markers or the white
-space out of a blank line is the rule for a quote's blank lines (below).
+both line breaks. Two spaces or more at the end of the line above, which what is typed makes a
+hard break (the paragraph goes on), go into the change, in front of the opener, so that they still
+end their line for a reader that does not know the markers; where another change stands between
+them and the line end, the edit is refused. The underline of a setext heading is a line of the
+break: replacing all of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading),
+and a change of a part of it is refused (below, under a setext heading). Where the closer or
+another change next to the break has no place, the edit is refused, as any edit is. The break of
+the author's own pending split is left as it was (#419). A deletion there is not this: a change
+that takes a line break away takes all of the break (above), taking the quote markers or the white
+space out of a blank line is the rule for a quote's blank lines (below), and a deletion that
+takes no line break and that rule does not know (the `>` of a blank line indented in a list item,
+in the break of a pending split) is written as the join of the two blocks, which the last check
+sees only where letters differ (#447).
 
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block
