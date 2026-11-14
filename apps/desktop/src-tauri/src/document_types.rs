@@ -12,9 +12,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-// Markdown's types: Redlines' own, which it imports and can be made the default app for, and the
-// one macOS 27 declares itself, which files can be typed with instead.
-use crate::default_app::{MARKDOWN, SYSTEM_MARKDOWN};
+// Markdown's type, the one Redlines opens Markdown files by and can be made their default app for.
+use crate::default_app::MARKDOWN;
+
+/// The type that other apps declare for Markdown (Word does, as a type that conforms to nothing),
+/// which the bundle claims as well, so that Open With offers Redlines for a file typed that way
+/// (#347). It is not Redlines' to declare, so the bundle only claims it.
+const PUBLIC_MARKDOWN: &str = "public.markdown";
 
 /// The parts of an Info.plist that say which documents an app opens.
 #[derive(Debug, Deserialize)]
@@ -76,9 +80,9 @@ fn read<T: serde::de::DeserializeOwned>(plist: &Path) -> T {
     plist::from_file(plist).unwrap_or_else(|error| panic!("{}: {error}", plist.display()))
 }
 
-/// What the bundle should declare: Markdown by its two types, Redlines' own, the one it can be made
-/// the default app for, and the one macOS 27 declares, which a Mac may give `.md` files instead
-/// (#347), at the rank of an app that opens it. R Markdown and Quarto by their extensions, which
+/// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
+/// app for, and by `public.markdown`, which other apps declare (#347), at the rank of an app that
+/// opens it. R Markdown and Quarto by their extensions, which
 /// macOS has no type for, and plain text by `.txt` alone, each at the rank of an alternative, so
 /// that Redlines is offered for those files and takes none of them, even on a Mac where no other
 /// app owns them: people who write R Markdown or Quarto have an editor of their choice. Plain
@@ -96,7 +100,7 @@ fn expected() -> Vec<Document> {
         editor(
             "Markdown Document",
             "Default",
-            &[MARKDOWN, SYSTEM_MARKDOWN],
+            &[MARKDOWN, PUBLIC_MARKDOWN],
             &[],
         ),
         editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
@@ -106,7 +110,7 @@ fn expected() -> Vec<Document> {
 }
 
 /// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type,
-/// and imports none that macOS declares itself: `SYSTEM_MARKDOWN` is only claimed.
+/// and imports none that others declare: `PUBLIC_MARKDOWN` is only claimed.
 fn markdown_type() -> Type {
     Type {
         identifier: MARKDOWN.to_owned(),
@@ -133,9 +137,9 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
     for document in &declared.documents {
         offered.extend(document.extensions.iter().map(|each| each.to_lowercase()));
         for name in &document.types {
-            // macOS declares this type itself, for the same two extensions, and a type it declares
-            // is not ours to import.
-            if name == SYSTEM_MARKDOWN {
+            // Other apps declare this type, for the same two extensions, and a type that others
+            // declare is not ours to import.
+            if name == PUBLIC_MARKDOWN {
                 offered.extend(markdown_type().tags.extensions);
                 continue;
             }
@@ -162,15 +166,22 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
 }
 
 #[test]
-fn the_quick_look_preview_lists_the_markdown_types_the_bundle_claims() {
-    // The preview extension (apps/desktop/quicklook) is built for the types that Redlines claims
-    // for Markdown: a file of either is previewed as it is opened.
-    let build_script = include_str!("../../scripts/build-quicklook");
-    let listed = format!("MARKDOWN_TYPES = [\"{MARKDOWN}\", \"{SYSTEM_MARKDOWN}\"]");
-    assert!(
-        build_script.contains(&listed),
-        "scripts/build-quicklook doesn't list {MARKDOWN} and {SYSTEM_MARKDOWN}"
-    );
+fn the_quick_look_preview_is_built_for_the_markdown_types_the_bundle_claims() {
+    // The preview extension (apps/desktop/quicklook) lists the types of the files it previews in
+    // scripts/build-quicklook: a file the app is offered for is previewed as well.
+    let script = include_str!("../../scripts/build-quicklook");
+    let list = script
+        .lines()
+        .find(|line| line.starts_with("MARKDOWN_TYPES = "))
+        .expect("scripts/build-quicklook lists MARKDOWN_TYPES");
+    let listed: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    let declared: Declared = read(&source());
+    let markdown = declared
+        .documents
+        .iter()
+        .find(|each| each.name == "Markdown Document")
+        .expect("the bundle declares Markdown");
+    assert_eq!(listed, markdown.types);
 }
 
 #[test]

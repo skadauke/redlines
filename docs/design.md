@@ -188,10 +188,10 @@ The window, on the desktop:
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
-  its types (`net.daringfireball.markdown`, which the app imports, and `public.markdown`, which
-  macOS 27 declares itself, and either of which a Mac may give `.md` files), R Markdown and Quarto
-  by their extensions, and `.txt` files by theirs, so Finder's Open With offers Redlines for each,
-  and for no other kind of text, such as source code. Where the
+  its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
+  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
+  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
+  source code. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
   for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
@@ -199,8 +199,7 @@ The window, on the desktop:
   Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
-  did. The choice is macOS's for a type, and these are for the type that macOS gives `.md` files
-  (`public.markdown` or else Redlines' own). Finder's Get Info changes the choice again.
+  did. Finder's Get Info changes the choice again.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.

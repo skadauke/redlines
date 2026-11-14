@@ -1,7 +1,6 @@
 //! The default app for Markdown files: which app opens them, and making Redlines that app, from
 //! Preferences › General › Make Redlines the Default. macOS keeps the choice by the app's
-//! identifier, so it holds for every copy of Redlines, and Finder's Get Info changes it too. It is
-//! kept for a type, and macOS gives `.md` files one of two (`markdown_type`).
+//! identifier, so it holds for every copy of Redlines, and Finder's Get Info changes it too.
 //!
 //! This module decides from facts that the caller gathers, so that the decisions can be tested on
 //! any system; `macos` gathers them from LaunchServices (`NSWorkspace`, macOS 12 and later) and
@@ -13,23 +12,9 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::AppHandle;
 
-/// The type macOS gives Markdown files, which the bundle imports and claims that Redlines opens
+/// The type macOS gives Markdown files, which the bundle declares that Redlines opens
 /// (`document-types.plist`).
 pub const MARKDOWN: &str = "net.daringfireball.markdown";
-
-/// The type that macOS 27 declares for Markdown itself, which the bundle claims as well: which of
-/// the two a Mac gives `.md` files is for macOS to say (#347).
-pub const SYSTEM_MARKDOWN: &str = "public.markdown";
-
-/// The Markdown type that the default app is read and set for: the one macOS gives `.md` files
-/// (`preferred`, its identifier) when it is the system's own, and else Redlines' own. Redlines
-/// claims no other, so a type of another app, or one made for the extension, falls back to it.
-pub fn markdown_type(preferred: Option<&str>) -> &'static str {
-    match preferred {
-        Some(SYSTEM_MARKDOWN) => SYSTEM_MARKDOWN,
-        _ => MARKDOWN,
-    }
-}
 
 /// What the system does about the default app.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -291,26 +276,13 @@ mod macos {
     use objc2_app_kit::NSWorkspace;
     use objc2_foundation::{NSCocoaErrorDomain, NSError, NSString, NSURL, NSUserCancelledError};
 
-    use super::{Answer, Handler, System, handler_at, markdown_type};
+    use super::{Answer, Handler, MARKDOWN, System, handler_at};
 
-    /// The identifier of the type that macOS gives `.md` files, if it says. The class is looked up
-    /// when the app runs rather than linked: macOS 11 brought it, and an older macOS must still
-    /// start the app.
-    pub fn preferred() -> Option<String> {
-        let class = AnyClass::get(c"UTType")?;
-        let extension = NSString::from_str("md");
-        // SAFETY: `+[UTType typeWithFilenameExtension:]` takes a string, and gives a type or nil.
-        let md: Option<Retained<AnyObject>> =
-            unsafe { msg_send![class, typeWithFilenameExtension: &*extension] };
-        // SAFETY: a `UTType` has an `identifier`, a string.
-        let identifier: Option<Retained<NSString>> = unsafe { msg_send![&*md?, identifier] };
-        Some(identifier?.to_string())
-    }
-
-    /// Markdown's type, a `UTType`: the one that the default app is read and set for.
+    /// Markdown's type, a `UTType`. The class is looked up when the app runs rather than linked:
+    /// macOS 11 brought it, and an older macOS must still start the app.
     fn markdown() -> Option<Retained<AnyObject>> {
         let class = AnyClass::get(c"UTType")?;
-        let identifier = NSString::from_str(markdown_type(preferred().as_deref()));
+        let identifier = NSString::from_str(MARKDOWN);
         // SAFETY: `+[UTType typeWithIdentifier:]` takes a string, and gives a type or nil.
         unsafe { msg_send![class, typeWithIdentifier: &*identifier] }
     }
@@ -726,26 +698,5 @@ mod tests {
             }
         );
         std::fs::remove_dir_all(&folder).unwrap();
-    }
-
-    #[test]
-    fn the_default_is_for_the_type_md_files_have_when_the_bundle_claims_it() {
-        // macOS 27's own type, when that is what it gives `.md` files.
-        assert_eq!(markdown_type(Some("public.markdown")), SYSTEM_MARKDOWN);
-        assert_eq!(markdown_type(Some("net.daringfireball.markdown")), MARKDOWN);
-        // A type of another app, which the bundle doesn't claim, or one macOS makes up for the
-        // extension, or no answer: Redlines' own type, as before.
-        assert_eq!(markdown_type(Some("com.example.markdown")), MARKDOWN);
-        assert_eq!(markdown_type(Some("dyn.ah62d4rv4ge80g55gq3w0n")), MARKDOWN);
-        assert_eq!(markdown_type(None), MARKDOWN);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn this_mac_says_which_type_md_files_have() {
-        // Whatever it is, the Mac says one, and the default is read for a type the bundle claims.
-        let preferred = macos::preferred();
-        assert!(preferred.is_some(), "no type for .md files");
-        assert!([MARKDOWN, SYSTEM_MARKDOWN].contains(&markdown_type(preferred.as_deref())));
     }
 }
