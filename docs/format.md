@@ -3250,7 +3250,7 @@ same values.
   it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the
   text of Clean with a change bar beside each changed line and the comments kept (design §5.3).
   Redlines opens the file in it, in place of the markup view that the person has remembered, which
-  opens the files that record none.
+  opens the files that have redlines and record none.
   - **Only a document that has redlines opens in it:** pending changes, highlights or comments.
     A new document, a plain Markdown file and a file whose ledger holds nothing to show, such as one
     that only records how it was left, open in Clean, whatever view was used last and whatever the

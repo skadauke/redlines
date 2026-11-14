@@ -105,6 +105,27 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(editor.getUiState().view).toBe('clean');
   });
 
+  it('goes to the remembered look, not the ledger’s, when a file opened in Clean gains redlines', () => {
+    const left = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\nview: simple\n-->\n`;
+    const editor = load(left, { markupView: 'redlines' });
+    expect(editor.getUiState().view).toBe('clean');
+    caretBefore(editor, 'paragraph');
+    editor.setTracking(true);
+    type(editor, 'new ');
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('is the ledger’s for a file that has only a comment', () => {
+    const commented = reviewed('view: simple').replace(
+      'A <!--ins k3x9-->new <!--/k3x9-->word,',
+      'A new word,',
+    );
+    const editor = load(commented, { markupView: 'redlines' });
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('is the ledger’s, or the remembered look, for a file that has only a highlight', () => {
     const highlighted = '# Notes\n\nA <!--hl h6bz-->word<!--/h6bz--> here.\n';
     expect(load(highlighted, { markupView: 'simple' }).getUiState().hasRedlines).toBe(true);
