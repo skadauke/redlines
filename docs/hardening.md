@@ -21,9 +21,10 @@ isn't held*, and a gap is a bug.
 
 1. **Every edit Redlines writes is meant to read the same in every order its pending changes can be
    decided in.** Each pending change can be accepted or rejected, some only once a neighbour is
-   decided (the format refuses a decision that would hide another mark, §2.6 and §3.3); the words the
-   file reads as must not depend on the order, and are judged by micromark 4.0.2 with GFM tables and
-   strikethrough, the oracle of the suites ([format.md](format.md) §12), and not by eye.
+   decided (a decision that would hide another change is refused, and says which to decide first:
+   §2.1, §3.4); the words the file reads as must not depend on the order, and are judged by micromark
+   4.0.2 with GFM tables and strikethrough, the oracle of the suites ([format.md](format.md) §12), and
+   not by eye.
 2. **Redlines is meant to refuse rather than repair, and a refusal says why.** An edit that no form
    can write soundly is refused, in words that name the cause and the way out ("This would change
    how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."). A key that does
@@ -38,10 +39,10 @@ isn't held*, and a gap is a bug.
    line (§3.5).
 4. **A keystroke is meant to stay within twice what it cost before the block keys were written.**
    Typing, Return and Backspace, in a long document with many pending changes, may take at most
-   twice what the same key took in the build that the numbers were recorded from (main at `4ca53fc`, where the
-   keys were CodeMirror's own, inside Redlines' tracked layer), plus a millisecond for noise, on
-   test documents of 16 KB and 150 KB with 200 changes, scaled to the machine by a calibration
-   (`cost.test.ts`, below).
+   twice what the same key took in the build that the numbers were recorded from (main at
+   `4ca53fc`, where the keys were CodeMirror's own, inside Redlines' tracked layer), plus a
+   millisecond for noise, on test documents of 16 KB and 150 KB with 200 changes, scaled to the
+   machine by a calibration (`cost.test.ts`, below).
 
 ## What holds them
 
@@ -111,20 +112,20 @@ result read otherwise in some order, or reached a dead end.
 
 `walk.test.ts` plays seeded walks of keys (Return, Backspace, Tab, typing, ⌘Z, an agent's edit, a
 decision) from random places in the random documents, with Track Changes on and off. `script.ts` is
-the harness: `runScript` plays a script on a real editor, through its keymaps, and `invariantProblems`
-reads what no key may break from the result. A walk is held to the invariants that its starting
-document holds: a hidden caret, an empty paragraph in the file, a stray blank line, micromark's
-reading of the file against the newest view, structural warnings, more markers at a line start than
-before, the order of decisions, Undo, the caret in an open empty paragraph, and the history. A
-refusal is allowed in a walk, and a break of one of those is not, except in the seeds that are
-skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258, and 146
-is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its own. A script row (`scriptRows`, for
-the findings in `walk-seeds.test.ts` and the suites of keys) is held further: to no refusal that it
-does not name, and to the rule that a skipped invariant that now holds fails; and a script of a
-single Return must be taken back by Backspace. `REDLINES_FUZZ=200` plays 200 walks of each kind; they
-run in Node's default heap since #286 was fixed (they had run out of memory at that count), and take
-a few minutes. A walk that finds something becomes the smallest script that shows it, in
-`walk-seeds.test.ts`, with the fix.
+the harness: `runScript` plays a script on a real editor, through its keymaps, and
+`invariantProblems` reads what no key may break from the result. A walk is held to the invariants
+that its starting document holds: a hidden caret, an empty paragraph in the file, a stray blank
+line, micromark's reading of the file against the newest view, structural warnings, more markers at
+a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, and
+the history. A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
+that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
+and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
+own. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
+held further: to no refusal that it does not name, and to the rule that a skipped invariant that now
+holds fails; and a script of a single Return must be taken back by Backspace. `REDLINES_FUZZ=200`
+plays 200 walks of each kind; they run in Node's default heap since #286 was fixed (they had run out
+of memory at that count), and take a few minutes. A walk that finds something becomes the smallest
+script that shows it, in `walk-seeds.test.ts`, with the fix.
 
 ### The cost gates
 
@@ -133,13 +134,13 @@ numbers recorded from main at `4ca53fc`, before `blocks/` existed, when the keys
 own. The file's header says how: the same file runs in a checkout whose keys are CodeMirror's own,
 with `REDLINES_COST=record`, which prints the numbers; on today's main it would measure the block
 keys against themselves, and the file's imports are newer than that commit, so recording them again
-means carrying the file back to a build like it. A key may take at most twice what that build's took. `hidden.test.ts` holds the hidden lines' pass to a
-linear cost, and `preview/long-document.test.ts` holds the drawing, and a keystroke, in long
-documents with deleted blocks and tables to bounds that are a multiple of the markdown parse of the
-document alone. `held()` retries a
-timing over its bound twice, with its yardstick timed again beside it, so that a busy machine fails a
-bound only when it keeps failing. These run only with `REDLINES_COST=check`, which CI's check job
-sets.
+means carrying the file back to a build like it. A key may take at most twice what that build's
+took. `hidden.test.ts` holds the hidden lines' pass to a linear cost, and
+`preview/long-document.test.ts` holds the drawing, and a keystroke, in long documents with deleted
+blocks and tables to bounds that are a multiple of the markdown parse of the document alone.
+`held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
+busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
+which CI's check job sets.
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
@@ -228,15 +229,15 @@ a proof that none exists, with the refusal kept. Aligning a column with Track Ch
 ("Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.",
 #281). Bold over more than five cells of a table was one of them, and is not any more (#267).
 
-**What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word import
-into full history and live sessions with several authors in full history. §7 says what merging gives:
-a conflict in the ledger is resolved by keeping both sides, with a stale entry that is ignored and a
-duplicate handle that is renamed as the exceptions, and with plain git, parallel work often conflicts
-there. §9 says what other tools do to the file: formatters that re-wrap prose push markers to line
-starts, editors that rewrite the whole file when they open it push them there too and loosen some
-tight lists, converting a file into a Google Doc drops every marker and the ledger (every change is accepted and
-every comment lost), MDX can't compile the comments, and a renderer that passes HTML through
-publishes the hidden text.
+**What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word
+import into full history and live sessions with several authors in full history. §7 says what
+merging gives: a conflict in the ledger is resolved by keeping both sides, with a stale entry that
+is ignored and a duplicate handle that is renamed as the exceptions, and with plain git, parallel
+work often conflicts there. §9 says what other tools do to the file: formatters that re-wrap prose
+push markers to line starts, editors that rewrite the whole file when they open it push them there
+too and loosen some tight lists, converting a file into a Google Doc drops every marker and the
+ledger (every change is accepted and every comment lost), MDX can't compile the comments, and a
+renderer that passes HTML through publishes the hidden text.
 
 **What only the app can show.** Layout, the system's selection and input methods, and the animation
 of a card are not in happy-dom; the WKWebView checks cover some of them, by hand.
