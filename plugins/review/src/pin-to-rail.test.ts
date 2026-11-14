@@ -523,6 +523,38 @@ describe('pinToRail', () => {
       expect(second.lost).toHaveBeenCalledOnce();
     });
 
+    it('does not say so to a host that released the element after the rail let go of it', async () => {
+      const loaded = await load();
+      const { editor } = loaded;
+      const { pin, lost } = pinAt(loaded, 'target', 200);
+      await frame();
+      // The rail lets go of it (Clean shows no note), and the host, closing in the same moment,
+      // releases it before it was told: it asked for the release, and is told nothing.
+      editor.setViewMode('clean');
+      pin?.release();
+      await tick();
+      expect(lost).not.toHaveBeenCalled();
+      // The same where the loss was the anchor's.
+      editor.setViewMode('redlines');
+      const { el } = hostElement(editor, 100);
+      const broken = { value: false };
+      const again = vi.fn();
+      const second = loaded.review.pinToRail(
+        el,
+        () => {
+          if (broken.value) throw new Error('The host’s anchor broke');
+          return at(editor, 'target');
+        },
+        again,
+      );
+      await frame();
+      broken.value = true;
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      second?.release();
+      await tick();
+      expect(again).not.toHaveBeenCalled();
+    });
+
     it('says so, once, when the rail goes with its document', async () => {
       const loaded = await load();
       const { editor } = loaded;

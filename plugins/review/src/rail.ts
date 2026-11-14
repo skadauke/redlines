@@ -163,6 +163,8 @@ interface Hosted {
   anchor: () => number;
   /** Told once, after the update that did it, that the rail no longer lays the element out. */
   lost: () => void;
+  /** The host released it: it is told nothing more, whatever the rail does after that. */
+  released: boolean;
 }
 
 /**
@@ -1358,7 +1360,7 @@ class Rail {
       return null;
     }
     const id = `${HOSTED} ${++this.hostedCount}`;
-    const hosted: Hosted = { el, anchor, lost };
+    const hosted: Hosted = { el, anchor, lost, released: false };
     this.hosted.set(id, hosted);
     // Wherever it was placed before, by the host or by this rail, was not for this layout.
     this.written.delete(el);
@@ -1372,6 +1374,9 @@ class Rail {
         if (mine()) this.reveal(el);
       },
       release: () => {
+        // The host's own doing, though the rail may have let go of the element before: whatever
+        // it had queued to tell the host of that goes unsaid.
+        hosted.released = true;
         if (!mine()) return;
         this.hosted.delete(id);
         this.sync(this.view.state);
@@ -1384,8 +1389,18 @@ class Rail {
    * of its own. Each is told, once this update is over, and places itself.
    */
   private dropHosted(): void {
-    for (const { lost } of this.hosted.values()) queueMicrotask(lost);
+    for (const hosted of this.hosted.values()) this.lose(hosted);
     this.hosted.clear();
+  }
+
+  /**
+   * Tells the host, once the update that is under way is over, that the rail no longer lays its
+   * element out: not if the host releases it first, which is its own way of saying the same.
+   */
+  private lose(hosted: Hosted): void {
+    queueMicrotask(() => {
+      if (!hosted.released) hosted.lost();
+    });
   }
 
   /**
@@ -1402,7 +1417,7 @@ class Rail {
         at = held.anchor();
       } catch {
         this.hosted.delete(id);
-        queueMicrotask(held.lost);
+        this.lose(held);
         continue;
       }
       const pos = Math.min(Math.max(Math.trunc(at) || 0, 0), state.doc.length);
