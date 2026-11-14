@@ -900,4 +900,31 @@ body {
   #editor .rl-bar-mixed::before {
     border-left-color: var(--rl-mixed);
   }
+
+  /*
+   * The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the text
+   * differently: the layer is left out, and each line that holds a change prints a bar down its
+   * whole paragraph, as the lines drew it before the layer.
+   */
+  #editor .rl-bar-layer {
+    display: none;
+  }
+
+  #editor .cm-line.rl-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -24px;
+    width: 0;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .cm-line.rl-bar-mixed::before {
+    border-left-color: var(--rl-mixed);
+  }
+
+  #editor .cm-line.rl-quote.rl-bar::before {
+    left: -26px;
+  }
 }
