@@ -323,6 +323,22 @@ export class Journey {
     await this.settle();
     return writeShot(this.page, this.info, shotName(name, this.options), options);
   }
+
+  /**
+   * Compares the window with its approved screenshot, `baselines/<spec file>/<name>.png` (with the
+   * look in the name: `-dark`, `-200`), and fails when it differs by more than a little (see the
+   * config's `toHaveScreenshot`). A failed run writes the image it got and a diff beside the
+   * expected one in the run's output folder. A baseline that doesn't exist fails the journey; the
+   * ones to approve are written by `pnpm journeys:accept`, on purpose, and reviewed in the PR.
+   * Keep baselines few: the ones that guard a look, not every moment.
+   */
+  async baseline(
+    name: string,
+    options: { clip?: { x: number; y: number; width: number; height: number } } = {},
+  ): Promise<void> {
+    await this.settle();
+    await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, options);
+  }
 }
 
 /**

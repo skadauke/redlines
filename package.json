@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "redlines": "node --experimental-strip-types --disable-warning=ExperimentalWarning packages/cli/src/main.ts",
-    "journeys": "pnpm --filter @redlines/journeys test"
+    "journeys": "pnpm --filter @redlines/journeys test",
+    "journeys:accept": "pnpm --filter @redlines/journeys accept"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
