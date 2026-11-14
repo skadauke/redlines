@@ -45,6 +45,7 @@ const is = (event: string, name: string) => event === name || event.startsWith(`
 
 const REVIEW: Readonly<Record<string, string>> = {
   'review.comment': 'Comment',
+  'review.highlight': 'Highlight',
   'review.reply': 'Reply',
   'review.resolve': 'Resolve',
   'review.reopen': 'Reopen',
