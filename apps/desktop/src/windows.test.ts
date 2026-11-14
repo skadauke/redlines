@@ -428,6 +428,77 @@ describe('a connected window', () => {
     expect(reports[1]).toEqual(['main', '/docs/plan.md', false]);
   });
 
+  describe('with a window opened for text that is still starting', () => {
+    /** An Untitled window holding text, whose page hasn't said what it holds. */
+    const starting = (label: string): DocumentWindow => ({
+      label,
+      path: null,
+      dirty: false,
+      starting: true,
+    });
+
+    it('holds a quit, asks nobody, and says so', async () => {
+      const { link, finished } = app([clean('main'), starting('doc-1')]);
+      const held = vi.fn();
+      const askMain = vi.fn(() => Promise.resolve(true));
+      const main = await connectWindow(link('main'), askMain, { held });
+      await main.quit();
+      expect(finished).toEqual(['keep running']);
+      expect(askMain).not.toHaveBeenCalled();
+      expect(held).toHaveBeenCalledExactlyOnceWith('quit');
+    });
+
+    it('holds it though other windows have unsaved edits, which are asked once it has reported', async () => {
+      const { link, finished } = app([dirty('main'), starting('doc-1')]);
+      const askMain = vi.fn(() => Promise.resolve(true));
+      const main = await connectWindow(link('main'), askMain, { held: vi.fn() });
+      await main.quit();
+      expect(finished).toEqual(['keep running']);
+      expect(askMain).not.toHaveBeenCalled();
+    });
+
+    it('asks as before once the window has reported', async () => {
+      const { link, finished } = app([dirty('main'), { ...dirty('doc-1'), starting: false }]);
+      const held = vi.fn();
+      const main = await connectWindow(link('main'), () => Promise.resolve(true), { held });
+      const doc = await connectWindow(link('doc-1'), () => Promise.resolve(true), { held });
+      expect(doc).toBeDefined();
+      await main.quit();
+      expect(finished).toEqual(['quit']);
+      expect(held).not.toHaveBeenCalled();
+    });
+
+    it('holds the restart for an update too, before anything is installed', async () => {
+      const { link } = app([clean('main'), starting('doc-1')]);
+      const held = vi.fn();
+      const main = await connectWindow(link('main'), () => Promise.resolve(true), { held });
+      const install = vi.fn(() => Promise.resolve());
+      const relaunch = vi.fn(() => Promise.resolve());
+      expect(await restartAfterAsking(main, install, relaunch)).toBe(false);
+      expect(install).not.toHaveBeenCalled();
+      expect(relaunch).not.toHaveBeenCalled();
+      expect(held).toHaveBeenCalledWith('quit');
+    });
+
+    it('says so when the app holds a quit it was asked for, or this window’s close', async () => {
+      const { link, fromApp } = app([clean('main')]);
+      const held = vi.fn();
+      await connectWindow(link('main'), () => Promise.resolve(true), { held });
+      fromApp('main', 'quit-held');
+      expect(held).toHaveBeenLastCalledWith('quit');
+      fromApp('main', 'close-held');
+      expect(held).toHaveBeenLastCalledWith('close');
+      expect(held).toHaveBeenCalledTimes(2);
+    });
+
+    it('needs no one to hear of it: a window with no one to tell holds the quit all the same', async () => {
+      const { link, finished } = app([clean('main'), starting('doc-1')]);
+      const main = await connectWindow(link('main'), () => Promise.resolve(true));
+      await main.quit();
+      expect(finished).toEqual(['keep running']);
+    });
+  });
+
   it('lists the files open in all the windows, for the restart after an update', async () => {
     const { link } = app([clean('main', '/docs/a.md'), clean('doc-1'), dirty('doc-2', '/b.md')]);
     const main = await connectWindow(link('main'), () => Promise.resolve(true));

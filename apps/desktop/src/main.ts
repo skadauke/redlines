@@ -144,7 +144,18 @@ let menuState: MenuState | null = null;
 let draftsPending = false;
 
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
-const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+const windows = isTauri
+  ? await connectWindow(tauriWindowLink(), askAboutThisWindow, {
+      // A window opened for text can't be asked about it in its first moments, and its text would go
+      // with a quit or a close: the app holds both, and the person tries again.
+      held: (what) =>
+        notice.flash(
+          what === 'quit'
+            ? 'A window is still opening. Try quitting again in a moment.'
+            : 'This window is still opening. Try closing it again in a moment.',
+        ),
+    })
+  : null;
 
 /**
  * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved

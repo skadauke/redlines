@@ -14,6 +14,11 @@ export interface DocumentWindow {
   path: string | null;
   /** Whether its document has unsaved edits. */
   dirty: boolean;
+  /**
+   * A window opened for text whose page hasn't yet said what it holds. It can't be asked about its
+   * text, which is the window's alone, so a quit waits until it has (src-tauri/src/windows.rs).
+   */
+  starting?: boolean;
 }
 
 /**
@@ -165,6 +170,16 @@ function shared<A extends unknown[], T>(
     }));
 }
 
+/** What a connected window tells the person. */
+export interface ConnectOptions {
+  /**
+   * A quit, or this window's close, was held because a window opened for text hasn't said what it
+   * holds yet, and its text would be lost without a question: the person is told to try again in a
+   * moment.
+   */
+  held?: (what: 'quit' | 'close') => void;
+}
+
 /**
  * Connects this window to the others. `askHere` asks about this window's own unsaved edits, and
  * resolves to whether to go on. The window the app told to, or whose menu was used, does the asking,
@@ -173,6 +188,7 @@ function shared<A extends unknown[], T>(
 export async function connectWindow(
   link: WindowLink,
   askHere: () => Promise<boolean>,
+  options: ConnectOptions = {},
 ): Promise<ConnectedWindow> {
   const waiting = new Map<string, (goOn: boolean) => void>();
   const askMe = shared(askHere);
@@ -210,9 +226,15 @@ export async function connectWindow(
     });
   };
 
-  const askEach = shared((asked?: Set<string>) =>
-    askEachDirtyWindow(() => link.list(), ask, asked),
-  );
+  const askEach = shared(async (asked?: Set<string>) => {
+    // A window opened for text can't be asked until its page has said what it holds, and its text
+    // would go with the quit: nothing is asked, the app keeps running, and the person is told.
+    if ((await link.list()).some(({ starting }) => starting === true)) {
+      options.held?.('quit');
+      return false;
+    }
+    return askEachDirtyWindow(() => link.list(), ask, asked);
+  });
 
   const quit = shared(async () => {
     const goOn = await askEach().catch((error: unknown) => {
@@ -237,6 +259,9 @@ export async function connectWindow(
     waiting.get(label)?.(goOn);
   });
   await link.listen('quit-requested', () => void quit());
+  // The app held a quit (the Dock's, or a logout) or this window's close, for a window still starting.
+  await link.listen('quit-held', () => options.held?.('quit'));
+  await link.listen('close-held', () => options.held?.('close'));
 
   let reporting = false;
   let latest: [string | null, boolean] = [null, false];
