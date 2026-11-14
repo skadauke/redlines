@@ -226,3 +226,39 @@ describe('the new row, in an editor', () => {
     expect(editor.getUiState().undo).toBe('Insert Row');
   });
 });
+
+describe('a tracked row made in Clean', () => {
+  const doc = '| a | b |\n| - | - |\n| 1 | 2 |\n';
+  const mounted: Editor[] = [];
+  afterEach(() => {
+    for (const editor of mounted.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  it.each(['simple', 'redlines'] as const)(
+    'shows Redlines in the look chosen last, as every other tracked edit made in Clean does (%s)',
+    (markupView) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc,
+        author: { handle: 'ada', name: 'Ada Lovelace' },
+        tracking: true,
+        view: 'clean',
+        markupView,
+      });
+      mounted.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      expect(editor.getUiState().view).toBe('clean');
+      editor.view.dispatch({ selection: { anchor: doc.indexOf('2 |') + 1 } });
+      // Tab in the last cell adds a row, tracked.
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }),
+        'editor',
+      );
+      expect(editor.getDoc()).not.toBe(doc);
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+});
