@@ -581,6 +581,7 @@ describe('rule 2 for columns', () => {
     colsInserted: false,
     colsChanged: false,
     align: false,
+    headerChanged: false,
   };
   const ROWS = 'Accept or reject the row changes in this table first.';
   const ALIGN = 'Accept or reject the alignment change in this table first.';

@@ -567,6 +567,38 @@ describe('a point mark of an alignment change', () => {
     expect(codes(mixed)).toEqual(['unclosed-mark']);
   });
 
+  it('leaves an align= opener whose value is no delimiter row unread, with its warning', () => {
+    // The value of an alignment change is the old delimiter row: dashes, colons and pipes, in cells.
+    for (const payload of [
+      'align=nonsense',
+      'align=',
+      `align=${SPEC} +bold`,
+      `align=${SPEC} align=${SPEC}`,
+      'align=\\|\\x20x\\x20\\|',
+      'align=\\|\\x20:\\x20\\|',
+      'align=\\|\\x20-\\x20\\|\\x20x',
+      'align=\\|\\x20-\\x20<!--y',
+    ]) {
+      const parsed = parse(TABLE.replace('Price |', `Price<!--fmt k3x9 ${payload}--> |`));
+      expect(parsed.marks, payload).toEqual([]);
+      expect(codes(parsed), payload).toEqual(['unclosed-mark']);
+    }
+    // The same opener with a delimiter row for its value is a mark.
+    const read = parse(TABLE.replace('Price |', `Price<!--fmt k3x9 align=\\|\\x20-\\x20\\|--> |`));
+    expect(read.marks.map((m) => m.id)).toEqual(['k3x9']);
+  });
+
+  it('leaves two openers of one id and no closer as they were read, not as one point', () => {
+    // The first is never closed, and the second opens the id again: no mark, as before the point form.
+    const parsed = parse(TABLE.replace('Price |', `Price${MARK} |`).replace('1.20', `1.20${MARK}`));
+    expect(parsed.marks).toEqual([]);
+    expect(codes(parsed).toSorted()).toEqual(['duplicate-id', 'unclosed-mark']);
+    // The same with three.
+    const three = parse(`a${MARK}b${MARK}c${MARK}d`);
+    expect(three.marks).toEqual([]);
+    expect(codes(three).toSorted()).toEqual(['duplicate-id', 'duplicate-id', 'unclosed-mark']);
+  });
+
   it('reads an align= opener alone on its line with no closer as a point, with no carrier', () => {
     // A span whose closer is gone: its opener is read as a point, which no table holds.
     const parsed = parse(withLedger(`${MARK}\n\n${TABLE}`, entry));

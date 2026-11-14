@@ -6,6 +6,7 @@
 
 import { bodyStart, lineEnd } from './blocks.ts';
 import { HTML_STARTS, indentColumns } from './block-read.ts';
+import { isAlignPayload } from './format-ops.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
 
 export type TableAlign = '' | 'left' | 'center' | 'right';
@@ -190,13 +191,18 @@ const ALIGN_POINT =
 /** What a mark is at least: its opener and `-->`, with nothing in its payload but `align=`. */
 const SHORTEST_POINT = '<!--fmt k3x9 align=-->'.length;
 
+/** What an opener has in front of its payload: `<!--fmt `, the id and a space. */
+const POINT_HEAD = '<!--fmt k3x9 '.length;
+
 /**
  * The mark of an alignment change that ends `text[from, to)`, white space after it aside: one whole
  * `<!--fmt ID align=…-->` that starts in the range and has its first `-->` for its end, as the scan
- * reads a marker. It is a point (no closer), and it stands at the end of the text of the header row's
- * last cell (format §3.7). Null when the range ends otherwise. It reads the text alone, so that
- * `readTables` and `readRowCells`, which the editor's model calls with no parse of the file, find the
- * same mark in the same cell.
+ * reads a marker, and whose value is a delimiter row, as the parse reads a point (`isAlignPayload`).
+ * It is a point (no closer), and it stands at the end of the text of the header row's last cell
+ * (format §3.7). Null when the range ends otherwise, or in an `align=` that is no alignment change,
+ * which the parse leaves as the text it is. It reads the text alone, so that `readTables` and
+ * `readRowCells`, which the editor's model calls with no parse of the file, find the same mark in the
+ * same cell.
  */
 export function alignPointIn(text: string, from: number, to: number): Range | null {
   let end = to;
@@ -209,7 +215,9 @@ export function alignPointIn(text: string, from: number, to: number): Range | nu
     ALIGN_POINT.lastIndex = at;
     const found = ALIGN_POINT.exec(cell);
     // The first opener whose first `-->` is the end is the marker: an opener after it is in its payload.
-    if (found && at + found[0].length === cell.length) return { from: from + at, to: end };
+    if (found && at + found[0].length === cell.length) {
+      return isAlignPayload(found[0].slice(POINT_HEAD, -3)) ? { from: from + at, to: end } : null;
+    }
   }
   return null;
 }

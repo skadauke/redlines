@@ -89,13 +89,20 @@ export interface TablePending {
   colsChanged: boolean;
   /** An alignment change. */
   align: boolean;
+  /** The header is itself a pending row change: `rows[0].insertion` is set (a row inserted above it,
+   * or moved to the top), or a deleted row has position 0 (the header deleted, or moved away). */
+  headerChanged: boolean;
 }
+
+/** The words of a refusal while an alignment change is pending: a column operation, or a row operation
+ * that touches the header, where the mark of the change stands (format §3.7, rule 5). */
+export const ALIGN_FIRST = 'Accept or reject the alignment change in this table first.';
 
 /** Whether a mark is a half of a move. */
 const isMove = (mark: MarkRange) => mark.entry.move !== undefined;
 
 /** What is pending in `table`: marks in its rows, the deletions below it, and a format change of
- * its alignment around it. */
+ * its alignment: a point in its header row, or a range around it that another tool wrote. */
 export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
   const header = table.rows[0];
   const inHeader = (mark: MarkRange) => {
@@ -108,6 +115,7 @@ export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
     colsInserted: false,
     colsChanged: false,
     align: false,
+    headerChanged: false,
   };
   for (const row of table.rows) {
     if (!row.insertion) continue;
@@ -122,11 +130,18 @@ export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
   }
   if (alignMarkOf(parsed, table)) pending.align = true;
   for (const deletion of table.deletions) {
-    if (deletion.axis === 'row') pending.rowsChanged = true;
-    else pending.colsChanged = true;
+    if (deletion.axis === 'row') {
+      pending.rowsChanged = true;
+      // A deleted row that comes back at position 0 comes back above the header.
+      if (deletion.position === 0) pending.headerChanged = true;
+    } else pending.colsChanged = true;
   }
+  if (header?.insertion) pending.headerChanged = true;
   return pending;
 }
+
+const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
+const ROWS_FIRST = 'Accept or reject the row changes in this table first.';
 
 /** The refusal of an operation that would leave a deletion or a move the wrong number of cells,
  * or null (format §3.7, rule 2). A column deleted or moved is kept as its cells top to bottom, so a
@@ -138,35 +153,37 @@ export function ruleTwo(
   pending: TablePending,
   tracked: boolean,
 ): string | null {
-  const columns = 'Accept or reject the column changes in this table first.';
-  const rows = 'Accept or reject the row changes in this table first.';
-  const align = 'Accept or reject the alignment change in this table first.';
   switch (op) {
     // A column put in a table while a row is deleted or moved would be missing from the kept row; one
     // put in while rows are inserted is in them too. Rule 5: nothing while an alignment change keeps
     // the old delimiter row, which would be a cell short or long.
     case 'insertCols':
-      return pending.align ? align : pending.rowsChanged ? rows : null;
+      return pending.align ? ALIGN_FIRST : pending.rowsChanged ? ROWS_FIRST : null;
     case 'deleteCols':
     case 'moveCols':
       return pending.align
-        ? align
+        ? ALIGN_FIRST
         : pending.rowsChanged || (tracked && pending.rowsInserted)
-          ? rows
+          ? ROWS_FIRST
           : null;
     case 'insertRows':
-      return pending.colsChanged ? columns : null;
+      return pending.colsChanged ? COLUMNS_FIRST : null;
     // Rule 5: `align=` keeps the whole old delimiter row, so a pending column would leave it a cell
-    // short or long. Rows don't touch the delimiter row. With Track Changes off the row is changed as
-    // it says, in the kept one too.
+    // short or long. Its mark stands in the header row, so a header that is itself a pending row change
+    // (a row inserted above it, the header deleted or moved) would leave it where rejecting the row
+    // could take it along or leave it in a body row. Rows below the header don't touch the delimiter
+    // row or the mark. With Track Changes off no mark is written: the row is changed as it says, in the
+    // kept one too.
     case 'align':
-      return tracked && (pending.colsInserted || pending.colsChanged) ? columns : null;
+      if (!tracked) return null;
+      if (pending.colsInserted || pending.colsChanged) return COLUMNS_FIRST;
+      return pending.headerChanged ? ROWS_FIRST : null;
     // A deleted or moved row keeps its cells as written, so a column inserted while it is pending
     // would be missing from it when the insertion is rejected. With Track Changes off the row is
     // taken out of the table, and only a column deleted or moved is left the wrong number of cells.
     case 'deleteRows':
     case 'moveRows':
-      return pending.colsChanged || (tracked && pending.colsInserted) ? columns : null;
+      return pending.colsChanged || (tracked && pending.colsInserted) ? COLUMNS_FIRST : null;
   }
 }
 
@@ -234,14 +251,14 @@ function rowText(
   return `${line}|`;
 }
 
-const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
-
-/** A row put above the header would take the header's place, and the marker of an inserted column
- * stands in the header: it is refused while a column is pending insertion (format §3.7). */
+/** A row put above the header would take the header's place, and the marker of an inserted column and
+ * the mark of an alignment change stand in the header: it is refused while a column is pending
+ * insertion or an alignment change is pending (format §3.7). */
 function headerCheck(op: TableOp & { kind: 'insertRows' }, table: TableRead, parsed: Parsed): void {
-  if (op.after < 0 && pendingOf(table, parsed).colsInserted) {
-    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
-  }
+  if (op.after >= 0) return;
+  const pending = pendingOf(table, parsed);
+  if (pending.colsInserted) throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  if (pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
 }
 
 /** Where the new rows go: the end of the line of the row they go below. */
@@ -372,10 +389,13 @@ function deleteRows(
 ): TableEdit {
   const remaining = table.rows.length - rows.length;
   if (remaining < 1) throw new EditError('Delete the table instead.', 'no-legal-placement');
-  const refusal = ruleTwo('deleteRows', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('deleteRows', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
-  if (rows.includes(0) && pendingOf(table, parsed).colsInserted)
+  if (rows.includes(0) && pending.colsInserted)
     throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  // The header carries the mark of an alignment change: it is neither deleted nor moved while it is pending.
+  if (rows.includes(0) && pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'delete');
     if (three) throw new EditError(three, 'no-legal-placement');
@@ -513,12 +533,14 @@ function moveRows(
   if (!Number.isInteger(to) || to < 0 || to > table.rows.length) {
     throw new EditError('There is no such place in this table.');
   }
-  const refusal = ruleTwo('moveRows', pendingOf(table, parsed), ctx !== null);
+  const pending = pendingOf(table, parsed);
+  const refusal = ruleTwo('moveRows', pending, ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
-  // The header carries the markers of inserted columns: it keeps its place while they are pending.
-  if ((rows.includes(0) || to === 0) && pendingOf(table, parsed).colsInserted) {
-    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
-  }
+  // The header carries the markers of inserted columns and the mark of an alignment change: it keeps its
+  // place while they are pending.
+  const header = rows.includes(0) || to === 0;
+  if (header && pending.colsInserted) throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  if (header && pending.align) throw new EditError(ALIGN_FIRST, 'no-legal-placement');
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'move');
     if (three) throw new EditError(three, 'no-legal-placement');

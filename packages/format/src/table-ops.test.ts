@@ -169,6 +169,7 @@ describe('rule 2: rows and columns don’t change together', () => {
     colsInserted: false,
     colsChanged: false,
     align: false,
+    headerChanged: false,
   };
   const COLUMNS = 'Accept or reject the column changes in this table first.';
 
@@ -197,10 +198,45 @@ describe('rule 2: rows and columns don’t change together', () => {
       colsInserted: true,
       colsChanged: true,
       align: false,
+      headerChanged: false,
     });
     const quiet = file(FRUIT);
     const [plain] = readTables(quiet, parse(quiet));
     expect(plain && pendingOf(plain, parse(quiet))).toEqual(base);
+  });
+
+  it('reads the header as a pending row change: a row inserted above it or moved to the top, or a row deleted at 0', () => {
+    const headerChanged = (body: string, marks: Record<string, string>) => {
+      const text = file(body, marks);
+      const parsed = parse(text);
+      const [table] = readTables(text, parsed);
+      return table && pendingOf(table, parsed).headerChanged;
+    };
+    const rows = '| a | b |\n| - | - |\n| c | d |';
+    // The first row has a marker of an inserted row: a new header (a row moved to the top is one too).
+    expect(headerChanged(rows.replace('| a |', '| <!--ins k3x9 row--> a |'), { k3x9: 'bo' })).toBe(
+      true,
+    );
+    // A deleted row that comes back above the first row: the header deleted, or moved away.
+    expect(headerChanged(`${rows}\n\n<!--del g5nb row=0 \\| z \\| w \\|-->`, { g5nb: 'bo' })).toBe(
+      true,
+    );
+    // A row inserted or deleted below the header is no change of it, and nor is a deleted column.
+    expect(headerChanged(rows.replace('| c |', '| <!--ins k3x9 row--> c |'), { k3x9: 'bo' })).toBe(
+      false,
+    );
+    expect(headerChanged(`${rows}\n\n<!--del g5nb row=1 \\| z \\| w \\|-->`, { g5nb: 'bo' })).toBe(
+      false,
+    );
+    expect(
+      headerChanged(`${rows}\n\n<!--del m2bd col=1 \\| a \\\\n \\| - \\\\n \\| c-->`, {
+        m2bd: 'bo',
+      }),
+    ).toBe(false);
+    // A column marker in the header is a column change, not a row one.
+    expect(headerChanged(rows.replace('| b |', '| <!--ins k3x9 col--> b |'), { k3x9: 'bo' })).toBe(
+      false,
+    );
   });
 
   it('refuses the operation, tracked and not, with a column pending deleted', () => {

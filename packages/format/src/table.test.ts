@@ -255,8 +255,9 @@ describe('the alignment mark at the end of a header row', () => {
     rows: string[] = [ROW],
     marks: Record<string, string> = { k3x9: 'bo' },
     threads: string[] = [],
+    eol = '\n',
   ) => {
-    const text = file([header, delimiter, ...rows].join('\n'), marks, threads);
+    const text = file([header, delimiter, ...rows].join(eol), marks, threads);
     const table = tablesOf(text)[0];
     if (!table) throw new Error(`No table in ${JSON.stringify(text)}`);
     return { text, table };
@@ -273,6 +274,8 @@ describe('the alignment mark at the end of a header row', () => {
     marks?: Record<string, string>;
     row?: string;
     rowTexts?: string[];
+    /** The line breaks of the table, when they are not LF. */
+    eol?: string;
   }[] = [
     {
       name: 'outer pipes',
@@ -295,6 +298,13 @@ describe('the alignment mark at the end of a header row', () => {
       header: `| Fruit | Count | Price${MARK}`,
       delimiter: '| :---- | :---: | ----:',
       texts: ['Fruit', 'Count', 'Price'],
+    },
+    {
+      name: 'CRLF line breaks, no trailing pipe: the mark is the end of the line',
+      header: `| Fruit | Count | Price${MARK}`,
+      delimiter: '| :---- | :---: | ----:',
+      texts: ['Fruit', 'Count', 'Price'],
+      eol: '\r\n',
     },
     {
       name: 'no leading pipe',
@@ -393,7 +403,7 @@ describe('the alignment mark at the end of a header row', () => {
 
   /** The table of a header case. */
   const read = (one: (typeof HEADERS)[number]) =>
-    tableOf(one.header, one.delimiter, [one.row ?? ROW], one.marks, one.threads);
+    tableOf(one.header, one.delimiter, [one.row ?? ROW], one.marks, one.threads, one.eol);
 
   it("stops the text of the header's last cell in front of the alignment mark", () => {
     for (const one of HEADERS) {
@@ -432,6 +442,23 @@ describe('the alignment mark at the end of a header row', () => {
         return cells;
       });
       expect(mine, one.name).toEqual(oracle[0]?.rows);
+    }
+  });
+
+  it('keeps a space between the text and the mark in the text, which the writer never adds', () => {
+    for (const [header, delimiter] of [
+      [`| Fruit | Count | Price ${MARK} |`, THREE],
+      [`| Fruit | Count | Price  ${MARK}`, '| :---- | :---: | ----:'],
+      [`Fruit | Count | Price\t${MARK}  `, ':---- | :---: | ----:'],
+    ] as const) {
+      const { text, table } = tableOf(header, delimiter);
+      const last = table.rows[0]?.cells[2];
+      expect(text.slice(last?.textFrom, last?.textTo), JSON.stringify(header)).toMatch(
+        /^Price\s+$/,
+      );
+      expect(last?.textTo, JSON.stringify(header)).toBe(text.indexOf(MARK));
+      // The mark is still the end of the cell, and the cells are three.
+      expect(table.rows[0]?.cells, JSON.stringify(header)).toHaveLength(3);
     }
   });
 
@@ -643,8 +670,8 @@ describe('alignPointIn', () => {
     expect(find(`${MARK}`)).toEqual({ from: 0, to: MARK.length });
     // Only what is in the range counts.
     expect(find(`${text} more`, 0, text.length)).toEqual({ from: 5, to: text.length });
-    // The payload may hold anything a value holds: escapes, and a `<!--` that is no end.
-    const odd = '<!--fmt b2c3 align=\\|\\x20-\\-\\-\\x20\\|\\x20x<!--y-->';
+    // The value is a delimiter row, with the escapes of a payload: `\|`, `\-`, `\x20`.
+    const odd = '<!--fmt b2c3 align=\\|\\x20-\\-\\-\\x20\\|\\x20:-\\x20\\|-->';
     expect(find(`a${odd}`)).toEqual({ from: 1, to: 1 + odd.length });
   });
 
@@ -670,6 +697,12 @@ describe('alignPointIn', () => {
       '<!--fmt a3x9 align=x-->',
       '<!--fmt k3e9 align=x-->',
       '<!--fmt K3X9 align=x-->',
+      // The value is no delimiter row: the mark is kept as the text it was, as the parse reads it.
+      '<!--fmt k3x9 align=nonsense-->',
+      '<!--fmt k3x9 align=-->',
+      `<!--fmt k3x9 align=${SPEC} +bold-->`,
+      '<!--fmt k3x9 align=\\|\\x20x\\x20\\|-->',
+      '<!--fmt k3x9 align=\\|\\x20:\\x20\\|-->',
       // `align=` is the payload's first word.
       '<!--fmt k3x9 +bold align=x-->',
       '<!--fmt k3x9 xalign=x-->',
@@ -689,12 +722,15 @@ describe('alignPointIn', () => {
   });
 
   it('takes the marker that the scan reads: a marker ends at its first -->', () => {
-    // The second opener is part of the first one's payload, as the scan reads them left to right.
-    const nested = 'a<!--fmt k3x9 align=x<!--fmt w8nn align=y-->';
-    expect(find(nested)).toEqual({ from: 1, to: nested.length });
+    const other = '<!--fmt w8nn align=\\|\\x20-\\x20\\|-->';
+    // The second opener is part of the first one's payload, as the scan reads them left to right: the
+    // first is the marker, and its value is no delimiter row, so nothing ends the range.
+    const nested = `a<!--fmt k3x9 align=x${other}`;
+    expect(find(nested)).toBeNull();
     // Two marks one after the other: the last one ends the range, and the first is text.
-    const two = 'a<!--fmt k3x9 align=x--><!--fmt w8nn align=y-->';
-    expect(find(two)).toEqual({ from: 24, to: two.length });
+    const first = '<!--fmt k3x9 align=\\|\\x20-\\x20\\|-->';
+    const two = `a${first}${other}`;
+    expect(find(two)).toEqual({ from: 1 + first.length, to: two.length });
   });
 });
 

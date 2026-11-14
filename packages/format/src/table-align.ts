@@ -1,27 +1,30 @@
-// Aligning a table's columns (format §3.7): a block format change around the table, `align=SPEC`,
-// with the old delimiter row as its value. The opener stands alone on the line before the table, as
-// any mark that starts a block does (§3.3), and the closer after one blank line below the table and
-// its deletion lines. Accepting takes the markers away; rejecting writes the old delimiter row back.
-// With Track Changes off the delimiter row is changed as it says, in the change's `align=` too, so
-// that both views have it.
+// Aligning a table's columns (format §3.7): a block format change, `align=SPEC`, with the old
+// delimiter row as its value. Redlines writes it as a point: one mark with no closer, at the end of the
+// text of the header row's last cell (#281), `<!--fmt k3x9 align=SPEC-->`. Nothing below or above the
+// table can share a line with it, so no edit beside the table has to be refused for it. Accepting takes the
+// mark away; rejecting writes the old delimiter row back and takes the mark away; neither decision
+// changes a byte outside the table's first two lines. With Track Changes off the delimiter row is
+// changed as it says, in the change's `align=` too, so that both views have it.
 //
-// The same change is also read as a point: an `align=` mark with no closer, in a row of the table,
-// at the end of the header's last cell (#281). Its decisions touch the delimiter row alone.
+// The span form is still read, drawn, carded and decided, and never written: an opener alone on the line
+// before the table, as any mark that starts a block does (§3.3), and a closer after one blank line below
+// the table and its deletion lines. Other tools wrote it, and the code for it (`closerRange`,
+// `checkAlignGap`, the closer in `alignHide`, `alignMarkOf` and `tableOfSegment`) is for that form alone.
 
 import { lineEnd, lineStart, openerRange } from './blocks.ts';
-import { eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
-import { addPerson, commitEdit, workingLedger } from './edit-support.ts';
+import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
 import { encodeValue, isAlignOps, opsOf } from './format-ops.ts';
 import type { AlignedColumn } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { idsIn, newId } from './ids.ts';
+import { inspectPlace } from './inline.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readDelimiterRow, readRowCells, tablesOfText } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
 import { deletedColCells } from './table-cols.ts';
-import { closersBelow, deletionLine, tableEnd } from './table-rows.ts';
+import { originalView } from './views.ts';
 import type {
   EditContext,
   MarkEntry,
@@ -106,9 +109,9 @@ function specOf(mark: MarkRange, segment: Segment): { spec: string; source: stri
 
 /** An alignment change of `table`: the point form, a mark with no closer in a row of the table (a
  * merge can leave it in any row; the writer puts it at the end of the header's last cell), or the
- * span form, a format change whose one operation is `align=`, its opener on the line before the table
- * and its closer below the table and its deletion lines, with nothing but markers and white space
- * between. */
+ * span form that other tools wrote, a format change whose one operation is `align=`, its opener on the
+ * line before the table and its closer below the table and its deletion lines, with nothing but
+ * markers and white space between. */
 export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undefined {
   const { text } = parsed;
   const point = parsed.marks.find((mark) => {
@@ -116,6 +119,7 @@ export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undef
     return open !== undefined && table.from <= open.from && open.to <= table.to;
   });
   if (point) return point;
+  // The span form, which Redlines no longer writes.
   return parsed.marks.find((mark) => {
     if (mark.kind !== 'fmt' || mark.segments.length !== 1) return false;
     const segment = mark.segments[0];
@@ -130,7 +134,8 @@ export function alignMarkOf(parsed: Parsed, table: TableRead): MarkRange | undef
 /** The range that the closer of an alignment change takes with it: the line break and the blank line
  * before it, back to the end of the table or its last deletion line, when it is alone on its line. A
  * closer with others after it on its line leaves them their line, and one with text on the next
- * line takes its own line only, so that the text is not read as a row. */
+ * line takes its own line only, so that the text is not read as a row. Only the span form that other
+ * tools wrote has a closer: Redlines writes the point form, which has none. */
 export function closerRange(text: string, close: Range): Range {
   const start = lineStart(text, close.from);
   const end = lineEnd(text, close.to);
@@ -153,7 +158,9 @@ export function closerRange(text: string, close: Range): Range {
   return { from: at, to: close.to };
 }
 
-/** The changes that take an alignment change's markers away, with what goes with them. */
+/** The changes that take an alignment change's markers away, with what goes with them: the opener
+ * alone for a point, which has no carrier and no closer; for the span form that other tools wrote, the
+ * opener with its carrier, and the closer with the blank line before it. */
 export function alignHide(text: string, segment: Segment): TextChange[] {
   const changes: TextChange[] = [{ ...openerRange(segment), insert: '' }];
   if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: '' });
@@ -170,6 +177,7 @@ function tableOfSegment(parsed: Parsed, segment: Segment): TableRead | undefined
     const { open } = segment;
     return tables.find((table) => table.from <= open.from && open.to <= table.to);
   }
+  // The span form that other tools wrote: the table between the opener's carrier and the closer.
   const head = segment.carrier?.to ?? segment.open.to;
   return tables.find((table) => table.from >= head && table.to <= close.from);
 }
@@ -232,16 +240,6 @@ export function alignLabel(columns: readonly AlignedColumn[]): string {
     .join(', ');
 }
 
-/** Where a closer for a table goes, and what is written there: after one blank line below the
- * table and its deletion lines, in front of the closers that are there already. */
-function closerSlot(text: string, table: TableRead, eol: string, marker: string): TextChange {
-  const last = table.deletions.at(-1);
-  const base = last ? deletionLine(text, last).to : tableEnd(table);
-  const closers = closersBelow(text, base);
-  if (closers !== -1) return { from: closers, to: closers, insert: marker };
-  return { from: base, to: base, insert: eol + eol + marker };
-}
-
 /**
  * The changes that give the kept copy of a moved column its new delimiter cell: with Track Changes off
  * an edit in a pending move's copy is written in both halves of the move (format §3.7, §3.10), and the
@@ -292,22 +290,63 @@ export interface AlignOp {
   align: TableAlign;
 }
 
-/** `pos` after `changes` that lie before it. */
+/** `pos` after `changes` that lie before it. Text written at `pos` itself stays after it: a caret in
+ * front of the mark of an alignment change stays in front of it. */
 function mapped(changes: readonly TextChange[], pos: number): number {
-  return changes.reduce(
-    (at, change) => (change.to <= pos ? at + change.insert.length - (change.to - change.from) : at),
-    pos,
-  );
+  return changes.reduce((at, change) => {
+    const before = change.from < change.to ? change.to <= pos : change.to < pos;
+    return before ? at + change.insert.length - (change.to - change.from) : at;
+  }, pos);
+}
+
+/** The words of a refusal to write the mark of an alignment change where the header's last cell ends. */
+const MARK_PLACE =
+  "A marker can't go at the end of this table's header, where Markdown would read it otherwise. Change the end of its last cell first, then align.";
+
+/** Whether a marker at `position` of `body` (the markers in `hidden` are not text) would be read
+ * otherwise (format §3.1): after an odd run of backslashes, which would escape it, or where
+ * `inspectPlace` finds a construct, a refusal, or a delimiter whose flanking the marker would change
+ * (an underscore at the end of the text, as in `_b_`). */
+function readsOtherwise(body: string, hidden: readonly Range[], position: number): boolean {
+  let slashes = 0;
+  while (body[position - 1 - slashes] === '\\') slashes++;
+  if (slashes % 2 === 1) return true;
+  const place = inspectPlace(body, hidden, position);
+  return place.kind === 'refuse' || place.kind === 'construct' || place.kind === 'flank';
+}
+
+/**
+ * Where the mark of an alignment change goes (format §3.7, #281): the end of the text of the header's
+ * last cell, after any marks that end that text and before the cell's padding and its closing pipe; the
+ * line's end in a header with no trailing pipe, with any spaces left after it; the stop after the first
+ * space of an empty cell. Never added space: a space between the text and the mark would not come back
+ * when the mark is decided.
+ *
+ * @throws EditError when a marker can't stand there: in the text as it reads now, or in the text as it
+ * reads with every other change of the file rejected, which brings back what a deletion or a replacement
+ * at the end of the cell took out, in front of the mark (a backslash that is deleted, say, would escape it
+ * once the deletion is rejected). No other order of decisions is looked at.
+ */
+function markPlace(text: string, parsed: Parsed, table: TableRead): number {
+  const last = table.rows[0]?.cells.at(-1);
+  if (!last) throw new EditError('There is no such column in this table.');
+  const at = last.textTo;
+  if (readsOtherwise(text, markerRanges(parsed), at)) throw refused(MARK_PLACE);
+  const original = originalView(text);
+  if (readsOtherwise(original.text, [], original.map.fromSource(at))) throw refused(MARK_PLACE);
+  return at;
 }
 
 /**
  * Aligning columns of a table (format §3.7, rule 5). With `ctx` it is a format change by its author:
- * the delimiter row gets the new alignment and an `align=` keeps the old row around the table; the
- * author's own pending change is changed in place, and goes when the old alignments are back.
- * Without it the delimiter row is changed as it says, and so is the old row of a change that is
- * pending, so that rejecting it keeps what was done.
+ * the delimiter row gets the new alignment, and one mark with no closer, at the end of the text of
+ * the header's last cell, keeps the old row; the author's own pending change is changed in place, and
+ * goes, with the old row written back as it was, when the old alignments are back. Without `ctx` the
+ * delimiter row is changed as it says, and so is the old row of a change that is pending (the span
+ * form that another tool wrote included), so that rejecting it keeps what was done.
  *
- * @throws EditError when another person's alignment change is pending, or the columns are as asked.
+ * @throws EditError when another person's alignment change is pending, the columns are as asked, or a
+ * marker can't stand at the end of the header's last cell.
  */
 export function alignEdit(
   text: string,
@@ -324,7 +363,6 @@ export function alignEdit(
   const mark = alignMarkOf(parsed, table);
   const segment = mark?.segments[0];
   const kept = mark && segment ? specOf(mark, segment) : undefined;
-  const eol = eolOf(text, parsed.ledgerRange);
   const ledger = workingLedger(parsed.ledger);
   const caretAt = (changes: readonly TextChange[]) =>
     mapped(changes, table.rows[0]?.cells[cols[0] ?? 0]?.textFrom ?? table.from);
@@ -382,6 +420,8 @@ export function alignEdit(
     });
   }
 
+  // The point form: one mark, no closer, and nothing written outside the table's first two lines.
+  const at = markPlace(text, parsed, table);
   addPerson(ledger, ctx.author);
   const taken = idsIn(text);
   const id = newId(taken, ctx.random);
@@ -389,15 +429,17 @@ export function alignEdit(
   if (ctx.group !== undefined) entry.group = ctx.group;
   if (ctx.note !== undefined) entry.note = ctx.note;
   ledger.marks[id] = entry;
-  const opener = `<!--fmt ${id} align=${encodeValue(delimiter)}-->${eol}${eol}`;
-  return done(
-    [
-      { from: table.from, to: table.from, insert: opener },
-      ...row,
-      closerSlot(text, table, eol, `<!--/${id}-->`),
-    ],
-    { parsed, created: [id], keeps: 'original' },
-  );
+  const opener = `<!--fmt ${id} align=${encodeValue(delimiter)}-->`;
+  return done([...row, { from: at, to: at, insert: opener }], {
+    parsed,
+    created: [id],
+    keeps: 'original',
+    // A mark that is not read is no change: an unclosed `<!--` or a code span that the scan pairs across
+    // the cells of the table takes it in (format §2.1).
+    verify: (_after, written) => {
+      if (!written.marks.some((mark) => mark.id === id)) throw refused(MARK_PLACE);
+    },
+  });
 }
 
 /** `line` (which starts at `base` in the text) with `changes` of the text made in it. */
@@ -413,9 +455,10 @@ function applyLine(line: string, changes: readonly TextChange[], base: number): 
 
 /**
  * Refuses a tracked edit on the lines between a table's last line and the next block's first character
- * while an alignment change of the table is pending (format §3.7, #281): its closer stands there, on a
- * line of its own, and a mark of the edit would share the line, which some order of decisions reads
- * otherwise. An edit at the end of the last row is the cell's, and is not refused.
+ * while an alignment change of the table is pending that is the span form another tool wrote (format
+ * §3.7, #281): its closer stands there, on a line of its own, and a mark of the edit would share the
+ * line, which some order of decisions reads otherwise. An edit at the end of the last row is the cell's,
+ * and is not refused. The point form has no closer, no gap and no refusal.
  *
  * @throws EditError naming the person whose change is pending.
  */
@@ -425,6 +468,7 @@ export function checkAlignGap(text: string, edits: readonly TextChange[], parsed
   const end = parsed.ledgerRange?.from ?? text.length;
   for (const mark of marks) {
     // The point form has no closer on a line below its table, so it has no gap, and no table is read.
+    // What is left is the span form of another tool.
     const segment = mark.segments[0];
     if (!segment?.close) continue;
     const table = tableOfSegment(parsed, segment);

@@ -11,7 +11,7 @@
 import { lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { readLine, readTables } from './table.ts';
+import { alignPointIn, readLine, readTables } from './table.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
 import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
@@ -561,7 +561,9 @@ export interface PipeWrite {
  * less, a header one too few for the delimiter row, and the table is none. A pipe is written plain, in
  * both versions, in its place: `| ` in front of the first cell, ` |` after the last. Empty when the edit
  * takes some other text, replaces, or is in no such row. Looks at the edited line first, and at the
- * tables only when that line could be one.
+ * tables only when that line could be one. The mark of an alignment change that ends a cell is no part of
+ * the cell's text (`alignPointIn`), so a deletion of all that text empties the cell, and the pipe goes
+ * after the mark, at the line's end, where the cell ends in both versions.
  */
 export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed): PipeWrite[] {
   if (edit.from === edit.to || edit.insert.trim() !== '' || !text.includes('|')) return [];
@@ -570,14 +572,16 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   if (edit.to > end) return [];
   const line = readLine(text, start, end);
   if (line.lone || line.cells.length < 2) return [];
-  // The cell's text is all in the edit, and none of it is a mark.
+  // The cell's text is all in the edit, and none of it is a mark. The mark of an alignment change that
+  // ends the cell stays, and is not text.
   const emptied = (index: number): boolean => {
     const cell = line.cells[index];
     if (!cell) return false;
-    const content = text.slice(cell.contentFrom, cell.contentTo);
+    const to = alignPointIn(text, cell.contentFrom, cell.contentTo)?.from ?? cell.contentTo;
+    const content = text.slice(cell.contentFrom, to);
     if (content.trim() === '' || content.includes('<!--')) return false;
     const first = cell.contentFrom + (content.length - content.trimStart().length);
-    const last = cell.contentTo - (content.length - content.trimEnd().length);
+    const last = to - (content.length - content.trimEnd().length);
     return edit.from <= first && last <= edit.to;
   };
   const writes: PipeWrite[] = [];

@@ -2,6 +2,7 @@
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
 import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
+import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { scan } from './scan.ts';
@@ -17,26 +18,24 @@ import type {
 } from './types.ts';
 
 /**
- * Whether a marker has no closing marker (format §2.2). `closed` is whether its id has a closer in the
- * file: an `align=` format change with none is the point form of an alignment change, which stands at
- * the end of a table's header row (format §3.7).
+ * Whether a marker has no closing marker (format §2.2). `alone` is whether it is the only marker its id
+ * has in the file: an `align=` format change whose value is a delimiter row, and which nothing else of
+ * its id goes with, is the point form of an alignment change, which stands at the end of a table's
+ * header row (format §3.7). Any other `align=` opener is read as before: it opens a range, or is
+ * unclosed (a value that is no delimiter row, or an id opened twice with no closer).
  */
-function isPoint(opener: Extract<Marker, { type: 'open' }>, closed: boolean): boolean {
+function isPoint(opener: Extract<Marker, { type: 'open' }>, alone: boolean): boolean {
   return (
     opener.kind === 'del' ||
     opener.kind === 'split' ||
     (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) ||
     (opener.kind === 'fmt' && BOX.test(opener.payload ?? '')) ||
-    (opener.kind === 'fmt' && !closed && ALIGN.test(opener.payload ?? ''))
+    (opener.kind === 'fmt' && alone && isAlignPayload(opener.payload ?? ''))
   );
 }
 
 /** The payload of a checked or unchecked box, a point form of `fmt` (format §2.6). */
 const BOX = /^[+-]check(?:=X)?$/;
-
-/** The payload of an alignment change of a table, whose form is a range around the table, or a point
- * in its header row when its id has no closer (format §2.6, §3.7). */
-const ALIGN = /^align=/;
 
 function rangeOf(marker: Marker): Range {
   return { from: marker.from, to: marker.to };
@@ -52,7 +51,7 @@ const TABLE_DELETION = /^(?:row|col)=/;
 function startsBlocks(opener: Extract<Marker, { type: 'open' }>, closer?: Marker): boolean {
   if (opener.kind === 'split') return false;
   if (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) return false;
-  if (opener.kind === 'fmt' && !closer && ALIGN.test(opener.payload ?? '')) return false;
+  if (opener.kind === 'fmt' && !closer && isAlignPayload(opener.payload ?? '')) return false;
   return !(opener.kind === 'del' && TABLE_DELETION.test(opener.payload ?? ''));
 }
 
@@ -137,7 +136,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
     const segments: Segment[] = [];
     let pending: Extract<Marker, { type: 'open' }> | null = null;
-    const closed = markers.some((marker) => marker.type === 'close');
+    const alone = markers.length === 1;
     for (const marker of markers) {
       if (marker.type === 'close') {
         if (pending) {
@@ -163,7 +162,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
         // A comment opener with no closer before the next one is a point comment.
         segments.push(segmentOf(body, pending));
       }
-      if (isPoint(marker, closed)) {
+      if (isPoint(marker, alone)) {
         segments.push(segmentOf(body, marker));
         pending = null;
       } else pending = marker;
