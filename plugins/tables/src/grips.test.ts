@@ -313,6 +313,38 @@ describe('column grips', () => {
     expect(checked()).toEqual(['Align Center']);
   });
 
+  it('aligns the column from its menu with Track Changes on: a point mark in the header, the column still selected and checked', () => {
+    // The mark ends the header's last cell whichever column is aligned: it is the table's, not the column's.
+    for (const [col, title, written] of [
+      [1, 'Align Center', /\| a \| b<!--fmt \w{4} align=[^>]*--> \|\n\| - \| :-: \|\n/],
+      [0, 'Align Right', /\| a \| b<!--fmt \w{4} align=[^>]*--> \|\n\| -: \| - \|\n/],
+    ] as const) {
+      const editor = mount(DOC, true);
+      const open = () => {
+        move(editor, colX(col), TOP - 10);
+        mouse(colGrip(editor)!, 'mousedown', { clientX: colX(col), clientY: TOP - 10 });
+        mouse(window, 'mouseup', { clientX: colX(col), clientY: TOP - 10 });
+      };
+      const checked = () =>
+        [...editor.view.dom.querySelectorAll('.rl-grip-item[aria-checked="true"]')].map(
+          (el) => el.textContent,
+        );
+      open();
+      expect(checked(), title).toEqual(['Default Alignment']);
+      const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+        (el) => el.textContent === title,
+      );
+      mouse(item!, 'mousedown');
+      expect(editor.getDoc(), title).toMatch(written);
+      expect(editor.getDoc().match(/<!--fmt /g), title).toHaveLength(1);
+      // The column is still selected, and the menu says what it has now.
+      expect(touchedCols(editor.view.state), title).toMatchObject({ first: col, last: col });
+      open();
+      expect(checked(), title).toEqual([title]);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
+  });
+
   it('clears the contents of the column with Clear Contents', () => {
     const editor = mount();
     move(editor, colX(1), TOP - 10);

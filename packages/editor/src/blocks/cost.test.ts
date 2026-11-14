@@ -549,14 +549,16 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
 });
 
 // A column aligned in the same table (tables, alignment): the third column centered and back to what it
-// was, with Track Changes off. It is one command, a cell of the delimiter row, and the editor reads the
-// table again; it is held to what a column move is, the document's parse 10 times and two milliseconds,
-// with the bound found the same way. A timing test: it runs with REDLINES_COST set, and a run over the
-// bound is timed twice more, each time with the parse.
+// was, with Track Changes off and on. Off, it is one command, a cell of the delimiter row, and the editor
+// reads the table again. On, the first command also writes the point mark at the end of the header's last
+// cell, which the format looks at in every order of deciding the changes there (#281), and the second
+// takes it away with its entry, the old alignments being back. Both are held to what a column move is,
+// the document's parse 10 times and two milliseconds, with the bound found the same way. A timing test: it
+// runs with REDLINES_COST set, and a run over the bound is timed twice more, each time with the parse.
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in a table', () => {
   it('costs at most 10 times the document’s parse, in a 300-row table', () => {
     const { doc } = longDocument({ table: true });
-    for (const tracking of [false]) {
+    for (const tracking of [false, true]) {
       const parent = document.createElement('div');
       document.body.append(parent);
       const editor = createEditor(parent, { doc, author: ada, tracking });
@@ -569,9 +571,15 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
         for (let i = 0; i < 4; i++) {
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, 'center');
-          if (i === 0) expect(view.state.doc.toString()).toMatch(/\| :-+: \|/);
+          if (i === 0) {
+            expect(view.state.doc.toString()).toMatch(/\| :-+: \|/);
+            // What is timed with Track Changes on is the change, not a refusal.
+            expect(/<!--fmt \w{4} align=/.test(view.state.doc.toString())).toBe(tracking);
+          }
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, '');
+          // The old alignments are back: the change is gone.
+          if (i === 0) expect(view.state.doc.toString()).not.toMatch(/<!--fmt \w{4} align=/);
         }
         return (performance.now() - start) / 8;
       };
