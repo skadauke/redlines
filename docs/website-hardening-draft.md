@@ -14,7 +14,7 @@ comparisons are with Word and Google Docs.
 ## A plain file, and what that is meant to give
 
 A Redlines document is an ordinary Markdown file. Open it in GitHub, pandoc, R Markdown, Quarto,
-Hugo or Docusaurus and you read the newest version of the document, because every change and
+Hugo or Docusaurus 3 and you read the newest version of the document, because every change and
 comment is an HTML comment that those programs hide. The format is designed so that:
 
 - Every change and every comment has its author and its time, as in Word.
@@ -25,8 +25,10 @@ comment is an HTML comment that those programs hide. The format is designed so t
   branches, which a merge repairs by renaming one.
 - The file keeps working when another tool touches it: a formatter, another editor, knitr, pandoc.
   Not every tool is safe, and the specification says which: anything that re-wraps prose pushes
-  markers to line starts, and the visual editors of RStudio and Quarto rewrite the whole file, so
-  Redlines files should be edited in source mode there.
+  markers to line starts; an editor that rewrites the whole file when it opens it does that and
+  loosens some tight lists, so Redlines files should be edited in source mode there; converting a
+  file into a Google Doc drops every marker and the ledger, so that every change is accepted and every
+  comment lost; and MDX can't compile the comments, so it is not supported.
 - There is one file. No sidecar, no database.
 - It can keep its own full history, so that any earlier version can be rebuilt without git.
 
@@ -37,27 +39,28 @@ changes are read in Redlines.
 
 An editor that writes into a file other programs read has a harder job than one that keeps its
 changes to itself. Four properties, and what tries to break each. They are what the tests aim at,
-not a promise that nothing breaks: the known exceptions are listed at the end, and a known exception
-is a bug.
+not a promise that nothing breaks: the exceptions found so far are listed at the end, and a known
+exception is a bug.
 
-**Whatever order the same decisions are made in, the document reads the same.** You can accept and
-reject pending changes in any order. Redlines is built to write an edit only where every order of
-those decisions gives the same words, and "the same" is judged by an independent Markdown reader
-(micromark 4.0.2, with GitHub's tables and strikethrough), not by us.
+**The document is meant to read the same in whatever order its changes are decided.** Each pending
+change can be accepted or rejected, some only once the one next to it is decided. Redlines is built to
+write an edit only where every order of those decisions gives the same words, and "the same" is
+judged by an independent Markdown reader (micromark 4.0.2, with GitHub's tables and strikethrough),
+not by us.
 
-**When it can't be sure, it says no, and says why.** It is meant not to guess and not to tidy. An edit
-that cannot be written soundly is refused in words that name the cause and the way out, and a key
-that does nothing and says nothing is a bug.
+**When it can't be sure, it is meant to say no, and to say why.** It is meant not to guess and not to
+tidy. An edit that cannot be written soundly is refused in words that name the cause and the way out,
+and a key that does nothing and says nothing is a bug.
 
-**No line of a paragraph, a heading, a list item, a quote or a table row begins with a marker.** In
-Markdown a line that begins with an HTML comment is read as a different kind of block, and the rest
-of the line changes meaning. The change to a whole block puts its opener and closer on lines of
-their own, which Markdown reads as a block that ends on that line; nowhere else does a line begin
-with one.
+**No line of a paragraph, a heading, a list item, a quote or a table row is meant to begin with a
+marker.** In Markdown a line that begins with an HTML comment is read as a different kind of block,
+and the rest of the line changes meaning. A marker that opens a change at the start of a block stands
+alone on the line before it, which Markdown reads as a block that ends on that line, and a marker may
+start a line inside an HTML block's own content; nowhere else is a line to begin with one.
 
-**Typing stays fast.** A keystroke in a long document with many changes may take at most twice what
-the same key took in the editor before its block keys were written, and that bound is tested on every
-change, on documents of 16 KB and 150 KB with 200 changes.
+**Typing is meant to stay fast.** A keystroke in a long document with many changes may take at most
+twice what the same key took in the editor before its block keys were written, and that bound is
+tested on every change, on documents of 16 KB and 150 KB with 200 changes.
 
 ## Why Redlines sometimes says no, where Word wouldn't
 
@@ -71,8 +74,8 @@ their words:
   Your edit would reach into text another person has proposed, and no way of writing it reads the
   same in every order of deciding.
 - *"An empty item can't start a list right under a line of text in Markdown, and a blank line there
-  would make the item above it loose. Put a blank line above the list first."* Return, at the start
-  of the first item of a list, under a line of text.
+  would make the item above it loose. Put a blank line above the list first."* Return, with Track
+  Changes on, at the start of the first item of a nested list, under the text of its parent item.
 - *"A line break typed here would be read as a different break once the changes are made together.
   Make the changes one at a time."*
 - *"A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit
@@ -83,12 +86,12 @@ their words:
 In most of these the way out is to decide the other person's change first, or to turn Track Changes
 off for the edit; the refusal says which.
 
-**Some of these are meant to go away.** Code that starts a list item, and indented code in an item or
+**Some of these are planned to go away.** Code that starts a list item, and indented code in an item or
 a quote, can't change with Track Changes on yet (#284). Typing in code that holds another person's
 pending code change is refused (#285); the open issue asks for a way of writing it that reads the same
-in every order, or for a proof that there is none, with the refusal kept. Aligning a table's column
-with Track Changes on is refused for now (#281). Bold over more than five cells of a table used to be
-refused, and no longer is (#267).
+in every order, or for a proof that there is none, in which case the refusal stays. Aligning a table's
+column with Track Changes on is refused for now (#281). Bold over more than five cells of a table used
+to be refused, and no longer is (#267).
 
 ## The evidence, in numbers
 
@@ -102,9 +105,9 @@ Each of these is from the checks of a merged pull request, and says what was com
   (#277): none newly wrong, 5,081 newly sound, 812 newly refused, and over 23,000 of the old
   version's wrong writes refused now. Five cases in one shape are still wrong, and the old version
   writes the same bytes there (#276).
-- **40,000 list layouts**: the test of #288 holds every line that the reading of lists calls an item
-  to micromark 4.0.2's reading; it draws 4,000 layouts each time it runs, and its checks ran it over
-  40,000.
+- **40,000 list layouts**: the test of #288 holds every line that the reading of lists is sure is an
+  item to micromark 4.0.2's reading; it draws 4,000 layouts each time it runs, and its checks ran it
+  over 40,000.
 
 These are *tested*. What is *proved* is smaller, and written out in prose in the format's
 specification: that a format change can be tried against the marks of its block with the marks that
@@ -118,18 +121,33 @@ specification records an earlier shortcut in one of them that was wrong.
 
 We would rather say it than have you find it.
 
-- **Silent wrong writes that are known today.** In a few shapes Redlines still writes something
-  that reads differently from what it shows, and each is an open issue: numbered lists under
-  Backspace (#292); a prefix edit of a blank quote line between two paragraphs (#358); typing over
-  one `*` of a pending bold's `**` (#299); Return in two rare layouts, a quote whose last line is a
-  lazy continuation followed by another quote and a paragraph followed by a line that looks like a
-  fence (#136); five cases in one shape of pastes next to another person's marks (#276); and
-  pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370).
+- **Silent wrong writes, and changes that can't be decided, found so far.** In a few shapes Redlines
+  still writes something that reads differently from what it shows, or leaves a change that can't be
+  decided. Each is an open issue, and the list is what has been found, not a count of what is there:
+  - numbered lists under Backspace (#292);
+  - a prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
+    changes (#358);
+  - typing over one `*` of a pending bold's `**` (#299);
+  - a bold change on a line that rejecting a pending deletion makes a link definition (#335), and
+    typing at the end of a link reference definition (#262);
+  - deleting the last block after a setext heading (#372), and rejecting a row move with a comment in
+    the moved row (#371);
+  - a highlight that runs from the text above a table into its header row can make another person's
+    pending column change impossible to decide (#396);
+  - an indented numbered item or bullet under an item, which the format's checks read as a new item
+    where Markdown continues the paragraph (#139);
+  - five cases in one shape of pastes next to another person's marks (#276);
+  - Return at the start of a nested first item, in four more shapes (#395);
+  - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370);
+  - Return at the end of a block, in two rare layouts, used to write a plain blank line that changes
+    what renders; it writes two line breaks that read as one now, a stray blank line that no reader
+    sees (#136, still open).
 - The specification lists what is not yet tested: Word import into the full history, and live
   sessions with several authors in the full history, among other things.
 - In a list under review, a change to its structure is refused when more than five marks have to be
-  tried with it; some shapes of numbered lists (nested in another item, with mixed delimiters) keep
-  their marks tried and so count toward that.
+  tried with it; five shapes (numbered items with unusual numbers or nesting, the empty item that
+  Markdown can't hold, and a line the editor reads as an item that Markdown doesn't) keep their marks
+  tried, and so count toward that.
 - The refusals listed above.
 - A renderer that passes HTML through publishes the hidden text: when a document leaves review,
   publish the newest view.
