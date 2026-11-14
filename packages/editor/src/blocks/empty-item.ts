@@ -9,23 +9,36 @@ import type { Text } from '@codemirror/state';
 /** An empty item's line: what is in front of its marker, the marker, and the space after it. */
 export const EMPTY_ITEM = /^((?:[ \t]*>)*)([ \t]*)([-*+]|\d{1,9}[.)])[ \t]*$/;
 
+/** The markers of tracked changes and comments, which the newest view doesn't show. */
+export const MARKER =
+  /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
+
 /** The kind of list a marker starts: its bullet, or the delimiter of its number. */
 const kindOf = (marker: string) => (/^\d/.test(marker) ? marker.slice(-1) : marker);
 
 /**
- * Whether an empty item with `marker`, indented by `indent` columns after the quote markers
+ * How far in a line is, in the container the quote markers `quote` make: the one space after the
+ * last `>` is the quote's own (`> - ` is an item at the margin of the quote), the rest is indentation.
+ */
+const indentIn = (quote: string, spaces: number): number =>
+  quote.includes('>') ? Math.max(0, spaces - 1) : spaces;
+
+/**
+ * Whether an empty item with `marker`, `spaces` columns of white space after the quote markers
  * `quote`, as line `n` of `doc`, would be no item in Markdown: nothing but text and deeper lines
  * above it before an item of its list or a blank line, a line less indented, or text at its own
  * indentation. A top-level item is so only right under a line of text (`underText`): above it is
- * otherwise its own list's, or another block.
+ * otherwise its own list's, or another block. Never on the first line: nothing is above it.
  */
 export function unsoundEmptyItem(
   doc: Text,
   n: number,
   quote: string,
-  indent: number,
+  spaces: number,
   marker: string,
 ): boolean {
+  if (n < 2) return false;
+  const indent = indentIn(quote, spaces);
   if (indent === 0) return underText(doc, n, quote);
   const same = quote.replaceAll(/[ \t]/g, '');
   for (let m = n - 1; m >= 1; m--) {
@@ -38,11 +51,12 @@ export function unsoundEmptyItem(
       if (m === n - 1) return false;
       continue;
     }
-    const deep = above[2]!.length;
+    const deep = indentIn(above[1]!, above[2]!.length);
     if (deep > indent) continue;
     if (deep < indent) return true;
     const item = /^([-*+]|\d{1,9}[.)])(?:[ \t]|$)/.exec(above[3]!);
-    return !item || kindOf(item[1]!) !== kindOf(marker);
+    // At its own indentation: an item of another list, or text. Not another block's line.
+    return item ? kindOf(item[1]!) !== kindOf(marker) : textLike(above[3]!);
   }
   return true;
 }
@@ -76,8 +90,7 @@ function underText(doc: Text, n: number, quote: string): boolean {
   const same = quote.replaceAll(/[ \t]/g, '');
   // The topmost line of the paragraph that the lines above make, below the nearest underline.
   let first: number | null = null;
-  // An underline of `=` was met: it ends the paragraph above it as a heading, unless an item or a
-  // quote further up owns it as a lazy line, which the lines up there tell.
+  // An underline or a definition was met: the text above it is no part of the paragraph.
   let sealed = false;
   for (let m = n - 1; m >= 1; m--) {
     const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(doc.line(m).text)!;
@@ -85,10 +98,15 @@ function underText(doc: Text, n: number, quote: string): boolean {
     if (above[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
     const text = above[3]!;
     if (text.trim() === '') break;
-    const deep = above[2]!.length;
+    const deep = indentIn(above[1]!, above[2]!.length);
     if (deep <= 3 && ITEM_LINE.test(text)) return false;
-    if (deep === 0 && !textLike(text)) {
-      if (!/^=+[ \t]*$/.test(text)) break;
+    if (deep <= 3 && !textLike(text)) {
+      // A table row: what follows it may be its rows, and no reading here tells.
+      if (text.startsWith('|')) return false;
+      // Another block's line, which an item's paragraph can't take as a lazy line.
+      if (!/^(?:=+|\[[^\]]*\]:.*)[ \t]*$/.test(text)) break;
+      // An underline or a definition: the end of the paragraph above it, unless an item or a quote
+      // further up owns it as a lazy line, which the lines up there tell.
       sealed = true;
       continue;
     }

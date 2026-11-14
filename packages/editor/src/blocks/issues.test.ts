@@ -49,6 +49,10 @@ const SELECTION =
 const EMPTIED =
   "This would leave an empty item that Markdown can't hold under the text above it, and a pending change or a comment next to it can't be taken out with it. Decide the change (or remove the comment) first, or leave some text in the item.";
 
+/** The words for an edit that would leave an empty item whose next lines would read as text above. */
+const EMPTIED_BELOW =
+  "This would leave an empty item that Markdown can't hold under the text above it, and what follows it would read as part of that text (its own next lines, or a number other than 1). Leave some text in the item.";
+
 describe('the linked issues', () => {
   scriptRows(
     both([
@@ -470,6 +474,70 @@ describe('the linked issues', () => {
         keys: ['Delete'],
         off: { file: 'Para.', caret: 'Para.⏎- ‸' },
       },
+      // The review of #462. An item on the first line has no text above it. An item with lines after
+      // its first one, or a numbered item other than 1 after it, would read as text of the line
+      // above once taken back: refused, in words. A closer, a point of a comment or a plain HTML
+      // comment ending the line above is no change to decide.
+      {
+        name: '#442: an item on the first line stays',
+        doc: '> - x‸',
+        keys: ['Backspace'],
+        off: { file: '> - ', caret: '> - ‸' },
+      },
+      {
+        name: '#442: …indented, a selection',
+        doc: '  - [x]',
+        keys: ['Delete'],
+        off: { file: '  - ', caret: '  - ‸' },
+      },
+      {
+        name: '#442: the item has lines after its first: refused, in words',
+        doc: 'Para.⏎- [first line]⏎  second line',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎- first line⏎  second line', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: …nested, and a lazy line',
+        doc: '- one⏎  - [x]⏎lazy',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  - x⏎lazy', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: a number other than 1 follows: refused, in words',
+        doc: 'Para.⏎1. [x]⏎2. b',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎1. x⏎2. b', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: …nested, one character',
+        doc: '- one⏎  1. x‸⏎  2. b',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  1. x⏎  2. b', refusal: EMPTIED_BELOW },
+      },
+      {
+        name: '#442: a bullet follows: the item goes, the list goes on',
+        doc: 'Para.⏎- [x]⏎- two',
+        keys: ['Backspace'],
+        off: { file: 'Para.⏎- two', caret: 'Para.⏎- ‸⏎- two' },
+      },
+      {
+        name: '#442: the closer of a change ends the line above: no change to decide',
+        doc: '- one<ins>x</ins>⏎  - y‸',
+        keys: ['Backspace'],
+        off: { file: '- one<ins>x</ins>', caret: '- one<ins>x</ins>⏎  - ‸' },
+      },
+      {
+        name: '#442: a plain HTML comment ends the line above',
+        doc: '- one <!-- note -->⏎  - y‸',
+        keys: ['Backspace'],
+        off: { file: '- one <!-- note -->', caret: '- one <!-- note -->⏎  - ‸' },
+      },
+      {
+        name: '#442: a quote holds a heading above the first item: it stays',
+        doc: '> # Head⏎> - x‸',
+        keys: ['Backspace'],
+        off: { file: '> # Head⏎> - ', caret: '> # Head⏎> - ‸' },
+      },
       // Where the empty item is an item in Markdown it stays, as it did.
       {
         name: '#442: an item after a blank line stays',
@@ -521,6 +589,28 @@ describe('the linked issues', () => {
   // With Track Changes on Redo of this deletion leaves the caret in the pending deletion's hidden
   // text (#461), which has nothing to do with the open item: Track Changes off only.
   scriptRows([
+    {
+      name: '#442: text inside a pending insertion goes with its markers: the item is open',
+      doc: '- one⏎  - <ins>y‸</ins>',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: '- one', caret: '- one⏎  - ‸' },
+    },
+    {
+      name: '#442: …another person’s insertion, a selection',
+      doc: '- one⏎  - <ins>[y]</ins>⏎⏎Para <ins>z</ins>',
+      others: 'bo',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: '- one⏎⏎Para <ins>z</ins>', caret: '- one⏎  - ‸⏎⏎Para <ins>z</ins>' },
+    },
+    {
+      name: '#442: an indented underline ends the paragraph above the first item: it stays',
+      doc: 'Para.⏎  ---⏎- x‸',
+      keys: ['Backspace'],
+      tc: false,
+      expect: { file: 'Para.⏎  ---⏎- ', caret: 'Para.⏎  ---⏎- ‸' },
+    },
     {
       name: '#442: …⌘Z and ⌘Y: the item is open again, the file without it, Track Changes off',
       doc: '- one⏎  - [x]',

@@ -303,13 +303,18 @@ block, each of which renders. So:
   holds `- one⏎  -` is read as Markdown reads it, and Tab on an empty item that Return didn't just
   make, where it would make this form, is refused ("An empty item can't be indented under a line
   of text in Markdown. Type in it first."). Any edit of the person's that takes all the text of an
-  item that Markdown can't hold empty opens it the same way, wherever the item is: Backspace or
-  Delete over its one character (#204), a selection, a cluster, Delete, a cut (#442; the first item
-  of a list right under a paragraph is such an item: `Para.⏎- ` is a heading). It is one place, a
-  change that leaves the caret on the item, and not a key at a time. The item's line and the end of
-  the line above carry no marker of a change, but a split of the author's own, which goes with the
-  item; where one does (another person's split, a deletion, an insertion, a comment), the edit is
-  refused in words, as taking the item back would decide that change. With Track Changes on the item
+  item that Markdown can't hold empty opens it the same way, anywhere but on the first line of the
+  file (nothing is above it there, and it is an item): Backspace or Delete over its one character
+  (#204), a selection, a cluster, Delete, a cut (#442; the first item of a list right under a
+  paragraph is such an item: `Para.⏎- ` is a heading). It is one place, a change that leaves the
+  caret on the item, and not a key at a time: the one character is the plain key too. Two things
+  keep the item from being taken back, and the edit is then refused, in words: a mark of a pending
+  change or a comment on its line, or one that begins at the end of the line above (an insertion
+  that holds the break, another person's split), which taking the item back would decide (a closer,
+  the point of a comment or a plain HTML comment ending the line above is nothing to decide, and a
+  split of the author's own goes with the item); and what follows the item, its own further lines
+  or an item that couldn't start a list under the text above (a number other than 1, an empty
+  one), which would read as text of that line once the item is gone. With Track Changes on the item
   goes whole instead.
 
 **Call:** the empty paragraph is transient. Showing it after you leave would draw something no

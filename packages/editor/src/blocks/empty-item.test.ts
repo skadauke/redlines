@@ -27,6 +27,8 @@ describe('the first item of a list, right under text', () => {
       '> Para.\n> - ',
       '- a\n\ntext\n- ',
       'Para.\n===\ntext\n- ',
+      '> Para.\n> - ',
+      '> One\n> two\n> 1. ',
     ]) {
       expect(readsAsItem(text), `micromark: ${JSON.stringify(text)}`).toBe(false);
       expect(unsound(text), JSON.stringify(text)).toBe(true);
@@ -50,12 +52,26 @@ describe('the first item of a list, right under text', () => {
       '> q\nPara.\n1. ',
       '1. a\n===\nPara.\n1) ',
       '   - a\n===\ntext\n* ',
+      '> # H\n> - ',
+      '> ***\n> - ',
+      'Para.\n  ---\n- ',
+      'Para.\n  # H\n- ',
+      '* a\n| a |\nPara.\n2. ',
+      '> q\n[a]: /u\nPara.\n2. ',
       '```\ncode\n```\n- ',
       '<!-- c -->\n- ',
       '> q\n- ',
       '- ',
     ]) {
       expect(readsAsItem(text), `micromark: ${JSON.stringify(text)}`).toBe(true);
+      expect(unsound(text), JSON.stringify(text)).toBe(false);
+    }
+  });
+});
+
+describe('an item on the first line', () => {
+  it('has nothing above it: it is an item', () => {
+    for (const text of ['  - ', '> - ', '   1. ', '>   - ', '>  1. ']) {
       expect(unsound(text), JSON.stringify(text)).toBe(false);
     }
   });
@@ -72,9 +88,11 @@ describe('a nested item', () => {
 
 describe('random documents', () => {
   it('never reads an empty item as no item where micromark reads one, and finds the ones it reads none for', () => {
-    // Lines of paragraphs, items, headings, rules, quotes, blocks and indentation, and then an empty
-    // top-level item. A false "no item" would hide an empty item from the file; the other way is the
-    // old behavior, which an indented first line or code above it leaves.
+    // Lines of paragraphs, items, headings, rules, quotes, definitions, table rows and
+    // indentation, and then an empty top-level item, plain and in a quote. A false "no item" would
+    // hide an empty item from the file; the other way is the old behavior, which an indented first
+    // line, a numbered item other than 1 above it, or code leave. (micromark reads no item after
+    // indented code, which is its own quirk, so those documents are left out.)
     const pool = [
       'Para.',
       '  Para.',
@@ -87,8 +105,11 @@ describe('random documents', () => {
       '   - a',
       '    - a',
       '# H',
+      '  # H',
       '***',
+      '  ***',
       '---',
+      '  ---',
       '===',
       '',
       '> q',
@@ -98,22 +119,29 @@ describe('random documents', () => {
       '  more',
       '   b',
       '1) a',
+      '```',
+      '| a |',
+      '[a]: /u',
     ];
     const last = ['- ', '* ', '1. ', '2. ', '1) '];
-    let seed = 7;
+    let seed = 11;
     const rand = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
     let found = 0;
-    for (let i = 0; i < 4000; i++) {
-      const lines: string[] = [];
-      for (let k = 1 + Math.floor(rand() * 4); k > 0; k--) {
-        lines.push(pool[Math.floor(rand() * pool.length)]!);
+    for (const quoted of [false, true]) {
+      for (let i = 0; i < 6000; i++) {
+        const lines: string[] = [];
+        for (let k = 1 + Math.floor(rand() * 4); k > 0; k--) {
+          lines.push(pool[Math.floor(rand() * pool.length)]!);
+        }
+        const body = lines.join('\n');
+        lines.push(last[Math.floor(rand() * last.length)]!);
+        const text = (quoted ? lines.map((l) => (l === '' ? '>' : `> ${l}`)) : lines).join('\n');
+        const says = unsound(text);
+        if (says) found++;
+        if (/(?:^|\n)(?:> )? {4}/.test(body)) continue;
+        expect(says && readsAsItem(text), JSON.stringify(text)).toBe(false);
       }
-      lines.push(last[Math.floor(rand() * last.length)]!);
-      const text = lines.join('\n');
-      const says = unsound(text);
-      if (says) found++;
-      expect(says && readsAsItem(text), JSON.stringify(text)).toBe(false);
     }
-    expect(found).toBeGreaterThan(200);
+    expect(found).toBeGreaterThan(400);
   });
 });
