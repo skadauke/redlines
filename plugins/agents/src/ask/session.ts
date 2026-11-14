@@ -293,7 +293,22 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     try {
       const agents = await deps.agents.list();
       if (mine !== epoch) return;
-      agent = pick(agents, question);
+      // An agent with no toolbox (an OpenClaw agent) has no `view` to read the selection with: it
+      // is sent the document and the thread of a comment, and answers there. Ask never picks one,
+      // and says so when the question names one, rather than answering it with another agent.
+      const named = mentionedAgents(question, agents)[0];
+      const without = agents.find((other) => other.id === named && other.toolbox === false);
+      if (without) {
+        return fail(
+          mine,
+          without,
+          `${without.name} answers in a comment’s thread, not in Ask: write the question as a comment.`,
+        );
+      }
+      agent = pick(
+        agents.filter((other) => other.toolbox !== false),
+        question,
+      );
       if (!agent) {
         return fail(
           mine,

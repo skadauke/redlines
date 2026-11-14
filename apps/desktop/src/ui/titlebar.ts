@@ -1,8 +1,10 @@
 // The title bar (design §5.1): part of the page, with the file name centered and three icons and
 // no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover. The file name says how many words the document has, and when it was last
-// saved, on hover, and a double-click on it renames the document. A small document icon beside it
-// drags the file, as a native title bar's proxy icon does.
+// their menus on hover, and a click on either does what it does most often: the eye switches
+// between Clean and Redlines, the pen turns Track Changes on and off. Each says what a click will
+// do, with its key, in a hint. The file name says how many words the document has, and when it was
+// last saved, on hover, and a double-click on it renames the document. A small document icon beside
+// it drags the file, as a native title bar's proxy icon does.
 
 import { menuViewOf } from '@redlines/editor';
 import type { MenuView, ViewMode } from '@redlines/editor';
@@ -76,6 +78,21 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
+/** The views a click on the View icon switches between: Raw is for the menu. */
+type SwitchView = Exclude<MenuView, 'raw'>;
+
+/** The views' names, and the keys the menu bar gives them (menu-model.ts, which a test compares). */
+const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Raw' };
+export const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
+/** The same keys as assistive technology names them (`aria-keyshortcuts`). */
+export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
+  clean: 'Alt+Meta+1',
+  redlines: 'Alt+Meta+2',
+  raw: 'Alt+Meta+3',
+};
+export const TRACKING_KEY = '⇧⌘E';
+export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
+
 /**
  * The bar is 52 points tall, and the fade that the text passes into under it ends 64 points down
  * (styles.css, which a test keeps these numbers in step with): the text rests below the fade, and
@@ -133,31 +150,13 @@ export function createTitleBar(
   const filesControl = element('div', 'rl-control rl-files-control');
   const filesButton = iconButton('Show files', icon('files', 17));
   filesButton.classList.add('rl-files-button');
-  const tip = element('div', 'rl-tip');
-  tip.id = 'rl-files-tip';
-  tip.setAttribute('role', 'tooltip');
-  tip.hidden = true;
-  const tipLabel = element('span', 'rl-tip-label');
-  const tipShortcut = element('span', 'rl-tip-shortcut');
-  tipShortcut.textContent = '⌃⌘S';
-  tip.append(tipLabel, tipShortcut);
-  filesButton.setAttribute('aria-describedby', tip.id);
-  filesControl.append(filesButton, tip);
-
-  let tipTimer: ReturnType<typeof setTimeout> | undefined;
-  const hideTip = () => {
-    clearTimeout(tipTimer);
-    tip.hidden = true;
-  };
-  filesButton.addEventListener('pointerenter', (event) => {
-    if (event.pointerType === 'touch') return;
-    clearTimeout(tipTimer);
-    tipTimer = setTimeout(() => (tip.hidden = false), TOOLTIP_MS);
+  filesControl.append(filesButton);
+  const filesTip = createTip(filesControl, filesButton, 'rl-files-tip', {
+    beforeShow: () => hideTips(),
   });
-  filesButton.addEventListener('pointerleave', hideTip);
   filesButton.addEventListener('mousedown', (event) => event.preventDefault());
   filesButton.addEventListener('click', () => {
-    hideTip();
+    filesTip.hide();
     actions.toggleSidebar();
   });
 
@@ -276,10 +275,28 @@ export function createTitleBar(
   const viewControl = element('div', 'rl-control');
   const viewButton = iconButton('View', icon('eye', 18));
   viewControl.append(viewButton);
+  // What a click on each will do, which the hint under it says, and the icon's description is.
+  // (A hint is not shown over its own icon's menu, which is open when the pointer has rested.)
+  const viewTip = createTip(viewControl, viewButton, 'rl-view-tip', {
+    end: true,
+    suppressed: () => viewMenu.isOpen,
+    beforeShow: () => hideTips(),
+  });
   const reviewControl = element('div', 'rl-control');
-  const reviewButton = iconButton('Review', icon('pen', 18));
+  // Named for what a click on it does, and pressed while that is on; its menu is Review.
+  const reviewButton = iconButton('Track Changes', icon('pen', 18));
   reviewControl.append(reviewButton);
+  const reviewTip = createTip(reviewControl, reviewButton, 'rl-review-tip', {
+    end: true,
+    suppressed: () => reviewMenu.isOpen,
+    beforeShow: () => hideTips(),
+  });
+  reviewButton.setAttribute('aria-keyshortcuts', TRACKING_ARIA_KEY);
   end.append(viewControl, reviewControl);
+  const tips = [filesTip, viewTip, reviewTip];
+  const hideTips = () => {
+    for (const tip of tips) tip.hide();
+  };
 
   bar.append(filesControl, titleGroup, end);
   root.append(bar);
@@ -304,11 +321,25 @@ export function createTitleBar(
   const menus: Menu[] = [];
   const neighbors = (self: () => Menu) => ({
     neighborOpen: () => menus.some((menu) => menu !== self() && menu.isOpen),
+    // A menu that opens takes the hints away: they would be over it.
     onOpen: () => {
-      hideTip();
+      hideTips();
       for (const menu of menus) if (menu !== self()) menu.close();
     },
   });
+
+  /**
+   * The one of Clean and Redlines shown last, by any means (the menu, the keys, a click on a change
+   * bar): what a click on the eye goes back to from Raw. Redlines for a window that has shown
+   * neither.
+   */
+  let lastShown: SwitchView = 'redlines';
+  /** What a click on the eye shows: Clean and Redlines in turn, and from Raw the one shown last. */
+  const viewAfterClick = (view: ViewMode): SwitchView => {
+    const shownNow = menuViewOf(view);
+    if (shownNow === 'raw') return lastShown;
+    return shownNow === 'clean' ? 'redlines' : 'clean';
+  };
 
   // All three views are there for any document (design §5.3): Redlines too, with or without
   // redlines, whether Track Changes is on or off. Redlines is checked in both its looks: Simple is
@@ -325,12 +356,18 @@ export function createTitleBar(
     label: 'View',
     container: viewControl,
     button: viewButton,
-    // ⌥⌘1 to ⌥⌘3, as in menu-model.ts.
+    // The keys are the menu bar's, as in menu-model.ts.
     entries: () => [
-      viewItem('clean', 'Clean', '⌥⌘1'),
-      viewItem('redlines', 'Redlines', '⌥⌘2'),
-      viewItem('raw', 'Raw', '⌥⌘3'),
+      viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
+      viewItem('redlines', VIEW_NAMES.redlines, VIEW_KEYS.redlines),
+      viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
     ],
+    // A click switches Clean and Redlines; Raw is for the menu.
+    activate: (event) => {
+      actions.setView(viewAfterClick(state.view));
+      // The pointer is still there: what the next click will do is said once it has rested.
+      if (event.detail > 0) viewTip.arm();
+    },
     ...neighbors(() => viewMenu),
   });
 
@@ -344,7 +381,7 @@ export function createTitleBar(
         label: 'Track changes',
         icon: 'tracking',
         iconClass: state.tracking ? 'rl-pen-on' : undefined,
-        shortcut: '⇧⌘E',
+        shortcut: TRACKING_KEY,
         checked: state.tracking,
         select: () => actions.toggleTracking(),
       },
@@ -367,6 +404,9 @@ export function createTitleBar(
         select: () => actions.toggleResolved(),
       },
     ],
+    // A click turns Track Changes on and off, as the key does. Its notice says so ("Track Changes
+    // is on"), and a hint at the bar's end would run into it in a narrow, zoomed window.
+    activate: () => actions.toggleTracking(),
     ...neighbors(() => reviewMenu),
   });
   menus.push(viewMenu, reviewMenu);
@@ -385,7 +425,16 @@ export function createTitleBar(
     const filesLabel = next.sidebarOpen ? 'Hide files' : 'Show files';
     filesButton.setAttribute('aria-label', filesLabel);
     filesButton.setAttribute('aria-pressed', String(next.sidebarOpen));
-    tipLabel.textContent = filesLabel;
+    filesTip.set(filesLabel, '⌃⌘S');
+
+    // What a click on each icon will do, said in its hint and to assistive technology.
+    const shownNow = menuViewOf(next.view);
+    if (shownNow !== 'raw') lastShown = shownNow;
+    const toView = viewAfterClick(next.view);
+    viewTip.set(`Show ${VIEW_NAMES[toView]}`, VIEW_KEYS[toView]);
+    viewButton.setAttribute('aria-keyshortcuts', VIEW_ARIA_KEYS[toView]);
+    reviewTip.set(next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes', TRACKING_KEY);
+    reviewButton.setAttribute('aria-pressed', String(next.tracking));
 
     if (penTracking !== next.tracking) {
       penTracking = next.tracking;
@@ -399,13 +448,13 @@ export function createTitleBar(
     update,
     beginRename,
     closeMenus() {
-      hideTip();
+      hideTips();
       for (const menu of menus) menu.close();
     },
     height: () => bar.getBoundingClientRect().height,
     room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
-      hideTip();
+      for (const tip of tips) tip.destroy();
       forgetPress?.();
       for (const menu of menus) menu.destroy();
       bar.remove();
@@ -420,6 +469,102 @@ function element<K extends keyof HTMLElementTagNameMap>(
   const el = document.createElement(tag);
   el.className = className;
   return el;
+}
+
+/** A hint under an icon, which says what the icon does and its key. */
+interface Tip {
+  /** What the hint says: the label, and beside it the key. */
+  set(label: string, shortcut: string): void;
+  /** Starts the pause after which it shows, which the pointer leaving ends. */
+  arm(): void;
+  hide(): void;
+  /** Takes the hint away and stops listening to the document and the window. */
+  destroy(): void;
+}
+
+interface TipOptions {
+  /** Aligns it with the right of the icon, for the icons at the bar's right end. */
+  end?: boolean;
+  /** Whether it may not show now, as while the icon's menu is open: it would be over it. */
+  suppressed?: () => boolean;
+  /** Called as it shows, so that the others can go: one hint at a time. */
+  beforeShow?: () => void;
+}
+
+/**
+ * The hint under an icon, in the dark bubble: it shows after the pointer has rested on the icon for
+ * a pause (a mouse's, not a finger's), and at once when the keyboard brings the focus there (the
+ * mouse never does: a press leaves the focus where it was), unless the icon's menu is open. It goes
+ * when the pointer leaves, the focus goes, the window loses the focus, Escape is pressed wherever
+ * the focus is, or `hide` is called, as a menu opening does. It is the icon's description for
+ * assistive technology.
+ */
+function createTip(
+  control: HTMLElement,
+  button: HTMLButtonElement,
+  id: string,
+  options: TipOptions = {},
+): Tip {
+  const tip = element('div', options.end ? 'rl-tip rl-tip-end' : 'rl-tip');
+  tip.id = id;
+  tip.setAttribute('role', 'tooltip');
+  tip.hidden = true;
+  const label = element('span', 'rl-tip-label');
+  const shortcut = element('span', 'rl-tip-shortcut');
+  tip.append(label, shortcut);
+  button.setAttribute('aria-describedby', id);
+  control.append(tip);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The last press was a finger's, whose tap leaves no pointer to rest or to leave. */
+  let touched = false;
+  // Escape dismisses a hint that is showing, wherever the focus is, and is left to whatever else
+  // it means.
+  const onEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') hide();
+  };
+  const show = () => {
+    if (options.suppressed?.()) return;
+    options.beforeShow?.();
+    tip.hidden = false;
+    document.addEventListener('keydown', onEscape, true);
+  };
+  function hide() {
+    clearTimeout(timer);
+    tip.hidden = true;
+    document.removeEventListener('keydown', onEscape, true);
+  }
+  const arm = () => {
+    clearTimeout(timer);
+    if (!touched) timer = setTimeout(show, TOOLTIP_MS);
+  };
+  button.addEventListener('pointerdown', (event) => {
+    touched = event.pointerType === 'touch';
+  });
+  button.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'touch') return;
+    touched = false;
+    arm();
+  });
+  button.addEventListener('pointerleave', hide);
+  button.addEventListener('focus', () => {
+    clearTimeout(timer);
+    show();
+  });
+  button.addEventListener('blur', hide);
+  window.addEventListener('blur', hide);
+  return {
+    set(text, key) {
+      label.textContent = text;
+      shortcut.textContent = key;
+    },
+    arm,
+    hide,
+    destroy() {
+      hide();
+      window.removeEventListener('blur', hide);
+    },
+  };
 }
 
 function iconButton(label: string, svg: SVGSVGElement): HTMLButtonElement {
