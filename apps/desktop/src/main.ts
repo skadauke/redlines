@@ -43,6 +43,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { localImageUrl } from './images.ts';
+import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
   drawnCommandsCheck,
@@ -1174,6 +1175,9 @@ if (isTauri) {
 } else {
   installShortcuts(menuModel);
   await controller.open('sample.md');
+  // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
+  // editor through this, in the plain page only. Nothing in a release build or the app has it.
+  if (import.meta.env.DEV) exposeForJourneys(editor, controller);
 }
 
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
