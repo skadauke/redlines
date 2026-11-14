@@ -41,6 +41,7 @@ import {
 } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
@@ -242,7 +243,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, frontMatter, scriptTags, emojiCodes],
+      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
