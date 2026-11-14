@@ -1,5 +1,7 @@
 # Block Editing Implementation Plan
 
+**Status (Nov 14, 2026):** Stages 1 to 6 have landed on `main` (design.md §5.14 describes what they built). In Stage 7, Task 7.1 landed in another form: a paragraph you typed takes a block change as typed text (#173, #424). Task 7.2, soft line breaks drawn as spaces, is not built.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Return, Shift-Return, Backspace, Delete, Tab and Shift-Tab edit blocks as a word processor does, with the blank lines between blocks hidden, in Clean and Redlines, with Track Changes on and off.

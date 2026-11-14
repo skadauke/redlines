@@ -55,10 +55,26 @@ and when, and the comment threads, are in a block at the end of the file.
   a tracked change. ⌘= and ⌘- zoom the whole window, and a pinch or ⌃⌘= and ⌃⌘- the text alone. A file sidebar (⌃⌘S) lists
   the folders and documents of the document's project, its repository or else its folder. Plain
   text files (`.txt`) open and save as Markdown files do, and code blocks have syntax colors. Local
-  images inside the project show in the document.
-- **Preferences** (⌘,): your name and handle, themes, zoom and text size, the editor's habits, and the
-  agents.
-- **Agents.** Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
+  images inside the project show in the document, and an image dropped on the editor, pasted or
+  chosen with Format › Image… is saved beside the document and linked, as a tracked insertion when
+  Track Changes is on. ⌘-click on a link opens it in the browser. GitHub alerts show as boxes with a
+  type menu, `<sub>` and `<sup>` as subscript and superscript (⌥⌘, and ⌥⌘.), and emoji shortcodes
+  as emoji, with a list after a colon. With two or more headings, a column of lines in the left
+  margin is the outline: hover to open it, click a heading to go there, ⌃⌘O for the keyboard.
+- **The window.** The title bar is the page: the text scrolls under it, the document icon next to
+  the name drags the file, a double-click on the name renames it, and the eye and the pen switch
+  Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
+  corner. A formatting palette opens from a handle at the bottom center and on right-click, and
+  ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.
+- **Reviewing.** The View menu lists Clean, Redlines and Raw. A click on a change bar, or View ›
+  Simple Look, switches Redlines to its simple look; a note's Accept and Reject there decide in
+  place, and say what they decide. Notes in the rail follow the view, level with the text on the
+  screen. The file records the view it was saved in, and whether Track Changes is on.
+- **Preferences** (⌘,): your name and handle, the default folder for new documents, themes, zoom and
+  text size (the text alone goes to 400%), the editor's habits (including where images are saved
+  and whether the word count shows), and the agents.
+- **Agents.** Select text and press ⌥⌘A (or Ask in the palette) to ask a question, answered in a
+  bubble beside it. Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
   thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
   thread, and any change it makes is a tracked change in its name, for you to accept or reject. An
   agent is your own Claude Code or Codex, signed in the way you signed it in; Redlines never
@@ -70,6 +86,7 @@ and when, and the comment threads, are in a block at the end of the file.
   allow it, the folder and your home folder (never hidden files and folders, or `~/Library` but
   its cloud folders). A document it cites,
   such as `plan.md:42`, opens at that line, and an image or a PDF in its default app.
+  An OpenClaw agent, added in Preferences › Agents, answers a comment that names it with a reply.
   Every run writes a log, which Help › Show Agent Logs opens.
 - **Quick Look.** Space on a Markdown file in Finder, Mail, Spotlight or the Open dialog shows it
   as the Clean view does: every change accepted, in the Default theme, under one line that says
