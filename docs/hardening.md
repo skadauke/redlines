@@ -118,7 +118,8 @@ that its starting document holds: a hidden caret, an empty paragraph in the file
 line, micromark's reading of the file against the newest view, structural warnings, more markers at
 a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, the
 history, and the file's text (`getDoc()` is the document with the open line taken back, each line
-and the ledger once: #439). A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
+and the ledger once: #439; a file with a CR is left out of that one, since its line endings come
+back as the file has them). A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
 that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
 and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
 own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker

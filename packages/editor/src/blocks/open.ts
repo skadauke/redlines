@@ -13,7 +13,7 @@
 // the empty paragraph then goes as an ordinary edit of its own, which ⌘Z brings back.
 
 import { isolateHistory } from '@codemirror/commands';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import {
   Annotation,
   type ChangeDesc,
@@ -605,8 +605,9 @@ function splitRejection(state: EditorState, line: Line, id: string): ChangeSet {
   const { doc } = state;
   const text = doc.toString();
   const marker = /^[ \t>]*(?=(?:[-*+]|\d{1,9}[.)])[ \t]*$)/.exec(line.text)?.[0].length ?? 0;
-  // The item's parent, and what stands in front of its marker.
-  let node: SyntaxNode | null = syntaxTree(state).resolveInner(line.from + marker, 1);
+  // The item's parent, and what stands in front of its marker: from a tree that reaches the item.
+  const tree = ensureSyntaxTree(state, line.to, 50) ?? syntaxTree(state);
+  let node: SyntaxNode | null = tree.resolveInner(line.from + marker, 1);
   while (node && node.name !== 'ListItem') node = node.parent;
   let parent: SyntaxNode | null = node?.parent ?? null;
   while (parent && parent.name !== 'ListItem') parent = parent.parent;
