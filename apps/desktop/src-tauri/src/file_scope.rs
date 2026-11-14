@@ -145,7 +145,7 @@ pub fn known_real(
     shown: &[PathBuf],
     path: &Path,
 ) -> Result<PathBuf, String> {
-    let refused = || format!("Redlines doesn’t look at {}.", path.display());
+    let refused = || refusal(path);
     if !path.is_absolute() {
         return Err(refused());
     }
@@ -154,20 +154,35 @@ pub fn known_real(
         return std::fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()));
     }
     let real = std::fs::canonicalize(path).map_err(|_| refused())?;
-    let hidden = |part: std::path::Component| part.as_os_str().to_string_lossy().starts_with('.');
     let in_a_project = shown
         .iter()
         // A folder that is no place, such as one that is empty, would hold every path.
         .filter(|folder| folder.is_absolute())
         .any(|folder| {
             real.strip_prefix(self::real(folder))
-                .is_ok_and(|below| !below.components().any(hidden))
+                .is_ok_and(|below| !is_hidden_below(below))
         });
     if in_a_project {
         Ok(real)
     } else {
         Err(refused())
     }
+}
+
+/// The one line that refuses a path a window may not know of. It has nothing of the file system's
+/// words, so it says nothing of whether the path is there, or where a link in it leads (design,
+/// 6.5).
+pub fn refusal(path: &Path) -> String {
+    format!("Redlines doesn’t look at {}.", path.display())
+}
+
+/// Whether a name is hidden in `below`, the path from a project's folder down to a file: a name
+/// that starts with a dot, which no sidebar lists. A project that is hidden by its own name shows
+/// what is in it, so the folder itself is not part of `below`.
+pub fn is_hidden_below(below: &Path) -> bool {
+    below
+        .components()
+        .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
 }
 
 /// Whether `scope` allows the file at `path`, as the file system plugin asks: by the file the path

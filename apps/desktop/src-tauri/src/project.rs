@@ -40,6 +40,16 @@ pub struct FileEntry {
     is_dir: bool,
 }
 
+/// Whether `path` is one as a dialog gives it: absolute, and with no `..` in it. The search for a
+/// `.git` follows the names a path holds, so one that leaves a repository on the way
+/// (`repo/../elsewhere/x.md`) would find a repository the file is not in.
+fn is_direct(path: &Path) -> bool {
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+}
+
 /// The project folder of the file at `document`, given the home folder: the nearest folder above
 /// it holding a `.git`, which is a file in a worktree, or else the document's own folder. The folder
 /// is one of the document's path as given, so that the sidebar can find the document in it.
@@ -75,6 +85,22 @@ pub fn list_shown(shown: &[PathBuf], root: &Path, folder: &Path) -> Result<Vec<F
     list_shown_with(shown, root, folder, true)
 }
 
+/// The folder `root` really is, if a sidebar shows it: `root` is one of `shown`, as given or as it
+/// really is, which a project folder that is a link is both. The window names the root, so it is
+/// not taken as it comes: a root that starts from wherever the app was started names no place the
+/// window can tell, and a project folder that does isn't one a sidebar shows.
+fn shown_root(shown: &[PathBuf], root: &Path) -> Option<PathBuf> {
+    if !root.is_absolute() {
+        return None;
+    }
+    let real_root = file_scope::real(root);
+    shown
+        .iter()
+        .filter(|project| project.is_absolute())
+        .any(|project| file_scope::real(project) == real_root)
+        .then_some(real_root)
+}
+
 /// `list_shown`, with or without the excludes that the person's git config names for every
 /// repository.
 fn list_shown_with(
@@ -84,13 +110,9 @@ fn list_shown_with(
     global_excludes: bool,
 ) -> Result<Vec<FileEntry>, String> {
     let refused = || format!("Can’t read {}.", folder.display());
-    let real_root = file_scope::real(root);
-    if !shown
-        .iter()
-        .any(|project| file_scope::real(project) == real_root)
-    {
+    let Some(real_root) = shown_root(shown, root) else {
         return Err(refused());
-    }
+    };
     // As the window names them, or as they really are: a project folder may be a link.
     let real_folder = file_scope::real(folder);
     let tries = [(root, folder), (&real_root, &real_folder)];
@@ -140,6 +162,16 @@ fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<Fi
     Ok(entries)
 }
 
+/// `openable`, if a sidebar shows the project folder `root` (one of `shown`, `shown_root`). The
+/// window names both the folder and the file, so it is not for the window to say which folder
+/// holds the file: a window that names a folder as its own root opens nothing, and the line that
+/// refuses it is that of any file that isn't inside a project, which says nothing of whether the
+/// file is there.
+fn openable_in(shown: &[PathBuf], root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let real_root = shown_root(shown, root).ok_or_else(|| cannot_open(path))?;
+    openable(&real_root, path)
+}
+
 /// The extensions, lowercase, of the files a link in a document opens in another app: images and
 /// PDFs, which open in Preview (`viewer`). Anything else may be something the system runs when it
 /// is opened, such as Terminal's settings files, links to files or web pages, or scripts.
@@ -148,8 +180,12 @@ const IMAGES_AND_PDFS: &[&str] = &[
 ];
 
 /// The file at `path`, as it really is, if it may be opened in Preview: an image or a PDF by the
-/// name of the file a link names, inside the project folder `root`, and neither a program, nor an
-/// alias, nor set to open in an app of its own. Otherwise a line to show the person.
+/// name of the file a link names, inside the project folder `root`, below no hidden name (as the
+/// sidebar lists none), and neither a program, nor an alias, nor set to open in an app of its own.
+/// Otherwise a line to show the person. The file is judged by what it really is, so a link in the
+/// project that leads out of it is no more openable than the file it leads to; and a file that is
+/// outside the folder, or hidden, gets the line of a file that isn't there, which says nothing of
+/// whether it is: the window can't find out which files are on the disk.
 fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let name = path
         .file_name()
@@ -160,10 +196,11 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     }
     let real = std::fs::canonicalize(path).map_err(|_| cannot())?;
     let real_root = std::fs::canonicalize(root).map_err(|_| cannot())?;
-    if !real.starts_with(&real_root) {
-        return Err(format!(
-            "“{name}” is outside this folder, so Redlines doesn’t open it."
-        ));
+    let known = real
+        .strip_prefix(&real_root)
+        .is_ok_and(|below| !file_scope::is_hidden_below(below));
+    if !known {
+        return Err(cannot());
     }
     let image_or_pdf = real.extension().is_some_and(|extension| {
         let extension = extension.to_string_lossy().to_lowercase();
@@ -323,14 +360,7 @@ impl Projects {
     }
 
     fn show_with(&self, file: &Path, home: Option<&Path>) {
-        // A path as a dialog gives it: absolute, and with no `..` in it. The search for a `.git`
-        // follows the names a path holds, so one that leaves a repository on the way
-        // (`repo/../elsewhere/x.md`) would show a repository the file is not in.
-        if !file.is_absolute()
-            || file
-                .components()
-                .any(|part| part == std::path::Component::ParentDir)
-        {
+        if !is_direct(file) {
             return;
         }
         let folder = sidebar_folder(file, home);
@@ -407,9 +437,7 @@ fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         format!("“{name}” is outside this folder, so Redlines doesn’t open it.")
     })?;
-    let hidden = inside
-        .components()
-        .any(|part| part.as_os_str().to_string_lossy().starts_with('.'));
+    let hidden = file_scope::is_hidden_below(inside);
     if hidden || !std::fs::metadata(&real).is_ok_and(|metadata| metadata.is_file()) {
         return Err(cannot());
     }
@@ -464,12 +492,13 @@ fn document_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Path
     document(shown_file(root, path, global_excludes)?, path)
 }
 
-/// The project folder of the document at `path` (`root_of`). Asking for the project of a document
-/// the person opened or saved is what shows it, so that the sidebar, which has the folder from this
-/// answer, can then list it (`list_folder`) and the window can learn what is in it (`real_path`):
-/// no other call has to come first.
+/// The project folder of the document at `path` (`root_of`), for a document the person opened or
+/// saved and no other path (`project_of`). Asking for the project of such a document is what shows
+/// it, so that the sidebar, which has the folder from this answer, can then list it
+/// (`list_folder`) and the window can learn what is in it (`real_path`): no other call has to come
+/// first.
 #[tauri::command(async)]
-pub fn project_root(app: AppHandle, path: String) -> ProjectRoot {
+pub fn project_root(app: AppHandle, path: String) -> Result<ProjectRoot, String> {
     project_of(
         &app.fs_scope(),
         &app.state::<Projects>(),
@@ -478,16 +507,23 @@ pub fn project_root(app: AppHandle, path: String) -> ProjectRoot {
     )
 }
 
-/// `project_root`, with the app's parts: the project of the document at `path`, shown if the scope
-/// allows the document.
+/// `project_root`, with the app's parts: the project of the document at `path`, shown, if the scope
+/// allows the document and the path is one as a dialog gives it (`is_direct`). The search for a
+/// `.git` would tell a window which paths have a repository above them, and which folder holds it,
+/// so for any other path one line refuses (`file_scope::refusal`), which says nothing of whether
+/// the path is there (design, 6.5).
 fn project_of(
     scope: &tauri::fs::Scope,
     projects: &Projects,
     path: &str,
     home: Option<&Path>,
-) -> ProjectRoot {
-    file_scope::show(scope, projects, path);
-    root_of(Path::new(path), home)
+) -> Result<ProjectRoot, String> {
+    let file = Path::new(path);
+    if is_direct(file) && file_scope::show(scope, projects, path) {
+        Ok(root_of(file, home))
+    } else {
+        Err(file_scope::refusal(file))
+    }
 }
 
 /// The entries of a folder that a sidebar shows, inside the project folder `root` that it shows
@@ -521,11 +557,13 @@ pub fn show_images(app: AppHandle, path: String) -> bool {
 }
 
 /// Opens an image or a PDF inside the project folder `root` in Preview, or on other systems in its
-/// default app (`openable`, `viewer`). Fails with a line to show the person.
+/// default app (`openable_in`, `viewer`), if a sidebar shows that folder (`Projects`). Fails with a
+/// line to show the person.
 #[tauri::command(async)]
-pub fn open_default(root: String, path: String) -> Result<(), String> {
+pub fn open_default(app: AppHandle, root: String, path: String) -> Result<(), String> {
+    let shown = app.state::<Projects>().folders();
     // The file as it really is, so that what opens is what was checked.
-    let real = openable(Path::new(&root), Path::new(&path))?;
+    let real = openable_in(&shown, Path::new(&root), Path::new(&path))?;
     let opened = viewer(&real).status().is_ok_and(|status| status.success());
     if opened {
         Ok(())
@@ -574,6 +612,24 @@ mod tests {
         .unwrap()
     }
 
+    /// The path to `path` from wherever the app was started: up to the disk's root, and down
+    /// again. It is relative, and it reaches the same place.
+    fn from_the_app(path: &Path) -> PathBuf {
+        let up: PathBuf = std::env::current_dir()
+            .unwrap()
+            .components()
+            .skip(1)
+            .map(|_| "..")
+            .collect();
+        let relative = up.join(path.strip_prefix("/").unwrap());
+        assert!(relative.is_relative());
+        assert_eq!(
+            fs::canonicalize(&relative).unwrap(),
+            fs::canonicalize(path).unwrap()
+        );
+        relative
+    }
+
     #[test]
     fn a_path_with_a_way_out_in_it_shows_no_project() {
         let disk = folder("show-way-out");
@@ -617,24 +673,127 @@ mod tests {
         scope.allow_file(disk.join("notes/plan.md")).unwrap();
         let ask = |path: PathBuf| project_of(&scope, &projects, &path.to_string_lossy(), None);
 
-        // A document the window wasn't given: the same answer as ever, and nothing is shown.
-        let answer = ask(disk.join("other/secret.md"));
-        assert_eq!(answer, root(&disk.join("other"), true, false));
+        // A document the window wasn't given: refused, and nothing is shown.
+        assert!(ask(disk.join("other/secret.md")).is_err());
         assert!(projects.folders().is_empty());
         // A document it was given, by a path that names another repository on the way and
-        // leaves it: not the project of that repository.
-        ask(disk.join("other/../notes/plan.md"));
+        // leaves it: refused, and not the project of that repository.
+        assert!(ask(disk.join("other/../notes/plan.md")).is_err());
         assert!(projects.folders().is_empty());
         // As the dialog gave it: the project is shown, which the sidebar, with the folder from this
         // answer, then lists, and no folder it doesn't show.
         let answer = ask(disk.join("notes/plan.md"));
-        assert_eq!(answer, root(&disk.join("notes"), true, false));
+        assert_eq!(answer, Ok(root(&disk.join("notes"), true, false)));
         let shown = projects.folders();
         assert_eq!(shown, [disk.join("notes")]);
         let notes = disk.join("notes");
         assert!(list_shown_with(&shown, &notes, &notes, false).is_ok());
         let other = disk.join("other");
         assert!(list_shown_with(&shown, &other, &other, false).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_window_learns_of_no_repository_by_asking_for_the_project_of_a_path_it_was_not_given() {
+        let disk = folder("project-of-probe");
+        make(
+            &disk,
+            &[
+                "probe/.git/",
+                "probe/payroll/salaries.csv",
+                "plain/notes/draft.md",
+                "notes/plan.md",
+            ],
+        );
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(disk.join("notes/plan.md")).unwrap();
+        let ask = |path: &Path| project_of(&scope, &projects, &path.to_string_lossy(), None);
+
+        // Files, folders and names that aren't there, whether or not a repository is above them:
+        // the answer was where the repository is, or that there is none.
+        for name in [
+            "probe/payroll/salaries.csv",
+            "probe/payroll",
+            "probe",
+            "probe/payroll/none.csv",
+            "plain/notes/draft.md",
+            "plain/notes",
+            "plain/notes/missing.md",
+            "notes",
+        ] {
+            assert!(ask(&disk.join(name)).is_err(), "{name}");
+        }
+        // A file it was given, by a path through folders it wasn't: the search for a repository
+        // follows the names, so it would find the one on the way.
+        assert!(ask(&disk.join("probe/payroll/../../notes/plan.md")).is_err());
+        assert!(ask(&disk.join("plain/../notes/plan.md")).is_err());
+        // A path that starts from wherever the app was started says nothing of where that is, and
+        // an empty one names no place.
+        assert!(ask(Path::new("notes/plan.md")).is_err());
+        assert!(ask(Path::new("")).is_err());
+        // Nothing of all that was shown.
+        assert!(projects.folders().is_empty());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_document_given_by_a_link_has_the_project_of_the_path_it_was_given_by() {
+        let disk = folder("project-of-link");
+        make(&disk, &["work/.git/", "work/real.md", "notes/.git/"]);
+        symlink(disk.join("work/real.md"), disk.join("notes/plan.md")).unwrap();
+        let (scope, projects) = (scope(), Projects::default());
+        // As the open dialog gives it: the path the person went through.
+        scope.allow_file(disk.join("notes/plan.md")).unwrap();
+        let ask = |path: PathBuf| project_of(&scope, &projects, &path.to_string_lossy(), None);
+
+        assert_eq!(
+            ask(disk.join("notes/plan.md")),
+            Ok(root(&disk.join("notes"), true, false))
+        );
+        assert_eq!(projects.folders(), [disk.join("notes")]);
+        // The file it is a link to is the person's too, and has its own project.
+        assert_eq!(
+            ask(disk.join("work/real.md")),
+            Ok(root(&disk.join("work"), true, false))
+        );
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn what_is_refused_of_a_project_reads_alike_whatever_is_there() {
+        let disk = folder("project-of-alike");
+        make(
+            &disk,
+            &[
+                "probe/.git/",
+                "probe/payroll/salaries.csv",
+                "plain/draft.md",
+            ],
+        );
+        let (scope, projects) = (scope(), Projects::default());
+        for name in [
+            // A file and a folder in a repository, and what isn't there.
+            "probe/payroll/salaries.csv",
+            "probe/payroll",
+            "probe/payroll/none.csv",
+            "probe",
+            // With no repository above, and by a way out through `..`.
+            "plain/draft.md",
+            "plain/none.md",
+            "plain/../probe/payroll/salaries.csv",
+            "plain/../probe/payroll/none.csv",
+            // From nowhere, and no place at all.
+            "",
+            "draft.md",
+        ] {
+            let path = disk.join(name);
+            let line = project_of(&scope, &projects, &path.to_string_lossy(), None).unwrap_err();
+            // One line, which has none of the file system's own words and none of what is there.
+            assert_eq!(
+                line,
+                format!("Redlines doesn’t look at {}.", path.display())
+            );
+        }
         fs::remove_dir_all(&disk).unwrap();
     }
 
@@ -898,6 +1057,24 @@ mod tests {
     }
 
     #[test]
+    fn a_root_that_starts_from_wherever_the_app_was_started_lists_nothing() {
+        let disk = folder("shown-relative");
+        make(&disk, &["repo/.git/", "repo/docs/plan.md"]);
+        let repo = disk.join("repo");
+        let shown = [repo.clone()];
+        assert_eq!(shown_names(&shown, &repo, &repo).unwrap(), ["docs/"]);
+        // The project as a path from the app's own folder reaches it, and names no place the window
+        // can tell: the folder it names as the root, or the one it lists, or both.
+        let relative = from_the_app(&repo);
+        assert!(shown_names(&shown, &relative, &relative).is_err());
+        assert!(shown_names(&shown, &relative, &repo).is_err());
+        assert!(shown_names(&shown, &relative, &repo.join("docs")).is_err());
+        // Nor is a folder that is shown by such a path a project: no sidebar shows it so.
+        assert!(shown_names(std::slice::from_ref(&relative), &repo, &repo).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
     fn a_sidebar_lists_no_folder_it_hides() {
         let repo = folder("shown-hidden");
         make(
@@ -1067,6 +1244,174 @@ mod tests {
         assert!(open("missing.png").is_err());
         assert!(openable(&repo, Path::new("logo.png")).is_err());
         fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn opens_an_image_only_in_a_project_a_sidebar_shows() {
+        let disk = folder("open-shown");
+        make(
+            &disk,
+            &[
+                "repo/.git/",
+                "repo/logo.png",
+                "repo/docs/figure.pdf",
+                "elsewhere/photo.png",
+                "elsewhere/sub/scan.pdf",
+            ],
+        );
+        let (repo, elsewhere) = (disk.join("repo"), disk.join("elsewhere"));
+        let shown = [repo.clone()];
+        let open = |root: &Path, path: &Path| openable_in(&shown, root, path);
+        // The folder the sidebar shows, and an image and a PDF in it.
+        assert_eq!(
+            open(&repo, &repo.join("logo.png")),
+            Ok(fs::canonicalize(repo.join("logo.png")).unwrap())
+        );
+        assert!(open(&repo, &repo.join("docs/figure.pdf")).is_ok());
+        // Named as its own root, any folder on the disk opened its images and PDFs.
+        assert!(open(&elsewhere, &elsewhere.join("photo.png")).is_err());
+        assert!(open(&elsewhere, &elsewhere.join("sub/scan.pdf")).is_err());
+        // Nor does a folder above the project, or the disk's root, serve as the root.
+        assert!(open(&disk, &elsewhere.join("photo.png")).is_err());
+        assert!(open(&disk, &repo.join("logo.png")).is_err());
+        assert!(open(Path::new("/"), &elsewhere.join("photo.png")).is_err());
+        // The project's root doesn't reach the folders around it, by name or through `..`.
+        assert!(open(&repo, &elsewhere.join("photo.png")).is_err());
+        assert!(open(&repo, &repo.join("../elsewhere/photo.png")).is_err());
+        // Nor is a folder of the project a root of its own.
+        let docs = repo.join("docs");
+        assert!(open(&docs, &docs.join("figure.pdf")).is_err());
+        // Where no sidebar shows anything, nothing is opened.
+        assert!(openable_in(&[], &repo, &repo.join("logo.png")).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_root_that_starts_from_wherever_the_app_was_started_opens_nothing() {
+        let disk = folder("open-relative");
+        make(&disk, &["repo/.git/", "repo/logo.png"]);
+        let repo = disk.join("repo");
+        let shown = [repo.clone()];
+        // The project as a path from the app's own folder reaches it.
+        let relative = from_the_app(&repo);
+        let logo = repo.join("logo.png");
+        assert!(openable_in(&shown, &repo, &logo).is_ok());
+        assert!(openable_in(&shown, &relative, &logo).is_err());
+        // An empty root names no place.
+        assert!(openable_in(&shown, Path::new(""), &logo).is_err());
+        // Nor is a folder that is shown by such a path a project: no sidebar shows it so.
+        assert!(openable_in(std::slice::from_ref(&relative), &repo, &logo).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_project_folder_that_is_a_link_opens_its_images_as_given_or_as_they_really_are() {
+        let disk = folder("open-root-link");
+        make(
+            &disk,
+            &[
+                "cloud/notes/.git/",
+                "cloud/notes/logo.png",
+                "cloud/other.png",
+            ],
+        );
+        let (real, link) = (disk.join("cloud/notes"), disk.join("notes"));
+        symlink(&real, &link).unwrap();
+        // The sidebar shows the folder by the path the window holds: through the link.
+        let shown = [link.clone()];
+        for (root, path) in [
+            (&link, link.join("logo.png")),
+            (&real, real.join("logo.png")),
+            (&link, real.join("logo.png")),
+            (&real, link.join("logo.png")),
+        ] {
+            assert!(
+                openable_in(&shown, root, &path).is_ok(),
+                "{root:?}, {path:?}"
+            );
+        }
+        // The folders around it are not the project.
+        let cloud = disk.join("cloud");
+        assert!(openable_in(&shown, &cloud, &cloud.join("other.png")).is_err());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn a_window_opens_nothing_below_a_hidden_name_in_a_project() {
+        let disk = folder("open-hidden");
+        make(
+            &disk,
+            &[
+                "repo/.git/",
+                "repo/.github/logo.png",
+                "repo/.hidden/pic.png",
+                "repo/docs/.private/scan.pdf",
+                "repo/docs/figure.png",
+                ".notes/plan.png",
+            ],
+        );
+        let repo = disk.join("repo");
+        // A link the sidebar lists, to an image in a folder it doesn't.
+        symlink(repo.join(".hidden/pic.png"), repo.join("pretty.png")).unwrap();
+        let shown = [repo.clone()];
+        let opens = |name: &str| openable_in(&shown, &repo, &repo.join(name)).is_ok();
+        for name in [
+            ".github/logo.png",
+            ".hidden/pic.png",
+            "docs/.private/scan.pdf",
+            "pretty.png",
+        ] {
+            assert!(!opens(name), "{name}");
+        }
+        assert!(opens("docs/figure.png"));
+        // A project that is hidden by its own name opens what is in it.
+        let notes = disk.join(".notes");
+        assert!(openable_in(&[notes.clone()], &notes, &notes.join("plan.png")).is_ok());
+        fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[test]
+    fn what_is_refused_to_open_reads_alike_whatever_is_there() {
+        let disk = folder("open-alike");
+        make(
+            &disk,
+            &[
+                "repo/.git/",
+                "repo/logo.png",
+                "repo/.github/logo.png",
+                "elsewhere/photo.png",
+                "elsewhere/notes.txt",
+            ],
+        );
+        let (repo, elsewhere) = (disk.join("repo"), disk.join("elsewhere"));
+        // Links in the project that lead out of it: to an image, and to what isn't there.
+        symlink(elsewhere.join("photo.png"), repo.join("out.png")).unwrap();
+        symlink(elsewhere.join("none.png"), repo.join("dangling.png")).unwrap();
+        let shown = [repo.clone()];
+        for (root, path) in [
+            // A root no sidebar shows, with the file there, and not.
+            (&elsewhere, elsewhere.join("photo.png")),
+            (&elsewhere, elsewhere.join("none.png")),
+            // Outside the project: an image that is there, a file that isn't an image, what isn't
+            // there, and the links that lead out.
+            (&repo, elsewhere.join("photo.png")),
+            (&repo, elsewhere.join("notes.txt")),
+            (&repo, elsewhere.join("none.png")),
+            (&repo, repo.join("out.png")),
+            (&repo, repo.join("dangling.png")),
+            // Below a hidden name, there or not.
+            (&repo, repo.join(".github/logo.png")),
+            (&repo, repo.join(".github/none.png")),
+            // From nowhere.
+            (&repo, PathBuf::from("logo.png")),
+        ] {
+            let line = openable_in(&shown, root, &path).unwrap_err();
+            // One line, which has none of the file system's own words, and none of what is there:
+            // only the name that was asked for.
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert_eq!(line, format!("Couldn’t open “{name}”."), "{path:?}");
+        }
+        fs::remove_dir_all(&disk).unwrap();
     }
 
     /// Sets an extended attribute, as Finder, `tar` and Archive Utility do.
