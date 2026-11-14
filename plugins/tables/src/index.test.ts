@@ -807,6 +807,20 @@ describe('the alignment commands', () => {
     expect(editor.getUiState().canUndo).toBe(false);
   });
 
+  it('are named Align Column in Undo and Redo, with Track Changes off and on', () => {
+    for (const tracking of [false, true]) {
+      const label = `Track Changes ${tracking ? 'on' : 'off'}`;
+      const editor = mount(doc, tracking);
+      select(editor, at('12'));
+      editor.commands.run('table.alignRight');
+      expect(editor.getUiState(), label).toMatchObject({ undo: 'Align Column', redo: null });
+      editor.undo();
+      expect(editor.getUiState(), label).toMatchObject({ undo: null, redo: 'Align Column' });
+      editor.redo();
+      expect(editor.getUiState(), label).toMatchObject({ undo: 'Align Column', redo: null });
+    }
+  });
+
   it('keeps a caret at the end of the last header cell in front of the mark', () => {
     const editor = mount(doc, true);
     const end = doc.indexOf('c |') + 1;
