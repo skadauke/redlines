@@ -4131,7 +4131,7 @@ const EMPTY_ITEM_IN_CODE =
  * (an empty item can't interrupt a paragraph), and the lines under it are indented four columns
  * past that text, which is code there (#143). */
 const UNDERLINED_BULLET_IN_CODE =
-  'The line break typed after this bullet makes it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject that line break first, or turn Track Changes off.';
+  'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
 
 /** The line of an empty list item, in a view. */
 const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
@@ -4300,16 +4300,20 @@ function onEmptyItem(view: DocView, position: number): boolean {
 
 /**
  * Whether the line of `view` that `position` (of the source) is on comes under a bullet that a
- * split's marker stands on and that the view reads as the underline of the text above it, with
- * blank lines between, if any (#143).
+ * split's marker stands on and that the view reads as the underline of the text above it: with, in
+ * between, the lines of its break, blank or indented four columns, which are code there (#143).
  */
 function underUnderliningBullet(text: string, view: DocView, position: number): boolean {
   const shown = view.text;
   const row = (start: number) => shown.slice(start, lineEnd(shown, start));
   const above = (start: number) => (start === 0 ? -1 : lineStart(shown, start - 1));
+  const bare = (line: string) => /^[ \t>]*-[ \t]*$/.test(line);
+  /** Whether a line is blank, or indented four columns past its quote markers. */
+  const apart = (line: string) =>
+    /^[ \t>]*$/.test(line) || /^(?:[ \t]{0,3}>[ \t]?)*(?: {4}|\t)/.test(line);
   let bullet = above(lineStart(shown, view.map.fromSource(position)));
-  while (bullet >= 0 && /^[ \t>]*$/.test(row(bullet))) bullet = above(bullet);
-  if (bullet < 0) return false;
+  while (bullet >= 0 && !bare(row(bullet)) && apart(row(bullet))) bullet = above(bullet);
+  if (bullet < 0 || !bare(row(bullet))) return false;
   const over = above(bullet);
   if (over < 0 || !underliningBullet(row(over), row(bullet))) return false;
   // The line of the file that the bullet is from holds the marker of the split.
@@ -4321,8 +4325,8 @@ function underUnderliningBullet(text: string, view: DocView, position: number): 
 function inCodeWords(text: string, edits: readonly TextChange[], views: Views): string {
   const view = views.newest(text);
   if (edits.some((edit) => onEmptyItem(view, edit.from))) return EMPTY_ITEM_IN_CODE;
-  // Text that starts with four columns is code of its own, whatever stands above it.
-  const plain = edits.filter((edit) => !/^(?: {4}|\t)/.test(edit.insert));
+  // Typed text with a line of four columns in it is code of its own, whatever stands above it.
+  const plain = edits.filter((edit) => !/(?:^|\n)(?: {4}|\t)/.test(edit.insert));
   if (plain.some((edit) => underUnderliningBullet(text, view, edit.from))) {
     return UNDERLINED_BULLET_IN_CODE;
   }

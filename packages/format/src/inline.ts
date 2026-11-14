@@ -489,18 +489,34 @@ function lazyUnder(above: string, line: string): boolean {
 }
 
 /**
+ * Whether a line can be underlined as the text of a setext heading: words, not a blank line nor the
+ * syntax of another block (a heading, a thematic break, a fence, HTML, a table row, a definition).
+ */
+function textLike(line: string): boolean {
+  const rest = line.replace(/^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
+  return (
+    rest !== '' &&
+    !/^(?:#{1,6}(?:[ \t]|$)|(?:[-*_=][ \t]*){2,}$|`{3,}|~{3,}|<|\||\[[^\]]*\]:)/.test(rest)
+  );
+}
+
+/**
  * Whether `line` is a bullet with nothing after it that reads as the setext underline of the text
  * in `above`, the line over it: an empty item can't interrupt a paragraph, and an underline is no
  * lazy line (#143).
  */
 export function underliningBullet(above: string, line: string): boolean {
-  return /^[ \t>]*-[ \t]*$/.test(line) && !BLANK.test(above) && !lazyUnder(above, line);
+  return /^[ \t>]*-[ \t]*$/.test(line) && textLike(above) && !lazyUnder(above, line);
 }
 
-/** Whether a split's marker starts on the line of `text` that `position` is on. */
+/**
+ * Whether a split's marker starts on the line of `text` that `position` is on, after a bullet and
+ * the white space after it (`-<marker>` is no item: its dash is text of the paragraph).
+ */
 function splitOnLine(text: string, hidden: readonly Range[], position: number): boolean {
   const from = lineStart(text, position);
   const to = lineEnd(text, position);
+  if (!/^[ \t>]*-[ \t]+<!--/.test(text.slice(from, to))) return false;
   return hidden.some(
     (range) => range.from >= from && range.from <= to && text.startsWith('<!--split ', range.from),
   );
@@ -545,8 +561,14 @@ export function inspectPlace(
   const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
   // A bullet that a split's marker stands on is an item in the file, whose first line is the marker,
   // wherever the view reads the bullet as the underline of the text above it: an empty item can't
-  // interrupt a paragraph. A marker beside the split's changes neither reading (#143).
-  const ofSplit = /^[ \t>]*-[ \t]*$/.test(lineText) && splitOnLine(text, hidden, position);
+  // interrupt a paragraph. An opener written beside the split's marker, for typed text (the caller
+  // gives the text after it), changes neither reading; a comment or a highlight, which has no text
+  // to write there, would stand on a line that the view reads as an underline, and stays refused
+  // (#143).
+  const ofSplit =
+    around.after !== undefined &&
+    /^[ \t>]*-[ \t]*$/.test(lineText) &&
+    splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
   if (
     !around.joined &&
