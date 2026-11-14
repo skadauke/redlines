@@ -216,9 +216,10 @@ export function alignDecision(
 
 /**
  * What an alignment change did to each column: where the delimiter row now differs from the old, with the
- * column's name, which is the text of its header cell as the page shows it (the newest view of the cell):
- * the markers of other changes in it are gone, and with them the text of a deletion, which its marker
- * holds, while the text of an insertion stays. A card and the review view name the column so.
+ * column's name, which is the newest view of its header cell, markers removed: the markers of other changes
+ * in it are gone, and with them the text of a deletion, which its marker holds, while the text of an
+ * insertion stays. Entities, escapes and emphasis stay as written. A card and the review view name the
+ * column so, by its number when no text shows.
  */
 export function alignChange(parsed: Parsed, mark: MarkRange): AlignedColumn[] {
   const segment = mark.segments[0];
