@@ -395,20 +395,26 @@ last; Raw is for the menu.
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there, with its shortcut, whatever the document holds and whether Track Changes is on or
   off, so the View menu always offers the same three views. A document without redlines looks
-  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin is
-  the only way to choose between them: the **full markup**, and the **simple look** ("Simple" for
-  short), the same text as Clean with a change bar beside each screen line that has a pending
-  change (§5.5), in its author's color, and the comments with their notes: deletions are hidden,
-  and inserted and reformatted text is plain (Word's Simple Markup). The click switches from the
-  one to the other, with the line where it was. The simple look is no view of its own: the View
-  menu has no entry for it and no key shows it, so the menu says "Redlines" in both looks.
+  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
+  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
+  line that has a pending change (§5.5), in its author's color, and the comments with their notes:
+  deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
+  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  click's line is the one under the pointer; the switch's, the one with the caret when it is on the
+  screen, else the first on it), and the look becomes the one remembered. The simple look is no view
+  of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
+  checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
+  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
+  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
 Raw shows them.
 
-Redlines remembers its look, the one a click on a change bar chose last, the full markup at first.
+Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
+the full markup at first.
 A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
@@ -490,8 +496,8 @@ mode has no counterpart in the desktop app.
   zoom, a change of font). A deletion that the view hides, as the simple look does, has its bar on
   the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
   their own. In Redlines a click on a bar switches between its two looks, the full markup and the
-  simple look, and is the only way to choose one: the bar is a target 24 px wide, only beside the
-  lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
+  simple look, as the View menu's Simple Look switch does: the bar is a target 24 px wide, only
+  beside the lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
   prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
   the printed page wraps the text differently.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -594,10 +600,13 @@ mode has no counterpart in the desktop app.
     there is about, and not one stacked down from far above. The one level with its anchor is the
     selected note (clicked, or with the caret in its anchor) while its anchor is in view, else the
     first note whose anchor is; with no anchor in view, the first note below the view, else the
-    last. A comment being written is always the one, and stays where it is while the person types
-    and scrolls. As the page scrolls, the note that is level with its anchor changes with the first
-    anchor in view, and the notes slide into place in a moment, as in Google Docs; they slide only
-    then, and not while a keystroke or a resize moves the text, and not at all under Reduce Motion.
+    last. An Ask bubble the rail lays out (§8.5) is always the one, and stays where it is while the
+    person scrolls; with none, a comment being written is, and stays where it is while the person
+    types and scrolls. With both open, the bubble stays level and the comment's box is placed
+    around it, as a note is, which may leave it lower than its text. As the page scrolls, the note
+    that is level with its anchor changes with the first anchor in view, and the notes slide into
+    place in a moment, as in Google Docs; they slide only then, and not while a keystroke or a
+    resize moves the text, and not at all under Reduce Motion.
     Selecting a note brings it level with its anchor and moves the others out of its way. The dots
     of a narrow window follow the same rule. A scroll places the notes again from what was last
     measured, only when another note is the one, and writes the notes within a screen of the page,
@@ -836,6 +845,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
 | Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
+| Simple Look (switch)           | ⌥⌘4                                                                                           | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Subscript, superscript         | ⌥⌘, and ⌥⌘. (Word's ⌘= and ⇧⌘= are Zoom In here)                                              | Ctrl+Alt+, and Ctrl+Alt+. |
@@ -1021,6 +1031,15 @@ syntax Markdown needs, and never shows them.
   is drawn as body text until the space completes it. The Paragraph menu writes the same syntax on
   an empty paragraph (Body does nothing); an empty heading, item, quote or code block stays when
   the caret leaves it, an empty paragraph goes.
+- **A paragraph you just typed takes a block change as typed text.** With Track Changes on, ⌘1 to
+  ⌘6, Quote and the lists on a paragraph that is all your own new text write their syntax into your
+  insertion, as typing it would, so there is no change of its own to decide, and accepting or
+  rejecting the insertion takes the syntax with it (format §2.6, #173). It holds for any paragraph of
+  a document you typed in one go, the title first, and wherever the caret stands in it, past its end
+  too (the End key), and with your own Return after it, as when you type in front of a paragraph.
+  Where only part of it is yours it is a change of the block, with a mark of its own; where your new
+  text starts it, or another person's change starts it or holds a line break in it, the change waits
+  for that to be decided, and the notice says so.
 - **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
   Returns pressed one after the other.
 - **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to
@@ -1515,9 +1534,17 @@ Agent edits are animated, like a streaming chat answer.
     that it changes nothing.
   - **The bubble** hangs beside the selection in the comment rail's style, and shows the agent's
     live line while it works (what it is doing, with Stop), then the answer. The selection stays
-    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going. A
-    failure stays on the line with its log, and with a button that opens Preferences where they
-    can put it right (the agent is signed out or too old), as a comment's run does.
+    tinted while it is open. Esc or a press elsewhere closes it, and stops a run still going; a
+    press on one of the rail's notes, which the bubble made room around, closes it once that click
+    is over, and not at the press, so that the notes don't move from under the pointer and the
+    click lands. A failure stays on the line with its log, and with a button that opens
+    Preferences where they can put it right (the agent is signed out or too old), as a comment's
+    run does. Where the rail shows its notes, the rail lays the bubble out among them, level with
+    the start of the selection, as it does a new comment's box (§5.7): the notes around it go up
+    or down to clear it, so that none is hidden, and they go back when it closes. A comment's box
+    open at the same time is placed around the bubble, as a note is. Where the rail shows none (a
+    narrow window, where the notes are dots; Clean; a document with no comment) the bubble hangs
+    over the page, in the margin beside the column or, with no room there, under the selection.
   - **Citations.** The answer marks the passages it used as [1], [2] and lists each under
     "Sources:" by its exact words. The bubble finds the words in the text as a reader sees it, as
     an agent's `comment` finds its quote, and makes the marker a link that selects the passage. A
@@ -1846,7 +1873,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   has one line over the text that says so and points to the app ("4 changes and 2 comments by
   Claude and Bo. Open in Redlines to review them."); the markers and the ledger never show. Front
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
-  line over its code. Raw HTML in the document is text, never live, and an image is its alt text.
+  line over its code. Raw HTML in the document is text, never live. An image that is a file in the
+  document's project is drawn; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
     It carries a bundle of `@redlines/format` (`newestView`, the count of what waits),
@@ -1871,8 +1899,20 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is
     read from all of the 4 MB; a file longer than that has no such line, since its ledger, at the
     end, isn't read.
-  - **Not yet:** images (a sandboxed extension can't read the files beside the document), and
-    thumbnails in Finder, which are a separate extension.
+  - **Images.** An image is drawn when it is a file inside the document's project, its repository
+    or else its own folder (the rule that the app's own preview loads images by, §6.5; a project
+    that is too broad, the home folder, a folder above it or the disk's root, is its document's own
+    folder alone, with no subfolder): no hidden file's or folder's, with no link leading out of the
+    project to it, and whose name and first bytes both say it is an image the preview shows (PNG,
+    JPEG, GIF, WebP, AVIF, HEIC, JPEG XL, BMP, ICO, TIFF or SVG). It loads at most 40 images, 16 MB
+    each and 48 MB in all; any other image, and any
+    that isn't there, is its alt text. An image from a server, or in a `data:` address, is never
+    loaded, so that a preview never tells a server that a file was opened. A sandboxed extension
+    can't read the files beside its document, so the extension has the sandbox's read-only
+    exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
+    Quick Look as the attachments of its answer, which the page names by `cid:` and which its
+    Content-Security-Policy allows and nothing else (`img-src cid:`).
+  - **Not yet:** thumbnails in Finder, which are a separate extension.
 
 ## 11. Security and privacy
 
@@ -1886,11 +1926,15 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
-- **The Quick Look preview reads the one file it is asked to preview,** in a sandbox with no network
-  entitlement, and draws a page with no script that loads nothing (its Content-Security-Policy says
-  so): a preview never tells a server that a file was opened. Its one exception to the sandbox is
-  JavaScriptCore's compiler, without which the renderer is 5 to 8 times as slow, which a long
-  document turns from a moment into a wait
+- **The Quick Look preview reads the file it is asked to preview, and the images that file links
+  to,** in a sandbox with no network entitlement, and draws a page with no script that loads
+  nothing but the images it was given (its Content-Security-Policy says so): a preview never tells
+  a server that a file was opened. Its two exceptions to the sandbox are JavaScriptCore's
+  compiler, without which the renderer is 5 to 8 times as slow, which a long document turns from a
+  moment into a wait, and a read-only exception for files, which the images need and nothing else
+  uses: it loads a file only inside the document's project, that is no hidden file's or folder's
+  and that no link leads out of it to, whose name and first bytes both say it is an image. What it
+  reads goes nowhere but into the page that Quick Look draws, since it has no network
   ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
   preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
@@ -1942,5 +1986,6 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
-6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order. Word for Mac gives ⌥⌘1 to
-   ⌥⌘3 to headings, which Redlines puts on ⌘1 to ⌘6; kept unless the clash proves real.
+6. **Shortcuts for the views** (§5.3): ⌥⌘1 to ⌥⌘3, in the menu's order, and ⌥⌘4 for the Simple Look
+   switch below them. Word for Mac gives ⌥⌘1 to ⌥⌘3 to headings, which Redlines puts on ⌘1 to
+   ⌘6; kept unless the clash proves real.

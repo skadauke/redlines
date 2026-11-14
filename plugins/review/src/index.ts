@@ -7,13 +7,13 @@ import type { PluginManifest } from '@redlines/plugin-api';
 import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
 import { cards } from './cards.ts';
 import { highlightsAt, highlightTitle, toggleHighlight } from './highlight.ts';
-import { rail, type RailOptions } from './rail.ts';
+import { type PinnedElement, rail, type RailOptions } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
 
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
 export { icon, type IconName } from './icons.ts';
-export type { ThreadExtras } from './rail.ts';
+export type { PinnedElement, ThreadExtras } from './rail.ts';
 
 /**
  * What the review interface is and needs. It reads and changes the document, and keeps the comments
@@ -98,6 +98,31 @@ export interface ReviewController {
    * and applies the rule once.
    */
   holdRail(held: boolean): void;
+  /**
+   * Has the rail lay out `el`, an element of the host's, among its notes, level with the text at
+   * `anchor` (a position the host keeps up with edits, which the rail reads when it syncs its
+   * notes, that is when the document or the selection changes, among other things, and not at
+   * each layout): as a new comment's box is, it stays level with its anchor, and the notes around
+   * it go up or down to clear it, so that none is covered. Ask's bubble is one. The rail sets the
+   * element's `left` and `top`, as for a note, and nothing else: it neither draws the element nor
+   * moves it in the page, and the host makes it as wide as a note (the rail's width), fills it,
+   * tells the rail when its height changes (`resized`, which measures the height again and
+   * nothing more) and takes it out of the page itself.
+   *
+   * The element is the one that stays level, and anything else is placed around it: a comment's
+   * box open at the same time is laid out like any note, below the element if its text is, and so
+   * may sit lower than its text. The rail holds one element at a time in this way: given two, the
+   * first in the text stays level, and the other is laid out around it as a note is.
+   *
+   * It returns null, and lays out nothing, where the rail doesn't show its notes in full: in a
+   * narrow editor (the notes are dots), in Clean and Raw, and when the rail has no note of its own,
+   * where the column makes no room for it, and when `anchor` throws. The host places the element
+   * itself then, as it would without a rail. One that was laid out is let go when the rail stops
+   * showing its notes, or when `anchor` throws, and `lost` is called, once, after the update that
+   * did it, for the host to place the element. Calling `release` takes it out of the layout, and
+   * the notes go back to their places.
+   */
+  pinToRail(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -201,6 +226,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       notes.closePopover();
     },
     holdRail: (held) => notes.hold(held),
+    pinToRail: (el, anchor, lost) => notes.pinToRail(el, anchor, lost),
     destroy() {
       if (destroyed) return;
       destroyed = true;

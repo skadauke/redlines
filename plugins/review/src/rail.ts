@@ -127,6 +127,47 @@ export interface Note {
   by: Handle;
   /** A reply being written whose thread is gone: its note keeps it, at the end of the document. */
   orphan?: true;
+  /** An element the host has the rail lay out (`Rail.pinElement`), which the rail doesn't draw. */
+  host?: true;
+}
+
+/**
+ * What the host holds for an element it has the rail lay out among its notes (`pinToRail`). The
+ * rail never owns the element: the host makes it, fills it and takes it out of the page. The rail
+ * holds one element at a time in this way: given two, the first in the text stays level with its
+ * anchor wherever the page is scrolled to, and the other is laid out around it as a note is.
+ */
+export interface PinnedElement {
+  /**
+   * Its height changed: the rail measures it again and lays the notes out around it, and does
+   * nothing more. It doesn't read the anchor again: the rail reads that when it syncs its notes,
+   * which is when the document or the selection changes, among other things, so an anchor that
+   * moved without either is seen at the next of those.
+   */
+  resized(): void;
+  /** Scrolls it into view once the rail has placed it, which is a moment from now. */
+  reveal(): void;
+  /**
+   * Takes it out of the layout, and the notes go back to their places. The element is left as it
+   * is, in the page, where the host put it. A host that released it is not told that the rail let
+   * go of it (`lost`), not even if the rail had, a moment before.
+   */
+  release(): void;
+}
+
+/** An element a host has the rail lay out (`Rail.pinElement`). */
+interface Hosted {
+  el: HTMLElement;
+  /**
+   * The position of the text it is level with, which the host keeps up with edits. Read when the
+   * rail syncs its notes, and not at each layout. An anchor that throws is a pin the rail can't
+   * hold: it lets the element go, as it does when it stops showing its notes in full.
+   */
+  anchor: () => number;
+  /** Told once, after the update that did it, that the rail no longer lays the element out. */
+  lost: () => void;
+  /** The host released it: it is told nothing more, whatever the rail does after that. */
+  released: boolean;
 }
 
 /**
@@ -311,6 +352,9 @@ export function pinnedNote(
 
 /** The id of the note a new comment is written in. No mark's id has a space (format §2.3). */
 const NEW_COMMENT = 'new comment';
+
+/** The start of the id of the note of an element the host has the rail lay out, and a number. */
+const HOSTED = 'hosted';
 
 /** What a draft says when a reload changed the text it was on. */
 const ANCHOR_CHANGED =
@@ -522,8 +566,14 @@ interface Layout {
   /** The notes that aren't, by index: the ones that can be the pinned one, and their anchors' lines. */
   open: number[];
   openLines: LineBox[];
-  /** The index of the selected note, or -1. */
+  /**
+   * The index of the note to keep level with its anchor if that is in view, or -1: the first
+   * element the host has laid out, else the selected note, which is a new comment's while it is
+   * written.
+   */
   selected: number;
+  /** Whether that note keeps its anchor's height wherever the page is scrolled to. */
+  stays: boolean;
   /** The note the places below were worked out around (-1: none yet), and each note's place. */
   placedFor: number;
   placed: number[];
@@ -574,6 +624,9 @@ class Rail {
   private sliding: ReturnType<typeof setTimeout> | undefined;
   /** The id of the selected note: the one clicked, or whose anchor holds the caret, or being written. */
   private selectedId: string | null = null;
+  /** The elements the host has the rail lay out among its notes, by the id of their notes. */
+  private readonly hosted = new Map<string, Hosted>();
+  private hostedCount = 0;
   /** Writes what is waiting to be written when the page goes away. */
   private readonly onPageHide = () => this.keeper?.flush();
   /** The host put the view at a place of its own, which drafts given back leave as it is. */
@@ -813,6 +866,9 @@ class Rail {
     if (shown && writing) notes.push(writing);
     // A stable sort, as in `notesIn`.
     notes.sort((a, b) => a.pos - b.pos);
+    // The host's elements stay while the rail shows its notes in full: not as dots, and not with
+    // no note of its own, which is also what Clean and Raw leave it.
+    if (this.hosted.size && (this.compact || !notes.length)) this.dropHosted();
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
     this.selectedId = selected?.id ?? null;
@@ -846,7 +902,7 @@ class Rail {
         if (at !== el) layer.insertBefore(el, at ?? null);
       }
     });
-    this.notes = notes;
+    this.notes = this.hosted.size ? this.withHosted(notes, state) : notes;
     // A note that is gone leaves no height behind.
     const here = new Set(notes.map(({ id }) => id));
     for (const id of this.heightOf.keys()) if (!here.has(id)) this.heightOf.delete(id);
@@ -925,6 +981,9 @@ class Rail {
     const parked: boolean[] = [];
     let again = false;
     const heights = notes.map(({ id }, i) => {
+      // An element of the host's is never parked, and has the height it has.
+      const hosted = this.hosted.get(id);
+      if (hosted) return hosted.el.offsetHeight;
       const note = this.views.get(id);
       if (!note) return 0;
       const line = lines[i];
@@ -953,6 +1012,11 @@ class Rail {
     const settled = settledOf(notes);
     // A resolved note gives way, and is never the one that keeps its anchor's height.
     const open = notes.flatMap((_, i) => (settled?.[i] ? [] : [i]));
+    // An element of the host's keeps its anchor's height, as a new comment being written does, and
+    // takes precedence: with both, the element stays level and the comment's box is placed around it
+    // as any note is, which may leave it lower than its text. With several elements, the first in
+    // the text is the one.
+    const level = notes.findIndex(({ host }) => host);
     return {
       notes,
       compact,
@@ -966,7 +1030,8 @@ class Rail {
       settled,
       open,
       openLines: open.map((i) => lines[i] ?? { top: 0, bottom: 0 }),
-      selected: notes.findIndex(({ id }) => id === this.selectedId),
+      selected: level >= 0 ? level : notes.findIndex(({ id }) => id === this.selectedId),
+      stays: level >= 0 || this.selectedId === NEW_COMMENT,
       placedFor: -1,
       placed: [],
     };
@@ -1027,6 +1092,8 @@ class Rail {
     this.dom.style.left = this.compact
       ? `${layout.edge + DOT_OFFSET * k}px`
       : `${layout.edge - RAIL_WIDTH * k}px`;
+    // The host's elements are laid out with the notes: the same left, and a top of their own.
+    for (const { el } of this.hosted.values()) el.style.left = this.dom.style.left;
     this.layout = layout;
     this.place(layout, layout.view, true);
   }
@@ -1038,15 +1105,16 @@ class Rail {
    * notes within a screen of it, and with `full`, every note that moved.
    */
   private place(layout: Layout, seen: Span, full: boolean): void {
-    const { open, openLines, selected } = layout;
+    const { open, openLines, selected, stays } = layout;
     const pinned =
       open[
         pinnedNote(
           openLines,
           seen,
           open.indexOf(selected),
-          // A new comment being written stays where it is, wherever the page is scrolled to.
-          this.selectedId === NEW_COMMENT,
+          // An element of the host's, else a new comment being written, stays where it is,
+          // wherever the page is scrolled to.
+          stays,
         )
       ] ?? 0;
     const arranged = pinned !== layout.placedFor;
@@ -1107,8 +1175,14 @@ class Rail {
     layout.notes.forEach(({ id }, i) => {
       const view = this.views.get(id);
       const top = placed[i];
-      if (!view || top === undefined) return;
+      if (top === undefined) return;
       const height = layout.heights[i] ?? 0;
+      if (!view) {
+        // The host's element, which the rail lays out in the full rail only.
+        const hosted = this.hosted.get(id);
+        if (hosted && !compact) set(hosted.el, top, height);
+        return;
+      }
       if (compact) {
         set(view.dot, top, DOT_SIZE * k);
         set(view.dom, top - POPOVER_LIFT * k, height);
@@ -1156,6 +1230,8 @@ class Rail {
     this.compact = compact;
     // What was read is for the other layout: a scroll before the next measure leaves it be.
     this.layout = null;
+    // The dots hold no element of the host's: they are let go, and the layout is of the notes.
+    if (compact && this.hosted.size) this.sync(this.view.state);
     this.dom.classList.toggle('rl-rail-compact', compact);
     // A new comment being written stays in sight, with the keyboard in its box.
     const writing = compact && this.views.has(NEW_COMMENT);
@@ -1258,6 +1334,109 @@ class Rail {
       read: () => null,
       write: () => el.scrollIntoView({ block: 'nearest' }),
     });
+  }
+
+  /**
+   * Lays out `el`, an element of the host's, among the notes, level with `anchor`: a position in
+   * the text, which the host keeps up with edits. As a new comment's box is, it stays level with
+   * its anchor wherever the page is scrolled to, and the notes around it go up or down to clear
+   * it, so that none is covered. The rail sets its `left` and `top`, as for a note, and neither
+   * draws it nor moves it in the page: the host makes it as wide as a note, fills it and tells the
+   * rail when its height changes (`resized`).
+   *
+   * The element is the one that stays level, and anything else is placed around it: a comment's
+   * box open at the same time is laid out like any note, below the element if its text is, and so
+   * may sit lower than its text. The rail holds one element at a time in this way: given two, the
+   * first in the text stays level, and the other is laid out around it as a note is.
+   *
+   * The rail reads `anchor` when it syncs its notes, which is when the document or the selection
+   * changes, among other things, and not at each layout: `resized` measures the element's height
+   * again and nothing more.
+   *
+   * The rail lays out only what it shows in full. In a narrow editor, where the notes are dots, and
+   * while it has no note of its own, as in Clean and Raw, or in a document with no comment (the
+   * column makes room for notes only), it takes nothing, and returns null: the host places the
+   * element as it would without a rail. One it holds is let go when it stops showing them, and
+   * `lost` is called once, after the update that did it (a host that places the element reads the
+   * layout, which an update doesn't allow), for the host to place the element then. An `anchor`
+   * that throws is a pin the rail can't hold either: null where it throws as the element is
+   * pinned, and a loss, like any other, where it throws later.
+   */
+  pinElement(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null {
+    if (this.destroyed || this.compact || !this.notes.some((note) => !note.host)) return null;
+    // Refused here, and not taken and then lost in the sync below: a host that pins again as soon as
+    // it is told of a loss (Ask does) would be told of another, and so on.
+    try {
+      anchor();
+    } catch {
+      return null;
+    }
+    const id = `${HOSTED} ${++this.hostedCount}`;
+    const hosted: Hosted = { el, anchor, lost, released: false };
+    this.hosted.set(id, hosted);
+    // Wherever it was placed before, by the host or by this rail, was not for this layout.
+    this.written.delete(el);
+    this.sync(this.view.state);
+    const mine = () => this.hosted.get(id) === hosted;
+    return {
+      resized: () => {
+        if (mine()) this.measure();
+      },
+      reveal: () => {
+        if (mine()) this.reveal(el);
+      },
+      release: () => {
+        // The host's own doing, though the rail may have let go of the element before: whatever
+        // it had queued to tell the host of that goes unsaid.
+        hosted.released = true;
+        if (!mine()) return;
+        this.hosted.delete(id);
+        this.sync(this.view.state);
+      },
+    };
+  }
+
+  /**
+   * The rail stops laying out the host's elements: its notes are dots, or not shown, or it has none
+   * of its own. Each is told, once this update is over, and places itself.
+   */
+  private dropHosted(): void {
+    for (const hosted of this.hosted.values()) this.lose(hosted);
+    this.hosted.clear();
+  }
+
+  /**
+   * Tells the host, once the update that is under way is over, that the rail no longer lays its
+   * element out: not if the host releases it first, which is its own way of saying the same.
+   */
+  private lose(hosted: Hosted): void {
+    queueMicrotask(() => {
+      if (!hosted.released) hosted.lost();
+    });
+  }
+
+  /**
+   * `notes` and the host's elements among them, in the order of their anchors. The anchors are
+   * read here, and an anchor is the host's code, run in an update: one that threw would have the
+   * editor switch the whole rail off. The element it belongs to is let go instead.
+   */
+  private withHosted(notes: readonly Note[], state: EditorState): Note[] {
+    const by = this.ctx.author.handle;
+    const hosted: Note[] = [];
+    for (const [id, held] of [...this.hosted]) {
+      let at: number;
+      try {
+        at = held.anchor();
+      } catch {
+        this.hosted.delete(id);
+        this.lose(held);
+        continue;
+      }
+      const pos = Math.min(Math.max(Math.trunc(at) || 0, 0), state.doc.length);
+      hosted.push({ id, pos, ranges: [], by, host: true });
+    }
+    // A stable sort, as in `notesIn`: at one place, the notes come first.
+    return [...notes, ...hosted].sort((a, b) => a.pos - b.pos);
   }
 
   /**
@@ -1372,6 +1551,7 @@ class Rail {
     });
     clearTimeout(this.closing);
     clearTimeout(this.sliding);
+    this.dropHosted();
     for (const view of this.views.values()) view.remove();
     this.dom.remove();
     this.view.scrollDOM.style.minHeight = '';
@@ -1808,6 +1988,8 @@ export interface RailControl {
    * and lets it go, applying the rule once, when the fingers lift.
    */
   hold(held: boolean): void;
+  /** Lays out an element of the host's among the notes (`Rail.pinElement`), or returns null. */
+  pinToRail(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
@@ -1848,6 +2030,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
       if (rail) rail.hold(held);
       else choices.held = held;
     },
+    pinToRail: (el, anchor, lost) => current()?.pinElement(el, anchor, lost) ?? null,
     setShowResolved(show) {
       if (choices.showResolved === show) return;
       choices.showResolved = show;

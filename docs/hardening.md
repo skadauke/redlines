@@ -120,7 +120,11 @@ a line start than before, the order of decisions, Undo, the caret in an open emp
 the history. A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
 that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
 and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
-own. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
+own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
+with the caret inside the marker and Track Changes off (`editedMarker`, seed 1140 of #292, `3.‸ ship`
+and Backspace): that is the person editing the syntax, the next numbered item reads as text of the
+line as Markdown reads it, and the tracked key is refused. A key that takes a marker away from the
+caret at an item's text, or an outdent, is held to it. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
 held further: to no refusal that it does not name, and to the rule that a skipped invariant that now
 holds fails; and a script of a single Return must be taken back by Backspace. `REDLINES_FUZZ=200`
 plays 200 walks of each kind; they run in Node's default heap since #286 was fixed (they had run out
@@ -135,12 +139,17 @@ own. The file's header says how: the same file runs in a checkout whose keys are
 with `REDLINES_COST=record`, which prints the numbers; on today's main it would measure the block
 keys against themselves, and the file's imports are newer than that commit, so recording them again
 means carrying the file back to a build like it. A key may take at most twice what that build's
-took. `hidden.test.ts` holds the hidden lines' pass to a linear cost, and
+took. `hidden.test.ts` holds the hidden lines' pass to a linear cost (4,000 lines of markers may
+take at most eight times what 1,000 take: linear is four, quadratic sixteen), and
 `preview/long-document.test.ts` holds the drawing, and a keystroke, in long documents with deleted
 blocks and tables to bounds that are a multiple of the markdown parse of the document alone.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
-busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
-which CI's check job sets.
+busy machine fails a bound only when it keeps failing. Where a timing has a yardstick of the same
+kind (the hidden lines' pass at two sizes; a key in code and a key in a paragraph of the same
+document), the two take turns, so that a runner slowed for a few seconds slows both alike. A
+yardstick of another kind tracks the timing less well on CI: a key in code varied by 19 % from run
+to run against the markdown parse and by 11 % against a key in a paragraph. These run only with
+`REDLINES_COST=check` (AGENTS.md says when CI sets it).
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
@@ -190,9 +199,13 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
-- Numbered lists: Backspace on `1. a⏎   - ‸plan⏎   2. ship`, and with Track Changes off Backspace at
-  a first item above an item that a pending deletion empties; the walks of `walk-248.test.ts` fail
-  four seeds at `REDLINES_FUZZ=2000` (#292).
+- The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
+  as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
+  its list leaves that line as text, and the editor sees no change (#446).
+- Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
+  reads as a heading in some order of decisions: the format refuses a numbered sibling that would
+  become the item's first child, not an item with no text (#433; Backspace at a nested first item
+  waits for such a change since #292).
 - A prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
   changes, is written without its line breaks (#358).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite

@@ -20,6 +20,8 @@ struct PreviewRenderer {
 
     private let context: JSContext
     private let render: JSValue
+    /// The script's `redlinesImages`, if it has one: the preview's does.
+    private let images: JSValue?
     private let thrown = Thrown()
 
     /// What the context's exception handler last heard.
@@ -41,17 +43,35 @@ struct PreviewRenderer {
         }
         self.context = context
         self.render = render
+        let images = context.objectForKeyedSubscript("redlinesImages")
+        self.images = images.flatMap { $0.isUndefined ? nil : $0 }
     }
 
-    /// The page for a file. `cut` says that `text` is only the start of a longer file.
-    func html(text: String, name: String, cut: Bool) throws -> String {
+    /// The page for a file. `cut` says that `text` is only the start of a longer file. `images` are
+    /// the local images that were loaded, by the path that the document wrote and the name to show
+    /// each by: the page draws those, and any other image is its alt text.
+    func html(text: String, name: String, cut: Bool, images loaded: [String: String] = [:]) throws -> String {
         thrown.message = nil
-        let result = render.call(withArguments: [text, name, cut])
+        let json = (try? JSONEncoder().encode(loaded)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let result = render.call(withArguments: [text, name, cut, json])
         if let message = thrown.message { throw Failure.script(message) }
         guard let result, result.isString, let html = result.toString() else {
             throw Failure.script("redlinesPreview gave no page")
         }
         return html
+    }
+
+    /// The local images that the page for a file would draw, as the paths that the document wrote:
+    /// what may be loaded from beside the file (PreviewImages.swift).
+    func imageSources(text: String, cut: Bool) throws -> [String] {
+        guard let images else { return [] }
+        thrown.message = nil
+        let result = images.call(withArguments: [text, cut])
+        if let message = thrown.message { throw Failure.script(message) }
+        guard let result, result.isString, let json = result.toString(),
+              let sources = try? JSONDecoder().decode([String].self, from: Data(json.utf8))
+        else { throw Failure.script("redlinesImages gave no list") }
+        return sources
     }
 
     /// A page of the file's text, as itself, for when the renderer fails: a preview that shows

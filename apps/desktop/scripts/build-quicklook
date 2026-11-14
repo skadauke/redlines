@@ -7,8 +7,9 @@ Space on one in Finder, and in Mail, Spotlight and the Open dialog.
 
 With no argument it bundles the renderer (quicklook/src, run in JavaScriptCore), compiles the
 extension for Apple silicon and Intel (Swift, with no Xcode project: swiftc), and assembles
-quicklook/build/RedlinesPreview.appex. The extension is signed there, with the sandbox entitlement
-and the hardened runtime: ad hoc, or with the identity in APPLE_SIGNING_IDENTITY when that is set.
+quicklook/build/RedlinesPreview.appex. The extension is signed there, with its entitlements (the sandbox,
+JavaScriptCore's compiler and a read-only exception for files, for a document's images) and the
+hardened runtime: ad hoc, or with the identity in APPLE_SIGNING_IDENTITY when that is set.
 `bundle.macOS.files` in src-tauri/tauri.conf.json copies the whole folder to
 Redlines.app/Contents/PlugIns, and Tauri signs the app around it without touching what is inside
 (it signs the app and the programs it copies, never a plug-in), so the extension must be signed
@@ -35,13 +36,17 @@ workspace builds there as it always did.
 
 from __future__ import annotations
 
+import json
 import plistlib
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
 import time
+import zlib
 from pathlib import Path
 from typing import List, NoReturn, Optional
 
@@ -225,7 +230,7 @@ def build(identity: Optional[str]) -> None:
         part = BUILD / f"{NAME}-{arch}"
         swiftc(
             arch,
-            [SWIFT / "PreviewRenderer.swift", SWIFT / "extension" / "PreviewProvider.swift"],
+            [SWIFT / "PreviewRenderer.swift", SWIFT / "PreviewImages.swift", SWIFT / "extension" / "PreviewProvider.swift"],
             part,
             "-module-name", NAME,
             "-application-extension",
@@ -250,7 +255,7 @@ def build_harness() -> None:
     arch = "arm64" if platform.machine() == "arm64" else "x86_64"
     swiftc(
         arch,
-        [SWIFT / "PreviewRenderer.swift", SWIFT / "harness" / "main.swift"],
+        [SWIFT / "PreviewRenderer.swift", SWIFT / "PreviewImages.swift", SWIFT / "harness" / "main.swift"],
         HARNESS,
         "-framework", "JavaScriptCore",
         "-framework", "UniformTypeIdentifiers",
@@ -326,9 +331,21 @@ def check_layout(appex: Path, checks: Checks, signed: bool) -> None:
     shown = display(appex)
     checks.ok("<key>com.apple.security.app-sandbox</key>" in shown, f"{name} is sandboxed")
     checks.ok("com.apple.security.network" not in shown, f"{name} has no network")
-    # JavaScriptCore's compiler is all it asks for besides the sandbox (swift/RedlinesPreview.entitlements).
-    granted = re.findall(r"<key>(com\.apple\.[^<]+)</key>", shown)
-    checks.ok(sorted(granted) == ["com.apple.security.app-sandbox", "com.apple.security.cs.allow-jit"], f"{name} has the sandbox and the compiler, and no other entitlement", str(granted))
+    # The sandbox, JavaScriptCore's compiler and a read-only exception for files, which the document's
+    # images need, and no other (swift/RedlinesPreview.entitlements): the exception is for every file,
+    # and only for reading.
+    found = re.search(r"<plist.*?</plist>", shown, re.S)
+    granted = plistlib.loads(found.group(0).encode()) if found else {}
+    checks.ok(
+        granted
+        == {
+            "com.apple.security.app-sandbox": True,
+            "com.apple.security.cs.allow-jit": True,
+            "com.apple.security.temporary-exception.files.absolute-path.read-only": ["/"],
+        },
+        f"{name} has the sandbox, the compiler and a read-only exception for files, and no other entitlement",
+        str(granted),
+    )
     checks.ok(re.search(r"flags=0x[0-9a-f]+\([^)]*\bruntime\b", shown) is not None, f"{name} has the hardened runtime")
     if signed:
         checks.ok("Authority=Developer ID Application" in shown, f"{name} is signed with a Developer ID")
@@ -424,6 +441,156 @@ def fixture_checks(checks: Checks) -> None:
     large.unlink()
 
 
+def png(size: int = 8, rgb: Tuple[int, int, int] = (200, 30, 30)) -> bytes:
+    """A small picture that decodes: a square of one color."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    row = b"\x00" + bytes(rgb) * size
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(row * size)) + chunk(b"IEND", b"")
+
+
+GIF = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,"
+       b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")  # fmt: skip
+SVG = '<?xml version="1.0"?>\n<!-- A logo -->\n<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#c33"/></svg>\n'
+
+
+def image_checks(checks: Checks) -> None:
+    """The local images of a preview, in a project made for the purpose: the document links to files
+    that the extension loads, and to others that it must not, and the page draws the first and shows
+    the alt text of the second (swift/PreviewImages.swift)."""
+    script = BUILD / "preview.js"
+    with tempfile.TemporaryDirectory(prefix="redlines-images-") as folder:
+        # Outside any repository, so that the project's own `.git` is the root, and a loose folder is its own.
+        base = Path(folder).resolve()
+        project = base / "project"
+        (project / ".git").mkdir(parents=True)
+        (project / "docs" / "my pics").mkdir(parents=True)
+        (project / "images").mkdir()
+        (project / ".hidden").mkdir()
+        (project / "docs" / "local.png").write_bytes(png())
+        (project / "docs" / "my pics" / "a b.png").write_bytes(png(rgb=(30, 30, 200)))
+        (project / "images" / "ok.png").write_bytes(png(rgb=(30, 200, 30)))
+        (project / "images" / "dot.gif").write_bytes(GIF)
+        (project / "images" / "logo.svg").write_text(SVG, encoding="utf-8")
+        (project / "images" / "fake.png").write_text("This is text, whatever its name says.\n", encoding="utf-8")
+        (project / "images" / "mismatch.jpg").write_bytes(png())
+        # A document type whose subset holds `]>` in a quoted value: the second is an SVG whatever it holds,
+        # the first is an HTML page that only starts as one would, and has a script.
+        (project / "images" / "entity.svg").write_text('<!DOCTYPE svg [ <!ENTITY e "]>"> ]>\n' + SVG.split("\n", 2)[2], encoding="utf-8")
+        (project / "images" / "evil.svg").write_text('<!DOCTYPE html [ <!ENTITY e "]><svg "> ]><html><body><script>alert(1)</script></body></html>\n', encoding="utf-8")
+        (project / "images" / ".h.png").write_bytes(png())
+        (project / ".hidden" / "h.png").write_bytes(png())
+        with open(project / "images" / "big.png", "wb") as big:
+            big.write(png())
+            big.truncate(17 * 1024 * 1024)
+        (base / "outside.png").write_bytes(png())
+        (project / "link-in.png").symlink_to("images/ok.png")
+        (project / "link-out.png").symlink_to("../outside.png")
+        absolute_inside = project / "images" / "ok.png"
+        document = project / "docs" / "page.md"
+        document.write_text(
+            "# Pictures\n\n"
+            "![ok](../images/ok.png) ![local](local.png) ![spaced](my%20pics/a%20b.png) "
+            "![svg](../images/logo.svg) ![gif](../images/dot.gif) ![link in](../link-in.png) "
+            "![mismatch](../images/mismatch.jpg) ![entity](../images/entity.svg) ![windows](..\\images\\ok.png) "
+            f"![absolute]({absolute_inside}) ![again](../images/ok.png)\n\n"
+            "Refused: ![link out](../link-out.png) ![outside](../../outside.png) "
+            f"![absolute outside]({base / 'outside.png'}) ![hidden folder](../.hidden/h.png) "
+            "![hidden file](../images/.h.png) ![fake](../images/fake.png) ![evil](../images/evil.svg) "
+            "![big](../images/big.png) ![missing](../images/missing.png) ![folder](../images) "
+            "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n",
+            encoding="utf-8",
+        )
+
+        listed = subprocess.run([HARNESS, "--list-images", script, document], capture_output=True, text=True)
+        checks.ok(listed.returncode == 0, "the images of a document are listed", listed.stderr.strip())
+        found = json.loads(listed.stdout) if listed.returncode == 0 else {"asked": [], "loaded": [], "root": ""}
+        checks.ok(found["root"] == str(project) and found["whole"] is True, "the project is the repository the document is in, with its subfolders", f"{found['root']} vs {project}")
+        loaded = {row["source"]: row for row in found["loaded"]}
+        wanted = {
+            "../images/ok.png": "image/png",
+            "local.png": "image/png",
+            "my pics/a b.png": "image/png",
+            "../images/logo.svg": "image/svg+xml",
+            "../images/dot.gif": "image/gif",
+            "../link-in.png": "image/png",
+            # Named as one raster image and holding another, it is the one it holds: as the app serves it.
+            "../images/mismatch.jpg": "image/png",
+            "../images/entity.svg": "image/svg+xml",
+            "..\\images\\ok.png": "image/png",
+            str(absolute_inside): "image/png",
+        }
+        for source, kind in wanted.items():
+            checks.ok(loaded.get(source, {}).get("type") == kind, f"the image {Path(source).name} is loaded as {kind}", str(loaded.get(source)))
+        refused = [
+            "../link-out.png", "../../outside.png", str(base / "outside.png"), "../.hidden/h.png", "../images/.h.png",
+            "../images/fake.png", "../images/evil.svg", "../images/big.png", "../images/missing.png", "../images",
+        ]  # fmt: skip
+        for source in refused:
+            checks.ok(source in found["asked"] and source not in loaded, f"the image {Path(source).name} is asked for and not loaded")
+        checks.ok(not any(source.startswith(("http", "data")) for source in found["asked"]), "no address of a server or a page is asked for")
+        checks.ok(sorted(loaded) == sorted(wanted), "no other image is loaded", str(sorted(loaded)))
+        checks.ok(len({row["name"] for row in found["loaded"]}) == len(found["loaded"]), "each image has a name of its own")
+
+        page = subprocess.run([HARNESS, script, document, "--images"], capture_output=True, text=True).stdout
+        for row in found["loaded"]:
+            checks.ok(f'src="cid:{row["name"]}"' in page, f"the page draws {row['source']!r} as cid:{row['name']}")
+        for alt in ["link out", "outside", "absolute outside", "hidden folder", "hidden file", "fake", "evil", "big", "missing", "folder", "remote", "data"]:
+            checks.ok(f'<span class="rl-image">{alt}</span>' in page, f"the page shows {alt!r} as its alt text")
+        checks.ok(re.search(r'<img[^>]*src="(?!cid:)', page) is None, "the page draws no image from anywhere but its attachments")
+        checks.ok("img-src cid:" in page, "the page's policy allows images from its attachments")
+        without = subprocess.run([HARNESS, script, document], capture_output=True, text=True).stdout
+        checks.ok("<img" not in without, "without the images, the page draws none")
+
+        # A loose document, with no repository: its own folder is the project, and nothing above it.
+        loose = base / "loose"
+        (loose / "sub").mkdir(parents=True)
+        (loose / "pic.png").write_bytes(png())
+        (loose / "sub" / "p.png").write_bytes(png())
+        (base / "up.png").write_bytes(png())
+        note = loose / "note.md"
+        note.write_text("![a](pic.png) ![b](sub/p.png) ![c](../up.png)\n", encoding="utf-8")
+        listed = subprocess.run([HARNESS, "--list-images", script, note], capture_output=True, text=True)
+        found = json.loads(listed.stdout) if listed.returncode == 0 else {"loaded": [], "root": ""}
+        checks.ok(found["root"] == str(loose), "a document with no repository is its own project", found["root"])
+        checks.ok(sorted(row["source"] for row in found["loaded"]) == ["pic.png", "sub/p.png"], "it loads its own folder's images, and not those above it", str(found["loaded"]))
+
+        # A project that is too broad, the home folder, a folder above it or the disk's root, is its
+        # document's own folder alone, with no subfolder: the app treats it so, and a repository in a
+        # person's home folder (dotfiles) or a document at the top of it must not let a document
+        # reach the pictures of the whole account.
+        def broad(label: str, home: Path, note: Path, wanted: List[str], root: Path, whole: bool) -> None:
+            listed = subprocess.run([HARNESS, "--list-images", "--home", home, script, note], capture_output=True, text=True)
+            seen = json.loads(listed.stdout) if listed.returncode == 0 else {"loaded": [], "root": "", "whole": None}
+            checks.ok(sorted(row["source"] for row in seen["loaded"]) == sorted(wanted), f"{label}: loads {wanted}", str(seen["loaded"]))
+            checks.ok(seen["root"] == str(root) and seen["whole"] is whole, f"{label}: the project is {root.name}, {'with' if whole else 'without'} its subfolders", f"{seen['root']} {seen['whole']}")
+
+        account = base / "account"
+        (account / ".git").mkdir(parents=True)
+        for folder_name in ("Downloads/sub", "Pictures", "code/.git", "code/docs", "code/img"):
+            (account / folder_name).mkdir(parents=True, exist_ok=True)
+        for picture in ("Downloads/pic.png", "Downloads/sub/s.png", "Pictures/private.png", "code/img/ok.png", "top.png"):
+            (account / picture).write_bytes(png())
+        pictures = "![d](pic.png) ![s](sub/s.png) ![p](../Pictures/private.png) ![t](../top.png)\n"
+        (account / "Downloads" / "x.md").write_text(pictures, encoding="utf-8")
+        broad("a repository in the home folder", account, account / "Downloads" / "x.md", ["pic.png"], account / "Downloads", False)
+        (account / "top.md").write_text("![a](top.png) ![p](Pictures/private.png) ![s](Downloads/sub/s.png)\n", encoding="utf-8")
+        broad("a document in the home folder", account, account / "top.md", ["top.png"], account, False)
+        (account / "code" / "docs" / "page.md").write_text("![ok](../img/ok.png) ![up](../../top.png)\n", encoding="utf-8")
+        broad("a repository below the home folder", account, account / "code" / "docs" / "page.md", ["../img/ok.png"], account / "code", True)
+
+        def too_broad(folder: str, home: str) -> str:
+            return subprocess.run([HARNESS, "--too-broad", folder, home], capture_output=True, text=True).stdout.strip()
+
+        for folder, home, expected in [("/", "/Users/ada", "true"), ("/Users", "/Users/ada", "true"), ("/Users/ada", "/Users/ada", "true"),
+                                       ("/Users/ada/code", "/Users/ada", "false"), ("/Users/grace", "/Users/ada", "false"), ("/Volumes/Backup", "/Users/ada", "false")]:  # fmt: skip
+            checks.ok(too_broad(folder, home) == expected, f"{folder} is {'too broad' if expected == 'true' else 'not too broad'} a project for {home}", too_broad(folder, home))
+
+
 def check() -> None:
     checks = Checks()
     print("build-quicklook: the extension", flush=True)
@@ -434,6 +601,8 @@ def check() -> None:
     checks.ok(asked == dynamic_type("zzqmdx"), "the dynamic types are the Mac's", f"{asked} vs {dynamic_type('zzqmdx')}")
     print("build-quicklook: the renderer in JavaScriptCore", flush=True)
     fixture_checks(checks)
+    print("build-quicklook: the local images", flush=True)
+    image_checks(checks)
     checks.done()
 
 

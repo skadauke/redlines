@@ -80,11 +80,15 @@ const NARROWER =
   "This item can't get a narrower bullet: lines under it that are not part of it now would be read as part of it.";
 const AT_START =
   'A pending change or a comment starts this block, and would have to move. Decide it first.';
+const AT_START_OWN =
+  'Your new text starts this block, and would have to move. Accept or reject your new text and its line breaks first.';
 const OWN_FIRST = 'Accept or reject your other change to this block first.';
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
-const NUMBERED_CHILD =
+/** Why an item can't be outdented: the numbered item after it would become text of its own. The
+ * editor's Backspace says it in the same words (it reads the refusal, not its text). */
+export const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
 const QUOTE_TIGHT =
   "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";
@@ -297,7 +301,9 @@ function readBlock(reader: BlockReader, paragraph: Range, items = false): Block 
       if (!starts) continue;
       const ops = mark.kind === 'fmt' ? opsOf(mark, segment) : [];
       if (!ops.some((op) => op.name === 'was') || mark.entry.by !== reader.owner) {
-        throw refused(AT_START);
+        throw refused(
+          mark.kind === 'ins' && mark.entry.by === reader.owner ? AT_START_OWN : AT_START,
+        );
       }
       own = { mark, segment, ops };
       if (opener < line) {

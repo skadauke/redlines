@@ -144,6 +144,8 @@ export interface StepResult {
   /** The file before and after the step. */
   before: string;
   after: string;
+  /** The line the caret was on before the step, and its column in it. */
+  caretLine: { text: string; col: number };
 }
 
 export interface ScriptResult {
@@ -566,6 +568,9 @@ export function runScript(script: Script): ScriptResult {
     const unread = unreadItems(start);
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
+      const { head } = editor.view.state.selection.main;
+      const caretOn = editor.view.state.doc.lineAt(head);
+      const caretLine = { text: caretOn.text, col: head - caretOn.from };
       const handled = play(editor, step);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
@@ -575,7 +580,7 @@ export function runScript(script: Script): ScriptResult {
           `step ${i + 1} (${JSON.stringify(step)}): ${more} more lines start an item than micromark reads in ${notation(bodyOf(editor.getDoc()))}`,
         );
       }
-      return { step, handled, before, after: editor.getDoc() };
+      return { step, handled, before, after: editor.getDoc(), caretLine };
     });
     const result: ScriptResult = {
       script,
