@@ -254,37 +254,103 @@ describe('the linked issues', () => {
         on: { caret: '- a⏎  - b<del ⏎    - >⏎  - ‸c' },
       },
       // The text of a nested item deleted again. Under a line of text an empty bullet is the
-      // underline of a heading and an empty numbered item is more of the text, so the item the
-      // person typed in (Return, Tab, text) and emptied by Backspace is open again, as it was before
-      // the text: the file never held it, and read the text above as a heading while the editor drew
-      // an empty item.
+      // underline of a heading and an empty numbered item is more of the text, so the file must not
+      // hold the item the person typed in (Return, Tab, text) once Backspace has emptied it: it held
+      // its marker alone, which read the text above it as a heading while the editor drew an empty
+      // item. Track Changes off, on a plain line: the item is open again, as it was before the text.
+      // Track Changes on, text of the author's own: the item goes whole with it, as the author's own
+      // pending text does (nothing of it is left to decide).
       {
-        name: '#204: Backspace over the only character of a new nested item: the item is open',
+        name: '#204: Backspace over the only character of a new nested item',
         doc: '- one‸',
         keys: ['Enter', 'Tab', { type: 'x' }, 'Backspace'],
         off: { file: '- one', caret: '- one⏎  - ‸' },
-        on: { file: '- one', caret: '- one<split>⏎  - ‸' },
-      },
-      {
-        name: '#204: …and the next Backspace takes it away',
-        doc: '- one‸',
-        keys: ['Enter', 'Tab', { type: 'x' }, 'Backspace', 'Backspace'],
-        off: { file: '- one', caret: '- one‸' },
         on: { file: '- one', caret: '- one‸' },
       },
       {
-        name: '#204: …or text typed in it again is written',
+        name: '#204: …the next Backspace takes the open item away (tracked: it went with the character)',
+        doc: '- one‸',
+        keys: ['Enter', 'Tab', { type: 'x' }, 'Backspace', 'Backspace'],
+        off: { file: '- one', caret: '- one‸' },
+        on: { file: '- on<del e>' },
+      },
+      {
+        name: '#204: …or text typed after it is written (tracked: on the line above)',
         doc: '- one‸',
         keys: ['Enter', 'Tab', { type: 'x' }, 'Backspace', { type: 'y' }],
         off: { file: '- one⏎  - y' },
-        on: { file: '- one<ins><split>⏎  - y</ins>' },
+        on: { file: '- one<ins>y</ins>' },
       },
       {
         name: '#204: a numbered step, typed in and deleted',
         doc: '1. one‸',
         keys: ['Enter', 'Tab', { type: 'x' }, 'Backspace'],
         off: { file: '1. one', caret: '1. one⏎   1. ‸' },
-        on: { file: '1. one', caret: '1. one<split>⏎   1. ‸' },
+        on: { file: '1. one', caret: '1. one‸' },
+      },
+      {
+        name: '#204: Delete in front of the only character of an item the file holds',
+        doc: '- one⏎  - ‸x',
+        keys: ['Delete'],
+        off: { file: '- one', caret: '- one⏎  - ‸' },
+        on: { caret: '- one‸<del ⏎  - x>' },
+      },
+      // The review of #426: an item whose line holds a marker, or whose break is another person's
+      // split, is not opened (the take-back would decide their change, and the ledger it drops
+      // made the file text twice, #439). Track Changes on, the author's own pending item goes whole.
+      {
+        name: '#204: a pending item of the author’s own, reopened from the file, its character deleted',
+        doc: '- one<ins><split>⏎  - x‸</ins>',
+        keys: ['Backspace'],
+        on: { file: '- one' },
+        skipOff: {
+          render:
+            'Track Changes off with the item’s insertion pending on its line: the plain key leaves the marker alone (#442)',
+        },
+      },
+      {
+        name: '#204: the same with an item after it',
+        doc: '- one<ins><split>⏎  - x‸</ins>⏎- two',
+        keys: ['Backspace'],
+        on: { file: '- one⏎- two' },
+        skipOff: {
+          render:
+            'Track Changes off with the item’s insertion pending on its line: the plain key leaves the marker alone (#442)',
+        },
+      },
+      {
+        name: '#204: the item’s break is another person’s split: it stays, and is not decided',
+        doc: '- one<split>⏎  - x‸',
+        others: 'bo',
+        keys: ['Backspace'],
+        off: { file: '- one<split>⏎  - ' },
+        on: {
+          file: '- one<split>⏎  - x',
+          refusal:
+            "A line break that someone inserted can't be deleted together with other text until that change is decided.",
+        },
+        skipOff: {
+          'list-reads':
+            'The plain key leaves the marker of an item with a pending break alone (#442)',
+        },
+      },
+      {
+        name: '#204: Delete in an empty nested item whose break is another person’s split: refused',
+        doc: '- one<split>⏎  - ‸⏎- two',
+        others: 'bo',
+        keys: ['Delete'],
+        off: { file: '- one<split>⏎  - ⏎- two', refusal: SELF_CHECK },
+        on: {
+          file: '- one<split>⏎  - ⏎- two',
+          refusal:
+            "This edit would leave bo's line break right next to your deletion, and deciding one would change the other. Decide bo's line break first.",
+        },
+      },
+      {
+        name: '#204: a character with a combining accent goes in two presses, as elsewhere',
+        doc: '- one⏎  - e\u0301‸',
+        keys: ['Backspace'],
+        off: { file: '- one⏎  - e' },
       },
       {
         name: '#204: an item the file holds, its one character deleted',

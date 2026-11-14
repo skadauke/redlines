@@ -310,8 +310,9 @@ function removeEmpty(
     // The format has no place for the marker of that deletion in front of an item nested under
     // another one (`  - ` alone on the line, at the start of it), tracked: the same text goes as
     // the break above it and the item, as Backspace takes it, one edit that is a substitution
-    // (#204).
-    if (!prev) return forward;
+    // (#204). Untracked the first form is refused only where a change of someone else's is next to
+    // it, which the break above it would decide: that refusal stands.
+    if (!prev || !state.field(trackingField, false)) return forward;
     return {
       ...forward,
       fallback: edit(
@@ -798,34 +799,52 @@ function inOwnInsertion(state: EditorState, from: number, to: number): boolean {
 }
 
 /**
- * Backspace over the only character of an item's text, where the item left empty is no item in
- * Markdown: an empty bullet under a line of text is the underline of a heading, and an empty numbered
- * item is more of the text (`empty-item.ts`). The character goes and the empty item is open, as it
- * was when Return and Tab made it: drawn, left out of the file, and gone with the next Backspace or
- * when the caret leaves (#204: the file held the item's marker alone, which read the text above it
- * as a heading, though the editor drew an empty item). Null where the item holds more, where the
- * empty item is sound, and with Track Changes on where the format deletes the whole item for the
- * deleted text itself (text that isn't the author's own insertion).
+ * Backspace (or Delete) over the only character of an item's text, where the item left empty is no
+ * item in Markdown: an empty bullet under a line of text is the underline of a heading, and an empty
+ * numbered item is more of the text (`empty-item.ts`). The file must not hold it (#204: it held the
+ * item's marker alone, which read the text above it as a heading, though the editor drew an empty
+ * item), so the item does not stay in it:
+ *
+ * - Track Changes off, nothing of a pending change on the item's line or at the end of the line
+ *   above: the character goes and the empty item is open, as it was when Return and Tab made it,
+ *   drawn, out of the file, written when text is typed in it, gone with the next Backspace or when
+ *   the caret leaves. An item with a marker on it can't be taken back plainly (`itemRemoval`), and
+ *   a split of someone else's at the end of the line above would be decided by it: those keep the
+ *   plain key.
+ * - Track Changes on, text of the author's own insertion that holds the item's break: the item goes
+ *   whole with the character, as the author's own pending text does.
+ * - Track Changes on, text that isn't the author's own: the format deletes the whole item itself.
+ *
+ * Null where the item holds more, where the text is more than one code point (the key then goes
+ * the way CodeMirror's does, one cluster at a time, and comes here at the last), and where the empty
+ * item would be sound.
  */
-function onlyCharOfItem(state: EditorState, block: Block, head: number): KeyEdit | null {
+function onlyCharOfItem(
+  state: EditorState,
+  block: Block,
+  head: number,
+  forward: boolean,
+): KeyEdit | null {
   if (block.kind !== 'paragraph' || block.containers.at(-1)?.kind !== 'item') return null;
   // One character and the closer of the insertion that holds it, at most: the rest is a key inside
   // the text, which costs nothing here.
   if (block.text.to - block.text.from > 64) return null;
+  const start = textStart(state, block);
+  const end = textEnd(state, block);
+  if (forward ? head !== start : head !== end) return null;
+  if ([...state.sliceDoc(start, end)].length !== 1) return null;
   const { doc } = state;
   const item = itemsAround(state, block)[0];
   const line = doc.lineAt(block.lines.from);
   if (
     !item ||
+    line.number < 2 ||
     item.line.number !== line.number ||
     doc.lineAt(item.node.to).number !== line.number
   ) {
     return null;
   }
-  const start = textStart(state, block);
-  const end = textEnd(state, block);
-  if (head !== end) return null;
-  if (!/^\P{M}\p{M}*$/u.test(state.sliceDoc(start, end))) return null;
+  // What the item is once the character is gone.
   const rest = (doc.sliceString(line.from, start) + doc.sliceString(end, line.to)).replace(
     MARKERS,
     '',
@@ -834,9 +853,18 @@ function onlyCharOfItem(state: EditorState, block: Block, head: number): KeyEdit
   if (!found || !unsoundEmptyItem(doc, line.number, found[1]!, found[2]!.length, found[3]!)) {
     return null;
   }
-  if (state.field(trackingField, false) && !inOwnInsertion(state, start, end)) return null;
+  const userEvent = forward ? 'delete.forward.block' : 'delete.backward.block';
+  const above = doc.line(line.number - 1);
+  if (state.field(trackingField, false)) {
+    // Text that isn't the author's own is deleted whole by the format; the author's own goes with
+    // the break that it made, and the item.
+    if (!inOwnInsertion(state, start, end)) return null;
+    return edit(state, [{ from: above.to, to: end }], above.to, userEvent);
+  }
+  // Nothing of a change on the line, or ending the line above, which the take-back would meet.
+  if (line.text.includes('<!--') || /-->$/.test(above.text)) return null;
   return {
-    ...edit(state, [{ from: start, to: end }], start, 'delete.backward.block'),
+    ...edit(state, [{ from: start, to: end }], start, userEvent),
     open: { at: start, assoc: 1, item: true },
   };
 }
@@ -861,7 +889,7 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   const start = textStart(state, block);
   if (head > start) {
     return (
-      onlyCharOfItem(state, block, head) ??
+      onlyCharOfItem(state, block, head, false) ??
       lastCharOfLine(state, block, head) ??
       afterHardBreak(state, block, head)
     );
@@ -923,7 +951,7 @@ export function planDelete(state: EditorState): KeyEdit | null {
   if (block.kind === 'rule') return null;
   if (isEmpty(state, block) && head >= block.text.from) return removeEmpty(state, block, userEvent);
   const end = textEnd(state, block);
-  if (head < end || head < block.text.from) return null;
+  if (head < end || head < block.text.from) return onlyCharOfItem(state, block, head, true);
   const { next } = neighbours(state, block);
   const deleted = next && onlyDeletedText(state, next);
   if (deleted) return { ...nothing(state), refusal: deleted };
