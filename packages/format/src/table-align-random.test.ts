@@ -13,7 +13,7 @@
 // `OLDER`, each with its issue: a bare header's last cell emptied under a marker, by an edit or a decision
 // (#428), typing over a delimiter of a pending bold (#299), a delimiter run typed next to another person's
 // marks (#265), a comment over a backtick, which makes decisions refused as hiding changes in code (#376),
-// and an entity or a tag that deletions cut beside a comment (#467). A state of a shape that none of them
+// and an entity, a tag or a link that deletions cut beside a comment (#467). A state of a shape that none of them
 // says fails the suite, and so does one where the mark makes another check fail first: an edit written
 // after the mark is held to the walk of every order of decisions that the writer makes (#466), so no state
 // that the mark alone makes unsound is left to draw. A tracked `_` or `*` typed at the start of a bare
@@ -28,8 +28,6 @@ import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
-import { normalizeLedger } from './ledger-order.ts';
-import { setLedger } from './ledger-write.ts';
 import { expectEveryOrderRead, readAs } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
@@ -49,6 +47,7 @@ import {
   expectNoDecisionRefused,
   file,
   thread,
+  withoutPoints,
 } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import type { TextChange } from './types.ts';
@@ -105,12 +104,6 @@ const POOL = [
 const tablesOf = (text: string) => blockLeaves(text).filter((leaf) => leaf.kind === 'table');
 const tidy = (view: string) => view.replace(/\s+$/, '');
 const firstLine = (error: unknown) => String(error).split('\n')[0] ?? '';
-
-/** The file with its point alignment marks cut out, and their entries in the ledger. */
-function withoutPoints(text: string): string {
-  const cut = text.replace(/<!--fmt \w{4} align=[^\r\n]*?-->/g, '');
-  return applyChanges(cut, setLedger(cut, normalizeLedger(cut, parse(cut).ledger)));
-}
 
 /** Every state of every order of decisions has newest and original views that are one table. */
 function expectEveryStateATable(text: string): void {
@@ -235,6 +228,10 @@ const READS_OTHERWISE = [
 /** The start of an HTML tag (a `<` and a letter, or a `/`) in the old text that a pending deletion or replacement
  * keeps, up to the end of its marker. */
 const TAG_IN_OLD_TEXT = /<!--(?:del|sub) \w{4} (?:(?!-->).)*<[a-z/]/i;
+/** The `]` of a link in the old text that a pending deletion or replacement keeps, and a comment that opens right after
+ * it, in front of the `(` that the link needs there: rejecting the deletion leaves the comment's marker between the two. */
+const LINK_IN_OLD_TEXT =
+  /<!--(?:del|sub) \w{4} (?:(?!-->).)*\]-->(?:<!--(?!cmt)[^>]*-->)*<!--cmt \w{4}-->\(/;
 
 const DELIMITER_ROW = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 
@@ -324,11 +321,11 @@ const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] 
   },
   {
     issue: '#467',
-    why: 'rejecting deletions that cut an HTML entity (an `&` and a letter), beside a comment, leaves a marker inside the entity, and the same holds of the start of an HTML tag (a `<` and a letter) that a pending deletion or replacement keeps: the file reads otherwise in some order of decisions',
+    why: 'rejecting deletions that cut an HTML entity (an `&` and a letter), beside a comment, leaves a marker inside the entity, and the same holds of the start of an HTML tag (a `<` and a letter) that a pending deletion or replacement keeps, and of a link whose `]` it keeps, a comment right after it and the `(` of the link after that: the file reads otherwise in some order of decisions',
     shape: ({ control, checks }) =>
       READS_OTHERWISE.includes(checks[0] ?? '') &&
       /<!--cmt /.test(control) &&
-      (/&[a-z]/i.test(control) || TAG_IN_OLD_TEXT.test(control)),
+      (/&[a-z]/i.test(control) || TAG_IN_OLD_TEXT.test(control) || LINK_IN_OLD_TEXT.test(control)),
   },
 ];
 
@@ -594,8 +591,13 @@ describe('a point alignment change with changes beside it, random', () => {
     const misread = ['an order reads otherwise than its view'];
     const entity = '| café | <!--del m5nn &a-->m<!--cmt q6rs-->p<!--del c2dd ;--><!--/q6rs--> ';
     const tag = 'b|<!--del f3gg <b--><!--cmt p5qm-->><!--/p5qm-->|';
+    // `REDLINES_FUZZ=300 REDLINES_SEED=24` draws the link: `[b](c)`, the `b]` deleted and a comment over `(c)`.
+    const link = '|  [<!--del j2kw b]--><!--cmt t5vw-->(c)<!--/t5vw-->  |';
     expect(shape?.(found({ control: entity, checks: misread }))).toBe(true);
     expect(shape?.(found({ control: tag, checks: misread }))).toBe(true);
+    expect(shape?.(found({ control: link, checks: misread }))).toBe(true);
+    expect(shape?.(found({ control: link.replace('cmt', 'ins'), checks: misread }))).toBe(false);
+    expect(shape?.(found({ control: link.replace('b]', 'b'), checks: misread }))).toBe(false);
     expect(
       shape?.(found({ control: tag, checks: ['the file reads otherwise than its newest view'] })),
     ).toBe(true);

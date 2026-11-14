@@ -14,13 +14,17 @@ import { bodyStart, frontMatterEnd, openerRange, prefixLength } from './blocks.t
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
+import { opsOf } from './format-ops.ts';
 import type { FormatOp } from './format-ops.ts';
 import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
+import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { randomDocument, seeded } from './random-docs.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
+import { isAlignPoint } from './table-align.ts';
+import { alignPointIn, readLine, readTables } from './table.ts';
 import { trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -1010,4 +1014,70 @@ export function expectNoDecisionRefused(
   };
   walk(text, []);
   return seen.size;
+}
+
+/**
+ * The point alignment change that a file has pending (format §3.7, #281), as a test holds it: its id, whether its mark ends
+ * the header's last cell (`alignPointIn` on that cell's content finds it where the mark is), and the old delimiter row
+ * that it holds. Undefined where the file has no such change, or its table has no header.
+ */
+export function pendingPoint(
+  text: string,
+): { id: string; ends: boolean; spec: string } | undefined {
+  const parsed = parse(text);
+  const mark = parsed.marks.find(isAlignPoint);
+  const segment = mark?.segments[0];
+  const header = readTables(text, parsed)[0]?.rows[0];
+  if (!mark || !segment || !header) return undefined;
+  const cell = readLine(text, header.from, header.to).cells.at(-1);
+  const found = cell ? alignPointIn(text, cell.contentFrom, cell.contentTo) : null;
+  const spec = opsOf(mark, segment).find((op) => op.value !== undefined)?.value ?? '';
+  return { id: mark.id, ends: found !== null && found.from === segment.open.from, spec };
+}
+
+/**
+ * While an alignment change is pending its mark is read once, with its entry in the ledger, and ends the header's last
+ * cell, and the original view has its old delimiter row (the table as it was, whatever has been done to its columns and
+ * rows since: a plain operation keeps the old row in step with the table). A file with none pending has nothing to hold.
+ * `original` is false for a merge, where a column change that is pending, once decided, leaves the old row, which is
+ * positional and never rewritten, with other columns than the original view's.
+ */
+export function expectPointHolds(label: string, text: string, original = true): void {
+  const held = pendingPoint(text);
+  if (!held) return;
+  const parsed = parse(text);
+  expect(
+    parsed.marks.filter((mark) => mark.id === held.id),
+    `${label}: the mark is read once`,
+  ).toHaveLength(1);
+  expect(parsed.ledger.marks[held.id], `${label}: the mark has its entry`).toBeDefined();
+  expect(held.ends, `${label}: the mark ends the header's last cell`).toBe(true);
+  if (!original) return;
+  expect(
+    originalView(text).text.split(/\r?\n/),
+    `${label}: the original view has the old delimiter row`,
+  ).toContain(held.spec);
+}
+
+/** The file with its point alignment marks cut out, and their entries in the ledger: the control of a file that an
+ * alignment change is suspected of making unsound (what is older than the change fails without it as well). */
+export function withoutPoints(text: string): string {
+  const cut = text.replace(/<!--fmt \w{4} align=[^\r\n]*?-->/g, '');
+  return applyChanges(cut, setLedger(cut, normalizeLedger(cut, parse(cut).ledger)));
+}
+
+/** How many markers the body of a file has as text that the scan does not read: a half of a code span or of a raw
+ * comment pairs with another across the cells and the rows of a table, and hides the markers between them. */
+export function unreadMarkers(state: string): number {
+  const raw =
+    bodyOf(state).match(
+      /<!--\/?(?:(?:ins|del|sub|fmt|hl|cmt|split) )?[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3}[ -]/g,
+    )?.length ?? 0;
+  return raw - scan(state).markers.length;
+}
+
+/** How many ledgers the scan reads in a file. A half of a comment hides a ledger that stands below it, and writes the
+ * next one after it; when the half goes with a column the first comes back into view as a ledger of its own. */
+export function ledgersRead(state: string): number {
+  return scan(state).ledgers.length;
 }

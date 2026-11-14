@@ -3,8 +3,13 @@
 // (format §3.7, "Cells apart"). Every order of decisions reads alike, all accepted is the newest view
 // and all rejected the original one; with no row or column pending, micromark reads each state as
 // its newest view. A rectangle is refused or written whole, and a refusal that speaks of a cell
-// names it and the person. `REDLINES_FUZZ` sets how many tables (6000 before a stage merges), and
-// `REDLINES_SEED` the seed.
+// names it and the person. While an alignment change is pending its mark ends the header's last
+// cell, and the original view has its old delimiter row. Some tables hold the unbalanced halves of
+// code spans and raw comments, which the scan pairs across the cells and rows of a table, and a bold
+// or italic over text that starts with a tag: a state that the alignment change is not the cause of
+// (the same file with the mark cut out fails the same check) and that holds one is left out, counted
+// by the issue it is (#376, #480, #265). `REDLINES_FUZZ` sets how many tables (6000 before a stage
+// merges), and `REDLINES_SEED` the seed.
 import { describe, expect, it } from 'vitest';
 import { addComment } from './comments.ts';
 import { applyChanges } from './changes.ts';
@@ -27,7 +32,13 @@ import {
   exactly,
   expectEveryOrderAlike,
   expectInOrder,
+  expectPointHolds,
   file,
+  pendingPoint,
+  ledgersRead,
+  unreadMarkers,
+  withoutPoints,
+  bodyOf,
 } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
@@ -66,6 +77,14 @@ const POOL = [
   'x7yz',
   'y8za',
 ];
+/** The halves that some cells hold: a backtick, and the opener or the closer of a raw comment, which the scan pairs
+ * with another across the cells and the rows of a table. */
+const HALVES = ['`', '<!--', '-->'];
+/** The delimiter run that opens a pending bold or italic right before an HTML tag (`<sup>`, `<sub>`): in the file it
+ * follows the `>` of a marker, and in the view, once the change in front of it is decided, a letter that somebody typed
+ * there. The run is left-flanking after the `>` and not after the letter, so micromark reads some order of decisions
+ * otherwise than its view (#265: a delimiter run next to another person's marks). No alignment change is in that. */
+const RUN_BEFORE_TAG = /<!--fmt \w{4} \+(?:bold|italic)-->\*+<(?:sup|sub)>/;
 const CELL_WORDS =
   /^.+'s .+ is in the cell in (?:the header|row \d+), column \d+\. Accept or reject it first, then format the cell\.$/;
 
@@ -81,6 +100,13 @@ describe('a rectangle of cells made bold or italic, random', () => {
     let withMarks = 0;
     let withStructure = 0;
     let wide = 0;
+    // The tables that end with an alignment change pending and a rectangle written, the rectangles written while one
+    // was pending, the tables that hold halves of code spans or comments, and those left out because the file
+    // without the mark fails the same (older: #376, #480).
+    let withAlignAndRect = 0;
+    let rectsBesideAlign = 0;
+    let withHalves = 0;
+    let older = 0;
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
       const padded = random() < 0.4;
@@ -91,6 +117,15 @@ describe('a rectangle of cells made bold or italic, random', () => {
           Array.from({ length: columns }, () => pick(WORDS)),
         ),
       ];
+      // One table in five holds one or two unbalanced halves, in the header or the body.
+      const halves = random() < 0.2;
+      if (halves) {
+        for (let k = 1 + Math.floor(random() * 2); k > 0; k--) {
+          const row = grid[random() < 0.4 ? 0 : 2 + Math.floor(random() * (grid.length - 2))];
+          const at = Math.floor(random() * columns);
+          if (row) row[at] = `${row[at] ?? ''}${pick(HALVES)}`;
+        }
+      }
       const widths = Array.from({ length: columns }, (_, c) =>
         Math.max(3, ...grid.map((r) => (r[c] ?? '').length)),
       );
@@ -126,6 +161,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
       const history: string[] = [];
       const ids = () => [...POOL].sort(() => random() - 0.5);
       let rectangles = 0;
+      let abandoned = false;
       for (let step = 0; step < 2 + Math.floor(random() * 3); step++) {
         const table = readTables(text, parse(text))[0];
         if (!table) break;
@@ -182,6 +218,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
                 current = applyChanges(current, made);
               }
               history.push(text);
+              if (pendingPoint(text)) rectsBesideAlign++;
               text = current;
               rectangles++;
               continue;
@@ -192,6 +229,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
               written++;
               rectangles++;
               if (ranges.length > 2) wide++;
+              if (pendingPoint(text)) rectsBesideAlign++;
             }
           } else if (kind === 'cell') {
             const target = table.rows[Math.floor(random() * rows)];
@@ -281,23 +319,69 @@ describe('a rectangle of cells made bold or italic, random', () => {
           throw error;
         }
         const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
-        const threads = parse(text).ledger.comments.map((t) => t.id);
-        if (parse(text).marks.length > 0) expectInOrder(label, threads, text);
-        let views: string[];
-        try {
-          views = [newestView(text).text, originalView(text).text];
-        } catch (error) {
-          throw new Error(`${label}: ${String(error)}\n${text}`, { cause: error });
-        }
-        for (const view of views) {
-          const found = tablesOf(view);
-          expect(found, label).toHaveLength(1);
-          const wideRow = found[0]?.rows?.[0]?.length;
+        const prev = history.at(-1) ?? '';
+        // An alignment change that is pending no longer is gone with its marker: an operation took it away, and did
+        // not leave it where the scan would not read it, with its entry lost.
+        const was = pendingPoint(prev);
+        if (was && !pendingPoint(text)) {
           expect(
-            found[0]?.rows?.every((r) => r.length === wideRow),
-            label,
-          ).toBe(true);
+            bodyOf(text),
+            `${label}: the alignment change is gone with its marker`,
+          ).not.toContain(`<!--fmt ${was.id} `);
         }
+        // A step that leaves a marker where the scan does not read it, beside a half of a code span or of a comment,
+        // or that brings a ledger that the half hid back into view as a second one, is older than the alignment
+        // change, which is held to be read (above) (#480): the table's story ends here.
+        if (
+          halves &&
+          (unreadMarkers(text) > unreadMarkers(prev) || ledgersRead(text) !== ledgersRead(prev))
+        ) {
+          abandoned = true;
+          break;
+        }
+        const sound = (state: string) => {
+          const threads = parse(state).ledger.comments.map((t) => t.id);
+          if (parse(state).marks.length > 0) expectInOrder(label, threads, state);
+          let views: string[];
+          try {
+            views = [newestView(state).text, originalView(state).text];
+          } catch (error) {
+            throw new Error(`${label}: ${String(error)}\n${state}`, { cause: error });
+          }
+          for (const view of views) {
+            const found = tablesOf(view);
+            expect(found, label).toHaveLength(1);
+            const wideRow = found[0]?.rows?.[0]?.length;
+            expect(
+              found[0]?.rows?.every((r) => r.length === wideRow),
+              label,
+            ).toBe(true);
+          }
+        };
+        try {
+          sound(text);
+        } catch (error) {
+          // The state is as unsound without the alignment change, in a table that holds a half of a code span or a
+          // comment: older (#376, #480). The table's story ends here, and is counted.
+          if (halves) {
+            let control = true;
+            try {
+              sound(withoutPoints(text));
+            } catch {
+              control = false;
+            }
+            if (!control) {
+              abandoned = true;
+              break;
+            }
+          }
+          throw error;
+        }
+        expectPointHolds(label, text);
+      }
+      if (abandoned) {
+        older++;
+        continue;
       }
       if (rectangles === 0) continue;
       const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
@@ -306,60 +390,88 @@ describe('a rectangle of cells made bold or italic, random', () => {
       if (marks.some((mark) => mark.entry.by !== 'ada' && mark.kind !== 'fmt')) withMarks++;
       const structure = /col-->|col=\d|row-->|row=\d|<!--fmt \w{4} align=/.test(text);
       if (structure) withStructure++;
-      if (marks.length <= 5) {
-        try {
-          expectEveryOrderAlike(label, text, exactly);
-          // Not where a person typed over a character of a pending format's syntax (a replacement
-          // whose old text is `*`): micromark reads the marked file's `**` otherwise there, whatever
-          // made the format change (#299). Take this out when #299 is fixed.
-          if (!structure && !/<!--sub \w{4} [^>]*[*_~`]/.test(text)) {
-            expectEveryOrderRead(label, text);
+      if (/<!--fmt \w{4} align=/.test(text)) withAlignAndRect++;
+      if (halves) withHalves++;
+      const finals = (state: string) => {
+        if (marks.length <= 5) {
+          try {
+            expectEveryOrderAlike(label, state, exactly);
+            // Not where a person typed over a character of a pending format's syntax (a replacement
+            // whose old text is `*`): micromark reads the marked file's `**` otherwise there, whatever
+            // made the format change (#299). Take this out when #299 is fixed.
+            if (!structure && !/<!--sub \w{4} [^>]*[*_~`]/.test(state)) {
+              expectEveryOrderRead(label, state);
+            }
+          } catch (error) {
+            throw new Error(`${String(error)}\n${state}`, { cause: error });
           }
-        } catch (error) {
-          throw new Error(`${String(error)}\n${text}`, { cause: error });
         }
-      }
-      const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
-      let accepted: string;
-      try {
-        accepted = applyChanges(text, acceptAll(text));
-      } catch (error) {
-        throw new Error(`${label}: accept all: ${String(error)}\n${text}`, { cause: error });
-      }
-      expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
-      const tidy = (view: string) => view.replace(/\s+$/, '');
-      expect(tidy(newestView(accepted).text), `${label}: accept all\n${text}`).toBe(
-        tidy(newestView(text).text),
-      );
-      let rejected: string;
-      try {
-        rejected = applyChanges(text, rejectAll(text));
-      } catch (error) {
-        throw new Error(
-          `${label}: reject all: ${String(error)}\n${text}\nBEFORE:\n${history.at(-1)}`,
-          {
-            cause: error,
-          },
+        const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
+        let accepted: string;
+        try {
+          accepted = applyChanges(state, acceptAll(state));
+        } catch (error) {
+          throw new Error(`${label}: accept all: ${String(error)}\n${state}`, { cause: error });
+        }
+        expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
+        const tidy = (view: string) => view.replace(/\s+$/, '');
+        expect(tidy(newestView(accepted).text), `${label}: accept all\n${state}`).toBe(
+          tidy(newestView(state).text),
         );
-      }
-      // A format change that a plain edit has since altered can't be undone and stays (§2.6).
-      expect(
-        left(rejected).filter((m) => m.kind !== 'fmt'),
-        `${label}: reject all leaves changes`,
-      ).toEqual([]);
-      if (left(rejected).length === 0) {
-        expect(tidy(originalView(rejected).text), `${label}: reject all\n${text}`).toBe(
-          tidy(originalView(text).text),
-        );
+        let rejected: string;
+        try {
+          rejected = applyChanges(state, rejectAll(state));
+        } catch (error) {
+          throw new Error(
+            `${label}: reject all: ${String(error)}\n${state}\nBEFORE:\n${history.at(-1)}`,
+            {
+              cause: error,
+            },
+          );
+        }
+        // A format change that a plain edit has since altered can't be undone and stays (§2.6).
+        expect(
+          left(rejected).filter((m) => m.kind !== 'fmt'),
+          `${label}: reject all leaves changes`,
+        ).toEqual([]);
+        if (left(rejected).length === 0) {
+          expect(tidy(originalView(rejected).text), `${label}: reject all\n${state}`).toBe(
+            tidy(originalView(state).text),
+          );
+        }
+      };
+      try {
+        finals(text);
+      } catch (error) {
+        // A table with a half of a code span or a comment (#376, #480), or a delimiter run before a tag (#265), whose
+        // file without the alignment change fails the same checks is older than the change: left out, and counted. A
+        // file that is sound without the mark and not with it fails.
+        let control = false;
+        if (halves || RUN_BEFORE_TAG.test(text)) {
+          try {
+            finals(withoutPoints(text));
+          } catch {
+            control = true;
+          }
+        }
+        if (!control) throw error;
+        older++;
       }
     }
     if (process.env['REDLINES_FUZZ_STATS']) {
       console.log(
-        `tables ${used}, written ${written}, refused for a cell ${refusedForCell}, with others' marks ${withMarks}, with rows or columns pending ${withStructure}, over more than two cells ${wide}`,
+        `tables ${used}, written ${written}, refused for a cell ${refusedForCell}, with others' marks ${withMarks}, with rows or columns pending ${withStructure}, over more than two cells ${wide}, with an alignment change pending ${withAlignAndRect} (${rectsBesideAlign} rectangles written beside one), with halves ${withHalves}, left out as older ${older}`,
       );
     }
     expect(used).toBeGreaterThan(10);
     expect(written).toBeGreaterThan(used / 3);
+    // An alignment change and a rectangle meet: tables end with one pending after a rectangle, and rectangles are
+    // written while one is. (Held at the default size and at 300 tables, as at 1500.)
+    expect(withAlignAndRect).toBeGreaterThan(0);
+    expect(rectsBesideAlign).toBeGreaterThan(0);
+    expect(withHalves).toBeGreaterThan(0);
+    // What is left out as older is a part of the tables that hold halves, which are one in five of them all.
+    expect(older).toBeLessThan(used / 4);
     if (fuzzCount(120) >= 1000) {
       expect(refusedForCell).toBeGreaterThan(0);
       expect(withMarks).toBeGreaterThan(used / 8);
