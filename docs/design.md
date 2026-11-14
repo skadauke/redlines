@@ -244,8 +244,8 @@ The window, on the desktop:
   default app for Markdown, the Quick Look preview of Markdown files, and installing the
   `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and text
   size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
-  starts on, whether line breaks show their marks, §5.5, and whether the word count shows) and
-  Agents (§8.6). Changes apply at once.
+  starts on, whether line breaks show their marks, §5.5, whether the word count shows, and
+  where images are saved, §5.10) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -419,7 +419,7 @@ A document opens in the view it was saved in, which its ledger records
 ([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
 full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
 in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment there, switches to
+in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
@@ -463,8 +463,13 @@ mode has no counterpart in the desktop app.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
-  notice makes that a deliberate choice. There is no "Just Mine" for now: a person's own tracking,
-  apart from the file's, is left for later.
+  notice makes that a deliberate choice. A file that comes to ask while it is open, when the window
+  reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
+  Track Changes turns on, under the same notice, and nothing is written, since the file asks
+  already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
+  tracking is switched off under them; the next switch they make writes the file's setting again.
+  A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
+  Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
   tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
   locked pen says why.
@@ -831,6 +836,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
+| Highlight                      | ⇧⌘H                                                                                           | Ctrl+Shift+H              |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
@@ -880,6 +886,38 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
+  in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
+  asks for files in the system's panel) all do the same. The file is copied into the folder for
+  images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
+  the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
+  over the sidebar, the title bar or the ground below the text goes where the caret is. The image
+  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
+  draws an image only while the caret is off its link, draws one just added all the same until the
+  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
+  data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
+  name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
+  folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
+  insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
+  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
+  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  person may go on writing while the images are saved: the links go in where the paste or drop was,
+  ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
+  all of it is still there; what was typed in it stays, and the links go after it. A document that
+  was replaced meanwhile gets none of the links, and the person is told, the files being where they
+  were saved.
+- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
+  `images` (the name can be changed), a folder named for the document (`plan.assets` for
+  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
+  preview loads images from, and the setting can't name another place on the disk. A document in
+  the home folder, whose project is too broad to load images from but for its own folder, takes
+  images in that folder alone, and says so for the other two. Only image files go in, by their
+  names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
+  or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
+  pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
+  browser, is left to the HTML.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
@@ -1193,13 +1231,30 @@ without each: a half-written comment is gone with the page, and nothing is saved
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
-nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+nothing in it run. The app tells a window of paths by the same two limits: the names in a folder,
+only for a project folder a sidebar shows and for the folders below it that the sidebar lists (none
+hidden, none that git ignores), and the real path of a file, links followed, only for a file the
+person opened or saved and for what is inside a project folder a sidebar shows, with no hidden name
+below the folder. A link in a project that leads out of it is no more known than the file it leads
+to, and anything else asked of gets one refusal, which says nothing of whether the path is there.
+Asking for a document's project is what shows it, once the person has opened or saved the document,
+by a path with no `..` in it, as a dialog gives it. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
 itself: a document dropped opens as one from Finder does, and is the window's, with its project's
 images, as any document the person opens is (but for the file that the window's own document icon
-dragged, dropped back on that window, which opens nothing); a folder or any other file dropped opens nothing, and
-lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
-scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
-and builds Tauri without that protocol.
+dragged, dropped back on that window, which opens nothing). Image files dropped alone, every file of
+the drop an image, are the window's to add to its document (§5.10), and are the one exception: the
+app, which has them from the system's drop, keeps them for that window and tells it how many there
+are, where they landed, and an id to ask for them by. The panel that Format › Image… shows is the
+app's too, so the window can raise a panel for image files and is given no path by it, only an id.
+The app copies the files into the folder for the document's images when the window asks, so the
+window never names a file to copy and reads none of them, and a pasted image's bytes, which the
+window has, are written the same way. What is copied is an image by its name and its first bytes, no
+larger than the preview shows, and goes inside the folder of a document the window may use and says
+it holds (the same trust as Rename and Reveal in Finder): in that folder itself, or in one folder
+named in the settings, never one that is a link out of it, and never replacing a file. A folder or
+any other file dropped opens nothing, and lets the window read nothing it couldn't before. Tauri
+adds everything dropped on a window to the scope of its own asset protocol, a folder with all it
+holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
 
 ### 6.6 Styling
 
@@ -1845,7 +1900,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   document turns from a moment into a wait
   ([releasing](releasing.md#the-quick-look-extension)).
 - **A desktop window reaches only the files the person opened or saved,** and the images its
-  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  preview loads (§6.5). It reads and writes those files and no others (but for the images it adds
+  beside its document, §5.10, which it cannot read back), and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
 - **Per-person state stays out of the file:** mode, zoom and text size, the markup view each

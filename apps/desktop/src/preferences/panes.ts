@@ -7,7 +7,13 @@ import type { SettingContribution } from '@redlines/plugin-api';
 import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
-import type { AppearanceChoice, Settings } from '../settings.ts';
+import {
+  imageFolderNameOf,
+  imageFolderNameProblem,
+  type AppearanceChoice,
+  type ImagePlace,
+  type Settings,
+} from '../settings.ts';
 import { stepSize, ZOOM_LADDER } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
@@ -592,6 +598,76 @@ function stepper(
   return group;
 }
 
+/** Where images can be saved (#308), as the Images row offers them. */
+const IMAGE_PLACES: readonly { value: ImagePlace; label: string }[] = [
+  { value: 'folder', label: 'In a folder beside the document' },
+  { value: 'assets', label: 'In a folder named for the document' },
+  { value: 'same', label: 'In the document’s folder' },
+];
+
+/** What the Images row says of where images go, for the settings as they are. */
+function whereImagesGo(settings: Settings): string {
+  switch (settings.imagePlace) {
+    case 'folder':
+      return `Saved in “${settings.imageFolderName}” next to the document.`;
+    case 'assets':
+      return 'Saved in a folder like “plan.assets” next to the document.';
+    case 'same':
+      return 'Saved next to the document.';
+  }
+}
+
+/**
+ * Images: where an image dropped or pasted into a document is saved (#308), always inside the
+ * document's folder, where the preview loads images from: in a folder beside it, called `images`
+ * unless the name is changed, in one named for the document, or in the document's own folder. The
+ * name is saved as it is typed, as long as a folder can have it; one that it can't is said so under
+ * the row, kept in the field while it is typed, and replaced by the saved name when the field is left.
+ */
+function imagesRow(deps: PaneDeps): HTMLElement {
+  const place = choice(IMAGE_PLACES, deps.settings().imagePlace, (value) => {
+    deps.update({ imagePlace: value });
+    show();
+  });
+  place.setAttribute('aria-label', 'Where images are saved');
+  const name = el('input', 'rl-pref-text');
+  name.type = 'text';
+  name.value = deps.settings().imageFolderName;
+  name.autocomplete = 'off';
+  name.spellcheck = false;
+  name.setAttribute('aria-label', 'Folder name');
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  const stack = el('div', 'rl-pref-stack');
+  stack.setAttribute('role', 'group');
+  stack.append(place, status);
+  /** The line, and the field for the folder's name where one is used, for the settings as they are. */
+  const show = () => {
+    const current = deps.settings();
+    if (current.imagePlace !== 'folder') name.remove();
+    else if (!name.isConnected) stack.insertBefore(name, status);
+    status.classList.remove('rl-pref-failure');
+    status.textContent = whereImagesGo(current);
+  };
+  name.addEventListener('input', () => {
+    const typed = imageFolderNameOf(name.value);
+    if (typed === null) {
+      // What is wrong with it, which is not always a slash.
+      status.classList.add('rl-pref-failure');
+      status.textContent = imageFolderNameProblem(name.value);
+      return;
+    }
+    deps.update({ imageFolderName: typed });
+    show();
+  });
+  name.addEventListener('blur', () => {
+    name.value = deps.settings().imageFolderName;
+    show();
+  });
+  show();
+  return row('Images', stack);
+}
+
 function editing(deps: PaneDeps): HTMLElement[] {
   const { settings, update } = deps;
   const current = settings();
@@ -625,6 +701,7 @@ function editing(deps: PaneDeps): HTMLElement[] {
       'Show word count',
       toggle(current.showWordCount, (value) => update({ showWordCount: value })),
     ),
+    imagesRow(deps),
   ];
 }
 

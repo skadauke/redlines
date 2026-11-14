@@ -391,8 +391,10 @@ export class DocumentController {
       this.#update({ dirty: false, notice: null });
     } else if (!this.#state.dirty) {
       this.#base = text;
-      this.#takeFromDisk(text);
-      this.#update({ dirty: false, notice: null });
+      // A file that newly asks everyone to track changes is read as one that is opened: the editor
+      // turns Track Changes on (`reloadDoc`), and the person is told why (design §5.4, #364).
+      const newlyAsks = this.#takeFromDisk(text);
+      this.#update({ dirty: false, notice: newlyAsks ? TRACKING_FOR_EVERYONE : null });
     } else {
       // A file changed back to the base is no conflict.
       this.#update({ notice: text === this.#base ? null : CHANGED_ON_DISK });
@@ -403,21 +405,24 @@ export class DocumentController {
    * Shows the file's `text` in place of the editor's, which has no unsaved edits. When the change
    * is nothing but the work of the author's agents, it is a step of theirs, one per change on disk,
    * which Undo takes back; any other change is a reload, which starts the history over. Asked once
-   * per change on disk, never per keystroke.
+   * per change on disk, never per keystroke. Says whether the file newly asks everyone to track
+   * changes, which a reload turns Track Changes on for.
    */
-  #takeFromDisk(text: string): void {
+  #takeFromDisk(text: string): boolean {
     const work = this.#agentWorkOn(text);
     if (work) {
       this.#diskSteps++;
       try {
         this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
-        return;
+        return false;
       } catch (error) {
         // The editor must show the file it now counts as saved: a reload, as for any change.
         console.error('Could not take the change on disk as a step', error);
       }
     }
+    const asked = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#editor.reloadDoc(text);
+    return !asked && this.#editor.getParsed().ledger.tracking === 'everyone';
   }
 
   /** Whose work alone turns the editor's text into `text`: the author's agents', or null. */
