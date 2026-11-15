@@ -26,6 +26,8 @@ export function readAs(text: string): string {
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]+(?=<\/|\n|<br \/>)/g, '')
+      // The line break after the opener of an item's text (`- <!--ins x-->⏎  a`) shows nowhere.
+      .replace(/(<li>)\n+(?!<)/g, '$1')
       // A space at the start of a cell (after a marker that starts it) shows nowhere.
       .replace(/(<t[dh](?: [^>]*)?>)[ \t]+/g, '$1')
       .replace(/\n\s*\n/g, '\n')

@@ -5188,6 +5188,11 @@ function editsOnce(
   if (code) return code;
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
+  // Text that starts with a space, typed right after a bare list marker, is written after the
+  // marker's space, which is written as it is (format §3.2): the insertion never stands between
+  // a marker and the space after it.
+  const spaced = bareMarkerSpaces(text, edits, plan);
+  if (spaced) return withPipes(text, spaced.edits, ctx, spaced.writes);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
   // plain one first, and make the edit after it. A row has one leading pipe: where `leadingPipeAt`
   // writes it (at the start of the text, after the row's indent), the one that an emptied first cell
@@ -5296,6 +5301,44 @@ function editsOnce(
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
+}
+
+/** A list marker at the start of a line, after its quote markers and the markers of the items it
+ * is nested in, with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
+const BARE_MARKER =
+  /^(?:[ \t]*>[ \t]?)*(?:[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]+)*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
+
+/**
+ * The edits that write text with a space first right after a bare list marker (`-` or `2.` alone
+ * on its line, an empty item to Markdown), as the space written as it is, with no mark, and the
+ * rest of the text after it (format §3.2). An insertion that began with the space would stand
+ * between the marker and its space: `-<!--ins x--> a<!--/x-->` is a paragraph to a reader that
+ * doesn't know the markers, though the newest view has an item. Written as
+ * `- <!--ins x-->a<!--/x-->` it reads as an item in every order of decisions, and rejected leaves
+ * `- `, an empty item, as the bare marker was. A lone space is the space alone, with no mark at
+ * all. A tab first is the marker's separator and is written as a space. Undefined where no edit is such: a marker with text after it is no bare marker, and text
+ * that doesn't start with a space needs none.
+ */
+function bareMarkerSpaces(
+  text: string,
+  edits: readonly TextChange[],
+  plan: Plan,
+): { edits: TextChange[]; writes: PipeWrite[] } | undefined {
+  const writes: PipeWrite[] = [];
+  const rest = edits.map((edit) => {
+    if (edit.from !== edit.to || !/^[ \t]/.test(edit.insert)) return edit;
+    if (plan.parsed.ledgerRange !== null && edit.from >= plan.parsed.ledgerRange.to) return edit;
+    const at = snapOut(plan.markers, edit.from, false);
+    const start = lineStart(text, at);
+    if (!BARE_MARKER.test(text.slice(start, at))) return edit;
+    // Nothing after it on the line but markers.
+    if (!/^(?:<!--[^]*?-->)*\r?$/.test(text.slice(at, lineEnd(text, at)))) return edit;
+    // A tab after a marker is its separator too, and is written as the one space that its item's
+    // text lines up with.
+    writes.push({ at, insert: ' ', leading: true });
+    return { ...edit, from: at, to: at, insert: edit.insert.slice(1) };
+  });
+  return writes.length > 0 ? { edits: rest, writes } : undefined;
 }
 
 /** The edits of `text` made as they are after the plain pipes `writes` (a leading `| ` before a marker

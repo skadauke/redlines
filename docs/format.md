@@ -1175,10 +1175,21 @@ middle of a paragraph it splits the paragraph.
 A tracked insertion never stands between a list marker and the space after it. A marker with no
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
 is a paragraph with a marker's character in it, in a renderer that doesn't know the markers, though the
-newest view is an item. An edit that writes text after a bare marker (the paste of list items,
-#510) therefore writes the space first, as untracked text, and the insertion opens after it, on the
-line before the text as §3.3 has it for a mark that starts a block: `- <!--ins x-->⏎  a<!--/x-->`.
-Accepting gives `- a`; rejecting gives `- `, an empty item, as the bare marker was.
+newest view is an item. Every edit that writes text after a bare marker with a space first (typing,
+autocorrect, a paste of plain text, the paste of list items (#510), an agent's insertion through the
+library, the `redlines` command or the MCP tools) therefore writes the space first, as untracked
+text, and the insertion opens after it, on the line before the text as §3.3 has it for a mark that
+starts a block: `- <!--ins x-->⏎  a<!--/x-->`. Accepting gives `- a`; rejecting gives `- `, an empty
+item, as the bare marker was. A tab typed there is the marker's separator and is written as that
+one space. A lone space is the space alone, with no mark at all: it reads as the same empty item
+in every order of decisions, and there is no change to decide. Text typed with no space first
+(`-a`) is text of a paragraph in both views, and is written as it is, `-<!--ins x-->a<!--/x-->`.
+The rule applies where the marker is the only thing on its line, but for markers of changes after
+it: a marker with text after it (`-x`) is no empty item, and takes the insertion as it was. Tested:
+`bare-marker.test.ts` of
+`packages/format`, of `packages/editor/src/blocks` and of `packages/agent-tools`, with random lists
+that have bare markers (`bareMarkerDocument`, `random-docs.ts`) in the format's and the editor's
+walks.
 
 ### 3.3 Marks that start or end a block
 

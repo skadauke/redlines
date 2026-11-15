@@ -401,3 +401,49 @@ export function adjacentListsDocument(random: () => number): string {
   };
   return `${Array.from({ length: 6 }, block).join('\n\n')}\n`;
 }
+
+/**
+ * Lists with bare markers in them (`-`, `*`, `+`, `1.`, `1)` alone on their line, an empty item to
+ * Markdown, #580): as the last line of the document, with a line after it, nested in an item or in a
+ * quote, after items and after a line of text, in lists of any marker. Plain words, no marks.
+ */
+export function bareMarkerDocument(random: () => number): string {
+  const below = (n: number) => Math.floor(random() * n);
+  const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+  const words = (count: number) => Array.from({ length: count }, () => pick(PLAIN)).join(' ');
+  const list = (indent: string): string => {
+    const ordered = below(3) === 0;
+    const mark = pick(['-', '*', '+']);
+    const delimiter = pick(['.', ')']);
+    const marker = (i: number) => (ordered ? `${i + 1}${delimiter}` : mark);
+    const lines: string[] = [];
+    const items = 1 + below(3);
+    // One of the items, not the first, has no text and no space after its marker.
+    const bare = items > 1 ? 1 + below(items - 1) : -1;
+    for (let i = 0; i < items; i++) {
+      lines.push(i === bare ? `${indent}${marker(i)}` : `${indent}${marker(i)} ${words(2)}`);
+      if (i !== bare && below(4) === 0) {
+        // A nested list that ends with a bare marker.
+        const inner = indent + ' '.repeat(marker(i).length + 1);
+        lines.push(
+          `${inner}${pick(['-', '*', '+'])} ${words(1)}`,
+          `${inner}${pick(['-', '*', '+'])}`,
+        );
+      }
+    }
+    return lines.join('\n');
+  };
+  const block = (): string => {
+    const kind = below(6);
+    if (kind === 0) return words(4);
+    if (kind === 1) return `${words(3)}\n${list('')}`;
+    if (kind === 2) return list('').replace(/^/gm, '> ');
+    return list('');
+  };
+  // The last block ends the document with a bare marker half of the time.
+  const blocks = Array.from({ length: 2 + below(3) }, block);
+  if (below(2) === 0) {
+    blocks.push(`${pick(['- ', '* ', '+ ', '1. ', '1) '])}${words(2)}\n${pick(['-', '*', '+'])}`);
+  }
+  return `${blocks.join(below(4) === 0 ? '\n' : '\n\n')}\n`;
+}
