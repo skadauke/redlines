@@ -1191,6 +1191,10 @@ syntax Markdown needs, and never shows them.
   Nothing joins into code, a table or front matter: the caret goes there instead. At the start of
   a list item, the first Backspace takes the bullet off and keeps the text where it is, the second
   joins it to the item above, as in Word.
+- **The keys read a list as CommonMark does.** A numbered line other than `1.` right under an
+  item's text (`1. a⏎   2. b`) is more of that text, not a sublist, so Return at its end makes the
+  next item of the list that holds `a`, and the file reads, in every order of decisions, as the
+  view shows it (format §3.2).
 - **The caret crosses a break in one press,** ← and → over hidden syntax and blank lines alike.
 
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because

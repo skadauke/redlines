@@ -20,6 +20,7 @@ import {
   blockAt,
   holdsMarkersOnly,
   isGapLine,
+  listItems,
   neighbours,
   openConstructs,
 } from './structure.ts';
@@ -222,7 +223,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
       marker: state.sliceDoc(mark.from, mark.to),
       after: space || ' ',
       task: node.getChild('Task') !== null,
-      loose: !!container?.loose && (list?.getChildren('ListItem').length ?? 0) > 1,
+      loose: !!container?.loose && listItems(state, list).length > 1,
     });
   }
   return items;
@@ -233,7 +234,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
 export function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
-  const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
+  const numbers = listItems(state, item.node.parent).map((other) => {
     const mark = other.getChild('ListMark');
     return mark ? Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) : NaN;
   });
@@ -282,6 +283,8 @@ export function lastInItem(state: EditorState, block: Block, item: Item): boolea
   ).resolveInner(block.text.from, 1);
   while (child && child.parent && child.parent.from !== item.node.from) child = child.parent;
   for (let next = child?.nextSibling ?? null; next; next = next.nextSibling) {
+    // In a quote, the marks of its later lines are nodes between the blocks.
+    if (next.name === 'QuoteMark') continue;
     if (next.name !== 'BulletList' && next.name !== 'OrderedList') return false;
   }
   return true;

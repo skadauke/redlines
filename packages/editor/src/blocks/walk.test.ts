@@ -66,10 +66,10 @@ const LIST_KEYS: Step[] = [
  * with a marker between the `*`s, then typing: micromark reads the file as emphasis and the view as
  * text. 130: Return at the end of an item of a list in a quote whose next item is indented like
  * code: the empty paragraph opens and the caret is not in it, and Undo gives back another text.
- * 146: Return in the middle of a `2.` item's text, in a sublist numbered from 2 under text, adds
- * another `2.` line, which micromark reads as text (the file read so already).
+ * (Seed 146, Return in the middle of a `2.` item's text in a sublist numbered from 2 under text, held
+ * this list until the keys read that line as the text it is, #600.)
  */
-const KNOWN_STAGE_1: ReadonlySet<number> = new Set([46, 130, 146]);
+const KNOWN_STAGE_1: ReadonlySet<number> = new Set([46, 130]);
 
 /** Where a walk may start: the start of a line's text, or a line's end, in the body. */
 function edges(doc: string): number[] {
@@ -110,8 +110,7 @@ const WALKED: Invariant[] = [
  * What the Stage 2 walks hold besides `WALKED`: that the file holds no more item lines than
  * micromark reads items. The walks of Stage 1's keys alone don't: Shift-Return at the start of an
  * item's text writes `1.\\` for its marker (seed 70 of those walks, with the documents as they were
- * before the random alerts drew a second paragraph, #358), and Return in the middle of the text of
- * a `2.` item under text adds another `2.` line, which is text (seed 146 here).
+ * before the random alerts drew a second paragraph, #358).
  */
 const STAGE_2_WALKED: Invariant[] = [...WALKED, 'list-reads'];
 
