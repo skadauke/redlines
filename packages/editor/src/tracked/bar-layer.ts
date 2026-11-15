@@ -328,12 +328,23 @@ export const hotBar = StateField.define<HotBar | null>({
   },
 });
 
+/**
+ * The line of the file that holds `pos`, or, where the view draws it joined to the lines around it
+ * (a list item's text brought up to its bullet over the hidden marker lines between, #540), the
+ * joined lines: the page draws them as one line of text, which starts at the first.
+ */
+function visualLine(view: EditorView, pos: number): { from: number; to: number } {
+  const line = view.state.doc.lineAt(pos);
+  const block = view.lineBlockAt(pos);
+  return block.from < line.from || block.to > line.to ? { from: block.from, to: block.to } : line;
+}
+
 /** The pieces of the change bar of the line that holds `pos`, in the viewport's coordinates. */
 export function barsOnLine(
   view: EditorView,
   pos: number,
 ): { left: number; segments: BarSegment[] } | null {
-  const line = view.state.doc.lineAt(pos);
+  const line = visualLine(view, pos);
   const found = view.state.facet(barMeasure).screenLines(view, line);
   if (!found) return null;
   const spans = trackedChangeSpans(view.state).filter(
@@ -367,9 +378,12 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
     const first = doc.lineAt(Math.max(span.from, lo)).number;
     const last = doc.lineAt(Math.min(span.to, hi)).number;
     for (let n = first; n <= last; n++) {
-      const here = byLine.get(n);
+      // Lines the view draws as one are one line of bar (`visualLine`), keyed by their first.
+      const joined = visualLine(view, doc.line(n).from);
+      const key = doc.lineAt(joined.from).number;
+      const here = byLine.get(key);
       if (here) here.push(span);
-      else byLine.set(n, [span]);
+      else byLine.set(key, [span]);
     }
   }
   if (!byLine.size) return [];
@@ -379,7 +393,7 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
   const base = layerBase(view);
   const markers: LayerMarker[] = [];
   for (const [n, spans] of [...byLine].sort((a, b) => a[0] - b[0])) {
-    const line = doc.line(n);
+    const line = visualLine(view, doc.line(n).from);
     const found = measure.screenLines(view, line);
     if (!found) continue;
     for (const segment of segmentsOf(line, found.lines, spans, found.drawn)) {
