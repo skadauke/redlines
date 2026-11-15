@@ -260,10 +260,11 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A formatting palette, hidden while you write.** There is no toolbar, and the palette is not one:
-  it opens only when asked, from a handle (a short gray bar at the bottom center of the window,
-  which hovering over brings up, and which goes out of sight while you type) and on right-click, at
-  the pointer, where it takes the place of the system's context menu. It is a small card of icons
+- **A formatting palette, shown only when summoned.** There is no toolbar, and the palette is not
+  one: it opens only when asked, on right-click, at the pointer, where it takes the place of the
+  system's context menu, and from the keyboard. Nothing is drawn at the bottom of the window to
+  summon it (the handle that was there is gone, decided on 2026-11-15), and it goes away when you
+  type. It is a small card of icons
   in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
   with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
   act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
@@ -1350,7 +1351,7 @@ written.
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `palette`    | The formatting palette: from a handle at the bottom center and on right-click (§5.1) | —                 |
+| `palette`    | The formatting palette: on right-click and ⌥⌘P (§5.1) | —                 |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 

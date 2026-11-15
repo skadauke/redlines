@@ -68,7 +68,6 @@ function mount(
   return { editor, palette, notices };
 }
 
-const handleOf = () => document.querySelector<HTMLElement>('.rl-palette-handle');
 const panelOf = () => document.querySelector<HTMLElement>('.rl-palette');
 const tipOf = () => document.querySelector<HTMLElement>('.rl-palette-tip');
 const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-palette-item')];
@@ -133,106 +132,28 @@ function menuKey(editor: Editor): MouseEvent {
 
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
-describe('the handle', () => {
-  it('is there, with the palette hidden', () => {
+describe('no handle', () => {
+  it('draws nothing at the bottom of the window; the palette is hidden until summoned', () => {
     mount();
-    const handle = handleOf();
-    expect(handle?.getAttribute('aria-label')).toBe('Formatting palette');
-    expect(handle?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('.rl-palette-handle')).toBeNull();
+    expect(document.querySelector('.rl-palette-grip')).toBeNull();
     expect(panelOf()?.hidden).toBe(true);
   });
 
-  it('brings the palette up on hover, and puts it away when the pointer goes', () => {
-    mount();
-    pointer(handleOf()!, 'pointerenter');
-    expect(panelOf()?.hidden).toBe(true);
-    vi.advanceTimersByTime(120);
-    expect(panelOf()?.hidden).toBe(false);
-    expect(handleOf()?.getAttribute('aria-expanded')).toBe('true');
-    pointer(handleOf()!, 'pointerleave');
-    vi.advanceTimersByTime(199);
-    expect(panelOf()?.hidden).toBe(false);
-    vi.advanceTimersByTime(1);
-    expect(panelOf()?.hidden).toBe(true);
-  });
-
-  it('stays while the pointer is on the palette itself', () => {
-    mount();
-    pointer(handleOf()!, 'pointerenter');
-    vi.advanceTimersByTime(120);
-    pointer(handleOf()!, 'pointerleave');
-    pointer(panelOf()!, 'pointerenter');
-    vi.advanceTimersByTime(1000);
-    expect(panelOf()?.hidden).toBe(false);
-    pointer(panelOf()!, 'pointerleave');
-    vi.advanceTimersByTime(200);
-    expect(panelOf()?.hidden).toBe(true);
-  });
-
-  it('does nothing for a pointer with a button down, which is selecting text', () => {
-    mount();
-    pointer(handleOf()!, 'pointerenter', { buttons: 1 });
-    vi.advanceTimersByTime(1000);
-    expect(panelOf()?.hidden).toBe(true);
-  });
-
-  it('does nothing for a finger', () => {
-    mount();
-    pointer(handleOf()!, 'pointerenter', { pointerType: 'touch' });
-    vi.advanceTimersByTime(1000);
-    expect(panelOf()?.hidden).toBe(true);
-  });
-
-  it('keeps the palette after a click, until a second click, Esc or a press elsewhere', () => {
-    mount();
-    handleOf()?.click();
-    expect(panelOf()?.hidden).toBe(false);
-    pointer(handleOf()!, 'pointerleave');
-    vi.advanceTimersByTime(1000);
-    expect(panelOf()?.hidden).toBe(false);
-    handleOf()?.click();
-    expect(panelOf()?.hidden).toBe(true);
-
-    handleOf()?.click();
-    key(document, 'Escape');
-    expect(panelOf()?.hidden).toBe(true);
-
-    handleOf()?.click();
-    pointer(document.body, 'pointerdown');
-    expect(panelOf()?.hidden).toBe(true);
-  });
-
-  it('cancels a press on it, which is what keeps the keyboard in the text', () => {
-    mount();
-    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-    handleOf()?.dispatchEvent(down);
-    expect(down.defaultPrevented).toBe(true);
-  });
-
-  it('goes out of the way while you type, and comes back with the pointer', () => {
-    const { editor } = mount();
-    key(editor.view.contentDOM, 'a');
-    expect(handleOf()?.hasAttribute('data-writing')).toBe(true);
-    window.dispatchEvent(new MouseEvent('pointermove'));
-    expect(handleOf()?.hasAttribute('data-writing')).toBe(false);
-    // A key that moves the caret, or holds a modifier, is not writing.
-    key(editor.view.contentDOM, 'ArrowLeft');
-    key(editor.view.contentDOM, 'b', { metaKey: true });
-    expect(handleOf()?.hasAttribute('data-writing')).toBe(false);
-  });
-
-  it('puts away a palette the pointer opened, when you go back to typing', () => {
-    const { editor } = mount();
-    handleOf()?.click();
+  it('puts away a palette that was summoned, when you go back to typing', () => {
+    const { editor, palette } = mount();
+    rightClick(editor);
     key(editor.view.contentDOM, 'a');
     expect(panelOf()?.hidden).toBe(true);
+    palette.show();
+    expect(panelOf()?.hidden).toBe(false);
   });
 });
 
 describe('the items', () => {
   it('are the commands of the registry, with no labels on them', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(buttons().map((button) => button.dataset['command'])).toEqual([
       'comment.add',
       'block.table',
@@ -253,7 +174,7 @@ describe('the items', () => {
 
   it('are in rows by group, with a hairline between them', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     const rows = [...document.querySelectorAll('.rl-palette-row')].map((row) =>
       row.getAttribute('aria-label'),
     );
@@ -263,18 +184,18 @@ describe('the items', () => {
 
   it('shows an item once its command lands', () => {
     const { editor } = mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(itemFor('format.sub')).toBeNull();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     editor.commands.register([command('format.sub', { title: 'Subscript' })]);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(itemFor('format.sub')).not.toBeNull();
   });
 
   it('runs the command, puts the palette away and leaves the keyboard in the text', () => {
     const ran = vi.fn(() => true);
     const { editor } = mount('Hello', {}, [command('format.bold', { title: 'Bold', run: ran })]);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     itemFor('format.bold')?.click();
     expect(ran).toHaveBeenCalledTimes(1);
     expect(panelOf()?.hidden).toBe(true);
@@ -283,7 +204,7 @@ describe('the items', () => {
 
   it('cancels a press on one, which is what keeps the text’s focus and selection', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     itemFor('format.bold')?.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
@@ -295,7 +216,7 @@ describe('the items', () => {
       command('format.italic', { isActive: () => false, isEnabled: () => false }),
       command('format.clear'),
     ]);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('true');
     expect(itemFor('format.italic')?.getAttribute('aria-pressed')).toBe('false');
     expect(itemFor('format.italic')?.disabled).toBe(true);
@@ -305,7 +226,7 @@ describe('the items', () => {
   it('follows the selection while it is open', () => {
     let bold = false;
     const { editor } = mount('Hello world', {}, [command('format.bold', { isActive: () => bold })]);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('false');
     bold = true;
     editor.view.dispatch({ selection: { anchor: 2 } });
@@ -316,7 +237,7 @@ describe('the items', () => {
 describe('the hint', () => {
   it('names an item and its keys after the title bar’s delay, and goes with the pointer', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     const button = itemFor('block.table')!;
     pointer(button, 'pointerenter');
     vi.advanceTimersByTime(399);
@@ -330,7 +251,7 @@ describe('the hint', () => {
 
   it('takes the delay it is given', () => {
     mount('Hello', { tooltipMs: 1000 });
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     pointer(itemFor('format.bold')!, 'pointerenter');
     vi.advanceTimersByTime(999);
     expect(tipOf()?.hidden).toBe(true);
@@ -339,8 +260,8 @@ describe('the hint', () => {
   });
 
   it('is not shown for a finger', () => {
-    mount();
-    handleOf()?.click();
+    const { editor } = mount();
+    rightClick(editor);
     pointer(itemFor('format.bold')!, 'pointerenter', { pointerType: 'touch' });
     vi.advanceTimersByTime(1000);
     expect(tipOf()?.hidden).toBe(true);
@@ -348,7 +269,7 @@ describe('the hint', () => {
 
   it('goes when the palette does', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     pointer(itemFor('format.bold')!, 'pointerenter');
     vi.advanceTimersByTime(400);
     key(document, 'Escape');
@@ -536,7 +457,7 @@ describe('what the page’s other boxes keep', () => {
     const { palette } = mount();
     const box = document.createElement('textarea');
     document.body.append(box);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     box.focus();
     const event = key(box, 'Escape');
     expect(event.defaultPrevented).toBe(false);
@@ -549,43 +470,19 @@ describe('what the page’s other boxes keep', () => {
     const box = document.createElement('textarea');
     document.body.append(box);
     box.focus();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     itemFor('format.bold')?.click();
     // The command ran, which the registry does not for a keyboard left in another box.
     expect(ran).toHaveBeenCalledTimes(1);
     expect(editor.view.hasFocus || document.activeElement === editor.view.contentDOM).toBe(true);
   });
 
-  it('leaves the keyboard in another box when the palette is put away by the pointer leaving', () => {
-    mount();
-    const box = document.createElement('textarea');
-    document.body.append(box);
-    pointer(handleOf()!, 'pointerenter');
-    vi.advanceTimersByTime(120);
-    box.focus();
-    pointer(handleOf()!, 'pointerleave');
-    vi.advanceTimersByTime(200);
-    expect(panelOf()?.hidden).toBe(true);
-    expect(document.activeElement).toBe(box);
-  });
-
   it('cancels a press on the padding of the palette, as on an item', () => {
     mount();
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     panelOf()?.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
-  });
-
-  it('says it is open for the palette the handle brought up, and not for a right-click’s', () => {
-    const { editor } = mount();
-    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
-    expect(handleOf()?.hasAttribute('aria-haspopup')).toBe(false);
-    rightClick(editor);
-    expect(handleOf()?.getAttribute('aria-expanded')).toBe('false');
-    key(document.body, 'Escape');
-    handleOf()?.click();
-    expect(handleOf()?.getAttribute('aria-expanded')).toBe('true');
   });
 });
 
@@ -899,7 +796,7 @@ describe('Cut, Copy and Paste', () => {
 
   it('show the system’s keys', () => {
     mount('Hello', { clipboard: clipboard() });
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     pointer(itemFor('edit.copy')!, 'pointerenter');
     vi.advanceTimersByTime(400);
     expect(tipOf()?.textContent).toBe('Copy⌘C');
@@ -907,7 +804,7 @@ describe('Cut, Copy and Paste', () => {
 
   it('cut and copy need a selection', () => {
     const { editor } = mount('Hello world', { clipboard: clipboard() });
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     expect(itemFor('edit.cut')?.disabled).toBe(true);
     expect(itemFor('edit.copy')?.disabled).toBe(true);
     expect(itemFor('edit.paste')?.disabled).toBe(false);
@@ -920,13 +817,13 @@ describe('Cut, Copy and Paste', () => {
     const board = clipboard();
     const { editor } = mount('Hello world', { clipboard: board });
     editor.view.dispatch({ selection: { anchor: 0, head: 5 } });
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     itemFor('edit.copy')?.click();
     expect(board.copy).toHaveBeenCalledTimes(1);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     itemFor('edit.cut')?.click();
     expect(board.cut).toHaveBeenCalledTimes(1);
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     itemFor('edit.paste')?.click();
     expect(board.paste).toHaveBeenCalledTimes(1);
   });
@@ -957,11 +854,10 @@ describe('Cut, Copy and Paste', () => {
 });
 
 describe('taking it out', () => {
-  it('removes the handle, the palette, the hint and the commands', () => {
+  it('removes the palette, the hint and the commands', () => {
     const { editor, palette } = mount('Hello', { clipboard: { cut() {}, copy() {}, paste() {} } });
-    handleOf()?.click();
+    mounted.at(-1)?.palette.show();
     palette.destroy();
-    expect(handleOf()).toBeNull();
     expect(panelOf()).toBeNull();
     expect(tipOf()).toBeNull();
     expect(editor.commands.list().some(({ id }) => id.startsWith('palette.'))).toBe(false);
