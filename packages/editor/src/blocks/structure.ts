@@ -347,6 +347,26 @@ function past(node: SyntaxNode | null, back = false): SyntaxNode | null {
 }
 
 /**
+ * Whether an item holds nothing but its text (and a list of lines that are text of it too): a
+ * block under it (`- c`, code, a second paragraph) is read by the parse, as before.
+ */
+function onlyText(state: EditorState, item: SyntaxNode): boolean {
+  let text: SyntaxNode | null = null;
+  for (let child = item.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'ListMark' || child.name === 'QuoteMark') continue;
+    if (!text && child.name === 'Paragraph') text = child;
+    else if (
+      !text ||
+      child.name !== 'OrderedList' ||
+      textualItems(state, text).length !== child.getChildren('ListItem').length
+    ) {
+      return false;
+    }
+  }
+  return text !== null;
+}
+
+/**
  * The items of the numbered list that follows the paragraph `head` on the very next line that are
  * text of that paragraph for CommonMark, which lets a list interrupt a paragraph only if it starts
  * at 1 and has text (the parse lets any numbered item in a numbered list do so, #600): the first, if
@@ -365,7 +385,8 @@ function textualItems(state: EditorState, head: SyntaxNode): SyntaxNode[] {
     if (
       !mark?.nextSibling ||
       doc.lineAt(item.from).number !== line + 1 ||
-      /^1[.)]$/.test(state.sliceDoc(mark.from, mark.to))
+      /^1[.)]$/.test(state.sliceDoc(mark.from, mark.to)) ||
+      !onlyText(state, item)
     ) {
       break;
     }

@@ -19,6 +19,9 @@ import { scriptRows, type Script } from './script.ts';
 const NO_FIRST_INDENT =
   "The first item of a list can't be indented: there is no item to put it under.";
 
+const LEAVES_LIST =
+  "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
+
 /** A row: the document, the key, and the newest view that Track Changes on and off both give. */
 type Row = [name: string, doc: string, key: Script['keys'], newest: string, refusal?: string];
 
@@ -58,21 +61,26 @@ scriptRows(
       '- x⏎  1. a⏎     2. b⏎  2. ',
     ],
     [
-      'Return after a 1. line, then a 2. line (the 2. is text, the next 1. is not)',
+      'Return after a 1. line, then a 2. line (the 2. is text, the next 1. is not) (unchanged from main)',
       '1. a⏎   2. b⏎   1. c‸',
       ['Enter'],
       '1. a⏎   2. b⏎   1. c⏎   2. ',
     ],
     ['Backspace after the marker', '1. a⏎   2. ‸b', ['Backspace'], '1. a⏎   b'],
-    ['Shift-Tab at a 2. line, two levels', '- a⏎  - x⏎    2. b‸', ['Shift-Tab'], '- a⏎- x⏎  2. b'],
     [
-      'Tab at a 2. line makes the item above a sublist, the line stays its text',
+      'Shift-Tab at a 2. line, two levels (unchanged from main)',
+      '- a⏎  - x⏎    2. b‸',
+      ['Shift-Tab'],
+      '- a⏎- x⏎  2. b',
+    ],
+    [
+      'Tab at a 2. line makes the item above a sublist, the line stays its text (unchanged from main)',
       '1. a⏎1. x⏎   2. ‸b',
       ['Tab'],
       '1. a⏎   1. x⏎      2. b',
     ],
     [
-      'Tab at a 2. line of the first item: no item above to put it under',
+      'Tab at a 2. line of the first item: no item above to put it under (unchanged from main)',
       '1. a⏎   2. ‸b',
       ['Tab'],
       '1. a⏎   2. b',
@@ -144,3 +152,36 @@ scriptRows(
   ]),
   60_000,
 );
+
+/** A block under a text item is read by the parse as before: the keys neither throw nor mis-write. */
+const SHAPES: [string, string][] = [
+  ['top level', '1. a⏎   2. b⏎      - c'],
+  ['in a quote', '> 1. a⏎>    2. b⏎>       - c'],
+  ['with 3. d under it', '1. a⏎   2. b⏎      - c⏎         3. d'],
+];
+const under: Script[] = [];
+for (const [shape, base] of SHAPES) {
+  const end = `${base}‸`;
+  const start = base.replace('1. a', '1. ‸a');
+  const keys: [string, string, Script['keys']][] = [
+    ['Return', end, ['Enter']],
+    ['Delete', end, ['Delete']],
+    ['Delete at the start', start, ['Delete']],
+    ['Backspace', start, ['Backspace']],
+    ['Shift-Tab', end, ['Shift-Tab']],
+    ['paste', end, [{ paste: '- p\n- q' }]],
+  ];
+  for (const [key, doc, steps] of keys) {
+    for (const tc of [true, false]) {
+      under.push({
+        name: `${key} with a block under a 2. text item, ${shape}, Track Changes ${tc ? 'on' : 'off'}`,
+        doc,
+        keys: steps,
+        tc,
+        // The existing refusal (lane R widens it): a line below that would read as text.
+        expect: key === 'Backspace' && tc ? { refusal: LEAVES_LIST } : {},
+      });
+    }
+  }
+}
+scriptRows(under, 60_000);
