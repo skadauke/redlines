@@ -262,6 +262,8 @@ const routeEdits = Prec.lowest(
         rect,
         change.insert,
         tr.annotation(Transaction.userEvent) ?? event,
+        // Typing clears the top-left cell alone; a paste, a drop or a cut clears them all.
+        tr.isUserEvent('input.type') && change.insert !== '',
       );
       return spec ? [spec] : [{}];
     }
