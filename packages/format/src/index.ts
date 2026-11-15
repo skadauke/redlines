@@ -61,6 +61,10 @@ export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
+export { findInPayload, payloadMarksOf } from './payload-marks.ts';
+export type { PayloadFound } from './payload-marks.ts';
+export { Untrackable, WIDEN_MOST_BLOCKS, widen } from './widen.ts';
+export type { UntrackableReason, Widened, WidenedUnit } from './widen.ts';
 export { indentOf, readTables, tableAt } from './table.ts';
 export type {
   TableAlign,

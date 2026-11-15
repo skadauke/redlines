@@ -25,10 +25,14 @@ isn't held*, and a gap is a bug.
    §2.1, §3.4); the words the file reads as must not depend on the order, and are judged by micromark
    4.0.2 with GFM tables and strikethrough, the oracle of the suites ([format.md](format.md) §12), and
    not by eye.
-2. **Redlines is meant to refuse rather than repair, and a refusal says why.** An edit that no form
-   can write soundly is refused, in words that name the cause and the way out ("This would change
-   how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."). A key that does
-   nothing and says nothing is a bug.
+2. **Redlines is meant to widen rather than refuse, and ask before an untracked edit.** An edit that
+   no fine form can write soundly is written as a replacement of the smallest unit that holds it,
+   with other people's pending changes in its old text, or, where no unit can be written, made
+   without tracking after the person is asked ([format.md](format.md) §3.12, §3.13). A refusal is
+   kept only where every write would leave the file wrong (an unreadable ledger, forged markup, an
+   agent's quote that is not there), in words that name the cause. A key that does nothing and says
+   nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
+   edit has a tier in `refusals.ts`, and a new one is a red test.
 3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
    marker.** In CommonMark a line that starts with `<!--` starts an HTML block, which changes how
    the rest of the line reads, so a marker stays at the end of the previous line
@@ -102,6 +106,11 @@ marks, rows and columns around it: every order of deciding it reads alike, and t
 `table-cols-random` and `table-rows-random` fail on a decision of it that is refused.
 
 ### Differential runs against main
+
+`packages/format/src/differential.node.test.ts` is the run kept in the repository for a change that
+adds a writer and calls it nowhere: a digest of what the existing writers, decisions and views write
+over a fixed corpus of random documents, which a branch must give as main does. R1's engine did
+(150 documents, one digest).
 
 A change to how an edit is written is run by its reviewer against main on the same random documents,
 and every decision where the two disagree is looked at. Those scripts are the reviewer's own, kept in
@@ -194,8 +203,9 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
    it. A shape that no random document draws is a shape nothing has tested.
 3. **Hold it to micromark.** The judge is micromark 4.0.2 with GFM, on the file and on every decision
    of it (`newestView`, `originalView`, `accept`, `reject`), and not your reading of the spec.
-4. **Refuse where no form reads alike, and say why.** A refusal names the cause and the way out, and a
-   test holds its words. Don't repair: a form that reads alike in most orders only is not a form.
+4. **Widen where no form reads alike.** The edit is a replacement of the unit that holds it
+   (`widen.ts`), not a refusal, and a form that reads alike in most orders only is not a form. Don't
+   add a refusal: `refusals.node.test.ts` fails on one with no tier.
 5. **If it is a key, keep it cheap,** and add a row to the cost gate.
 6. **If it is drawn or measured, add a check for WKWebView.**
 7. **Have it reviewed** by someone who will try to break it.
@@ -248,11 +258,16 @@ its case; each is a bug. The list is what has been found, not a count of what is
   what renders (#136). It writes the break as two line breaks that read as one now, a stray blank
   line in the file that no reader sees, and the issue is still open.
 
-**Refusals that are planned to go away.** Code that starts a list item, and indented code in an item
-or a quote, are refused with Track Changes on (#284). Typing in code that holds another person's
-pending code change is refused (#285): the issue asks for a form that reads alike in every order, or
-a proof that none exists, with the refusal kept. Bold over more than five cells of a table was one of
-them, and is not any more (#267).
+**Refusals that are still thrown.** The engine that replaces them (`widen.ts`, format §3.12) is
+written and held by `widen-random.test.ts`, `widen-pairs.test.ts` and `payload-marks.test.ts`, and
+the writers call it one unit at a time (tables, lists, blocks, code, then the alert and the disabled
+commands). Until one does, it still refuses. `refusals.ts` says which of the refusals in the sources
+becomes what, and the test that holds it fails on a new one. What is not held of the engine itself:
+a replacement is found by a reader of lines that knows quotes, items, fences, indented code, raw
+text and tables, and not every Markdown form (a table that interrupts a paragraph, display math with
+a blank line in it, setext headings in a container); where its gate (the views, the shape of the
+lists, the two decisions of the replacement) does not catch what micromark reads otherwise, the
+random suite is what does.
 
 **What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word
 import into full history and live sessions with several authors in full history. §7 says what
