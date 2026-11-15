@@ -12,11 +12,12 @@
 // - Backspace at the first item of a list at the top level, or in a quote, takes its marker away
 //   and leaves its text a paragraph. What was under it moves out by the item's own offset (its
 //   indentation, marker and the spaces after it), if some block under it would else stand four
-//   columns in or more, and stays where it is otherwise. Track Changes on writes no such move (a
-//   tracked change can't write the indentation of a line, and the format has no block change that
-//   takes the item and keeps what it holds), so the key says so in words and writes nothing: lane R
-//   widens it into a replacement of the whole item (#497).
-// - Shift-Tab in indented code takes only the columns past those that make it code.
+//   columns in or more, and stays where it is otherwise (code moves with it, to keep its content).
+//   Track Changes on writes the move as one substitution that holds the old lines, from the end of
+//   the paragraph's last line (or the break above it) through the item's last line, beside the
+//   deletion of the marker.
+// - Shift-Tab in indented code keeps the four columns that make it code only where the line below
+//   it would else join the paragraph it becomes; there it says so in words.
 // - Backspace at the first item of a nested list goes up a level as Shift-Tab does, with what is
 //   nested in it, which the format moves along and the key's plain edit now moves too.
 //
@@ -30,8 +31,9 @@
 // back each step.
 import { scriptRows, type Script } from './script.ts';
 
-const NESTED_STAY =
-  "This item can't leave its list while Track Changes is on: the list or blocks nested under it would be indented too far to be a list or blocks any more, and their indentation can't be changed as a tracked edit. Take the marker out with Track Changes off, or move the nested items out first.";
+/** The refusal that main has for a marker in a quote on the first line of the file, tracked. */
+const DEEP_AT_START =
+  "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
 
 /** What a script ends with: the newest view, or the refusal (the file as it was). */
 type Ending = string | { refusal: string };
@@ -41,7 +43,7 @@ type Row = [
   name: string,
   doc: string,
   keys: Script['keys'],
-  off: string,
+  off: Ending,
   on?: Ending, // the same as `off` where not given
 ];
 
@@ -73,64 +75,47 @@ scriptRows(
       '* ‸note a a a⏎    - a a a',
       ['Backspace'],
       'note a a a⏎  - a a a',
-      { refusal: NESTED_STAY },
     ],
     [
       'a number and a bullet under it (the issue, seed 417)',
       '1. ‸alpha a a⏎    * a a a',
       ['Backspace'],
       'alpha a a⏎ * a a a',
-      { refusal: NESTED_STAY },
     ],
-    [
-      'a number and a 1. under it',
-      '1. ‸alpha⏎    1. a',
-      ['Backspace'],
-      'alpha⏎ 1. a',
-      { refusal: NESTED_STAY },
-    ],
+    ['a number and a 1. under it', '1. ‸alpha⏎    1. a', ['Backspace'], 'alpha⏎ 1. a'],
     [
       'two levels deep: the depth among the items is kept',
       '- ‸a⏎    - b⏎        - c',
       ['Backspace'],
       'a⏎  - b⏎      - c',
-      { refusal: NESTED_STAY },
     ],
-    ['a wide marker', '10. ‸a⏎      - b', ['Backspace'], 'a⏎  - b', { refusal: NESTED_STAY }],
+    ['a wide marker', '10. ‸a⏎      - b', ['Backspace'], 'a⏎  - b'],
     [
       'the next item of the list stays where it is',
       '- ‸a⏎    - b⏎- c',
       ['Backspace'],
       'a⏎  - b⏎- c',
-      { refusal: NESTED_STAY },
     ],
     [
       'in a quote',
       '> * ‸note⏎>     - a',
       ['Backspace'],
       '> note⏎>   - a',
-      { refusal: NESTED_STAY },
+      { refusal: DEEP_AT_START },
     ],
-    [
-      'a loose list',
-      '- ‸a⏎⏎    - b⏎⏎- c',
-      ['Backspace'],
-      'a⏎⏎  - b⏎⏎- c',
-      { refusal: NESTED_STAY },
-    ],
+    ['in a quote, below a paragraph', 'p⏎⏎> * ‸note⏎>     - a', ['Backspace'], 'p⏎⏎> note⏎>   - a'],
+    ['a loose list', '- ‸a⏎⏎    - b⏎⏎- c', ['Backspace'], 'a⏎⏎  - b⏎⏎- c'],
     [
       'an item with a paragraph and a nested list',
       '- ‸a⏎⏎  more⏎⏎    - b',
       ['Backspace'],
       'a⏎⏎more⏎⏎  - b',
-      { refusal: NESTED_STAY },
     ],
     [
       'a second paragraph four columns in (a wide marker)',
       '10. ‸a⏎⏎    more',
       ['Backspace'],
       'a⏎⏎more',
-      { refusal: NESTED_STAY },
     ],
   ]),
   60_000,
@@ -144,7 +129,6 @@ scriptRows(
       'p‸⏎⏎- b⏎    - c',
       ['Delete'],
       'pb⏎  - c',
-      { refusal: NESTED_STAY },
     ],
     [
       'Delete above a list whose nested bullet is two columns in',
@@ -157,7 +141,58 @@ scriptRows(
       'p⏎⏎- ‸b⏎    - c',
       ['Backspace'],
       'p⏎⏎b⏎  - c',
-      { refusal: NESTED_STAY },
+    ],
+  ]),
+  60_000,
+);
+
+/** Other shapes of what is under the item: tabs, a quote, a fence, code, a task item, a quote around it. */
+const NESTED_CODE =
+  "This item can't leave its list while Track Changes is on: what is under it has to move out a level, and code among it can't be written again as a tracked change yet. Take the marker out with Track Changes off, or move the code out first.";
+scriptRows(
+  rows([
+    ['a nested item indented with a tab', '- ‸a⏎\t- b', ['Backspace'], 'a⏎  - b'],
+    ['a quote nested in the item', '- ‸a⏎⏎    > q', ['Backspace'], 'a⏎⏎  > q'],
+    ['a task item', '- [ ] ‸a⏎    - b', ['Backspace'], 'a⏎  - b'],
+    [
+      'a wide marker in a quote, below a paragraph',
+      'p⏎⏎> 10. ‸a⏎>       - b',
+      ['Backspace'],
+      'p⏎⏎> a⏎>   - b',
+    ],
+    [
+      'a fence nested in the item',
+      '- ‸a⏎⏎    ```⏎    x⏎    ```',
+      ['Backspace'],
+      'a⏎⏎  ```⏎  x⏎  ```',
+      { refusal: NESTED_CODE },
+    ],
+    [
+      'indented code beside a nested list',
+      '- ‸a⏎⏎      code⏎⏎    - b',
+      ['Backspace'],
+      'a⏎⏎    code⏎⏎  - b',
+      { refusal: NESTED_CODE },
+    ],
+    [
+      'indented code alone keeps its content untracked, as it was tracked',
+      '- ‸a⏎⏎      code',
+      ['Backspace'],
+      'a⏎⏎    code',
+      'a⏎⏎      code',
+    ],
+    [
+      'Delete into a list item moves the lines to its text column (the join, two columns less)',
+      '- a‸⏎⏎10. b⏎      - c',
+      ['Delete'],
+      '- ab⏎    - c',
+    ],
+    [
+      'Backspace at a nested first item with indented code after it',
+      '- a⏎  - ‸b⏎⏎        code⏎  - c',
+      ['Backspace'],
+      '- a⏎- b⏎⏎      code⏎  - c',
+      '- a⏎- b⏎⏎        code⏎  - c',
     ],
   ]),
   60_000,
@@ -204,33 +239,58 @@ scriptRows(
   60_000,
 );
 
-/** Shift-Tab in indented code keeps the columns that make it code (the issue, seeds 297 and 576). */
+/**
+ * Shift-Tab in indented code outdents it, to a paragraph at the end: only where a line right under
+ * it would join that paragraph (the issue, seeds 297 and 576) it says so in words and does nothing.
+ */
+const KEEP_CODE =
+  "This code can't be outdented any further: the line right under it would become part of the paragraph it turns into. Put a blank line under the code first.";
+// With Track Changes on, outdenting indented code is refused by the tracked layer, in words.
+const END_CODE =
+  'This would end the code block it is typed in. Change the code first, or turn off Track Changes.';
+const CODE_IN_ITEM =
+  "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.";
 scriptRows(
   rows([
     [
       'at the four columns of indented code at the top level',
       'p⏎⏎    co‸de',
       ['Shift-Tab'],
-      'p⏎⏎    code',
+      'p⏎⏎code',
+      { refusal: END_CODE },
     ],
+    ['in an item', '- a⏎⏎      co‸de', ['Shift-Tab'], '- a⏎⏎  code', { refusal: CODE_IN_ITEM }],
     [
-      'in an item, with a list nested under it (the issue, seed 297)',
-      '  ```⏎  ```⏎   2. a a a a a⏎⏎          a alpha‸⏎      1. a a a',
+      'before a list, a blank line between',
+      '    co‸de⏎⏎- a⏎    - b',
       ['Shift-Tab'],
-      '  ```⏎  ```⏎   2. a a a a a⏎⏎          a alpha⏎      1. a a a',
-    ],
-    [
-      'in an item, after a lazy line, then a list under the code (the issue, seed 576)',
-      '+ a a a a⏎    1. a a a a⏎    a note⏎⏎           a a‸⏎        + a a a a a a a',
-      ['Shift-Tab'],
-      '+ a a a a⏎    1. a a a a⏎    a note⏎⏎           a a⏎        + a a a a a a a',
+      'code⏎⏎- a⏎    - b',
+      { refusal: END_CODE },
     ],
     [
       'past the four columns it takes what more there is',
       'p⏎⏎      co‸de',
       ['Shift-Tab'],
-      'p⏎⏎    code',
-      'p⏎⏎    code⏎',
+      'p⏎⏎code',
+      { refusal: END_CODE },
+    ],
+    [
+      'with a list item right under it, in an item (the issue, seed 297)',
+      '  ```⏎  ```⏎   2. a a a a a⏎⏎          a alpha‸⏎      1. a a a',
+      ['Shift-Tab'],
+      { refusal: KEEP_CODE },
+    ],
+    [
+      'with a list item right under it, after a lazy line (the issue, seed 576)',
+      '+ a a a a⏎    1. a a a a⏎    a note⏎⏎           a a‸⏎        + a a a a a a a',
+      ['Shift-Tab'],
+      { refusal: KEEP_CODE },
+    ],
+    [
+      'with text right under it at the top level',
+      'p⏎⏎    co‸de⏎text',
+      ['Shift-Tab'],
+      { refusal: KEEP_CODE },
     ],
   ]),
   60_000,

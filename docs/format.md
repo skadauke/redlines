@@ -1484,12 +1484,14 @@ and Delete at the end of the paragraph above a list, take the white space of the
 away by as many columns as its marker and the spaces after it take (or put it in, to the text column of
 the block above, for the join), so that those blocks stand where micromark reads them as the items,
 quotes and paragraphs they were, and where none would stand four columns in or out of the item that
-holds the text, they stay. With Track Changes on that is not written: the indentation of a line is
-no text a tracked change holds, and the format's block change to a paragraph refuses an item that
-holds a block of its own, so the key is refused in words and writes nothing (lane R widens it into a
-replacement of the whole item, #497). Shift-Tab in indented code takes only the columns past the four
-that make it code, as a line that gave them up would be text of the paragraph above and the list
-under it would read as that paragraph's too. Tested: `nested-keep.test.ts` of
+holds the text, they stay. With Track Changes on the lines are written again as one substitution that holds the old lines, from
+the end of the paragraph's last line (or the break above it) through the item's last line, beside the
+deletion of the marker (`<!--del k3x9 * -->⏎⏎note<!--sub m2bd \n    - a-->⏎  - a<!--/m2bd-->`): it reads
+alike in every order of decisions. A fence or indented code among those lines is not held by a
+substitution in an item, so the key is refused in words (lane R widens it into a replacement of the
+whole item, #497). Shift-Tab in indented code outdents it as it always did, to a paragraph at the end,
+and keeps the four columns that make it code only where a line stands right under the code (an item
+or text), which the paragraph would take in; there it is refused in words, with Track Changes off too. Tested: `nested-keep.test.ts` of
 `packages/editor/src/blocks`, and the editor's walks.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it

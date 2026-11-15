@@ -160,15 +160,6 @@ const readsAsText = (row: string) =>
 const BELOW_CHANGES =
   "A pending change in the line below would make it read differently once this item has moved: an item that the change leaves empty can't follow text, and would turn it into a heading. Accept or reject that change first.";
 
-/**
- * Why the item that has blocks nested in it can't leave its list while Track Changes is on: they
- * would stand four columns or more in, as text or code, unless their indentation is written again,
- * and a tracked change can't write the indentation of a line. The lane for widening such an edit
- * into a replacement of the whole item is #497.
- */
-const NESTED_STAY =
-  "This item can't leave its list while Track Changes is on: the list or blocks nested under it would be indented too far to be a list or blocks any more, and their indentation can't be changed as a tracked edit. Take the marker out with Track Changes off, or move the nested items out first.";
-
 /** Why an item can't go up a level where the line after it would become part of its text. */
 const ABSORBED =
   "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
@@ -390,28 +381,78 @@ function leaving(
   item: SyntaxNode,
   after: number,
   into = 0,
-): { needed: boolean; changes: ChangeSpec[] } {
+): { needed: boolean; changes: ChangeSpec[]; replace: ChangeSpec | null; code: boolean } {
   const { doc } = state;
+  const offset = textOffset(state, item);
   let needed = false;
+  let code = false;
   for (let child = item.firstChild; child; child = child.nextSibling) {
     if (child.name === 'ListMark' || child.name === 'Task' || child.name === 'QuoteMark') continue;
     const line = doc.lineAt(child.from);
     // The item's own first block, on the marker line, or in the lines of the paragraph.
-    if (line.number <= after || child.name === 'CodeBlock') continue;
+    if (line.number <= after) continue;
+    // Code keeps its content, which is what stands past its four columns: untracked it moves with
+    // the rest. Tracked, a substitution can't hold indented code in an item (the tracked layer
+    // refuses it), so code alone is left, as it was, with the spaces its content gains.
+    if (child.name === 'CodeBlock') {
+      code = true;
+      if (offset !== into && !state.field(trackingField, false)) needed = true;
+      continue;
+    }
     const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
     const white = /^[ \t]*/.exec(line.text.slice(quoted))![0];
     const at = columnAt(line.text, quoted + white.length) - columnAt(line.text, quoted);
     if (at < into || at - into >= 4) needed = true;
   }
-  if (!needed) return { needed, changes: [] };
+  // Code anywhere below (in a nested item too) is in the lines a substitution would hold.
+  for (let c = item.cursor(); needed && !code && c.next();) {
+    if (c.to > item.to) break;
+    if ((c.name === 'FencedCode' || c.name === 'CodeBlock') && doc.lineAt(c.from).number > after) {
+      code = true;
+    }
+  }
+  if (!needed) return { needed, changes: [], replace: null, code };
   const last = doc.lineAt(item.to).number;
-  const by = textOffset(state, item) - into;
-  return {
-    needed,
-    changes:
-      by > 0 ? takeColumns(state, after + 1, last, by) : putColumns(state, after + 1, last, -by),
-  };
+  const by = offset - into;
+  const changes =
+    by > 0 ? takeColumns(state, after + 1, last, by) : putColumns(state, after + 1, last, -by);
+  // The same lines as one replacement, from the end of the paragraph's last line to the end of the
+  // item's: the one change a tracked edit can write for them (a substitution that holds the old
+  // lines), as indentation alone is no text it can hold.
+  const from = doc.line(after).to;
+  const to = doc.line(last).to;
+  const moved = state.changes(changes);
+  const text = state
+    .update({ changes })
+    .state.doc.sliceString(moved.mapPos(from, -1), moved.mapPos(to, 1));
+  return { needed, changes, replace: { from, to, insert: text }, code };
 }
+
+/**
+ * Why the lines under an item that leaves its list can't be written again as a tracked change
+ * where code stands among them: the one substitution that holds the old lines holds no fence or
+ * indented code of an item (the tracked layer refuses it). The lane that widens such an edit into
+ * a replacement of the whole item, lane R (#497), writes it.
+ */
+const NESTED_CODE =
+  "This item can't leave its list while Track Changes is on: what is under it has to move out a level, and code among it can't be written again as a tracked change yet. Take the marker out with Track Changes off, or move the code out first.";
+
+/** `leaving`'s refusal, if Track Changes is on and the lines hold indented code that must move with them. */
+const codeRefusal = (
+  state: EditorState,
+  under: { needed: boolean; code: boolean },
+  userEvent: 'delete.backward.block' | 'delete.forward.block',
+): KeyEdit | null =>
+  under.needed && under.code && state.field(trackingField, false)
+    ? { ...nothing(state), userEvent, refusal: NESTED_CODE }
+    : null;
+
+/** The edits of `leaving`'s lines as the file is edited: Track Changes on writes the replacement. */
+const movedLines = (
+  state: EditorState,
+  under: { changes: ChangeSpec[]; replace: ChangeSpec | null },
+): ChangeSpec[] =>
+  state.field(trackingField, false) ? (under.replace ? [under.replace] : []) : under.changes;
 
 /** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
 const NUMBERED_IN_CONTAINER =
@@ -494,10 +535,9 @@ function join(
       doc.lineAt(below.lines.to).number,
       holder?.name === 'ListItem' ? textOffset(state, holder) : 0,
     );
-    if (under.needed && state.field(trackingField, false)) {
-      return { ...nothing(state), userEvent, refusal: NESTED_STAY };
-    }
-    changes.push(...under.changes);
+    const stuck = codeRefusal(state, under, userEvent);
+    if (stuck) return stuck;
+    changes.push(...movedLines(state, under));
   }
   return edit(state, changes, from, userEvent);
 }
@@ -897,10 +937,17 @@ function outdent(state: EditorState, block: Block): KeyEdit {
   // further in, four columns or more, as text or code.
   const moved =
     columnAt(line.text, markerAt - line.from) - columnAt(parent.indent, parent.indent.length);
+  const first = state.doc.lineAt(block.lines.to).number;
+  const into = textOffset(state, own.node) - moved;
+  const tracked = leaving(state, own.node, first, into);
+  const stuck = moved > 0 ? codeRefusal(state, tracked, userEvent) : null;
+  if (stuck) return stuck;
   const under =
-    moved > 0
-      ? takeColumns(state, line.number + 1, state.doc.lineAt(own.node.to).number, moved)
-      : [];
+    moved <= 0
+      ? []
+      : state.field(trackingField, false)
+        ? movedLines(state, tracked)
+        : takeColumns(state, line.number + 1, state.doc.lineAt(own.node.to).number, moved);
   return edit(
     state,
     [{ from, to: markerAt, insert: parent.indent }, ...under],
@@ -945,9 +992,6 @@ function outOfList(
   const own = block.containers.at(-1)!;
   // What stood in the item moves out of it with the paragraph, by the item's own offset.
   const under = leaving(state, item, doc.lineAt(block.lines.to).number);
-  if (under.needed && state.field(trackingField, false)) {
-    return { ...nothing(state), userEvent, refusal: NESTED_STAY };
-  }
   // The first line of the file, Track Changes on: the format takes the marker out as a change of
   // its own, and the lines below it, up to a blank line, must not turn into text of this one or
   // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
@@ -998,7 +1042,28 @@ function outOfList(
       changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
     }
   }
-  changes.push(...under.changes);
+  const stuck = codeRefusal(state, under, userEvent);
+  if (stuck) return stuck;
+  const moving = movedLines(state, under);
+  if (moving.length && prev && state.field(trackingField, false)) {
+    // Under a block, the marker's removal is a substitution of the break before it, which a
+    // second edit right after can't be written beside: one replacement from the break to the end
+    // of the item's lines.
+    const all = [...changes, ...moving];
+    const starts = all.map((c) => (c as { from: number }).from);
+    const from = Math.min(prev.lines.to, ...starts);
+    const to = (moving[0] as { to: number }).to;
+    const after = state.update({ changes: all });
+    const mapped = state.changes(all);
+    changes.length = 0;
+    changes.push({
+      from,
+      to,
+      insert: after.state.doc.sliceString(mapped.mapPos(from, -1), mapped.mapPos(to, 1)),
+    });
+  } else {
+    changes.push(...moving);
+  }
   // In front of the text, however the format writes the break: right after the break's line
   // breaks, which a marker's payload never holds as they are.
   if (before && prev) {

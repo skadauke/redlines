@@ -156,7 +156,7 @@ test.describe('lists @lists', () => {
   }
 
   // #604: Backspace at the first item takes its marker away; the list under it stays a list, moved
-  // out a level (with Track Changes off), and with it on the key says so and writes nothing.
+  // out a level, with Track Changes off and on (a tracked deletion and one substitution).
   for (const tracking of [false, true]) {
     test(`Backspace at the first item with a list nested in it, Track Changes ${tracking ? 'on' : 'off'}`, async ({
       start,
@@ -170,8 +170,12 @@ test.describe('lists @lists', () => {
       await j.shot(`backspace-nested-after-${look}`);
       const file = (await j.cmText()).split('<!-- redlines')[0]!;
       if (tracking) {
-        // Refused in words, and nothing is written: the nested list is not turned into text.
-        expect(file).toBe(doc);
+        // The marker is a tracked deletion, and the lines under it one substitution that holds the
+        // old ones: the list stays a list in every order of deciding.
+        expect(file).toContain('<!--del ');
+        expect(file).toContain('<!--sub ');
+        await j.press('ControlOrMeta+z');
+        expect((await j.cmText()).split('<!-- redlines')[0]).toBe(doc);
       } else {
         // The text is a paragraph, the list under it is still a list, the depth among its items kept.
         expect(file).toBe('note\n  - one\n      - two\n  - three\n');
