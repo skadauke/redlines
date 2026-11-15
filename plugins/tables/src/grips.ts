@@ -66,6 +66,12 @@ const GRIP_REACH = 14;
 const GRIP_SPAN = 26;
 /** The room between a handle's reach and the table's edge. */
 const GRIP_GAP = 2;
+/** The widgets at the table's edges: Add column and Add row are strips this thick, 4 px from the table,
+ * and the table's corner widget is a square; the pointer is looked for within `EDGE_REACH` of them. */
+const EDGE_SIZE = 20;
+const EDGE_GAP = 4;
+const EDGE_REACH = EDGE_GAP + EDGE_SIZE + 4;
+const CORNER_SIZE = 16;
 
 export const GRIPS_STYLE = `
 .rl-grips { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
@@ -74,6 +80,20 @@ export const GRIPS_STYLE = `
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
   width: 18px; height: 22px; border-radius: 4px; user-select: none;
   color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1;
+}
+.rl-edge-add, .rl-table-select {
+  position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer; user-select: none; background: var(--rl-rule); color: var(--rl-ink);
+  border: 1px solid transparent; font-size: var(--rl-size-ui); line-height: 1;
+}
+.rl-edge-add:hover, .rl-table-select:hover { border-color: var(--rl-ink-3); }
+.rl-edge-col { width: ${EDGE_SIZE}px; }
+.rl-edge-row { height: ${EDGE_SIZE}px; }
+.rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
+.rl-table-select::before {
+  content: ''; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 2px;
+  background: linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat;
 }
 .rl-plus:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
 .rl-plus, .rl-col-plus { cursor: pointer; border: 1px solid var(--rl-rule); background: var(--rl-page); }
@@ -208,9 +228,9 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
     const here =
       !near ||
       (near.x >= box.left - reach &&
-        near.x <= box.right &&
+        near.x <= box.right + EDGE_REACH &&
         near.y >= box.top - Math.max(PLUS_REACH, COL_STRIP) &&
-        near.y <= box.bottom + PLUS_REACH);
+        near.y <= box.bottom + Math.max(PLUS_REACH, EDGE_REACH));
     if (!here) continue;
     const known = measured.get(wrapper);
     if (
@@ -278,6 +298,11 @@ class Grips {
     first: number;
     last: number;
   } | null = null;
+  private addCol: HTMLElement | null = null;
+  private addRow: HTMLElement | null = null;
+  private selectAll: HTMLElement | null = null;
+  /** The table the edge widgets act on. */
+  private edgeOf: Drawn | null = null;
   private colGrip: HTMLElement | null = null;
   private colPlus: HTMLElement | null = null;
   private colPlusLine: HTMLElement | null = null;
@@ -372,6 +397,7 @@ class Grips {
     this.at = null;
     this.boundary = null;
     this.hideCols();
+    this.hideEdges();
     if (!keepMenu) this.closeMenu();
   }
 
@@ -398,8 +424,13 @@ class Grips {
     }
     if (this.menu) return;
     const tables = drawnTables(this.view, { x: event.clientX, y: event.clientY });
+    this.movedOverGrips(tables, event.clientX, event.clientY);
+    this.movedOverEdges(tables, event.clientX, event.clientY);
+  }
+
+  /** The row handle and the + between rows and columns, for the pointer at `x`, `y`. */
+  private movedOverGrips(tables: readonly Drawn[], x: number, y: number): void {
     const viewLeft = this.view.dom.getBoundingClientRect().left;
-    const { clientX: x, clientY: y } = event;
     this.movedOverColumns(tables, x, y);
     // A boundary near the pointer, in the strip: a + there.
     for (const drawn of tables) {
@@ -448,6 +479,97 @@ class Grips {
       }
     }
     this.hideCols();
+  }
+
+  /**
+   * The widgets at the table's edges: Add column, just right of the table, while the pointer is over
+   * its rightmost column (or the widget); Add row, just below, while it is over the bottom row; and
+   * the corner square that selects the table, while it is over the table or the strips beside it
+   * (not while a + stands where the square would).
+   */
+  private movedOverEdges(tables: readonly Drawn[], x: number, y: number): void {
+    for (const drawn of tables) {
+      const lastCol = drawn.cols[drawn.cols.length - 1];
+      const lastRow = drawn.rects[drawn.rects.length - 1];
+      const inColumns = x >= drawn.left && x <= drawn.right;
+      const inRows = y >= drawn.top && y <= drawn.bottom;
+      const col = !!lastCol && inRows && x >= lastCol.left && x <= drawn.right + EDGE_REACH;
+      const row = !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
+      const corner =
+        x >= drawn.left - 24 && x <= drawn.right && y >= drawn.top - COL_STRIP && y <= drawn.bottom;
+      if (!col && !row && !corner) continue;
+      this.edgeOf = drawn;
+      this.showEdge('addCol', col);
+      this.showEdge('addRow', row);
+      this.showEdge('selectAll', corner && !this.plus && !this.colPlus);
+      return;
+    }
+    this.hideEdges();
+  }
+
+  private hideEdges(): void {
+    this.addCol?.remove();
+    this.addRow?.remove();
+    this.selectAll?.remove();
+    this.addCol = this.addRow = this.selectAll = null;
+    this.edgeOf = null;
+  }
+
+  /** Shows (or takes away) one of the edge widgets, at the edge of the table `edgeOf`. */
+  private showEdge(which: 'addCol' | 'addRow' | 'selectAll', on: boolean): void {
+    const drawn = this.edgeOf;
+    if (!on || !drawn) {
+      this[which]?.remove();
+      this[which] = null;
+      return;
+    }
+    let el = this[which];
+    if (!el) {
+      el = document.createElement('div');
+      if (which === 'selectAll') {
+        el.className = 'rl-table-select';
+        this.hint(el, 'Select the table');
+      } else {
+        el.className = `rl-edge-add ${which === 'addCol' ? 'rl-edge-col' : 'rl-edge-row'}`;
+        el.textContent = '+';
+        this.hint(el, which === 'addCol' ? 'Add a column' : 'Add a row');
+      }
+      el.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        if (event.button !== 0) return;
+        const at = this.edgeOf;
+        if (!at) return;
+        const table = tablesOf(this.view.state).find((t) => t.id === at.table.id) ?? at.table;
+        if (which === 'addCol') insertColsAt(this.view, table, table.columns);
+        else if (which === 'addRow') insertRowsAt(this.view, table, table.rows.length);
+        else {
+          const selection = rectSelection(
+            table,
+            { row: 0, col: 0 },
+            { row: table.rows.length - 1, col: table.columns - 1 },
+          );
+          if (selection) this.view.dispatch({ selection, userEvent: 'select' });
+        }
+        this.hide();
+      });
+      this.layer.append(el);
+      this[which] = el;
+    }
+    const base = this.view.dom.getBoundingClientRect();
+    if (which === 'addCol') {
+      // Just right of the table, as tall as it, and never off the window.
+      const left = Math.min(drawn.right + EDGE_GAP, base.right - EDGE_SIZE - 4);
+      el.style.left = `${left - base.left}px`;
+      el.style.top = `${drawn.top - base.top}px`;
+      el.style.height = `${Math.max(0, drawn.bottom - drawn.top)}px`;
+    } else if (which === 'addRow') {
+      el.style.left = `${drawn.left - base.left}px`;
+      el.style.top = `${drawn.bottom + EDGE_GAP - base.top}px`;
+      el.style.width = `${Math.max(0, drawn.right - drawn.left)}px`;
+    } else {
+      el.style.left = `${Math.max(4, drawn.left - GRIP_GAP - CORNER_SIZE) - base.left}px`;
+      el.style.top = `${Math.max(4, drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
+    }
   }
 
   private hideColPlus(): void {
