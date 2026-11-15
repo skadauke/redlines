@@ -80,6 +80,30 @@ fails if the editor didn't take it. Only setup and reading go through the page's
 (`window.__redlines`, `src/journey-hook.ts`, set only in development in a plain tab). A script
 error in the page fails the journey. CI: `.github/workflows/journeys.yml` (below).
 
+## The app's own windows
+
+The journeys draw the page. The title bar, Preferences, About, dialogs and the window's shadow are
+the app's: `apps/desktop/scripts/app-windows` runs a built `Redlines.app`, finds its windows by
+process id and takes each with `screencapture -l<window id>`, whatever is in front of it.
+
+```sh
+cd apps/desktop
+pnpm tauri build --bundles app          # → src-tauri/target/release/bundle/macos/Redlines.app
+scripts/app-windows                      # the main window → apps/desktop/app-windows/NN-*.png and index.md
+scripts/app-windows --debug              # the debug build's app (pnpm tauri build --debug --bundles app)
+scripts/app-windows --panes --file ../../docs/design.md   # also Preferences and About; open a document
+```
+
+The terminal (or the Claude app that runs it) needs **Screen Recording** permission, once: System
+Settings › Privacy & Security › Screen & System Audio Recording; quit and open it again. Without it
+`screencapture` writes the wallpaper, so the script stops first and says so. `--panes` also needs
+**Accessibility** (it presses ⌘, and the About menu item through System Events); without it those
+shots are skipped. It needs `swiftc` (the Xcode command line tools) for its small window-list
+helper, and waits `--wait` seconds (4) before each shot. It never asks for computer use. It starts a
+new instance of the app and stops only that one, with what that instance started (it asks, then
+kills what is still running after ten seconds). It replaces its own earlier `NN-*.png` and `index.md`
+in `--out` and nothing else.
+
 ## CI
 
 `.github/workflows/journeys.yml` runs them on a macOS runner (WebKit there is the app's engine, and
