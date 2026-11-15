@@ -601,7 +601,16 @@ function undoAllTheWay(view: EditorView, seen: Set<string>, start: string): stri
 }
 
 /** Plays a script on a real editor and reports what it did; `checkInvariants` judges it. */
-export function runScript(script: Script): ScriptResult {
+export function runScript(
+  script: Script,
+  options: {
+    /** Without the replays (Undo after each step, Undo all the way back, the take-back), which
+     * cost most of a script's time: for suites that play many scripts and check other things. */
+    light?: boolean;
+    /** Called with the editor after each step, for a suite that reads the editor itself. */
+    onStep?: (editor: Editor, index: number) => void;
+  } = {},
+): ScriptResult {
   const expanded = expandDoc(script);
   const seen = new Set<string>([expanded.text]);
   const mounted = mount(script, expanded, seen);
@@ -618,6 +627,7 @@ export function runScript(script: Script): ScriptResult {
       const caretOn = editor.view.state.doc.lineAt(head);
       const caretLine = { text: caretOn.text, col: head - caretOn.from };
       const handled = play(editor, step);
+      options.onStep?.(editor, i);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
       if (!start.includes('\r')) {
@@ -645,15 +655,15 @@ export function runScript(script: Script): ScriptResult {
       steps,
       refusals: [...mounted.refusals],
       hiddenCaret: hiddenAt(editor),
-      undoFailures: undoEach(script, expanded),
+      undoFailures: options.light ? [] : undoEach(script, expanded),
       openCaretFailures,
       listReadFailures,
       historyFailures: [],
       fileTextFailures,
       openItem: openBlock(editor.view.state)?.item === true,
     };
-    result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
-    if (script.keys.length === 1 && script.keys[0] === 'Enter') {
+    if (!options.light) result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
+    if (!options.light && script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {
         play(again.editor, 'Enter');
