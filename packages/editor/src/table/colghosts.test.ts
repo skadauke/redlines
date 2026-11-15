@@ -263,4 +263,15 @@ describe('inserted columns', () => {
     }
     expect(dom(simple).textContent).toBe(dom(clean).textContent);
   });
+
+  it('are in the author’s color alone in Simple: no tint, no underline, in every row', () => {
+    const simple = load('simple', INSERTED);
+    const marked = [...dom(simple).querySelectorAll<HTMLElement>('.rl-tc.rl-ins-col-plain')];
+    expect(marked.length).toBe(3);
+    expect(marked.every((el) => /\brl-author-\d\b/.test(el.className))).toBe(true);
+    expect(marked.every((el) => el.dataset['mark'] === 'k3x9')).toBe(true);
+    // Not in Clean, and not the full markup's class in Simple.
+    expect(dom(load('clean', INSERTED)).querySelectorAll('.rl-ins-col-plain')).toHaveLength(0);
+    expect(dom(simple).querySelectorAll('.rl-ins-col')).toHaveLength(0);
+  });
 });
