@@ -575,15 +575,29 @@ mode has no counterpart in the desktop app.
   the contrast its theme gives it. **Next and Previous no longer select the change:** they put the caret at its start
   and mark it, so copying or typing after them acts at the caret, not on the change; the panel
   planned for it (§5.6 below) holds the keyboard. With no changes the command is disabled.
-- **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
-  next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
-  Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
-  the simple look closes it, because a person who chooses to read has stopped stepping through
-  changes, and while it is open a click on a change bar opens that change's card in place of
-  switching the look. It floats at the bottom of the window and closes with Esc or its close
-  button; without it, a change's card, or its note in the rail (§5.7, in the simple look too),
-  still accepts or rejects that change. It holds:
-  - "Change 3 of 17", with previous and next, through changes and comments in document order,
+- **The review panel** (the review bar's place, Review Changes in the Review menu or the next-change
+  shortcut ⌘⌥]) opens at once, on the document's first change or on the first change the selection
+  touches (the selection goes), and marks that change. Opening it, or moving it to a change, shows
+  the full markup, from Clean, from the simple look and from Raw, so that each change shows while you
+  decide it. Showing the simple look closes it, because a person who chooses to read has stopped
+  stepping through changes, and while it is open a click on a change bar opens that change's card in
+  place of switching the look. It is a card **beside the change**: in the margin to the right of the
+  text, level with the change's top and as wide as the margin lets it be (at least 240 px); where
+  the margin has no room, below the change, or above it when it doesn't fit below. It never covers
+  the change, and stays inside the window (or the sheet, for an editor that is one). Its title is its
+  handle: drag it, and it stays where it was put until it closes. It says who made the change and
+  when, and what it did, and has **Accept (A)**, **Reject (R)**, **Comment (C)**, **Previous (←)** and
+  **Next (→)**, with the key shown on each button. Accept and Reject decide the change and move on to
+  the next; after the last, it says there are no more changes to review, with a Done button. Comment
+  opens a field, "Ask about this change"; Return posts it as a comment on the change's text, and Esc
+  closes the field. **The panel takes the keyboard** when it opens and after each change, so that
+  the letters and the arrows reach it; a click into the document gives the keyboard back to the
+  document, and typing is typing again. Esc or its close button closes it. The review's mark is the
+  thin ring and the wider bar described above. Without it, a change's card, or its note in the rail
+  (§5.7, in the simple look too), still accepts or rejects that change. The panel's measures are the
+  interface's own sizes (13 px and 12 px), whatever the text size. Its title shows the count, and the
+  rest is planned for it:
+  - "Change 3 of 17" (shown), with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
     once, and Accept and Reject decide them all in one step, or none if one is refused;

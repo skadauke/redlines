@@ -262,11 +262,11 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         if (review.isBarOpen()) review.openBar();
         else if (ui && ui.changes.length > 0) review.next();
         else review.openBar();
-        const bar = root.querySelector('.rl-review-bar');
+        const bar = root.querySelector('.rl-review-panel');
         const buttons = [
           ...(bar?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
         ];
-        // Named by its aria-label: the bar's text buttons also hold a hint for a narrow window.
+        // Named by its aria-label: the panel's text buttons also show their key.
         const target =
           buttons.find((each) => each.getAttribute('aria-label') === 'Accept') ?? buttons[0];
         target?.focus();

@@ -64,7 +64,7 @@ test('Accept works from the keyboard', async ({ page }) => {
   const review = sheet(page).getByRole('button', { name: 'Review' });
   await review.focus();
   await page.keyboard.press('Enter');
-  const accept = sheet(page).locator('.rl-review-bar').getByRole('button', { name: 'Accept' });
+  const accept = sheet(page).locator('.rl-review-panel').getByRole('button', { name: 'Accept' });
   await expect(accept).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(editor(page).locator('.rl-ins')).toHaveCount(0);
@@ -79,7 +79,7 @@ test('the agent panel fits 320 px', async ({ page }) => {
   await expect(editor(page).locator('.rl-ins')).toContainText('5', { timeout: 5000 });
   await expect(live(page).getByText(REPLY)).toBeVisible();
   await sheet(page).getByRole('button', { name: 'Review' }).click();
-  const bar = sheet(page).locator('.rl-review-bar');
+  const bar = sheet(page).locator('.rl-review-panel');
   await expect(bar).toBeVisible();
   const box = (await bar.boundingBox())!;
   const frame = (await sheet(page).boundingBox())!;
