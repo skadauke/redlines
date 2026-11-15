@@ -338,7 +338,8 @@ export class Journey {
     name: string,
     options: { clip?: { x: number; y: number; width: number; height: number } } = {},
   ): Promise<void> {
-    await this.settle();
+    // The picture for the look review too (with the caret, which the comparison hides).
+    await this.shot(name, options);
     // CodeMirror draws its caret as an element, which Playwright's own caret hiding doesn't know.
     await this.page.addStyleTag({ content: '.cm-cursorLayer { visibility: hidden !important; }' });
     // A screenshot that has to settle may take longer than the two seconds a person waits.

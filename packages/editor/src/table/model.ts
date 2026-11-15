@@ -9,7 +9,7 @@
 import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
 import type { SyntaxNode, Tree } from '@lezer/common';
-import { indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
+import { blankTrailingMarkers, indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
 
 export type Align = '' | 'left' | 'center' | 'right';
 
@@ -60,7 +60,8 @@ function isTopLevel(node: { parent: { name: string } | null }): boolean {
 }
 
 function readRow(doc: Text, from: number, to: number, index: number): Row {
-  const text = doc.sliceString(from, to);
+  // The markers that end the row are no cell: a pending inserted table has one on each line.
+  const text = blankTrailingMarkers(doc.sliceString(from, to));
   const { cells } = readRowCells(text, 0, text.length);
   return {
     from,
@@ -94,7 +95,7 @@ function readTable(doc: Text, from: number, to: number): Table | null {
   }
   const columns = rows[0]?.cells.length ?? 0;
   const aligns = readDelimiterRow(
-    doc.sliceString(delimiterLine.from, delimiterLine.to),
+    blankTrailingMarkers(doc.sliceString(delimiterLine.from, delimiterLine.to)),
     0,
     delimiterLine.to - delimiterLine.from,
     columns,

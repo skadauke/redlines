@@ -265,6 +265,16 @@ function cellOf(
   };
 }
 
+/** The markers of an inserted line break or the end of an insertion that end a line of a table
+ * (§3.7, "A table inserted with Track Changes on"). */
+const TRAILING_MARKERS = /(?:<!--(?:split [a-z0-9]{4}|\/[a-z0-9]{4})-->)+(?=[ \t]*$)/;
+
+/** `text` with the markers that end it as spaces: the same length, so the same positions. A row
+ * of a pending inserted table ends with one, which is no cell of the row. */
+export function blankTrailingMarkers(text: string): string {
+  return text.replace(TRAILING_MARKERS, (marker) => ' '.repeat(marker.length));
+}
+
 /** The marker of an inserted row or column as it is written, `<!--ins ID row-->` or `col`. */
 const TABLE_MARKER =
   /<!--ins [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3} (?:row|col)-->/y;
@@ -380,7 +390,9 @@ function headerOf(text: string, line: Line, next: Line): TableAlign[] | null {
  * Every table of the file's body, in order. Not read: a table in a quote or list item, in a code
  * block, or in front matter or the ledger.
  */
-export function readTables(text: string, parsed: Parsed): TableRead[] {
+export function readTables(source: string, parsed: Parsed): TableRead[] {
+  // The markers that end a line are no cell: a table inserted as a whole has one on each line.
+  const text = source.split('\n').map(blankTrailingMarkers).join('\n');
   const stop = parsed.ledgerRange?.from ?? text.length;
   const lines: Line[] = [];
   for (let start = bodyStart(text); start <= stop;) {

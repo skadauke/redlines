@@ -44,6 +44,12 @@ run leaves the picture it got, the approved one and a diff in `test-results/<jou
   wrong once); a journey's other moments are `j.shot(name)`, for the look review, and are compared
   with nothing.
 
+## The look review
+
+`pnpm journeys:look` collects a run's screenshots into `apps/desktop/journeys/look-review/` with an
+`INDEX.md`, for an agent or a person to check against the checklist. How a lane uses it:
+[look-review.md](look-review.md).
+
 ## Journeys for bugs that are still open
 
 A journey that fails today because of an open issue is written as

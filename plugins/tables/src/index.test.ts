@@ -1016,3 +1016,35 @@ describe('the alignment commands', () => {
     expect(editor.getDoc()).toMatch(/<!--ins (\w{4})-->z<!--\/\1--><!--fmt \w{4} align=/);
   });
 });
+
+describe('a table that is a pending insertion, a marker at the end of each line (P0-a)', () => {
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: ada, at: 2026-11-01T10:00Z}\n  s1aa: {by: ada, at: 2026-11-01T10:00Z}\n  s2bb: {by: ada, at: 2026-11-01T10:00Z}\n  s3cc: {by: ada, at: 2026-11-01T10:00Z}\n-->\n';
+  const PENDING =
+    'One.<!--ins k3x9--><!--split s1aa-->\n\n| Name | Age |<!--split s2bb-->\n| --- | --- |<!--split s3cc-->\n| Ada | 36 |<!--/k3x9-->\n\nTwo.\n';
+
+  it.each([
+    'table.insertRowBelow',
+    'table.insertRowAbove',
+    'table.insertColumnRight',
+    'table.insertColumnLeft',
+    'table.deleteColumn',
+  ])('%s works, as on a table of the file’s own', (id) => {
+    const editor = mount(`${PENDING}${LEDGER}`, true);
+    select(editor, editor.getDoc().indexOf('Ada') + 1);
+    expect(editor.getUiState().enabledCommands).toContain(id);
+    const before = editor.getDoc();
+    expect(editor.commands.run(id)).toBe(true);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+  });
+
+  it('Tab in the last cell adds a row, and a pasted block of cells is read as cells', () => {
+    const editor = mount(`${PENDING}${LEDGER}`, true);
+    select(editor, editor.getDoc().indexOf('36') + 1);
+    const before = editor.getDoc();
+    press(editor, 'Tab');
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+  });
+});

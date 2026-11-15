@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { alignMarkOf } from './table-align.ts';
-import { alignPointIn, readRowCells, readTables, tableAt } from './table.ts';
+import { alignPointIn, blankTrailingMarkers, readRowCells, readTables, tableAt } from './table.ts';
 import type { TableRead } from './table.ts';
 import { blockLeaves, file, thread } from './test-helpers.ts';
 
@@ -867,5 +867,27 @@ describe('readTables against the oracle', () => {
       const text = `${pick(BEFORE)}${table}${pick(AFTER)}`;
       expectOracle(random() < 0.2 ? text.replaceAll('\n', '\r\n') : text);
     }
+  });
+});
+
+describe('the markers that end a line of a table (a table inserted as a whole)', () => {
+  const body =
+    'One.<!--ins k3x9--><!--split s1aa-->\n\n| Name | Age |<!--split s2bb-->\n| --- | --- |<!--split s3cc-->\n| Ada | 36 |<!--/k3x9-->\n\nTwo.\n';
+  const ledger =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: ada, at: 2026-11-01T10:00Z}\n  s1aa: {by: ada, at: 2026-11-01T10:00Z}\n  s2bb: {by: ada, at: 2026-11-01T10:00Z}\n  s3cc: {by: ada, at: 2026-11-01T10:00Z}\n-->\n';
+
+  it('are no cell: the table is read, with its rows of two cells', () => {
+    const text = `${body}${ledger}`;
+    const tables = readTables(text, parse(text));
+    expect(tables).toHaveLength(1);
+    expect(tables[0]!.rows.map((row) => row.cells.length)).toEqual([2, 2]);
+    expect(tables[0]!.aligns).toEqual(['', '']);
+  });
+
+  it('are white space of the same length', () => {
+    const line = '| a | b |<!--split s1aa--><!--/k3x9-->  ';
+    expect(blankTrailingMarkers(line)).toHaveLength(line.length);
+    expect(blankTrailingMarkers(line).trimEnd()).toBe('| a | b |');
+    expect(blankTrailingMarkers('| a | <!--split s1aa--> b |')).toBe('| a | <!--split s1aa--> b |');
   });
 });
