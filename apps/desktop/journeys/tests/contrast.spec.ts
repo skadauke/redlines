@@ -143,7 +143,7 @@ test.describe('interface text keeps 4.5:1 @views', () => {
 test.describe('shapes that show state keep 3:1 (#653)', () => {
   test('a checkbox outline and a focus ring', async ({ start }) => {
     const j = await start({
-      doc: '- [ ] A task to do\n- [x] A task done\n',
+      doc: '- [ ] A task to do\n- [x] A task done\n\nA paragraph after.\n',
       tracking: false,
       view: 'clean',
     });
@@ -161,15 +161,21 @@ test.describe('shapes that show state keep 3:1 (#653)', () => {
     expect(ratio(flatten([outline!], page), page), 'the checkbox outline').toBeGreaterThanOrEqual(
       3,
     );
-    // A control focused from the keyboard: its ring.
-    await j.page.keyboard.press('Tab');
+    // A checkbox focused after a key, as the keyboard does: its ring.
+    await j.caretAtEnd();
+    await j.page.keyboard.press('Shift');
+    await j.page
+      .locator('.rl-box')
+      .first()
+      .evaluate((box) => (box as unknown as HTMLElement).focus());
     const ring = await j.page.evaluate(() => {
       const focused = document.activeElement;
       if (!focused || focused === document.body) return null;
       const style = getComputedStyle(focused);
       return { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth };
     });
-    expect(ring, 'something takes the focus from Tab').not.toBeNull();
+    expect(ring, 'the checkbox takes the focus').not.toBeNull();
+    expect(ring?.style, 'the focus ring is drawn').not.toBe('none');
     if (ring && ring.style !== 'none') {
       expect(ratio(flatten([ring.color], page), page), 'the focus ring').toBeGreaterThanOrEqual(3);
     }
