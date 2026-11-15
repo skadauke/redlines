@@ -134,6 +134,11 @@ export interface Host {
   /** The URL the page loads the file at `path` from, once `allowImages` is true; null if none. */
   imageUrl(path: string): string | null;
   /**
+   * The stamp of each image file, in order: one text that changes when the file is saved again
+   * (`src/image-watch.ts`). Null for a file the page may not load or that isn't there.
+   */
+  imageStamps(paths: string[]): Promise<(string | null)[]>;
+  /**
    * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
    * doesn't let the windows use them again.
    */
@@ -460,6 +465,7 @@ function createTauriHost(): Host {
     },
     allowImages: (path) => invoke<boolean>('show_images', { path }),
     imageUrl: (path) => convertFileSrc(path),
+    imageStamps: (paths) => invoke<(string | null)[]>('image_stamps', { paths }),
     forgetDocuments: async () => {
       await invoke('forget_documents');
     },
@@ -576,6 +582,24 @@ function numbered(name: string, taken: (name: string) => boolean): string {
   }
 }
 
+/**
+ * Debug only, in the development page: stands in for Preview, which a page has none of
+ * (`apps/desktop/journeys`). An image opened in it is recorded, and one saved again there is
+ * replaced, the way a save in Preview changes the file.
+ */
+export interface DevImages {
+  /** The paths asked to open in another app, in order. */
+  opened: string[];
+  /** Saves the image at `path` again, with other bytes. */
+  replace(path: string, blob: Blob): void;
+}
+
+declare global {
+  interface Window {
+    __redlinesImages?: DevImages;
+  }
+}
+
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
@@ -583,6 +607,21 @@ function createBrowserHost(): Host {
   // loads them from, each made once, or the preview would draw an image again at every look.
   const images = new Map<string, Blob>();
   const imageUrls = new Map<string, string>();
+  /** How many times each image was saved again, which only the development page does. */
+  const stamps = new Map<string, number>();
+  const dev: DevImages | null = import.meta.env.DEV
+    ? {
+        opened: [],
+        replace(path, blob) {
+          images.set(path, blob);
+          const url = imageUrls.get(path);
+          if (url) URL.revokeObjectURL(url);
+          imageUrls.delete(path);
+          stamps.set(path, (stamps.get(path) ?? 0) + 1);
+        },
+      }
+    : null;
+  if (dev) window.__redlinesImages = dev;
   const read = (path: string) => {
     const text = files.get(path);
     return text === undefined
@@ -622,8 +661,13 @@ function createBrowserHost(): Host {
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
     list: () =>
       Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
-    openDefault: () =>
-      Promise.reject(new Error('A browser tab has no other apps to open files in.')),
+    // The development page has a stand-in for Preview (`DevImages`); a tab has no other apps.
+    openDefault: (path) => {
+      if (!dev)
+        return Promise.reject(new Error('A browser tab has no other apps to open files in.'));
+      dev.opened.push(path);
+      return Promise.resolve();
+    },
     // Every file of the folder is the tab's own, and it remembers nothing.
     allowDocument: () => Promise.resolve(),
     // The images added in this tab are in its memory, in the folder of the document.
@@ -637,6 +681,10 @@ function createBrowserHost(): Host {
       imageUrls.set(path, url);
       return url;
     },
+    imageStamps: (paths) =>
+      Promise.resolve(
+        paths.map((path) => (images.has(path) ? String(stamps.get(path) ?? 0) : null)),
+      ),
     forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.

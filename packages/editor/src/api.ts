@@ -241,6 +241,15 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * Opens the file of a local image in another app, for a double-click on the image, and for the
+   * `image.edit` command (Edit Image in Preview): given the image's path as the document writes it,
+   * decoded and relative to the document (`img/a b.png`). The host knows where the document is and
+   * what may be opened. A remote image is never given: it has no file, and a double-click on it
+   * does nothing. Default: none, and a double-click does what it does anywhere in the text, and
+   * the command isn't registered.
+   */
+  openImage?: (src: string) => void;
+  /**
    * Called when image files are pasted into the document, or dropped on it, with the files and the
    * spot their links will go to (`ImageSpot`). The host saves each file where the document can
    * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells

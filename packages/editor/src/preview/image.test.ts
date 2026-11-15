@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
 import type { WidgetType } from '@codemirror/view';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
+import { imagePress } from './image.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -240,5 +241,129 @@ describe('images', () => {
       img.dispatchEvent(new Event('load'));
       expect(img.style.getPropertyValue('width')).toBe(width);
     }
+  });
+});
+
+describe('opening an image', () => {
+  const DOC = 'Hello ![A cat](img/a%20cat.png) and ![Web](https://example.com/w.png) end';
+
+  function editorOpening(openImage?: (src: string) => void): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: DOC,
+      author,
+      view: 'redlines',
+      resolveImage: local,
+      openImage,
+    });
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor: DOC.length } });
+    open.push(editor);
+    return editor;
+  }
+
+  /** A press, handed to the extension's handler alone: the editor's own handling needs a layout. */
+  const pressed = (handler: ReturnType<typeof imagePress>, editor: Editor) => {
+    const press = (target: Element, detail: number) => {
+      const event = new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        detail,
+      });
+      Object.defineProperty(event, 'target', { value: target });
+      return handler(event, editor.view);
+    };
+    return press;
+  };
+
+  it('hands the path of a local image, decoded, to the host on a double-click', () => {
+    const opened: string[] = [];
+    const editor = editorOpening();
+    const press = pressed(
+      imagePress((src) => opened.push(src)),
+      editor,
+    );
+    const [cat] = editor.view.dom.querySelectorAll('.rl-image');
+    expect(press(cat!, 1)).toBe(false);
+    // The first click puts the caret on the image, which shows its source in place of the picture,
+    // and the second lands there: it is taken whole, so that it selects no word.
+    expect(press(editor.view.contentDOM, 2)).toBe(true);
+    expect(opened).toEqual(['img/a cat.png']);
+  });
+
+  it('does nothing for a remote image, and selects no word either', () => {
+    const opened: string[] = [];
+    const editor = editorOpening();
+    const press = pressed(
+      imagePress((src) => opened.push(src)),
+      editor,
+    );
+    const web = editor.view.dom.querySelectorAll('.rl-image')[1];
+    press(web!, 1);
+    expect(press(editor.view.contentDOM, 2)).toBe(true);
+    expect(opened).toEqual([]);
+  });
+
+  it('does nothing for a double-click that did not start on an image', () => {
+    const opened: string[] = [];
+    const editor = editorOpening();
+    const press = pressed(
+      imagePress((src) => opened.push(src)),
+      editor,
+    );
+    press(editor.view.contentDOM, 1);
+    expect(press(editor.view.contentDOM, 2)).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it('does nothing when the second press is late, or the text changed between them', () => {
+    const opened: string[] = [];
+    const editor = editorOpening();
+    const press = pressed(
+      imagePress((src) => opened.push(src)),
+      editor,
+    );
+    const [cat] = editor.view.dom.querySelectorAll('.rl-image');
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1000);
+    press(cat!, 1);
+    now.mockReturnValue(1000 + 5000);
+    expect(press(editor.view.contentDOM, 2)).toBe(false);
+    now.mockReturnValue(1000);
+    press(cat!, 1);
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(press(editor.view.contentDOM, 2)).toBe(false);
+    now.mockRestore();
+    expect(opened).toEqual([]);
+  });
+
+  it('is part of the editor only with a host hook, which also registers the command', () => {
+    const without = editorOpening();
+    expect(without.commands.list().some(({ id }) => id === 'image.edit')).toBe(false);
+    const withHook = editorOpening(() => {});
+    expect(withHook.commands.list().some(({ id }) => id === 'image.edit')).toBe(true);
+  });
+
+  it('has a command for the image under the caret or in the selection', () => {
+    const opened: string[] = [];
+    const editor = editorOpening((src) => opened.push(src));
+    const command = () => editor.commands.list().find(({ id }) => id === 'image.edit')!;
+    expect(command().title).toBe('Edit Image in Preview');
+    // The caret is at the end, off any image: disabled.
+    expect(editor.getUiState().enabledCommands).not.toContain('image.edit');
+    expect(editor.commands.run('image.edit')).toBe(false);
+    // On the local image.
+    editor.view.dispatch({ selection: { anchor: DOC.indexOf('cat') } });
+    expect(editor.getUiState().enabledCommands).toContain('image.edit');
+    expect(editor.commands.run('image.edit')).toBe(true);
+    // In a selection that holds it.
+    editor.view.dispatch({ selection: { anchor: 0, head: DOC.indexOf(' and') } });
+    expect(editor.commands.run('image.edit')).toBe(true);
+    // On the remote image: it has no file.
+    editor.view.dispatch({ selection: { anchor: DOC.indexOf('example') } });
+    expect(editor.commands.run('image.edit')).toBe(false);
+    expect(opened).toEqual(['img/a cat.png', 'img/a cat.png']);
   });
 });

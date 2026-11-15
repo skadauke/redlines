@@ -1256,6 +1256,9 @@ mod tests {
         fs::set_permissions(repo.join("build.png"), fs::Permissions::from_mode(0o755)).unwrap();
         assert!(open("build.png").is_err());
         assert!(open("missing.png").is_err());
+        // A `..` that leads out of the project, to a file that is there.
+        assert!(open("../elsewhere.png").is_err());
+        assert!(open("docs/../../elsewhere.png").is_err());
         assert!(openable(&repo, Path::new("logo.png")).is_err());
         fs::remove_dir_all(&outside).unwrap();
     }
