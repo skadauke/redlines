@@ -1,6 +1,8 @@
-//! Images added to a document (#308): files the person drops on its window or chooses in a panel,
-//! and the data of an image pasted, saved in a folder beside the document, which the preview loads
-//! them from (`images`). The page links them once they are there.
+//! Images added to a document (#308, #523): files the person drops on its window or chooses in a
+//! panel, and the data of an image pasted, saved in the project's one folder for images (`images`,
+//! in the project folder the sidebar shows: the repository's root, else the document's own folder),
+//! which the preview loads them from. The page links them, by a path relative to the document,
+//! once they are there.
 //!
 //! The page never names a file to copy. The app knows the files dropped on a window from the
 //! system's drop (`dropped`) and those chosen from the panel it shows itself (`pick_images`), and
@@ -9,10 +11,12 @@
 //! person gave it, and a drop still lets the window read nothing it couldn't before.
 //!
 //! What goes in is an image, by its name and by its first bytes (`images::image_type`), no larger
-//! than the preview serves, and only inside the folder of the window's own document: that folder, or
-//! one folder named in the settings inside it, where the preview loads from (`destination`). A name
-//! that is taken gets a number, and nothing is ever replaced (`unique_file`). A dropped or chosen
-//! file is copied, never moved.
+//! than the preview serves, and only in the project's folder for images, one folder named in the
+//! settings inside the project folder, where the preview loads from (`destination`); a document in
+//! the home folder or at the disk's root, which is no project, has its images in its own folder. A
+//! name that is taken gets a number, and nothing is ever replaced (`unique_file`); an image that is
+//! there already, byte for byte, is linked and not copied again. A dropped or chosen file is
+//! copied, never moved.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -112,17 +116,13 @@ impl ImageSources {
     }
 }
 
-/// Why images don't go in the folder a name says, in a project whose images the preview loads from
-/// the document's own folder alone (`project::ProjectRoot::is_too_broad`).
-const TOO_BROAD: &str = "Redlines shows images only from this document’s own folder here, so it can’t add them to a folder. In Preferences › Editor, choose “In the document’s folder” for Images.";
+/// Why images aren't added to a folder that leads out of the project's folder.
+const OUTSIDE: &str = "The folder for images leads outside the project’s folder, so Redlines doesn’t add images to it.";
 
-/// Why images aren't added to a folder that leads out of the document's folder.
-const OUTSIDE: &str = "The folder for images leads outside the document’s folder, so Redlines doesn’t add images to it.";
-
-/// Why images aren't added to a document whose folder isn't there: it was moved or deleted since,
+/// Why images aren't added to a project whose folder isn't there: it was moved or deleted since,
 /// and a folder made again for it would hold images that no document links to.
 const MOVED: &str =
-    "The document’s folder isn’t there any more, so Redlines doesn’t add images to it.";
+    "The project’s folder isn’t there any more, so Redlines doesn’t add images to it.";
 
 fn not_an_image(name: &str) -> String {
     format!("“{name}” isn’t an image Redlines can show.")
@@ -139,19 +139,21 @@ fn cannot_add(name: &str, error: &io::Error) -> String {
     format!("Couldn’t add “{name}”: {error}.")
 }
 
-/// The folder for images that the settings name, relative to the document: none for the document's
-/// own folder, or one name with no slash that isn't hidden, whose images the preview wouldn't load
-/// (`images::Images::allow_folder`).
-fn relative_folder(folder: &str) -> Result<Option<&str>, String> {
+/// The name of the project's folder for images when the settings give none.
+const DEFAULT_FOLDER: &str = "images";
+
+/// The folder for images that the settings name, which is one name with no slash that isn't hidden,
+/// whose images the preview wouldn't load (`images::Images::allow_folder`); `images` for none.
+fn folder_name(folder: &str) -> Result<&str, String> {
     if folder.is_empty() {
-        return Ok(None);
+        return Ok(DEFAULT_FOLDER);
     }
     let plain = !folder.starts_with('.')
         && !folder.trim().is_empty()
-        && !folder.contains(['/', '\\'])
+        && !folder.contains(['/', '\\', ':'])
         && !folder.chars().any(char::is_control);
     if plain {
-        Ok(Some(folder))
+        Ok(folder)
     } else {
         Err(format!(
             "“{folder}” can’t be the folder for images: it is a name with no slash, and not a hidden one."
@@ -159,26 +161,59 @@ fn relative_folder(folder: &str) -> Result<Option<&str>, String> {
     }
 }
 
-/// The folder for the images of the document at `document`: its own folder when `folder` is empty,
-/// and otherwise the one named `folder` in it. Where the project is too broad to load images from
-/// but for the document's own folder, only that one.
-fn destination(document: &Path, folder: &str, too_broad: bool) -> Result<PathBuf, String> {
+/// Where the images of a document go: the folder, the folder it has to be inside of, and how a
+/// document links to it.
+#[derive(Debug, PartialEq)]
+struct Place {
+    /// The folder for images, which may not be made yet.
+    target: PathBuf,
+    /// The folder that has to be there already, and that `target` is, or is inside.
+    bound: PathBuf,
+    /// The path of `target` from the document's folder, written as a link: `images`, `../images`, or
+    /// nothing for the document's own folder.
+    link: String,
+}
+
+/// The place for the images of the document at `document`, in the project whose folder is `project`
+/// (`project::root_of`): the folder named `folder` in it, the project's one folder for images, which
+/// is the same for every document in it. Where the project is too broad to load images from but for
+/// the document's own folder (the home folder, the disk's root), the document's own folder.
+fn destination(
+    document: &Path,
+    folder: &str,
+    project: &Path,
+    too_broad: bool,
+) -> Result<Place, String> {
     let own = document
         .parent()
         .filter(|own| !own.as_os_str().is_empty())
         .ok_or_else(|| "This document has no folder to add images to.".to_owned())?;
-    match relative_folder(folder)? {
-        None => Ok(own.to_path_buf()),
-        Some(_) if too_broad => Err(TOO_BROAD.to_owned()),
-        Some(name) => Ok(own.join(name)),
+    let name = folder_name(folder)?;
+    if too_broad {
+        return Ok(Place {
+            target: own.to_path_buf(),
+            bound: own.to_path_buf(),
+            link: String::new(),
+        });
     }
+    // The project folder is the document's folder or one above it.
+    let depth = own
+        .strip_prefix(project)
+        .map_err(|_| "This document isn’t in the project folder.".to_owned())?
+        .components()
+        .count();
+    Ok(Place {
+        target: project.join(name),
+        bound: project.to_path_buf(),
+        link: format!("{}{name}", "../".repeat(depth)),
+    })
 }
 
-/// Makes the folder `target`, in the folder `own` of its document or that folder itself, and gives
-/// it as it really is, if it is inside `own`: a folder that is a link to somewhere else holds no
-/// image the preview would load, and Redlines doesn't write there. The document's own folder has to
-/// be there already: only the one folder named in the settings is made, never the way to it, so that
-/// a folder that was moved is not made again.
+/// Makes the folder `target`, in the folder `own` (the project's, or the document's where the
+/// project is too broad) or that folder itself, and gives it as it really is, if it is inside `own`:
+/// a folder that is a link to somewhere else holds no image the preview would load, and Redlines
+/// doesn't write there. `own` has to be there already: only the one folder named in the settings is
+/// made, never the way to it, so that a folder that was moved is not made again.
 fn ensure_folder(own: &Path, target: &Path) -> Result<PathBuf, String> {
     let made = |error: io::Error| format!("Couldn’t make the folder for images: {error}.");
     let real_own = std::fs::canonicalize(own).map_err(|_| MOVED.to_owned())?;
@@ -256,6 +291,76 @@ fn spoiled(folder: &Path, made: &str, name: &str, error: &io::Error) -> String {
     cannot_add(name, error)
 }
 
+/// Whether the file at `path` holds exactly `bytes`, read in pieces and no further than they go, so
+/// that a file that grew since its size was looked at is not read whole.
+fn holds(path: &Path, bytes: &[u8]) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut piece = [0u8; 64 * 1024];
+    let mut at = 0;
+    loop {
+        match file.read(&mut piece) {
+            Ok(0) => return at == bytes.len(),
+            Ok(n) if bytes.len() >= at + n && bytes[at..at + n] == piece[..n] => at += n,
+            _ => return false,
+        }
+    }
+}
+
+/// The name of the file in `folder` that holds the same bytes as `file`, which is `len` bytes long
+/// and begins with `head`, among those a copy of it would have been given: `name`, `name-2`, and so
+/// on while there are files of those names. None when there is none, or `file` can't be read again.
+fn identical_copy(
+    folder: &Path,
+    name: &str,
+    head: &[u8],
+    file: &mut File,
+    len: u64,
+) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name, ""),
+    };
+    let mut whole: Option<Vec<u8>> = None;
+    let mut misses = 0;
+    for number in 1..=10_000u32 {
+        let candidate = if number == 1 {
+            name.to_owned()
+        } else {
+            format!("{stem}-{number}{extension}")
+        };
+        // A gap in the numbering (a copy that was deleted) doesn't end the search, a few do.
+        let Ok(metadata) = std::fs::symlink_metadata(folder.join(&candidate)) else {
+            misses += 1;
+            if misses > 3 {
+                return None;
+            }
+            continue;
+        };
+        misses = 0;
+        if !metadata.is_file() || metadata.len() != len {
+            continue;
+        }
+        if whole.is_none() {
+            let mut bytes = head.to_vec();
+            file.seek(SeekFrom::Start(head.len() as u64)).ok()?;
+            (&mut *file).take(len).read_to_end(&mut bytes).ok()?;
+            whole = Some(bytes);
+        }
+        if whole
+            .as_deref()
+            .is_some_and(|bytes| holds(&folder.join(&candidate), bytes))
+        {
+            // The copy goes on from where it was: the head and the rest are read again below.
+            file.seek(SeekFrom::Start(head.len() as u64)).ok()?;
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// Copies the image file `source` into `folder`, under its own name or a numbered one, and gives the
 /// name it has there. The file stays where it is. An image that is in `folder` already is not
 /// copied: the document links to it, and the name is its own. Refused with a sentence for a file
@@ -290,7 +395,14 @@ fn copy_image(folder: &Path, source: &Path, max: u64) -> Result<String, String> 
     {
         return Ok(name);
     }
-    let (mut copy, made) = unique_file(folder, &clean_name(&name)).map_err(cannot)?;
+    // A copy of it is there already, under its name or a numbered one: the document links to that.
+    let wanted = clean_name(&name);
+    if let Some(same) = identical_copy(folder, &wanted, &head, &mut file, metadata.len()) {
+        return Ok(same);
+    }
+    let (mut copy, made) = unique_file(folder, &wanted).map_err(cannot)?;
+    // Back to where the head ended, whatever the search for a copy read.
+    std::io::Seek::seek(&mut file, io::SeekFrom::Start(head.len() as u64)).map_err(cannot)?;
     // The head is read already; the rest follows, and never more than an image may be, should the
     // file have grown since it was looked at.
     let rest = (max + 1).saturating_sub(head.len() as u64);
@@ -324,29 +436,40 @@ fn write_image(folder: &Path, wanted: &str, bytes: &[u8], max: u64) -> Result<St
     Ok(made)
 }
 
-/// The path a document links an image in `folder` (as the settings name it) by.
-fn link_path(folder: &str, name: &str) -> String {
-    if folder.is_empty() {
+/// The path a document links an image called `name` by, in the folder that `link` is the path of
+/// from the document (`Place::link`).
+fn link_path(link: &str, name: &str) -> String {
+    if link.is_empty() {
         name.to_owned()
     } else {
-        format!("{folder}/{name}")
+        format!("{link}/{name}")
     }
 }
 
-/// The folder made for the images of a document, as it really is, and whether it was there before.
+/// The folder made for the images of a document, as it really is, how the document links to it,
+/// and whether it was there before.
 struct Prepared {
     real: PathBuf,
+    link: String,
     existed: bool,
 }
 
-/// Makes the folder for the images of `document` (`destination`, `ensure_folder`), or says why it
-/// can't be, before anything else is done.
-fn prepare(document: &Path, folder: &str, too_broad: bool) -> Result<Prepared, String> {
-    let target = destination(document, folder, too_broad)?;
-    let existed = target.is_dir();
-    let own = document.parent().unwrap_or(&target);
-    let real = ensure_folder(own, &target)?;
-    Ok(Prepared { real, existed })
+/// Makes the folder for the images of `document`, in the project at `project` (`destination`,
+/// `ensure_folder`), or says why it can't be, before anything else is done.
+fn prepare(
+    document: &Path,
+    folder: &str,
+    project: &Path,
+    too_broad: bool,
+) -> Result<Prepared, String> {
+    let place = destination(document, folder, project, too_broad)?;
+    let existed = place.target.is_dir();
+    let real = ensure_folder(&place.bound, &place.target)?;
+    Ok(Prepared {
+        real,
+        link: place.link,
+        existed,
+    })
 }
 
 /// Takes the folder away again when it was made for this and nothing went in.
@@ -356,13 +479,13 @@ fn finish(prepared: &Prepared, added: &AddedImages) {
     }
 }
 
-/// Copies each of `files` into `real`, the folder for images that `folder` names in the settings:
-/// the paths to link, and a sentence for each file that couldn't be added.
-fn copy_all(real: &Path, folder: &str, files: &[PathBuf], max: u64) -> AddedImages {
+/// Copies each of `files` into `prepared`'s folder: the paths to link, and a sentence for each file
+/// that couldn't be added.
+fn copy_all(prepared: &Prepared, files: &[PathBuf], max: u64) -> AddedImages {
     let mut added = AddedImages::default();
     for file in files {
-        match copy_image(real, file, max) {
-            Ok(name) => added.paths.push(link_path(folder, &name)),
+        match copy_image(&prepared.real, file, max) {
+            Ok(name) => added.paths.push(link_path(&prepared.link, &name)),
             Err(sentence) => added.refused.push(sentence),
         }
     }
@@ -372,21 +495,23 @@ fn copy_all(real: &Path, folder: &str, files: &[PathBuf], max: u64) -> AddedImag
 /// Adds the images kept for the window `label` under `id` to the document: the folder is made, or
 /// refused, first, so that a refusal leaves the images with the window, which can ask again with
 /// another folder; they are taken only then, and once.
+#[allow(clippy::too_many_arguments)]
 fn add_given(
     sources: &ImageSources,
     label: &str,
     id: u64,
     document: &Path,
     folder: &str,
+    project: &Path,
     too_broad: bool,
     max: u64,
 ) -> Result<AddedImages, String> {
-    let prepared = prepare(document, folder, too_broad)?;
+    let prepared = prepare(document, folder, project, too_broad)?;
     let Some(files) = sources.take(label, id) else {
         finish(&prepared, &AddedImages::default());
         return Err("Those images were added already, or weren’t given to this window.".to_owned());
     };
-    let added = copy_all(&prepared.real, folder, &files, max);
+    let added = copy_all(&prepared, &files, max);
     finish(&prepared, &added);
     Ok(added)
 }
@@ -395,15 +520,16 @@ fn add_given(
 fn add_data(
     document: &Path,
     folder: &str,
+    project: &Path,
     too_broad: bool,
     name: &str,
     bytes: &[u8],
     max: u64,
 ) -> Result<AddedImages, String> {
-    let prepared = prepare(document, folder, too_broad)?;
+    let prepared = prepare(document, folder, project, too_broad)?;
     let mut added = AddedImages::default();
     match write_image(&prepared.real, name, bytes, max) {
-        Ok(made) => added.paths.push(link_path(folder, &made)),
+        Ok(made) => added.paths.push(link_path(&prepared.link, &made)),
         Err(sentence) => added.refused.push(sentence),
     }
     finish(&prepared, &added);
@@ -508,13 +634,14 @@ pub fn window_closed(app: &AppHandle, label: &str) {
     app.state::<ImageSources>().forget_window(label);
 }
 
-/// The window's own document at `document`, which the window may use (`files::check_own_file`), and
-/// whether its project is too broad to load images from but for the document's own folder.
+/// The window's own document at `document`, which the window may use (`files::check_own_file`), the
+/// folder of its project, and whether that is too broad to load images from but for the document's
+/// own folder.
 fn own_document(
     app: &AppHandle,
     window: &WebviewWindow,
     document: &str,
-) -> Result<(PathBuf, bool), String> {
+) -> Result<(PathBuf, PathBuf, bool), String> {
     let scope = app.fs_scope();
     let path = Path::new(document);
     check_own_file(
@@ -525,7 +652,7 @@ fn own_document(
         |path| file_scope::allowed(&scope, path),
     )?;
     let root = project::root_of(path, std::env::home_dir().as_deref());
-    Ok((path.to_path_buf(), root.is_too_broad()))
+    Ok((path.to_path_buf(), root.folder(), root.is_too_broad()))
 }
 
 /// Shows the system's panel for image files, a sheet of the window that asks, and keeps what is
@@ -558,9 +685,8 @@ pub fn pick_images(app: AppHandle, window: WebviewWindow) -> Result<Option<Given
 }
 
 /// Copies the image files the window was given under `id` (`dropped`, `pick_images`) into the
-/// folder for the images of its document, which is `folder` inside the document's folder (or the
-/// document's folder itself for ''): the paths to link, and a sentence for each file that couldn't
-/// be added.
+/// project's folder for images, which is `folder` inside the project folder (`images` for ''): the
+/// paths to link, relative to the document, and a sentence for each file that couldn't be added.
 #[tauri::command(async)]
 pub fn add_images(
     app: AppHandle,
@@ -569,19 +695,20 @@ pub fn add_images(
     document: String,
     folder: String,
 ) -> Result<AddedImages, String> {
-    let (document, too_broad) = own_document(&app, &window, &document)?;
+    let (document, project, too_broad) = own_document(&app, &window, &document)?;
     add_given(
         &app.state::<ImageSources>(),
         window.label(),
         id,
         &document,
         &folder,
+        &project,
         too_broad,
         MAX_IMAGE_BYTES,
     )
 }
 
-/// Writes a pasted image into the folder for the images of the window's document, as
+/// Writes a pasted image into the project's folder for images, as
 /// `add_images` does for files. The request's body is the image data, and its headers say, written
 /// as percent codes, the document (`x-redlines-document`), the folder (`x-redlines-folder`) and the
 /// file name the image should have (`x-redlines-name`).
@@ -592,10 +719,11 @@ pub fn add_pasted_image(
     request: tauri::ipc::Request<'_>,
 ) -> Result<AddedImages, String> {
     let read = pasted_request(request.headers(), request.body())?;
-    let (document, too_broad) = own_document(&app, &window, &read.document)?;
+    let (document, project, too_broad) = own_document(&app, &window, &read.document)?;
     add_data(
         &document,
         &read.folder,
+        &project,
         too_broad,
         &read.name,
         read.bytes,
@@ -629,9 +757,50 @@ mod tests {
         files: &[PathBuf],
         max: u64,
     ) -> Result<AddedImages, String> {
+        add_files_in(
+            document,
+            document.parent().unwrap(),
+            folder,
+            too_broad,
+            files,
+            max,
+        )
+    }
+
+    /// `add_files` for a document in the project whose folder is `project`.
+    fn add_files_in(
+        document: &Path,
+        project: &Path,
+        folder: &str,
+        too_broad: bool,
+        files: &[PathBuf],
+        max: u64,
+    ) -> Result<AddedImages, String> {
         let sources = ImageSources::default();
         let id = sources.keep("main", files.to_vec());
-        add_given(&sources, "main", id, document, folder, too_broad, max)
+        add_given(
+            &sources, "main", id, document, folder, project, too_broad, max,
+        )
+    }
+
+    /// Pastes `bytes` into a document whose own folder is its project's, as the command does.
+    fn put(
+        document: &Path,
+        folder: &str,
+        too_broad: bool,
+        name: &str,
+        bytes: &[u8],
+        max: u64,
+    ) -> Result<AddedImages, String> {
+        add_data(
+            document,
+            folder,
+            document.parent().unwrap(),
+            too_broad,
+            name,
+            bytes,
+            max,
+        )
     }
 
     /// A document in a new folder, and the folder.
@@ -643,12 +812,12 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_for_images_is_none_or_a_plain_name() {
-        assert_eq!(relative_folder(""), Ok(None));
+    fn the_folder_for_images_is_a_plain_name_and_images_for_none() {
+        assert_eq!(folder_name(""), Ok("images"));
         for name in ["images", "plan.assets", "my images", "Bilder 1"] {
-            assert_eq!(relative_folder(name), Ok(Some(name)), "{name}");
+            assert_eq!(folder_name(name), Ok(name), "{name}");
         }
-        // No way out of the document's folder, and no hidden name, which the preview doesn't load.
+        // No way out of the project's folder, and no hidden name, which the preview doesn't load.
         for name in [
             "../images",
             "a/b",
@@ -659,32 +828,56 @@ mod tests {
             "a\\b",
             " ",
             "a\nb",
+            "a:b",
         ] {
-            assert!(relative_folder(name).is_err(), "{name:?}");
+            assert!(folder_name(name).is_err(), "{name:?}");
         }
     }
 
     #[test]
-    fn images_go_beside_the_document_in_the_folder_named_or_in_its_own() {
-        let document = Path::new("/docs/plan.md");
-        assert_eq!(
-            destination(document, "images", false),
-            Ok(PathBuf::from("/docs/images"))
-        );
-        assert_eq!(destination(document, "", false), Ok(PathBuf::from("/docs")));
-        assert!(destination(document, "../x", false).is_err());
-        assert!(destination(Path::new("plan.md"), "images", false).is_err());
+    fn images_go_in_the_one_folder_of_the_project_whatever_folder_the_document_is_in() {
+        let place = |document: &str| {
+            destination(Path::new(document), "images", Path::new("/repo"), false).unwrap()
+        };
+        let at_root = place("/repo/plan.md");
+        assert_eq!(at_root.target, PathBuf::from("/repo/images"));
+        assert_eq!(at_root.bound, PathBuf::from("/repo"));
+        assert_eq!(at_root.link, "images");
+        // From a folder below, the same folder is reached from above, hidden folders included.
+        assert_eq!(place("/repo/docs/plan.md").target, at_root.target);
+        assert_eq!(place("/repo/docs/plan.md").link, "../images");
+        assert_eq!(place("/repo/.github/docs/plan.md").link, "../../images");
+        assert!(destination(Path::new("/repo/p.md"), "../x", Path::new("/repo"), false).is_err());
+        assert!(destination(Path::new("plan.md"), "images", Path::new("/repo"), false).is_err());
+        // A document that is not in the project folder has no folder for images in it.
+        assert!(destination(Path::new("/else/p.md"), "images", Path::new("/repo"), false).is_err());
+    }
+
+    #[test]
+    fn a_document_that_is_in_no_project_keeps_its_images_folder_beside_it() {
+        // With no repository the project is the document's own folder (`project::root_of`).
+        let place = destination(
+            Path::new("/docs/plan.md"),
+            "images",
+            Path::new("/docs"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(place.target, PathBuf::from("/docs/images"));
+        assert_eq!(place.link, "images");
     }
 
     #[test]
     fn a_project_too_broad_takes_images_in_its_documents_own_folder_alone() {
-        let document = Path::new("/Users/ada/plan.md");
-        assert_eq!(
-            destination(document, "", true),
-            Ok(PathBuf::from("/Users/ada"))
-        );
-        let refused = destination(document, "images", true).unwrap_err();
-        assert!(refused.contains("In Preferences"), "{refused}");
+        let place = destination(
+            Path::new("/Users/ada/plan.md"),
+            "images",
+            Path::new("/Users/ada"),
+            true,
+        )
+        .unwrap();
+        assert_eq!(place.target, PathBuf::from("/Users/ada"));
+        assert_eq!(place.link, "");
     }
 
     #[test]
@@ -743,12 +936,17 @@ mod tests {
         std::fs::write(&source, PNG).unwrap();
         std::fs::write(own.join("shot.png"), "someone else's").unwrap();
         assert_eq!(copy_image(&own, &source, 1000), Ok("shot-2.png".to_owned()));
-        assert_eq!(copy_image(&own, &source, 1000), Ok("shot-3.png".to_owned()));
+        // The same bytes again are linked, not copied again.
+        assert_eq!(copy_image(&own, &source, 1000), Ok("shot-2.png".to_owned()));
+        // Other bytes under the name are another file, numbered on.
+        let other = folder("numbered-other").join("shot.png");
+        std::fs::write(&other, b"\x89PNG\r\n\x1a\nother").unwrap();
+        assert_eq!(copy_image(&own, &other, 1000), Ok("shot-3.png".to_owned()));
         assert_eq!(
             std::fs::read(own.join("shot.png")).unwrap(),
             b"someone else's"
         );
-        assert_eq!(std::fs::read(own.join("shot-3.png")).unwrap(), PNG);
+        assert_eq!(std::fs::read(own.join("shot-2.png")).unwrap(), PNG);
     }
 
     #[test]
@@ -834,10 +1032,10 @@ mod tests {
         assert_eq!(added.paths, ["images/a.png", "images/c.png"]);
         assert_eq!(added.refused, ["“b.txt” isn’t an image Redlines can show."]);
         assert!(own.join("images/a.png").is_file());
-        // The document's own folder is linked by the bare name.
-        let beside = add_files(&document, "", false, &files[..1], 1000).unwrap();
-        assert_eq!(beside.paths, ["a.png"]);
-        assert!(own.join("a.png").is_file());
+        // The folder the settings name is the one folder, wherever the document is.
+        let named = add_files(&document, "pictures", false, &files[..1], 1000).unwrap();
+        assert_eq!(named.paths, ["pictures/a.png"]);
+        assert!(own.join("pictures/a.png").is_file());
     }
 
     #[test]
@@ -855,15 +1053,15 @@ mod tests {
     }
 
     #[test]
-    fn adds_pasted_data_beside_the_document() {
+    fn adds_pasted_data_to_the_folder_the_settings_name() {
         let (own, document) = document("adds-data");
-        let added = add_data(&document, "plan.assets", false, "image.png", PNG, 1000).unwrap();
+        let added = put(&document, "plan.assets", false, "image.png", PNG, 1000).unwrap();
         assert_eq!(added.paths, ["plan.assets/image.png"]);
         assert_eq!(
             std::fs::read(own.join("plan.assets/image.png")).unwrap(),
             PNG
         );
-        let refused = add_data(&document, "plan.assets", false, "image.png", b"no", 1000).unwrap();
+        let refused = put(&document, "plan.assets", false, "image.png", b"no", 1000).unwrap();
         assert!(refused.paths.is_empty());
         assert_eq!(
             refused.refused,
@@ -873,7 +1071,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn refuses_a_folder_that_leads_out_of_the_documents_folder() {
+    fn refuses_a_folder_that_leads_out_of_the_projects_folder() {
         let (own, document) = document("outside");
         let elsewhere = folder("outside-elsewhere");
         std::os::unix::fs::symlink(&elsewhere, own.join("images")).unwrap();
@@ -890,7 +1088,7 @@ mod tests {
         let (own, document) = document("inside");
         std::fs::create_dir_all(own.join("real")).unwrap();
         std::os::unix::fs::symlink(own.join("real"), own.join("images")).unwrap();
-        let added = add_data(&document, "images", false, "a.png", PNG, 1000).unwrap();
+        let added = put(&document, "images", false, "a.png", PNG, 1000).unwrap();
         assert_eq!(added.paths, ["images/a.png"]);
         assert!(own.join("real/a.png").is_file());
     }
@@ -918,7 +1116,7 @@ mod tests {
     fn a_document_folder_that_is_gone_is_not_made_again() {
         let (own, document) = document("moved");
         std::fs::remove_dir_all(&own).unwrap();
-        let refused = add_data(&document, "images", false, "a.png", PNG, 1000);
+        let refused = put(&document, "images", false, "a.png", PNG, 1000);
         assert_eq!(refused, Err(MOVED.to_owned()));
         // Not even its parents: images no document links to would be all that was there.
         assert!(!own.exists());
@@ -928,7 +1126,7 @@ mod tests {
     fn a_file_that_has_the_name_of_the_folder_is_no_folder_for_images() {
         let (own, document) = document("file-named");
         std::fs::write(own.join("images"), "not a folder").unwrap();
-        let refused = add_data(&document, "images", false, "a.png", PNG, 1000).unwrap_err();
+        let refused = put(&document, "images", false, "a.png", PNG, 1000).unwrap_err();
         assert!(refused.contains("is a file"), "{refused}");
         assert_eq!(std::fs::read(own.join("images")).unwrap(), b"not a folder");
     }
@@ -940,16 +1138,26 @@ mod tests {
         std::fs::write(from.join("a.png"), PNG).unwrap();
         let sources = ImageSources::default();
         let id = sources.keep("main", vec![from.join("a.png")]);
-        // A project too broad for a folder: refused, and nothing taken.
-        assert_eq!(
-            add_given(&sources, "main", id, &document, "images", true, 1000),
-            Err(TOO_BROAD.to_owned())
+        // A file has the name of the folder: refused, and nothing taken.
+        std::fs::write(own.join("images"), "not a folder").unwrap();
+        let project = own.clone();
+        let refused = add_given(
+            &sources, "main", id, &document, "images", &project, false, 1000,
         );
-        // The person chooses the document's own folder, and the same images go in, once.
-        let added = add_given(&sources, "main", id, &document, "", true, 1000).unwrap();
-        assert_eq!(added.paths, ["a.png"]);
-        assert!(own.join("a.png").is_file());
-        assert!(add_given(&sources, "main", id, &document, "", true, 1000).is_err());
+        assert!(refused.unwrap_err().contains("is a file"));
+        // The person names another folder, and the same images go in, once.
+        let added = add_given(
+            &sources, "main", id, &document, "pictures", &project, false, 1000,
+        )
+        .unwrap();
+        assert_eq!(added.paths, ["pictures/a.png"]);
+        assert!(own.join("pictures/a.png").is_file());
+        assert!(
+            add_given(
+                &sources, "main", id, &document, "pictures", &project, false, 1000
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -959,7 +1167,16 @@ mod tests {
         let other = sources.keep("doc-1", vec![PathBuf::from("/a.png")]);
         // Another window's, and ones nobody was given.
         for id in [other, other + 100] {
-            let refused = add_given(&sources, "main", id, &document, "images", false, 1000);
+            let refused = add_given(
+                &sources,
+                "main",
+                id,
+                &document,
+                "images",
+                own.as_path(),
+                false,
+                1000,
+            );
             assert!(refused.is_err(), "{id}");
         }
         assert!(!own.join("images").exists());
@@ -990,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pasted_request_with_no_folder_means_the_documents_own() {
+    fn a_pasted_request_with_no_folder_means_the_default_one() {
         use tauri::http::HeaderValue;
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1096,5 +1313,146 @@ mod tests {
         assert_eq!(sources.take("main", ids[1]), None);
         assert!(sources.take("main", ids[2]).is_some());
         assert!(sources.take("main", *ids.last().unwrap()).is_some());
+    }
+
+    /// A repository with `.git` in it, a document at `relative` in it, and the folder.
+    fn in_repo(name: &str, relative: &str) -> (PathBuf, PathBuf) {
+        let repo = folder(name);
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let document = repo.join(relative);
+        std::fs::create_dir_all(document.parent().unwrap()).unwrap();
+        std::fs::write(&document, "# Plan\n").unwrap();
+        (repo, document)
+    }
+
+    #[test]
+    fn every_document_of_a_repository_adds_images_to_its_one_folder_and_links_it_from_where_it_is()
+    {
+        let (repo, deep) = in_repo("repo", ".github/docs/plan.md");
+        let top = repo.join("README.md");
+        std::fs::write(&top, "# Read\n").unwrap();
+        let from = folder("repo-from");
+        std::fs::write(from.join("a.png"), PNG).unwrap();
+        let root = project::root_of(&deep, None);
+        assert_eq!(root.folder(), repo);
+        let added = add_files_in(
+            &deep,
+            &root.folder(),
+            "images",
+            false,
+            &[from.join("a.png")],
+            1000,
+        )
+        .unwrap();
+        // From a hidden folder below the project's, up to its folder for images.
+        assert_eq!(added.paths, ["../../images/a.png"]);
+        assert!(repo.join("images/a.png").is_file());
+        assert!(!repo.join(".github").join("images").exists());
+        // The same file from the top is linked from there; it is already in the folder.
+        let again =
+            add_files_in(&top, &repo, "images", false, &[from.join("a.png")], 1000).unwrap();
+        assert_eq!(again.paths, ["images/a.png"]);
+        assert_eq!(std::fs::read_dir(repo.join("images")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn an_image_dragged_in_from_elsewhere_is_copied_and_never_over_a_file() {
+        let (repo, document) = in_repo("repo-copy", "docs/plan.md");
+        let elsewhere = folder("repo-copy-from");
+        std::fs::write(elsewhere.join("shot.png"), PNG).unwrap();
+        std::fs::create_dir_all(repo.join("images")).unwrap();
+        std::fs::write(repo.join("images/shot.png"), b"\x89PNG\r\n\x1a\nother").unwrap();
+        let added = add_files_in(
+            &document,
+            &repo,
+            "images",
+            false,
+            &[elsewhere.join("shot.png")],
+            1000,
+        )
+        .unwrap();
+        assert_eq!(added.paths, ["../images/shot-2.png"]);
+        // The original stays where it was, and the file that was there is as it was.
+        assert_eq!(std::fs::read(elsewhere.join("shot.png")).unwrap(), PNG);
+        assert_eq!(
+            std::fs::read(repo.join("images/shot.png")).unwrap(),
+            b"\x89PNG\r\n\x1a\nother"
+        );
+    }
+
+    #[test]
+    fn an_image_that_is_in_the_folder_byte_for_byte_is_linked_and_not_copied_again() {
+        let (repo, document) = in_repo("repo-same", "docs/plan.md");
+        let elsewhere = folder("repo-same-from");
+        std::fs::write(elsewhere.join("shot.png"), PNG).unwrap();
+        let drop = |files: &[PathBuf]| {
+            add_files_in(&document, &repo, "images", false, files, 1000).unwrap()
+        };
+        assert_eq!(
+            drop(&[elsewhere.join("shot.png")]).paths,
+            ["../images/shot.png"]
+        );
+        // Dragged again: the same bytes are there, so the document links to them.
+        assert_eq!(
+            drop(&[elsewhere.join("shot.png")]).paths,
+            ["../images/shot.png"]
+        );
+        // Other bytes under the name get a number; those, dragged again, link to the numbered one.
+        let other = elsewhere.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("shot.png"), b"\x89PNG\r\n\x1a\nother").unwrap();
+        assert_eq!(
+            drop(&[other.join("shot.png")]).paths,
+            ["../images/shot-2.png"]
+        );
+        assert_eq!(
+            drop(&[other.join("shot.png")]).paths,
+            ["../images/shot-2.png"]
+        );
+        assert_eq!(
+            drop(&[elsewhere.join("shot.png")]).paths,
+            ["../images/shot.png"]
+        );
+        assert_eq!(std::fs::read_dir(repo.join("images")).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn a_pasted_image_goes_in_the_projects_folder_too() {
+        let (repo, document) = in_repo("repo-paste", "a/b/plan.md");
+        let added = add_data(&document, "images", &repo, false, "image.png", PNG, 1000).unwrap();
+        assert_eq!(added.paths, ["../../images/image.png"]);
+        assert!(repo.join("images/image.png").is_file());
+    }
+
+    #[test]
+    fn a_document_in_no_project_has_the_folder_for_images_beside_it() {
+        let (own, document) = document("no-project");
+        let root = project::root_of(&document, None);
+        assert_eq!(root.folder(), own);
+        let added = add_data(
+            &document,
+            "images",
+            &root.folder(),
+            false,
+            "a.png",
+            PNG,
+            1000,
+        )
+        .unwrap();
+        assert_eq!(added.paths, ["images/a.png"]);
+        assert!(own.join("images/a.png").is_file());
+    }
+
+    #[test]
+    fn a_gap_in_the_numbering_does_not_hide_a_copy_that_is_there() {
+        let (own, _) = document("gap");
+        let source = folder("gap-from").join("shot.png");
+        std::fs::write(&source, PNG).unwrap();
+        // `shot.png` was deleted since, and `shot-2.png` holds the same bytes.
+        std::fs::write(own.join("shot-2.png"), PNG).unwrap();
+        assert_eq!(copy_image(&own, &source, 1000), Ok("shot-2.png".to_owned()));
+        // Bytes that differ in the last byte, the same size, are another file.
+        std::fs::write(own.join("shot-2.png"), b"\x89PNG\r\n\x1a\n0001").unwrap();
+        assert_eq!(copy_image(&own, &source, 1000), Ok("shot.png".to_owned()));
     }
 }

@@ -105,7 +105,7 @@ describe('mountDemo', () => {
   it('opens the review bar when there is no change, with nothing to accept', () => {
     const { handle, root } = mountForTest('design');
     handle.openReviewBar();
-    expect(root.querySelector('.rl-review-bar')).not.toBeNull();
+    expect(root.querySelector('.rl-review-panel')).not.toBeNull();
     expect(buttonNamed(root, 'Accept').disabled).toBe(true);
   });
 
