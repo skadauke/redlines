@@ -262,15 +262,19 @@ export function appMenuModel(
   const withCommands = (
     menu: NonNullable<EditorCommand['menu']>,
     rows: readonly MenuRow[],
+    last: readonly MenuRow[] = [],
   ): MenuRow[] => {
     const registered = registry.list().filter((command) => command.menu === menu);
     const commandRows = registered.flatMap((command, i) => {
       const row = commandRow(command, registry);
       return i > 0 && registered[i - 1]?.group !== command.group ? [SEPARATOR, row] : [row];
     });
-    return rows.length && commandRows.length
-      ? [...rows, SEPARATOR, ...commandRows]
-      : [...rows, ...commandRows];
+    const body =
+      rows.length && commandRows.length
+        ? [...rows, SEPARATOR, ...commandRows]
+        : [...rows, ...commandRows];
+    // The rows that close the menu, as the Mac's Enter Full Screen closes View, come after them.
+    return last.length ? [...body, SEPARATOR, ...last] : body;
   };
   // Redlines is checked in both its looks: Simple is its simple look, no view of its own.
   const viewRow = (view: MenuView, text: string, key: string): ActionRow => ({
@@ -394,79 +398,84 @@ export function appMenuModel(
     { title: 'Table', rows: withCommands('table', []) },
     {
       title: 'View',
-      rows: withCommands('view', [
-        // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
-        // the clash proves real (design §14, open question 6).
-        viewRow('clean', 'Clean', '1'),
-        viewRow('redlines', 'Redlines', '2'),
-        viewRow('raw', 'Raw', '3'),
-        SEPARATOR,
-        // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
-        // while it shows, off in the full markup, and not there to choose in Clean and Raw, which
-        // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
-        {
-          text: 'Simple Look',
-          accelerator: 'Alt+CmdOrCtrl+4',
-          action: () => commands.switchLook(),
-          checked: (state) => state.view === 'simple',
-          enabled: (state) => menuViewOf(state.view) === 'redlines',
-        },
-        SEPARATOR,
-        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
-        // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
-        {
-          text: 'Actual Size',
-          accelerator: 'CmdOrCtrl+0',
-          action: () => commands.actualSize(),
-          enabled: (state) => state.zoom !== null && state.zoom !== 1,
-          ...zoomKey,
-        },
-        {
-          text: 'Zoom In',
-          accelerator: 'CmdOrCtrl+=',
-          action: () => commands.zoomIn(),
-          enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
-          ...zoomKey,
-        },
-        {
-          text: 'Zoom Out',
-          accelerator: 'CmdOrCtrl+-',
-          action: () => commands.zoomOut(),
-          enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
-          ...zoomKey,
-        },
-        SEPARATOR,
-        // Text Zoom's keys keep the Mac's Ctrl and Cmd off the Mac too, as Show Files' do: a row
-        // has one accelerator for every platform, and Windows and Linux get keys of their own
-        // when they are supported.
-        {
-          text: 'Actual Text Size',
-          accelerator: 'Ctrl+Cmd+0',
-          action: () => commands.actualTextSize(),
-          enabled: (state) => state.textSize !== 1,
-        },
-        {
-          text: 'Larger Text',
-          accelerator: 'Ctrl+Cmd+=',
-          action: () => commands.biggerText(),
-          enabled: (state) => state.textSize < TEXT_MOST,
-        },
-        {
-          text: 'Smaller Text',
-          accelerator: 'Ctrl+Cmd+-',
-          action: () => commands.smallerText(),
-          enabled: (state) => state.textSize > TEXT_LEAST,
-        },
-        SEPARATOR,
-        {
-          text: 'Show Files',
-          accelerator: 'Ctrl+Cmd+S',
-          action: () => commands.toggleSidebar(),
-          textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
-        },
-        // The Mac's own, which says Exit Full Screen while the window is.
-        { item: 'Fullscreen', text: 'Enter Full Screen' },
-      ]),
+      rows: withCommands(
+        'view',
+        [
+          // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
+          // the clash proves real (design §14, open question 6).
+          viewRow('clean', 'Clean', '1'),
+          viewRow('redlines', 'Redlines', '2'),
+          viewRow('raw', 'Raw', '3'),
+          SEPARATOR,
+          // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
+          // while it shows, off in the full markup, and not there to choose in Clean and Raw, which
+          // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
+          {
+            text: 'Simple Look',
+            accelerator: 'Alt+CmdOrCtrl+4',
+            action: () => commands.switchLook(),
+            checked: (state) => state.view === 'simple',
+            enabled: (state) => menuViewOf(state.view) === 'redlines',
+          },
+          SEPARATOR,
+          // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
+          // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
+          {
+            text: 'Actual Size',
+            accelerator: 'CmdOrCtrl+0',
+            action: () => commands.actualSize(),
+            enabled: (state) => state.zoom !== null && state.zoom !== 1,
+            ...zoomKey,
+          },
+          {
+            text: 'Zoom In',
+            accelerator: 'CmdOrCtrl+=',
+            action: () => commands.zoomIn(),
+            enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
+            ...zoomKey,
+          },
+          {
+            text: 'Zoom Out',
+            accelerator: 'CmdOrCtrl+-',
+            action: () => commands.zoomOut(),
+            enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
+            ...zoomKey,
+          },
+          SEPARATOR,
+          // Text Zoom's keys keep the Mac's Ctrl and Cmd off the Mac too, as Show Files' do: a row
+          // has one accelerator for every platform, and Windows and Linux get keys of their own
+          // when they are supported.
+          {
+            text: 'Actual Text Size',
+            accelerator: 'Ctrl+Cmd+0',
+            action: () => commands.actualTextSize(),
+            enabled: (state) => state.textSize !== 1,
+          },
+          {
+            text: 'Larger Text',
+            accelerator: 'Ctrl+Cmd+=',
+            action: () => commands.biggerText(),
+            enabled: (state) => state.textSize < TEXT_MOST,
+          },
+          {
+            text: 'Smaller Text',
+            accelerator: 'Ctrl+Cmd+-',
+            action: () => commands.smallerText(),
+            enabled: (state) => state.textSize > TEXT_LEAST,
+          },
+          SEPARATOR,
+          {
+            text: 'Show Files',
+            accelerator: 'Ctrl+Cmd+S',
+            action: () => commands.toggleSidebar(),
+            textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
+          },
+        ],
+        [
+          // The Mac's own, which says Exit Full Screen while the window is. Always the last row.
+          { item: 'Fullscreen', text: 'Enter Full Screen' },
+        ],
+      ),
     },
     {
       title: 'Review',

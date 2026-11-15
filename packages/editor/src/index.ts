@@ -145,6 +145,8 @@ export {
   insertRowsAt,
   moveCols,
   moveColsTo,
+  canMoveCols,
+  canMoveRows,
   moveRows,
   moveRowsTo,
   rowCount,

@@ -626,11 +626,11 @@ describe('title bar', () => {
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
   });
 
-  it('keeps Review changes for documents with redlines', () => {
+  it('keeps Review Changes for documents with redlines', () => {
     const { bar, menu } = setup({ hasRedlines: false, view: 'clean' });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(true);
     bar.update({ ...BASE, hasRedlines: true });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(false);
   });
 
   it('tints the current view', () => {
@@ -652,7 +652,7 @@ describe('title bar', () => {
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
     bar.update({ ...BASE, tracking: true });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(true);
-    expect(item(menu('Review'), 'Track changes').getAttribute('aria-checked')).toBe('true');
+    expect(item(menu('Review'), 'Track Changes').getAttribute('aria-checked')).toBe('true');
     bar.update({ ...BASE, tracking: false });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
   });
@@ -661,20 +661,21 @@ describe('title bar', () => {
     const { actions, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    expect(item(review, 'Track changes').textContent).toContain('⇧⌘E');
-    expect(item(review, 'Review changes').textContent).toContain('⌥⌘]');
-    item(review, 'Track changes').click();
+    expect(item(review, 'Track Changes').textContent).toContain('⇧⌘E');
+    // ⌥⌘] is Next Change's key; the menu bar's Review Changes has none, and so has this row.
+    expect(item(review, 'Review Changes').textContent).not.toMatch(/[⌘⌥⇧⌃]/);
+    item(review, 'Track Changes').click();
     expect(actions.toggleTracking).toHaveBeenCalledOnce();
-    item(review, 'Review changes').click();
+    item(review, 'Review Changes').click();
     expect(actions.openReview).toHaveBeenCalledOnce();
     expect(shown(review)).toBe(false);
   });
 
-  it('the Review menu checks Show resolved comments, and switches it', () => {
+  it('the Review menu checks Show Resolved Comments, and switches it', () => {
     const { actions, bar, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    const row = item(review, 'Show resolved comments');
+    const row = item(review, 'Show Resolved Comments');
     expect(row.getAttribute('role')).toBe('menuitemcheckbox');
     expect(row.getAttribute('aria-checked')).toBe('false');
     // Its own glyph, not the View button's eye.
@@ -682,13 +683,13 @@ describe('title bar', () => {
       button('View').querySelector('svg')?.innerHTML,
     );
     bar.update({ ...BASE, showResolved: true });
-    expect(item(menu('Review'), 'Show resolved comments').getAttribute('aria-checked')).toBe(
+    expect(item(menu('Review'), 'Show Resolved Comments').getAttribute('aria-checked')).toBe(
       'true',
     );
     // Any document can show them: it isn't tied to the document having redlines.
     bar.update({ ...BASE, hasRedlines: false });
-    expect(item(menu('Review'), 'Show resolved comments').disabled).toBe(false);
-    item(menu('Review'), 'Show resolved comments').click();
+    expect(item(menu('Review'), 'Show Resolved Comments').disabled).toBe(false);
+    item(menu('Review'), 'Show Resolved Comments').click();
     expect(actions.toggleResolved).toHaveBeenCalledOnce();
   });
 
@@ -942,7 +943,7 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
     press(button('Track Changes'), 'ArrowDown');
     expect(shown(menu('Review'))).toBe(true);
-    expect(document.activeElement).toBe(item(menu('Review'), 'Track changes'));
+    expect(document.activeElement).toBe(item(menu('Review'), 'Track Changes'));
     press(menu('Review'), 'Escape');
     press(button('View'), 'ArrowUp');
     expect(shown(menu('View'))).toBe(true);

@@ -108,9 +108,10 @@ export interface EditorCommand {
   /**
    * Whether its key goes on to the core's binding when the command is disabled or did nothing, as
    * ⌘↩ does outside a table, where it is Return at the end of a block. Default: false, a key
-   * belongs to its command.
+   * belongs to its command. A function decides by the state: a table's ⌥↑ at the first row is
+   * disabled and still the table's, and outside a table it is the core's.
    */
-  keyFallsThrough?: boolean;
+  keyFallsThrough?: boolean | ((state: EditorState) => boolean);
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */

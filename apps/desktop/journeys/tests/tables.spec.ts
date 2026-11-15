@@ -63,6 +63,37 @@ test.describe('tables @tables', () => {
     expect(await isOpaque(menu), 'the menu is opaque').toBe(true);
   });
 
+  // Menus that only refuse are disabled: Move Row Up at the first row, Move Row Down at the last.
+  test('the row grip menu disables Move Row Up at the first row and Move Row Down at the last', async ({
+    start,
+  }) => {
+    const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
+    await j.settle();
+    const grip = j.page.locator('.rl-grip').first();
+    const menu = j.page.locator('.rl-grip-menu');
+    const item = (name: string) =>
+      menu.locator('.rl-grip-item', { hasText: new RegExp(`^${name}$`) });
+    await j.hover('A');
+    await grip.click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await expect(item('Move Row Up'), 'disabled at the first row').toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(item('Move Row Down')).not.toHaveAttribute('aria-disabled', 'true');
+    await j.shot('row-grip-menu-first-row');
+    await j.page.keyboard.press('Escape');
+    await j.hover('3');
+    await grip.click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await expect(item('Move Row Down'), 'disabled at the last row').toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(item('Move Row Up')).not.toHaveAttribute('aria-disabled', 'true');
+    await j.shot('row-grip-menu-last-row');
+  });
+
   test('the grips and the + have hover hints', async ({ start }) => {
     const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
     await j.settle();
