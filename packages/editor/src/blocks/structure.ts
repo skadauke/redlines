@@ -340,92 +340,76 @@ function startsWithMarkerText(state: EditorState, node: SyntaxNode, first: Line)
   return shown.trim() !== '' && !/^<[!?/a-zA-Z]/.test(shown.trim());
 }
 
-/**
- * Whether a numbered item with text can't start a list that interrupts a paragraph, as CommonMark
- * has it: only an item numbered `1` can. The parse lets any numbered item inside a
- * numbered list do so (a sublist numbered `2.` under the text of its item), where micromark takes
- * the line for more of the paragraph's text (#600).
- */
-function cannotInterrupt(state: EditorState, item: SyntaxNode): boolean {
-  const mark = item.getChild('ListMark');
-  // An empty item is the open item of the editor's keys (`empty-item.ts`), kept out of the file.
-  if (!mark || !mark.nextSibling) return false;
-  return !/^1[.)]$/.test(state.sliceDoc(mark.from, mark.to));
+/** A node's next sibling (or previous, going `back`), past the marks of a quote's later lines. */
+function past(node: SyntaxNode | null, back = false): SyntaxNode | null {
+  while (node?.name === 'QuoteMark') node = back ? node.prevSibling : node.nextSibling;
+  return node;
 }
 
 /**
  * The items of the numbered list that follows the paragraph `head` on the very next line that are
- * text of that paragraph for CommonMark: the first, if it can't interrupt a paragraph, and the
- * items after it on consecutive lines, as long as none can. Empty if the list starts any other way.
+ * text of that paragraph for CommonMark, which lets a list interrupt a paragraph only if it starts
+ * at 1 and has text (the parse lets any numbered item in a numbered list do so, #600): the first, if
+ * it can't, and the items after it on consecutive lines, as long as none can. An empty item is
+ * the open item of the editor's keys (`empty-item.ts`), kept out of the file, so it is none of them.
  */
 function textualItems(state: EditorState, head: SyntaxNode): SyntaxNode[] {
-  // In a quote, the marks of its later lines are nodes between the blocks.
-  let list = head.nextSibling;
-  while (list?.name === 'QuoteMark') list = list.nextSibling;
-  if (head.name !== 'Paragraph' || !list || list.name !== 'OrderedList') return [];
+  const list = past(head.nextSibling);
+  if (head.name !== 'Paragraph' || list?.name !== 'OrderedList') return [];
   const { doc } = state;
   let line = doc.lineAt(head.to).number;
   const found: SyntaxNode[] = [];
   for (let item = list.firstChild; item; item = item.nextSibling) {
     if (item.name === 'QuoteMark') continue;
-    if (item.name !== 'ListItem' || doc.lineAt(item.from).number !== line + 1) break;
-    if (!cannotInterrupt(state, item)) break;
+    const mark = item.getChild('ListMark');
+    if (
+      !mark?.nextSibling ||
+      doc.lineAt(item.from).number !== line + 1 ||
+      /^1[.)]$/.test(state.sliceDoc(mark.from, mark.to))
+    ) {
+      break;
+    }
     found.push(item);
     line = doc.lineAt(item.to).number;
   }
   return found;
 }
 
-/** The items of a list as CommonMark reads them: not those that are text of the paragraph above it. */
-export function listItems(state: EditorState, list: SyntaxNode | null): SyntaxNode[] {
-  const items = list?.getChildren('ListItem') ?? [];
-  return items.filter((item) => !textualHead(state, item));
-}
-
 /** The paragraph whose text a list item is, for CommonMark, if it is one of `textualItems`. */
 function textualHead(state: EditorState, item: SyntaxNode): SyntaxNode | null {
-  if (item.name !== 'ListItem') return null;
-  let head = item.parent?.prevSibling ?? null;
-  while (head?.name === 'QuoteMark') head = head.prevSibling;
-  if (!head || head.name !== 'Paragraph') return null;
-  return textualItems(state, head).some((it) => it.from === item.from) ? head : null;
+  const head = item.name === 'ListItem' ? past(item.parent?.prevSibling ?? null, true) : null;
+  return head && textualItems(state, head).some((it) => it.from === item.from) ? head : null;
+}
+
+/** The items of a list as CommonMark reads them: not those that are text of the paragraph above it. */
+export function listItems(state: EditorState, list: SyntaxNode | null): SyntaxNode[] {
+  return list?.getChildren('ListItem').filter((item) => !textualHead(state, item)) ?? [];
 }
 
 /** The end of the text of the paragraph `head`, with the lines of the lists that are its text. */
 function textEnd(state: EditorState, head: SyntaxNode): number {
   let end = head.to;
   for (const item of textualItems(state, head)) {
-    let last = item.to;
-    for (let child = item.firstChild; child; child = child.nextSibling) {
-      if (child.name === 'Paragraph') {
-        last = textEnd(state, child);
-        break;
-      }
-    }
-    end = Math.max(end, last);
+    const text = item.getChild('Paragraph');
+    end = Math.max(end, text ? textEnd(state, text) : item.to);
   }
   return end;
 }
 
 /**
  * The paragraph that a paragraph of the parse is part of the text of for CommonMark, with the end of
- * that text: a numbered list under a paragraph that micromark reads as
- * more of the paragraph (`1. a⏎   2. b`, where `2. b` is text of the item), which the parse reads as
- * a sublist (#600). Null where the node is no part of such a text.
+ * that text: a numbered list under a paragraph that micromark reads as more of the paragraph
+ * (`1. a⏎   2. b`, where `2. b` is text of the item), which the parse reads as a sublist (#600).
+ * Null where the node is no part of such a text.
  */
 function textRun(state: EditorState, node: SyntaxNode): { head: SyntaxNode; to: number } | null {
-  let head: SyntaxNode | null = null;
+  let head = node.name === 'Paragraph' ? node : null;
   for (let up: SyntaxNode | null = node; up; up = up.parent) {
     const above = textualHead(state, up);
-    if (above) {
-      head = above;
-      up = above;
-    }
+    if (above) head = up = above;
   }
-  if (!head && node.name === 'Paragraph') head = node;
-  if (!head) return null;
-  const to = textEnd(state, head);
-  return to > head.to ? { head, to } : null;
+  const to = head ? textEnd(state, head) : 0;
+  return head && to > head.to ? { head, to } : null;
 }
 
 /** The block a leaf node is, read on the line where it starts. */
