@@ -614,8 +614,9 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
-  for (const { line, spacing, below } of spacings(read.reading, leaves)) {
-    b.lineClass(state.doc.line(line), `rl-space-${spacing}${below ? '-below' : ''}`);
+  for (const { line, spacing, below, apart } of spacings(read.reading, leaves)) {
+    const kind = below ? '-below' : apart ? '-apart' : '';
+    b.lineClass(state.doc.line(line), `rl-space-${spacing}${kind}`);
   }
   return b.finish();
 }

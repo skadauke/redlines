@@ -179,12 +179,26 @@ function startsCallout(state: Reading, leaf: SyntaxNode): boolean {
   return state.doc.lineAt(leaf.from).number === state.doc.lineAt(quote.from).number;
 }
 
+/** Whether `leaf` is a block of an alert's box (#389): its lines are tinted. */
+function inCallout(state: Reading, leaf: SyntaxNode): boolean {
+  for (let up = leaf.parent; up; up = up.parent) {
+    if (up.name === 'Blockquote' && calloutOf(state, up)) return true;
+  }
+  return false;
+}
+
 /** Where the space between two blocks goes: a line, by its number, and which side of it. */
 export interface Space {
   line: number;
   spacing: Spacing;
   /** Below the line's text, for a boxed block under it, rather than above. */
   below: boolean;
+  /**
+   * Outside the box, for an alert under an alert (#389): both are tinted, so padding on either
+   * would be tinted too and the two boxes would touch. The space is padding on the line that
+   * starts the second, which the tint is clipped to leave out.
+   */
+  apart?: boolean;
 }
 
 /** The space above each leaf block but the first, given the leaf blocks in document order. */
@@ -203,8 +217,14 @@ export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[]
     if (above) {
       const spacing = spacingOf(state, above, leaf, looseness);
       const boxed = (node: SyntaxNode) => BOXED.has(node.name) || startsCallout(state, node);
-      const below = boxed(leaf) && !boxed(above);
-      found.push({ line: doc.lineAt(below ? above.to : leaf.from).number, spacing, below });
+      const apart = startsCallout(state, leaf) && inCallout(state, above);
+      const below = !apart && boxed(leaf) && !boxed(above);
+      found.push({
+        line: doc.lineAt(below ? above.to : leaf.from).number,
+        spacing,
+        below,
+        ...(apart ? { apart } : {}),
+      });
     }
     above = leaf;
   }

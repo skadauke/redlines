@@ -347,7 +347,8 @@ Redlines covers everything in the Markdown Guide's
   title's menu and Paragraph › Alert, which writes a new alert with its body selected, are the ways
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
-  while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
+  while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
 - **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
   change.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML

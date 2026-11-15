@@ -25,8 +25,9 @@ export function space(kind: keyof typeof SPACE): string {
 type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
 
 /**
- * A rule for each kind of space: above a block's first line, and below the text of the line above
- * code, front matter or a table, whose first line is tinted or not drawn.
+ * A rule for each kind of space: above a block's first line, below the text of the line above
+ * code, front matter or a table, whose first line is tinted or not drawn, and outside an alert's
+ * box, above the second of two.
  */
 function spaceRules(): ThemeSpec {
   const rules: ThemeSpec = {};
@@ -36,6 +37,14 @@ function spaceRules(): ThemeSpec {
     rules[`.cm-line.rl-space-${kind}`] = above;
     rules[`.rl-struck.rl-space-${kind}`] = above;
     rules[`.cm-line.rl-space-${kind}-below`] = { paddingBottom: space(kind) };
+    // An alert under an alert (#389): the box's first line takes the space as padding, which the
+    // tint would paint, so the tint is clipped to the box (a transparent border would square the
+    // box's top corners, which the radius rounds from the border box). The alert's own padding is
+    // the same as `.rl-callout-first`'s.
+    rules[`.cm-line.rl-callout-first.rl-space-${kind}-apart`] = {
+      paddingTop: `calc(${space(kind)} + ${textPx(10)})`,
+      clipPath: `inset(${space(kind)} 0 0 0 round 8px 8px 0 0)`,
+    };
   }
   return rules;
 }
