@@ -155,6 +155,37 @@ test.describe('lists @lists', () => {
     }
   }
 
+  // #604: Backspace at the first item takes its marker away; the list under it stays a list, moved
+  // out a level, with Track Changes off and on (a tracked deletion and one substitution).
+  for (const tracking of [false, true]) {
+    test(`Backspace at the first item with a list nested in it, Track Changes ${tracking ? 'on' : 'off'}`, async ({
+      start,
+    }) => {
+      const doc = '* note\n    - one\n        - two\n    - three\n';
+      const j = await start({ doc, tracking, view: 'redlines' });
+      await j.place(2);
+      const look = tracking ? 'tracked' : 'plain';
+      await j.shot(`backspace-nested-before-${look}`);
+      await j.press('Backspace');
+      await j.shot(`backspace-nested-after-${look}`);
+      const file = (await j.cmText()).split('<!-- redlines')[0]!;
+      if (tracking) {
+        // The marker is a tracked deletion, and the lines under it one substitution that holds the
+        // old ones: the list stays a list in every order of deciding.
+        expect(file).toContain('<!--del ');
+        expect(file).toContain('<!--sub ');
+        await j.press('ControlOrMeta+z');
+        expect((await j.cmText()).split('<!-- redlines')[0]).toBe(doc);
+      } else {
+        // The text is a paragraph, the list under it is still a list, the depth among its items kept.
+        expect(file).toBe('note\n  - one\n      - two\n  - three\n');
+        await j.press('ControlOrMeta+z');
+        expect(await j.cmText()).toBe(doc);
+        await j.shot('backspace-nested-undone-plain');
+      }
+    });
+  }
+
   test('Return on an empty last bullet ends the list (the control for the checkbox)', async ({
     start,
   }) => {

@@ -1191,6 +1191,22 @@ syntax Markdown needs, and never shows them.
   Nothing joins into code, a table or front matter: the caret goes there instead. At the start of
   a list item, the first Backspace takes the bullet off and keeps the text where it is, the second
   joins it to the item above, as in Word.
+- **What is nested under an item stays a list when the item's marker goes.** Backspace at the start
+  of the first item of a list takes its marker away and leaves its text a paragraph, and Delete
+  at the end of the paragraph above a list takes the first item's marker into it. A list, a quote
+  or a paragraph under the item moves out with the text, a level up, by as many columns as the
+  item's marker and the spaces after it take, so that the depth among them is kept (Word and Google
+  Docs promote the items under it the same way): `* note⏎    - a` becomes `note⏎  - a`, where it
+  would have been one paragraph of two lines, which Markdown reads as text. Where nothing under the
+  item would stand four columns in, nothing moves. With Track Changes on the move is one
+  substitution that holds the old lines, written beside the deletion of the marker (`* note⏎    - a`
+  gives `<!--del * -->⏎⏎note<!--sub \n    - a-->⏎  - a<!--/-->`), which reads the same in every
+  order of decisions; where fenced or indented code stands among the lines that move, or the
+  tracked layer can't hold the lines, the key says so in words and writes nothing (lane R widens it
+  into a replacement of the whole item, #497). Shift-Tab and the first Backspace in a nested
+  list move what is nested in the item along, as before. Shift-Tab in indented code outdents it
+  to a paragraph, and where a line stands right under the code (an item, or text) it keeps the four
+  columns that make it code and says so, since the line would else join the paragraph.
 - **The keys read a list as CommonMark does.** A numbered line other than `1.` right under an
   item's text (`1. a⏎   2. b`) is more of that text, not a sublist, so Return at its end makes the
   next item of the list that holds `a`, and the file reads, in every order of decisions, as the
