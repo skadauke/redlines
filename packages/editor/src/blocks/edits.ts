@@ -335,6 +335,12 @@ function bareItemAt(
   const text = (item: Item) => item.indent.length + item.marker.length + item.after.length;
   // As far in as the text of the innermost item, the line is more of its paragraph for CommonMark too.
   if (!items[0] || column >= text(items[0])) return null;
+  // A line after it indented to its content column is its content: the item is not empty.
+  if (line.number < doc.lines) {
+    const next = doc.line(line.number + 1).text;
+    const lead = /^(?:[ \t]*>)*[ \t]*/.exec(next)![0].length;
+    if (next.trim() && lead >= column + found[2]!.length + 1 && /[^ \t>]/.test(next)) return null;
+  }
   const outer = items.findIndex((item) => column >= text(item));
   const parents = outer < 0 ? [] : items.slice(outer);
   const bare: Item = {

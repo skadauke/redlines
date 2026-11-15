@@ -163,3 +163,40 @@ scriptRows(
   ] as Script[],
   60_000,
 );
+
+// Runs of bare markers, and the contexts where a bare line is no empty item to Return.
+const both = (rows: [string, string, 'Enter' | 'Backspace'][]): Script[] =>
+  rows.flatMap(([name, doc, key]) =>
+    [true, false].map((tc) => ({
+      name: `${name}, Track Changes ${tc ? 'on' : 'off'}`,
+      doc,
+      keys: [key],
+      tc,
+      expect: tc && name.includes('next line') ? { refusal: NOT_IN_INDENTATION } : {},
+    })),
+  );
+
+scriptRows(
+  both([
+    ['Backspace, run of three, top level', '- a⏎-⏎-⏎-‸⏎', 'Backspace'],
+    ['Backspace, run of three, nested', '- a⏎  -⏎  -⏎-‸⏎', 'Backspace'],
+    ['Backspace, run of three, same indent nested', '- a⏎  - b⏎  -⏎  -⏎  -‸⏎', 'Backspace'],
+    ['Backspace, run of three, numbers', '1. a⏎2.⏎3.⏎4.‸⏎', 'Backspace'],
+    ['Backspace, run of three, 1)', '1) a⏎2)⏎3)⏎4)‸⏎', 'Backspace'],
+    ['Backspace, run of three, star', '* a⏎*⏎*⏎*‸⏎', 'Backspace'],
+    ['Backspace, run of four', '- a⏎-⏎-⏎-⏎-‸⏎', 'Backspace'],
+    ['Backspace, run of four, plus, a line after', '+ a⏎+⏎+⏎+⏎+‸⏎+ b⏎', 'Backspace'],
+    ['Backspace, run of four, nested numbers', '- a⏎  1. b⏎  2.⏎  3.⏎  4.‸⏎', 'Backspace'],
+    ['Backspace in a quote', '> - a⏎> -‸⏎', 'Backspace'],
+    ['Backspace in a quote, run of three', '> - a⏎> -⏎> -⏎> -‸⏎', 'Backspace'],
+    ['Return under text is no empty item (setext)', 'text⏎-‸⏎', 'Enter'],
+    ['Return in the content column is no empty item', '1. a⏎   -‸⏎', 'Enter'],
+    ['Return after a tab is no empty item', '1. a⏎\t-‸⏎', 'Enter'],
+    ['Return under a second line of the text', '1. text⏎   more⏎   -‸⏎', 'Enter'],
+    ['Return with its content on the next line', '1. a⏎-‸⏎  more⏎', 'Enter'],
+    ['Return at a bare number of the same list', '1. a⏎2.‸⏎', 'Enter'],
+    ['Return at a bare number of the other delimiter', '1. a⏎1)‸⏎', 'Enter'],
+    ['Return at a bare bullet of another kind', '- a⏎*‸⏎', 'Enter'],
+  ]),
+  60_000,
+);

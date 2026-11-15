@@ -57,7 +57,7 @@ const isEmpty = (state: EditorState, block: Block) =>
   !state.sliceDoc(block.text.from, block.text.to).trim();
 
 /** A line that is a list marker and nothing else, after its quote markers and the markers of the items it is in. */
-const BARE_LINE = /(?:^|[ \t>])(?:[-+*]|\d{1,9}[.)])$/;
+const BARE_LINE = /^(?:[ \t]*>)*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
 
 const tree = (state: EditorState, to: number) =>
   ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
@@ -532,8 +532,19 @@ function removeEmpty(
     isEmpty(state, prev) &&
     BARE_LINE.test(state.doc.lineAt(prev.lines.to).text)
   ) {
-    const { prev: before } = neighbours(state, prev);
-    const from = before ? before.lines.to : prev.lines.from;
+    // Up past a run of bare markers, which all go: none may be left with the deletion behind it.
+    let top = prev;
+    let before = neighbours(state, top).prev;
+    while (
+      before &&
+      isEmpty(state, before) &&
+      BARE_LINE.test(state.doc.lineAt(before.lines.to).text) &&
+      state.doc.lineAt(before.lines.to).number + 1 === state.doc.lineAt(top.lines.from).number
+    ) {
+      top = before;
+      before = neighbours(state, top).prev;
+    }
+    const from = before ? before.lines.to : top.lines.from;
     return edit(state, [{ from, to: block.lines.to }], from, userEvent);
   }
   if (prev)
