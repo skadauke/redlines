@@ -422,6 +422,36 @@ test.describe('tables @tables', () => {
     }
   }
 
+  // #520: typing in a table moves the widths after a pause (about 300 ms), not on each key, and
+  // they end as a reload of the same text gives them.
+  test('typing a long word into a narrow column widens it after a pause, as a reload does @tables', async ({
+    start,
+  }) => {
+    const doc = 'Intro\n\n| Name | Notes |\n| - | - |\n| Ada | x |\n';
+    const j = await start({ doc, tracking: false, view: 'clean' });
+    await j.settle();
+    const before = await widthsOf(j.page);
+    await j.caretAfter('Ada');
+    await j.shot('widths-typing-before');
+    await j.type('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+    await j.page.waitForTimeout(700);
+    await j.settle();
+    const typed = await widthsOf(j.page);
+    await j.shot('widths-typing-after');
+    expect(typed[0], 'the column widened while the caret stayed in the table').toBeGreaterThan(
+      (before[0] ?? 0) + 20,
+    );
+    const again = await start({ doc: await j.text(), tracking: false, view: 'clean' });
+    await again.settle();
+    const reloaded = await widthsOf(again.page);
+    reloaded.forEach((width, i) => {
+      expect(
+        Math.abs(width - (typed[i] ?? 0)),
+        `column ${i}: ${typed[i]} after typing, ${width} after a reload`,
+      ).toBeLessThanOrEqual(1);
+    });
+  });
+
   // #522: a selection of cells is one even highlight in each cell; the page's own text highlight is
   // not drawn over it or beside it (it was: boxes on the hidden pipes' widgets, offset from the cell).
   const selections: Record<string, (j: Journey) => Promise<void>> = {

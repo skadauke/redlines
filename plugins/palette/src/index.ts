@@ -1,6 +1,6 @@
 // The formatting palette (issue #313; design §5.1: there is no toolbar, and this is not one). It is
-// hidden while you write, and opens in two ways: on hover over a handle at the bottom center of the
-// window, and on right-click, at the pointer, in place of WebKit's own menu. Its items are commands
+// shown only when summoned, in two ways: on right-click, at the pointer, in place of WebKit's own
+// menu, and from the keyboard (Show Formatting Palette, below the caret). Its items are commands
 // of the registry, by id, so that it, the Format menu and the shortcuts never disagree about names,
 // keys or whether an item is there. Items show no labels: hovering names one and its keys, after the
 // title bar's delay. Esc closes it, and it is reachable from the keyboard (Show Formatting Palette,
@@ -23,8 +23,8 @@ export { formatShortcut } from './shortcuts.ts';
 
 export interface PaletteOptions {
   /**
-   * The box the palette and its handle go in. Default: the editor's own element. Where it goes
-   * makes no difference to where they appear: both are fixed to the window.
+   * The box the palette goes in. Default: the editor's own element. Where it goes
+   * makes no difference to where it appears: it is fixed to the window.
    */
   container?: HTMLElement;
   /** How long the pointer rests on an item before its hint shows: the title bar's `TOOLTIP_MS`. */
@@ -52,20 +52,17 @@ export interface Palette {
   /** Puts the palette away. */
   hide(): void;
   isOpen(): boolean;
-  /** Takes the palette, its handle and its commands out of the page. */
+  /** Takes the palette and its commands out of the page. */
   destroy(): void;
 }
 
 /** How the palette was opened, which says what puts it away. */
-type How = 'hover' | 'click' | 'keyboard' | 'context';
+type How = 'keyboard' | 'context';
 
 /** How soon, and how near, a press of the mouse comes before the menu event it is the pointer's for. */
 const PRESS_MS = 1000;
 const PRESS_PX = 6;
 
-/** The title bar's delays: a menu opens a moment after the pointer comes, and closes after it goes. */
-const HOVER_OPEN_MS = 120;
-const HOVER_CLOSE_MS = 200;
 /** The space around the palette, and between it and what it is placed against. */
 const MARGIN = 8;
 const GAP = 8;
@@ -92,7 +89,7 @@ function moveSelectionTo(editor: Editor, pos: number): void {
 }
 
 /**
- * Adds the palette to an editor: its handle, its right-click, and the commands Show Formatting
+ * Adds the palette to an editor: its right-click, and the commands Show Formatting
  * Palette (⌥⌘P, in the View menu) and, with a clipboard, Cut, Copy and Paste (which have no menu
  * or key here). Register the plugins whose commands it shows first, or later: an item appears when
  * its command is registered. Returns the palette, whose `destroy` takes it out again.
@@ -104,16 +101,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   const tooltipMs = options.tooltipMs ?? 400;
   const removeStyle = installStyle(doc);
 
-  // The parts: the handle, the palette, and the hint, which is the palette's own.
-  const handle = doc.createElement('button');
-  handle.type = 'button';
-  handle.className = 'rl-palette-handle';
-  handle.tabIndex = -1;
-  handle.setAttribute('aria-label', 'Formatting palette');
-  handle.setAttribute('aria-expanded', 'false');
-  const grip = doc.createElement('span');
-  grip.className = 'rl-palette-grip';
-  handle.append(grip);
+  // The parts: the palette, and the hint, which is the palette's own.
   const panel = doc.createElement('div');
   panel.className = 'rl-palette';
   panel.setAttribute('role', 'toolbar');
@@ -128,7 +116,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   tipKeys.className = 'rl-palette-tip-keys';
   tip.append(tipName, tipKeys);
   const container = options.container ?? view.dom;
-  container.append(handle, panel, tip);
+  container.append(panel, tip);
 
   let how: How | null = null;
   let drawn: DrawnPanel | null = null;
@@ -137,8 +125,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   /** Counts the palette's openings, so that an answer that comes late knows its own. */
   let opening = 0;
   let placeAgain: () => void = () => {};
-  let openTimer: ReturnType<typeof setTimeout> | undefined;
-  let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
 
   const groups = () => shownGroups(editor.commands.list(), view.state);
@@ -175,12 +161,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     const top = y + height + MARGIN > win.innerHeight ? y - height : y;
     panel.style.left = `${clamp(x, width, win.innerWidth)}px`;
     panel.style.top = `${clamp(top, height, win.innerHeight)}px`;
-  };
-  const placeAbove = (rect: DOMRect) => {
-    const width = panel.offsetWidth;
-    const height = panel.offsetHeight;
-    panel.style.left = `${clamp(rect.left + rect.width / 2 - width / 2, width, win.innerWidth)}px`;
-    panel.style.top = `${clamp(rect.top - GAP - height, height, win.innerHeight)}px`;
   };
   const placeBelow = (rect: { left: number; top: number; bottom: number }) => {
     const width = panel.offsetWidth;
@@ -249,14 +229,12 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   };
   const onPress = (event: PointerEvent) => {
     const target = event.target;
-    if (target instanceof Node && (panel.contains(target) || handle.contains(target))) return;
+    if (target instanceof Node && panel.contains(target)) return;
     close();
   };
   const onScroll = (event: Event) => {
-    // The handle's palette is fixed to the window, and what is under it can scroll.
-    if (how === 'context' || how === 'keyboard') {
-      if (!(event.target instanceof Node) || !panel.contains(event.target)) close();
-    }
+    // The palette is fixed to the window, and what is under it can scroll.
+    if (!(event.target instanceof Node) || !panel.contains(event.target)) close();
   };
   const onGone = () => close();
 
@@ -276,8 +254,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   }
 
   function open(next: How, place: () => void, rows: typeof spelling = null): void {
-    clearTimeout(openTimer);
-    clearTimeout(closeTimer);
     hideHint();
     if (how === null) listen();
     how = next;
@@ -286,8 +262,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     panel.hidden = false;
     placeAgain = place;
     place();
-    // The handle is open only for the palette it brought up.
-    handle.setAttribute('aria-expanded', String(next === 'hover' || next === 'click'));
   }
 
   /** Whether the keyboard is in a text field of the page other than the document and the palette. */
@@ -305,8 +279,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   }
 
   function close(refocus = false): void {
-    clearTimeout(openTimer);
-    clearTimeout(closeTimer);
     hideHint();
     opening++;
     if (how === null) return;
@@ -317,39 +289,12 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     drawn = null;
     spelling = null;
     panel.hidden = true;
-    handle.setAttribute('aria-expanded', 'false');
     unlisten();
     if (takeBack) view.focus();
   }
 
-  const fromHandle = (next: 'hover' | 'click') => () => {
-    open(next, () => placeAbove(handle.getBoundingClientRect()));
-  };
-
-  // The handle: hovering brings the palette up, and moving away puts it away. A press on it keeps
-  // the palette until Esc or a press elsewhere. A pointer with a button held is selecting text, and
-  // brings up nothing.
-  handle.addEventListener('pointerenter', (event) => {
-    if (event.pointerType === 'touch' || event.buttons !== 0) return;
-    clearTimeout(closeTimer);
-    if (how === null) openTimer = setTimeout(fromHandle('hover'), HOVER_OPEN_MS);
-  });
-  const scheduleClose = (event: PointerEvent) => {
-    if (event.pointerType === 'touch') return;
-    clearTimeout(openTimer);
-    if (how === 'hover') closeTimer = setTimeout(() => close(), HOVER_CLOSE_MS);
-  };
-  handle.addEventListener('pointerleave', scheduleClose);
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
   panel.addEventListener('mousedown', (event) => event.preventDefault());
-  panel.addEventListener('pointerenter', () => clearTimeout(closeTimer));
-  panel.addEventListener('pointerleave', scheduleClose);
-  handle.addEventListener('mousedown', (event) => event.preventDefault());
-  handle.addEventListener('click', () => {
-    if (how === 'click') close();
-    else fromHandle('click')();
-  });
-
   // The keys in the palette: the arrows move among the items, Home and End to the ends, and Tab and
   // Esc put it away. Return and Space press the item, as a button does.
   panel.addEventListener('keydown', (event) => {
@@ -390,17 +335,14 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     event.stopPropagation();
   });
 
-  // Typing: the handle goes out of the way until the pointer moves, and a palette that the pointer
-  // opened goes too. A key that only moves the caret or holds a modifier is not writing.
+  // Typing: a palette that the pointer opened goes, as the person went back to writing. A key that
+  // only moves the caret or holds a modifier is not writing.
   const onWriting = (event: KeyboardEvent) => {
     if (event.key.length > 1 && !/^(Backspace|Delete|Enter|Tab)$/.test(event.key)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    handle.dataset['writing'] = '';
     if (how !== null && how !== 'keyboard') close();
   };
-  const onMove = () => delete handle.dataset['writing'];
   view.contentDOM.addEventListener('keydown', onWriting);
-  win.addEventListener('pointermove', onMove);
 
   // The right-click.
   const rowsOf = (word: string, suggestions: readonly string[]): SpellingRows => ({
@@ -536,8 +478,6 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
       view.contentDOM.removeEventListener('keydown', onWriting);
       view.contentDOM.removeEventListener('contextmenu', onContextMenu);
       view.contentDOM.removeEventListener('mousedown', notePress, true);
-      win.removeEventListener('pointermove', onMove);
-      handle.remove();
       panel.remove();
       tip.remove();
       removeStyle();
