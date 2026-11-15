@@ -479,6 +479,10 @@ importers:
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
+    devDependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
 
   plugins/tables:
     dependencies:
