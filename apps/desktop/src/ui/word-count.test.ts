@@ -7,6 +7,7 @@ import {
   createEditorWordCount,
   createWordCount,
   IDLE_MS,
+  SELECTION_MS,
   wordCountLabel,
   wordsIn,
 } from './word-count.ts';
@@ -105,6 +106,48 @@ describe('createWordCount', () => {
     vi.advanceTimersByTime(1);
     expect(count).toHaveBeenCalledOnce();
     expect(label()?.textContent).toBe('1,204 words');
+  });
+
+  it('counts a moved selection soon, once for a drag, and again for the next move', () => {
+    const { words, count, counted, label } = setup();
+    counted.selected = 9;
+    for (let i = 0; i < 5; i++) words.schedule(false);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledOnce();
+    expect(label()?.textContent).toBe('9 of 1,204 words');
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a moved selection while hidden never, and after a refresh or a show as usual', () => {
+    const { words, count } = setup(false);
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS * 2);
+    expect(count).not.toHaveBeenCalled();
+    words.setVisible(true);
+    expect(count).toHaveBeenCalledOnce();
+    words.refresh();
+    words.schedule(false);
+    vi.advanceTimersByTime(0);
+    expect(count).toHaveBeenCalledTimes(2);
+    words.setVisible(false);
+    words.setVisible(true);
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledTimes(4);
+  });
+
+  it('lets a waiting count for a change to the text cover a selection moved meanwhile', () => {
+    const { words, count } = setup();
+    words.schedule();
+    vi.advanceTimersByTime(IDLE_MS - 10);
+    words.schedule(false);
+    vi.advanceTimersByTime(5);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(5);
+    expect(count).toHaveBeenCalledOnce();
   });
 
   it('counts a document that has just opened as soon as the page has drawn it, not on idle', () => {
@@ -270,7 +313,7 @@ describe('the word count of an editor', () => {
     vi.advanceTimersByTime(IDLE_MS);
     expect(label()).toBe('4 words');
     select(5, 13);
-    vi.advanceTimersByTime(IDLE_MS);
+    vi.advanceTimersByTime(SELECTION_MS);
     expect(label()).toBe('2 of 4 words');
   });
 
