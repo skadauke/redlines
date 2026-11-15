@@ -410,7 +410,7 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     // source is as wide as its drawn box, which a bullet's two columns are not.
     if (marker) b.mark(mark.from, boxEnd, 'rl-list-source');
     else {
-      const style = `display: inline-block; width: calc(${cols} * 0.6em)`;
+      const style = `display: inline-block; text-indent: 0; width: calc(${cols} * 0.6em)`;
       b.push(
         Decoration.mark({ class: 'rl-list-source', attributes: { style } }).range(
           mark.from,
@@ -435,7 +435,8 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     if (first) return;
     // A continuation line keeps its place relative to the item's text.
     const at = columns(next, next.from, spaceAfter(next, next.from));
-    b.indent(next, plain ? Math.max(0, hang + at - textCol) : at);
+    // A lazy one, at the margin, stays there.
+    b.indent(next, plain && at > 0 ? Math.max(0, hang + at - textCol) : at);
   });
 }
 

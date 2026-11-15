@@ -1035,6 +1035,7 @@ class StruckWidget extends WidgetType {
     wrap.className = 'rl-struck-blocks';
     if (this.after) wrap.dataset['after'] = 'true';
     let item = this.afterItem;
+    const indents: number[] = [];
     for (const deleted of this.deleted) {
       const bar = barClass(deleted.colors);
       for (const block of deleted.blocks) {
@@ -1045,6 +1046,7 @@ class StruckWidget extends WidgetType {
           continue;
         }
         const { kind } = block;
+        if (kind.kind !== 'item') indents.length = 0;
         const div = document.createElement('div');
         div.dataset['mark'] = deleted.id;
         const classes = ['rl-struck', bar];
@@ -1059,7 +1061,11 @@ class StruckWidget extends WidgetType {
         item = kind.kind === 'item';
         div.className = classes.join(' ');
         if (kind.kind === 'item') {
-          const level = Math.floor(kind.indent / 2) + 1;
+          // The item's level, from the indents of the items before it in this run (the parse's
+          // nesting isn't there): one deeper than the nearest item it is indented past.
+          while (indents.length && indents[indents.length - 1]! >= kind.indent) indents.pop();
+          indents.push(kind.indent);
+          const level = indents.length + (indents.length === 1 && kind.indent > 0 ? 1 : 0);
           const depth = Math.min(level, BULLETS.length);
           const mark = document.createElement('span');
           mark.className = 'rl-list-mark';

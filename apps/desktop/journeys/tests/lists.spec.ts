@@ -127,4 +127,15 @@ test.describe('lists @lists', () => {
       expect(a.out[level]!.text).toBeGreaterThan(a.out[level - 1]!.text + 10);
     }
   });
+
+  test("showing a marker's source does not move the item's text", async ({ start }) => {
+    const j = await start({ doc: '- aaa\n  - bbb\n1. ccc\n', tracking: false, view: 'clean' });
+    for (const word of ['aaa', 'bbb', 'ccc']) {
+      await j.caretAtEnd();
+      const before = (await j.pointOf(word)).x;
+      await j.place((await j.cmText()).indexOf(word) - 1);
+      await j.shot(`source-shown-${word}`);
+      expect(Math.abs((await j.pointOf(word)).x - before), `${word} stays`).toBeLessThan(0.6);
+    }
+  });
 });
