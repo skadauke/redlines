@@ -286,15 +286,17 @@ export function selectRect(view: EditorView, scope: Scope): boolean {
 export const clearedCells = Annotation.define<boolean>();
 
 /** What clearing `cells` writes, as plain edits: the text of each goes, and `insert` is written in
- * the first, top-left one. Null where nothing changes. */
+ * the first, top-left one. With `onlyFirst` (typing over a rectangle) the other cells are left as
+ * they are. Null where nothing changes. */
 function planOf(
   cells: readonly Cell[],
   insert: string,
+  onlyFirst = false,
 ): { changes: { from: number; to: number; insert?: string }[]; first: Cell } | null {
   const first = cells[0];
   if (!first) return null;
   const changes: { from: number; to: number; insert?: string }[] = [];
-  for (const cell of cells) {
+  for (const cell of onlyFirst ? [first] : cells) {
     if (cell === first && insert !== '') {
       changes.push({ from: cell.textFrom, to: cell.textTo, insert });
     } else if (cell.textFrom < cell.textTo) changes.push({ from: cell.textFrom, to: cell.textTo });
@@ -309,8 +311,9 @@ function clearSpec(
   cells: readonly Cell[],
   insert: string,
   userEvent: string,
+  onlyFirst = false,
 ): Parameters<EditorView['dispatch']>[0] | null {
-  const plan = planOf(cells, insert);
+  const plan = planOf(cells, insert, onlyFirst);
   if (!plan) return null;
   const changes = ChangeSet.of(plan.changes, state.doc.length);
   const caret = changes.mapPos(plan.first.textFrom, -1) + insert.length;
@@ -323,14 +326,17 @@ function clearSpec(
   };
 }
 
-/** The transaction that clears a rectangle's cells and types `insert` into the first. */
+/** The transaction that clears a rectangle's cells and writes `insert` into the first. With
+ * `typed` (keys typed over the rectangle) only the first, top-left cell is cleared, and the others
+ * are left alone; otherwise (a paste, a drop, a cut, a delete) every cell is. */
 export function rectSpec(
   state: EditorState,
   rect: Rect,
   insert: string,
   userEvent: string,
+  typed = false,
 ): Parameters<EditorView['dispatch']>[0] | null {
-  return clearSpec(state, cellsOfRect(rect), insert, userEvent);
+  return clearSpec(state, cellsOfRect(rect), insert, userEvent, typed);
 }
 
 /**

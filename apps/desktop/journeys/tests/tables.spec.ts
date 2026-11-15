@@ -117,34 +117,30 @@ test.describe('tables @tables', () => {
   });
 
   for (const tracking of [false, true]) {
-    known(
-      521,
-      `typing over a rectangle of cells clears only the top-left cell, Track Changes ${tracking ? 'on' : 'off'}`,
-      /the other cells are left alone/,
-      async ({ start }) => {
-        const j = await start({ doc: `Intro\n\n${TABLE}`, tracking, view: 'redlines' });
-        await j.settle();
-        const from = await j.pointOf('1');
-        const to = await j.pointOf('4');
-        await j.drag({ x: from.x + 2, y: from.y }, { x: to.x + 2, y: to.y });
-        await j.shot('cells-selected');
-        await j.type('z', 'burst');
-        await j.shot('cells-typed');
-        // The others keep their text. Today every other cell of the rectangle is cleared (struck,
-        // with Track Changes on: no deletion at all is right).
-        if (tracking) {
-          expect((await j.text()).includes('<!--del'), 'the other cells are left alone').toBe(
-            false,
-          );
-        } else {
-          const drawn = await j.page.locator('.rl-tc').allInnerTexts();
-          expect(
-            drawn.map((cell) => cell.trim()),
-            'the other cells are left alone',
-          ).toEqual(['A', 'B', 'z', '2', '3', '4']);
-        }
-      },
-    );
+    test(`typing over a rectangle of cells clears only the top-left cell, Track Changes ${tracking ? 'on' : 'off'}`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: `Intro\n\n${TABLE}`, tracking, view: 'redlines' });
+      await j.settle();
+      const from = await j.pointOf('1');
+      const to = await j.pointOf('4');
+      await j.drag({ x: from.x + 2, y: from.y }, { x: to.x + 2, y: to.y });
+      await j.shot('cells-selected');
+      await j.type('z', 'burst');
+      await j.shot('cells-typed');
+      // The others keep their text; with Track Changes on, the one cell is a tracked edit.
+      if (tracking) {
+        const text = await j.text();
+        expect(text.match(/<!--(sub|del|ins) /g), 'one cell is edited').toHaveLength(1);
+        expect(text, 'the other cells are left alone').toContain('| 2 |\n| 3 | 4 |');
+      } else {
+        const drawn = await j.page.locator('.rl-tc').allInnerTexts();
+        expect(
+          drawn.map((cell) => cell.trim()),
+          'the other cells are left alone',
+        ).toEqual(['A', 'B', 'z', '2', '3', '4']);
+      }
+    });
   }
 
   // #520: adding a column gives the widths a reload of the resulting text gives (no jump after a

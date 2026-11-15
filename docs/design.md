@@ -806,7 +806,10 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   caret can stand in (`cellIsEmpty`, `cells.ts`): deleted text counts as gone, a line break as text,
   and an author's own HTML comment as empty in Clean and Simple, where it is hidden, and not in
   Redlines, which draws it as a note. A row with text is never deleted by one keystroke: the first
-  press clears it. Typing clears the cells and types into the top-left one; ⌘B, ⌘I and the Format
+  press clears it. Typing clears the top-left cell alone and types there, and leaves the other cells as they are
+  (tracked, a deletion of its text and an insertion of the typed text; the caret ends after the
+  typed text, the selection gone, one Undo); an input method composing does the same. ⌫, ⌦, Cut
+  and a paste over the cells clear or replace every cell. ⌘B, ⌘I and the Format
   menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
   cells' text in one row and on the whole rows across rows.
 - **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
