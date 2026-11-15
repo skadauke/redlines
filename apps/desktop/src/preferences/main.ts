@@ -30,7 +30,9 @@ import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import {
   PANES,
+  buildFilterSections,
   renderFilter,
+  type FilterSection,
   renderPane,
   type CommandLineInstall,
   type CommandLineLink,
@@ -226,7 +228,7 @@ watchSettings((next) => {
   const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
   if (!editing && !pane?.querySelector('[data-waiting]')) {
     if (filter.hidden) show(current);
-    else showFilter();
+    else showFilter(true);
   }
 });
 
@@ -293,38 +295,62 @@ filter.autocomplete = 'off';
 filter.spellcheck = false;
 filter.hidden = true;
 pane.before(filter);
-function showFilter(): void {
-  for (const button of buttons.values()) {
+/** The rows of every pane, built once for a filter, so that a keystroke redraws none of them. */
+let built: FilterSection[] | null = null;
+function showFilter(rebuild = false): void {
+  for (const [id, button] of buttons) {
     button.setAttribute('aria-selected', 'false');
-    button.tabIndex = -1;
+    // The tab of the pane the filter was opened from stays in the tab order.
+    button.tabIndex = id === current ? 0 : -1;
   }
   tidy();
   tidy = () => {};
-  detections.clear();
-  renderFilter(filter.value, pane!, deps);
+  if (rebuild || !built) {
+    detections.clear();
+    built = buildFilterSections(deps);
+  }
+  renderFilter(filter.value, pane!, deps, built);
   pane!.removeAttribute('aria-labelledby');
 }
 function clearFilter(): void {
+  built = null;
   if (filter.hidden) return;
   filter.value = '';
   filter.hidden = true;
 }
+/** Back from the filter to the pane it was opened from, with the focus on its tab. */
+function leaveFilter(): void {
+  clearFilter();
+  show(current);
+  buttons.get(current)?.focus();
+}
 filter.addEventListener('input', () => {
-  if (filter.value === '') {
-    filter.hidden = true;
-    show(current);
-  } else showFilter();
+  if (filter.value === '') leaveFilter();
+  else showFilter();
 });
 filter.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   event.preventDefault();
-  clearFilter();
-  show(current);
-  buttons.get(current)?.focus();
+  leaveFilter();
 });
 window.addEventListener('keydown', (event) => {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
-  if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select'))
+  if (event.defaultPrevented || event.isComposing) return;
+  // Escape clears the filter from a result's control too.
+  if (event.key === 'Escape' && !filter.hidden) {
+    event.preventDefault();
+    leaveFilter();
+    return;
+  }
+  // A first character, typed where nothing takes it: not a shortcut, not a control's own key (Space
+  // presses a button), not a field's, and not while the filter is open.
+  if (!filter.hidden || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key.length !== 1 || event.key === ' ') return;
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.closest('input, textarea, select, button, a, [contenteditable], [role="button"]'))
+  )
     return;
   event.preventDefault();
   filter.hidden = false;

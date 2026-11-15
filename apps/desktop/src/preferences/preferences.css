@@ -44,7 +44,9 @@ body {
   flex: none;
   align-items: center;
   justify-content: center;
-  height: calc(68 * var(--rl-pt));
+  min-height: calc(68 * var(--rl-pt));
+  padding: calc(7 * var(--rl-pt)) 0;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--rl-rule);
 }
 

@@ -730,8 +730,14 @@ function sectionsOf(pane: PaneId, deps: PaneDeps): Section[] {
   return more.length ? [...sections, { title: 'More', rows: more }] : sections;
 }
 
-function heading(title: string): HTMLElement {
-  return el('h2', 'rl-pref-section', title);
+/** A group of rows under its heading, which names it. */
+function group(title: string, rows: HTMLElement[]): HTMLElement {
+  const root = el('section', 'rl-pref-group');
+  const head = el('h2', 'rl-pref-section', title);
+  head.id = `rl-pref-group-${nextId++}`;
+  root.setAttribute('aria-labelledby', head.id);
+  root.append(head, ...rows);
+  return root;
 }
 
 /**
@@ -742,10 +748,7 @@ export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps)
   container.replaceChildren();
   container.dataset['pane'] = pane;
   for (const { title, rows } of sectionsOf(pane, deps)) {
-    const group = el('section', 'rl-pref-group');
-    group.setAttribute('aria-label', title);
-    group.append(heading(title), ...rows);
-    container.append(group);
+    container.append(group(title, rows));
   }
   if (pane !== 'agents') return () => {};
   if (deps.agentsPane) {
@@ -760,26 +763,39 @@ export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps)
 /** What a row says that the filter reads: its label and its notes. */
 const textOf = (row: HTMLElement) => (row.textContent ?? '').toLowerCase();
 
+/** A section of a pane, named with its pane: what the filter searches. */
+export interface FilterSection extends Section {
+  pane: string;
+}
+
+/** The rows of every pane that is made of rows, drawn once, for a filter to show some of. */
+export function buildFilterSections(deps: PaneDeps): FilterSection[] {
+  return PANES.flatMap(({ id, label }) =>
+    sectionsOf(id, deps).map((section) => ({ ...section, pane: label })),
+  );
+}
+
 /**
- * Draws the rows that match `query` from every pane that is made of rows, each result under the
- * pane and section it belongs to ("Editor › Writing"); "Nothing matches" when none does. The rows
- * are the panes' own, so a control works as it does there.
+ * Draws the rows that match `query` from `sections` (those of \`buildFilterSections\`, which a
+ * caller keeps between keystrokes, so that a row that is waiting for the system keeps its state),
+ * each result under the pane and section it belongs to ("Editor › Writing"); "Nothing matches" when
+ * none does. The rows are the panes' own, so a control works as it does there.
  */
-export function renderFilter(query: string, container: HTMLElement, deps: PaneDeps): void {
+export function renderFilter(
+  query: string,
+  container: HTMLElement,
+  deps: PaneDeps,
+  sections: FilterSection[] = buildFilterSections(deps),
+): void {
   container.replaceChildren();
   container.dataset['pane'] = 'filter';
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   let found = 0;
-  for (const { id, label } of PANES) {
-    for (const { title, rows } of sectionsOf(id, deps)) {
-      const matching = rows.filter((row) => words.every((word) => textOf(row).includes(word)));
-      if (!matching.length) continue;
-      found += matching.length;
-      const group = el('section', 'rl-pref-group');
-      group.setAttribute('aria-label', `${label} › ${title}`);
-      group.append(heading(`${label} › ${title}`), ...matching);
-      container.append(group);
-    }
+  for (const { pane, title, rows } of sections) {
+    const matching = rows.filter((row) => words.every((word) => textOf(row).includes(word)));
+    if (!matching.length) continue;
+    found += matching.length;
+    container.append(group(`${pane} › ${title}`, matching));
   }
   if (!found) container.append(line('Nothing matches.', 'rl-pref-empty'));
 }
