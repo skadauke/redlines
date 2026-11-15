@@ -140,6 +140,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/images.ts', 'IMAGE_IN_CODE', 'disable', 'inventory #137'],
   [
+    'packages/editor/src/images.ts',
+    'IMAGE_NOT_DRAWN',
+    'disable',
+    'an image is not put where it would never be drawn: front matter, HTML, a comment, display math, a link address (#375)',
+  ],
+  [
     'packages/editor/src/index.ts',
     'refused',
     'info',

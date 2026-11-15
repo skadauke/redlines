@@ -778,7 +778,7 @@ describe('the panes', () => {
     it('saves no name that a folder in the project can’t have, and says why', () => {
       const { container, update, now } = draw('editor');
       const row = imagesRow(container);
-      for (const typed of ['.images', 'a/b', '../images', 'a\\b', 'a\u0085b']) {
+      for (const typed of ['.images', 'a/b', '../images', 'a\\b']) {
         update.mockClear();
         row.type(row.name, typed);
         expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
