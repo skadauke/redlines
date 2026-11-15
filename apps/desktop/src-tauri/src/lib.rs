@@ -292,7 +292,7 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
     // It opens at the size the zoom gives it, so that it never resizes in view.
     let (width, height) = zoom::preferences_inner_size(&app);
     let window = tauri::WebviewWindowBuilder::from_config(&app, config)?
-        .initialization_script(zoom::init_script(&app))
+        .initialization_script(zoom::init_script(&app, &config.label))
         .inner_size(width, height)
         .build()?;
     zoom::apply(&window);
@@ -498,6 +498,7 @@ pub fn run() {
                 windows::close_requested(window.app_handle(), window.label(), api);
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                zoom::window_closed(window.app_handle(), window.label());
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.

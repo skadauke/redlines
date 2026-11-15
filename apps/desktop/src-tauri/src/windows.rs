@@ -480,7 +480,7 @@ fn build_window(
             None => builder,
         }
         // The page starts at the app's zoom, which is set on the window right after it is built.
-        .initialization_script(crate::zoom::init_script(app))
+        .initialization_script(crate::zoom::init_script(app, &config.label))
         .build()
     });
     match &built {

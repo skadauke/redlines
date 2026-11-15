@@ -551,7 +551,7 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   return [
     row('Appearance', lightOrDark),
     row('Theme', theme),
-    row('Zoom', zoom, line('For windows you open next')),
+    row('Zoom', zoom, line('This window and windows you open next')),
     row('Text size', text, line('For windows you open next')),
   ];
 }

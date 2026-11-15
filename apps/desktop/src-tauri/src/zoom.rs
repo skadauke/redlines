@@ -194,9 +194,17 @@ pub fn set_up(app: &AppHandle) {
     *app.state::<Zoom>().lock() = level;
 }
 
-/// The script for a window about to be built, which hands its page the app's level.
-pub fn init_script(app: &AppHandle) -> String {
-    script(*app.state::<Zoom>().lock())
+/// The script for the window `label` about to be built, which hands its page the window's own
+/// level when it has one (a window built again under a label it still has), else the app's.
+pub fn init_script(app: &AppHandle, label: &str) -> String {
+    let own = app.state::<WindowZooms>().lock().get(label).copied();
+    script(own.or(*app.state::<Zoom>().lock()))
+}
+
+/// A closed window's level is forgotten, so that a window built under its label (Preferences is)
+/// starts at the app's level.
+pub fn window_closed(app: &AppHandle, label: &str) {
+    app.state::<WindowZooms>().lock().remove(label);
 }
 
 /// Sets the page zoom of a window just built, when the app has a level.
