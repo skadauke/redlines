@@ -498,9 +498,8 @@ describe('triple-click', () => {
 
   it('is not the triple-click’s for one and two clicks, in Raw, and on a thematic break', () => {
     const editor = mount('One.⏎⏎Tw‸o.');
-    // A click is a caret where it hit, and a double-click in text is CodeMirror's word.
-    expect(click(editor, 8, 1)?.main.head).toBe(8);
-    expect(click(editor, 8, 1)?.main.empty).toBe(true);
+    // With no hidden closers at the end of a line, a click and a double-click are CodeMirror's.
+    expect(click(editor, 8, 1)).toBeNull();
     expect(click(editor, 8, 2)).toBeNull();
     const rule = mount('One.⏎⏎---⏎⏎Tw‸o.');
     expect(click(rule, 7)).toBeNull();

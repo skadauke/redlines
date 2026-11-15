@@ -8,13 +8,9 @@
 
 import {
   cursorLineDown,
-  cursorLineUp,
   cursorPageDown,
-  cursorPageUp,
   selectLineDown,
-  selectLineUp,
   selectPageDown,
-  selectPageUp,
 } from '@codemirror/commands';
 import {
   EditorSelection,
@@ -392,6 +388,16 @@ export function restingPlace(state: EditorState, pos: number): number {
   return at;
 }
 
+/** Whether a line of the document ends inside the range of hidden closers and a break after them. */
+function hasTails(state: EditorState): boolean {
+  let found = false;
+  atomsOf(state).between(0, state.doc.length, (from, to) => {
+    if (to > state.doc.lineAt(from).to && from < state.doc.lineAt(from).to) found = true;
+    return found ? false : undefined;
+  });
+  return found;
+}
+
 /**
  * The start of the hidden closers that end the row before `pos`, when `pos` is the far edge of the
  * range that the closers and the break after them make: where a move down that landed at the end
@@ -444,7 +450,9 @@ function settling(view: EditorView): EditorView {
           settleVertical(target, start, target.moveVertically(start, forward, distance), forward);
       }
       const value: unknown = Reflect.get(target, key, target);
-      return typeof value === 'function' ? value.bind(target) : value;
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
     },
   });
 }
@@ -479,7 +487,7 @@ export const verticalKeys = Prec.high(
  */
 const pointerSelection = EditorView.mouseSelectionStyle.of((view, event) => {
   if (event.button !== 0 || event.detail > 2) return null;
-  if (view.state.field(viewModeField, false) === 'raw') return null;
+  if (view.state.field(viewModeField, false) === 'raw' || !hasTails(view.state)) return null;
   const type = event.detail === 2 ? 2 : 1;
   const at = (e: MouseEvent) => {
     const { pos, assoc } = view.posAndSideAtCoords({ x: e.clientX, y: e.clientY }, false);
