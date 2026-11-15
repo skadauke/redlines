@@ -187,9 +187,10 @@ export interface EditorOptions {
    */
   tracking?: boolean;
   /**
-   * Whether turning Track Changes on or off is written to the document, as `tracking: everyone` in
-   * its ledger (format §5.6), so that the file remembers it, and is edited like by any change.
-   * Default: false, and `setTracking` changes only this editor's state, for a host with no file.
+   * Whether Track Changes, as the person switches it, is the document's to record, as `tracking:
+   * everyone` in its ledger when the host saves the file (`recordTracking`, format §5.6), so that
+   * the file remembers it. Default: false, and `setTracking` changes only this editor's state, for a
+   * host with no file.
    */
   saveTracking?: boolean;
   /**
@@ -386,18 +387,26 @@ export interface Editor {
    * gone, with the marks that have no text left; an edit with no legal form says why through
    * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
    *
-   * With `saveTracking`, the switch is written to the document (format §5.6): the ledger gains or
-   * loses `tracking: everyone`, in a step of its own that Undo takes back with Track Changes
-   * itself, and `onChange` hears of it. A file that can't take a ledger refuses it, says why
-   * through `onNotice`, and stays as it was.
+   * The switch changes the editor's state and nothing else: it makes no edit, so it never makes the
+   * document edited and has no step to undo, and it writes nothing to the file (format §5.6). With
+   * `saveTracking`, the host records it in the ledger as `tracking: everyone` when it saves the
+   * file for another reason (`recordTracking`).
    *
-   * `options.inFile` says whether this switch is written to the document: by default as the
+   * `options.inFile` says whether this switch is the document's to record: by default as the
    * `saveTracking` option says, and `false` keeps it to this editor, for a Track Changes that is a
    * person's own preference and not the file's (new documents that start tracked).
-   *
-   * @returns false when the file refused, and Track Changes is as it was.
    */
-  setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+  setTracking(on: boolean, options?: { inFile?: boolean }): void;
+  /**
+   * Writes Track Changes, as the person last chose it (`setTracking`), to the ledger: the line
+   * `tracking: everyone` goes in or comes out (format §5.6). For the host to call when it saves the
+   * file, with `recordView`. Nothing is recorded for a document where the person chose nothing, or
+   * chose it as a preference of their own. It never makes a ledger: a file with none, which a first
+   * change gives one, a ledger that holds nothing else and a ledger that can't be read are left as
+   * they are, and it is never why a save fails. It is no step of its own: it joins the newest step,
+   * which Undo takes back with it, and with every step taken back it waits for the next save.
+   */
+  recordTracking(): void;
   /**
    * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
    * `view: simple` (format §5.6): for the host to call when it saves the file, so that the document

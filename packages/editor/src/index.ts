@@ -16,10 +16,9 @@ import { GFM } from '@lezer/markdown';
 import {
   accept as acceptChange,
   acceptMarks,
-  EditError,
   reject as rejectChange,
   rejectMarks,
-  setTracking as trackingInFile,
+  recordTracking as recordTrackingInFile,
   setView as viewInFile,
   type TextChange,
 } from '@redlines/format';
@@ -218,6 +217,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   const saveTracking = options.saveTracking ?? false;
+  /**
+   * What the person last chose for Track Changes in this document, which the next save records in
+   * its ledger (`recordTracking`); null when they chose nothing since it was loaded, and the file
+   * says what it says.
+   */
+  let trackingChosen: boolean | null = null;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   /**
@@ -396,12 +401,41 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     });
   };
 
+  /**
+   * Puts a setting that the host records at a save into the document (`recordTracking`,
+   * `recordView`): joined to the newest step, so that Undo gives it back with the step and no step
+   * is left that undoes nothing a person can see (steps to redo, which a change would put out of
+   * step, are dropped, as by any edit); with no step at all, outside the history, which has none to
+   * put out of step. It is made in no empty paragraph's place, which would open one that the file
+   * never gets.
+   */
+  const recordInFile = (changes: TextChange[]) => {
+    if (!changes.length) return;
+    const { state } = view;
+    const joins = undoDepth(state) > 0;
+    // With every step taken back there is none to join, and a change outside the history would
+    // put the ledger out of step with the steps to redo: a save made while they remain leaves the
+    // file as the history has it, and the first save after a new edit records it.
+    if (!joins && redoDepth(state) > 0) return;
+    view.dispatch({
+      changes,
+      annotations: [
+        trackedEditAnnotation.of(true),
+        Transaction.remote.of(true),
+        ...(joins
+          ? [joinsNewestStep.of(true), isolateHistory.of('after')]
+          : [Transaction.addToHistory.of(false)]),
+      ],
+    });
+  };
+
   const editor: Editor = {
     view,
     commands,
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
       view.setState(stateFor(loadFile(doc)));
+      trackingChosen = null;
       shownLook = lookOf(view.state);
       told = fileText(view.state);
       report();
@@ -425,14 +459,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         userEvent: 'reload',
       });
       // A file that newly asks everyone to track changes is read as one that is opened: Track
-      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364). One
-      // that stops asking leaves it as it is, so that nobody's tracking is switched off under them.
+      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364), and
+      // no choice is left to record. One that stops asking leaves it as it is, so that nobody's
+      // tracking is switched off under them, and a choice of the person's is kept, for the next save
+      // to record (format §5.6).
       if (
         !asked &&
         view.state.field(parsedField).ledger.tracking === 'everyone' &&
         !view.state.field(trackingField)
       ) {
         view.dispatch({ effects: setTrackingEffect.of(true) });
+        trackingChosen = null;
       }
     },
     applyAgentEdit: (doc, step) => {
@@ -474,61 +511,21 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
     setTracking: (on, switched) => {
-      if (!(switched?.inFile ?? saveTracking)) {
-        view.dispatch({ effects: setTrackingEffect.of(on) });
-        return true;
-      }
-      let changes: TextChange[];
-      try {
-        changes = trackingInFile(view.state.doc.toString(), on);
-      } catch (error) {
-        if (!(error instanceof EditError)) throw error;
-        // The file can't take the setting: Track Changes stays as it was, and says why.
-        options.onNotice?.(error.message);
-        return false;
-      }
-      view.dispatch({
-        changes,
-        effects: setTrackingEffect.of(on),
-        // A step of its own, apart from the typing around it, that Undo takes back with Track
-        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite, and
-        // not an edit in the caret's place, where it would open an empty paragraph that the file
-        // never gets (as a reload isn't).
-        annotations: [
-          trackedEditAnnotation.of(true),
-          Transaction.remote.of(true),
-          isolateHistory.of('full'),
-        ],
-        userEvent: 'track.switch',
-      });
-      return true;
+      view.dispatch({ effects: setTrackingEffect.of(on) });
+      // The switch writes nothing and makes no edit (format §5.6): the file records it when it is
+      // saved for another reason (`recordTracking`). A switch that is the person's own preference,
+      // not the document's, is never recorded.
+      if (switched?.inFile ?? saveTracking) trackingChosen = on;
+    },
+    recordTracking: () => {
+      if (trackingChosen === null) return;
+      recordInFile(recordTrackingInFile(view.state.doc.toString(), trackingChosen));
     },
     recordView: () => {
       const shown = view.state.field(viewModeField);
       // Raw is never saved: the file keeps the view it had.
       if (shown === 'raw') return;
-      const changes = viewInFile(view.state.doc.toString(), shown);
-      if (!changes.length) return;
-      const { state } = view;
-      const joins = undoDepth(state) > 0;
-      // With every step taken back there is none to join, and a change outside the history would
-      // put the ledger out of step with the steps to redo: the next save records the view.
-      if (!joins && redoDepth(state) > 0) return;
-      view.dispatch({
-        changes,
-        // Joined to the newest step, so that Undo gives it back with the step, and no step is
-        // left that undoes nothing a person can see (steps to redo, which a change would put out
-        // of step, are dropped, as by any edit); with no step at all, outside the history, which
-        // has none to put out of step. What comes after is a step of its own. Not an edit in the
-        // caret's place, which would open an empty paragraph that the file never gets.
-        annotations: [
-          trackedEditAnnotation.of(true),
-          Transaction.remote.of(true),
-          ...(joins
-            ? [joinsNewestStep.of(true), isolateHistory.of('after')]
-            : [Transaction.addToHistory.of(false)]),
-        ],
-      });
+      recordInFile(viewInFile(view.state.doc.toString(), shown));
     },
     setTyping: (next: EditorTyping) => {
       typing = next;

@@ -3068,8 +3068,10 @@ front matter in R Markdown and Quarto.
 - The word `redlines` comes first, so other tools don't mistake the comment for their own. Marp,
   for one, reads a leading YAML comment as slide settings.
 - The ledger appears with the first tracked change, comment or setting, and is removed when
-  nothing is left in it. The view (§5.6) is a setting that never keeps one: a file with no ledger
-  gets none for it, and a ledger left with nothing but a view is removed.
+  nothing is left in it. Redlines writes the settings only when it saves a file for another
+  reason (§5.6), and the view is one that never keeps a ledger: a file with no ledger gets none for
+  it, and a ledger left with nothing but a view is removed. Turning Track Changes on makes no ledger
+  either: the first tracked change does, and `tracking: everyone` goes in with the next save.
 - The file's last line break stays its last. The ledger goes in front of it, after a blank line
   of two line breaks, also in a file with no text, where the blank line keeps what is typed first
   apart from the ledger; a file without a final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
@@ -3229,22 +3231,38 @@ same values.
 
 - **`tracking: everyone`** works like Word's Track Changes "For Everyone": everyone who opens the
   file in Redlines starts with Track Changes on, under a notice that says so.
-  - Turning Track Changes on in Redlines writes it, and turning it off takes it away, as Word saves
-    Track Changes in the document. The file is edited like any other change to it: the switch is
-    written at once, so the document has unsaved edits until it is saved, and switching back
-    leaves the file as it was. A file with no text yet gets the ledger after a blank line, like
-    any file (§5.1).
-  - A file that can't take a ledger, because its ledger can't be read (§5.1) or its end is inside a
-    code block or a comment that is never closed, can't have Track Changes turned on. Redlines says
-    why, in the words of the refusal, and leaves it off: with it on, no tracked change could be
-    written there either.
+  - Redlines records it when the file is saved, as it records the view (below), and not when Track
+    Changes is switched. Turning Track Changes on or off in Redlines changes no byte of the file
+    and makes no edit, so it never makes a document edited, has no step for Undo, and a document
+    that was only switched asks nothing when it is closed. The save that the document needs for
+    another reason writes the setting as it was chosen last: `tracking: everyone` goes into the
+    ledger when Track Changes is on, and the line is taken out when it is off, so that someone who
+    turns it on, makes a change, saves, and opens the file again, or sends it to someone else,
+    finds it on, as Word saves Track Changes in the document.
+  - Recording it changes that one line, a new line after `version`'s or the line taken out, and no
+    other byte of the ledger: a Save never rewrites what a person didn't touch, whatever tool or
+    version wrote it. An agent's edits and the `redlines` command line leave it as it is.
+  - **It is never a reason for a ledger.** A plain file gets none when Track Changes is turned on,
+    nor when it is saved with it on: the first change that is tracked gives the file the ledger
+    that holds it (§5.1), and the setting goes in with it at the next save. A ledger that holds
+    nothing else doesn't take it, and turning it off in a file whose ledger holds nothing but it
+    removes the ledger (§5.1), so the file is as it was.
+  - A choice is recorded only if a person made it in the window, and not a window's Track Changes
+    that came from Preferences' start for new documents, or from a file that asked for it: a file
+    that is opened is as it says, a file that is reloaded and asks for it drops any choice (the
+    window follows the file), and a choice that a reloaded file doesn't contradict is kept for the
+    next save: a window that has it on while the file no longer asks keeps it on, and records it.
+  - A file whose ledger can't be read (§5.1) or whose end is inside a code block or a comment that
+    is never closed can have Track Changes turned on, since turning it on writes nothing. No tracked
+    change can be written there, so each edit is refused as it is with Track Changes on in any
+    file, and says why; the save never fails for the setting, and leaves the ledger as it is.
   - A plain file can't enforce it. It is a default, like Word's Lock Tracking without a password.
     Hosts with real permissions enforce roles themselves.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
   - A window that reloads the file because it changed on disk reads the setting again: a file that
-    newly carries `tracking: everyone` turns Track Changes on, under the same notice, and the
-    switch writes nothing, since the file asks already. One that no longer carries it leaves
+    newly carries `tracking: everyone` turns Track Changes on, under the same notice, and nothing
+    is to be written, since the file asks already. One that no longer carries it leaves
     Track Changes as the window has it, so that nobody's tracking is switched off under them.
 - **`view: clean`, `view: redlines` or `view: simple`** is the view the document opens in, the one
   it was in when it was last saved: Clean; Redlines' full markup; or Redlines' simple look, the

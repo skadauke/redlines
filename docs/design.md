@@ -451,15 +451,17 @@ mode has no counterpart in the desktop app.
   ⌘⇧E does in Word; hovering over it opens the Review menu, whose first item is the same switch.
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
-- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes).
-  Turning Track Changes on writes `tracking: everyone` into the file's ledger, and turning it off
-  takes it out ([format §5.6](format.md#56-settings)). The switch makes the document edited, like
-  any change to it, so the next Save keeps it, and a step of its own, which Undo takes back.
-  Someone who turns it on, saves, and opens the file again, or sends it to someone else, finds it
-  still on. A file with no ledger gets one for it, and turning it off again leaves the file as it
-  was. A file that can't take a ledger (an unreadable one, or an end inside a code block that is
-  never closed) can't have it turned on, and says why. Preferences' Track Changes for new
-  documents is the person's own start: it writes nothing to the file until they switch it.
+- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes). The
+  switch itself changes nothing in the file: turning Track Changes on or off never makes the
+  document edited, so a document that was only switched asks nothing when it is closed, and it has
+  no step for Undo. The ledger records the setting when the file is saved for another reason
+  (`tracking: everyone`, [format §5.6](format.md#56-settings)), as it records the view, so someone
+  who turns it on, makes a change, saves, and opens the file again, or sends it to someone else,
+  finds it still on. Turning it off in a tracked file and saving takes the line out. A plain
+  Markdown file gets no ledger for it: the ledger comes with the first tracked change. A file that
+  can't take a ledger (an unreadable one, or an end inside a code block that is never closed) can
+  have it turned on, and refuses each tracked edit with the reason, as it always did. Preferences'
+  Track Changes for new documents is the person's own start: it is never recorded in the file.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
@@ -467,7 +469,7 @@ mode has no counterpart in the desktop app.
   reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
   Track Changes turns on, under the same notice, and nothing is written, since the file asks
   already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
-  tracking is switched off under them; the next switch they make writes the file's setting again.
+  tracking is switched off under them; the next switch they make is recorded at the next save.
   A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
   Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
@@ -1067,7 +1069,7 @@ Syrus and GitHub notify); paragraph locking.
 ### 5.13 Undo
 
 Undo goes back in time through what this window did: your edits, decisions, comments and replies,
-turning Track Changes on or off, and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+and the runs of your agents (§8). Turning Track Changes on or off is no step: it changes nothing in the file (§5.4). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
 between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
