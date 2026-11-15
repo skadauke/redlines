@@ -5,23 +5,90 @@
 
 import { eolOf, inEol } from './changes.ts';
 import type { Eol } from './changes.ts';
-import type { MarkRange, Parsed, PayloadMarks, Segment } from './types.ts';
+import { CONTAINER_PREFIX } from './blocks.ts';
+import { serializeLedger } from './ledger-write.ts';
+import { scanPayload } from './scan.ts';
+import type { Ledger, MarkRange, Parsed, PayloadMarks, Segment } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
-/** The ledger of a file as a payload's own file holds it: with LF line breaks, or empty. */
-export function ledgerTextOf(text: string, parsed: Parsed): string {
-  const range = parsed.ledgerRange;
-  if (!range) return '';
-  return text
-    .slice(range.from)
-    .replace(/^[\r\n]+|[\r\n]+$/g, '')
-    .replaceAll('\r\n', '\n');
+/** The ids of the marks that a payload holds, at every depth, and those of the payloads inside. */
+function idsOfSite(site: PayloadMarks, ids = new Set<string>()): Set<string> {
+  for (const mark of site.marks) ids.add(mark.id);
+  for (const deeper of site.payloads) idsOfSite(deeper, ids);
+  return ids;
+}
+
+/**
+ * The ledger that a payload's file holds, as text with LF line breaks: only the entries of the
+ * marks that the payload holds. An id that stands elsewhere in the file has none, so the payload's
+ * file reads it as text, as the parser of the whole file does.
+ */
+export function ledgerFor(parsed: Parsed, ids: ReadonlySet<string>): string {
+  const marks: Ledger['marks'] = {};
+  for (const [id, entry] of Object.entries(parsed.ledger.marks)) if (ids.has(id)) marks[id] = entry;
+  const comments = parsed.ledger.comments.filter((thread) => ids.has(thread.id));
+  return serializeLedger({ ...parsed.ledger, marks, comments }).replace(/[\r\n]+$/, '');
+}
+
+/**
+ * The ledger for one payload: the entries of the marks it holds, and of the markers in it that are
+ * too deep to be read as marks of the file, which become marks when the replacement above them is
+ * rejected (so the views, which show the file after that, read them as the marks they will be).
+ * An id that stands in the body, or twice in the payloads, has none: it is text.
+ */
+export function ledgerForSite(parsed: Parsed, site: PayloadMarks): string {
+  const ids = idsOfSite(site);
+  const top = new Set(parsed.marks.map((mark) => mark.id));
+  const seen = new Map<string, number>();
+  const count = (text: string, depth: number) => {
+    if (depth > 8 || !text.includes('<!--')) return;
+    for (const marker of scanPayload(text).markers) {
+      if (marker.type !== 'open') continue;
+      seen.set(marker.id, (seen.get(marker.id) ?? 0) + 1);
+      if (marker.payload !== undefined) count(marker.payload, depth + 1);
+    }
+  };
+  count(site.text, 0);
+  for (const [id, times] of seen) if (times === 1 && !top.has(id)) ids.add(id);
+  return ledgerFor(parsed, ids);
+}
+
+/**
+ * What stands before a payload's opener on its line when the line starts with a container's prefix
+ * (`> `, `- `, indentation): the payload's file starts with it, so that what is decided in it sees
+ * the lines as they stand in the file. `whole` is the text that holds the opener, with its own
+ * prefix, and `from` where the opener starts in it.
+ */
+export function prefixBefore(whole: string, from: number): string {
+  const before = whole
+    .slice(whole.lastIndexOf('\n', from - 1) + 1, from)
+    .replace(/<!--.*?-->/g, '');
+  return CONTAINER_PREFIX.test(before) ? before : '';
+}
+
+/** The prefix of each payload in a chain, outermost first. */
+export function prefixesOf(text: string, parsed: Parsed, chain: readonly PayloadMarks[]): string[] {
+  const prefixes: string[] = [];
+  let whole = text;
+  let offset = 0;
+  for (const [depth, site] of chain.entries()) {
+    const holder =
+      depth === 0
+        ? parsed.marks.find((mark) => mark.id === site.owner)
+        : chain[depth - 1]?.marks.find((mark) => mark.id === site.owner);
+    const open = holder?.segments[site.segment]?.open;
+    const prefix = open ? prefixBefore(whole, open.from + offset) : '';
+    prefixes.push(prefix);
+    whole = prefix + site.text;
+    offset = prefix.length;
+  }
+  return prefixes;
 }
 
 /**
  * A payload as a file: a line break to stand after something, as the text of a unit does in a
- * file, the payload, and the ledger of the file it is in. The first line break keeps a payload that
- * starts with `---` from being read as front matter. Nothing in it is the ledger's but the end.
+ * file, the prefix and the payload, and a ledger. The first line break keeps a payload that starts
+ * with `---` from being read as front matter. Nothing in it is the ledger's but the end.
  */
 export function payloadFile(payload: string, ledger: string): string {
   return `\n${payload}\n\n${ledger}`;
@@ -33,16 +100,21 @@ export function payloadOfFile(proxy: string, parsed: Parsed): string {
   return body.replace(/^\n/, '');
 }
 
+/** What a view of a payload's file leaves of the payload: without the line break in front, and
+ * without the prefix. Where the view has lost the prefix, as it does not, the text as it is. */
+function withoutPrefix(view: string, prefix: string): string {
+  const text = view.replace(/^\n/, '');
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text;
+}
+
 /** The old text of a payload as the original view shows it: its own marks rejected. */
-export function originalOfPayload(payload: string, ledger: string): string {
-  const view = originalView(payloadFile(payload, ledger)).text;
-  return view.replace(/^\n/, '');
+export function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
+  return withoutPrefix(originalView(payloadFile(prefix + payload, ledger)).text, prefix);
 }
 
 /** The old text of a payload as the newest view shows it: its own marks accepted. */
-export function newestOfPayload(payload: string, ledger: string): string {
-  const view = newestView(payloadFile(payload, ledger)).text;
-  return view.replace(/^\n/, '');
+export function newestOfPayload(payload: string, ledger: string, prefix = ''): string {
+  return withoutPrefix(newestView(payloadFile(prefix + payload, ledger)).text, prefix);
 }
 
 /** The payload of one segment of a mark that holds marks, if it does. */
@@ -72,7 +144,10 @@ export function originalText(
   const payload = segment.payload ?? '';
   const eol = eolOf(text, parsed.ledgerRange);
   const site = payloadAt(parsed, mark, segment);
-  const old = site ? originalOfPayload(payload, ledgerTextOf(text, parsed)) : payload;
+  // A payload that holds no mark is the old text as it is.
+  const old = site
+    ? originalOfPayload(payload, ledgerForSite(parsed, site), prefixBefore(text, segment.open.from))
+    : payload;
   return inEol(old, eol);
 }
 

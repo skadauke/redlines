@@ -43,6 +43,16 @@ const INSERTS = [
   'a\nb',
   '',
   '| a | b |',
+  '\t',
+  '    code',
+  '\n===',
+  '# H #',
+  '[x]: http://a.b "t"',
+  '---',
+  '<br>',
+  '*',
+  '_',
+  '\\',
 ];
 
 function randomIds(below: (n: number) => number) {
@@ -259,7 +269,7 @@ describe('random widened replacements', () => {
     // Few edits are untrackable, and they say why.
     expect(seen.untrackable / total).toBeLessThan(0.35);
     expect(seen.written).toBeGreaterThan(total / 2);
-  }, 120_000);
+  }, 300_000);
 
   it('writes every edit that the fine writer refuses, or says it is untrackable', () => {
     const total = fuzzCount(300);
@@ -292,5 +302,5 @@ describe('random widened replacements', () => {
     console.log(JSON.stringify({ total, refused, written }));
     expect(bad).toEqual([]);
     expect(written).toBeGreaterThan(refused / 2);
-  }, 120_000);
+  }, 300_000);
 });

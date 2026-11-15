@@ -99,7 +99,7 @@ describe('reading the marks in a payload', () => {
   it('reads a marker as text when its closer is not in the same payload', () => {
     const old = '<!--ins k3x9-->Fast importer';
     const parsed = parse(file(replaced(old, NEW), { r2zd: 'ada', k3x9: 'bo' }));
-    expect(parsed.payloads[0]?.marks).toEqual([]);
+    expect(parsed.payloads).toEqual([]);
     expect(parsed.warnings.map((w) => [w.code, w.id])).toContainEqual(['payload-mark', 'k3x9']);
   });
 
@@ -112,7 +112,7 @@ describe('reading the marks in a payload', () => {
   it('does not read a marker in a payload’s code, which is the code’s', () => {
     const old = 'Write `<!--ins k3x9-->` to start.';
     const parsed = parse(file(replaced(old, 'New.'), { r2zd: 'ada', k3x9: 'bo' }));
-    expect(parsed.payloads[0]?.marks).toEqual([]);
+    expect(parsed.payloads).toEqual([]);
     // The entry has no mark: it is an orphan, as it is in a file whose body has no such mark.
     expect(parsed.warnings.map((w) => w.code)).toEqual(['orphan-entry']);
   });
@@ -239,5 +239,32 @@ describe('comments and highlights in the old text of a replacement', () => {
     expect(applyChanges(held, rejectAll(held))).toBe(
       `Intro.\n\nimporter ships very April.\n\nOutro.\n`,
     );
+  });
+});
+
+describe('what the review of the engine found', () => {
+  it('reject all leaves nothing pending, also what a payload too deep to read held as text', () => {
+    const l5 = '<!--ins g5th-->five<!--/g5th-->';
+    const l4 = `<!--sub f4th ${encodePayload(l5)}-->four<!--/f4th-->`;
+    const l3 = `<!--sub t3rd ${encodePayload(l4)}-->three<!--/t3rd-->`;
+    const l2 = `<!--sub s2nd ${encodePayload(l3)}-->two<!--/s2nd-->`;
+    const marks = { r2zd: 'ada', s2nd: 'bo', t3rd: 'ada', f4th: 'bo', g5th: 'ada' };
+    const text = file(replaced(l2, 'new'), marks);
+    const done = applyChanges(text, rejectAll(text));
+    expect(parse(done).marks).toEqual([]);
+    // The innermost old text is the insertion alone, which rejecting takes away.
+    expect(done).toBe('Intro.\n\n\n\nOutro.\n');
+  });
+
+  it('a payload that holds an id that stands in the body too has no place in the ledger’s order', () => {
+    const old = 'old <!--ins m5q7-->x<!--/m5q7--> end';
+    const body = `Intro.\n\n<!--del k3x9 ${encodePayload(old)}-->b <!--ins m5q7-->y<!--/m5q7-->`;
+    const text = file(body, { k3x9: 'bo', m5q7: 'bo' });
+    expect(parse(text).payloads).toEqual([]);
+    expect(Object.keys(parse(applyChanges(text, accept(text, 'm5q7'))).ledger.marks)).toEqual([
+      'k3x9',
+    ]);
+    // Reviews and decisions agree about the text that the parser reads as text.
+    expect(originalView(text).text).toBe(`Intro.\n\nold <!--ins m5q7-->x<!--/m5q7--> endb \n`);
   });
 });

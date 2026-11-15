@@ -27,13 +27,15 @@ import {
   underscoreRewrites,
 } from './format-undo.ts';
 import { parse } from './parse.ts';
+import { scanPayload } from './scan.ts';
 import { encodePayload } from './payload.ts';
 import {
   findInPayload,
-  ledgerTextOf,
+  ledgerForSite,
   payloadFile,
   payloadIdsOf,
   payloadOfFile,
+  prefixesOf,
 } from './payload-marks.ts';
 import type { PayloadFound } from './payload-marks.ts';
 import { tablesOfText } from './table.ts';
@@ -343,6 +345,25 @@ function emptiedAnnotations(
   return extra;
 }
 
+/** The ids of every marker in the payloads of `marks`, however deep: those that are read, and those
+ * that a payload too deep to read holds as text until the replacement is rejected. */
+function deepIds(marks: readonly MarkRange[]): string[] {
+  const ids: string[] = [];
+  const walk = (payload: string, depth: number) => {
+    if (depth > 8 || !payload.includes('<!--')) return;
+    for (const marker of scanPayload(payload).markers) {
+      if (marker.type !== 'open') continue;
+      ids.push(marker.id);
+      if (marker.payload !== undefined) walk(marker.payload, depth + 1);
+    }
+  };
+  for (const mark of marks) {
+    if (mark.kind !== 'sub' && mark.kind !== 'del') continue;
+    for (const segment of mark.segments) walk(segment.payload ?? '', 0);
+  }
+  return ids;
+}
+
 /** Whether a mark is a half of a move of a row. */
 const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== undefined;
 
@@ -551,13 +572,17 @@ function decideInPayload(
   const top = chain[0];
   if (!leaf || !top)
     throw new EditError(`There is no change with the id ${mark.id}.`, 'unknown-id');
-  const ledger = ledgerTextOf(text, parsed);
-  const proxy = payloadFile(leaf.text, ledger);
+  // The payload is a file of its own, with the prefix its first line has in the file (`> `, `- `),
+  // and with the entries of the marks it holds.
+  const prefix = prefixesOf(text, parsed, chain).at(-1) ?? '';
+  const proxy = payloadFile(prefix + leaf.text, ledgerForSite(parsed, leaf));
   const read = parse(proxy);
   const inside = markToDecide(read, mark.id);
   const changes = decide(proxy, read, [inside], action);
   const made = applyChanges(proxy, changes);
   let written = payloadOfFile(made, parse(made));
+  if (!written.startsWith(prefix)) throw new EditError(UNFINISHED, 'no-legal-placement');
+  written = written.slice(prefix.length);
   // The decided text goes back into the opener that holds it, one payload at a time, inward out.
   for (let depth = chain.length - 1; depth >= 1; depth--) {
     const site = chain[depth];
@@ -780,6 +805,8 @@ export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): 
   // The marks in the old text of a replacement that is rejected are pending again, and are
   // rejected with it: nothing is left pending but what the filter keeps (format §3.12).
   const wanted = new Set(marks.flatMap((mark) => payloadIdsOf(parsed, mark)));
+  // Marks that were text in a payload too deep to read come back as marks, and go with it.
+  for (const id of deepIds(marks)) wanted.add(id);
   let current = applyChanges(text, changes);
   for (let round = 0; wanted.size > 0 && round <= wanted.size; round++) {
     const read = parse(current);

@@ -102,11 +102,12 @@ function markTables(text: string, units: Unit[], tables: readonly Range[]): void
       unit.kind = 'table';
       unit.atomic = false;
       // The deletion lines under the table are its own: blocks that start inside it go.
-      while (units[i + 1] && units[i + 1]!.from < table.to) {
+      const deletion = (next: Unit) =>
+        /^<!--del [a-z0-9]{4} (?:row|col)=/.test(text.slice(next.from, next.to));
+      while (units[i + 1] && units[i + 1]!.from < table.to && deletion(units[i + 1]!)) {
         unit.to = Math.max(unit.to, units[i + 1]!.to);
         units.splice(i + 1, 1);
       }
-      unit.to = Math.max(unit.to, table.to);
     }
     markTables(text, unit.children, tables);
   }
@@ -207,8 +208,14 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
         // A paragraph, a heading, a rule, an HTML block: lines up to a blank line.
         let end = at;
         if (!ATX.test(head.text) && !RULE.test(head.text.trim())) {
-          while (lines[end + 1] && !blank(lines[end + 1]!) && !startsBlock(lines[end + 1]!.text))
+          while (
+            lines[end + 1] &&
+            !blank(lines[end + 1]!) &&
+            !glueClose(lines[end + 1]!) &&
+            !startsBlock(lines[end + 1]!.text)
+          ) {
             end++;
+          }
         }
         while (lines[end + 1] && glueClose(lines[end + 1]!)) end++;
         units.push(make('block', lines[end]!));
@@ -394,18 +401,19 @@ export function withPrefixes(text: string, units: readonly Unit[]): void {
 }
 
 /**
- * Which lists a file has, and whether each is tight, with the lists in them: what a blank line in a
- * tight list changes, and what a reader that does not know the markers reads differently from the
- * newest view. A replacement must leave the shape that the newest view has: the gate of `widen.ts`
- * compares the two.
+ * The structure of a file's blocks: the lists (tight or loose), items and quotes, and what each
+ * holds, with every other block a leaf. A replacement must leave the structure that the newest view
+ * has, as a reader that does not know the markers would read it (a blank line in a tight list
+ * loosens it, a closer on a line of its own is a block, a line that was lazy text is a block of its
+ * own): the gate of `widen.ts` compares the two.
  */
 export function shapeOf(units: readonly Unit[]): string {
   return units
-    .flatMap((unit) =>
-      unit.kind === 'list'
-        ? [`${unit.tight ? 'T' : 'L'}(${shapeOf(unit.children)})`]
-        : [shapeOf(unit.children)],
-    )
-    .filter((shape) => shape !== '')
+    .map((unit) => {
+      if (unit.kind === 'list') return `${unit.tight ? 'T' : 'L'}(${shapeOf(unit.children)})`;
+      if (unit.kind === 'item') return `i(${shapeOf(unit.children)})`;
+      if (unit.kind === 'quote') return `q(${shapeOf(unit.children)})`;
+      return 'b';
+    })
     .join(',');
 }

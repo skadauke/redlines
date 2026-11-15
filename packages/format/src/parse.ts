@@ -295,7 +295,8 @@ function readPayloads(
           (candidate) =>
             candidate.ownerId === mark.id && candidate.opener.from === segment.open.from,
         );
-        if (child) deeper.push({ ...read(child), segment: index });
+        const inner = child ? { ...read(child), segment: index } : undefined;
+        if (inner && held(inner)) deeper.push(inner);
       });
     }
     return {
@@ -307,7 +308,12 @@ function readPayloads(
       payloads: deeper,
     };
   };
-  return roots.map(read);
+  return roots.map(read).filter(held);
+}
+
+/** A payload that holds marks, or payloads that do. */
+function held(site: PayloadMarks): boolean {
+  return site.marks.length > 0 || site.payloads.length > 0;
 }
 
 /** Each parse's ledger, as read, by the parse; for later parses of the same file. */

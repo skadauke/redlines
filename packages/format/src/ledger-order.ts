@@ -27,16 +27,20 @@ export function normalizeLedger(textAfter: string, ledger: Ledger): Ledger {
   const firstOpener = new Map<string, MarkKind>();
   // The marks in the old text of a replacement stay in the ledger as long as the replacement
   // does: they are in the order of the replacement's place in the body (format §3.12).
+  const top = scan(textAfter).markers;
+  const topIds = new Set(top.map((marker) => marker.id));
   const walk = (markers: readonly Marker[], depth: number) => {
     for (const marker of markers) {
       if (marker.type !== 'open') continue;
+      // An id that stands in the body too is text in a payload (format §3.12): it has no place here.
+      if (depth > 0 && topIds.has(marker.id)) continue;
       if (!firstOpener.has(marker.id)) firstOpener.set(marker.id, marker.kind);
       if (depth < MOST_PAYLOAD_DEPTH && holdsMarks(marker)) {
         walk(scanPayload(marker.payload ?? '').markers, depth + 1);
       }
     }
   };
-  walk(scan(textAfter).markers, 0);
+  walk(top, 0);
 
   const marks: Record<string, MarkEntry> = {};
   const anchorOrder = new Map<string, number>();

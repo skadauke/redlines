@@ -199,6 +199,77 @@ describe('stacked replacements (format §3.12, Editing it)', () => {
   });
 });
 
+describe('what the review found', () => {
+  /** What widen writes reads as its newest view, or it says it is untrackable. */
+  function soundOrUntrackable(label: string, text: string, find: string, insert: string) {
+    let done;
+    try {
+      done = widen(text, replacing(text, find, insert), context(ada, ['r2zd']));
+    } catch (error) {
+      expect(error, label).toBeInstanceOf(Untrackable);
+      return;
+    }
+    expect(parse(done.text).warnings, label).toEqual([]);
+    expect(readsAsNewest(done.text), `${label}: reads as the newest text`).toBe(true);
+    expectSound(label, done.text);
+  }
+
+  it('a deleted unclosed comment opener does not take the ledger into the views', () => {
+    const text = file('Hello <!--del k3x9 <!-\\- -->world, see the note.', { k3x9: 'ada' });
+    expect(originalView(text).text).toBe('Hello <!-- world, see the note.\n');
+    expect(applyChanges(text, reject(text, 'k3x9'))).toContain('Hello <!-- world');
+    expect(parse(text).payloads).toEqual([]);
+  });
+
+  it('widening ends, where closure brings the unit back down', () => {
+    const body = '<!--sub v5jj a-b <sup>-->\n\n- **p><!--/v5jj-->*alpha*</sup>';
+    const text = file(body, { v5jj: 'bo' });
+    const view = newestView(text).text;
+    const run = () =>
+      widen(
+        text,
+        [{ from: 3, to: Math.min(15, view.length), insert: '<!--' }],
+        context(ada, ['r2zd']),
+      );
+    try {
+      run();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Untrackable);
+    }
+  });
+
+  it.each([
+    ['indented code', '\t'],
+    ['indented code of spaces', '    beta'],
+    ['a setext underline', 'x\n==='],
+    ['a heading with closing #s', '# H #'],
+    ['a link reference definition', '[x]: http://a.b "t"'],
+    ['a table with no body rows', '| a | b |\n| - | - |'],
+    ['an HTML line', '<br>'],
+    ['a thematic break', '---'],
+  ])('new text that is %s is written as it reads, or is untrackable', (name, insert) => {
+    const top = file('Intro.\n\nbeta <!--ins k3x9-->big<!--/k3x9--> x.\n\nOutro.', { k3x9: 'bo' });
+    soundOrUntrackable(`${name} (top)`, top, 'beta big x.', insert);
+    const plain = file('Intro.\n\nbeta x.\n\nOutro.');
+    soundOrUntrackable(`${name} (plain)`, plain, 'beta x.', insert);
+    const item = file('- one\n- two <!--ins k3x9-->big<!--/k3x9-->', { k3x9: 'bo' });
+    soundOrUntrackable(`${name} (last item)`, item, 'two big', insert);
+    const quote = file('> a <!--ins k3x9-->big<!--/k3x9--> b\n\nOutro.', { k3x9: 'bo' });
+    soundOrUntrackable(`${name} (quote)`, quote, 'a big b', insert);
+  });
+
+  it('a mark decided in the old text of a unit in a quote keeps the quote’s prefix', () => {
+    const text = file('> <!--sub k8s3 text del-->\n> zz<!--/k8s3-->ta\n> more\n', { k8s3: 'bo' });
+    const done = widen(text, replacing(text, 'more', '# MORE'), context(ada, ['r2zd']));
+    const through = applyChanges(
+      applyChanges(done.text, accept(done.text, 'k8s3')),
+      reject(applyChanges(done.text, accept(done.text, 'k8s3')), done.id),
+    );
+    const rejected = applyChanges(done.text, reject(done.text, done.id));
+    expect(through).toBe(applyChanges(rejected, accept(rejected, 'k8s3')));
+  });
+});
+
 describe('what no unit can hold', () => {
   it('is untrackable in front matter', () => {
     const text = file('---\ntitle: One\n---\n\nBody.');

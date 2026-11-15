@@ -13,7 +13,13 @@ import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.t
 import { alignChange, alignHide, alignLabel } from './table-align.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
-import { ledgerTextOf, newestOfPayload, originalText, payloadAt } from './payload-marks.ts';
+import {
+  ledgerForSite,
+  newestOfPayload,
+  originalText,
+  payloadAt,
+  prefixBefore,
+} from './payload-marks.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { insertedCols, insertedRows, readRowCells, tablesOfText } from './table.ts';
@@ -519,7 +525,11 @@ export function reviewView(text: string): string {
       const site = mark.kind === 'sub' ? payloadAt(parsed, mark, segment) : undefined;
       if (site) {
         const marks = site.marks.filter((held) => held.kind !== 'hl');
-        open = `{~~${newestOfPayload(site.text, ledgerTextOf(text, parsed))}~>`;
+        open = `{~~${newestOfPayload(
+          site.text,
+          ledgerForSite(parsed, site),
+          prefixBefore(text, segment.open.from),
+        )}~>`;
         const names = marks.map((held) => `[${held.id} ${held.entry.by}]`);
         const last = names.pop();
         const note = names.length > 0 ? `${names.join(', ')} and ${last}` : last;

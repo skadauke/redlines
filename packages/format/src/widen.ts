@@ -16,7 +16,7 @@ import { idsIn, newId } from './ids.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { ledgerTextOf, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
+import { ledgerFor, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
 import { encodePayload } from './payload.ts';
 import { shapeOf, unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
@@ -113,8 +113,16 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   const others = (range: Range) => othersIn(parsed, range, ctx);
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
+  // A unit that closure brought back to one already tried would go up and down for ever.
+  const tried = new Set<string>();
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
+    const key = `${closed.lineFrom}:${closed.to}`;
+    if (tried.has(key)) {
+      rung = widerThan(rung);
+      continue;
+    }
+    tried.add(key);
     const blocks = topLevelBlocks(units, closed);
     if (blocks > WIDEN_MOST_BLOCKS) {
       throw new Untrackable(
@@ -364,8 +372,9 @@ function tryRung(
     // The unit holds its marks whole, so they are decided in it as a file of its own, with the
     // prefix of its first line (format §3.12, the same way a mark in an old text is decided).
     try {
-      const ledgerText = ledgerTextOf(text, parsed);
-      const proxy = payloadFile(text.slice(rung.lineFrom, to), ledgerText);
+      const inside = parsed.marks.filter((mark) => touches(mark, range));
+      const ids = new Set(inside.flatMap((mark) => [mark.id, ...payloadIdsOf(parsed, mark)]));
+      const proxy = payloadFile(text.slice(rung.lineFrom, to), ledgerFor(parsed, ids));
       const made = applyChanges(
         proxy,
         rejectMarks(
@@ -394,14 +403,17 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  if (endsInDelimiter(now) && rung.prefix !== '' && !rung.atomic) return giveUp('delimiter');
+  if ((endsInDelimiter(now) || riskyEnd(now, rung.prefix)) && rung.prefix !== '' && !rung.atomic) {
+    return giveUp('delimiter');
+  }
   const atomic =
     rung.atomic ||
     rung.kind === 'table' ||
     endsInFence(old) ||
     endsInFence(now) ||
     endsInBare(now) ||
-    endsInDelimiter(now);
+    endsInDelimiter(now) ||
+    riskyEnd(now, rung.prefix);
   const blankAfter =
     atomic &&
     rung.prefix === '' &&
@@ -410,6 +422,7 @@ function tryRung(
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
+  if (HTML_LINE.test(lastLineOf(now, rung.prefix))) return giveUp('html');
   const lead = scaffold(rung.prefix, eol, rung.tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
@@ -461,6 +474,36 @@ let trace: ((why: string) => void) | undefined;
 /** Asks to be told why each rung of the ladder is given up. Pass undefined to stop. */
 export function traceWidening(hear: ((why: string) => void) | undefined): void {
   trace = hear;
+}
+
+/** The last lines that don't hold a marker glued to them: indented code, a setext underline, a
+ * thematic break, an ATX heading (its closing `#`s), a link reference definition, a table's
+ * delimiter row, an HTML block. A closer stands alone on the line after them (format §3.12). */
+const RISKY_LINES = [
+  /^( {4,}|\t)/,
+  /^ {0,3}(?:=+|-+)[ \t]*$/,
+  /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,
+  /^ {0,3}#{1,6}(?:[ \t].*)?#[ \t]*$/,
+  /^ {0,3}\[[^\]]+\]:/,
+  /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/,
+];
+
+/** An HTML block, which goes on over the line after it, a closer included, to a blank line. */
+const HTML_LINE = /^ {0,3}<[/A-Za-z!?]/;
+
+/** The last line of a text, without the prefix of its container (quote markers, bullets, the
+ * indentation of an item's lines). */
+function lastLineOf(text: string, prefix: string): string {
+  const lines = text.split('\n');
+  let last = lines.at(-1) ?? '';
+  const inner = continuationPrefix(prefix);
+  if (lines.length > 1 && inner !== '' && last.startsWith(inner)) last = last.slice(inner.length);
+  return last.replace(/^(?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))[ \t]?)+/, '');
+}
+
+function riskyEnd(text: string, prefix: string): boolean {
+  const line = lastLineOf(text, prefix);
+  return RISKY_LINES.some((risky) => risky.test(line));
 }
 
 function giveUp(why: string): undefined {
