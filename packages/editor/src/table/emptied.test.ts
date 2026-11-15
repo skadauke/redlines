@@ -473,6 +473,33 @@ describe('in an editor', () => {
 
   const DOC = '| a | b |\n| - | - |\n| 11 | 12 |\n| 21 | 22 |\n| 31 | 32 |\n';
 
+  // A held ⌦ (#473): the repeats that follow the deletion of the rows don't eat the next row's text.
+  for (const tracking of [false, true]) {
+    it(`a held ⌦ stops when it has deleted the rows, and a pressed ⌦ after it is a character's, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = mount(DOC, tracking);
+      editor.view.dispatch({
+        selection: { anchor: DOC.indexOf('21'), head: DOC.indexOf('22') + 2 },
+      });
+      const key = (type: 'keydown' | 'keyup', repeat: boolean) => {
+        forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+        editor.view.contentDOM.dispatchEvent(
+          new KeyboardEvent(type, { key: 'Delete', repeat, bubbles: true, cancelable: true }),
+        );
+      };
+      key('keydown', false); // clears the cells
+      key('keydown', true); // deletes the rows
+      const deleted = editor.getDoc();
+      expect(deleted).not.toBe(DOC);
+      key('keydown', true); // the key is held: nothing more is deleted
+      key('keydown', true);
+      expect(editor.getDoc(), 'the repeats leave the next row alone').toBe(deleted);
+      key('keyup', false);
+      // Pressed again, it is a character's, as in any cell.
+      key('keydown', false);
+      expect(editor.getDoc(), 'a new press deletes a character').not.toBe(deleted);
+    });
+  }
+
   for (const tracking of [false, true]) {
     const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
 

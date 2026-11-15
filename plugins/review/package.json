@@ -17,5 +17,8 @@
     "@redlines/editor": "workspace:*",
     "@redlines/format": "workspace:*",
     "@redlines/plugin-api": "workspace:*"
+  },
+  "devDependencies": {
+    "@codemirror/language": "^6.13.1"
   }
 }

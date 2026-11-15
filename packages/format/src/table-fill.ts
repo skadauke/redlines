@@ -31,7 +31,7 @@ const NOT_MISSING = 'That cell is not one its row lacks.';
 
 /** Which cell of which row: `col` is a column the row doesn't have, of a body row (the header has them
  * all); `text` is what is typed there, and none writes the pipes alone. */
-export interface FillCells {
+interface FillCells {
   row: number;
   col: number;
   text?: string;

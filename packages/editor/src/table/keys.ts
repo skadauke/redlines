@@ -510,15 +510,17 @@ const lineBreak: Command = (view) => {
  * and the notice says what refuses it. Text is only ever cleared by the key: a row that has some is
  * never deleted by one keystroke. Only a rectangle is asked, and only its own cells are read.
  */
-function clearOrDeleteCells(view: EditorView): boolean {
+function clearOrDeleteCells(view: EditorView, onDeleted?: () => void): boolean {
   const { state } = view;
   const rect = rectOf(state);
   if (!rect) return false;
   const cells = cellsOfRect(rect);
   const kind = whole(rect);
   if (kind && cells.length > 0 && cells.every((cell) => cellIsEmpty(state, cell))) {
-    if (kind === 'table') return deleteTable(view);
-    return kind === 'row' ? deleteRows(view) : deleteCols(view);
+    const done =
+      kind === 'table' ? deleteTable(view) : kind === 'row' ? deleteRows(view) : deleteCols(view);
+    if (done) onDeleted?.();
+    return done;
   }
   return clearCells(view, cells);
 }
@@ -536,9 +538,41 @@ const backspace: Command = (view) => {
   return atEdge(state, here.cell, here.head, false);
 };
 
+/**
+ * Whether the ⌦ now pressed is a held key's repeat, and the key has just deleted rows, columns or a
+ * table (#473): the caret lands at the next row's first cell, and the repeats would eat its text, a
+ * character at a time (a held ⌫ stops there, at the cell's start). A key handler is not told of the
+ * repeat, so an observer of the key events says it. The hold ends when the key is let go or pressed
+ * again.
+ */
+const heldDelete = new WeakMap<EditorView, { repeat: boolean; deleted: boolean }>();
+const heldState = (view: EditorView) => {
+  let held = heldDelete.get(view);
+  if (!held) {
+    held = { repeat: false, deleted: false };
+    heldDelete.set(view, held);
+  }
+  return held;
+};
+const heldObservers = EditorView.domEventObservers({
+  keydown(event, view) {
+    const held = heldState(view);
+    held.repeat = event.repeat;
+    if (!event.repeat) held.deleted = false;
+  },
+  keyup(event, view) {
+    if (event.key === 'Delete' || event.key === 'Backspace') heldState(view).deleted = false;
+  },
+});
+
 /** ⌦: nothing at a cell's end, a `<br>` whole in front of the caret. */
 const forwardDelete: Command = (view) => {
-  if (clearOrDeleteCells(view)) return true;
+  const held = heldState(view);
+  // The repeats of a held ⌦ that deleted rows are not for the next row's text.
+  if (held.repeat && held.deleted) return true;
+  // What the key did, when it deleted the rows, the columns or the table: the repeats are not for
+  // the text the caret lands in.
+  if (clearOrDeleteCells(view, () => (held.deleted = true))) return true;
   if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
@@ -644,6 +678,7 @@ const key =
 export function tableKeymap(): Extension {
   return [
     cellBreaks,
+    heldObservers,
     Prec.highest(
       keymap.of([
         { key: 'ArrowLeft', run: sideways(false) },
