@@ -4,7 +4,15 @@
 // difference: the closer would stand inside the code, so the new block is written with its closing
 // fence, and the old block, the payload, stays as it was. Accepting gives a closed block (the
 // same code to a reader), rejecting gives the unclosed block back byte for byte (#570).
-import { applyChanges, newestView, rejectAll, acceptAll } from '@redlines/format';
+import {
+  accept,
+  acceptAll,
+  applyChanges,
+  newestView,
+  parse,
+  reject,
+  rejectAll,
+} from '@redlines/format';
 import { describe, expect, it } from 'vitest';
 import { runScript, type Script, scriptRows, type Step } from './script.ts';
 
@@ -377,6 +385,13 @@ describe('↓ at the last line of a fenced block that is never closed', () => {
         on: { original: '~~~⏎x = 1' },
       },
       {
+        name: '↓ in a fence indented three spaces writes the fence at the same indentation',
+        doc: 'Some text.⏎⏎   ```js⏎   let x = 1‸',
+        keys: ['ArrowDown', { type: 'q' }],
+        off: { file: 'Some text.⏎⏎   ```js⏎   let x = 1⏎   ```⏎⏎q' },
+        on: { original: 'Some text.⏎⏎   ```js⏎   let x = 1' },
+      },
+      {
         name: '↓ in the middle of the code is the caret’s move only',
         doc: 'Some text.⏎⏎```js⏎let x‸ = 1⏎let y = 2',
         keys: ['ArrowDown'],
@@ -431,23 +446,57 @@ describe('a change elsewhere in a file that ends in a block that is never closed
   ]);
 });
 
+/** Every order of accepting and rejecting the file's marks, none refused: how many ends it reaches. */
+function walkNoneRefused(file: string, seen = new Set<string>()): number {
+  if (seen.has(file)) return 0;
+  seen.add(file);
+  const marks = [
+    ...new Set(
+      parse(file)
+        .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        .map((mark) => mark.id),
+    ),
+  ];
+  if (marks.length === 0) return 1;
+  let ends = 0;
+  for (const id of marks) {
+    for (const decide of [accept, reject]) {
+      // A decision that is refused throws: the test fails with its words.
+      ends += walkNoneRefused(applyChanges(file, decide(file, id)), seen);
+    }
+  }
+  return ends;
+}
+
 describe('rejecting and accepting what was typed in a block that is never closed', () => {
-  // The invariants let a decision that is refused wait for the others; these are not refused.
+  // The invariants let a decision that is refused wait for the others; here none may be refused,
+  // and rejecting everything gives the original, or the original with its fence closed where a
+  // ledger stays after it (a comment thread, a setting).
   const docs = [
     'Some text.⏎⏎```js⏎let x = 1‸',
     'Some text.⏎⏎```js⏎let x = 1⏎‸',
     'Some text.⏎⏎~~~⏎let x = 1‸⏎',
     '> ```js⏎> let x = 1‸',
     '- a⏎⏎  ```js⏎  let x = 1‸⏎⏎After.',
+    'Some text.⏎⏎   ```js⏎   let x = 1‸',
   ];
   for (const doc of docs) {
     for (const keys of [[{ type: 'a' }], ['Enter'], ['Backspace'], ['ArrowDown']] as Step[][]) {
       it(`${doc} with ${JSON.stringify(keys)}`, () => {
         const result = runScript({ name: 'decide', doc, keys, tc: true, expect: {} });
         const { file, start } = result;
+        expect(walkNoneRefused(file)).toBeGreaterThan(0);
         expect(applyChanges(file, rejectAll(file)).trimEnd()).toBe(start.trimEnd());
         const accepted = applyChanges(file, acceptAll(file));
         expect(accepted.trimEnd()).toBe(newestView(file).text.trimEnd());
+        // A comment thread (or a setting) keeps the ledger: rejecting closes the fence, and no
+        // decision is refused.
+        if (parse(file).ledgerRange === null) return; // a key that wrote nothing
+        const kept = file.replace(/\n-->(\n?)$/, '\ntracking: everyone\n-->$1');
+        expect(walkNoneRefused(kept)).toBeGreaterThan(0);
+        const back = applyChanges(kept, rejectAll(kept));
+        expect(parse(back).ledgerRange, 'the ledger is read').not.toBeNull();
+        expect(parse(back).warnings).toEqual([]);
       });
     }
   }

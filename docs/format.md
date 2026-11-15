@@ -1971,17 +1971,19 @@ Next paragraph.
   code. The substitution of such a block therefore writes the block with a closing fence, the
   opening fence's character and length, after the container's prefix, as the last line of the
   new text (a block whose new text already ends in a closing line, as ↓ at its end writes it, has
-  that one); the payload is the old block as it was, unclosed. Rejecting gives the unclosed block
-  back, byte for byte; accepting gives the block closed, which every reader reads as the same
+  that one); the payload is the old block as it was, unclosed. Accepting gives the block closed, which every reader reads as the same
   code. Typing, Backspace and Return in it, at its last line (the end of the file or of the
   container) or anywhere else in it, are written so, in a quote and in a list item (not in a fence
   that starts an item), in LF and CRLF files alike; a following key edits the closed block in the
   pending substitution, as in any. A block whose last line is its opening fence (nothing after it
   to change) takes no such write, and a block that holds a ledger's head, a ledger that the open
   fence swallowed, neither: both are refused as code is, in the words above. A decision that gives
-  an unclosed block back while other marks stay in the file is refused ("This decision would
-  leave a code block open to the end of the file. Decide the changes next to it first."), since
-  the ledger would be code after it; with no other mark left it removes the ledger with it. A
+  an unclosed block back is never refused for it: with no ledger left after it (nothing else in
+  the ledger, no comment, no setting such as `tracking` or `history`), the block comes back as it
+  was, byte for byte, and the ledger goes with it; where the ledger stays (other marks pending, a
+  comment thread, any setting), it would be code after an open block, so the old code is written
+  with a closing fence added, the opening fence's character and length, after its indentation and
+  container prefix, which every reader reads as the same code. A
   file that ends in such a block and has no ledger yet can't take a tracked change elsewhere
   either, and says so (§5.1, "Close it first").
 - The code of a raw-text element is what stands between its opening tag's `>` and its closing tag

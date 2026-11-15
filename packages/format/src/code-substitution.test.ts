@@ -10,7 +10,16 @@ import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { decodePayload } from './payload.ts';
-import { ada, bo, bodyOf, context, expectEveryOrderAlike, file } from './test-helpers.ts';
+import {
+  ada,
+  bo,
+  bodyOf,
+  context,
+  expectEveryOrderAlike,
+  expectNoDecisionRefused,
+  file,
+  thread,
+} from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 import type { Person } from './types.ts';
@@ -670,21 +679,58 @@ describe('a fenced code block that is never closed, changed with Track Changes o
     expect(parse(applyChanges(open, edit.changes)).warnings).toEqual([]);
   });
 
-  it('can be rejected whole once no other change needs the ledger, and not before', () => {
+  /** The file after typing `a` at the end of the unclosed block, then `more` done to it. */
+  const changed = (more: (text: string) => string) => {
     const first = trackedEdits(
       open,
       [{ from: open.length, to: open.length, insert: 'a' }],
       context(ada, ['m2bd']),
     );
-    let text = applyChanges(open, first.changes);
-    const second = trackedEdits(text, [{ from: 3, to: 3, insert: 'Z' }], context(ada, ['n8fx']));
-    text = applyChanges(text, second.changes);
-    // The original block is open to the end of the file: with a ledger left after it, the ledger
-    // would be code. The decision waits (it is refused, in words) for the other change.
-    expect(() => reject(text, 'm2bd')).toThrow('leave a code block open to the end of the file');
-    expect(() => accept(text, 'm2bd')).not.toThrow();
+    return more(applyChanges(open, first.changes));
+  };
+  const withLedgerLine = (line: string) => (text: string) =>
+    text.replace('version: 1\n', `version: 1\n${line}\n`);
+  const withThread = (text: string) =>
+    text
+      .replace('Intro', 'In<!--cmt c8d2-->tr<!--/c8d2-->o')
+      .replace(/\n-->(\n?)$/, `\ncomments:\n${thread('c8d2').join('\n')}\n-->$1`);
+  const withInsertion = (text: string) =>
+    applyChanges(
+      text,
+      trackedEdits(text, [{ from: 3, to: 3, insert: 'Z' }], context(ada, ['n8fx'])).changes,
+    );
+
+  // Where the ledger stays (a comment, a setting, another change), rejecting writes the original
+  // code with a closing fence, so that the ledger is outside it; with no ledger left, the block
+  // comes back as it was.
+  const shapes: Record<string, (text: string) => string> = {
+    'a comment thread': withThread,
+    'tracking: everyone': withLedgerLine('tracking: everyone'),
+    'history: full': withLedgerLine('history: full'),
+    'another change above it': withInsertion,
+  };
+  for (const [name, more] of Object.entries(shapes)) {
+    it(`is rejected with a closing fence where the ledger stays: ${name}`, () => {
+      const text = changed(more);
+      expect(parse(text).warnings, 'the file reads').toEqual([]);
+      const rejected = applyChanges(text, reject(text, 'm2bd'));
+      expect(parse(rejected).ledgerRange, 'the ledger is still read').not.toBeNull();
+      expect(parse(rejected).warnings).toEqual([]);
+      expect(bodyOf(rejected)).toContain('```js\nlet x = 1\n```');
+      expect(bodyOf(rejected)).not.toContain('<!--sub');
+      const accepted = applyChanges(text, accept(text, 'm2bd'));
+      expect(bodyOf(accepted)).toContain('```js\nlet x = 1a\n```');
+      // Every order reads the same, and no decision is refused.
+      expectEveryOrderAlike(name, text);
+      expect(expectNoDecisionRefused(name, text)).toBeGreaterThan(0);
+    });
+  }
+
+  it('is rejected back to the unclosed block when no ledger is left', () => {
+    const text = changed((t) => t);
     expect(back(text)).toBe(open);
-    expectEveryOrderAlike('unclosed code and a change above it', text);
+    expect(applyChanges(text, rejectAll(text))).toBe(open);
+    expect(() => accept(text, 'm2bd')).not.toThrow();
   });
 
   it('keeps the container’s prefix on the fence it writes', () => {

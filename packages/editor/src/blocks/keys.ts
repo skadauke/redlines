@@ -586,10 +586,14 @@ export function planDownAtEnd(view: EditorView): KeyEdit | null {
   if (unclosed) {
     // The closing fence goes on the last line when it is empty (a line of the code that would
     // be blank, once the fence closes it), and on a new line under it otherwise.
-    const cont = continuation(state, block);
-    const run = /(`{3,}|~{3,})/.exec(doc.lineAt(block.lines.from).text)?.[1] ?? '```';
+    // Under the opening fence's own container syntax and indentation (a fence may stand one to
+    // three spaces in).
+    const opener = doc.lineAt(block.lines.from).text;
+    const found = /^([ \t>]*)(`{3,}|~{3,})/.exec(opener);
+    const run = found?.[2] ?? '```';
+    const cont = found?.[1] ?? continuation(state, block);
     const empty =
-      last.text.trim() === blankOf(cont).trim() &&
+      last.text.trim() === blankOf(continuation(state, block)).trim() &&
       last.number > doc.lineAt(block.lines.from).number;
     const change = empty
       ? { from: last.from, to: last.to, insert: cont + run }
