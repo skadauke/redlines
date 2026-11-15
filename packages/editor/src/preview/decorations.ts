@@ -8,8 +8,10 @@
 
 import { syntaxTree } from '@codemirror/language';
 import {
-  type EditorState,
+  EditorSelection,
+  EditorState,
   type Extension,
+  Prec,
   type Line,
   type Range,
   StateField,
@@ -661,7 +663,42 @@ function hardBreaksOf(decorations: DecorationSet): DecorationSet {
   return found;
 }
 
+/**
+ * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
+ * over, hidden. A space typed in front of them makes the run longer, and the caret mapped through
+ * the typing lands inside it; it goes to the nearer edge (in front of them when typing at their
+ * start), where it can be seen, and a selection's ends go outward.
+ */
+const hardBreakCaret = Prec.highest(
+  EditorState.transactionFilter.of((tr) => {
+    if (!tr.docChanged && !tr.selection) return tr;
+    if (tr.state.field(viewModeField, false) === 'raw') return tr;
+    const breaks = hardBreaksOf(tr.state.field(previewField));
+    if (!breaks.size) return tr;
+    const outside = (pos: number, side: -1 | 0 | 1) => {
+      let moved = pos;
+      breaks.between(pos, pos, (from, to) => {
+        if (from < pos && pos < to) {
+          moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+        }
+      });
+      return moved;
+    };
+    const { selection } = tr;
+    const ranges = (selection ?? tr.newSelection).ranges.map((range) =>
+      range.empty
+        ? EditorSelection.cursor(outside(range.head, 0))
+        : EditorSelection.range(
+            outside(range.anchor, range.anchor < range.head ? -1 : 1),
+            outside(range.head, range.head < range.anchor ? -1 : 1),
+          ),
+    );
+    const next = EditorSelection.create(ranges, tr.newSelection.mainIndex);
+    return next.eq(tr.newSelection) ? tr : [tr, { selection: next, sequential: true }];
+  }),
+);
+
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField];
+  return [previewField, hardBreakCaret];
 }
