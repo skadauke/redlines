@@ -1232,6 +1232,15 @@ not read so yet: the keys treat them by the parse, as before, and no write for t
 (lane R widens such an edit, #497). Tested: `sublist-two.test.ts` of
 `packages/editor/src/blocks`, and the editor's walks over lists side by side.
 
+A break typed at the start of a line that goes on a paragraph, right after a line break that a
+marker ends the line before (`* a<!--sub k3x9 ⏎  b-->⏎b<!--/k3x9-->`, the caret in front of the
+second `b`: Backspace outdented a lazy line of a loose item, and Return follows), would write its
+split alone on its line, an HTML block that ends the paragraph and the list it is in, which the
+file reads as two lists and the newest view as one (#598). No write that stays at the end of the
+line before it is known for the break that the substitution holds, so the break is refused, in the
+words of the other break that would leave a marker at the start of a line: "A line break here
+would leave a change marker at the start of the new line." Lane R widens it (#497).
+
 ### 3.3 Marks that start or end a block
 
 A mark that starts at the beginning of a block puts its opener on the line before the block, with

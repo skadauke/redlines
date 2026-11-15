@@ -462,6 +462,22 @@ function pastMarkers(plan: Plan, position: number): number {
  * break has a blank line (a new block), and otherwise the break is refused. */
 function breakPosition(plan: Plan, position: number, trail: string): number {
   const at = pastMarkers(plan, position);
+  // At the start of a line that goes on a paragraph's text, the split would stand alone there, an
+  // HTML block that ends the paragraph, or the list it is in, which the file reads and the newest
+  // view doesn't (#598: Return at the start of a lazy line that a pending change put there).
+  const lineAt = plan.text.lastIndexOf('\n', at - 1) + 1;
+  if (lineAt > 0 && /^[ \t>]*$/.test(plan.text.slice(lineAt, at))) {
+    const before = plan.text.slice(plan.text.lastIndexOf('\n', lineAt - 2) + 1, lineAt - 1);
+    if (
+      /[^ \t>]/.test(before) &&
+      plan.markers.some((m) => m.role !== 'ledger' && m.to === lineAt - 1)
+    ) {
+      throw new EditError(
+        'A line break here would leave a change marker at the start of the new line.',
+        'no-legal-placement',
+      );
+    }
+  }
   const marker = plan.markers.find((m) => m.role !== 'ledger' && m.from > at);
   const block = /\n[ \t>]*\r?\n/.test(trail);
   if (!block && marker && /^[ \t]+$/.test(plan.text.slice(at, marker.from))) {
