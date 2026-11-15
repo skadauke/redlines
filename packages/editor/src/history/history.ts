@@ -146,6 +146,12 @@ export interface HistoryConfig {
    */
   agentCaret?: (tr: Transaction) => EditorSelection;
   /**
+   * The selection an undo or redo of the person's own steps ends with (Redlines), given that undo
+   * or redo as made: the step's start selection can fall in text that the change made hidden, and
+   * an undo runs no transaction filter that would move it out (#461). By default, as made.
+   */
+  visibleCaret?: (tr: Transaction) => EditorSelection;
+  /**
    * What a transaction's step is called (Redlines), for the Edit menu: the label its event keeps,
    * the first transaction's, while later ones join it. By default, none.
    */
@@ -162,6 +168,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
         joinToEvent: (t: Transaction, isAdjacent: boolean) =>
           isAdjacent || !!t.annotation(joinsStep),
         agentCaret: (tr: Transaction) => tr.state.selection,
+        visibleCaret: (tr: Transaction) => tr.state.selection,
         label: () => null,
       },
       {
@@ -172,6 +179,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
           (tr: Transaction, adj: boolean) =>
             a(tr, adj) || b(tr, adj),
         agentCaret: (a: Required<HistoryConfig>['agentCaret']) => a,
+        visibleCaret: (a: Required<HistoryConfig>['visibleCaret']) => a,
         label: (a: Required<HistoryConfig>['label']) => a,
       },
     );
@@ -783,8 +791,10 @@ class HistoryState {
       };
       const tr = state.update(spec);
       // Redlines: an agent's step puts the caret where it changed, which the made step tells.
-      if (!event.owner) return tr;
-      return state.update({ ...spec, selection: state.facet(historyConfig).agentCaret(tr) });
+      const config = state.facet(historyConfig);
+      if (event.owner) return state.update({ ...spec, selection: config.agentCaret(tr) });
+      const shown = config.visibleCaret(tr);
+      return shown.eq(tr.state.selection) ? tr : state.update({ ...spec, selection: shown });
     }
   }
 }
