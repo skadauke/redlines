@@ -39,8 +39,8 @@ const ALIGNS = [
  * Registers the Table menu's commands and returns a function that takes them out again. Register
  * before the menu bar is drawn, as every plugin with commands does.
  */
-export function createTables(editor: Editor): () => void {
-  const removeGrips = editor.addExtension(tableGrips());
+export function createTables(editor: Editor, options: { tooltipMs?: number } = {}): () => void {
+  const removeGrips = editor.addExtension(tableGrips(options));
   const select = (
     id: string,
     title: string,

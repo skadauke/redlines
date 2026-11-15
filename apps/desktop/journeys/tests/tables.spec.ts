@@ -46,7 +46,9 @@ test.describe('tables @tables', () => {
     },
   );
 
-  known(519, 'the row grip menu is opaque', /the menu is opaque/, async ({ start }) => {
+  // The grip's menu is opaque (its background named a token that did not exist), and the grips and
+  // the + have hints after the title bar's delay (the table's look, #518 and #519's hints).
+  test('the row grip menu is opaque', async ({ start }) => {
     const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
     await j.settle();
     await j.hover('1');
@@ -57,18 +59,45 @@ test.describe('tables @tables', () => {
     if (!(await menu.isVisible())) await grip.click();
     await expect(menu, 'the menu opens').toBeVisible();
     await j.shot('row-grip-menu');
-    // Today its background is transparent: the table's text shows through it.
     expect(await isOpaque(menu), 'the menu is opaque').toBe(true);
   });
 
-  known(519, 'a row grip has a hover hint', /the grip has a hint/, async ({ start }) => {
+  test('the grips and the + have hover hints', async ({ start }) => {
     const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
     await j.settle();
     await j.hover('1');
     const grip = j.page.locator('.rl-grip').first();
     await expect(grip, 'the grip is drawn').toBeVisible();
-    const hint = (await grip.getAttribute('title')) ?? (await grip.getAttribute('aria-label'));
-    expect(hint, 'the grip has a hint').toBeTruthy();
+    const tip = j.page.locator('.rl-grip-hint');
+    await expect(tip, 'no hint before the pointer rests').toBeHidden();
+    await grip.hover();
+    await expect(tip, 'the grip has a hint').toHaveText(/move the row/);
+    await j.shot('row-grip-hint');
+    await j.page.mouse.move(2, 2);
+    await expect(tip, 'the hint goes when the pointer leaves').toBeHidden();
+  });
+
+  test('the table header has the body size and faint lines divide the columns', async ({
+    start,
+  }) => {
+    const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
+    await j.settle();
+    const sizes = await j.page.evaluate(() => {
+      const size = (el: Element | null) => (el ? getComputedStyle(el).fontSize : '');
+      return {
+        header: size(document.querySelector('.rl-th .rl-tc')),
+        body: size(document.querySelector('.rl-trow:not(.rl-th) .rl-tc')),
+        divider: getComputedStyle(document.querySelector('.rl-th .rl-tc') as Element)
+          .borderRightWidth,
+        last: getComputedStyle(document.querySelector('.rl-th .rl-tc:last-child') as Element)
+          .borderRightWidth,
+      };
+    });
+    expect(sizes.header, 'the header uses the body size').toBe(sizes.body);
+    expect(sizes.divider, 'a line divides the columns').toBe('1px');
+    expect(sizes.last, 'none after the last column').toBe('0px');
+    await j.shot('table-look');
+    await j.baseline('table-look');
   });
 
   for (const tracking of [false, true]) {

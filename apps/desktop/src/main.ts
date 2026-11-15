@@ -343,7 +343,7 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
-createTables(editor);
+createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
 // matching emoji, as Preferences allow (asked each time).
 createEmoji(editor, { enabled: () => settings.emojiSuggestions });

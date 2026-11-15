@@ -331,6 +331,10 @@ export const baseThemeSpec: ThemeSpec = {
     borderBottom: '1px solid var(--rl-rule)',
   },
   '.rl-tc:last-child': { paddingRight: '0' },
+  // Faint lines divide the columns: each cell but the last ends in one, and each but the first
+  // keeps a margin of its own from it.
+  '.rl-tc:not(:last-child)': { borderRight: '1px solid var(--rl-rule)' },
+  '.rl-tc:not(:first-child)': { paddingLeft: s(16) },
   '.rl-tc-hidden': { display: 'none' },
   '.rl-tc[data-align="left"]': { textAlign: 'left' },
   '.rl-tc[data-align="center"]': { textAlign: 'center' },
@@ -390,7 +394,6 @@ export const baseThemeSpec: ThemeSpec = {
     paddingBottom: s(8),
     color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-th-font)',
-    fontSize: 'var(--rl-th-size)',
     fontWeight: '700',
     textTransform: 'var(--rl-th-case)',
     letterSpacing: 'var(--rl-th-track)',
