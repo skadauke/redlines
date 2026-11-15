@@ -432,7 +432,10 @@ export function settleVertical(
   const row = tailBefore(view.state, moved.head);
   if (row === null) return moved;
   const end = view.coordsAtPos(row, -1);
-  const from = view.coordsAtPos(start.head, start.assoc || (start.empty ? 1 : -1));
+  const from = view.coordsAtPos(
+    start.head,
+    start.assoc || ((start.empty ? forward : start.head === start.from) ? 1 : -1),
+  );
   if (!end || !from || from.bottom > end.top + 1) return moved;
   // The column the move aims at: CodeMirror's own, kept in the range it returns.
   const rect = view.contentDOM.getBoundingClientRect();
@@ -491,9 +494,12 @@ const pointerSelection = EditorView.mouseSelectionStyle.of((view, event) => {
   const type = event.detail === 2 ? 2 : 1;
   const at = (e: MouseEvent) => {
     const { pos, assoc } = view.posAndSideAtCoords({ x: e.clientX, y: e.clientY }, false);
-    return { pos: restingPlace(view.state, pos), assoc, hit: pos };
+    const rested = restingPlace(view.state, pos);
+    return { pos: rested, assoc: rested === pos ? assoc : (-1 as const), hit: pos };
   };
   let start = at(event);
+  // A table's presses are the table's own (cells, rectangles of cells).
+  if (blockAt(view.state, start.hit)?.kind === 'table') return null;
   // A double-click picks the word, which CodeMirror's own does, but past the end of a line.
   if (type === 2 && start.pos === start.hit) return null;
   let startSel = view.state.selection;
