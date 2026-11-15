@@ -47,6 +47,21 @@ const ledger = (ids: string[]) =>
 const local = (src: string) => `app://${src}`;
 
 describe('images', () => {
+  it('centers an image alone in its paragraph, with its pending change around it or not', () => {
+    const alone = (doc: string) => drawn(editorWith(doc, local, 0))[0];
+    const plain = 'Before\n\n![A cat](cat.png)\n\nAfter';
+    expect(alone(plain)?.classList.contains('rl-image-own')).toBe(true);
+    const tracked = `Before\n\n<!--ins k3x9-->\n\n![A cat](cat.png)<!--/k3x9-->\n\nAfter${ledger(['k3x9'])}`;
+    expect(alone(tracked)?.classList.contains('rl-image-own')).toBe(true);
+    const split = `Before\n\n![A cat](cat.png)<!--split k3x9-->\nAfter${ledger(['k3x9'])}`;
+    expect(alone(split)?.classList.contains('rl-image-own')).toBe(true);
+    // Text beside it keeps it in the line.
+    const inline = 'Before ![A cat](cat.png) after';
+    expect(alone(inline)?.classList.contains('rl-image-own')).toBe(false);
+    const trackedInline = `Before <!--ins k3x9-->![A cat](cat.png)<!--/k3x9-->${ledger(['k3x9'])}`;
+    expect(alone(trackedInline)?.classList.contains('rl-image-own')).toBe(false);
+  });
+
   it('draws an image and shows the syntax when the caret is on it', () => {
     const doc = 'Before\n\n![A cat](cat.png)\n\nAfter';
     const away = editorWith(doc, local, 0);
