@@ -399,7 +399,7 @@ export const baseThemeSpec: ThemeSpec = {
   // on the cells of the rows between that are not selected (a column's, a rectangle's) (#522). Text
   // outside the table keeps its highlight, and with no cell selected (a caret, or text inside one
   // cell) nothing here applies.
-  '.cm-content:has(.rl-sel) .rl-trow::selection, .cm-content:has(.rl-sel) .rl-trow *::selection': {
+  '&.rl-cell-selecting .rl-trow::selection, &.rl-cell-selecting .rl-trow *::selection': {
     backgroundColor: 'transparent',
     color: 'inherit',
   },

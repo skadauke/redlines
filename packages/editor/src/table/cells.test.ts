@@ -138,6 +138,20 @@ describe('a rectangle of cells', () => {
     expect(shownCells(editor)).toEqual([]);
   });
 
+  it('puts rl-cell-selecting on the editor root with cells selected, and not with a caret or text in one cell', () => {
+    const editor = load();
+    const root = editor.view.dom;
+    expect(root.classList.contains('rl-cell-selecting'), 'a caret').toBe(false);
+    select(editor, start(editor, '12'), end(editor, '23'));
+    expect(root.classList.contains('rl-cell-selecting'), 'a rectangle').toBe(true);
+    select(editor, start(editor, '12'), end(editor, '12') - 1);
+    expect(root.classList.contains('rl-cell-selecting'), 'text in one cell').toBe(false);
+    select(editor, start(editor, '12'), end(editor, '32'));
+    expect(root.classList.contains('rl-cell-selecting'), 'a column').toBe(true);
+    select(editor, 0, 0);
+    expect(root.classList.contains('rl-cell-selecting'), 'a caret again').toBe(false);
+  });
+
   it('is kept by an edit, and read again from the table’s own place', () => {
     const editor = load();
     select(editor, start(editor, '12'), end(editor, '22'));

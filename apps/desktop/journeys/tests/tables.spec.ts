@@ -251,6 +251,26 @@ test.describe('tables @tables', () => {
     });
   }
 
+  test('a rectangle over an empty cell leaves no page highlight in it', async ({ start }) => {
+    const gap = '| A | B |\n| - | - |\n| 1 |  |\n| 3 | 4 |\n';
+    const j = await start({ doc: `Intro\n\n${gap}`, tracking: false, view: 'clean' });
+    await j.settle();
+    const from = await j.pointOf('1');
+    const to = await j.pointOf('4');
+    await j.drag({ x: from.x + 2, y: from.y }, { x: to.x + 2, y: to.y });
+    await expect(
+      j.page.locator('.rl-cell-selecting'),
+      'the editor knows cells are selected',
+    ).toHaveCount(1);
+    const drawn = await j.page.evaluate(() =>
+      [...document.querySelectorAll('.rl-trow, .rl-trow *')]
+        .map((el) => getComputedStyle(el, '::selection').backgroundColor)
+        .filter((color) => color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent'),
+    );
+    expect(drawn, "no text highlight in the table's rows").toEqual([]);
+    await j.shot('cells-rectangle-empty');
+  });
+
   test("a text selection inside one cell is the page's highlight and no cell is selected", async ({
     start,
   }) => {
