@@ -25,8 +25,6 @@ import {
 import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import {
-  blankOf,
-  continuation,
   type KeyEdit,
   planReturn,
   planSelectionReturn,
@@ -584,25 +582,15 @@ export function planDownAtEnd(view: EditorView): KeyEdit | null {
   const breaks = (doc.sliceString(last.to, end).match(/\n/g) ?? []).length;
   if (breaks - (end < doc.length ? 1 : 0) >= 2) return null;
   if (unclosed) {
-    // The closing fence goes on the last line when it is empty (a line of the code that would
-    // be blank, once the fence closes it), and on a new line under it otherwise.
-    // Under the opening fence's own container syntax and indentation (a fence may stand one to
-    // three spaces in).
-    const opener = doc.lineAt(block.lines.from).text;
-    const found = /^([ \t>]*)(`{3,}|~{3,})/.exec(opener);
-    const run = found?.[2] ?? '```';
-    const cont = found?.[1] ?? continuation(state, block);
-    const empty =
-      last.text.trim() === blankOf(continuation(state, block)).trim() &&
-      last.number > doc.lineAt(block.lines.from).number;
-    const change = empty
-      ? { from: last.from, to: last.to, insert: cont + run }
-      : { from: last.to, insert: `\n${cont}${run}` };
+    // The closing fence goes on the last line when that is empty (the code ends above it), and on
+    // a new line under it otherwise, in the opening fence's own container syntax and indentation.
+    const first = doc.lineAt(block.lines.from);
+    const fence = /^[ \t>]*(`{3,}|~{3,})/.exec(first.text)?.[0] ?? '```';
+    const empty = /^[ \t>]*$/.test(last.text) && last.number > first.number;
+    const from = empty ? last.from : last.to;
     return {
-      changes: [change],
-      selection: EditorSelection.single(
-        last.from + (empty ? 0 : last.length + 1) + cont.length + run.length,
-      ),
+      changes: [{ from, to: last.to, insert: (empty ? '' : '\n') + fence }],
+      selection: EditorSelection.single(from + (empty ? 0 : 1) + fence.length),
       userEvent: 'input.break',
       closeFence: true,
     };
@@ -616,13 +604,12 @@ export function planDownAtEnd(view: EditorView): KeyEdit | null {
 
 const downKey = blockKey((view) => {
   const edit = planDownAtEnd(view);
-  if (!edit) return false;
-  if (!edit.closeFence) return applyKeyEdit(view, edit);
   // Code that is never closed: the closing fence, then the empty paragraph below it, one step to
   // undo (#570).
-  if (!applyKeyEdit(view, { ...edit, isolateBefore: true })) return false;
-  const below = view.state.selection.main.empty ? planDownAtEnd(view) : null;
-  if (below && !below.closeFence)
+  if (!edit?.closeFence) return edit ? applyKeyEdit(view, edit) : false;
+  applyKeyEdit(view, { ...edit, isolateBefore: true });
+  const below = planDownAtEnd(view);
+  if (below)
     applyKeyEdit(view, { ...below, userEvent: 'delete.selection', join: true, record: true });
   return true;
 });

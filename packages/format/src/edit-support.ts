@@ -14,7 +14,6 @@ import {
 } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { keepsLedger, setLedger } from './ledger-write.ts';
-import { findLedger } from './ledger-read.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
@@ -659,19 +658,21 @@ export function commitEdit(
   let sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
-  // A decision that gives back a code block that is never closed, while the ledger stays (other
-  // marks, a comment, a setting), would leave the ledger inside the code: the code gets a closing
-  // fence, which every reader reads as the same code, and the ledger stays outside it. With no
-  // ledger left, the block comes back as it was (below).
+  // A decision that gives back a code block that is never closed would leave the ledger inside it.
+  // Where the ledger stays (other marks, a comment, a setting), the code gets a closing fence, the
+  // same code to every reader; with no mark left, the ledger goes and the block comes back as it
+  // was.
   let fenced = false;
-  if (before?.ledgerRange && removing && !options.keepLedger) {
+  const range = before?.ledgerRange;
+  if (range && removing && !options.keepLedger) {
     const bare = applyChanges(text, sorted);
-    if (findLedger(bare) === null && keepsLedger(normalizeLedger(bare, ledger))) {
-      const fence = closingFenceFor(text, sorted, bare, before.ledgerRange.from);
-      if (fence) {
-        sorted = [...sorted, fence].sort((a, b) => a.from - b.from || a.to - b.to);
-        fenced = true;
-      }
+    if (parse(bare).ledgerRange === null) {
+      const keeps = keepsLedger(normalizeLedger(bare, ledger));
+      const fix = keeps
+        ? closingFenceFor(text, sorted, bare, range.from)
+        : { from: range.from, to: range.to, insert: '' };
+      if (fix) sorted = [...sorted, fix].sort((a, b) => a.from - b.from || a.to - b.to);
+      fenced = keeps;
     }
   }
   const changes = before
@@ -697,17 +698,6 @@ export function commitEdit(
       ledgerChanges = error;
     }
   }
-  // A decision that gives back a code block that is never closed leaves the ledger inside it: the
-  // ledger in the new text can't be found, so it is taken out of the old one, where it stands
-  // after the body, when no mark is left for it to hold.
-  let swallowed: TextChange | undefined;
-  if (before && !options.keepLedger && Array.isArray(ledgerChanges) && ledgerChanges.length === 0) {
-    const was = before.ledgerRange === null ? null : findLedger(text);
-    if (was && findLedger(after) === null && !keepsLedger(normalizeLedger(after, ledger))) {
-      swallowed = { from: was.range.from, to: was.range.to, insert: '' };
-      ledgerChanges = [];
-    }
-  }
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
@@ -716,16 +706,7 @@ export function commitEdit(
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps && !(fenced && options.keeps === 'original')) {
-      // With the ledger as it ends up: a block left open at the end of the body (a decision that
-      // gives back an unclosed code block) would swallow a ledger that the decision is about to
-      // take out.
-      const final =
-        swallowed !== undefined
-          ? applyChanges(text, [...changes, swallowed])
-          : ledgerChanges === undefined || ledgerChanges instanceof EditError
-            ? after
-            : applyChanges(text, joinChanges(text, changes, after, ledgerChanges));
-      assertViewsKept(text, final, options.keeps);
+      assertViewsKept(text, after, options.keeps);
     }
     assertPlaced(
       before,
@@ -736,11 +717,8 @@ export function commitEdit(
     );
   }
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
-  const done = swallowed
-    ? [...changes, swallowed].sort((a, b) => a.from - b.from || a.to - b.to)
-    : ledgerChanges === undefined
-      ? changes
-      : joinChanges(text, changes, after, ledgerChanges);
+  const done =
+    ledgerChanges === undefined ? changes : joinChanges(text, changes, after, ledgerChanges);
   // An edit in the cell that a pending alignment change ends is held to every order of decisions of the changes
   // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
   if (before && !removing) assertPointHolds(text, before, done);
@@ -759,24 +737,15 @@ function closingFenceFor(
   ledgerFrom: number,
 ): TextChange | undefined {
   const open = scan(after).verbatim.findLast((range) => range.kind === 'fence');
-  if (!open || open.to < after.length) return undefined;
-  const line = after.slice(
-    open.from,
-    after.indexOf('\n', open.from) < 0 ? after.length : after.indexOf('\n', open.from),
-  );
-  const found = /^([ \t>]*)(`{3,}|~{3,})/.exec(line.replace(/\r$/, ''));
-  if (!found) return undefined;
   const last = changes.filter((change) => change.to <= ledgerFrom).at(-1);
+  const found = open && /^([ \t>]*)(`{3,}|~{3,})/.exec(after.slice(open.from, open.from + 99));
   // Only where nothing but white space stands between it and the ledger: the block ends the body.
-  if (!last || !/^\s*$/.test(text.slice(last.to, ledgerFrom))) return undefined;
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  let delta = 0;
-  for (const change of changes) {
-    if (change.to <= last.to) delta += change.insert.length - (change.to - change.from);
+  if (!found || !last || open.to < after.length || /\S/.test(text.slice(last.to, ledgerFrom))) {
+    return undefined;
   }
-  const bodyEnd = last.to + delta;
-  const ends = /\n$/.test(after.slice(0, bodyEnd));
-  return { from: last.to, to: last.to, insert: `${ends ? '' : eol}${found[1]}${found[2]}` };
+  const end = after.length - text.length + last.to;
+  const eol = after.slice(end - 1, end) === '\n' ? '' : text.includes('\r\n') ? '\r\n' : '\n';
+  return { from: last.to, to: last.to, insert: eol + found[1] + found[2] };
 }
 
 /** How many markers of a file's body stand right after an unescaped backslash, which escapes them

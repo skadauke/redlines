@@ -60,8 +60,6 @@ export interface Holder {
 }
 
 const OPEN_FENCE = /^([ \t>]*)(`{3,}|~{3,})/;
-/** A line that looks like a fence, after any list markers and quote markers. */
-const FENCE_ISH = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*(?:`{3,}|~{3,})/;
 const CLOSE_FENCE = /^[ \t>]*(`{3,}|~{3,})[ \t]*$/;
 const MATH_LINE = /^[ \t>]*\$\$[ \t]*$/;
 const RAW_OPEN = /^[ \t]{0,3}<(script|pre|style|textarea|title)(?=[\s>]|$)/i;
@@ -110,7 +108,6 @@ export function codeBlockOf(
   edits: readonly TextChange[],
   frontEnd: number,
   markers: readonly MarkerRange[],
-  bodyEnd: number = text.length,
 ): Located | null {
   const first = edits[0];
   if (!first || edits.length === 0) return null;
@@ -122,8 +119,7 @@ export function codeBlockOf(
     (range) => range.kind !== 'comment' && range.from <= lo && hi <= range.to,
   );
   if (found) {
-    block =
-      found.kind === 'fence' ? fencedBlock(text, found, bodyEnd, verbatim) : rawBlock(text, found);
+    block = found.kind === 'fence' ? fencedBlock(text, found) : rawBlock(text, found);
     const item = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]/.test(
       text.slice(found.from, lineEnd(text, found.from)),
     );
@@ -196,79 +192,47 @@ function inCode(text: string, block: CodeBlock, edit: TextChange): boolean {
 const endOf = (text: string, range: Range) =>
   text[range.to - 1] === '\r' ? range.to - 1 : range.to;
 
-function fencedBlock(
-  text: string,
-  scanned: Range,
-  bodyEnd: number,
-  verbatim: readonly Verbatim[],
-): CodeBlock | null {
+function fencedBlock(text: string, scanned: Range): CodeBlock | null {
   const range = { from: scanned.from, to: endOf(text, scanned) };
   const firstEnd = lineEnd(text, range.from);
   const lastStart = lineStart(text, range.to);
   const open = text.slice(range.from, firstEnd);
-  const run = OPEN_FENCE.exec(open)?.[2];
-  if (!run) return null;
+  const [, prefix = '', run] = OPEN_FENCE.exec(open) ?? [];
+  // A list marker in front of the fence is the item's: the mark would go after the bullet.
+  if (!run || /[-*+]|\d/.test(prefix)) return null;
   const close = lastStart > range.from ? text.slice(lastStart, range.to) : '';
   const closing = CLOSE_FENCE.exec(close)?.[1];
-  const closed = closing !== undefined && closing[0] === run[0] && closing.length >= run.length;
-  if (!closed) {
-    // No closing fence: the block runs to the end of its container, or of the file's body (the
-    // ledger after it is no code).
-    // A fence with nothing after it has no code to change (a key typed on it is an edit of the
-    // fence's own line).
-    if (lastStart <= range.from || closing !== undefined) return null;
-    // Where the scan can tell: the fence starts its line (after quote markers and indentation only),
-    // and every line after it keeps its container's prefix.
-    if (range.from !== lineStart(text, range.from)) return null;
-    if (/[-*+]|\d/.test(OPEN_FENCE.exec(open)?.[1] ?? '')) return null;
-    // A ledger inside it is one that the open block swallowed: the file's marks are lost already,
-    // and what is typed there is no tracked change of the block.
-    if (/^[ \t>]*<!-- redlines(?:\s|$)/m.test(text.slice(range.from, range.to))) return null;
-    // The scan may have read what is the closing fence of a block as the opening of this one, where
-    // the block above it starts in a way the scan doesn't know (a fence behind a bullet and a
-    // quote marker): a line above that looks like a fence and is no part of a block it read means
-    // the block is not told for sure.
-    for (let at = range.from; at > 0;) {
-      at = lineStart(text, at - 1);
-      if (
-        FENCE_ISH.test(text.slice(at, lineEnd(text, at))) &&
-        !verbatim.some((v) => v.from <= at && at < v.to)
-      ) {
-        return null;
-      }
-    }
-    let to = Math.min(range.to, bodyEnd);
-    if (to < range.to || to < text.length) {
-      // The body ends before the range does, with the ledger or in a container: the lines of
-      // blank space that end it are no part of the block.
-      while (to > firstEnd && /^[ \t>]*\r?$/.test(text.slice(lineStart(text, to), to))) {
-        to = breakBefore(text, lineStart(text, to));
-      }
-    }
-    return {
-      kind: 'fenced',
-      unclosed: true,
-      from: range.from,
-      to,
-      editFrom: firstEnd,
-      editTo: to,
-      prefix: OPEN_FENCE.exec(open)?.[1] ?? '',
-      open,
-      close: '',
-    };
-  }
-  // A list marker in front of the fence is the item's: the mark would go after the bullet.
-  if (/[-*+]|\d/.test(OPEN_FENCE.exec(open)?.[1] ?? '')) return null;
-  return {
+  const block: CodeBlock = {
     kind: 'fenced',
     from: range.from,
     to: range.to,
     editFrom: firstEnd,
     editTo: breakBefore(text, lastStart),
-    prefix: OPEN_FENCE.exec(open)?.[1] ?? '',
+    prefix,
     open,
     close,
   };
+  if (closing !== undefined && closing[0] === run[0] && closing.length >= run.length) return block;
+  // No closing fence: the block runs to the end of its container, or of the body (the ledger after
+  // it is no code). Built only where the scan can be trusted: code under the fence's line (a key on
+  // the fence's own line is an edit of the fence), the fence at the start of its line, in no
+  // quote inside an item (the scan doesn't read the fence of one, and takes its closing fence for
+  // an opening one), and no ledger swallowed by it (its marks are lost already).
+  if (
+    closing !== undefined ||
+    lastStart <= range.from ||
+    range.from !== lineStart(text, range.from) ||
+    !/^(?:[ \t]*|(?:>[ \t]*)+)$/.test(prefix) ||
+    /^[ \t>]*<!-- redlines(?:\s|$)/m.test(text.slice(range.from, range.to))
+  ) {
+    return null;
+  }
+  // Where the body ends before the range does (the ledger, a container): blank lines end it.
+  const to =
+    range.to < text.length
+      ? firstEnd + text.slice(firstEnd, range.to).replace(/(?:\r?\n[ \t>]*)+$/, '').length
+      : range.to;
+  return { ...block, unclosed: true, to, editTo: to, close: '' };
 }
 
 function rawBlock(text: string, scanned: Range): CodeBlock | null {
@@ -597,15 +561,10 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
 
 /** Whether an unclosed fenced block, as an edit leaves it, ends in a line that closes it. */
 export function closesAtEnd(block: CodeBlock, now: string): boolean {
-  if (!block.unclosed) return false;
+  const lines = linesOf(now);
   const run = OPEN_FENCE.exec(block.open)?.[2] ?? '```';
-  const fence = CLOSE_FENCE.exec(linesOf(now).at(-1) ?? '')?.[1];
-  return (
-    linesOf(now).length > 1 &&
-    fence !== undefined &&
-    fence[0] === run[0] &&
-    fence.length >= run.length
-  );
+  const fence = CLOSE_FENCE.exec(lines.at(-1) ?? '')?.[1] ?? '';
+  return !!block.unclosed && lines.length > 1 && fence[0] === run[0] && fence.length >= run.length;
 }
 
 /** The payload of a substitution of a block: its text, one line. */
