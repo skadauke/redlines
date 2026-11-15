@@ -84,9 +84,11 @@ export const frontMatter: MarkdownConfig = {
 
 /**
  * Whether the selection starts in the YAML front matter, where a change can't be marked and a
- * comment or highlight has no anchor (format §3.8). Reads the parse, so it is cheap at every state.
+ * comment or highlight has no anchor (format §3.8). With `whole`, only when the selection ends there
+ * too: a selection that reaches the body is widened by a format change. Reads the parse, so it is cheap.
  */
-export function inFrontMatter(state: EditorState): boolean {
+export function inFrontMatter(state: EditorState, whole = false): boolean {
   const first = syntaxTree(state).topNode.firstChild;
-  return first?.name === 'FrontMatter' && state.selection.main.from <= first.to;
+  const { from, to } = state.selection.main;
+  return first?.name === 'FrontMatter' && (whole ? to : from) <= first.to;
 }

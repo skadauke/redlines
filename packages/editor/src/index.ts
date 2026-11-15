@@ -38,7 +38,6 @@ import {
   commandTitles,
   createCommandRegistry,
   disabledReasons,
-  enabledCommands,
 } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
@@ -397,6 +396,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
+    const reasons = disabledReasons(commands.list(), state);
     return {
       view: state.field(viewModeField),
       markupView: state.facet(markupViewFacet),
@@ -404,9 +404,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
-      enabledCommands: enabledCommands(commands.list(), state),
+      enabledCommands: commands
+        .list()
+        .filter(({ id }) => !(id in reasons))
+        .map(({ id }) => id),
       disabledReasons: {
-        ...disabledReasons(commands.list(), state),
+        ...reasons,
         // Undo and Redo are the host's Edit items, not registered commands; their hints are here.
         ...reasonFor('edit.undo', undoDisabledReason(state)),
         ...reasonFor('edit.redo', redoDisabledReason(state)),

@@ -251,11 +251,16 @@ function inlineReason(state: EditorState): string | undefined {
   const range = formatTarget(state);
   if (!range) return undefined;
   const nodes = atSelection(state);
-  if (inFrontMatter(state)) return FRONT_MATTER_HINT;
-  if (nodes.some(({ name }) => CODE_BLOCK.has(name) || name === 'HTMLBlock')) return IN_CODE_HINT;
+  // Only a selection wholly in verbatim text is refused: one that reaches out of it is widened to the
+  // text around it by the format library, as it always was.
+  if (inFrontMatter(state, true)) return FRONT_MATTER_HINT;
+  const verbatim = nodes.find(({ name }) => CODE_BLOCK.has(name) || name === 'HTMLBlock');
+  if (verbatim && range.to <= verbatim.to) return IN_CODE_HINT;
   if (inMarker(state, range)) return MARKER_ONLY;
   const span = nodes.find(({ name }) => name === 'InlineCode');
-  if (span && !(range.from <= span.from && range.to >= span.to)) return IN_CODE_SPAN_HINT;
+  if (span && range.to <= span.to && !(range.from <= span.from && range.to >= span.to)) {
+    return IN_CODE_SPAN_HINT;
+  }
   if (nodes.some(({ name }) => name === 'LinkReference')) return DEFINES_HINT;
   return undefined;
 }

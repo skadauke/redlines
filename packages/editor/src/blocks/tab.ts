@@ -183,7 +183,10 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
 export function indentReason(state: EditorState, outdent: boolean): string | undefined {
   const { selection } = state;
   if (selection.ranges.length > 1) return undefined;
-  const { from, to } = selection.main;
+  const { from } = selection.main;
+  let { to } = selection.main;
+  // A selection that ends at the start of a line (a triple-click) doesn't take that line.
+  if (to > from && state.doc.lineAt(to).from === to) to = state.doc.lineAt(to).from - 1;
   const start = blockAt(state, from);
   const end = from === to ? start : blockAt(state, to);
   const first = start && itemOf(state, start, from);

@@ -787,3 +787,27 @@ describe('commands in a table', () => {
     expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
   });
 });
+
+describe('a selection that reaches out of verbatim text is still formatted (review of R6a)', () => {
+  it('keeps Bold enabled for ⌘A in a document that starts with front matter or code', () => {
+    for (const doc of ['---\ntitle: x\n---\n\nBody text.\n', '```\ncode\n```\n\nBody text.\n']) {
+      const { editor } = mount(doc);
+      select(editor, 0, doc.length);
+      expect(editor.getUiState().disabledReasons['format.bold'], doc).toBeUndefined();
+    }
+  });
+
+  it('keeps Bold enabled for a selection that starts inside a code span and ends after it', () => {
+    const doc = 'Say `code here` now.\n';
+    const { editor } = mount(doc);
+    select(editor, doc.indexOf('here'), doc.indexOf('now') + 3);
+    expect(editor.getUiState().disabledReasons['format.bold']).toBeUndefined();
+  });
+
+  it('keeps Indent enabled for a triple-clicked last list item', () => {
+    const doc = '- aa\n- bb\n- cc\n';
+    const { editor } = mount(doc);
+    select(editor, doc.indexOf('- cc'), doc.length);
+    expect(editor.getUiState().disabledReasons['block.indent']).toBeUndefined();
+  });
+});

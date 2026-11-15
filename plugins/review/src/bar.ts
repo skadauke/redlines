@@ -20,7 +20,7 @@ import {
   setViewModeEffect,
   viewModeField,
 } from '@redlines/editor';
-import { type MarkRange, rejectReason } from '@redlines/format';
+import { type MarkRange, type Parsed, rejectReason } from '@redlines/format';
 import { icon, type IconName } from './icons.ts';
 import {
   attempt,
@@ -399,12 +399,7 @@ class Bar {
     // A change that can only be accepted: Reject is grayed, and its hint says why.
     const marks = groups[current] ?? [];
     const parsed = state.field(parsedField);
-    setReason(
-      reject,
-      current < 0
-        ? undefined
-        : marks.map((mark) => rejectReason(parsed, mark)).find((reason) => reason !== undefined),
-    );
+    setReason(reject, current < 0 ? undefined : firstReason(parsed, marks));
   }
 
   /**
@@ -529,4 +524,13 @@ export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
     ),
     EditorView.scrollMargins.of((view) => (isBarOpen(view.state) ? { bottom: BAR_ROOM } : null)),
   ];
+}
+
+/** The first reason that one of `marks` can't be rejected, stopping there (each is a dry run). */
+function firstReason(parsed: Parsed, marks: readonly MarkRange[]): string | undefined {
+  for (const mark of marks) {
+    const reason = rejectReason(parsed, mark);
+    if (reason !== undefined) return reason;
+  }
+  return undefined;
 }
