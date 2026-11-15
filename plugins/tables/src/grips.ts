@@ -68,27 +68,36 @@ export const GRIPS_STYLE = `
   color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1; letter-spacing: -2px;
 }
 .rl-grip:hover, .rl-plus:hover, .rl-col-grip:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
-.rl-plus, .rl-col-plus { cursor: pointer; letter-spacing: 0; border: 1px solid var(--rl-rule); background: var(--rl-paper); }
+.rl-plus, .rl-col-plus { cursor: pointer; letter-spacing: 0; border: 1px solid var(--rl-rule); background: var(--rl-page); }
 .rl-plus-line, .rl-col-plus-line { position: absolute; height: 1px; background: var(--rl-ink-3); pointer-events: none; }
 .rl-col-plus-line { width: 1px; }
 .rl-col-grip { width: 22px; height: 18px; cursor: grab; letter-spacing: 0; }
 .rl-drop-line { position: absolute; height: 2px; background: var(--rl-ink); pointer-events: none; }
 .rl-drag-copy {
   position: absolute; max-width: 320px; padding: 4px 10px; border-radius: 4px; opacity: 0.85;
-  background: var(--rl-paper); color: var(--rl-ink); box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+  background: var(--rl-page); color: var(--rl-ink); box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
   font-size: var(--rl-size-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
 }
 .rl-row-dim { opacity: 0.4; }
 .rl-grip-menu {
-  position: absolute; min-width: 180px; padding: 4px; border-radius: 6px; background: var(--rl-paper);
+  position: absolute; min-width: 180px; padding: 4px; border-radius: 6px; background: var(--rl-page);
   color: var(--rl-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 0.22); border: 1px solid var(--rl-rule);
   font-size: var(--rl-size-ui);
 }
+.rl-grip-hint {
+  position: absolute; z-index: 6; padding: 6px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--rl-tip, #1d1d1f); color: #fff; font-size: var(--rl-size-ui-small);
+  line-height: 1.3; white-space: nowrap; box-shadow: 0 4px 16px rgb(0 0 0 / 0.22);
+}
+.rl-grip-hint[hidden] { display: none; }
 .rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
 .rl-grip-item:hover { background: var(--rl-rule); }
 .rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
 `;
+
+/** The title bar's hint delay, which the app passes in (`TOOLTIP_MS`). */
+const DEFAULT_TOOLTIP_MS = 400;
 
 const STYLE_ID = 'rl-grips-style';
 function installStyle(): void {
@@ -198,6 +207,10 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
 
 class Grips {
   readonly layer = document.createElement('div');
+  /** The hint a grip or a + shows after a rest of the pointer, as the title bar's buttons do. */
+  private readonly tip = document.createElement('div');
+  private tipTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly tooltipMs: number;
   private grip: HTMLElement | null = null;
   private plus: HTMLElement | null = null;
   private plusLine: HTMLElement | null = null;
@@ -256,11 +269,16 @@ class Grips {
     this.view.dispatch({});
   }
 
-  constructor(view: EditorView) {
+  constructor(view: EditorView, tooltipMs = DEFAULT_TOOLTIP_MS) {
     this.view = view;
+    this.tooltipMs = tooltipMs;
     installStyle();
     this.layer.className = 'rl-grips';
     this.layer.setAttribute('aria-hidden', 'true');
+    this.tip.className = 'rl-grip-hint';
+    this.tip.setAttribute('role', 'tooltip');
+    this.tip.hidden = true;
+    this.layer.append(this.tip);
     view.dom.append(this.layer);
     view.dom.addEventListener('mousemove', this.onMove);
     view.dom.addEventListener('mouseleave', this.onLeave);
@@ -295,6 +313,7 @@ class Grips {
   }
 
   hide(keepMenu = true): void {
+    this.hideHint();
     this.grip?.remove();
     this.plus?.remove();
     this.plusLine?.remove();
@@ -387,6 +406,35 @@ class Grips {
     this.colBoundary = null;
   }
 
+  /** Gives a grip or a + its hint: shown after the pointer rests on it, gone when it leaves or presses. */
+  private hint(el: HTMLElement, text: string): void {
+    el.setAttribute('aria-label', text);
+    el.addEventListener('mouseenter', () => {
+      clearTimeout(this.tipTimer);
+      // A drag or an open menu has the pointer's attention.
+      if (this.drag || this.menu) return;
+      this.tipTimer = setTimeout(() => {
+        // The grip may have gone since the pointer came (hiding doesn't say mouseleave).
+        if (!el.isConnected) return;
+        const base = this.view.dom.getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        this.tip.textContent = text;
+        this.tip.hidden = false;
+        const room = base.width - this.tip.offsetWidth - 4;
+        this.tip.style.left = `${Math.max(4, Math.min(box.left - base.left, room))}px`;
+        this.tip.style.top = `${box.bottom - base.top + 6}px`;
+      }, this.tooltipMs);
+    });
+    const hide = () => this.hideHint();
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('mousedown', hide);
+  }
+
+  private hideHint(): void {
+    clearTimeout(this.tipTimer);
+    this.tip.hidden = true;
+  }
+
   private showColGrip(at: { drawn: Drawn; col: number }): void {
     this.colAt = at;
     const rect = at.drawn.cols[at.col];
@@ -396,6 +444,7 @@ class Grips {
       grip.className = 'rl-col-grip';
       grip.textContent = '⋯';
       grip.addEventListener('mousedown', (event) => this.pressedCol(event));
+      this.hint(grip, 'Drag to move the column, click for its menu');
       this.layer.append(grip);
       this.colGrip = grip;
     }
@@ -415,6 +464,7 @@ class Grips {
       const plus = document.createElement('div');
       plus.className = 'rl-col-plus';
       plus.textContent = '+';
+      this.hint(plus, 'Add a column');
       plus.addEventListener('mousedown', (event) => {
         event.preventDefault();
         const at = this.colBoundary;
@@ -550,6 +600,7 @@ class Grips {
       grip.className = 'rl-grip';
       grip.textContent = '⋮⋮';
       grip.addEventListener('mousedown', (event) => this.pressed(event));
+      this.hint(grip, 'Drag to move the row, click for its menu');
       this.layer.append(grip);
       this.grip = grip;
     }
@@ -570,6 +621,7 @@ class Grips {
       const plus = document.createElement('div');
       plus.className = 'rl-plus';
       plus.textContent = '+';
+      this.hint(plus, 'Add a row');
       plus.addEventListener('mousedown', (event) => {
         event.preventDefault();
         const at = this.boundary;
@@ -768,8 +820,8 @@ class Grips {
 }
 
 /** The row and column grips, the + between rows and columns and the dragging of both, for the tables plugin. */
-export function tableGrips(): Extension {
-  const plugin = ViewPlugin.fromClass(Grips);
+export function tableGrips(options: { tooltipMs?: number } = {}): Extension {
+  const plugin = ViewPlugin.define((view) => new Grips(view, options.tooltipMs));
   return [
     plugin,
     // The page scrolls under a grip: it goes (the editor takes this listener away with the view).
