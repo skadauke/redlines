@@ -102,7 +102,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     flex: 'none',
     marginLeft: 'auto',
     paddingLeft: notePx(4),
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-head': {
@@ -202,7 +202,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     resize: 'none',
   },
   '.rl-note-box textarea:focus': { borderColor: 'var(--rl-ink-3)' },
-  '.rl-note-box textarea::placeholder': { color: 'var(--rl-ink-3)' },
+  '.rl-note-box textarea::placeholder': { color: 'var(--rl-ink-2)' },
   '.rl-note-box-row': {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -289,7 +289,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     boxShadow: '0 0 0 3px color-mix(in srgb, var(--rl-ink-3) 25%, transparent)',
   },
   '.rl-note-resolved .rl-note-name, .rl-note-resolved .rl-note-text': {
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
   },
   '.rl-note-resolved .rl-dot': { backgroundColor: 'var(--rl-ink-3)' },
   '.rl-note-resolved-line': {
@@ -297,7 +297,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     alignItems: 'center',
     gap: notePx(4),
     marginTop: notePx(6),
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-resolved-line svg': { flex: 'none', width: notePx(12), height: notePx(12) },

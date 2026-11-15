@@ -260,7 +260,7 @@ body {
 }
 
 .rl-title-edited {
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
 }
 
 .rl-titlebar-end {
@@ -554,7 +554,7 @@ body {
   flex: none;
   padding: 6px 20px 8px;
   overflow: hidden;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-small);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -631,7 +631,7 @@ body {
 
 .rl-sidebar-message {
   padding: 6px 12px 6px calc(12px + var(--rl-depth, 0) * 14px);
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   font-size: var(--rl-size-ui);
   line-height: 1.4;
 }
@@ -674,13 +674,13 @@ body {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   cursor: default;
 }
 
 .rl-notice-close:hover {
   background: var(--rl-pressed);
-  color: var(--rl-ink-2);
+  color: var(--rl-ink);
 }
 
 /*
@@ -779,13 +779,13 @@ body {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   cursor: default;
 }
 
 .rl-notification-close:hover {
   background: var(--rl-pressed);
-  color: var(--rl-ink-2);
+  color: var(--rl-ink);
 }
 
 .rl-notification button:focus-visible {
