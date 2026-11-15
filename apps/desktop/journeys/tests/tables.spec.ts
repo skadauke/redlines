@@ -70,7 +70,8 @@ test.describe('tables @tables', () => {
     await j.settle();
     const grip = j.page.locator('.rl-grip').first();
     const menu = j.page.locator('.rl-grip-menu');
-    const item = (name: string) => menu.locator('.rl-grip-item', { hasText: new RegExp(`^${name}$`) });
+    const item = (name: string) =>
+      menu.locator('.rl-grip-item', { hasText: new RegExp(`^${name}$`) });
     await j.hover('A');
     await grip.click({ button: 'right' });
     await expect(menu).toBeVisible();
