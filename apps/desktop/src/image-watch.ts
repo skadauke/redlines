@@ -13,30 +13,47 @@ export type Stamps = (paths: string[]) => Promise<(string | null)[]>;
 export interface ImageWatch {
   /**
    * The URL to load the image at `path` from: `url`, as the host made it, with the version of the
-   * image added once it has been saved again. The path is watched from now on.
+   * image added once it has been saved again. It only notes that the path is drawn, which is all a
+   * drawing may do.
    */
   url(path: string, url: string): string;
-  /** Looks at every image drawn: the paths of those saved again since the last look. */
+  /** The images are about to be drawn again: those that are drawn then are the ones to watch. */
+  begin(): void;
+  /**
+   * Looks at the images drawn since `begin`, and stops watching the rest (a path typed one letter at
+   * a time, an image taken out of the text): the paths of those saved again since the last look.
+   */
   check(): Promise<string[]>;
-  /** Forgets every image: another document is drawn. */
+  /** Takes the stamp of the images drawn, soon, for those that came since: not at the drawing. */
+  settle(): void;
+  /** Another document is drawn. The versions stay, for the document that comes back. */
   forget(): void;
 }
 
 /** The URLs that carry a version: the app's own image scheme, which ignores the query. */
 const SERVED_BY_THE_APP = /^(asset:|https?:\/\/asset\.localhost)/i;
 
+/** How long after the last change to the drawing the stamps of new images are taken. */
+const SETTLE_MS = 500;
+
 export function createImageWatch(stamps: Stamps): ImageWatch {
-  /** The stamp each drawn image had when last looked at; undefined while it hasn't been. */
+  /** The stamp each watched image had when last looked at; undefined while it hasn't been. */
   let known = new Map<string, string | null | undefined>();
-  /** How many times each image was found saved again. */
-  let versions = new Map<string, number>();
-  /** The stamps being asked for, for the images that came since the last ask. */
+  /** The images drawn since `begin` (or since the document began). */
+  let drawn = new Set<string>();
+  /**
+   * How many times each image was found saved again, for the whole session: a document that comes
+   * back loads from the URL the webview last saw, not from one it may have a copy of.
+   */
+  const versions = new Map<string, number>();
   let learning: Promise<void> = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let epoch = 0;
 
-  /** Asks for the stamp of each image that has none yet, once, for all that came in a moment. */
+  /** Asks for the stamp of each drawn image that has none yet. */
   const learn = () => {
     const mine = epoch;
+    for (const path of drawn) if (!known.has(path)) known.set(path, undefined);
     learning = learning.then(async () => {
       const fresh = [...known].filter(([, stamp]) => stamp === undefined).map(([path]) => path);
       if (!fresh.length) return;
@@ -50,16 +67,22 @@ export function createImageWatch(stamps: Stamps): ImageWatch {
 
   return {
     url(path, url) {
-      if (!known.has(path)) {
-        known.set(path, undefined);
-        queueMicrotask(learn);
-      }
+      drawn.add(path);
       const version = versions.get(path);
       if (!version || !SERVED_BY_THE_APP.test(url)) return url;
       return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
     },
+    begin() {
+      drawn = new Set();
+    },
+    settle() {
+      clearTimeout(timer);
+      timer = setTimeout(learn, SETTLE_MS);
+    },
     async check() {
       const mine = epoch;
+      clearTimeout(timer);
+      for (const path of known.keys()) if (!drawn.has(path)) known.delete(path);
       learn();
       await learning;
       const paths = [...known.keys()];
@@ -79,8 +102,9 @@ export function createImageWatch(stamps: Stamps): ImageWatch {
     },
     forget() {
       epoch += 1;
+      clearTimeout(timer);
       known = new Map();
-      versions = new Map();
+      drawn = new Set();
       learning = Promise.resolve();
     },
   };

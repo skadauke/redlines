@@ -16,7 +16,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::http::header::{
-    CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue,
+    X_CONTENT_TYPE_OPTIONS,
 };
 use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::plugin::TauriPlugin;
@@ -295,6 +296,8 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
     let headers = response.headers_mut();
     headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(POLICY));
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    // A file saved again in another app must show its new bytes: the webview asks every time.
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
 

@@ -220,6 +220,9 @@ function openImageInPreview(src: string): void {
  * drawn again from the file, the others as they are, and the document's text is not touched.
  */
 async function refreshSavedImages(): Promise<void> {
+  // Drawn again first, so that the images the text shows now are the ones looked at.
+  imageWatch.begin();
+  editor.refreshImages();
   const changed = await imageWatch.check();
   if (changed.length) editor.refreshImages();
 }
@@ -296,6 +299,8 @@ const editor = createEditor(element('#editor'), {
   markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
+    // Images the text shows now are watched once the typing pauses.
+    imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
     runsSawChange();
   },
@@ -632,6 +637,7 @@ async function showImages(path: string | null): Promise<void> {
     if (!allowed || doc?.path !== path) return;
     imageFolder = root.tooBroad ? dirname(path) : root.folder;
     editor.refreshImages();
+    imageWatch.settle();
   } catch (error) {
     console.warn('Could not allow the images of the document', error);
   }
