@@ -353,7 +353,8 @@ Redlines covers everything in the Markdown Guide's
   title's menu and Paragraph › Alert, which writes a new alert with its body selected, are the ways
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
-  while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
+  while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
 - **Image size:** while the pointer is over an image, a handle on its left edge and one on its
   right edge resize it, with its aspect kept; the image follows the pointer as it is dragged, and
   one Undo takes the size back. A large image fits the text column and a small one keeps its own
@@ -580,15 +581,29 @@ mode has no counterpart in the desktop app.
   the contrast its theme gives it. **Next and Previous no longer select the change:** they put the caret at its start
   and mark it, so copying or typing after them acts at the caret, not on the change; the panel
   planned for it (§5.6 below) holds the keyboard. With no changes the command is disabled.
-- **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
-  next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
-  Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
-  the simple look closes it, because a person who chooses to read has stopped stepping through
-  changes, and while it is open a click on a change bar opens that change's card in place of
-  switching the look. It floats at the bottom of the window and closes with Esc or its close
-  button; without it, a change's card, or its note in the rail (§5.7, in the simple look too),
-  still accepts or rejects that change. It holds:
-  - "Change 3 of 17", with previous and next, through changes and comments in document order,
+- **The review panel** (the review bar's place, Review Changes in the Review menu or the next-change
+  shortcut ⌘⌥]) opens at once, on the document's first change or on the first change the selection
+  touches (the selection goes), and marks that change. Opening it, or moving it to a change, shows
+  the full markup, from Clean, from the simple look and from Raw, so that each change shows while you
+  decide it. Showing the simple look closes it, because a person who chooses to read has stopped
+  stepping through changes, and while it is open a click on a change bar opens that change's card in
+  place of switching the look. It is a card **beside the change**: in the margin to the right of the
+  text, level with the change's top and as wide as the margin lets it be (at least 240 px); where
+  the margin has no room, below the change, or above it when it doesn't fit below. It never covers
+  the change, and stays inside the window (or the sheet, for an editor that is one). Its title is its
+  handle: drag it, and it stays where it was put until it closes. It says who made the change and
+  when, and what it did, and has **Accept (A)**, **Reject (R)**, **Comment (C)**, **Previous (←)** and
+  **Next (→)**, with the key shown on each button. Accept and Reject decide the change and move on to
+  the next; after the last, it says there are no more changes to review, with a Done button. Comment
+  opens a field, "Ask about this change"; Return posts it as a comment on the change's text, and Esc
+  closes the field. **The panel takes the keyboard** when it opens and after each change, so that
+  the letters and the arrows reach it; a click into the document gives the keyboard back to the
+  document, and typing is typing again. Esc or its close button closes it. The review's mark is the
+  thin ring and the wider bar described above. Without it, a change's card, or its note in the rail
+  (§5.7, in the simple look too), still accepts or rejects that change. The panel's measures are the
+  interface's own sizes (13 px and 12 px), whatever the text size. Its title shows the count, and the
+  rest is planned for it:
+  - "Change 3 of 17" (shown), with previous and next, through changes and comments in document order,
     with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
     share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
     once, and Accept and Reject decide them all in one step, or none if one is refused;
@@ -1061,20 +1076,25 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
   folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
   insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
-  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  undoing it takes back the link only: the file stays in the project’s folder for images, where it can be seen and
   deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
-  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  document with no file yet asks to be saved first, since there is no project folder to save in. The
   person may go on writing while the images are saved: the links go in where the paste or drop was,
   ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
   all of it is still there; what was typed in it stays, and the links go after it. A document that
   was replaced meanwhile gets none of the links, and the person is told, the files being where they
   were saved.
-- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
-  `images` (the name can be changed), a folder named for the document (`plan.assets` for
-  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
-  preview loads images from, and the setting can't name another place on the disk. A document in
-  the home folder, whose project is too broad to load images from but for its own folder, takes
-  images in that folder alone, and says so for the other two. Only image files go in, by their
+- **Where images go** (#523) is one folder for the project, Preferences › Editor › Images: `images`
+  (the name can be changed) in the project folder the sidebar shows, which is the repository's root,
+  or the document's own folder where it is in no repository. Every document of the project saves
+  its images there and links them by a path from where it is (`../images/shot.png`), so the
+  preview, which loads from the project folder, finds them from a document in any folder below it,
+  a hidden one included. An image dragged in from elsewhere is copied in, never moved, and nothing
+  is ever replaced: a taken name gets `-2`, `-3` and on, and an image that is there already, byte
+  for byte, is linked and not copied again. A document that is in no project keeps an `images`
+  folder beside it. A document in the home folder or at the disk's root, whose project is too broad
+  to load images from but for its own folder, takes images in that folder alone. The setting can't
+  name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
   or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
   pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a

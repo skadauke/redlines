@@ -213,7 +213,7 @@ describe('the items', () => {
   it('disables the ones that cannot run, and marks a toggle that is on', () => {
     mount('Hello', {}, [
       command('format.bold', { isActive: () => true }),
-      command('format.italic', { isActive: () => false, isEnabled: () => false }),
+      command('format.italic', { isActive: () => false, disabledReason: () => 'Not here.' }),
       command('format.clear'),
     ]);
     mounted.at(-1)?.palette.show();
@@ -765,7 +765,7 @@ describe('from the keyboard', () => {
 
   it('skips the items that are disabled', () => {
     const { editor } = mount('Hello', {}, [
-      command('format.bold', { isEnabled: () => false }),
+      command('format.bold', { disabledReason: () => 'Not here.' }),
       command('format.italic'),
       command('format.clear'),
     ]);

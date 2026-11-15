@@ -97,7 +97,7 @@ that cover text end with a closing marker that names the id.
 ```
 
 - Fields are separated by one space. The payload is everything after the space that follows the
-  id, up to `-->`. It may be empty.
+  id, up to `-->`. It may be empty. A payload may hold marks, written in its encoding (§3.12).
 - A closing marker carries only the id. Ids are unique in a document, so ranges can overlap
   (§3.6).
 - A mark's author and time are in its ledger entry (§2.4), which keeps markers short.
@@ -157,7 +157,7 @@ mark's markers there than the file had.
 | ------------- | ------------------------------------------ | ------------------------------------------ | ---------- |
 | Insertion     | `<!--ins k3x9-->new text<!--/k3x9-->`      | Added text                                 | new text   |
 | Deletion      | `<!--del w2rf old text-->`                 | Removed text, kept in the payload          | nothing    |
-| Substitution  | `<!--sub p7qd old-->new<!--/p7qd-->`       | Replaced text; the payload is the old text | new        |
+| Substitution  | `<!--sub p7qd old-->new<!--/p7qd-->`       | Replaced text; the payload is the old text, and may hold other people's marks (§3.12) | new        |
 | Format change | `<!--fmt m2bd +bold-->**word**<!--/m2bd-->` | Changed formatting, same words (§2.6)     | **word**   |
 | Highlight     | `<!--hl h4kz-->text<!--/h4kz-->`           | A reviewer's highlight                     | text       |
 | Comment       | `<!--cmt c8d2-->text<!--/c8d2-->`          | The text a comment thread is about (§4)    | text       |
@@ -2055,28 +2055,21 @@ Next paragraph.
   is the block without it.
 - Under a closing fence, line breaks are written plain at the top level, in a quote and in a list
   item, in LF and CRLF files alike.
-- A marker anywhere in a block's range, its fence or tag lines and what follows the closing tag on
-  its line included, is a pending change in the code, and the edit is refused, naming the person
-  ("Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
-  "Your pending change…" for your own, except the substitution of this block that the edit goes
-  on through, below).
-- A block whose line breaks are not all the file's (a CRLF line in an LF block) is refused: the
-  payload gives one kind back ("…line breaks that the rest of the file doesn't…").
 - Further keystrokes of the author in a block that their own pending insertion or substitution
   holds edit the newest code and make no mark: the pending change already holds the block, and its
   payload is still the old block. The same goes for a block inside an insertion of the author's
   that holds more than the block.
-- Another person's pending insertion or substitution that holds the block is theirs to decide
-  first. The edit is refused (`no-legal-placement`) and names them: "This would change how Bo
-  Chen's insertion reads. Decide it first, or turn off Track Changes." No form of a second
-  substitution in the new text of a first reads the same in every order of decisions.
+- Another person's pending insertion or substitution that holds the block is theirs to decide, and
+  an edit of the block is a replacement of the block written inside it (§3.12): a second
+  substitution in the new text of a first reads the same in every order of decisions. A marker in
+  the block's range, in its fence or tag lines or after the closing tag on its line, is another
+  person's mark that the block's replacement takes into its payload (§3.12). A block whose line
+  breaks are not all the file's is given back in the file's (§8, every restored text).
 - Indented code is changed this way at the top level only, and only when no marker stands in the
   block or in the lines between it and the text above it, where a change that adds or takes away a
-  blank line would make it code in one view and text in the other (§2.1). Not built yet, and
-  refused in words that name the code ("A tracked change can't go in code that starts a list item
-  yet. Turn off Track Changes to edit it."; "…in indented code in a list item or a quote yet…"):
-  fenced code that starts an item of a list (`- ```js`), and indented code in a list item or a
-  quote. With Track Changes off every key works in them as in any code. `pre` and `title` (and the
+  blank line would make it code in one view and text in the other (§2.1). Code that starts an item
+  of a list (`- ```js`), and indented code in a list item or a quote, are changed as part of their
+  item or their list (§3.12). With Track Changes off every key works in them as in any code. `pre` and `title` (and the
   other raw-text elements) inside a quote or a list item are not read as raw text yet (#284): the
   scan finds raw text only where it starts at the left edge, so a change there is written as in
   any HTML block, and the promise that no marker goes inside them holds at the top level only. A `title` element is raw
@@ -2140,7 +2133,8 @@ pandoc file's `{width=}` is not written yet). The rule:
 
 ### 3.6 Nesting
 
-Payloads never contain markers, because an HTML comment can't contain another. The structure is
+A payload never holds a marker as HTML, because an HTML comment can't contain another: it holds it
+encoded (§2.5), and where it decodes to marks, §3.12 reads them. The structure is
 as flat as Word's, where a run of text is plain, inserted, deleted, or inserted and then deleted
 by someone else.
 
@@ -2370,11 +2364,13 @@ it, one per line:
   the block before it when the table ends the text. Its payload is the table as it reads with your
   own pending changes rejected, and its comments are left out. The rule that a table keeps a row is
   for deleting rows: the whole table may go.
-  - **Another person's pending changes stay theirs.** With Track Changes on, a table that holds one
-    can't be deleted until it is decided ("Bo Chen's pending change is in this table. Decide it
-    first."). That is a change in a cell, an inserted or moved row or column, a row or column
-    deleted and kept below the table, an alignment change, and a pending change whose text holds
-    the table. Comments and highlights are no changes.
+  - **Another person's pending changes stay theirs.** The deletion's payload holds the table with
+    them in it (§3.12), and so for a row or column that is another person's pending insertion or
+    move, or that holds their pending change: the operation is a replacement of the table where its
+    fine form is not sound. That is a change in a cell, an inserted or moved row or column, a row or
+    column deleted and kept below the table, an alignment change, and a pending change whose text
+    holds the table. Comments and highlights are no changes. The refusals "Decide it first" of
+    rows, columns and alignment in rules 2, 3 and 5 are replacements of the table in the same way.
   - **Your own fold into the deletion,** as rejecting them would. A row or column you inserted is
     removed outright, rows and columns you deleted or moved are in the payload as they were, and
     your alignment change is undone. The deletion lines the table kept go with it, and their ledger
@@ -2385,11 +2381,8 @@ it, one per line:
   - **Comments become point comments where the table was,** as in a row that leaves (rule 4): at the
     start of the text of the block after the table, or, where that block can hold no marker, at the
     end of the text of the block before it. A comment with a part that stays loses only the part in
-    the table. A highlight has no point form and goes. A comment with one end in the table and the
-    other outside it is refused ("Bo Chen's comment runs from this table into the text next to it.
-    Delete it first, or turn off Track Changes."), and so is one that no text next to the table
-    can keep, as when the table is all the text ("Bo Chen's comment is in this table, and no text
-    next to it can keep it. Delete the comment first, or turn off Track Changes.").
+    the table. A highlight has no point form and goes. A comment is a mark in the payload, and one
+    that crosses the table's edge takes the block it crosses into the unit (§3.12).
   - **Where Track Changes has no place to write it.** The deletion's marker stands in front of the
     block after the table, or behind the block before it when the table ends the text. It can't
     stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
@@ -2895,11 +2888,9 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
-`frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
-an edit there is refused with the error code `front-matter`: "Front matter can't be edited with
-Track Changes on yet." A comment or a highlight there is refused with the same code, in words
-about what it is: "A comment can't be anchored in front matter yet." and "A highlight can't be made
-in front matter yet. Select text in the body instead."
+`frontmatter`, one entry per changed key with the old value (§5.4). An edit there with Track
+Changes on is made after the alert of §3.13, and leaves no mark. The commands for a comment and a
+highlight are disabled in front matter, with the reason in their hint.
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
 the body's, and are written plain; anything else typed there is refused as an edit of front matter.
@@ -3153,6 +3144,83 @@ The marks of one such edit share a `group` when there are several (§5.4). Nothi
 is collapsed: this is how one edit is first written, as typing over a selection writes one
 substitution; Simplify markup (§3.6) is the command that collapses marks already written. A person's
 typing is recorded as it is typed and is never joined.
+
+### 3.12 Widened replacements
+
+An edit that can't be written as marks at the grain it was made, so that every order of decisions
+reads alike, is written as a substitution of the smallest unit that holds it (below) with the unit
+as the old text and the unit as it reads with the edit made as the new text. There is no refusal for
+an edit that would read differently in some order of decisions: it is written this way. A
+substitution of this kind is written in the forms of §3.3 (a paragraph, a heading, a quote's
+paragraph, a list item, a list) and of §3.5 (a code block, display math, raw-text HTML) and §3.7 (a
+table), and nothing about its markers differs from theirs.
+
+The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
+and the views read the replacements it writes, and the writers that refuse today call it one unit at
+a time (tables, lists, blocks, code). Until a writer calls it, it still refuses, in the words of its
+own section.
+
+**The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
+bullet outside), a list, a code block or a table. The edit is written as the replacement of the
+smallest of them that holds it and for which the file reads as its newest view with the replacement
+pending, the original view is what it was, no marker stands at the start of a line that it didn't,
+the lists are as tight as they were, and both decisions of the replacement can be made; otherwise of
+the next larger one: a block, then its list item, its list, and the quote that holds it. A unit holds
+every mark it touches whole: a comment, a highlight or a change that starts in the unit and ends
+outside it takes the blocks it spans into the unit. A unit of more than eight top-level blocks
+(`WIDEN_MOST_BLOCKS`) is not written, and the edit is not tracked (§3.13). Where the edit is in the
+new text of someone else's substitution, the unit is a unit of that new text, written inside it:
+the old text of the second is the new text of the first, and the first's marks stand around it.
+Accepting the first leaves the second pending; rejecting the first takes the second with it.
+
+**The old text holds other people's marks.** Marks in a payload are written in the payload's
+encoding (§2.5): `<!--ins k3x9-->` is `<!-\-ins k3x9-\->`. A decoded payload's marker is a mark
+when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, its
+opener and closer are in the same payload, and payloads nest at most three deep
+(`MOST_PAYLOAD_DEPTH`). Otherwise it is text, and the parser says so (`payload-mark`). The entries
+of such marks stay in the ledger. Your own pending changes in the unit are not kept: they fold into
+the replacement, as rejecting them would. Comments and highlights are no changes, and stay in the
+payload, whoever's they are.
+
+- Rejecting the replacement writes the decoded payload, marks included, where the replacement was:
+  the file as it was before the edit, byte for byte but for the file's line breaks (§8).
+- Accepting it leaves the new text. The marks in the payload go with the old text, with their
+  entries; a comment in it becomes a point comment at the start of the new text, as for a deleted
+  block (§3.4, §3.7); a highlight goes.
+- Accepting or rejecting a mark in the payload decides it in the old text, as it would be decided
+  in the file, and writes the payload again; the new text is not touched. It is refused exactly when
+  it would be refused in the file. Accept all and reject all decide the replacement, and reject all
+  rejects the marks that come back with it.
+- Every order of these decisions reads alike: the old text is, after any decisions, what deciding
+  them in the file before the edit would have left, and rejecting the replacement gives that;
+  accepting it gives the new text whatever was decided.
+
+**Editing it.** The author's further edits in the new text are made in place, with no mark (§3.6).
+When the new text is the unit as it reads with the marks of the old text accepted, the replacement
+is removed, and the unit is as it was, with those marks pending. Another person's edit in the new
+text is written as a mark in it where a fine mark reads alike in every order, and else as a
+replacement of a unit of the new text, written inside the first replacement's text (above).
+
+**The closer** stands at the end of the new text's last line, except where a marker there would
+read otherwise: after a closing fence, a table, a bare list marker or an emphasis delimiter or
+backslash that ends the new text, it stands alone on the line after, with the container's prefix,
+and at the top level, where a blank line follows, in that blank line, with the payload ending in the
+unit's line break (§3.5).
+
+**With Track Changes off** an edit that can't be made without deciding other people's pending
+changes in its unit is made after an alert (§3.13), and decides them: the unit is written as the
+edit makes it from the newest text, which accepts those changes.
+
+Every order of decisions reads the same, judged against micromark 4.0.2 with GFM
+(`widen-random.test.ts`, `widen-pairs.test.ts`).
+
+### 3.13 Untracked edits
+
+An edit that can't be tracked, and that no unit holds, or that is in front matter or in Raw while
+Track Changes is on, is made without tracking after the person is asked, and leaves no mark and no
+ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
+Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
+agent.
 
 ## 4. Comments
 
@@ -3723,7 +3791,8 @@ The library derives three read-only views of a document. None is ever stored.
 - **Original:** every pending change rejected. Format changes are undone after the other changes,
   as rejecting all of them does, and one inside another before the one around it: the old syntax as
   it was written, the old indentation, the old box. One that can't be undone keeps its text as it
-  is. Restored text has the file's line breaks, as rejecting writes it.
+  is. Restored text has the file's line breaks, as rejecting writes it. A replacement's old text
+  is read as it would be with its own marks rejected too (§3.12).
 - **Review:** the newest text with pending changes in CriticMarkup notation, each followed by its
   id and author in brackets. Language models know CriticMarkup from their training data, so this is
   the view agents read:
@@ -3731,6 +3800,11 @@ The library derives three read-only views of a document. None is ever stored.
   ```text
   We will ship the {++new ++}[k3x9 ada]importer in {~~March~>April~~}[p7qd claude-ada], after the {==security review==}{>>[c8d2 bo] Who signs off on the security review?<<}.{-- The old exporter stays as it is.--}[w2rf bo]
   ```
+
+  A replacement whose old text holds other people's marks (§3.12) is written as a substitution of
+  the old text as it reads with their changes accepted by the new text, and a note names them, so
+  that an agent can decide them by id:
+  `{~~Fast importer ships April.~>## Fast importer ships April.~~}[r2zd ada]{>>[r2zd ada] Its old text holds [k3x9 bo] and [w2rf bo]<<}`.
 
   A format change is named by the operations that rejecting it undoes: its text highlighted and a
   note after it, `{==**newly bold**==}{>>[m2bd ada] Formatted: +bold<<}`. A block's change puts
@@ -3988,6 +4062,9 @@ R users can still get full fidelity: the R package can run the TypeScript export
   them.
 - The placement rules of §3 come with 72 render cases, checked on GitHub, cmark-gfm, markdown-it,
   micromark, commonmark.js and pandoc.
+- The widened replacements of §3.12 are held by `widen-random.test.ts`, `widen-pairs.test.ts` and
+  `payload-marks.test.ts`: every order of decisions of the replacement and of the marks in its
+  payload reads alike, judged against micromark 4.0.2 with GFM.
 - A parser returns the views (§8), the marks as ranges (possibly in several segments), the people
   and threads, and warnings: unknown keys, duplicate ids, markers at a line start, segments whose
   kinds disagree, marks without ledger entries, ledger entries without marks, and threads without

@@ -63,8 +63,9 @@ export function pageClipboard(
   };
 }
 
-/** Whether the selection holds text: what Cut and Copy have to work on. */
-const hasSelection = (state: EditorState) => state.selection.ranges.some((range) => !range.empty);
+/** Why Cut and Copy have nothing to work on: the selection holds no text. */
+const noSelection = (state: EditorState): string | undefined =>
+  state.selection.ranges.some((range) => !range.empty) ? undefined : 'Select some text first.';
 
 /** The commands of the Edit group, which a registry may not hold already: they have no menu. */
 export function editCommands(
@@ -81,8 +82,8 @@ export function editCommands(
     return true;
   };
   return [
-    { id: 'edit.cut', title: 'Cut', run: run('cut'), isEnabled: hasSelection },
-    { id: 'edit.copy', title: 'Copy', run: run('copy'), isEnabled: hasSelection },
+    { id: 'edit.cut', title: 'Cut', run: run('cut'), disabledReason: noSelection },
+    { id: 'edit.copy', title: 'Copy', run: run('copy'), disabledReason: noSelection },
     { id: 'edit.paste', title: 'Paste', run: run('paste') },
   ];
 }

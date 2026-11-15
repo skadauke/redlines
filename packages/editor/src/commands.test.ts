@@ -105,7 +105,9 @@ describe('shortcuts', () => {
   it('does not run a disabled command', () => {
     const editor = mount();
     const run = vi.fn(() => true);
-    editor.commands.register([command({ shortcut: 'Mod-b', run, isEnabled: () => false })]);
+    editor.commands.register([
+      command({ shortcut: 'Mod-b', run, disabledReason: () => 'Not here.' }),
+    ]);
     press(editor, 'Mod-b');
     expect(run).not.toHaveBeenCalled();
     expect(editor.commands.run('format.bold')).toBe(false);
@@ -119,7 +121,7 @@ describe('keys the core binds too', () => {
   const outcomes: Partial<EditorCommand>[] = [
     { run: () => true },
     { run: () => false },
-    { run: () => true, isEnabled: () => false },
+    { run: () => true, disabledReason: () => 'Not here.' },
   ];
 
   it.each(['Mod-i', 'Mod-]', 'Mod-['])('%s belongs to the command, whatever it does', (key) => {
@@ -130,7 +132,7 @@ describe('keys the core binds too', () => {
       caretAt(editor, 5);
 
       expect(press(editor, key).defaultPrevented).toBe(true);
-      expect(run).toHaveBeenCalledTimes(outcome.isEnabled ? 0 : 1);
+      expect(run).toHaveBeenCalledTimes(outcome.disabledReason ? 0 : 1);
       expect(editor.getDoc()).toBe(doc);
       expect(editor.view.state.selection.main).toMatchObject({ anchor: 5, head: 5 });
     }
@@ -264,7 +266,9 @@ describe('the ui state', () => {
     const reports: EditorUiState[] = [];
     const editor = mount({ onUiState: (state) => reports.push(state) });
     editor.commands.register([
-      command({ isEnabled: (state) => state.doc.length > 20 }),
+      command({
+        disabledReason: (state) => (state.doc.length > 20 ? undefined : 'Too short.'),
+      }),
       command({ id: 'always' }),
     ]);
     expect(editor.getUiState().enabledCommands).toEqual(['always']);
@@ -410,7 +414,7 @@ describe('a key that falls through', () => {
         title: 'Fall',
         shortcut: 'Mod-j',
         keyFallsThrough: true,
-        isEnabled: () => enabled,
+        disabledReason: () => (enabled ? undefined : 'Not now.'),
         run: () => {
           ran++;
           return true;
@@ -463,5 +467,59 @@ describe('baseTitle', () => {
     ] as const) {
       expect(baseTitle({ id: 'x', title, run: () => true })).toBe(expected);
     }
+  });
+});
+
+describe('a command that can say why it is disabled', () => {
+  const unlessLong = (state: { doc: { length: number } }) =>
+    state.doc.length > 4 ? 'The document is too long.' : undefined;
+
+  it('is in disabledReasons while it is disabled, and in enabledCommands when it is not', () => {
+    const seen: EditorUiState[] = [];
+    const editor = mount({ doc: 'One.', onUiState: (ui) => seen.push(ui) });
+    editor.commands.register([
+      command({ id: 'x.long', disabledReason: unlessLong }),
+      command({ id: 'x.always' }),
+    ]);
+    expect(editor.getUiState().disabledReasons).toEqual({});
+    expect(editor.getUiState().enabledCommands).toEqual(['x.long', 'x.always']);
+    editor.view.dispatch({ changes: { from: 4, insert: ' Two three.' } });
+    expect(editor.getUiState().disabledReasons).toEqual({ 'x.long': 'The document is too long.' });
+    expect(editor.getUiState().enabledCommands).toEqual(['x.always']);
+    // The host is told when only a reason changed.
+    expect(seen.at(-1)?.disabledReasons).toEqual({ 'x.long': 'The document is too long.' });
+  });
+
+  it('says its reason from its key, and never runs', () => {
+    const notices: string[] = [];
+    const run = vi.fn(() => true);
+    const editor = mount({ doc: 'One two three.', onNotice: (m) => notices.push(m) });
+    editor.commands.register([command({ shortcut: 'Mod-b', run, disabledReason: unlessLong })]);
+    expect(press(editor, 'Mod-b').defaultPrevented).toBe(true);
+    expect(run).not.toHaveBeenCalled();
+    expect(notices).toEqual(['The document is too long.']);
+    // And from a menu or a toolbar button that runs it by id.
+    expect(editor.commands.run('format.bold')).toBe(false);
+    expect(notices).toEqual(['The document is too long.', 'The document is too long.']);
+  });
+
+  it('says nothing from a key that goes on to the core when the command is disabled', () => {
+    const notices: string[] = [];
+    const editor = mount({ doc: 'One two three.', onNotice: (m) => notices.push(m) });
+    editor.commands.register([
+      command({ shortcut: 'Mod-b', keyFallsThrough: true, disabledReason: unlessLong }),
+    ]);
+    press(editor, 'Mod-b');
+    expect(notices).toEqual([]);
+  });
+
+  it('runs a command that has no reason', () => {
+    const notices: string[] = [];
+    const run = vi.fn(() => true);
+    const editor = mount({ doc: 'One.', onNotice: (m) => notices.push(m) });
+    editor.commands.register([command({ shortcut: 'Mod-b', run, disabledReason: unlessLong })]);
+    press(editor, 'Mod-b');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(notices).toEqual([]);
   });
 });

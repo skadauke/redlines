@@ -57,7 +57,7 @@ import {
 } from '@redlines/format';
 import { lineChanges } from '../diff.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
-import { onlyHidden, pastHidden } from './decorations.ts';
+import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
   bodyEnd,
@@ -657,13 +657,28 @@ function untrackedSpec(
   return rewritten(tr, result.changes, result.caret);
 }
 
-/** A selection that reaches past the body, onto the line after the hidden ledger, stops at it. */
+/** Closers of marks and nothing else: what ends the body's text, in front of the hidden ledger. */
+const CLOSERS = /^(?:<!--\/[^\n>]*-->)+$/;
+
+/**
+ * A selection that reaches past the body, onto the line after the hidden ledger, stops at it: in
+ * front of the closers that end the body's text when the end is inside them, which are hidden
+ * together with the ledger after them (#393).
+ */
 function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpec[] {
   const end = bodyEnd(tr.startState.field(parsedField));
   const selection = tr.newSelection;
   if (end === null || selection.ranges.every((r) => r.anchor <= end && r.head <= end)) return tr;
+  let stop = end;
+  // The end of the body inside the closers that end its text: in front of them. (Inside only line
+  // breaks that end it, the end is where a new line goes.)
+  if (!tr.docChanged && tr.isUserEvent('select')) {
+    atomsOf(tr.startState).between(end, end, (from, to) => {
+      if (from < end && end < to && CLOSERS.test(tr.startState.sliceDoc(from, end))) stop = from;
+    });
+  }
   const ranges = selection.ranges.map((r) =>
-    EditorSelection.range(Math.min(r.anchor, end), Math.min(r.head, end)),
+    EditorSelection.range(Math.min(r.anchor, stop), Math.min(r.head, stop)),
   );
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }

@@ -37,10 +37,11 @@ import {
   activeCommands,
   commandTitles,
   createCommandRegistry,
-  enabledCommands,
+  disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
-import { frontMatter } from './blocks/front-matter.ts';
+import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
@@ -52,6 +53,7 @@ import {
   agentStep,
   joinsNewestStep,
   redoDepth,
+  redoDisabledReason,
   redoHasSomething,
   redoName,
   redoSayingWhy,
@@ -59,6 +61,7 @@ import {
   startOver,
   undoDepth,
   undoHistory,
+  undoDisabledReason,
   undoHasSomething,
   undoKeys,
   undoName,
@@ -129,6 +132,7 @@ export {
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
+export { indentReason } from './blocks/tab.ts';
 export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -149,6 +153,12 @@ export {
   moveColsTo,
   canMoveCols,
   canMoveRows,
+  alignReason,
+  deleteColsReason,
+  deleteRowsReason,
+  moveColsReason,
+  moveRowsReason,
+  NOT_IN_TABLE,
   moveRows,
   moveRowsTo,
   rowCount,
@@ -186,6 +196,9 @@ export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/t
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 
+/** A hint of one id, or none. */
+const reasonFor = (id: string, reason: string | undefined) => (reason ? { [id]: reason } : {});
+
 const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) => {
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
@@ -202,6 +215,7 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   sameIds(a.activeCommands, b.activeCommands) &&
   sameIds(a.enabledCommands, b.enabledCommands) &&
   sameTitles(a.commandTitles, b.commandTitles) &&
+  sameTitles(a.disabledReasons, b.disabledReasons) &&
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
@@ -375,9 +389,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
   told = fileText(initial);
-  const commands = createCommandRegistry(() => editor, report);
+  const commands = createCommandRegistry(
+    () => editor,
+    report,
+    (message) => options.onNotice?.(message),
+  );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
+    const reasons = disabledReasons(commands.list(), state);
     return {
       view: state.field(viewModeField),
       markupView: state.facet(markupViewFacet),
@@ -385,7 +404,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
-      enabledCommands: enabledCommands(commands.list(), state),
+      enabledCommands: commands
+        .list()
+        .filter(({ id }) => !(id in reasons))
+        .map(({ id }) => id),
+      disabledReasons: {
+        ...reasons,
+        // Undo and Redo are the host's Edit items, not registered commands; their hints are here.
+        ...reasonFor('edit.undo', undoDisabledReason(state)),
+        ...reasonFor('edit.redo', redoDisabledReason(state)),
+      },
       commandTitles: commandTitles(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
@@ -665,7 +693,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       {
         id: 'image.edit',
         title: 'Edit Image in Preview',
-        isEnabled: (state) => localImageAt(state) !== null,
+        disabledReason: (state) =>
+          localImageAt(state) === null
+            ? 'Select an image in the document to edit it in Preview.'
+            : undefined,
         run: ({ view: { state } }) => {
           const src = localImageAt(state);
           if (src === null) return false;

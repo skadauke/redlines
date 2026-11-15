@@ -209,11 +209,10 @@ export function imageSpot(
       if (atSpot) {
         // The caret is at the end of the links, as a paste leaves it, where the preview draws the
         // image all the same (`freshImageField`).
-        view.dispatch({
-          selection: { anchor: end.to },
-          effects: freshImageEffect.of(end.to),
-          scrollIntoView: true,
-        });
+        view.dispatch({ selection: { anchor: end.to }, scrollIntoView: true });
+        // Where the caret rests: the end of the links, or in front of the hidden closer that ends
+        // the body's text when that is where the end is (#393).
+        view.dispatch({ effects: freshImageEffect.of(view.state.selection.main.head) });
       }
       return true;
     },
