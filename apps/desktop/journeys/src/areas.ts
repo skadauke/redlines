@@ -9,13 +9,28 @@ export type Area = (typeof AREAS)[number];
 
 type Effect = readonly Area[] | 'all';
 
+/** Paths no journey is about: a test of the code, a check page, the Rust, the agents' programs. */
+const NO_JOURNEYS: readonly RegExp[] = [
+  /\.(node\.)?test\.ts$/,
+  /-check\.ts$/,
+  /^apps\/desktop\/(src-tauri|redlines|quicklook|scripts)\//,
+  /^packages\/(cli|agent-process|agent-tools)\//,
+  /^plugins\/agent-/,
+  /^(integrations|docs|website|\.claude-plugin)\//,
+  /^\.github\/(?!workflows\/journeys\.yml)/,
+];
+
+/** Where an area's code is: a change there runs that area's journeys (first match wins). */
 const RULES: readonly (readonly [RegExp, Effect])[] = [
   // Everything draws through these.
   [/^packages\/(format|plugin-api)\//, 'all'],
-  [/^plugins\/themes\//, 'all'],
+  [/^plugins\/(themes|outline|find)\//, 'all'],
   [/^packages\/editor\/src\/[^/]+\.ts$/, 'all'],
   [/^packages\/editor\/src\/(tracked|clipboard|history)\//, 'all'],
-  [/^apps\/desktop\/src\/(main|styles|zoom|text-size|document|settings|journey-hook)[^/]*$/, 'all'],
+  [
+    /^apps\/desktop\/src\/(sample\.md|main\.ts|styles\.css|zoom|text-|document|settings|window-theme|plugins|host|journey-hook)/,
+    'all',
+  ],
   [/^apps\/desktop\/(journeys\/|index\.html|vite\.config\.ts|package\.json)/, 'all'],
   [
     /^(\.github\/workflows\/journeys\.yml|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml)$/,
@@ -31,15 +46,28 @@ const RULES: readonly (readonly [RegExp, Effect])[] = [
   [/^(plugins\/(review|palette)\/|apps\/desktop\/src\/ui\/)/, ['views', 'links']],
 ];
 
+/**
+ * Code the page is built from that no rule names: a change there could change any picture, so it
+ * runs them all rather than none.
+ */
+const DRAWS_THE_PAGE: readonly RegExp[] = [
+  /^packages\/(editor|format|plugin-api)\//,
+  /^plugins\//,
+  /^apps\/desktop\/(src|journeys)\//,
+];
+
 /** The areas to run for the paths changed, or 'all' when one of them touches everything. */
 export function areasFor(paths: readonly string[]): readonly Area[] | 'all' {
   const wanted = new Set<Area>();
   for (const path of paths) {
-    for (const [pattern, effect] of RULES) {
-      if (!pattern.test(path)) continue;
-      if (effect === 'all') return 'all';
-      for (const area of effect) wanted.add(area);
+    if (NO_JOURNEYS.some((pattern) => pattern.test(path))) continue;
+    const rule = RULES.find(([pattern]) => pattern.test(path));
+    if (rule === undefined) {
+      if (DRAWS_THE_PAGE.some((pattern) => pattern.test(path))) return 'all';
+      continue;
     }
+    if (rule[1] === 'all') return 'all';
+    for (const area of rule[1]) wanted.add(area);
   }
   return AREAS.filter((area) => wanted.has(area));
 }

@@ -20,6 +20,8 @@ on:
       - '!docs/**'
       - '!website/**'
       - '!**/*.md'
+      # The sample document is a journeys input (the smoke baseline opens it).
+      - 'apps/desktop/src/sample.md'
   push:
     branches: [main]
     paths:
@@ -27,26 +29,27 @@ on:
       - '!docs/**'
       - '!website/**'
       - '!**/*.md'
+      - 'apps/desktop/src/sample.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to a pull request replaces its run; a run on main, and the sweep, are each left to
+# finish, since their pictures are those of a commit that nothing else will look at.
 concurrency:
-  group: journeys-${{ github.ref }}
-  cancel-in-progress: true
+  group: journeys-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   journeys:
     runs-on: macos-15
     timeout-minutes: 30
-    env:
-      CI: 'true'
     steps:
       - uses: actions/checkout@v7
         with:
           # A pull request's changed paths come from its merge base with the target branch.
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
           persist-credentials: false
 
       # The pnpm version comes from packageManager in package.json.
@@ -70,12 +73,16 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
         run: |
           grep=''
           if [ "$EVENT" = pull_request ]; then
-            grep=$(git diff --name-only "$BASE...$HEAD" |
-              node --experimental-strip-types --disable-warning=ExperimentalWarning \
-                apps/desktop/journeys/scripts/areas.ts)
+            # The list is written first, so that a failed diff fails the step: it must not be read
+            # as "no paths" and run the smoke journeys alone. No rename detection, so that a file
+            # moved out of an area is listed by its old path too.
+            git diff --name-only --no-renames "$BASE...$HEAD" > "$RUNNER_TEMP/changed.txt"
+            grep=$(node --experimental-strip-types --disable-warning=ExperimentalWarning \
+              apps/desktop/journeys/scripts/areas.ts < "$RUNNER_TEMP/changed.txt")
           fi
           echo "grep=$grep" >> "$GITHUB_OUTPUT"
           echo "The journeys: ${grep:-all}"
@@ -102,7 +109,8 @@ jobs:
 
       - name: Collect the screenshots for the look review
         if: ${{ !cancelled() }}
-        run: pnpm --filter @redlines/journeys look || true
+        continue-on-error: true
+        run: pnpm --filter @redlines/journeys look
 
       - name: Upload the screenshots and diffs
         if: ${{ !cancelled() }}

@@ -179,7 +179,7 @@ repo root.
   journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
   look; **pushes to main** run every journey in the light look and the smoke journeys in the other
   three looks (nobody waits on it; a red main goes to the coordinator); **manual dispatch is the
-  sweep**: every journey in all four looks. It ignores the same paths as `ci.yml`. Every run uploads
+  sweep**: every journey in all four looks. It skips docs, the website and Markdown, as `ci.yml` does (but for the sample document). Every run uploads
   `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
   failed comparison) and `look-review` (the pictures in order, with INDEX.md).
 - The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
