@@ -52,7 +52,7 @@ const barWidths = (j: Journey) =>
     })),
   );
 
-test.describe('Review Changes starts at once @review', () => {
+test.describe('Review Changes starts at once @views', () => {
   test('with the caret in the middle, it goes to the first change and marks it', async ({
     start,
   }) => {
