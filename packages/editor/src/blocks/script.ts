@@ -28,6 +28,7 @@ import { expect, it } from 'vitest';
 import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
+import { plainPastes } from '../tracked/clipboard.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
@@ -70,6 +71,7 @@ export type KeyName =
 export type Step =
   | KeyName
   | { type: string }
+  | { paste: string; plain?: boolean }
   | { agent: string }
   | { decide: 'accept' | 'reject' }
   | { tracking: boolean };
@@ -408,6 +410,15 @@ function play(editor: Editor, step: Step): boolean {
   if (typeof step === 'string') return press(view, step);
   if ('type' in step) {
     view.dispatch(view.state.replaceSelection(step.type), { userEvent: 'input.type' });
+  } else if ('paste' in step) {
+    // The whole document parsed first, as for a key: the paste reads its place from the tree.
+    forceParsing(view, view.state.doc.length, 5000);
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', step.paste);
+    const event = new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true });
+    // Paste as Plain Text: the text goes in as text, whatever it is.
+    if (step.plain) plainPastes.add(event);
+    view.contentDOM.dispatchEvent(event);
   } else if ('agent' in step) {
     editor.applyAgentEdit(`${step.agent}\n\n${editor.getDoc()}`, {
       group: 'walk',

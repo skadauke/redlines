@@ -1172,6 +1172,14 @@ middle of a paragraph it splits the paragraph.
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
   break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
 
+A tracked insertion never stands between a list marker and the space after it. A marker with no
+space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
+is a paragraph with a marker's character in it, in a renderer that doesn't know the markers, though the
+newest view is an item. An edit that writes text after a bare marker (the paste of list items,
+#510) therefore writes the space first, as untracked text, and the insertion opens after it, on the
+line before the text as §3.3 has it for a mark that starts a block: `- <!--ins x-->⏎  a<!--/x-->`.
+Accepting gives `- a`; rejecting gives `- `, an empty item, as the bare marker was.
+
 ### 3.3 Marks that start or end a block
 
 A mark that starts at the beginning of a block puts its opener on the line before the block, with

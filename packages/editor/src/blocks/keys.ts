@@ -30,6 +30,8 @@ import {
   planSelectionReturn,
   planShiftReturn,
   returnAtEnd,
+  textEnd,
+  textStart,
 } from './edits.ts';
 import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
@@ -48,6 +50,7 @@ import {
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
+import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
   openBlock,
@@ -212,6 +215,93 @@ export function applyKeyEdit(
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
+  return true;
+}
+
+/**
+ * A paste of list items into a list item (`planListPaste`): one step to undo, a selection in the
+ * item deleted first as typing deletes it. False where the paste is not that, and goes in as text.
+ */
+export function pasteListItems(view: EditorView, text: string): boolean {
+  const pasted = pastedItems(text);
+  if (!pasted) return false;
+  const { state } = view;
+  const { main } = state.selection;
+  if (state.selection.ranges.length > 1) return false;
+  /** Whether the tracked layer would refuse an edit: it is not made, and the paste goes in as text. */
+  const refused = (at: EditorState, edit: KeyEdit) =>
+    at
+      .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
+      .effects.some((effect) => effect.is(refusedEditEffect));
+  if (main.empty) {
+    const bare = bareMarkerAt(state);
+    if (bare !== null) {
+      // The space after the marker first, written as it is, then the paste after it: one step.
+      const space: KeyEdit & { isolateBefore?: boolean } = {
+        changes: [{ from: bare, insert: ' ' }],
+        selection: EditorSelection.single(bare + 1),
+        userEvent: 'input.paste',
+        plain: true,
+        isolateBefore: true,
+      };
+      const after = state.update({
+        changes: space.changes,
+        selection: space.selection,
+        annotations: trackedEditAnnotation.of(true),
+      }).state;
+      const planned = planListPaste(after, pasted);
+      if (!planned || refused(after, planned)) return false;
+      applyKeyEdit(view, space);
+      const edit = planListPaste(view.state, pasted);
+      if (edit) applyKeyEdit(view, { ...edit, userEvent: 'delete.selection', join: true });
+      return true;
+    }
+    const edit = planListPaste(state, pasted);
+    return edit && !refused(state, edit) ? applyKeyEdit(view, edit) : false;
+  }
+  // Over a selection: planned on the text without it first, so that nothing is deleted for a paste
+  // that then goes in as text.
+  // Both ends in the text of an item (a selection over a marker or a checkbox is text's way).
+  const inText = (pos: number) => {
+    const block = blockAt(state, pos);
+    return (
+      block?.kind === 'paragraph' &&
+      block.containers.at(-1)?.kind === 'item' &&
+      pos >= textStart(state, block) &&
+      pos <= Math.max(textEnd(state, block), textStart(state, block))
+    );
+  };
+  if (!inText(main.from) || !inText(main.to)) return false;
+  const deletion: KeyEdit = {
+    changes: [{ from: main.from, to: main.to }],
+    selection: EditorSelection.single(main.from),
+    // Named as the paste is, which the history joins it to.
+    userEvent: 'input.paste',
+  };
+  if (refused(state, deletion)) return false;
+  const without = state.update({ ...deletion, changes: deletion.changes }).state;
+  const planned = planListPaste(without, pasted);
+  if (!planned || refused(without, planned)) return false;
+  const before = state.doc;
+  applyKeyEdit(view, { ...deletion, isolateBefore: true });
+  // Refused: nothing more.
+  if (view.state.doc.eq(before)) return true;
+  const edit = planListPaste(view.state, pasted);
+  // Named as a deletion, which the history joins to the step before it (only typing and deletions
+  // join); the step keeps the name of the first, Paste. The plan was made on the text without the
+  // selection above, and no shape the sweeps try (every selection of the swept lists, Track Changes on and
+  // off) plans differently after the real deletion: a plan that is gone is a bug, which is reported, not a paste to lose.
+  // The text goes in rather than lose the paste.
+  if (!edit) console.error('A list paste that planned before its deletion has no plan after it');
+  const at = view.state.selection.main.head;
+  applyKeyEdit(view, {
+    ...(edit ?? {
+      changes: [{ from: at, insert: text }],
+      selection: EditorSelection.single(at + text.length),
+    }),
+    userEvent: 'delete.selection',
+    join: true,
+  });
   return true;
 }
 
