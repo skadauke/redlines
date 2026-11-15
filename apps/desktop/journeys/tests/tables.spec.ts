@@ -15,20 +15,16 @@ test.describe('tables @tables', () => {
     await j.shot('table-added-plain');
   });
 
-  known(
-    517,
-    'a table added with Track Changes on is drawn, not raw',
-    /the table is drawn/,
-    async ({ start }) => {
-      const j = await start({ doc: 'Intro\n\n', tracking: true, view: 'redlines' });
-      await j.caretAtEnd();
-      await j.paste(TABLE);
-      expect(await j.cmText()).toContain('| A | B |');
-      await j.shot('table-added-tracked');
-      // Today it shows as the Markdown source, with its pipes.
-      await expect(j.page.locator('.rl-tbl'), 'the table is drawn').toHaveCount(1);
-    },
-  );
+  // Fixed by #546 (it was #517: with Track Changes on the table showed as raw Markdown); a journey
+  // kept as its guard.
+  test('a table added with Track Changes on is drawn, not raw', async ({ start }) => {
+    const j = await start({ doc: 'Intro\n\n', tracking: true, view: 'redlines' });
+    await j.caretAtEnd();
+    await j.paste(TABLE);
+    expect(await j.cmText()).toContain('| A | B |');
+    await j.shot('table-added-tracked');
+    await expect(j.page.locator('.rl-tbl'), 'the table is drawn').toHaveCount(1);
+  });
 
   known(
     519,
