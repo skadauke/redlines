@@ -341,7 +341,11 @@ export class Journey {
     await this.settle();
     // CodeMirror draws its caret as an element, which Playwright's own caret hiding doesn't know.
     await this.page.addStyleTag({ content: '.cm-cursorLayer { visibility: hidden !important; }' });
-    await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, options);
+    // A screenshot that has to settle may take longer than the two seconds a person waits.
+    await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, {
+      ...options,
+      timeout: 10_000,
+    });
   }
 }
 
@@ -372,21 +376,42 @@ export const test = base.extend<JourneyOptions & { start: Start }>({
 });
 
 /**
- * A journey that fails today because of an open issue: `known(510, 'pasting a bullet…', body)`.
- * It is a `test.fail`, so the run is green while the bug stands, and goes red when the fix lands
- * ("expected to fail, but passed"): then the lane that fixed it changes `known(510, …)` to
- * `test(…)`, and the journey guards the fix. `JOURNEYS_EVIDENCE=1` runs it as an ordinary test,
- * to show the failure: that is the evidence for the issue.
+ * A journey that fails today because of an open issue:
+ * `known(510, 'pasting a bullet…', /the pasted bullet is its own item/, body)`.
+ *
+ * The body is run, and its failure is the bug: it must fail with `signature` in its message (give
+ * the assertion that shows the bug a message, `expect(x, 'the pasted bullet is its own item')`), so
+ * a typo, a timeout or a page error is a failure of the journey, not "the bug". The run is green
+ * while the bug stands and goes red when the fix lands ("known bug #510 no longer fails"): then the
+ * lane that fixed it changes `known(510, …)` to `test(…)`, and the journey guards the fix.
+ * `JOURNEYS_EVIDENCE=1` runs the body as an ordinary test, to show the failure itself.
  */
 export function known(
   issue: number,
   title: string,
+  signature: RegExp,
   body: (fixtures: { start: Start; page: Page }, info: TestInfo) => Promise<void> | void,
 ): void {
   const name = `${title} (#${issue})`;
   const details = { annotation: { type: 'issue', description: `#${issue}` } };
-  if (process.env['JOURNEYS_EVIDENCE']) test(name, details, body);
-  else test.fail(name, details, body);
+  test(name, details, async ({ start, page }, info) => {
+    if (process.env['JOURNEYS_EVIDENCE'] === '1') return body({ start, page }, info);
+    let failure: unknown;
+    try {
+      await body({ start, page }, info);
+    } catch (error) {
+      failure = error;
+    }
+    if (failure === undefined) {
+      throw new Error(`known bug #${issue} no longer fails: change known(${issue}, …) to test(…)`);
+    }
+    const message = failure instanceof Error ? failure.message : JSON.stringify(failure);
+    if (!signature.test(message)) {
+      throw new Error(
+        `#${issue} failed, but not as the bug does (expected ${String(signature)}):\n${message}`,
+      );
+    }
+  });
 }
 
 /** Opens the page in the state asked for, and waits until it is drawn and still. */

@@ -17,11 +17,13 @@ test.describe('the end of the document @blocks', () => {
       await j.type('x', 'burst');
       await j.shot(`down-after-${kind}`);
       // The new text is on a line of its own, after the block.
-      expect((await j.cmText()).split('\n').at(-1)).toBe('x');
+      expect((await j.cmText()).split('\n').at(-1), 'the text is on a line below the block').toBe(
+        'x',
+      );
     };
     const title = `↓ after a ${kind} at the end reaches a line below it`;
     // A table works; after code and a quote the caret lands on the block's own last line.
     if (kind === 'table') test(title, journey);
-    else known(514, title, journey);
+    else known(514, title, /the text is on a line below the block/, journey);
   }
 });

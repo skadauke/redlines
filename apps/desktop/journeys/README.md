@@ -46,9 +46,12 @@ run leaves the picture it got, the approved one and a diff in `test-results/<jou
 
 ## Journeys for bugs that are still open
 
-A journey that fails today because of an open issue is written as `known(510, 'title', body)`
-(from `src/journey.ts`). It is a `test.fail`: the run stays green while the bug stands, and goes
-red ("expected to fail, but passed") when the fix lands. The lane that fixed it changes
+A journey that fails today because of an open issue is written as
+`known(510, 'title', /the pasted bullet is an item of its own/, body)` (from `src/journey.ts`). The
+body runs, and it must fail with the signature in its message (give the assertion that shows the bug
+a message: `expect(x, 'the pasted bullet is an item of its own')`), so a typo, a timeout or a page
+error fails the journey instead of passing as "the bug". The run stays green while the bug stands and
+goes red ("known bug #510 no longer fails") when the fix lands: the lane that fixed it changes
 `known(510, …)` to `test(…)`, and the journey guards the fix. The failure is the evidence:
 `JOURNEYS_EVIDENCE=1 pnpm journeys tests/lists.spec.ts` runs `known` journeys as ordinary tests and
 shows what fails and where (and the shots show what it looks like).

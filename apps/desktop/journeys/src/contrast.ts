@@ -40,7 +40,7 @@ export function over(top: Rgba, under: Rgba): Rgba {
 function luminance({ r, g, b }: Rgba): number {
   const lin = (v: number) => {
     const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
@@ -74,14 +74,19 @@ export function paintOf(locator: Locator): Promise<Paint> {
 }
 
 /** The contrast of an element's text with what is behind it, in the colours the screen shows. */
-export async function contrastOf(locator: Locator): Promise<number> {
+export async function contrastOf(locator: Locator, pageColor?: Rgba): Promise<number> {
   const paint = await paintOf(locator);
-  const behind = flatten(paint.backgrounds);
-  const text = over(parseColor(paint.color), behind);
+  const behind = flatten(paint.backgrounds, pageColor);
+  // Text at less than full opacity is a blend of its colour and what is behind it.
+  const own = parseColor(paint.color);
+  const text = over({ ...own, a: own.a * paint.opacity }, behind);
   return ratio(text, behind);
 }
 
-/** Whether nothing behind the element shows through its own background (a menu must be opaque). */
+/**
+ * Whether nothing behind the element shows through its own background (a menu must be opaque).
+ * It reads the background colour and `opacity` only: a `backdrop-filter` or an image isn't seen.
+ */
 export async function isOpaque(locator: Locator): Promise<boolean> {
   const paint = await paintOf(locator);
   const own = parseColor(paint.backgrounds[0] ?? 'rgba(0, 0, 0, 0)');

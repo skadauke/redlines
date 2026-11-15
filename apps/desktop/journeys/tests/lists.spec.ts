@@ -37,14 +37,22 @@ test.describe('lists @lists', () => {
     expect(await j.cmText()).toBe('- one\n  - twoabcdef\n  - ghi\n');
   });
 
-  known(510, 'pasting a bullet into a list adds an item', async ({ start }) => {
-    const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
-    await j.caretAfter('two');
-    await j.paste('- pasted');
-    await j.shot('paste-bullet');
-    // Today the paste lands inside the item: "- two- pasted".
-    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['- one', '- two', '- pasted']);
-  });
+  known(
+    510,
+    'pasting a bullet into a list adds an item',
+    /the pasted bullet is an item of its own/,
+    async ({ start }) => {
+      const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
+      await j.caretAfter('two');
+      await j.paste('- pasted');
+      await j.shot('paste-bullet');
+      // Today the paste lands inside the item: "- two- pasted".
+      expect(
+        (await j.cmText()).trimEnd().split('\n'),
+        'the pasted bullet is an item of its own',
+      ).toEqual(['- one', '- two', '- pasted']);
+    },
+  );
 
   // Stephan saw the checklist stay open (#513); in the page it ends, with Track Changes off and
   // on, so this guards it. If it fails in the app and not here, the app's own path differs.

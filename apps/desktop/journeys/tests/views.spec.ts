@@ -8,7 +8,7 @@ import { isOpaque } from '../src/contrast.ts';
  * label (the text before the shortcut).
  */
 async function openEye(j: Journey) {
-  await j.page.getByRole('button', { name: 'View' }).hover();
+  await j.page.getByRole('button', { name: 'View', exact: true }).hover();
   const items = j.page.locator('.rl-menu-item').filter({ visible: true });
   await expect(items.first()).toBeVisible();
   return {
@@ -23,19 +23,26 @@ test.describe('the eye @views', () => {
     const eye = await openEye(j);
     await j.shot('eye-menu');
     for (const label of ['Clean', 'Redlines', 'Raw']) await expect(eye.item(label)).toHaveCount(1);
-    expect(await isOpaque(j.page.locator('.rl-menu-item').first().locator('..'))).toBe(true);
+    expect(await isOpaque(j.page.locator('.rl-menu').filter({ visible: true }))).toBe(true);
   });
 
-  known(499, 'in a file with no changes, Redlines is disabled in the eye', async ({ start }) => {
-    const j = await start({ doc: 'Hello\n', tracking: false });
-    const eye = await openEye(j);
-    // Today Redlines can be chosen in a file with nothing to show.
-    await expect(eye.item('Redlines')).toBeDisabled();
-  });
+  known(
+    499,
+    'in a file with no changes, Redlines is disabled in the eye',
+    /Redlines is disabled/,
+    async ({ start }) => {
+      const j = await start({ doc: 'Hello\n', tracking: false });
+      const eye = await openEye(j);
+      await expect(eye.item('Redlines'), 'the Redlines row is there').toHaveCount(1);
+      // Today Redlines can be chosen in a file with nothing to show.
+      await expect(eye.item('Redlines'), 'Redlines is disabled').toBeDisabled();
+    },
+  );
 
-  known(499, 'the eye has no Simple Look row', async ({ start }) => {
+  known(499, 'the eye has no Simple Look row', /no Simple Look row/, async ({ start }) => {
     const j = await start({ doc: 'Hello\n', tracking: false });
     const eye = await openEye(j);
-    await expect(eye.item('Simple Look')).toHaveCount(0);
+    await expect(eye.item('Clean'), 'the menu is open').toHaveCount(1);
+    await expect(eye.item('Simple Look'), 'no Simple Look row').toHaveCount(0);
   });
 });
