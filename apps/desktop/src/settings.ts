@@ -40,13 +40,13 @@ const MAX_FOLDER_NAME = 100;
 export function imageFolderNameProblem(typed: string): string | null {
   const name = typed.trim();
   if (name === '') return 'A folder needs a name.';
-  if (name.length > MAX_FOLDER_NAME) {
+  // Characters as the person counts them, not the UTF-16 units of a string.
+  if ([...name].length > MAX_FOLDER_NAME) {
     return `A folder’s name can’t be longer than ${MAX_FOLDER_NAME} characters.`;
   }
   const control = (char: string) => char < ' ' || (char >= '\u007f' && char <= '\u009f');
-  const plain =
-    !name.startsWith('.') &&
-    ![...name].some((char) => char === '/' || char === '\\' || control(char));
+  if ([...name].some(control)) return 'A folder’s name can’t have control characters in it.';
+  const plain = !name.startsWith('.') && ![...name].some((char) => char === '/' || char === '\\');
   return plain ? null : 'A folder’s name has no slash and doesn’t start with a dot.';
 }
 

@@ -810,7 +810,7 @@ describe('the panes', () => {
       const { container, update, now } = draw('editor');
       const row = imagesRow(container);
       const field = row.name()!;
-      for (const typed of ['.images', 'a/b', '../images', 'a\\b', 'a\u0085b']) {
+      for (const typed of ['.images', 'a/b', '../images', 'a\\b']) {
         update.mockClear();
         row.type(field, typed);
         expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();

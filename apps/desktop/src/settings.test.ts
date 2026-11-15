@@ -400,11 +400,22 @@ describe('settings', () => {
     expect(imageFolderNameProblem('x'.repeat(101))).toBe(
       'A folder’s name can’t be longer than 100 characters.',
     );
-    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a\u0007b', 'a\u0085b', 'a\u007fb']) {
+    for (const typed of ['.images', 'a/b', '../x', 'a\\b']) {
       expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
         'A folder’s name has no slash and doesn’t start with a dot.',
       );
     }
+    // A control character is not a slash, and the sentence doesn't say it is (#375).
+    for (const typed of ['a\u0007b', 'a\u0085b', 'a\u007fb']) {
+      expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
+        'A folder’s name can’t have control characters in it.',
+      );
+    }
+    // The limit counts characters as the person does: a hundred emoji are a hundred characters.
+    expect(imageFolderNameProblem('😀'.repeat(100))).toBeNull();
+    expect(imageFolderNameProblem('😀'.repeat(101))).toBe(
+      'A folder’s name can’t be longer than 100 characters.',
+    );
     // The same names the settings take.
     for (const typed of [
       'images',

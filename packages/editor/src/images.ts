@@ -15,6 +15,9 @@ import { rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
 /** Why an image doesn't go where the caret is in code, which would show the link as it is. */
 export const IMAGE_IN_CODE = 'An image can’t go inside code.';
 
+/** Why an image doesn't go where it would never be drawn: front matter, HTML, a comment, display math, the inside of a link's address or of another image. */
+export const IMAGE_NOT_DRAWN = 'An image can’t go here: it wouldn’t be drawn.';
+
 /**
  * What is said when the document was replaced while the images were being saved, so that their
  * links have nowhere to go: they stay where they were saved, and the person is told.
@@ -107,12 +110,43 @@ function inCode(state: EditorState, pos: number): boolean {
   return indent > 0 && within(state, pos + indent, 1, blocks);
 }
 
+/** The nodes a link to an image is never drawn inside of. */
+const UNDRAWN = [
+  'FrontMatter',
+  'HTMLBlock',
+  'CommentBlock',
+  'Comment',
+  'HTMLTag',
+  'ProcessingInstruction',
+  'Autolink',
+  'URL',
+  'LinkTitle',
+  'Image',
+];
+
 /**
- * Why the document takes no image in `from`–`to`, or null when it does: in code, or by what the
- * edit would be refused for, asked of the editing rules themselves so that none is repeated here.
+ * Whether a link at `pos` is where none is drawn: strictly inside front matter, an HTML block or
+ * tag, a comment, the address or title of a link or the alt text or source of another image (its
+ * edges are outside it), or inside display math, which the parse doesn't know (`$$` before it an odd
+ * number of times, on its lines and in its own).
+ */
+function undrawn(state: EditorState, pos: number): boolean {
+  if (within(state, pos, -1, UNDRAWN) && within(state, pos, 1, UNDRAWN)) return true;
+  const line = state.doc.lineAt(pos);
+  let opened = (line.text.slice(0, pos - line.from).match(/\$\$/g) ?? []).length;
+  for (let n = line.number - 1; n >= 1; n--) {
+    if (state.doc.line(n).text.trim() === '$$') opened++;
+  }
+  return opened % 2 === 1;
+}
+
+/**
+ * Why the document takes no image in `from`–`to`, or null when it does: in code, where none is
+ * drawn, or by what the edit would be refused for, asked of the editing rules themselves so that none is repeated here.
  */
 function refusal(state: EditorState, from: number, to: number): string | null {
   if (inCode(state, from)) return IMAGE_IN_CODE;
+  if (undrawn(state, from)) return IMAGE_NOT_DRAWN;
   const probe = state.update({
     changes: { from, to, insert: PROBE },
     userEvent: 'input.image',
