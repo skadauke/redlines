@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor } from '@redlines/editor';
+import { createEditor, type Editor, rectOf, touchedRows } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dropBoundary, scrollSpeed } from './drag.ts';
 import { createTables } from './index.ts';
@@ -166,6 +166,41 @@ describe('dragging a grip', () => {
     expect(rows(editor)).toEqual(['11', '21', '31']);
   });
 
+  it('highlights nothing while it drags, and the rows are selected after the drop', () => {
+    const editor = mount();
+    // A selection made before: it is not drawn during the drag either.
+    move(editor, LEFT + 50, rowY(1));
+    fire(grip(editor), 'mousedown', { clientX: 60, clientY: rowY(1) });
+    fire(window, 'mouseup', { clientX: 60, clientY: rowY(1) });
+    expect(rectOf(editor.view.state)).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    drag(editor, 2, TOP + 4 * 40 + 20, false);
+    expect(editor.view.dom.querySelector('.rl-drop-line')).not.toBeNull();
+    expect(rectOf(editor.view.state)).toBeNull();
+    fire(window, 'mouseup', { clientX: 60, clientY: TOP + 4 * 40 + 20 });
+    expect(rows(editor)).toEqual(['11', '31', '21']);
+    expect(touchedRows(editor.view.state)).toMatchObject({ first: 3, last: 3, rectangle: true });
+  });
+
+  it('shows the drop line only where the row would go, never at its own place', () => {
+    const editor = mount();
+    const line = () => editor.view.dom.querySelector<HTMLElement>('.rl-drop-line');
+    // Row 2 (boundaries 2 and 3 are its own place).
+    drag(editor, 2, rowY(2) - 20, false);
+    expect(line()?.hidden).toBe(true);
+    move(editor, 60, rowY(2) + 20);
+    expect(line()?.hidden).toBe(true);
+    move(editor, 60, TOP + 4 * 40);
+    expect(line()?.hidden).toBe(false);
+    expect(line()?.dataset['boundary']).toBe('4');
+    move(editor, 60, TOP + 40);
+    expect(line()?.hidden).toBe(false);
+    expect(line()?.dataset['boundary']).toBe('1');
+    expect(line()?.style.height).toBe('3px');
+    fire(window, 'mouseup', { clientX: 60, clientY: TOP + 40 });
+    expect(rows(editor)).toEqual(['21', '11', '31']);
+  });
+
   it('moves all the rows selected with the one dragged', () => {
     const editor = mount();
     // Select rows 1 to 2 with the grips, then drag one of them to the end.
@@ -228,10 +263,11 @@ describe('dragging a column grip', () => {
 
   it('draws a vertical drop line at the boundary and dims the column, and the line goes with Esc', () => {
     const editor = mount();
-    dragCol(editor, 0, LEFT + 200 + 5, false);
+    dragCol(editor, 0, LEFT + 2 * 200 - 5, false);
     const line = editor.view.dom.querySelector<HTMLElement>('.rl-drop-line');
-    expect(line?.dataset['boundary']).toBe('1');
-    expect(line?.style.width).toBe('2px');
+    expect(line?.dataset['boundary']).toBe('2');
+    expect(line?.hidden).toBe(false);
+    expect(line?.style.width).toBe('3px');
     expect(editor.view.dom.querySelector('.rl-drag-copy')).not.toBeNull();
     expect(editor.view.dom.querySelectorAll('.rl-row-dim').length).toBeGreaterThan(0);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

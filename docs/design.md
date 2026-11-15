@@ -830,12 +830,15 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   insertion adds as many rows as the selection touches, with the caret in the first new cell;
   deletion takes the rows the selection touches and puts the caret in the row that is then there;
   moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
-  the row under the pointer, left of the change bars and inside the window, in a layer over the
-  editor that assistive technology does not see (the menu bar has every command); a press selects
-  the row (⇧ extends) and opens its menu (Insert Above and Below, Delete, Delete Table, Move Up and
-  Down, Clear Contents), Esc closes it and keeps the selection; a drag moves the rows, and the
-  others selected with it, to any boundary, the last included: they dim, a copy follows the
-  pointer, a 2 px line marks the drop, the page scrolls near its edges, Esc cancels. A + shows
+  the row under the pointer, left of the change bars and inside the window (where the margin is
+  too narrow for that, a narrow window or a large text size, it stands at the table's edge), in a
+  layer over the editor that assistive technology does not see (the menu bar has every command); a
+  click selects the row (⇧ extends) when it is released, and a right-click selects it and opens its
+  menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
+  it and keeps the selection; a drag moves the rows, and the others selected with it, to any
+  boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
+  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
 - **Columns, the same.** Insert Column Left and Right (⌥⌘← and ⌥⌘→), Delete Column (⌃⌘⌫) and Move
@@ -843,8 +846,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
   deletes the whole table the caret or the selection is in. A column's grip (⋯) stands above the
-  column in the strip above the table, and never leaves it; a press selects the column (⇧ extends)
-  and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
+  column in the strip above the table, and never leaves it; a click selects the column (⇧ extends)
+  when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
   page's table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the
