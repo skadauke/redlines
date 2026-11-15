@@ -140,6 +140,26 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** A pending change's markers, as docs/format.md §2.1 defines them: `<!--ins k3x9-->`, `<!--/k3x9-->`,
+ * `<!--del k3x9 payload-->` (the payload on one line, any text but `-->`). */
+const ID = '[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}';
+const MARKER = new RegExp(
+  `<!--(?:/${ID}|(?:ins|del|sub|fmt|hl|cmt|split) ${ID}(?: (?:(?!-->).)*)?)-->`,
+  'g',
+);
+
+/**
+ * Whether the image stands alone in its paragraph's line: nothing but space and the markers of a
+ * pending change around it. Track Changes on writes the markers beside an image it adds, which must
+ * not draw it at the left where the same image is centered with it off.
+ */
+function aloneInItsLine(state: EditorState, node: SyntaxNode): boolean {
+  const line = state.doc.lineAt(node.from);
+  if (node.to > line.to) return false;
+  const around = state.sliceDoc(line.from, node.from) + state.sliceDoc(node.to, line.to);
+  return around.replace(MARKER, '').trim() === '';
+}
+
 /** The decoration that draws an `Image` node, or null for one that stays source. */
 export function imageDecoration(state: EditorState, node: SyntaxNode): Decoration | null {
   const marks = node.getChildren('LinkMark');
@@ -155,8 +175,7 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
-  const line = state.doc.lineAt(node.from);
-  const own = line.text.trim() === state.sliceDoc(node.from, node.to) && node.to <= line.to;
+  const own = aloneInItsLine(state, node);
   return Decoration.replace({ widget: new ImageWidget(alt, url, own) });
 }
 
