@@ -26,7 +26,7 @@ test.describe('images @blocks', () => {
         const line = rect(document.querySelector('.rl-image')!.closest('.cm-line'));
         return [img.left + img.width / 2, line.left + line.width / 2];
       });
-      expect(Math.abs(box! - column!), 'it is centered in the column').toBeLessThan(2);
+      expect(Math.abs(box - column), 'it is centered in the column').toBeLessThan(2);
     });
   }
 
