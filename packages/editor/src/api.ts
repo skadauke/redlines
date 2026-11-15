@@ -9,7 +9,7 @@ import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 /**
  * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
- * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
+ * insertions in their author's color without the underline, change bars and comments kept). Simple is no view of its own: a click on a
  * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
  * (`MenuView`) and a switch for the look.
  */
