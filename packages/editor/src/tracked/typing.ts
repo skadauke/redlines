@@ -675,7 +675,7 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
     });
   }
   const ranges = selection.ranges.map((r) =>
-    EditorSelection.range(r.anchor > end ? stop : r.anchor, r.head > end ? stop : r.head),
+    EditorSelection.range(Math.min(r.anchor, stop), Math.min(r.head, stop)),
   );
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }

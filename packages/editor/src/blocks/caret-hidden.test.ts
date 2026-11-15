@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The caret never rests in hidden text, in the shapes that put it there (#393, #461, #608): each a
 // keystroke script held to every invariant of the suite, `hidden-caret` first.
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { invariantProblems, runScript, type Script, scriptRows } from './script.ts';
 
 describe('the caret in front of the closers that end the body (#393)', () => {
@@ -60,5 +60,38 @@ describe('Redo of a tracked deletion (#461)', () => {
       tc: true,
       expect: { caret: '- one‸<del ⏎  - x>' },
     },
+    {
+      // A redo of a replacement at the end of the body stays in the body: the selection doesn't
+      // reach through the hidden ledger.
+      name: '#461: ⌘Z and ⌘Y of typing over a selection at the end of the body',
+      doc: 'Hello [world]',
+      keys: [{ type: 'q' }, 'Mod-z', 'Mod-y'],
+      tc: true,
+      expect: {},
+    },
   ]);
+});
+
+describe('a redo stays in the body (#461)', () => {
+  it('a selection of the replaced text ends before the hidden ledger', () => {
+    const script: Script = {
+      name: 'redo at the end',
+      doc: 'Hello [world]',
+      keys: [{ type: 'q' }, 'Mod-z', 'Mod-y'],
+      tc: true,
+      expect: {},
+    };
+    let reach = Number.POSITIVE_INFINITY;
+    let ledger = 0;
+    runScript(script, {
+      light: true,
+      onStep: (editor, i) => {
+        if (i !== 2) return;
+        const text = editor.view.state.doc.toString();
+        ledger = text.indexOf('<!-- redlines');
+        reach = editor.view.state.selection.main.to;
+      },
+    });
+    expect(reach).toBeLessThanOrEqual(ledger);
+  });
 });

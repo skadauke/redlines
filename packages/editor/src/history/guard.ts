@@ -163,6 +163,7 @@ export const undoKeymap: readonly KeyBinding[] = undoKeys();
 function outOfHiddenText(tr: Transaction): EditorSelection {
   const { selection } = tr.state;
   const atoms = atomsOf(tr.state);
+  const end = bodyEnd(tr.state.field(parsedField));
   const outside = (pos: number, side: -1 | 0 | 1) => {
     let moved = pos;
     atoms.between(pos, pos, (from, to) => {
@@ -170,6 +171,15 @@ function outOfHiddenText(tr: Transaction): EditorSelection {
         moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
       }
     });
+    // Never past the body: onto the ledger that is hidden after it, in front of the closers that
+    // end the body's text when the body's end is inside them (as `selectionInBody` stops a
+    // selection).
+    if (end !== null && moved > end) {
+      moved = end;
+      atoms.between(end, end, (from, to) => {
+        if (from < end && end < to) moved = from;
+      });
+    }
     return moved;
   };
   const next = EditorSelection.create(
