@@ -1,8 +1,7 @@
 // The icon in About Redlines goes through the icon family when it is clicked: the next mark takes
-// the place of the one shown, drawn as a tracked change. The mark shown is struck through with a
-// red line that is drawn across it, and fades out with it; the next mark comes in from below, with
-// a red underline that is drawn across under it and goes, all in about half a second. A person who
-// has asked for less motion gets a plain crossfade. Nothing announces it: the cursor stays an
+// the place of the one shown. The mark shown fades out, and the next mark comes in from below, all
+// in about half a second; no line is drawn across either. A person who has asked for less motion
+// gets a plain crossfade. Nothing announces it: the cursor stays an
 // arrow, and the icon has no label (about.css). The app's Dock icon follows the mark, until the
 // next launch.
 
@@ -73,11 +72,8 @@ export interface CyclerOptions {
 }
 
 /** The milliseconds of each part of the change: it ends about half a second after the click. */
-const STRIKE = { duration: 140 };
 const FADE_OUT = { duration: 200, delay: 100 };
-const COME_IN = { duration: 240, delay: 170 };
-const UNDERLINE = { duration: 200, delay: 210 };
-const UNDERLINE_GOES = { duration: 110, delay: 410 };
+const COME_IN = { duration: 280, delay: 190 };
 const CROSSFADE = { duration: 180 };
 
 /** How far below its place the next mark starts, in CSS pixels. */
@@ -99,12 +95,6 @@ export function createIconCycler(stage: HTMLElement, options: CyclerOptions): Ic
     stage.append(img);
     return img;
   };
-  const line = (className: string): HTMLElement => {
-    const element = document.createElement('div');
-    element.className = className;
-    stage.append(element);
-    return element;
-  };
 
   let mark = options.start;
   let shown = draw(mark);
@@ -124,23 +114,13 @@ export function createIconCycler(stage: HTMLElement, options: CyclerOptions): Ic
     const incoming = draw(mark);
     shown = incoming;
     const animations: Animation[] = [];
-    const lines: HTMLElement[] = [];
     if (options.reducedMotion()) {
       animations.push(
         animate(from, [{ opacity: 1 }, { opacity: 0 }], { ...CROSSFADE, easing: 'linear' }),
         animate(incoming, [{ opacity: 0 }, { opacity: 1 }], { ...CROSSFADE, easing: 'linear' }),
       );
     } else {
-      const strike = line('rl-strike');
-      const underline = line('rl-underline');
-      lines.push(strike, underline);
       animations.push(
-        animate(strike, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], {
-          ...STRIKE,
-          easing: 'ease-out',
-        }),
-        // The line goes with the mark it strikes, not after it, across the new one.
-        animate(strike, [{ opacity: 1 }, { opacity: 0 }], { ...FADE_OUT, easing: 'ease-in' }),
         animate(from, [{ opacity: 1 }, { opacity: 0 }], { ...FADE_OUT, easing: 'ease-in' }),
         animate(
           incoming,
@@ -150,18 +130,6 @@ export function createIconCycler(stage: HTMLElement, options: CyclerOptions): Ic
           ],
           { ...COME_IN, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
         ),
-        animate(
-          underline,
-          [
-            { transform: 'scaleX(0)', opacity: 1 },
-            { transform: 'scaleX(1)', opacity: 1 },
-          ],
-          { ...UNDERLINE, easing: 'ease-out' },
-        ),
-        animate(underline, [{ opacity: 1 }, { opacity: 0 }], {
-          ...UNDERLINE_GOES,
-          easing: 'linear',
-        }),
       );
     }
     const finish = () => {
@@ -169,7 +137,6 @@ export function createIconCycler(stage: HTMLElement, options: CyclerOptions): Ic
       going = null;
       for (const animation of animations) animation.cancel();
       from.remove();
-      for (const element of lines) element.remove();
     };
     going = finish;
     void Promise.all(animations.map((animation) => animation.finished)).then(finish);
