@@ -13,6 +13,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
   accept as acceptChange,
   acceptMarks,
@@ -107,6 +108,7 @@ import {
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
+  trackingStepEffect,
   trackedTyping,
   trackingField,
 } from './tracked/typing.ts';
@@ -198,7 +200,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
-  a.canRedo === b.canRedo;
+  a.canRedo === b.canRedo &&
+  a.canAcceptAll === b.canAcceptAll;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -278,6 +281,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
+    trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
     baseTheme,
     EditorView.lineWrapping,
@@ -305,6 +309,25 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         startState.field(viewModeField) !== state.field(viewModeField) ||
         startState.facet(markupViewFacet) !== markupView;
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
+      // Undo and Redo of a step that stopped Track Changes switch it with the text: the file's
+      // record follows, as for a switch of the person's.
+      if (trackingChanged && update.docChanged && saveTracking) {
+        trackingChosen = state.field(trackingField);
+      }
+      // Every switch says so (design §5.4), also one that Undo or Redo makes with the text; the
+      // step's own message is the host's, which says what was accepted.
+      if (
+        trackingChanged &&
+        update.transactions.some(
+          (tr) =>
+            tr.effects.some((effect) => effect.is(trackingStepEffect)) &&
+            tr.annotation(Transaction.userEvent) !== 'accept',
+        )
+      ) {
+        options.onNotice?.(
+          state.field(trackingField) ? 'Track Changes is on' : 'Track Changes is off',
+        );
+      }
       // A command's state may read the syntax tree, which a background parse brings further along
       // in a transaction that changes nothing else.
       const parsedFurther = syntaxTree(startState) !== syntaxTree(state);
@@ -361,6 +384,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
+      canAcceptAll: changesToAccept(state).length > 0,
     };
   };
   let reported = uiFor(initial);
@@ -559,6 +583,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     accept: (id) => {
       const text = view.state.doc.toString();
       decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+    },
+    acceptAllAndStopTracking: () => {
+      const tr = acceptAndStop(view.state);
+      if (!tr) return false;
+      view.dispatch(tr);
+      if (saveTracking) trackingChosen = false;
+      return true;
     },
     reject: (id) => {
       const text = view.state.doc.toString();

@@ -38,6 +38,11 @@ export interface MenuCommands {
   switchLook(): void;
   toggleSidebar(): void;
   toggleTracking(): void;
+  /**
+   * Accepts the changes in the selection, or with only a caret all of them, and turns Track Changes
+   * off (`Editor.acceptAllAndStopTracking`).
+   */
+  acceptAllAndStopTracking(): void;
   openReview(): void;
   /** Shows resolved comments in the rail, or hides them. */
   toggleResolved(): void;
@@ -74,6 +79,8 @@ export interface MenuState {
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
+  /** The editor's `EditorUiState.canAcceptAll`: a change in the selection, or in the document. */
+  canAcceptAll: boolean;
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
@@ -469,6 +476,11 @@ export function appMenuModel(
           accelerator: 'Shift+CmdOrCtrl+E',
           action: () => commands.toggleTracking(),
           checked: (state) => state.tracking,
+        },
+        {
+          text: 'Accept All Changes and Stop Tracking',
+          action: () => commands.acceptAllAndStopTracking(),
+          enabled: (state) => state.canAcceptAll,
         },
         SEPARATOR,
         { text: 'Review Changes', action: () => commands.openReview(), enabled: hasRedlines },
