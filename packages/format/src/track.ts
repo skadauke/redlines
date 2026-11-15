@@ -460,8 +460,24 @@ function pastMarkers(plan: Plan, position: number): number {
  * none of them starts the new line, where a renderer would read the rest of it as raw HTML
  * (format §3.2). A marker after spaces would start it as well: it gets a line of its own when the
  * break has a blank line (a new block), and otherwise the break is refused. */
-function breakPosition(plan: Plan, position: number, trail: string): number {
+function breakPosition(plan: Plan, position: number, trail: string, insertion = false): number {
   const at = pastMarkers(plan, position);
+  // At the start of a line that goes on a paragraph's text, the split would stand alone there, an
+  // HTML block that ends the paragraph, or the list it is in, which the file reads and the newest
+  // view doesn't (#598: Return at the start of a lazy line that a pending change put there).
+  const lineAt = plan.text.lastIndexOf('\n', at - 1) + 1;
+  if (insertion && lineAt > 0 && /^[ \t>]*$/.test(plan.text.slice(lineAt, at))) {
+    const before = plan.text.slice(plan.text.lastIndexOf('\n', lineAt - 2) + 1, lineAt - 1);
+    if (
+      /[^ \t>]/.test(before) &&
+      plan.markers.some((m) => m.role !== 'ledger' && m.to === lineAt - 1)
+    ) {
+      throw new EditError(
+        'A line break here would leave a change marker at the start of the new line.',
+        'no-legal-placement',
+      );
+    }
+  }
   const marker = plan.markers.find((m) => m.role !== 'ledger' && m.from > at);
   const block = /\n[ \t>]*\r?\n/.test(trail);
   if (!block && marker && /^[ \t]+$/.test(plan.text.slice(at, marker.from))) {
@@ -476,9 +492,9 @@ function breakPosition(plan: Plan, position: number, trail: string): number {
 /** What typing `typing` at `position` writes: part of the author's own insertion, or a new
  * insertion, which splits the insertions and substitutions of other people around it. Breaks
  * with no text are splits alone. */
-function typeAt(plan: Plan, position: number, typing: Typing): Typed {
+function typeAt(plan: Plan, position: number, typing: Typing, insertion = false): Typed {
   if (typing.inner === '') {
-    return { at: breakPosition(plan, position, typing.trail), text: typing.trail };
+    return { at: breakPosition(plan, position, typing.trail, insertion), text: typing.trail };
   }
   let at = position;
   for (let step = 0; step < steps(plan); step++) {
@@ -4238,7 +4254,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   const start = plan.changes.length;
   const createdBefore = plan.created.length;
   if (placed.from === placed.to) {
-    const typedAt = typeAt(plan, placed.from, full);
+    const typedAt = typeAt(plan, placed.from, full, true);
     plan.changes.push({ from: typedAt.at, to: typedAt.at, insert: typedAt.text });
     if (typedAt.later) {
       plan.changes.push({

@@ -352,6 +352,32 @@ export class Journey {
   }
 
   /**
+   * A screenshot with the caret drawn in: the editor's caret is the browser's own, which a
+   * screenshot never holds, so a blue bar stands where the selection's head is, for a look review
+   * of where the caret rests. A selection shows as the browser draws it.
+   */
+  async shotWithCaret(
+    name: string,
+    options: { clip?: { x: number; y: number; width: number; height: number } } = {},
+  ): Promise<string> {
+    await this.page.evaluate(() => {
+      const { view } = window.__redlines!.editor;
+      const { head } = view.state.selection.main;
+      const box = view.coordsAtPos(head);
+      if (!box) return;
+      const bar = document.createElement('div');
+      bar.id = 'journey-caret';
+      bar.style.cssText = `position:fixed;left:${box.left - 1}px;top:${box.top}px;width:2px;height:${box.bottom - box.top}px;background:#0a84ff;z-index:99999;pointer-events:none`;
+      document.body.append(bar);
+    });
+    try {
+      return await this.shot(name, options);
+    } finally {
+      await this.page.evaluate(() => document.getElementById('journey-caret')?.remove());
+    }
+  }
+
+  /**
    * Compares the window with its approved screenshot, `baselines/<spec file>/<name>.png` (with the
    * look in the name: `-dark`, `-200`), and fails when it differs by more than a little (see the
    * config's `toHaveScreenshot`). A failed run writes the image it got and a diff beside the
