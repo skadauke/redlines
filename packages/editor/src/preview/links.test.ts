@@ -2,6 +2,7 @@
 // ⌘-click on a link opens its address through the host, with a hint on hover (design §5.2).
 
 import { forceParsing } from '@codemirror/language';
+import { showTooltip } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { linkDestination, openableAddress } from './links.ts';
@@ -343,6 +344,24 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()?.getAttribute('aria-hidden')).toBe('true');
     mouse(link, 'mouseleave');
     expect(hint()).toBeNull();
+  });
+
+  it('is drawn in the theme’s hint (--rl-tip, white text) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
+    const editor = load(DOC, { openLink: vi.fn() });
+    mouse(linkNamed(editor, 'web link'), 'mousemove', { clientX: 5, clientY: 5 });
+    vi.advanceTimersByTime(400);
+    // The hint is the tooltip's own element, so its rule needs the tooltip's class to win.
+    expect(hint()?.classList.contains('cm-tooltip')).toBe(true);
+    const rules = [...document.querySelectorAll('style')]
+      .map((style) => style.textContent)
+      .join('');
+    const rule = /\.cm-tooltip\.rl-link-hint\s*\{([^}]*)\}/.exec(rules)?.[1] ?? '';
+    expect(rule).toMatch(/background-color:\s*var\(--rl-tip\)/);
+    expect(rule).toMatch(/color:\s*#ffffff/);
+    // A link on the first lines of the page still shows its hint (the title bar's room above).
+    const tooltips = editor.view.state.facet(showTooltip).filter((tip) => tip !== null);
+    expect(tooltips).toHaveLength(1);
+    expect(tooltips[0]?.clip).toBe(false);
   });
 
   it('waits for the pause again on another link, and is not for one that does not open', () => {

@@ -210,6 +210,10 @@ const hintField = StateField.define<Hint | null>({
       return {
         pos: hint.pos,
         above: true,
+        // Not clipped: CodeMirror puts away a tooltip whose anchor is above the editor's box less
+        // the host's scroll margins (the title bar's room), and a link on the first lines of the
+        // page would then show no hint at all (the review notes' cards do the same).
+        clip: false,
         create() {
           const dom = document.createElement('div');
           dom.className = 'rl-link-hint';
@@ -391,7 +395,11 @@ export function linkOpening(options: LinkOpeningOptions): Extension {
 }
 
 const linkTheme = EditorView.baseTheme({
-  '.rl-link-hint': {
+  // The hint is itself the tooltip's element, so CodeMirror's own tooltip look (a light gray
+  // ground and a border) is on it too: `.cm-tooltip.rl-link-hint` is what wins over it. The look
+  // is the title bar's hint (--rl-tip, and the same whites).
+  '.cm-tooltip.rl-link-hint': {
+    border: 'none',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
@@ -412,8 +420,6 @@ const linkTheme = EditorView.baseTheme({
     textOverflow: 'ellipsis',
     color: 'rgb(255 255 255 / 0.62)',
   },
-  // A tooltip of CodeMirror's draws no frame of its own here.
-  '.cm-tooltip:has(> .rl-link-hint)': { border: 'none', backgroundColor: 'transparent' },
   // With the key that opens down, a link that opens is a pointer.
   '.cm-content.rl-link-ready .rl-link': { cursor: 'pointer' },
 });
