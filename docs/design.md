@@ -831,9 +831,10 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Rows Above", "Delete 3 Rows", "Move Row Up", every one a step to undo with its selection back);
   insertion adds as many rows as the selection touches, with the caret in the first new cell;
   deletion takes the rows the selection touches and puts the caret in the row that is then there;
-  moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
-  the row under the pointer, left of the change bars and inside the window (where the margin is
-  too narrow for that, a narrow window or a large text size, it stands at the table's edge), in a
+  moving takes them one place, and they stay selected. A handle shows in the left margin beside
+  the row under the pointer, while the pointer is over the table: a small pill (5 × 16 px) at the
+  table's left edge (its reach, 14 px wide, ends 2 px from it), over the change bars' strip and inside the window, which grows
+  a little (8 × 22 px) when the pointer is over it, to say it can be dragged, in a
   layer over the editor that assistive technology does not see (the menu bar has every command); a
   click selects the row (⇧ extends) when it is released, and a right-click selects it and opens its
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
@@ -847,8 +848,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Column Left and Right (no default key) count the columns the selection touches ("Insert 2 Columns
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
-  deletes the whole table the caret or the selection is in. A column's grip (⋯) stands above the
-  column in the strip above the table, and never leaves it; a click selects the column (⇧ extends)
+  deletes the whole table the caret or the selection is in. A column's handle is the same pill, turned
+  (16 × 5 px, growing to 22 × 8), just above the column at the table's top edge; a click selects the column (⇧ extends)
   when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
@@ -859,6 +860,15 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
   and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows.
+- **Widgets at the table's edges.** With the pointer over the table, three small widgets grow it and
+  select it without a menu, in the same layer as the handles. **Add column** is a strip as tall as
+  the table, 4 px right of it, 20 px wide, with a +, while the pointer is over the rightmost column
+  or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
+  over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
+  as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
+  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
+  has a hint after the title bar's delay.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection

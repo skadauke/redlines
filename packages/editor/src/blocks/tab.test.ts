@@ -551,6 +551,39 @@ describe("an empty item of another person's pending split", () => {
   );
 });
 
+// The caret at the end of an item's text with a block after it stays there (#508): the tracked
+// layer's closer and the line breaks after it make one hidden range, and the caret was taken to
+// its far end, the start of the next block, where the next letters went.
+describe('Tab and Shift-Tab at the end of an item with a block after it', () => {
+  scriptRows(
+    both([
+      {
+        name: 'Tab: the caret stays after the item’s text',
+        doc: '- one⏎- two‸⏎⏎Next',
+        keys: ['Tab'],
+        off: { caret: '- one⏎  - two‸⏎⏎Next' },
+        on: { caret: '- one⏎  - <fmt was=indent=0>⏎    two‸</fmt>⏎⏎Next' },
+      },
+      {
+        name: 'Tab in a numbered list',
+        doc: '1. one⏎2. two⏎3. three‸⏎⏎Next',
+        keys: ['Tab'],
+        off: { caret: '1. one⏎2. two⏎   1. three‸⏎⏎Next' },
+        on: {
+          caret: '1. one⏎2. two⏎   1. <fmt was=indent=0 was=ol=3.\\x20>⏎      three‸</fmt>⏎⏎Next',
+        },
+      },
+      {
+        name: 'Shift-Tab: the caret stays after the item’s text',
+        doc: '- one⏎  - two‸⏎⏎Next',
+        keys: ['Shift-Tab'],
+        off: { caret: '- one⏎- two‸⏎⏎Next' },
+        on: { caret: '- one⏎- <fmt was=indent=2>⏎  two‸</fmt>⏎⏎Next' },
+      },
+    ]),
+  );
+});
+
 describe('the open empty item', () => {
   it('is read as an item at its level holding a character, and left out of the file', () => {
     const parent = document.createElement('div');

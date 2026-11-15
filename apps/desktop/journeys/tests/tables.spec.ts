@@ -293,7 +293,7 @@ test.describe('tables @tables', () => {
       const g = (await grip.boundingBox())!;
       expect(g.x, 'inside the window').toBeGreaterThanOrEqual(4);
       expect(g.x + g.width, 'not over the table').toBeLessThanOrEqual(tbl.x);
-      expect(tbl.x - (g.x + g.width), 'close to the table').toBeLessThanOrEqual(30);
+      expect(tbl.x - (g.x + g.width), 'close to the table').toBeLessThanOrEqual(8);
       // The pointer reaches it from the table, and it hints and opens its menu.
       await grip.hover();
       await expect(j.page.locator('.rl-grip-hint')).toHaveText(/move the row/);
@@ -305,6 +305,169 @@ test.describe('tables @tables', () => {
       expect(m.x, 'the menu is inside the window').toBeGreaterThanOrEqual(0);
       expect(m.x + m.width, 'the menu is inside the window').toBeLessThanOrEqual(width);
       await j.shot(`narrow-${width}-grip-menu`);
+    });
+  }
+
+  // #519, decided 2026-11-15: one handle per row and per column, a small pill in the margin close to
+  // the table's edge; it grows when the pointer is over it; the row's and the column's look alike;
+  // a click selects, a right-click opens the menu.
+  test("the handles are pills close to the table that grow under the pointer, a row's and a column's alike", async ({
+    start,
+  }) => {
+    const j = await start({ doc: `Intro\n\n${MOVE}`, tracking: false, view: 'clean' });
+    await j.settle();
+    const pill = (sel: string) =>
+      j.page.evaluate((s) => {
+        const el = document.querySelector<HTMLElement>(s);
+        if (!el) return null;
+        const style = getComputedStyle(el, '::before');
+        return {
+          width: parseFloat(style.width),
+          height: parseFloat(style.height),
+          fill: style.backgroundColor,
+          border: style.borderTopColor,
+          radius: style.borderTopLeftRadius,
+          box: {
+            right: el.getBoundingClientRect().right,
+            bottom: el.getBoundingClientRect().bottom,
+          },
+        };
+      }, sel);
+    const tbl = (await j.page.locator('.rl-tbl').first().boundingBox())!;
+    await j.hover('3');
+    const row = j.page.locator('.rl-grip').first();
+    const col = j.page.locator('.rl-col-grip').first();
+    await expect(row, 'a row handle shows over the table').toBeVisible();
+    await expect(col, 'a column handle shows over the table').toBeVisible();
+    const rowAt = (await pill('.rl-grip'))!;
+    const colAt = (await pill('.rl-col-grip'))!;
+    // Close to the table's edges, not floating off.
+    expect(
+      tbl.x - rowAt.box.right,
+      "the row handle is at the table's left edge",
+    ).toBeLessThanOrEqual(4);
+    expect(rowAt.box.right).toBeLessThanOrEqual(tbl.x);
+    expect(
+      tbl.y - colAt.box.bottom,
+      "the column handle is at the table's top edge",
+    ).toBeLessThanOrEqual(4);
+    expect(colAt.box.bottom).toBeLessThanOrEqual(tbl.y);
+    // Alike: the same paint and shape, the one turned.
+    expect(colAt.fill).toBe(rowAt.fill);
+    expect(colAt.border).toBe(rowAt.border);
+    expect(colAt.radius).toBe(rowAt.radius);
+    expect([colAt.width, colAt.height]).toEqual([rowAt.height, rowAt.width]);
+    await j.shot('handles-at-rest');
+    // They grow a little under the pointer.
+    await row.hover();
+    await expect
+      .poll(async () => (await pill('.rl-grip'))!.width, { message: 'the row handle grows' })
+      .toBeGreaterThan(rowAt.width);
+    await expect.poll(async () => (await pill('.rl-grip'))!.width).toBe(rowAt.width + 3);
+    const rowGrown = (await pill('.rl-grip'))!;
+    expect(rowGrown.width, 'the row handle grows').toBeGreaterThan(rowAt.width);
+    expect(rowGrown.height).toBeGreaterThan(rowAt.height);
+    expect(rowGrown.width, 'a little').toBeLessThanOrEqual(rowAt.width + 6);
+    await j.shot('row-handle-grown');
+    await j.hover('3');
+    await col.hover();
+    await expect.poll(async () => (await pill('.rl-col-grip'))!.width).toBeGreaterThan(colAt.width);
+    const colGrown = (await pill('.rl-col-grip'))!;
+    expect(colGrown.width, 'the column handle grows').toBeGreaterThan(colAt.width);
+    expect(colGrown.height).toBeGreaterThan(colAt.height);
+    await j.shot('column-handle-grown');
+    // They go when the pointer leaves the table.
+    await j.page.mouse.move(2, 2);
+    await expect(row).toBeHidden();
+    await expect(col).toBeHidden();
+  });
+
+  test('a click on a column handle selects the column, and a right-click opens its menu, with no Move submenu', async ({
+    start,
+  }) => {
+    const j = await start({ doc: `Intro\n\n${MOVE}`, tracking: false, view: 'clean' });
+    await j.settle();
+    await j.hover('1');
+    const col = j.page.locator('.rl-col-grip').first();
+    await col.click();
+    await expect(j.page.locator('.rl-grip-menu'), 'a left-click opens none').toBeHidden();
+    // The column's four cells: the header and three rows.
+    expect(await selected(j.page), 'the click selects the column').toBe(4);
+    await j.shot('column-handle-clicked');
+    await j.hover('2');
+    await col.click({ button: 'right' });
+    const menu = j.page.locator('.rl-grip-menu');
+    await expect(menu, 'a right-click opens the menu').toBeVisible();
+    expect(await isOpaque(menu), 'the menu is opaque').toBe(true);
+    await expect(menu.locator('[aria-haspopup]'), 'no submenu').toHaveCount(0);
+    await j.shot('column-handle-menu');
+  });
+
+  // #622, decided 2026-11-15: Add column (right of the table, over the rightmost column), Add row
+  // (below it, over the bottom row) and a corner widget that selects the table.
+  for (const tracking of [false, true]) {
+    const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
+    const view = tracking ? 'redlines' : 'clean';
+    test(`Add column, Add row and Select table widgets at the table's edges, ${mode}`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: `Intro\n\n${MOVE}`, tracking, view });
+      await j.settle();
+      const box = async (sel: string) => (await j.page.locator(sel).first().boundingBox())!;
+      // A cell of a row by its place (the markers of tracked edits hold digits of their own).
+      const cell = (row: number) =>
+        j.page.locator('.rl-trow:not(.rl-ghost)').nth(row).locator('.rl-tc').first();
+      const addCol = j.page.locator('.rl-edge-col');
+      const addRow = j.page.locator('.rl-edge-row');
+      const corner = j.page.locator('.rl-table-select');
+      const tbl = await box('.rl-tbl');
+      // Over the first column: none of Add column; the corner widget shows with the table's handles.
+      await j.hover('1');
+      await expect(addCol, 'Add column is not shown over the first column').toBeHidden();
+      await expect(corner, 'the corner widget shows over the table').toBeVisible();
+      const c = await box('.rl-table-select');
+      expect(c.x + c.width, 'the corner widget is left of the table').toBeLessThanOrEqual(tbl.x);
+      expect(c.y + c.height, 'and above it').toBeLessThanOrEqual(tbl.y);
+      expect(tbl.x - (c.x + c.width), 'close to the corner').toBeLessThanOrEqual(4);
+      // Over the rightmost column: Add column, just right of the table.
+      await j.hover('2');
+      await expect(addCol, 'Add column is shown over the last column').toBeVisible();
+      const a = await box('.rl-edge-col');
+      expect(a.x, 'just right of the table').toBeGreaterThanOrEqual(tbl.x + tbl.width);
+      expect(a.x - (tbl.x + tbl.width), 'close to the table').toBeLessThanOrEqual(6);
+      expect(a.height, 'as tall as the table').toBeGreaterThan(tbl.height - 4);
+      await j.shot('add-column-widget');
+      // Reached from the table, it keeps showing, and a click adds a column at the end.
+      await addCol.hover();
+      await expect(addCol).toBeVisible();
+      await expect(j.page.locator('.rl-grip-hint')).toHaveText(/Add a column/);
+      await addCol.click();
+      expect(await j.cmText(), 'a column is added at the end').toMatch(/\| A \| B \|[^|\n]*\|/);
+      await expect(j.page.locator('.rl-th .rl-tc[data-col]')).toHaveCount(3);
+      // Over the bottom row: Add row, just below the table.
+      await j.hover(cell(-1));
+      await expect(addRow, 'Add row is shown over the bottom row').toBeVisible();
+      const tbl2 = await box('.rl-tbl');
+      const r = await box('.rl-edge-row');
+      expect(r.y - (tbl2.y + tbl2.height), 'just below the table').toBeLessThanOrEqual(6);
+      expect(r.y).toBeGreaterThanOrEqual(tbl2.y + tbl2.height);
+      await j.shot('add-row-widget');
+      await j.hover(cell(2));
+      await expect(addRow, 'Add row is not shown over a middle row').toBeHidden();
+      await j.hover(cell(-1));
+      const rows = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      await addRow.click();
+      const after = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      expect(after, 'a row is added at the end').toBe(rows + 1);
+      // The corner widget selects the table.
+      await j.hover(cell(1));
+      await corner.click();
+      expect(await selected(j.page), 'the whole table is selected').toBeGreaterThanOrEqual(10);
+      await j.shot('table-selected-by-widget');
+      // With Track Changes on the added row and column are the tracked insertions the Table menu makes.
+      const file = await j.text();
+      if (tracking) expect(file, 'the additions are tracked insertions').toContain('<!--ins ');
+      else expect(file).not.toContain('<!--ins ');
     });
   }
 
