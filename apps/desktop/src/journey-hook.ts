@@ -9,6 +9,8 @@ import type { DocumentController } from './document.ts';
 export interface JourneyHook {
   editor: Editor;
   controller: DocumentController;
+  /** A row of the menu bar by its text, or null: whether it is enabled, and a way to choose it. */
+  menuRow(text: string): { enabled: boolean; run(): boolean } | null;
 }
 
 declare global {
@@ -17,6 +19,10 @@ declare global {
   }
 }
 
-export function exposeForJourneys(editor: Editor, controller: DocumentController): void {
-  window.__redlines = { editor, controller };
+export function exposeForJourneys(
+  editor: Editor,
+  controller: DocumentController,
+  menu: Pick<JourneyHook, 'menuRow'>,
+): void {
+  window.__redlines = { editor, controller, ...menu };
 }

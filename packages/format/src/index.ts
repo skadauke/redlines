@@ -31,6 +31,7 @@ export { addHighlight } from './highlights.ts';
 export {
   accept,
   acceptAll,
+  changesIn,
   acceptMarks,
   canReject,
   isDecidable,
