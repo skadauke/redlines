@@ -2076,6 +2076,29 @@ Return there is the ordinary Return, a new paragraph, and the line stays a parag
 Changes on only Paragraph › Table makes a table. With Track Changes off the rows are written
 as typed.
 
+**A table inserted as a whole** (Paragraph › Table with Track Changes on) is the author's pending
+insertion, with the paragraph breaks around it as splits (§3.4): each of its lines ends with the
+marker of the break after it, and its last line with the closer of the insertion:
+
+```markdown
+One.<!--ins k3x9--><!--split s1aa-->
+
+| Name | Age |<!--split s2bb-->
+| ---- | --- |<!--split s3cc-->
+| Ada  | 36  |<!--/k3x9-->
+
+Two.
+```
+
+A marker of a split or the closer of an insertion that ends a line of a table is no cell of that
+row, in the reader (`blankTrailingMarkers`: the line read with the marker as white space, the
+same length) and in the editor's parse, which draws such a table as the table it becomes once the
+insertion is accepted. A plain reader, micromark among them, counts the marker as one more cell,
+so the file as written is no table to it until the insertion is decided; every decision reads as
+a table or as nothing, as for any pending block. A rule inserted the same way (`---<!--/k3x9-->`)
+is read as a rule. The closer of any other mark that ends a row's line is read the same way, so
+that the text of a cell a mark ends is the text in front of the closer.
+
 **An inserted row** carries a marker at the start of its first cell, followed by one space:
 
 ```markdown

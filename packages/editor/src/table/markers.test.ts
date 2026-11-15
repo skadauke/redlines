@@ -5,7 +5,7 @@
 import { forceParsing, syntaxTree } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
-import { blankTrailingMarkers } from './markers.ts';
+import { blankTrailingMarkers } from '@redlines/format';
 import { tablesOf } from './model.ts';
 
 const open: Editor[] = [];
@@ -65,6 +65,7 @@ describe('the markers that end a line of a table', () => {
     ['the delimiter row', '| a | b |\n| - | - |<!--split s1aa-->\n| 1 | 2 |'],
     ['a body row', '| a | b |\n| - | - |\n| 1 | 2 |<!--split s1aa-->\n| 3 | 4 |'],
     ['every line', '| a | b |<!--split s1aa-->\n| - | - |<!--split s2bb-->\n| 1 | 2 |<!--/s3cc-->'],
+    ['the delimiter row, under a paragraph', 'Intro\n| a | b |\n| - | - |<!--/s1aa-->\n| 1 | 2 |'],
     ['a table with no outer pipes', 'a | b<!--split s1aa-->\n--- | ---<!--split s2bb-->\n1 | 2'],
   ])('a table with a marker ending %s is drawn as a table', (_, table) => {
     for (const view of ['redlines', 'clean'] as const) {

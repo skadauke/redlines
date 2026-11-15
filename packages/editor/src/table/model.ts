@@ -9,8 +9,7 @@
 import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
 import type { SyntaxNode, Tree } from '@lezer/common';
-import { indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
-import { blankTrailingMarkers } from './markers.ts';
+import { blankTrailingMarkers, indentOf, readDelimiterRow, readRowCells } from '@redlines/format';
 
 export type Align = '' | 'left' | 'center' | 'right';
 

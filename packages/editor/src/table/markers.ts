@@ -8,14 +8,11 @@
 // white space, by the parser alone: the document, and every position in the tree, stay as they are.
 // A rule inserted the same way (`---<!--/k3x9-->`) is read as the rule it will be.
 
+import { blankTrailingMarkers } from '@redlines/format';
 import { GFM, type BlockContext, type Line, type MarkdownConfig } from '@lezer/markdown';
 
 /** The markers of an inserted line break or the end of an insertion that end a line. */
 const TRAILING = /(?:<!--(?:split [a-z0-9]{4}|\/[a-z0-9]{4})-->)+(?=[ \t]*$)/;
-
-/** `text` with the markers that end it as spaces: the same length, so the same positions. */
-export const blankTrailingMarkers = (text: string): string =>
-  text.replace(TRAILING, (marker) => ' '.repeat(marker.length));
 
 /**
  * `text` without the markers that end it, and the white space after them. The parser reads a
@@ -72,7 +69,12 @@ export const tableMarkers: MarkdownConfig = {
               const second = (parser as unknown as { rows: unknown }).rows == null;
               line.text = second ? stripTrailingMarkers(text) : blankTrailingMarkers(text);
               try {
-                return next(block, line, withContent(own, blankTrailingMarkers(own.content)));
+                // The header is read from the content on the second line only.
+                return next(
+                  block,
+                  line,
+                  second ? withContent(own, blankTrailingMarkers(own.content)) : own,
+                );
               } finally {
                 line.text = text;
               }
@@ -81,10 +83,13 @@ export const tableMarkers: MarkdownConfig = {
           },
           endLeaf(cx, line, leaf) {
             if (!original.endLeaf) return false;
+            // Only a line with a pipe can be a header, which the original asks about.
+            if (!line.text.includes('|')) return original.endLeaf(cx, line, leaf);
             const text = line.text;
             line.text = blankTrailingMarkers(text);
             const peek = Object.create(cx) as BlockContext;
-            peek.peekLine = () => blankTrailingMarkers(cx.peekLine());
+            // The next line is the delimiter row, if this is a header: read like `nextLine` does.
+            peek.peekLine = () => stripTrailingMarkers(cx.peekLine());
             try {
               return original.endLeaf(peek, line, leaf);
             } finally {
