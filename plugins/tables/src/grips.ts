@@ -411,12 +411,17 @@ class Grips {
     el.setAttribute('aria-label', text);
     el.addEventListener('mouseenter', () => {
       clearTimeout(this.tipTimer);
+      // A drag or an open menu has the pointer's attention.
+      if (this.drag || this.menu) return;
       this.tipTimer = setTimeout(() => {
+        // The grip may have gone since the pointer came (hiding doesn't say mouseleave).
+        if (!el.isConnected) return;
         const base = this.view.dom.getBoundingClientRect();
         const box = el.getBoundingClientRect();
         this.tip.textContent = text;
         this.tip.hidden = false;
-        this.tip.style.left = `${Math.max(4, box.left - base.left)}px`;
+        const room = base.width - this.tip.offsetWidth - 4;
+        this.tip.style.left = `${Math.max(4, Math.min(box.left - base.left, room))}px`;
         this.tip.style.top = `${box.bottom - base.top + 6}px`;
       }, this.tooltipMs);
     });

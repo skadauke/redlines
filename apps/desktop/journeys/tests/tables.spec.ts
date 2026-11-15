@@ -87,17 +87,33 @@ test.describe('tables @tables', () => {
       return {
         header: size(document.querySelector('.rl-th .rl-tc')),
         body: size(document.querySelector('.rl-trow:not(.rl-th) .rl-tc')),
-        divider: getComputedStyle(document.querySelector('.rl-th .rl-tc') as Element)
-          .borderRightWidth,
-        last: getComputedStyle(document.querySelector('.rl-th .rl-tc:last-child') as Element)
-          .borderRightWidth,
+        divider: getComputedStyle(
+          document.querySelectorAll('.rl-th .rl-tc')[1] as Element,
+          '::after',
+        ).borderLeftWidth,
+        first: getComputedStyle(document.querySelector('.rl-th .rl-tc') as Element, '::after')
+          .borderLeftWidth,
       };
     });
     expect(sizes.header, 'the header uses the body size').toBe(sizes.body);
     expect(sizes.divider, 'a line divides the columns').toBe('1px');
-    expect(sizes.last, 'none after the last column').toBe('0px');
+    expect(sizes.first, 'none before the first column').toBe('0px');
     await j.shot('table-look');
     await j.baseline('table-look');
+  });
+
+  test('the column lines leave a table of three columns its widths', async ({ start }) => {
+    const wide = '| Alpha | Extraordinarily | Gamma |\n| - | - | - |\n| one | two | three |\n';
+    const j = await start({ doc: `Intro\n\n${wide}`, tracking: false, view: 'clean' });
+    await j.settle();
+    const overflow = await j.page.evaluate(
+      () =>
+        [...document.querySelectorAll<HTMLElement>('.rl-tc')].filter(
+          (cell) => cell.scrollWidth > cell.clientWidth + 1,
+        ).length,
+    );
+    expect(overflow, 'no cell is narrower than its longest word').toBe(0);
+    await j.shot('table-three-columns');
   });
 
   for (const tracking of [false, true]) {
