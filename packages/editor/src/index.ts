@@ -75,6 +75,8 @@ import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
+import { imageSizeCommands } from './image-commands.ts';
+import { noticeFacet } from './image-size.ts';
 import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
@@ -270,6 +272,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice),
+    noticeFacet.of(options.onNotice),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -655,7 +658,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   queueMicrotask(tellNewPeople);
   const { openImage } = options;
   if (openImage) {
-    // For a host's Image menu: the image under the caret or in the selection.
+    // For a host's Image menu (a host that has one gives `openImage`): the image under the caret or
+    // in the selection, its size and its alignment.
+    commands.register(imageSizeCommands(options.onNotice));
     commands.register([
       {
         id: 'image.edit',
