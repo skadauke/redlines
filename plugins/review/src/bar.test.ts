@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { barClickHandlers, currentChange, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
+import { EditError } from '@redlines/format';
 import { panelPlace } from './bar.ts';
 import { button, file, mount, PEOPLE, press, REFUSAL, thread, unmountAll } from './test-helpers.ts';
 
@@ -670,6 +671,15 @@ describe('where the panel goes', () => {
     expect(at).toEqual({ left: 996, top: 294, width: 272 });
   });
 
+  it('keeps clear of the margin notes: the nearest place along the margin that has none', () => {
+    const change = { left: 200, right: 500, top: 300, bottom: 322 };
+    const notes = [{ top: 280, bottom: 360 }];
+    const at = panelPlace({ change, column: { left: 130, right: 900 }, visible, notes }, size);
+    expect(at.left).toBe(916);
+    // Below the note, or above it, and never over it.
+    expect(at.top >= 366 || at.top + size.height <= 274).toBe(true);
+  });
+
   it('goes below the change where the margin has no room, never over it', () => {
     const change = { left: 40, right: 300, top: 300, bottom: 322 };
     const at = panelPlace(
@@ -837,5 +847,53 @@ describe('the review panel', () => {
     key(editor, 'ArrowRight');
     expect(panelOf(editor).style.left).toBe('400px');
     expect(panelOf(editor).style.top).toBe('400px');
+  });
+
+  it('does not decide a change for every repeat of a held key', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'a', { repeat: true });
+    key(editor, 'a', { repeat: true });
+    expect(editor.getDoc()).toContain('<!--ins k3x9-->');
+    expect(count(editor)).toBe('Change 1 of 3');
+    key(editor, 'a');
+    expect(editor.getDoc()).not.toContain('<!--ins k3x9-->');
+  });
+
+  it('leaves a key that is part of an input method’s composition alone', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'c');
+    const field = panelOf(editor).querySelector('textarea')!;
+    field.value = 'half';
+    press(field, 'Enter', { keyCode: 229 });
+    press(field, 'Escape', { isComposing: true });
+    expect(editor.getDoc()).not.toContain('half');
+    expect(field.value).toBe('half');
+  });
+
+  it('keeps the words of a comment when the decision is refused', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'c');
+    const field = panelOf(editor).querySelector('textarea')!;
+    field.value = 'Keep me';
+    const real = editor.accept.bind(editor);
+    editor.accept = () => {
+      throw new EditError('The ledger can’t be read.', 'unreadable-ledger');
+    };
+    try {
+      button(panelOf(editor), 'Accept').click();
+    } finally {
+      editor.accept = real;
+    }
+    expect(field.value).toBe('Keep me');
+    expect(count(editor)).toBe('Change 1 of 3');
+  });
+
+  it('reads the next change out when it comes up', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    expect(panelOf(editor).querySelector('.rl-rp-body')?.getAttribute('aria-live')).toBe('polite');
   });
 });

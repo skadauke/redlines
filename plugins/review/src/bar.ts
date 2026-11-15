@@ -49,6 +49,11 @@ import {
  * the document: the review leaves nothing selected, and the browser keeps drawing the old selection
  * while the document is out of focus.
  */
+/** Whether a key is part of an input method's composition (Safari ends it before the key). */
+function composing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 function takeFocus(panel: HTMLElement): void {
   panel.focus({ preventScroll: true });
   panel.ownerDocument.getSelection()?.removeAllRanges();
@@ -265,19 +270,20 @@ function decide(
   ctx: ReviewContext,
   how: 'accept' | 'reject',
   line: HTMLElement,
-): void {
+): boolean {
   const groups = suggestionsOf(ctx);
   const current = currentGroup(view.state, changesOf(ctx), groups);
   const change = groups[current]?.[0];
-  if (!change) return;
+  if (!change) return false;
   const ran = attempt(line, () => decideSuggestion(ctx, how, change.id));
-  if (!ran) return;
+  if (!ran) return false;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
   const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
   const next = after
     .map((marks) => marks.map(({ id }) => remaining.get(id)).find((left) => left !== undefined))
     .find((left) => left !== undefined);
   if (next) select(view, ctx, next);
+  return true;
 }
 
 /** A button with an icon alone, explained by a hint on hover: its name and shortcut. */
@@ -318,6 +324,8 @@ export interface PanelSpace {
   change: { left: number; right: number; top: number; bottom: number };
   column: { left: number; right: number };
   visible: { left: number; top: number; right: number; bottom: number };
+  /** The margin notes the panel must not cover, where they are drawn. */
+  notes?: readonly { top: number; bottom: number }[];
 }
 
 /**
@@ -335,12 +343,23 @@ export function panelPlace(
     Math.max(low, Math.min(value, Math.max(low, high)));
   const topLimit = visible.top + PANEL_MARGIN;
   const bottomLimit = visible.bottom - PANEL_MARGIN;
-  // In the margin right of the text, as wide as the margin lets it be.
+  // In the margin right of the text, as wide as the margin lets it be, level with the change; or, where
+  // a note is there, in the nearest place along the margin that no note is in.
   const room = visible.right - PANEL_MARGIN - (column.right + PANEL_GAP);
   if (room >= PANEL_MIN_WIDTH) {
     const width = Math.min(size.width, room);
-    const top = clamp(change.top - 6, topLimit, bottomLimit - size.height);
-    return { left: column.right + PANEL_GAP, top, width };
+    const notes = space.notes ?? [];
+    const wanted = clamp(change.top - 6, topLimit, bottomLimit - size.height);
+    const free = (top: number) =>
+      top >= topLimit &&
+      top + size.height <= bottomLimit &&
+      notes.every((note) => top + size.height + 6 <= note.top || top >= note.bottom + 6);
+    const candidates = [
+      wanted,
+      ...notes.flatMap((note) => [note.bottom + 8, note.top - size.height - 8]),
+    ].toSorted((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted));
+    const top = candidates.find(free);
+    if (top !== undefined) return { left: column.right + PANEL_GAP, top, width };
   }
   const width = Math.min(size.width, visible.right - visible.left - 2 * PANEL_MARGIN);
   const left = clamp(
@@ -417,6 +436,8 @@ class Panel {
       iconButton('close', 'Close', 'Esc', () => this.close()),
     );
     const body = element('div', 'rl-rp-body');
+    // What the next change is, who made it and what it did, is read out when it comes up.
+    body.setAttribute('aria-live', 'polite');
     const controls: Controls = {
       count,
       body,
@@ -476,12 +497,12 @@ class Panel {
     const { controls, panel } = this;
     if (!controls || !panel) return;
     if (event.target === controls.field) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !composing(event)) {
         event.preventDefault();
         event.stopPropagation();
         this.closeForm();
         takeFocus(panel);
-      } else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      } else if (event.key === 'Enter' && !event.shiftKey && !composing(event)) {
         event.preventDefault();
         this.comment();
       }
@@ -492,18 +513,27 @@ class Panel {
       this.close();
       return;
     }
-    if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || composing(event)) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const target =
       { a: controls.accept, r: controls.reject, c: controls.comment }[key] ??
       (key === 'ArrowRight' ? controls.next : key === 'ArrowLeft' ? controls.previous : null);
     if (!target || target.disabled) return;
+    // A key held down decides one change, not the rest of the document.
+    if (
+      event.repeat &&
+      (target === controls.accept || target === controls.reject || target === controls.comment)
+    ) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     target.click();
   }
 
   private decide(how: 'accept' | 'reject'): void {
-    this.closeForm();
+    // The comment being written goes only when the decision is made and the panel moves on (a
+    // refused decision leaves the change, and the words, where they are).
     if (this.error) decide(this.view, this.ctx, how, this.error);
     if (this.panel) takeFocus(this.panel);
   }
@@ -641,8 +671,13 @@ class Panel {
                 bottom: Math.max(a.bottom, z.bottom),
               }
             : null;
+        const notes = [...view.dom.querySelectorAll('.rl-rail .rl-note')].map((note) => {
+          const r = note.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom };
+        });
         return {
           visible,
+          notes,
           column: text,
           change,
           width: panel.offsetWidth || PANEL_WIDTH,
@@ -650,8 +685,12 @@ class Panel {
           win: { width: win.innerWidth, height: win.innerHeight },
         };
       },
-      write: ({ visible, column, change, width, height, win }) => {
+      write: ({ visible, notes, column, change, width, height, win }) => {
         if (!this.panel) return;
+        // An editor scrolled out of the page takes its panel with it.
+        const gone = visible.right <= visible.left || visible.bottom <= visible.top;
+        this.panel.style.visibility = gone ? 'hidden' : '';
+        if (gone) return;
         let at: { left: number; top: number; width?: number } | null = this.dragged;
         if (!at) {
           // A change off the screen leaves the panel where it is, kept on the screen.
@@ -665,6 +704,7 @@ class Panel {
             },
             column,
             visible,
+            notes,
           };
           at = panelPlace(space, { width: PANEL_WIDTH, height });
           if (off && change) {
