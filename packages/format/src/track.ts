@@ -1138,6 +1138,8 @@ function spacesBefore(plan: Plan, position: number): { spaces: number; together:
 
 /** Why two spaces at a line's end are refused when the next line starts with something that the
  * change can't take in: it would have to go on past the line break (format §3.1, 6). */
+const HARD_BREAK_SYNTAX =
+  'Two spaces make a hard break, and the next line takes no marker (a link definition, for one). Type the spaces somewhere else.';
 const HARD_BREAK_NEXT_LINE =
   "Two spaces make a hard break, and another person's change starts the next line. Decide it first.";
 
@@ -1756,7 +1758,7 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
     blank = true;
   }
   if (line >= limit) return undefined;
-  const end = lineEnd(text, line);
+  let end = lineEnd(text, line);
   const lineText = text.slice(line, end);
   const lead = prefixLength(lineText);
   // The author's own markers at the start of the text go into the change, which may rewrite them;
@@ -1767,6 +1769,7 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
     if (!marker?.mark || marker.mark.entry.by !== plan.ctx.author.handle) return undefined;
     start = marker.to;
   }
+  end = lineEnd(text, start);
   // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
   // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
   const rest = text.slice(start, end);
@@ -1897,6 +1900,14 @@ function endOfBody(plan: Plan, at: number): { end: number; bring: boolean } | un
  * starts what follows (named, as `backslashBeforeAt` names it), or the next line takes no closer.
  */
 function noWordReason(plan: Plan, at: number): string {
+  const found = otherMarkerAhead(plan, at);
+  return found
+    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
+    : BACKSLASH_BEFORE_SYNTAX;
+}
+
+/** Another person's marker that starts the text at `at` or the first line with text after it. */
+function otherMarkerAhead(plan: Plan, at: number): MarkerRange | undefined {
   const { text, markers } = plan;
   const starts = (position: number) =>
     markers.find(
@@ -1909,9 +1920,7 @@ function noWordReason(plan: Plan, at: number): string {
     if (lead < lineEnd(text, line)) break;
     line = nextLineStart(text, line);
   }
-  return found
-    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
-    : BACKSLASH_BEFORE_SYNTAX;
+  return found;
 }
 
 /**
@@ -2516,7 +2525,9 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         // Among or behind the trailing spaces of a hard break: the change goes on past the line
         // break, to the end of the first word of the next line.
         const ahead = nextWordEnd(plan, nextLineStart(text, to));
-        if (ahead === undefined) refuse(HARD_BREAK_NEXT_LINE);
+        if (ahead === undefined) {
+          refuse(otherMarkerAhead(plan, to) ? HARD_BREAK_NEXT_LINE : HARD_BREAK_SYNTAX);
+        }
         grow(from, ahead ?? to);
       } else if (close.kind === 'refuse') refuse(close.reason + tookBackslash);
       else if (close.kind === 'construct') grow(close.from, close.to);

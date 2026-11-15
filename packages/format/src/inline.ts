@@ -3,6 +3,7 @@
 // at. This is not a Markdown parser: it finds links, images, autolinks, entities, tags, escapes and
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
+import { HTML_STARTS } from './block-read.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
@@ -658,15 +659,31 @@ export function inspectPlace(
   const spaces = / {2,}$/.exec(full);
   // Spaces are a hard break only after text: a line that is blank (or only a quote's `>`) has none.
   const hardBreak = around.before === undefined || /[^ \t>]/.test(full.trimEnd());
+  // A line of a table under the paragraph: the model ends the paragraph there, but without a
+  // delimiter row under it a table row is text of it, and the spaces end its line.
+  const [row = '', under = ''] = text.slice(range.to + 1).split('\n', 2);
+  const loneRow =
+    newline === -1 &&
+    range.to < text.length &&
+    /^\|/.test(row.slice(prefixLength(row)).trimStart()) &&
+    !DELIMITER_ROW.test(under);
   // An opener in front of text typed there, which starts with spaces that the line's own end
   // continues (`around.after` is that text and what follows it): the spaces before it and the ones
   // typed are one run, and the opener stands among them.
+  // A comment or a tag on the next line ends the paragraph: the spaces are no hard break.
+  const next = v.slice(newline + 1).split('\n', 1)[0] ?? '';
+  const ends =
+    newline !== -1 && HTML_STARTS.some(([start]) => start.test(next.slice(prefixLength(next))));
   const typedRun =
     around.before === undefined &&
     / $/.test(headLine) &&
     /^ +\r?\n/.test(around.after ?? '') &&
     /[^ \t>]/.test(headLine.trimEnd());
-  if (typedRun || (spaces && hardBreak && headLine.length > spaces.index && newline !== -1)) {
+  if (
+    !ends &&
+    (typedRun ||
+      (spaces && hardBreak && headLine.length > spaces.index && (newline !== -1 || loneRow)))
+  ) {
     return {
       kind: 'refuse',
       reason: 'A marker can not go between a hard break and the line end.',

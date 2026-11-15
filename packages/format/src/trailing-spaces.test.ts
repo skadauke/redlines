@@ -236,4 +236,49 @@ describe('two spaces typed at the end of a line (#603)', () => {
     expect(newestView(after).text.trim()).toBe('<div>abc  \ndef</div>');
     expectEveryOrderAlike('html block', after);
   });
+
+  describe('the next line is a block of its own, or takes no marker', () => {
+    // A line that ends the paragraph: the spaces are no hard break, and a plain insertion is sound.
+    const ends: [string, string][] = [
+      ['a heading', 'abc\n# H'],
+      ['a fence', 'abc\n```\ncode\n```'],
+      ['a rule', 'abc\n***'],
+      ['a bullet', 'abc\n- x'],
+    ];
+    for (const [label, body] of ends) {
+      it(`writes the spaces as they are in front of ${label}`, () => {
+        const text = file(body, {});
+        const after = typedAt(text, 3, '  ');
+        expect(bodyOf(after).trim()).toBe(
+          `abc<!--ins fpxh-->  <!--/fpxh-->\n${body.split('\n').slice(1).join('\n')}`,
+        );
+        expectEveryOrderAlike(label, after);
+      });
+    }
+
+    it('says what is on the next line where it is a link definition, which takes no marker', () => {
+      const text = file('abc\n[x]: /u', {});
+      expect(() => typedAt(text, 3, '  ')).toThrow(
+        'Two spaces make a hard break, and the next line takes no marker (a link definition, for one). Type the spaces somewhere else.',
+      );
+    });
+
+    it('says what is on the next line where it is a table row with no delimiter row', () => {
+      const text = file('abc\n| a | b |', {});
+      expect(() => typedAt(text, 3, '  ')).toThrow(/the next line takes no marker/);
+    });
+
+    it('ends the paragraph at a table with its delimiter row, and writes the spaces as they are', () => {
+      const text = file('abc\n| a | b |\n|---|---|', {});
+      const after = typedAt(text, 3, '  ');
+      expect(bodyOf(after).trim()).toBe('abc<!--ins fpxh-->  <!--/fpxh-->\n| a | b |\n|---|---|');
+    });
+
+    it('writes the same as before for a multi-line deletion of the author starting the line', () => {
+      const text = file('abc\n<!--del c3c3 de\n-->hi', { c3c3: 'ada' });
+      const after = typedAt(text, 3, '  ');
+      expect(bodyOf(after).trim()).toBe('abc<!--ins fpxh-->  <!--/fpxh-->\n<!--del c3c3 de\n-->hi');
+      expectSound('a deletion that starts the line', text, after);
+    });
+  });
 });
