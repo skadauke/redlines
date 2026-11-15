@@ -1149,6 +1149,7 @@ describe('ui state', () => {
       redo: null,
       canUndo: false,
       canRedo: false,
+      canAcceptAll: false,
     });
   });
 

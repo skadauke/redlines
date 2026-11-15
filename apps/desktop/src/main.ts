@@ -24,7 +24,7 @@ import {
   type EditorUiState,
   type ImageSpot,
 } from '@redlines/editor';
-import { newestView } from '@redlines/format';
+import { EditError, newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
 import { createPalette, pageClipboard } from '@redlines/palette';
@@ -778,6 +778,18 @@ const toggleTracking = () => {
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
 
+/** Review ▸ Accept All Changes and Stop Tracking: the selection's changes, or all, then Track Changes off. */
+const acceptAllAndStopTracking = () => {
+  try {
+    if (!editor.acceptAllAndStopTracking()) return;
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+    return notice.flash(error.message);
+  }
+  controller.dismissNotice(TRACKING_FOR_EVERYONE);
+  notice.flash('Changes accepted. Track Changes is off');
+};
+
 /**
  * Saves a change to the settings. Each window keeps its own file sidebar and its own text size,
  * whatever another saved: what is stored for them is only what a new window starts with.
@@ -938,6 +950,7 @@ const commands: MenuCommands = {
   switchLook: () => editor.switchLook(),
   toggleSidebar,
   toggleTracking,
+  acceptAllAndStopTracking,
   openReview,
   toggleResolved,
   undo: () => undoOrRedo(false),
@@ -1038,6 +1051,7 @@ function render(): void {
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
+    canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
     zoom: zoom?.level() ?? null,
@@ -1178,7 +1192,25 @@ if (isTauri) {
   await controller.open('sample.md');
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
-  if (import.meta.env.DEV) exposeForJourneys(editor, controller);
+  if (import.meta.env.DEV) {
+    exposeForJourneys(editor, controller, {
+      // The menu bar is the app's, and a page has none: a journey chooses a row through this, which
+      // runs it only while the menu would have it enabled.
+      menuRow: (text) => {
+        const rows = menuModel.menus.flatMap((menu) => menu.rows);
+        const row = rows.find((r) => 'action' in r && r.text === text);
+        if (!row || !('action' in row) || !menuState) return null;
+        const enabled = !row.disabled && (row.enabled?.(menuState) ?? true);
+        return {
+          enabled,
+          run: () => {
+            if (enabled) row.action();
+            return enabled;
+          },
+        };
+      },
+    });
+  }
 }
 
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do

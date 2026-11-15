@@ -28,6 +28,7 @@ function commands() {
     switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
+    acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
@@ -67,6 +68,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   view: 'clean',
   tracking: false,
   hasRedlines: false,
+  canAcceptAll: false,
   sidebarOpen: false,
   showResolved: false,
   zoom: 1,
@@ -227,6 +229,7 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Review')).toEqual([
       ['Track Changes', 'Shift+CmdOrCtrl+E'],
+      ['Accept All Changes and Stop Tracking', undefined],
       '---',
       ['Review Changes', undefined],
       ['Next Change', 'Alt+CmdOrCtrl+]'],
@@ -301,6 +304,8 @@ describe('the menu model', () => {
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     click('Review', 'Track Changes');
     expect(c.toggleTracking).toHaveBeenCalledOnce();
+    click('Review', 'Accept All Changes and Stop Tracking');
+    expect(c.acceptAllAndStopTracking).toHaveBeenCalledOnce();
     click('Review', 'Review Changes');
     expect(c.openReview).toHaveBeenCalledOnce();
     click('Review', 'Next Change');
@@ -336,6 +341,12 @@ describe('the menu model', () => {
     expect(resolved.checked?.(state({ showResolved: false }))).toBe(false);
     // Any document with a rail can show them.
     expect(resolved.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
+
+    // Accept All Changes and Stop Tracking waits for a change to accept, in the selection or the
+    // document: the editor says (`canAcceptAll`), and no refusal stands in for it.
+    const accept = actionRow(model, 'Review', 'Accept All Changes and Stop Tracking');
+    expect(accept.enabled?.(state({ canAcceptAll: false }))).toBe(false);
+    expect(accept.enabled?.(state({ canAcceptAll: true }))).toBe(true);
 
     const next = actionRow(model, 'Review', 'Next Change');
     expect(next.enabled?.(state({ hasRedlines: false }))).toBe(false);
