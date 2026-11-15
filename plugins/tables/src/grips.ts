@@ -173,6 +173,13 @@ export function plusLeft(tableLeft: number, editorLeft: number): number {
   return Math.max(4, tableLeft - GRIP_GAP - 18) - editorLeft;
 }
 
+/** Whether the pointer is over the table's corner square, which a + at the first boundary would cover. */
+function inCorner(drawn: { left: number; top: number }, x: number, y: number): boolean {
+  const left = drawn.left - GRIP_GAP - CORNER_SIZE;
+  const top = drawn.top - GRIP_GAP - CORNER_SIZE;
+  return x >= left && x <= left + CORNER_SIZE && y >= top && y <= top + CORNER_SIZE;
+}
+
 /** How far above the table a column handle's reach begins. */
 export const colGripTop = (tableTop: number): number => tableTop - GRIP_GAP - GRIP_REACH;
 
@@ -435,7 +442,9 @@ class Grips {
     // A boundary near the pointer, in the strip: a + there.
     for (const drawn of tables) {
       if (x > drawn.left + 12 || x < viewLeft) continue;
-      const index = plusBoundary(y, boundariesOf(drawn.rects));
+      let index = plusBoundary(y, boundariesOf(drawn.rects));
+      // Over the corner square the + at the first boundary stands aside: a click is its.
+      if (index === 0 && inCorner(drawn, x, y)) index = null;
       if (index !== null) {
         this.showPlus(drawn, index);
         this.showGrip(null);
@@ -463,7 +472,8 @@ class Grips {
       const over = y >= drawn.top - COL_STRIP && y <= drawn.bottom;
       if (!over || x < drawn.left || x > drawn.right) continue;
       const edges = colBoundariesOf(drawn.cols);
-      const boundary = inStrip ? plusBoundary(x, edges) : null;
+      let boundary = inStrip ? plusBoundary(x, edges) : null;
+      if (boundary === 0 && inCorner(drawn, x, y)) boundary = null;
       if (boundary !== null) {
         this.showColPlus(drawn, boundary);
         this.colGrip?.remove();
@@ -494,14 +504,24 @@ class Grips {
       const inColumns = x >= drawn.left && x <= drawn.right;
       const inRows = y >= drawn.top && y <= drawn.bottom;
       const col = !!lastCol && inRows && x >= lastCol.left && x <= drawn.right + EDGE_REACH;
-      const row = !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
+      // Not where the next table's own strip above it is: Add row would cover its handles.
+      const crowded = [...this.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')].some(
+        (el) => {
+          const top = el.getBoundingClientRect().top;
+          return top > drawn.bottom && top - COL_STRIP < drawn.bottom + EDGE_REACH;
+        },
+      );
+      const row =
+        !crowded && !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
       const corner =
         x >= drawn.left - 24 && x <= drawn.right && y >= drawn.top - COL_STRIP && y <= drawn.bottom;
       if (!col && !row && !corner) continue;
       this.edgeOf = drawn;
       this.showEdge('addCol', col);
       this.showEdge('addRow', row);
-      this.showEdge('selectAll', corner && !this.plus && !this.colPlus);
+      // The + at a table's first boundary stands where the square is; the others don't.
+      const covered = this.boundary?.index === 0 || this.colBoundary?.index === 0;
+      this.showEdge('selectAll', corner && !covered);
       return;
     }
     this.hideEdges();
@@ -536,7 +556,8 @@ class Grips {
       }
       el.addEventListener('mousedown', (event) => {
         event.preventDefault();
-        if (event.button !== 0) return;
+        // A Control-click is a right-click on a Mac: no insertion.
+        if (event.button !== 0 || event.ctrlKey) return;
         const at = this.edgeOf;
         if (!at) return;
         const table = tablesOf(this.view.state).find((t) => t.id === at.table.id) ?? at.table;
