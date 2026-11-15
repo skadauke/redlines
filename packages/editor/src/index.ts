@@ -75,7 +75,7 @@ import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
-import { imageResolver, refreshImagesEffect } from './preview/image.ts';
+import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -283,6 +283,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.openImage ? imageOpening(options.openImage) : [],
     undoHistory(),
     trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
@@ -652,6 +653,23 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
+  const { openImage } = options;
+  if (openImage) {
+    // For a host's Image menu: the image under the caret or in the selection.
+    commands.register([
+      {
+        id: 'image.edit',
+        title: 'Edit Image in Preview',
+        isEnabled: (state) => localImageAt(state) !== null,
+        run: ({ view: { state } }) => {
+          const src = localImageAt(state);
+          if (src === null) return false;
+          openImage(src);
+          return true;
+        },
+      },
+    ]);
+  }
   return editor;
 }
 

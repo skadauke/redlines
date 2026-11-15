@@ -42,7 +42,8 @@ import { createDocumentData, createShelf, memoryStorage } from './document-data.
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
-import { localImageUrl } from './images.ts';
+import { createImageWatch } from './image-watch.ts';
+import { localImagePath, localImageUrl } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
@@ -194,6 +195,38 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The images the preview has drawn, which are looked at again when the window regains the focus. */
+const imageWatch = createImageWatch((paths) => host.imageStamps(paths));
+
+/**
+ * Opens the local image `src`, as the document writes it, in Preview. The app says no to any file
+ * that isn't an image inside the project folder (`open_default`), and its line is shown.
+ */
+function openImageInPreview(src: string): void {
+  const document = imageDocument;
+  const root = imageFolder;
+  const path = document && root !== null ? localImagePath(src, document, root) : null;
+  if (path === null || root === null) {
+    notice.flash('Couldn’t open the image.');
+    return;
+  }
+  host.openDefault(path, root).catch((error: unknown) => {
+    notice.flash(error instanceof Error ? error.message : String(error));
+  });
+}
+
+/**
+ * The person comes back from Preview, where an image was saved: the images whose files changed are
+ * drawn again from the file, the others as they are, and the document's text is not touched.
+ */
+async function refreshSavedImages(): Promise<void> {
+  // Drawn again first, so that the images the text shows now are the ones looked at.
+  imageWatch.begin();
+  editor.refreshImages();
+  const changed = await imageWatch.check();
+  if (changed.length) editor.refreshImages();
+}
+
 /** The system's beep, as the Mac makes it for a key or an item that does nothing. */
 function beep(): void {
   if (isTauri) void invoke('beep').catch(() => {});
@@ -247,8 +280,15 @@ const editor = createEditor(element('#editor'), {
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
-    return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
+    // The URL of an image saved again carries a version, so that it loads from the file again.
+    return localImageUrl(src, path, imageFolder, (file) => {
+      const url = host.imageUrl(file);
+      return url === null ? null : imageWatch.url(file, url);
+    });
   },
+  // A double-click on a local image opens its file in Preview, which the app does, and a browser
+  // tab has no such app (the development page has a stand-in, for the journeys).
+  openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
   typing: typingOf(settings),
   // A word ended with Return gets the system's correction, which only the app can ask for; a plain
   // browser has none. Asked only while Preferences' spell check is on (the editor sees to that).
@@ -259,6 +299,8 @@ const editor = createEditor(element('#editor'), {
   markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
+    // Images the text shows now are watched once the typing pauses.
+    imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
     runsSawChange();
   },
@@ -586,6 +628,7 @@ const projectOf = (path: string) => host.projectRoot(path);
  */
 async function showImages(path: string | null): Promise<void> {
   imageFolder = null;
+  imageWatch.forget();
   editor.refreshImages();
   if (path === null) return;
   try {
@@ -594,6 +637,7 @@ async function showImages(path: string | null): Promise<void> {
     if (!allowed || doc?.path !== path) return;
     imageFolder = root.tooBroad ? dirname(path) : root.folder;
     editor.refreshImages();
+    imageWatch.settle();
   } catch (error) {
     console.warn('Could not allow the images of the document', error);
   }
@@ -1300,6 +1344,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
 window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();
+  void refreshSavedImages();
 });
 // Undo and Redo are the document's or a field's, by where the keys are: the menu follows them,
 // also when they go to another window, Preferences.

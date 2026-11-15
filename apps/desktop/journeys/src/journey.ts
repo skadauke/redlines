@@ -65,6 +65,7 @@ interface Hook {
       dispatch(spec: unknown): void;
     };
     getDoc(): string;
+    setDoc(doc: string): void;
     setTracking(on: boolean, options?: { inFile?: boolean }): unknown;
     setViewMode(mode: string): void;
     getUiState(): Record<string, unknown>;

@@ -1051,6 +1051,20 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
   pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
   browser, is left to the HTML.
+- **Editing an image in Preview.** A double-click on an image opens its file in Preview (and the
+  command Edit Image in Preview, `image.edit`, does the same for the image under the caret or in
+  the selection, which the toolbar's Image menu offers). The editor only hands the host the
+  image's path as the document writes it (`EditorOptions.openImage`); the app resolves it from the
+  document, and opens it only if it is an image inside the project folder the sidebar shows, below
+  no hidden name, not a program, an alias or a link that leads out (the rule of a link to an image
+  in the sidebar, `open_default`), and says why when it isn't. A remote image has no file, and a
+  double-click on it does nothing (it selects no word either). A page or an embed gives no hook:
+  a double-click there does what it does anywhere in the text. The second click of the pair
+  selects no word. When the person saves in Preview and comes back to the window, the app asks the
+  stamps (modification time and size) of the images the document drew, and loads again, from a
+  URL with a version, the ones that changed and no other; the document's text is never touched. It
+  looks when the window regains the focus rather than watching the files, since the app watches a
+  document's own file alone, and the picture of a file that is gone stays as it was.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
