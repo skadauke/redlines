@@ -6,51 +6,6 @@
 const STYLE_ID = 'rl-palette-style';
 
 export const PALETTE_STYLE = `
-/* The handle at the bottom center of the window: a short bar that is nearly not there. */
-.rl-palette-handle {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  z-index: 5;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  box-sizing: border-box;
-  width: 140px;
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--rl-ink-3);
-  cursor: default;
-  transform: translateX(-50%);
-  -webkit-user-select: none;
-  user-select: none;
-}
-.rl-palette-grip {
-  width: 36px;
-  height: 4px;
-  margin-bottom: 6px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.45;
-  transition: opacity 160ms ease;
-}
-.rl-palette-handle:hover .rl-palette-grip,
-.rl-palette-handle[aria-expanded='true'] .rl-palette-grip {
-  opacity: 0.9;
-}
-/* While you write, it is out of the way, until the pointer moves. */
-.rl-palette-handle[data-writing] .rl-palette-grip {
-  opacity: 0;
-}
-.rl-palette-handle:focus-visible {
-  outline: 2px solid var(--rl-ink-3);
-  outline-offset: -2px;
-  border-radius: 8px;
-}
-
 /* The palette. */
 .rl-palette {
   position: fixed;
@@ -181,11 +136,10 @@ export const PALETTE_STYLE = `
 
 @media (prefers-reduced-motion: reduce) {
   .rl-palette, .rl-palette-tip { animation: none; }
-  .rl-palette-grip { transition: none; }
 }
 
 @media print {
-  .rl-palette, .rl-palette-handle, .rl-palette-tip { display: none !important; }
+  .rl-palette, .rl-palette-tip { display: none !important; }
 }
 `;
 
