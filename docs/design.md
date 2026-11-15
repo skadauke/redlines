@@ -831,9 +831,10 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Rows Above", "Delete 3 Rows", "Move Row Up", every one a step to undo with its selection back);
   insertion adds as many rows as the selection touches, with the caret in the first new cell;
   deletion takes the rows the selection touches and puts the caret in the row that is then there;
-  moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
-  the row under the pointer, left of the change bars and inside the window (where the margin is
-  too narrow for that, a narrow window or a large text size, it stands at the table's edge), in a
+  moving takes them one place, and they stay selected. A handle shows in the left margin beside
+  the row under the pointer, while the pointer is over the table: a small pill (5 × 16 px) at the
+  table's left edge (its reach, 14 px wide, ends 2 px from it), over the change bars' strip and inside the window, which grows
+  a little (8 × 22 px) when the pointer is over it, to say it can be dragged, in a
   layer over the editor that assistive technology does not see (the menu bar has every command); a
   click selects the row (⇧ extends) when it is released, and a right-click selects it and opens its
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
@@ -847,8 +848,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Column Left and Right (no default key) count the columns the selection touches ("Insert 2 Columns
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
-  deletes the whole table the caret or the selection is in. A column's grip (⋯) stands above the
-  column in the strip above the table, and never leaves it; a click selects the column (⇧ extends)
+  deletes the whole table the caret or the selection is in. A column's handle is the same pill, turned
+  (16 × 5 px, growing to 22 × 8), just above the column at the table's top edge; a click selects the column (⇧ extends)
   when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
