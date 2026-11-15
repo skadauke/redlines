@@ -1,7 +1,8 @@
 // Tables: adding one, its grips and their menu, and typing over cells.
 
 import { expect, known, test } from '../src/journey.ts';
-import { isOpaque } from '../src/contrast.ts';
+import { contrastOf, isOpaque } from '../src/contrast.ts';
+import type { Journey } from '../src/journey.ts';
 
 const TABLE = '| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n';
 
@@ -197,4 +198,68 @@ test.describe('tables @tables', () => {
       });
     }
   }
+
+  // #522: a selection of cells is one even highlight in each cell; the page's own text highlight is
+  // not drawn over it or beside it (it was: boxes on the hidden pipes' widgets, offset from the cell).
+  const selections: Record<string, (j: Journey) => Promise<void>> = {
+    rectangle: async (j) => {
+      const from = await j.pointOf('1');
+      const to = await j.pointOf('4');
+      await j.drag({ x: from.x + 2, y: from.y }, { x: to.x + 2, y: to.y });
+    },
+    row: async (j) => {
+      await j.hover('1');
+      await j.page.locator('.rl-grip').first().click();
+      await j.page.keyboard.press('Escape');
+    },
+    column: async (j) => {
+      await j.hover('A');
+      await j.page.locator('.rl-col-grip').click();
+      await j.page.keyboard.press('Escape');
+    },
+    table: async (j) => {
+      await j.caretAfter('1');
+      await j.press('ControlOrMeta+a');
+      await j.press('ControlOrMeta+a');
+    },
+  };
+  for (const [name, select] of Object.entries(selections)) {
+    test(`selected cells (${name}) are one even highlight @tables`, async ({ start }) => {
+      const j = await start({ doc: `Intro\n\n${TABLE}`, tracking: false, view: 'clean' });
+      await j.settle();
+      await select(j);
+      const marked = j.page.locator('.rl-sel');
+      expect(await marked.count(), 'cells are selected').toBeGreaterThan(0);
+      // Nothing in the table's rows draws the page's own highlight.
+      const drawn = await j.page.evaluate(() =>
+        [...document.querySelectorAll('.rl-trow, .rl-trow *')].map(
+          (el) => getComputedStyle(el, '::selection').backgroundColor,
+        ),
+      );
+      expect(
+        drawn.filter((color) => color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent'),
+        "no text highlight in the table's rows",
+      ).toEqual([]);
+      for (let i = 0; i < (await marked.count()); i++) {
+        expect(
+          await contrastOf(marked.nth(i)),
+          `text in selected cell ${i} is readable`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      await j.shot(`cells-${name}`);
+      if (name === 'row' || name === 'table') await j.baseline(`cells-${name}`);
+    });
+  }
+
+  test("a text selection inside one cell is the page's highlight and no cell is selected", async ({
+    start,
+  }) => {
+    const wide = '| A | B |\n| - | - |\n| alpha beta gamma | 2 |\n';
+    const j = await start({ doc: `Intro\n\n${wide}`, tracking: false, view: 'clean' });
+    await j.settle();
+    await j.selectText('beta');
+    await expect(j.page.locator('.rl-sel'), 'no cell is selected').toHaveCount(0);
+    expect(await j.selectedText()).toBe('beta');
+    await j.baseline('text-in-cell');
+  });
 });

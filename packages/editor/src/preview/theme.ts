@@ -393,8 +393,13 @@ export const baseThemeSpec: ThemeSpec = {
     color: 'HighlightText',
   },
   '.rl-sel': { color: 'inherit' },
-  // The text highlight stays out of selected cells: the cell is the selection.
-  '.rl-sel::selection, .rl-sel *::selection': {
+  // The text highlight stays out of the table's rows while cells are selected: the cells are the
+  // selection. The page's own highlight of the text between the first and the last cell reached
+  // boxes on the hidden pipes' widgets and CodeMirror's buffers, over and beside the cells' color, and
+  // on the cells of the rows between that are not selected (a column's, a rectangle's) (#522). Text
+  // outside the table keeps its highlight, and with no cell selected (a caret, or text inside one
+  // cell) nothing here applies.
+  '.cm-content:has(.rl-sel) .rl-trow::selection, .cm-content:has(.rl-sel) .rl-trow *::selection': {
     backgroundColor: 'transparent',
     color: 'inherit',
   },
@@ -409,6 +414,8 @@ export const baseThemeSpec: ThemeSpec = {
     letterSpacing: 'var(--rl-th-track)',
     borderBottomColor: 'var(--rl-ink-3)',
   },
+  // A selected header cell reads as the others do: the quieter gray on the selection's blue was 3.4:1.
+  '.rl-th .rl-tc:has(.rl-sel)': { color: 'HighlightText' },
 };
 
 export const baseTheme = EditorView.baseTheme(baseThemeSpec);
