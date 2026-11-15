@@ -8,6 +8,7 @@
   "scripts": {
     "test": "playwright test",
     "typecheck": "tsc",
+    "accept": "playwright test --update-snapshots=changed",
     "look": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/look-review.ts"
   },
   "devDependencies": {
