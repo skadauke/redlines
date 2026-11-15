@@ -124,6 +124,22 @@ describe('row grips', () => {
     expect(parseFloat(grip(editor)?.style.left ?? '')).toBeGreaterThanOrEqual(4);
   });
 
+  it('moves up to the table when the margin is narrow, and stays 4 px inside the window', () => {
+    for (const [table, near] of [
+      [48, 8],
+      [30, 12],
+    ] as const) {
+      tableLeft = table;
+      const editor = mount();
+      move(editor, table + 50, rowY(1));
+      const left = parseFloat(grip(editor)?.style.left ?? '');
+      // 18 px wide: its right edge is close to the table's, never over it.
+      expect(left + 18).toBeLessThanOrEqual(table);
+      expect(table - (left + 18)).toBeLessThanOrEqual(near);
+      expect(left).toBeGreaterThanOrEqual(4);
+    }
+  });
+
   it('hides at the next keystroke', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));
@@ -132,12 +148,22 @@ describe('row grips', () => {
     expect(grip(editor)).toBeNull();
   });
 
-  it('selects the row on a press and opens its menu, with counted titles', () => {
+  it('selects the row when a click is released, and opens no menu', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));
     mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
-    expect(touchedRows(editor.view.state)).toMatchObject({ first: 2, last: 2, rectangle: true });
+    // Nothing is highlighted before the release.
+    expect(rectOf(editor.view.state)).toBeNull();
     mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+    expect(touchedRows(editor.view.state)).toMatchObject({ first: 2, last: 2, rectangle: true });
+    expect(menuItems(editor)).toEqual([]);
+  });
+
+  it('selects the row on a right-click and opens its menu, with counted titles', () => {
+    const editor = mount();
+    move(editor, LEFT + 50, rowY(2));
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
+    expect(touchedRows(editor.view.state)).toMatchObject({ first: 2, last: 2, rectangle: true });
     expect(menuItems(editor)).toEqual([
       'Insert Row Above',
       'Insert Row Below',
@@ -150,8 +176,7 @@ describe('row grips', () => {
     // ⇧-press extends: two rows.
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     move(editor, LEFT + 50, rowY(3));
-    mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(3), shiftKey: true });
-    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(3) });
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(3), shiftKey: true });
     expect(menuItems(editor)).toContain('Delete 2 Rows');
     expect(menuItems(editor)).toContain('Insert 2 Rows Above');
   });
@@ -159,8 +184,7 @@ describe('row grips', () => {
   it('runs a menu item as its command does', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));
-    mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
-    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
     const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
       (el) => el.textContent === 'Delete Row',
     );
@@ -173,8 +197,7 @@ describe('row grips', () => {
   it('clears the contents of the row with Clear Contents', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));
-    mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
-    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
     const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
       (el) => el.textContent === 'Clear Contents',
     );
@@ -187,8 +210,7 @@ describe('row grips', () => {
     for (const tracking of [false, true]) {
       const editor = mount(DOC, tracking);
       move(editor, LEFT + 50, rowY(2));
-      mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
-      mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+      mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
       const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
         (el) => el.textContent === 'Delete Table',
       );
@@ -202,8 +224,7 @@ describe('row grips', () => {
   it('closes the menu on Esc and keeps the selection', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));
-    mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(2) });
-    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
     expect(menuItems(editor)).not.toEqual([]);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(menuItems(editor)).toEqual([]);
@@ -264,12 +285,21 @@ describe('column grips', () => {
     expect(grip(editor)).toBeNull();
   });
 
-  it('selects the column on a press and opens its menu, with counted titles', () => {
+  it('selects the column when a click is released, and opens no menu', () => {
     const editor = mount();
     move(editor, colX(0), TOP - 10);
     mouse(colGrip(editor)!, 'mousedown', { clientX: colX(0), clientY: TOP - 10 });
-    expect(touchedCols(editor.view.state)).toMatchObject({ first: 0, last: 0, rectangle: true });
+    expect(rectOf(editor.view.state)).toBeNull();
     mouse(window, 'mouseup', { clientX: colX(0), clientY: TOP - 10 });
+    expect(touchedCols(editor.view.state)).toMatchObject({ first: 0, last: 0, rectangle: true });
+    expect(menuItems(editor)).toEqual([]);
+  });
+
+  it('selects the column on a right-click and opens its menu, with counted titles', () => {
+    const editor = mount();
+    move(editor, colX(0), TOP - 10);
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(0), clientY: TOP - 10 });
+    expect(touchedCols(editor.view.state)).toMatchObject({ first: 0, last: 0, rectangle: true });
     expect(menuItems(editor)).toEqual([
       'Insert Column Left',
       'Insert Column Right',
@@ -285,8 +315,7 @@ describe('column grips', () => {
     ]);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10, shiftKey: true });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10, shiftKey: true });
     expect(menuItems(editor)).toContain('Delete 2 Columns');
     expect(menuItems(editor)).toContain('Insert 2 Columns Left');
   });
@@ -294,15 +323,13 @@ describe('column grips', () => {
   it('runs a menu item as its command does, and Esc keeps the selection', () => {
     const editor = mount();
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(menuItems(editor)).toEqual([]);
     expect(touchedCols(editor.view.state)).toMatchObject({ first: 1, last: 1, rectangle: true });
     mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
     const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
       (el) => el.textContent === 'Delete Column',
     );
@@ -314,8 +341,7 @@ describe('column grips', () => {
   it('aligns the column from its menu, the caret’s alignment checked', () => {
     const editor = mount();
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
     const checked = () =>
       [...editor.view.dom.querySelectorAll('.rl-grip-item[aria-checked="true"]')].map(
         (el) => el.textContent,
@@ -329,8 +355,7 @@ describe('column grips', () => {
     // The column is still selected, and the menu says what it has now.
     expect(touchedCols(editor.view.state)).toMatchObject({ first: 1, last: 1 });
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
     expect(checked()).toEqual(['Align Center']);
   });
 
@@ -343,8 +368,7 @@ describe('column grips', () => {
       const editor = mount(DOC, true);
       const open = () => {
         move(editor, colX(col), TOP - 10);
-        mouse(colGrip(editor)!, 'mousedown', { clientX: colX(col), clientY: TOP - 10 });
-        mouse(window, 'mouseup', { clientX: colX(col), clientY: TOP - 10 });
+        mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(col), clientY: TOP - 10 });
       };
       const checked = () =>
         [...editor.view.dom.querySelectorAll('.rl-grip-item[aria-checked="true"]')].map(
@@ -369,8 +393,7 @@ describe('column grips', () => {
   it('clears the contents of the column with Clear Contents', () => {
     const editor = mount();
     move(editor, colX(1), TOP - 10);
-    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
     const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
       (el) => el.textContent === 'Clear Contents',
     );
@@ -385,8 +408,7 @@ describe('column grips', () => {
       const doc = 'Intro.\n\n| a | b |\n| - | - |\n\nAfter.\n';
       const editor = mount(doc, tracking);
       move(editor, colX(1), TOP - 10);
-      mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-      mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+      mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
       expect(rectOf(editor.view.state)).toBeNull();
       const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
         (el) => el.textContent === 'Clear Contents',
@@ -408,8 +430,7 @@ describe('column grips', () => {
       const doc = 'Intro.\n\n| a |\n| - |\n\nAfter.\n';
       const editor = mount(doc, tracking);
       move(editor, LEFT + 30, rowY(0));
-      mouse(grip(editor)!, 'mousedown', { clientX: LEFT - 20, clientY: rowY(0) });
-      mouse(window, 'mouseup', { clientX: LEFT - 20, clientY: rowY(0) });
+      mouse(grip(editor)!, 'contextmenu', { clientX: LEFT - 20, clientY: rowY(0) });
       expect(rectOf(editor.view.state)).toBeNull();
       const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
         (el) => el.textContent === 'Clear Contents',
@@ -425,8 +446,7 @@ describe('column grips', () => {
     it(`deletes the table from the column menu, as the command does, Track Changes ${tracking ? 'on' : 'off'}`, () => {
       const editor = mount(DOC, tracking);
       move(editor, colX(1), TOP - 10);
-      mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
-      mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+      mouse(colGrip(editor)!, 'contextmenu', { clientX: colX(1), clientY: TOP - 10 });
       const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
         (el) => el.textContent === 'Delete Table',
       );
