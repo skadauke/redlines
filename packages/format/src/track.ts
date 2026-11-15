@@ -5304,9 +5304,9 @@ function editsOnce(
 }
 
 /** A list marker at the start of a line, after its quote markers and the markers of the items it
- * is nested in, with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
-const BARE_MARKER =
-  /^(?:[ \t]*(?:>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]+))*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
+ * is nested in (each space belongs to one quantifier only, so that no line backtracks), with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
+export const BARE_MARKER =
+  /^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
 
 /**
  * The edits that write text with a space first right after a bare list marker (`-` or `2.` alone

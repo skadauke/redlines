@@ -17,6 +17,16 @@ import { newestView } from './views.ts';
 const BLOCK_TAGS =
   'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|pre|script|search|section|style|summary|table|tbody|td|textarea|tfoot|th|thead|title|tr|track|ul';
 
+/**
+ * The line break after `<li>`, to drop (`readAs`), except in front of what starts a block there: a
+ * block tag of either case, a declaration, comment or processing instruction (`<!`, `<?`), and any
+ * tag alone on its line, which is an HTML block (a custom tag, `<my-tag>`) and not inline text.
+ */
+const AFTER_LI_OPENER = new RegExp(
+  `(<li>)\\n+(?!<[!?]|</?(?:${BLOCK_TAGS})[\\s>/]|</?[a-z][\\w-]*(?:\\s[^>]*)?>[ \\t]*(?:\\n|$|</li>))`,
+  'gi',
+);
+
 /** The HTML micromark makes of a text, with GFM's tables and strikethrough, without the HTML
  * comments (the markers), and without the white space that Markdown does not show (before a line
  * break, a closing tag or a hard break, and at the start of a cell). */
@@ -36,7 +46,7 @@ export function readAs(text: string): string {
       // a quote, a table, `<hr>`, or the HTML block names of CommonMark) follows `<li>` the line
       // break goes with the structure, and the two readings still differ by it. No view is judged
       // to read alike that has other words, another nesting or another block in it.
-      .replace(new RegExp(`(<li>)\\n+(?!</?(?:${BLOCK_TAGS})[\\s>/])`, 'g'), '$1')
+      .replace(AFTER_LI_OPENER, '$1')
       // A space at the start of a cell (after a marker that starts it) shows nowhere.
       .replace(/(<t[dh](?: [^>]*)?>)[ \t]+/g, '$1')
       .replace(/\n\s*\n/g, '\n')

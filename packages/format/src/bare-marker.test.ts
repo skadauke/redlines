@@ -13,7 +13,7 @@ import { expectEveryOrderRead, expectSound, readAs } from './oracle.ts';
 import { parse } from './parse.ts';
 import { bareMarkerDocument, fuzzCount, seeded } from './random-docs.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { BARE_MARKER, trackedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -349,4 +349,35 @@ describe('the random lists with bare markers', () => {
     }
     expect(written).toBeGreaterThan(draws);
   }, 120_000);
+});
+
+describe('the bare marker pattern', () => {
+  it('has no exponential backtracking in deep quotes', () => {
+    // A space belongs to one quantifier only, so a failing line is read in linear time. The bound is
+    // generous (the old pattern took seconds at 26 levels, and years at 200).
+    const started = performance.now();
+    for (const line of [
+      '>  '.repeat(200),
+      '> '.repeat(200) + 'x',
+      '>  '.repeat(200) + 'x',
+      '-   '.repeat(100) + 'x',
+    ]) {
+      expect(BARE_MARKER.test(line)).toBe(false);
+    }
+    expect(BARE_MARKER.test('> '.repeat(200) + '-')).toBe(true);
+    expect(BARE_MARKER.test('- > 2.')).toBe(true);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('the oracle keeps a line break after <li> that a block follows', () => {
+  it('drops it before text and inline tags, keeps it before HTML blocks', () => {
+    // Inline: the break shows nowhere.
+    expect(readAs('- <!--x-->\n  **b**')).toBe(readAs('- **b**'));
+    // An HTML block (a block tag in capitals, a declaration, an instruction, a custom tag alone on
+    // its line) is flow content after the break, which an inline reading doesn't have.
+    for (const html of ['<DIV>x</DIV>', '<?php x ?>', '<!DOCTYPE html>', '<my-tag>']) {
+      expect(readAs(`- <!--x-->\n  ${html}`), html).toMatch(/<li>\n</);
+    }
+  });
 });
