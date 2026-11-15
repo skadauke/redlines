@@ -165,9 +165,10 @@ export const setViewModeEffect = StateEffect.define<ViewMode>();
 export const holdViewAnnotation = Annotation.define<boolean>();
 
 /**
- * How the document is shown. It starts in the view its ledger says it was saved in (`view`, format
- * §5.6), or else in Redlines, in the look chosen last (the markup view), when the document has
- * redlines and in Clean when it doesn't (design §5.3), and after that it stays as chosen: Redlines
+ * How the document is shown. A document with no redlines, a new one or a plain Markdown file, starts
+ * in Clean, whatever view was used last and whatever its ledger says (format §5.6, design §5.3). One
+ * that has redlines starts in the view its ledger says it was saved in (`view`), or else in
+ * Redlines, in the look chosen last (the markup view), and after that it stays as chosen: Redlines
  * is available whatever the document holds, so one whose last redline goes stays in it. The one
  * exception is a document that gains redlines while it is shown Clean, as when an agent's
  * suggestions arrive, which switches to Redlines in that look, so suggestions are never invisible.
@@ -175,8 +176,10 @@ export const holdViewAnnotation = Annotation.define<boolean>();
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => {
     const parsed = state.field(parsedField);
-    if (parsed.ledger.view) return parsed.ledger.view;
-    return hasRedlines(parsed) ? state.facet(markupViewFacet) : 'clean';
+    // Nothing to show, nothing to be left in: a ledger that only says how the file was left
+    // doesn't open it in Redlines.
+    if (!hasRedlines(parsed)) return 'clean';
+    return parsed.ledger.view ?? state.facet(markupViewFacet);
   },
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));

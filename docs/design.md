@@ -415,11 +415,12 @@ Raw shows them.
 
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
-A document opens in the view it was saved in, which its ledger records
-([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
-full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
-in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
+A document that has redlines (pending changes, highlights or comment threads) opens in the view it
+was saved in, which its ledger records ([format §5.6](format.md#56-settings)): `view: clean` opens it
+in Clean, `view: redlines` in the full markup and `view: simple` in the simple look. One that
+records none opens in Redlines, in the look remembered. A document that has none, a new document or
+a plain Markdown file, always opens in Clean, whatever view was used last and whatever its ledger
+says: there are no redlines to show. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
@@ -433,7 +434,7 @@ write: a Save, made for another reason, records the view (Clean, the full markup
 never Raw) in a file that has a ledger, so that reading a document leaves its git history quiet,
 and a view alone never adds a ledger to a plain file. A save made in Raw leaves the view the file
 had. The look remembered is each person's own: it is kept in the app's settings, opens the files
-that record no view, and reaches every window for the documents each opens next, without changing
+with redlines that record no view, and reaches every window for the documents each opens next, without changing
 the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
 menu also previews the original (every change rejected) and one person's changes alone (everyone
 else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it

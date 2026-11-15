@@ -78,10 +78,60 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(clean.getUiState().hasRedlines).toBe(true);
     expect(load(reviewed('view: redlines')).getUiState().view).toBe('redlines');
     expect(load(reviewed('view: simple')).getUiState().view).toBe('simple');
-    // With nothing to show, as well: a file that only says how it was left.
-    const plain = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: redlines\n-->\n`;
-    expect(load(plain).getUiState().view).toBe('redlines');
-    expect(load(plain.replace('view: redlines', 'view: simple')).getUiState().view).toBe('simple');
+  });
+
+  it('is Clean for a file with no changes or comments, whatever its ledger says or was used last', () => {
+    // A plain file, a new document, and a file whose ledger only says how it was left.
+    for (const markupView of ['redlines', 'simple'] as const) {
+      expect(load(PLAIN, { markupView }).getUiState().view).toBe('clean');
+      expect(load('', { markupView }).getUiState().view).toBe('clean');
+      for (const view of ['clean', 'redlines', 'simple']) {
+        const left = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: ${view}\n-->\n`;
+        const editor = load(left, { markupView });
+        expect(editor.getUiState().view, `${view} ${markupView}`).toBe('clean');
+        expect(editor.getUiState().hasRedlines).toBe(false);
+      }
+    }
+  });
+
+  it('is Clean for a new document that another was open before, whatever view that was in', () => {
+    const editor = load(reviewed('view: simple'));
+    expect(editor.getUiState().view).toBe('simple');
+    editor.setDoc('');
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setDoc(reviewed('view: redlines'));
+    editor.setViewMode('raw');
+    editor.setDoc(PLAIN);
+    expect(editor.getUiState().view).toBe('clean');
+  });
+
+  it('goes to the remembered look, not the ledger’s, when a file opened in Clean gains redlines', () => {
+    const left = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\nview: simple\n-->\n`;
+    const editor = load(left, { markupView: 'redlines' });
+    expect(editor.getUiState().view).toBe('clean');
+    caretBefore(editor, 'paragraph');
+    editor.setTracking(true);
+    type(editor, 'new ');
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('is the ledger’s for a file that has only a comment', () => {
+    const commented = reviewed('view: simple').replace(
+      'A <!--ins k3x9-->new <!--/k3x9-->word,',
+      'A new word,',
+    );
+    const editor = load(commented, { markupView: 'redlines' });
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
+  it('is the ledger’s, or the remembered look, for a file that has only a highlight', () => {
+    const highlighted = '# Notes\n\nA <!--hl h6bz-->word<!--/h6bz--> here.\n';
+    expect(load(highlighted, { markupView: 'simple' }).getUiState().hasRedlines).toBe(true);
+    expect(load(highlighted, { markupView: 'simple' }).getUiState().view).toBe('simple');
+    const left = `${highlighted}\n<!-- redlines\n${NOTE}\nversion: 1\nview: clean\n-->\n`;
+    expect(load(left, { markupView: 'simple' }).getUiState().view).toBe('clean');
   });
 
   it('wins over the markup view the app remembered, which opens the files that have none', () => {

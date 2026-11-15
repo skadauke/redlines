@@ -315,9 +315,9 @@ export interface Editor {
   /**
    * Replaces the whole document and clears the undo history, as when a file is opened. The
    * file's line ending is taken from the new string, and the view and Track Changes start over
-   * from their defaults: the view the ledger says (`view: clean`, `view: redlines` or
-   * `view: simple`, format §5.6), or else the markup view when the document has redlines and Clean
-   * when it has none, and tracking on when the file asks for it (`tracking: everyone`).
+   * from their defaults: Clean when the document has no redlines, whatever its ledger says; otherwise
+   * the view the ledger says (`view: clean`, `view: redlines` or `view: simple`, format §5.6), or
+   * else the markup view; and tracking on when the file asks for it (`tracking: everyone`).
    */
   setDoc(doc: string): void;
   /**
@@ -409,8 +409,8 @@ export interface Editor {
   recordTracking(): void;
   /**
    * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
-   * `view: simple` (format §5.6): for the host to call when it saves the file, so that the document
-   * opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * `view: simple` (format §5.6): for the host to call when it saves the file, so that a document
+   * that has redlines opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
    * file with none gets none, and a ledger that can't be read is left as it is. It is
    * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
    * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
