@@ -31,6 +31,7 @@ import { scanPayload } from './scan.ts';
 import { encodePayload } from './payload.ts';
 import {
   findInPayload,
+  intact,
   ledgerForSite,
   payloadFile,
   payloadIdsOf,
@@ -576,6 +577,13 @@ function decideInPayload(
   // and with the entries of the marks it holds.
   const prefix = prefixesOf(text, parsed, chain).at(-1) ?? '';
   const proxy = payloadFile(prefix + leaf.text, ledgerForSite(parsed, leaf));
+  // An old text that ends inside a comment or a fence that it never closes takes the ledger into it.
+  if (!intact(proxy, prefix + leaf.text)) {
+    throw new EditError(
+      "This change is in text that ends inside a comment or a code block that is never closed, so it can't be decided there. Decide the change that holds it first.",
+      'no-legal-placement',
+    );
+  }
   const read = parse(proxy);
   const inside = markToDecide(read, mark.id);
   const changes = decide(proxy, read, [inside], action);

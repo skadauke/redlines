@@ -7,6 +7,7 @@ import { eolOf, inEol } from './changes.ts';
 import type { Eol } from './changes.ts';
 import { CONTAINER_PREFIX } from './blocks.ts';
 import { serializeLedger } from './ledger-write.ts';
+import { parse } from './parse.ts';
 import { scanPayload } from './scan.ts';
 import type { Ledger, MarkRange, Parsed, PayloadMarks, Segment } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -107,14 +108,29 @@ function withoutPrefix(view: string, prefix: string): string {
   return text.startsWith(prefix) ? text.slice(prefix.length) : text;
 }
 
-/** The old text of a payload as the original view shows it: its own marks rejected. */
+/**
+ * Whether the ledger stands where `payloadFile` put it. A payload that ends inside a comment or a
+ * code fence that it never closes takes the ledger into it, and what is decided in such a file
+ * would write the ledger into the old text.
+ */
+export function intact(proxy: string, payload: string): boolean {
+  const read = parse(proxy);
+  return read.ledgerRange !== null && payloadOfFile(proxy, read) === payload;
+}
+
+/** The old text of a payload as the original view shows it: its own marks rejected. Where the
+ * payload takes the ledger into itself (`intact`), the old text as it is. */
 export function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
-  return withoutPrefix(originalView(payloadFile(prefix + payload, ledger)).text, prefix);
+  const proxy = payloadFile(prefix + payload, ledger);
+  if (!intact(proxy, prefix + payload)) return payload;
+  return withoutPrefix(originalView(proxy).text, prefix);
 }
 
 /** The old text of a payload as the newest view shows it: its own marks accepted. */
 export function newestOfPayload(payload: string, ledger: string, prefix = ''): string {
-  return withoutPrefix(newestView(payloadFile(prefix + payload, ledger)).text, prefix);
+  const proxy = payloadFile(prefix + payload, ledger);
+  if (!intact(proxy, prefix + payload)) return payload;
+  return withoutPrefix(newestView(proxy).text, prefix);
 }
 
 /** The payload of one segment of a mark that holds marks, if it does. */

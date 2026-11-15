@@ -16,7 +16,7 @@ import { idsIn, newId } from './ids.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { ledgerFor, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
+import { intact, ledgerFor, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
 import { encodePayload } from './payload.ts';
 import { shapeOf, unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
@@ -375,6 +375,7 @@ function tryRung(
       const inside = parsed.marks.filter((mark) => touches(mark, range));
       const ids = new Set(inside.flatMap((mark) => [mark.id, ...payloadIdsOf(parsed, mark)]));
       const proxy = payloadFile(text.slice(rung.lineFrom, to), ledgerFor(parsed, ids));
+      if (!intact(proxy, text.slice(rung.lineFrom, to))) return giveUp('fold: unclosed');
       const made = applyChanges(
         proxy,
         rejectMarks(
@@ -403,7 +404,11 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  if ((endsInDelimiter(now) || riskyEnd(now, rung.prefix)) && rung.prefix !== '' && !rung.atomic) {
+  if (
+    rung.prefix !== '' &&
+    !rung.atomic &&
+    (endsInDelimiter(now) || riskyEnd(now, rung.prefix) || /\n[ \t>]*$/.test(now))
+  ) {
     return giveUp('delimiter');
   }
   const atomic =
@@ -498,7 +503,7 @@ function lastLineOf(text: string, prefix: string): string {
   let last = lines.at(-1) ?? '';
   const inner = continuationPrefix(prefix);
   if (lines.length > 1 && inner !== '' && last.startsWith(inner)) last = last.slice(inner.length);
-  return last.replace(/^(?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))[ \t]?)+/, '');
+  return last.replace(/^(?: {0,3}(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))[ \t]?)+/, '');
 }
 
 function riskyEnd(text: string, prefix: string): boolean {

@@ -268,3 +268,14 @@ describe('what the review of the engine found', () => {
     expect(originalView(text).text).toBe(`Intro.\n\nold <!--ins m5q7-->x<!--/m5q7--> endb \n`);
   });
 });
+
+describe('old text that takes the ledger into itself', () => {
+  const body = 'Hello <!--del k3x9 old <!-\\-ins n3n3-\\->x<!-\\-/n3n3-\\-> <!-\\- tail-->world.';
+  const text = file(body, { k3x9: 'ada', n3n3: 'bo' });
+
+  it('is shown as it is, and a mark in it is refused, not decided with the ledger written in', () => {
+    expect(originalView(text).text).not.toContain('redlines');
+    expect(() => reject(text, 'n3n3')).toThrow(/never closed/);
+    expect(() => accept(text, 'n3n3')).toThrow(/never closed/);
+  });
+});

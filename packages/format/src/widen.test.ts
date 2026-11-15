@@ -270,6 +270,22 @@ describe('what the review found', () => {
   });
 });
 
+describe('what the second review found', () => {
+  it('a closer is not written after indented code that a tag leads into', () => {
+    const text = file('<!--sub vhb2 beta-->\n\né H<sub>a-b</sub>O<!--/vhb2--> tail\n', {
+      vhb2: 'bo',
+    });
+    let done;
+    try {
+      done = widen(text, replacing(text, 'é H<sub', '    '), context(ada, ['r2zd']));
+    } catch (error) {
+      expect(error).toBeInstanceOf(Untrackable);
+      return;
+    }
+    expect(readsAsNewest(done.text)).toBe(true);
+  });
+});
+
 describe('what no unit can hold', () => {
   it('is untrackable in front matter', () => {
     const text = file('---\ntitle: One\n---\n\nBody.');
