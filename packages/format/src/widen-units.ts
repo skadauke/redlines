@@ -57,10 +57,10 @@ const glueOpen = (line: Line) =>
 const glueClose = (line: Line) => !blank(line) && CLOSER_ONLY.test(line.text.trim());
 
 /** The units of the body of a file: its top-level blocks, with the containers in them. */
-export function unitsOf(text: string, parsed: Parsed): Unit[] {
-  const stop = parsed.ledgerRange?.from ?? text.length;
+export function unitsOf(text: string, parsed: Parsed, region?: Range): Unit[] {
+  const stop = region?.to ?? parsed.ledgerRange?.from ?? text.length;
   const lines: Line[] = [];
-  for (let at = bodyStart(text); at <= stop; ) {
+  for (let at = region?.from ?? bodyStart(text); at <= stop; ) {
     const newline = text.indexOf('\n', at);
     let to = newline === -1 || newline >= stop ? Math.min(stop, text.length) : newline;
     if (text[to - 1] === '\r' && to > at) to--;

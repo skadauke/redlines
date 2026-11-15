@@ -775,5 +775,20 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
  * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return rejectTogether(text, parsed, selected(parsed, filter));
+  const marks = selected(parsed, filter);
+  let changes = rejectTogether(text, parsed, marks);
+  if (parsed.payloads.length === 0) return changes;
+  // The marks in the old text of a replacement that is rejected are pending again, and are
+  // rejected with it: nothing is left pending but what the filter keeps (format §3.12).
+  const wanted = new Set(marks.flatMap((mark) => payloadIdsOf(parsed, mark)));
+  let current = applyChanges(text, changes);
+  for (let round = 0; wanted.size > 0 && round <= wanted.size; round++) {
+    const read = parse(current);
+    const again = selected(read, filter).filter((mark) => wanted.has(mark.id));
+    if (again.length === 0) break;
+    const step = rejectTogether(current, read, again);
+    changes = spliceRepairs(text, changes, current, step);
+    current = applyChanges(current, step);
+  }
+  return changes;
 }

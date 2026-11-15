@@ -101,6 +101,32 @@ describe('every kind of unit', () => {
   });
 });
 
+describe('stacked replacements (format §3.12, Editing it)', () => {
+  it('another person’s edit in the new text is written inside the first replacement', () => {
+    const text = file('Intro.\n\nThe importer ships in April.\n\nOutro.');
+    const first = widen(text, replacing(text, 'ships in April', 'ships in May'), context(ada, ['r2zd']));
+    const second = widen(
+      first.text,
+      replacing(first.text, 'May', 'June, after the review'),
+      context(bo, ['s3vb']),
+    );
+    expect(parse(second.text).marks.map((mark) => mark.id)).toEqual(['r2zd', 's3vb']);
+    expect(second.text).toContain('<!--/s3vb--><!--/r2zd-->');
+    expect(applyChanges(first.text, second.changes)).toBe(second.text);
+    expect(parse(second.text).warnings).toEqual([]);
+    expect(readsAsNewest(second.text)).toBe(true);
+    expectSound('stacked', second.text);
+    // Rejecting the second gives the first back, byte for byte; rejecting the first takes both.
+    expect(applyChanges(second.text, reject(second.text, 's3vb'))).toBe(first.text);
+    expect(applyChanges(second.text, reject(second.text, 'r2zd')).trimEnd()).toBe(bodyOf(text).trimEnd());
+    // Accepting the first leaves the second pending, with the first's new text as its old text.
+    const left = applyChanges(second.text, accept(second.text, 'r2zd'));
+    expect(parse(left).marks.map((mark) => [mark.id, mark.payload])).toEqual([
+      ['s3vb', 'The importer ships in May.'],
+    ]);
+  });
+});
+
 describe('what no unit can hold', () => {
   it('is untrackable in front matter', () => {
     const text = file('---\ntitle: One\n---\n\nBody.');

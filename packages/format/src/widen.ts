@@ -9,13 +9,14 @@
 
 import { scaffold, continuationPrefix, bodyStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
-import { rejectMarks } from './decide.ts';
+import { isDecidable, rejectMarks } from './decide.ts';
 import { addPerson, changesBetween, paragraphBreaks, workingLedger } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { ledgerTextOf, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
 import { encodePayload } from './payload.ts';
 import { unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
@@ -76,6 +77,9 @@ export interface Widened {
   unit: WidenedUnit;
   /** The ids of other people's pending changes that are in its old text. */
   held: string[];
+  /** The ids of the author's own pending changes in the unit, which folded into the replacement:
+   * its old text has them rejected. */
+  folded: string[];
 }
 
 /**
@@ -105,13 +109,14 @@ export function widen(
     throw new Untrackable('front-matter', "Front matter can't be marked as a change.");
   }
   const intended = applyChanges(view.text, sorted);
-  const units = unitsOf(text, parsed);
+  const region = replacementText(parsed, text, sourceFrom, sourceTo);
+  const units = unitsOf(text, parsed, region);
   const others = (range: Range) => othersIn(parsed, range, ctx);
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
   let blocks = 0;
   for (let index = 0; rung; index++) {
-    const closed = closure(parsed, units, rung, sourceFrom, sourceTo);
+    const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
     blocks = topLevelBlocks(units, closed);
     if (blocks > WIDEN_MOST_BLOCKS) {
       throw new Untrackable(
@@ -121,10 +126,11 @@ export function widen(
         others({ from: closed.lineFrom, to: closed.to }),
       );
     }
-    const done = tryRung(text, parsed, view, intended, sorted, closed, ctx, id, index, blocks);
+    const done = tryRung(text, parsed, view, intended, sorted, closed, ctx, id, index, blocks, region);
     if (done) return done;
     rung = widerThan(closed);
   }
+  if (process.env['WIDEN_WHY']) console.log('WHY ladder-end');
   throw new Untrackable('no-unit', 'No unit can hold this change.', undefined, others({ from: sourceFrom, to: sourceTo }));
 }
 
@@ -201,6 +207,45 @@ function widerThan(rung: Rung): Rung | undefined {
   return parent ? rungOfUnits([parent], parent.parent) : undefined;
 }
 
+/**
+ * The new text of the innermost substitution that holds the edit, where the edit is typed in text
+ * that someone else's replacement wrote: the unit is found in that text, and written inside the
+ * replacement (format §3.12, "Editing it"). Only where the new text starts a line, at the top.
+ */
+function replacementText(
+  parsed: Parsed,
+  text: string,
+  from: number,
+  to: number,
+): Range | undefined {
+  let found: Range | undefined;
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'sub') continue;
+    for (const segment of mark.segments) {
+      if (!segment.close) continue;
+      const start = segment.carrier?.to ?? segment.content.from;
+      const end = segment.content.to;
+      if (start > from || to > end) continue;
+      if (start !== 0 && text[start - 1] !== '\n') continue;
+      if (!found || start >= found.from) found = { from: start, to: end };
+    }
+  }
+  return found;
+}
+
+/** Whether the text of a mark holds all of `region`: the mark is around it, not in it. */
+function encloses(mark: MarkRange, region: Range | undefined): boolean {
+  return (
+    region !== undefined &&
+    mark.segments.some(
+      (segment) =>
+        segment.close !== undefined &&
+        segment.content.from <= region.from &&
+        region.to <= segment.content.to,
+    )
+  );
+}
+
 /** Whether a mark has any marker in `range`. */
 function touches(mark: MarkRange, range: Range): boolean {
   return mark.segments.some((segment) => {
@@ -227,6 +272,7 @@ function closure(
   start: Rung,
   spanFrom: number,
   spanTo: number,
+  region: Range | undefined,
 ): Rung {
   let rung = start;
   for (let round = 0; round <= parsed.marks.length; round++) {
@@ -235,6 +281,7 @@ function closure(
     let grew = false;
     for (const mark of parsed.marks) {
       if (!touches(mark, { from: rung.lineFrom, to: rung.to })) continue;
+      if (encloses(mark, region)) continue;
       const extent = extentOf(mark);
       if (extent.from < from) {
         from = extent.from;
@@ -258,17 +305,6 @@ function topLevelBlocks(units: readonly Unit[], rung: Rung): number {
   return units.filter((unit) => unit.lineFrom <= rung.to && rung.lineFrom <= unit.to).length;
 }
 
-/** What a position becomes when `changes` are made: inside a change, at its start. */
-function mapped(changes: readonly TextChange[], position: number): number {
-  let delta = 0;
-  for (const change of changes) {
-    if (position < change.from) break;
-    if (position <= change.to && position > change.from) return change.from + delta;
-    delta += change.insert.length - (change.to - change.from);
-  }
-  return position + delta;
-}
-
 function tryRung(
   text: string,
   parsed: Parsed,
@@ -280,39 +316,54 @@ function tryRung(
   id: string,
   index: number,
   blocks: number,
+  region: Range | undefined,
 ): Widened | undefined {
   // The new text: the unit as the newest view has it, with the edits made.
   const viewFrom = view.map.fromSource(rung.from);
   const viewTo = view.map.fromSource(rung.to);
-  if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return undefined;
+  if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
   const now = applyChanges(
     view.text.slice(viewFrom, viewTo),
     edits.map((edit) => ({ ...edit, from: edit.from - viewFrom, to: edit.to - viewFrom })),
   );
+  // Nothing left of the unit is a deletion of it, not a replacement.
+  if (now.trim() === '') return giveUp('empty');
   const range = { from: rung.lineFrom, to: rung.to };
   // Your own pending changes in the unit fold into the replacement: they are rejected in its old
   // text, as they would be by rejecting them, and their text is in the new text.
   const own = parsed.marks.filter(
-    (mark) => mark.entry.by === ctx.author.handle && touches(mark, range),
+    (mark) =>
+      mark.entry.by === ctx.author.handle &&
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      isDecidable(mark) &&
+      touches(mark, range) &&
+      !encloses(mark, region),
   );
-  let before = text;
-  let from = rung.from;
-  let to = rung.to;
+  const from = rung.from;
+  const to = rung.to;
+  let old = text.slice(from, to);
   if (own.length > 0) {
+    // The unit holds its marks whole, so they are decided in it as a file of its own, with the
+    // prefix of its first line (format §3.12, the same way a mark in an old text is decided).
     try {
-      const folded = rejectMarks(text, own.map((mark) => mark.id));
-      before = applyChanges(text, folded);
-      from = mapped(folded, rung.from);
-      to = mapped(folded, rung.to);
+      const ledgerText = ledgerTextOf(text, parsed);
+      const proxy = payloadFile(text.slice(rung.lineFrom, to), ledgerText);
+      const made = applyChanges(
+        proxy,
+        rejectMarks(proxy, own.map((mark) => mark.id)),
+      );
+      const folded = payloadOfFile(made, parse(made));
+      if (!folded.startsWith(rung.prefix)) return giveUp('fold prefix');
+      old = folded.slice(rung.prefix.length);
     } catch (error) {
-      if (error instanceof EditError) return undefined;
+      if (error instanceof EditError) return giveUp(`fold: ${error.message.slice(0, 60)}`);
       throw error;
     }
   }
+  const before = text;
   const eol = eolOf(text, parsed.ledgerRange);
-  const old = before.slice(from, to);
-  const held = idsHeld(parse(before), from, to);
-  const ledger = workingLedger(parse(before).ledger);
+  const ledger = workingLedger(parsed.ledger);
   addPerson(ledger, ctx.author);
   const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
   if (ctx.group !== undefined) entry.group = ctx.group;
@@ -321,7 +372,8 @@ function tryRung(
   const next = before.slice(to);
   // A block that is atomic, or a table, stands in the form of rule 9: where a blank line follows at
   // the top level, the closer stands in it and the payload ends with the block's line break.
-  const atomic = rung.atomic || rung.kind === 'table' || endsInFence(old) || endsInFence(now);
+  const atomic =
+    rung.atomic || rung.kind === 'table' || endsInFence(old) || endsInFence(now) || endsInBare(now);
   const blankAfter = atomic && rung.prefix === '' && /^\r?\n\r?\n[ \t]*\S/.test(next) && !/^\r?\n\r?\n<!-- redlines/.test(next);
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
@@ -339,14 +391,17 @@ function tryRung(
   }
   const result = applyChanges(before, [{ from, to: end, insert: written }]);
   const done = withLedger(result, ledger);
-  if (!done) return undefined;
+  if (!done) return giveUp('ledger');
   if (!passes(text, parsed, done, intended, id)) return undefined;
+  const read = parse(done);
+  const holder = read.marks.find((mark) => mark.id === id);
   return {
     changes: changesBetween(text, done),
     text: done,
     id,
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
-    held,
+    held: holder ? payloadIdsOf(read, holder) : [],
+    folded: own.map((mark) => mark.id),
   };
 }
 
@@ -356,11 +411,15 @@ function endsInFence(text: string): boolean {
   return /(?:^|\n)[ \t>]*(?:`{3,}|~{3,})[ \t]*$/.test(text);
 }
 
-/** The ids of the marks of `parsed` that start inside `[from, to)`. */
-function idsHeld(parsed: Parsed, from: number, to: number): string[] {
-  return parsed.marks
-    .filter((mark) => touches(mark, { from, to }))
-    .map((mark) => mark.id);
+/** Whether the last line of a text is a bare list marker (`-` or `1.` alone, after its quote and
+ * list markers): no mark stands right behind one (format §3.2). */
+function endsInBare(text: string): boolean {
+  return /(?:^|\n)[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]*)+$/.test(text);
+}
+
+function giveUp(why: string): undefined {
+  if (process.env['WIDEN_WHY']) console.log('WHY', why);
+  return undefined;
 }
 
 /** The text with the ledger written for its body; undefined where it can't be written. */
@@ -385,15 +444,38 @@ function passes(
   intended: string,
   id: string,
 ): boolean {
+  const why = failure(text, before, after, intended, id);
+  if (why && process.env['WIDEN_WHY']) console.log('WHY', why);
+  return why === undefined;
+}
+
+function failure(
+  text: string,
+  before: Parsed,
+  after: string,
+  intended: string,
+  id: string,
+): string | undefined {
   const read = parse(after);
-  if (process.env.WIDEN_DEBUG) console.log('GATE', JSON.stringify(after.slice(0, 300)), read.warnings.map((w) => w.code), JSON.stringify(newestView(after).text), JSON.stringify(intended));
-  if (!read.marks.some((mark) => mark.id === id && mark.kind === 'sub')) return false;
+  if (!read.marks.some((mark) => mark.id === id && mark.kind === 'sub')) return 'not read';
   const grew = (code: string) =>
     read.warnings.filter((w) => w.code === code).length >
     before.warnings.filter((w) => w.code === code).length;
-  if (['line-start-marker', 'payload-mark', 'unclosed-mark', 'unopened-close', 'kind-mismatch', 'duplicate-id', 'missing-entry', 'orphan-entry', 'orphan-thread'].some(grew)) {
-    return false;
+  const bad = [
+    'line-start-marker',
+    'payload-mark',
+    'unclosed-mark',
+    'unopened-close',
+    'kind-mismatch',
+    'duplicate-id',
+    'missing-entry',
+    'orphan-entry',
+    'orphan-thread',
+  ].find(grew);
+  if (bad) return `warning ${bad}`;
+  if (paragraphBreaks(newestView(after).text) !== paragraphBreaks(intended)) return 'newest';
+  if (paragraphBreaks(originalView(after).text) !== paragraphBreaks(originalView(text).text)) {
+    return 'original';
   }
-  if (paragraphBreaks(newestView(after).text) !== paragraphBreaks(intended)) return false;
-  return paragraphBreaks(originalView(after).text) === paragraphBreaks(originalView(text).text);
+  return undefined;
 }

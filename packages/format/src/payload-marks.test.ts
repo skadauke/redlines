@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { bodyOf, file, problemsOf, thread } from './test-helpers.ts';
@@ -189,5 +189,46 @@ describe('deciding a replacement whose old text holds marks', () => {
       file(replaced('two <!--sub s2nd three-->and<!--/s2nd-->', 'new'), { r2zd: 'ada', s2nd: 'bo' }),
     );
     expect(run(nested, reject, 'r2zd')).toBe(file(before(second), { s2nd: 'bo', t3rd: 'ada' }));
+  });
+});
+
+describe('comments and highlights in the old text of a replacement', () => {
+  const old = 'See <!--cmt c7bk-->this<!--/c7bk--> and <!--hl h4jm-->that<!--/h4jm-->.';
+  const marks = { r2zd: 'ada', h4jm: 'bo' };
+  const threads = thread('c7bk', 'bo', 'Why this?');
+  const text = file(replaced(old, 'See it.'), marks, threads);
+
+  it('accepting the replacement leaves a point comment where the new text starts, and drops a highlight', () => {
+    const done = run(text, accept, 'r2zd');
+    expect(done).toBe(
+      file('Intro.\n\n<!--cmt c7bk-->\n\nSee it.\n\nOutro.', {}, threads),
+    );
+    const read = parse(done);
+    expect(read.warnings).toEqual([]);
+    expect(read.marks.map((mark) => [mark.id, mark.kind])).toEqual([['c7bk', 'cmt']]);
+    expect(Object.keys(read.ledger.marks)).toEqual([]);
+  });
+
+  it('rejecting the replacement gives the comment and the highlight back where they were', () => {
+    expect(run(text, reject, 'r2zd')).toBe(file(`Intro.\n\n${old}\n\nOutro.`, { h4jm: 'bo' }, threads));
+  });
+
+  it('dismissing the highlight in the old text decides it there', () => {
+    const done = run(text, accept, 'h4jm');
+    expect(done).toBe(
+      file(replaced('See <!--cmt c7bk-->this<!--/c7bk--> and that.', 'See it.'), { r2zd: 'ada' }, threads),
+    );
+  });
+
+  it('a comment is not accepted or rejected, in the old text either', () => {
+    expect(() => accept(text, 'c7bk')).toThrow(/resolved or deleted/);
+  });
+
+  it('accept all and reject all decide the replacement, and the marks it holds go with it', () => {
+    const marks2 = { r2zd: 'ada', k3x9: 'bo', w2rf: 'bo' };
+    const held = file(replaced(OLD, NEW), marks2);
+    expect(applyChanges(held, acceptAll(held))).toBe(`Intro.\n\n${NEW}\n\nOutro.\n`);
+    // Reject all leaves nothing pending: the replacement is rejected, and their changes with it.
+    expect(applyChanges(held, rejectAll(held))).toBe(`Intro.\n\nimporter ships very April.\n\nOutro.\n`);
   });
 });
