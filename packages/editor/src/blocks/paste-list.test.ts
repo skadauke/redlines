@@ -12,6 +12,7 @@ import {
   type Script,
   scriptRows,
 } from './script.ts';
+import { fuzzCount, seeded } from '../../../format/src/random-docs.ts';
 import { pastedItems } from './paste.ts';
 
 interface Row {
@@ -505,46 +506,84 @@ describe('a paste at every caret of a list', () => {
   }
 });
 
-// Every selection of a short list, over one item, across items and over their syntax.
+// Every selection of a short list, over one item, across items and over their syntax. The edges
+// (selections whose ends both sit at a line start, a line end or a marker's edge) are always
+// checked; the rest are a seeded sample, and all of them with REDLINES_FUZZ set (REDLINES_FUZZ=300
+// is the depth run). Each list shape is two tests, the edges and the rest, so that none does too
+// much: every selection costs the whole suite of invariants, every order of decisions included.
 describe('a paste over every selection of a list', () => {
   const docs = ['- one⏎- two⏎', '1. one⏎2. two⏎', '- one⏎  - sub⏎- two⏎'];
   const pastes = ['- a', '- a⏎  - b'];
+  const everything = fuzzCount(0) > 0;
+  // How much of the rest the default run takes.
+  const sampleRate = 0.12;
+
+  /** The offsets where a line starts or ends and where its marker begins or ends. */
+  function edgeOffsets(doc: string): Set<number> {
+    const edges = new Set<number>();
+    let start = 0;
+    for (const line of doc.split('⏎')) {
+      const marker = /^(\s*)((?:[-+*]|\d{1,9}[.)])(?: |$))?/.exec(line);
+      const indent = marker?.[1]?.length ?? 0;
+      const mark = marker?.[2] ?? '';
+      edges.add(start);
+      edges.add(start + line.length);
+      edges.add(start + 1 + line.length);
+      if (mark) {
+        edges.add(start + indent);
+        edges.add(start + indent + mark.trimEnd().length);
+        edges.add(start + indent + mark.length);
+      }
+      start += line.length + 1;
+    }
+    return edges;
+  }
+
   for (const doc of docs) {
     for (const tc of [false, true]) {
-      it(`${doc}, Track Changes ${tc ? 'on' : 'off'}`, () => {
-        const failures: string[] = [];
-        for (let from = 0; from < doc.length; from++) {
-          for (let to = from + 1; to <= doc.length; to++) {
-            for (const paste of pastes) {
-              const marked = `${doc.slice(0, from)}⟦${doc.slice(from, to)}⟧${doc.slice(to)}`;
-              const script: Script = {
-                name: `${marked} <- ${paste} ${tc ? 'on' : 'off'}`,
-                doc: marked,
-                keys: [{ paste: paste.replaceAll('⏎', '\n') }],
-                tc,
-                expect: {},
-              };
-              const result = runScript(script);
-              try {
-                checkInvariants(result);
-              } catch (error) {
-                // A selection that goes in as text (over a marker): what text does is today's.
-                const as = runScript({
-                  ...script,
-                  keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
-                });
-                const asText = as.file === result.file;
-                if (asText && as.refusals.length > 0) continue;
-                if (asText && Object.values(invariantProblems(as)).some((f) => f.length > 0)) {
-                  continue;
+      for (const part of ['edges', 'rest'] as const) {
+        it(`${doc}, Track Changes ${tc ? 'on' : 'off'}, ${part}`, () => {
+          const edges = edgeOffsets(doc);
+          const next = seeded(doc.length * 7 + (tc ? 1 : 0));
+          const failures: string[] = [];
+          for (let from = 0; from < doc.length; from++) {
+            for (let to = from + 1; to <= doc.length; to++) {
+              const isEdge = edges.has(from) && edges.has(to);
+              if (isEdge !== (part === 'edges')) continue;
+              // One draw per selection, so the sample is the same every run.
+              const drawn = next();
+              if (part === 'rest' && !everything && drawn >= sampleRate) continue;
+              for (const paste of pastes) {
+                const marked = `${doc.slice(0, from)}⟦${doc.slice(from, to)}⟧${doc.slice(to)}`;
+                const script: Script = {
+                  name: `${marked} <- ${paste} ${tc ? 'on' : 'off'}`,
+                  doc: marked,
+                  keys: [{ paste: paste.replaceAll('⏎', '\n') }],
+                  tc,
+                  expect: {},
+                };
+                const result = runScript(script);
+                try {
+                  checkInvariants(result);
+                } catch (error) {
+                  // A selection that goes in as text (over a marker): what text does is today's.
+                  const as = runScript({
+                    ...script,
+                    keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
+                  });
+                  const asText = as.file === result.file;
+                  if (asText && as.refusals.length > 0) continue;
+                  if (asText && Object.values(invariantProblems(as)).some((f) => f.length > 0)) {
+                    continue;
+                  }
+                  failures.push(`${script.name}: ${(error as Error).message.split('\n')[0]}`);
                 }
-                failures.push(`${script.name}: ${(error as Error).message.split('\n')[0]}`);
               }
             }
           }
-        }
-        expect(failures).toEqual([]);
-      }, 60_000);
+          expect(failures).toEqual([]);
+        }, 60_000);
+      }
     }
   }
 });
