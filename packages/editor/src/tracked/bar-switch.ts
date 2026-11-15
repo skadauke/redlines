@@ -360,10 +360,13 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
 
       private readonly move = (event: MouseEvent) => {
         if (this.press) return;
+        // A drag that began elsewhere (a selection) crossing the margin is no hover over a bar.
+        if (event.buttons) return this.unhover();
         const target = targetAt(this.view, geometry, event.clientX, event.clientY);
         if (!target) return this.unhover();
         if (this.hot?.element === target.element && this.hot.from === target.from) return;
-        this.unhover();
+        // From one bar to another the editor stays marked: one transaction, with no flicker.
+        this.unhover(true);
         this.hover(target);
       };
 
@@ -396,12 +399,12 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         this.view.scrollDOM.style.cursor = '';
       }
 
-      private unhover(): void {
+      private unhover(keepMarked = false): void {
         if (!this.hot) return;
         this.release();
         const { state } = this.view;
         const effects = [
-          ...(state.field(barsHot, false) ? [setBarsHot.of(false)] : []),
+          ...(!keepMarked && state.field(barsHot, false) ? [setBarsHot.of(false)] : []),
           ...(state.field(hotBar, false) ? [setHotBar.of(null)] : []),
           ...(state.field(hoverField) !== null ? [setHover.of(null)] : []),
         ];

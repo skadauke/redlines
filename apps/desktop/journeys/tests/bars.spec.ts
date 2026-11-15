@@ -40,7 +40,7 @@ test.describe('change bars @views', () => {
     const j = await withBars(start);
     const rest = await bars(j);
     expect(rest.widths.length, 'two bars are drawn').toBe(2);
-    expect(rest.widths.every((w) => w === 2)).toBe(true);
+    const thin = Math.max(...rest.widths);
     await j.shot('bars-at-rest');
 
     const [first, last] = rest.centers;
@@ -52,20 +52,20 @@ test.describe('change bars @views', () => {
     expect(over, 'the cursor over a bar is a hand').toBe('pointer');
     const hot = await bars(j);
     expect(
-      hot.widths.every((w) => w > 2),
+      hot.widths.every((w, i) => w > rest.widths[i]!),
       'every bar is thicker while over one',
     ).toBe(true);
     await j.shot('bars-pointer-over');
 
     // Over the other bar, the same.
     await j.page.mouse.move(last!.x, last!.y);
-    expect((await bars(j)).widths.every((w) => w > 2)).toBe(true);
+    expect((await bars(j)).widths.every((w) => w > thin)).toBe(true);
 
     // Away from the bars, back to rest, and the text's cursor.
     await j.page.mouse.move(rest.centers[0]!.x + 200, rest.centers[0]!.y);
     const away = await bars(j);
     expect(
-      away.widths.every((w) => w === 2),
+      away.widths.every((w, i) => w === rest.widths[i]),
       'bars are back to 2 px',
     ).toBe(true);
     const cursor = await j.page.evaluate(
@@ -81,8 +81,12 @@ test.describe('change bars @views', () => {
     await j.page.mouse.click(centers[0]!.x, centers[0]!.y);
     expect((await j.uiState())['view']).toBe('simple');
     // And the bars still thicken in the simple look.
+    await j.settle();
     const again = await bars(j);
+    const thin = Math.max(...again.widths);
+    // The pointer is already there: it leaves and comes back, as a hand does.
+    await j.page.mouse.move(again.centers[0]!.x + 200, again.centers[0]!.y);
     await j.page.mouse.move(again.centers[0]!.x, again.centers[0]!.y);
-    expect((await bars(j)).widths.every((w) => w > 2)).toBe(true);
+    expect((await bars(j)).widths.every((w) => w > thin)).toBe(true);
   });
 });

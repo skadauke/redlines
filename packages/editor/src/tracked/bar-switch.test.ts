@@ -318,9 +318,26 @@ describe('the click on a change bar', () => {
     scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
     scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
     expect(marked()).toBe(false);
-    // A press on the bar takes it away, as the switch does, and the text's changing does too.
+    // A press on the bar takes it away.
     scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mousedown', ON_BAR));
+    expect(marked()).toBe(false);
+    // (Its release is the click, which switches the look.)
+    document.dispatchEvent(mouse('mouseup', ON_BAR));
+    editor.setViewMode('simple');
+    scrollDOM.scrollTop = 0;
+    // A switch of the look takes it away, and so does the text's changing.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
     editor.setViewMode('redlines');
+    expect(marked()).toBe(false);
+    editor.setViewMode('simple');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' }, annotations: [] });
+    expect(marked(), 'an edit').toBe(false);
+    // A drag from elsewhere that crosses the margin is no hover.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR, { buttons: 1 }));
     expect(marked()).toBe(false);
     // In Clean there is no bar to be over.
     editor.setViewMode('clean');
