@@ -175,6 +175,39 @@ describe('themes', () => {
     }
   });
 
+  it('keeps every author color, and the ink, at 4.5:1 under the review mark’s wash', () => {
+    // Review Changes washes the current change with a few percent of the ink over the page
+    // (`REVIEW_WASH` in plugins/review/src/styles.ts), and the text on it must stay readable.
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../review/src/styles.ts'),
+      'utf8',
+    );
+    const percent = Number(/export const REVIEW_WASH = (\d+);/.exec(source)?.[1]);
+    expect(percent).toBeGreaterThan(0);
+    const rgb = (hex: string) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+    let worst = Infinity;
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const page = rgb(declared.get('--rl-page')!);
+        const ink = rgb(declared.get('--rl-ink')!);
+        const under = page.map((v, i) =>
+          Math.round(v * (1 - percent / 100) + ink[i]! * (percent / 100)),
+        );
+        const wash = `#${under.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+        for (const token of [
+          '--rl-ink',
+          ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `--rl-author-${n}`),
+        ]) {
+          const ratio = contrast(declared.get(token)!, wash);
+          worst = Math.min(worst, ratio);
+          expect(ratio, `${name} ${appearance} ${token}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+    expect(worst).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('the code colors are in every theme, readable on the page and a code block, and none is red', () => {
     for (const { name } of THEMES) {
       for (const appearance of APPEARANCES) {

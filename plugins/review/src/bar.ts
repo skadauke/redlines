@@ -90,6 +90,14 @@ function currentIndex(state: EditorState, changes: readonly MarkRange[]): number
     return from === main.from && to === main.to;
   });
   if (exact >= 0) return exact;
+  // A caret at an edge that two changes share (a deletion then an insertion) is on the one that
+  // starts there, which is where the review put it, not on the one that ends there.
+  if (main.empty) {
+    const starting = changes.findIndex((change) =>
+      change.segments.some((segment) => segmentSpan(segment).from === main.head),
+    );
+    if (starting >= 0) return starting;
+  }
   let found = -1;
   let size = Infinity;
   changes.forEach((change, index) => {
@@ -153,7 +161,7 @@ function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
     effects: [
       ...opening(view, ctx),
       moveTo.of(change.id),
-      setCurrentChange.of({ ranges }),
+      setCurrentChange.of({ ids: marks.map((mark) => mark.id), ranges }),
       EditorView.scrollIntoView(caret, { y: 'center' }),
     ],
     userEvent: 'select.review',

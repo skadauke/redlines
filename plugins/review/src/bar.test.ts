@@ -160,6 +160,69 @@ describe('review bar', () => {
     });
   });
 
+  describe('the mark of the current change', () => {
+    const marked = (editor: Editor) => editor.view.state.field(currentChange);
+
+    it('goes when the change is accepted from its card or rail note, which send no selection', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.startReview();
+      expect(marked(editor)).not.toBeNull();
+      editor.accept('k3x9');
+      expect(marked(editor)).toBeNull();
+      expect(editor.view.dom.querySelector('.rl-review-current')).toBeNull();
+    });
+
+    it('goes when the change is rejected from elsewhere', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.next();
+      review.next();
+      expect(marked(editor)?.ids).toEqual(['w2rf']);
+      editor.reject('w2rf');
+      expect(marked(editor)).toBeNull();
+    });
+
+    it('goes when the bar’s Accept decides the last change, with no next one to move to', () => {
+      const one = file('Only <!--ins k3x9-->one<!--/k3x9--> here.', [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+      ]);
+      const { editor, review } = mount(one, { real: true });
+      review.startReview();
+      button(bar(editor)!, 'Accept').click();
+      expect(count(editor)).toBe('No changes');
+      expect(marked(editor)).toBeNull();
+      expect(editor.view.dom.querySelector('.rl-review-current')).toBeNull();
+    });
+
+    it('goes when an edit removes the change, and stays when an edit elsewhere leaves it', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.startReview();
+      editor.view.dispatch({ changes: { from: 0, to: 0, insert: 'X' } });
+      expect(marked(editor)?.ids).toEqual(['k3x9']);
+      const text = editor.view.state.doc.toString();
+      const from = text.indexOf('<!--ins k3x9-->');
+      const to = text.indexOf('<!--/k3x9-->') + '<!--/k3x9-->'.length;
+      editor.view.dispatch({ changes: { from, to } });
+      expect(marked(editor)).toBeNull();
+    });
+
+    it('is on the change that starts at a caret on an edge two changes share', () => {
+      const replaced = file('A <!--del w2rf  old--><!--ins p7qd-->new<!--/p7qd--> b.', [
+        ...PEOPLE,
+        'marks:',
+        '  w2rf: {by: ada, at: 2026-10-31T09:30Z}',
+        '  p7qd: {by: ada, at: 2026-10-31T09:30Z}',
+      ]);
+      const { editor, review } = mount(replaced, { real: true });
+      review.openBar();
+      const at = editor.view.state.doc.toString().indexOf('<!--ins p7qd-->');
+      editor.view.dispatch({ selection: { anchor: at } });
+      // The caret is where the deletion ends and the insertion starts: it is on the insertion.
+      expect(count(editor)).toBe('Change 2 of 2');
+    });
+  });
+
   it('accept decides and moves on', () => {
     const { editor, review, decided } = mount(doc);
     review.next();

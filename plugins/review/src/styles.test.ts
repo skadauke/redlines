@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { notePx, reviewThemeSpec } from './styles.ts';
+import { notePx, REVIEW_WASH, reviewThemeSpec } from './styles.ts';
 
 const NOTE = /-?\d+(\.\d+)?px \* var\(--rl-note-scale, 1\)/g;
 const WINDOW = 'calc(100vw - 32px)';
@@ -67,5 +67,13 @@ describe('the review styles at a text size', () => {
         expect(JSON.stringify(rule), selector).not.toContain('scale');
       }
     }
+  });
+});
+
+describe('the mark of the current change', () => {
+  it('is drawn with the wash that the themes test measures (themes/src/index.test.ts)', () => {
+    expect(reviewThemeSpec['.rl-review-current']).toMatchObject({
+      backgroundColor: `color-mix(in srgb, var(--rl-ink) ${REVIEW_WASH}%, transparent)`,
+    });
   });
 });

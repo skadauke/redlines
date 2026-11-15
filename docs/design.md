@@ -558,7 +558,11 @@ mode has no counterpart in the desktop app.
   marked, not selected: its text gets a gray wash and a thin ring, its change bar is drawn wider
   (4 px), and its note in the rail is the selected one, all in the theme's inks, so it never looks
   like a selection. The mark moves with Previous and Next and goes when the bar closes or the
-  caret moves elsewhere. With no changes the command is disabled.
+  caret moves elsewhere, and when the change is decided or edited away from anywhere (its card, its
+  note, the bar, an agent). The wash is faint enough that every author's color keeps 4.5:1 under it
+  in every theme. **Next and Previous no longer select the change:** they put the caret at its start
+  and mark it, so copying or typing after them acts at the caret, not on the change; the panel
+  planned for it (§5.6 below) holds the keyboard. With no changes the command is disabled.
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
   next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
   Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing

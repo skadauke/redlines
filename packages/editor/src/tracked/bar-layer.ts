@@ -10,7 +10,7 @@ import { type Extension, Facet, StateEffect, StateField } from '@codemirror/stat
 import { Direction, EditorView, layer, type LayerMarker, RectangleMarker } from '@codemirror/view';
 import { colorClass } from './colors.ts';
 import { type ChangeSpan, trackedChangeSpans } from './decorations.ts';
-import { viewModeField } from './field.ts';
+import { parsedField, viewModeField } from './field.ts';
 
 /** How far left of the text a bar stands, in CSS pixels (the theme draws it 2 px wide). */
 export const BAR_LEFT = 24;
@@ -284,6 +284,8 @@ export interface HotBar {
  * the review closes, which the plugin says with a null.
  */
 export interface CurrentChange {
+  /** The ids of its marks: the mark goes when one is gone, decided or edited away, by anyone. */
+  ids?: readonly string[];
   ranges: readonly { from: number; to: number }[];
 }
 
@@ -298,7 +300,12 @@ export const currentChange = StateField.define<CurrentChange | null>({
     // The person moved the selection elsewhere: they are no longer on that change.
     if (tr.selection) return null;
     if (!tr.docChanged) return value;
+    if (value.ids?.length) {
+      const here = new Set(tr.state.field(parsedField).marks.map((mark) => mark.id));
+      if (value.ids.some((id) => !here.has(id))) return null;
+    }
     return {
+      ids: value.ids,
       ranges: value.ranges.map(({ from, to }) => ({
         from: tr.changes.mapPos(from, 1),
         to: tr.changes.mapPos(to, -1),
@@ -379,9 +386,9 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
       const [only] = segment.colors;
       const author = segment.colors.length === 1 && only ? colorClass(only) : 'rl-bar-mixed';
       const hotClass = hot?.from === segment.from ? ' rl-bar-hot' : '';
-      const isCurrent = current.some(
-        (range) => segment.from <= range.to && segment.to >= range.from,
-      );
+      // Exclusive edges: a change that only touches the current one's end is not it. A screen line
+      // that holds both (a segment is a screen line) widens together.
+      const isCurrent = current.some((range) => segment.from < range.to && segment.to > range.from);
       markers.push(
         new RectangleMarker(
           `rl-bar-seg ${author}${hotClass}${isCurrent ? ' rl-bar-current' : ''}`,
