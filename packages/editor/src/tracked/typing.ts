@@ -657,6 +657,9 @@ function untrackedSpec(
   return rewritten(tr, result.changes, result.caret);
 }
 
+/** Closers of marks and nothing else: what ends the body's text, in front of the hidden ledger. */
+const CLOSERS = /^(?:<!--\/[^\n>]*-->)+$/;
+
 /**
  * A selection that reaches past the body, onto the line after the hidden ledger, stops at it: in
  * front of the closers that end the body's text when the end is inside them, which are hidden
@@ -669,9 +672,9 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   let stop = end;
   // The end of the body inside the closers that end its text: in front of them. (Inside only line
   // breaks that end it, the end is where a new line goes.)
-  if (!tr.docChanged) {
+  if (!tr.docChanged && tr.isUserEvent('select')) {
     atomsOf(tr.startState).between(end, end, (from, to) => {
-      if (from < end && end < to && tr.startState.sliceDoc(from, end).trim() !== '') stop = from;
+      if (from < end && end < to && CLOSERS.test(tr.startState.sliceDoc(from, end))) stop = from;
     });
   }
   const ranges = selection.ranges.map((r) =>
