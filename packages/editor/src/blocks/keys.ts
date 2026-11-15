@@ -47,7 +47,6 @@ import {
   planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
-import { staleInput } from './stale-input.ts';
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
@@ -723,7 +722,6 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
-    Prec.highest(staleInput()),
     Prec.lowest(openLineSpaces),
   ];
 }
