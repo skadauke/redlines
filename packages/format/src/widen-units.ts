@@ -304,7 +304,7 @@ function readList(
     // Blank lines between items keep the list going when another item follows.
     let after = k;
     while (lines[after] && blank(lines[after]!)) after++;
-    if (after > k && lines[after] && BULLET.test(lines[after]!.text)) k = after;
+    if (lines[after] && BULLET.test(lines[after]!.text)) k = after;
     else break;
   }
   list.to = lines[items.at(-1)?.last ?? at]!.to;

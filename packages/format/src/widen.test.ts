@@ -42,8 +42,12 @@ function check(label: string, text: string, find: string, insert: string, kind: 
   else expect(rejected, label).toBe(`${bodyOf(text).replace(/\n+$/, '')}\n`);
   // Accepting it gives the new text, whatever was decided inside.
   const accepted = applyChanges(after, accept(after, done.id));
-  expect(parse(accepted).marks, label).toEqual([]);
-  expect(bodyOf(accepted).replace(/\n+$/, ''), label).toBe(wanted.replace(/\n+$/, ''));
+  // The marks in the unit go with it; the others stay pending.
+  expect(
+    parse(accepted).marks.map((mark) => mark.id),
+    label,
+  ).toEqual(parse(text).marks.map((mark) => mark.id).filter((mark) => !done.held.includes(mark)));
+  expect(newestView(accepted).text.replace(/\n+$/, ''), label).toBe(wanted.replace(/\n+$/, ''));
   return done;
 }
 
@@ -59,6 +63,41 @@ describe('widening an edit to the unit that holds it', () => {
   it('a paragraph with no other marks', () => {
     const text = file('Intro.\n\nThe importer ships in April.\n\nOutro.');
     check('plain', text, 'ships in April', 'ships in May, after the review', 'block');
+  });
+});
+
+describe('every kind of unit', () => {
+  it('a table that another person changed, rewritten', () => {
+    const table = ['| Fruit | Count |', '| ----- | ----- |', '| Apples | <!--ins k3x9-->3<!--/k3x9--> |', '| Pears | 5 |'];
+    const text = file(`Intro.\n\n${table.join('\n')}\n\nOutro.`, { k3x9: 'bo' });
+    const done = check('table', text, 'Pears | 5', 'Pears | 6', 'table');
+    expect(done.held).toEqual(['k3x9']);
+  });
+
+  it('a quote paragraph', () => {
+    const text = file('Intro.\n\n> Quoted <!--ins k3x9-->text<!--/k3x9--> here.\n\nOutro.', { k3x9: 'bo' });
+    check('quote', text, 'Quoted text here', '# Quoted text here', 'block');
+  });
+
+  it('an item of a loose list, with its bullet outside', () => {
+    const text = file('- one <!--ins k3x9-->two<!--/k3x9-->\n\n- three\n\nOutro.', { k3x9: 'bo' });
+    check('loose item', text, 'one two', '## one two', 'block');
+  });
+
+  it('an item of a tight list, with its bullet outside', () => {
+    const text = file('Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.', { k3x9: 'bo' });
+    check('tight item', text, 'one two', '## one two', 'block');
+  });
+
+  it('code that starts an item of a tight list goes up to the list (format 12.3)', () => {
+    const text = file('Intro.\n\n- ```js\n  let a = 1;\n  ```\n- two <!--ins k3x9-->more<!--/k3x9-->\n\nOutro.', { k3x9: 'bo' });
+    const done = check('tight code', text, 'let a = 1;', 'let a = 2;', 'list');
+    expect(done.unit.rung).toBeGreaterThan(0);
+  });
+
+  it('a fenced block of code', () => {
+    const text = file('Intro.\n\n```js\nlet a = 1;\n```\n\nOutro. <!--ins k3x9-->More.<!--/k3x9-->', { k3x9: 'bo' });
+    check('code', text, 'let a = 1;', 'let a = 2;', 'code');
   });
 });
 

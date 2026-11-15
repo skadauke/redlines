@@ -107,6 +107,7 @@ export function widen(
   const intended = applyChanges(view.text, sorted);
   const units = unitsOf(text, parsed);
   const others = (range: Range) => othersIn(parsed, range, ctx);
+  const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
   let blocks = 0;
   for (let index = 0; rung; index++) {
@@ -120,7 +121,7 @@ export function widen(
         others({ from: closed.lineFrom, to: closed.to }),
       );
     }
-    const done = tryRung(text, parsed, view, intended, sorted, closed, ctx, index, blocks);
+    const done = tryRung(text, parsed, view, intended, sorted, closed, ctx, id, index, blocks);
     if (done) return done;
     rung = widerThan(closed);
   }
@@ -276,6 +277,7 @@ function tryRung(
   edits: readonly TextChange[],
   rung: Rung,
   ctx: EditContext,
+  id: string,
   index: number,
   blocks: number,
 ): Widened | undefined {
@@ -311,7 +313,6 @@ function tryRung(
   const old = before.slice(from, to);
   const held = idsHeld(parse(before), from, to);
   const ledger = workingLedger(parse(before).ledger);
-  const id = newId(idsIn(before), ctx.random);
   addPerson(ledger, ctx.author);
   const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
   if (ctx.group !== undefined) entry.group = ctx.group;
@@ -320,7 +321,7 @@ function tryRung(
   const next = before.slice(to);
   // A block that is atomic, or a table, stands in the form of rule 9: where a blank line follows at
   // the top level, the closer stands in it and the payload ends with the block's line break.
-  const atomic = rung.atomic || rung.kind === 'table';
+  const atomic = rung.atomic || rung.kind === 'table' || endsInFence(old) || endsInFence(now);
   const blankAfter = atomic && rung.prefix === '' && /^\r?\n\r?\n[ \t]*\S/.test(next) && !/^\r?\n\r?\n<!-- redlines/.test(next);
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
@@ -331,8 +332,8 @@ function tryRung(
   let end = to;
   if (atomic) {
     const line = `${continuationPrefix(rung.prefix)}${closer}`;
-    written = `${opener}${lead}${body}${eol}${line}${blankAfter ? eol : ''}`;
-    if (blankAfter) end = to + (next.startsWith('\r\n') ? 2 : 1);
+    written = `${opener}${lead}${body}${eol}${line}`;
+    if (blankAfter) end = to + eol.length;
   } else {
     written = `${opener}${lead}${body}${closer}`;
   }
@@ -347,6 +348,12 @@ function tryRung(
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
     held,
   };
+}
+
+/** Whether the last line of a text closes a fenced block: a closer written after it would be read
+ * as part of the fence's line, so it stands alone on the line after (format §3.5). */
+function endsInFence(text: string): boolean {
+  return /(?:^|\n)[ \t>]*(?:`{3,}|~{3,})[ \t]*$/.test(text);
 }
 
 /** The ids of the marks of `parsed` that start inside `[from, to)`. */
@@ -379,6 +386,7 @@ function passes(
   id: string,
 ): boolean {
   const read = parse(after);
+  if (process.env.WIDEN_DEBUG) console.log('GATE', JSON.stringify(after.slice(0, 300)), read.warnings.map((w) => w.code), JSON.stringify(newestView(after).text), JSON.stringify(intended));
   if (!read.marks.some((mark) => mark.id === id && mark.kind === 'sub')) return false;
   const grew = (code: string) =>
     read.warnings.filter((w) => w.code === code).length >
