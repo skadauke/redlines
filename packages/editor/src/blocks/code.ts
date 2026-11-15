@@ -288,6 +288,8 @@ export function planCodeTab(state: EditorState, block: Block, outdent: boolean):
   const lines = linesOf(state, from, to).filter((line) => !onFence(line));
   if (lines.length === 0) return nothing(state);
   const changes: ChangeSpec[] = [];
+  const indented = block.kind === 'code' && !shape.opens;
+  const syntax = block.text.from - block.lines.from;
   for (const line of lines) {
     const start = line.from + (line.text.startsWith(cont) ? cont.length : 0);
     if (!outdent) {
@@ -301,7 +303,11 @@ export function planCodeTab(state: EditorState, block: Block, outdent: boolean):
     const take = lead.startsWith('\t')
       ? 1
       : Math.min(/^ */.exec(lead)?.[0].length ?? 0, unit === '\t' ? 4 : unit.length);
-    if (take > 0) changes.push({ from: start, to: start + take });
+    // The first four columns of indented code, past its container's, are what make it code: a
+    // line that gave them up would be text of a paragraph, and take the list under it along.
+    const kept = indented ? Math.max(0, start - line.from + lead.length - syntax) : Infinity;
+    const taken = Math.min(take, kept);
+    if (taken > 0) changes.push({ from: start, to: start + taken });
   }
   if (changes.length === 0) return nothing(state);
   const mapped = state.changes(changes);

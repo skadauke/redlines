@@ -160,6 +160,15 @@ const readsAsText = (row: string) =>
 const BELOW_CHANGES =
   "A pending change in the line below would make it read differently once this item has moved: an item that the change leaves empty can't follow text, and would turn it into a heading. Accept or reject that change first.";
 
+/**
+ * Why the item that has blocks nested in it can't leave its list while Track Changes is on: they
+ * would stand four columns or more in, as text or code, unless their indentation is written again,
+ * and a tracked change can't write the indentation of a line. The lane for widening such an edit
+ * into a replacement of the whole item is #497.
+ */
+const NESTED_STAY =
+  "This item can't leave its list while Track Changes is on: the list or blocks nested under it would be indented too far to be a list or blocks any more, and their indentation can't be changed as a tracked edit. Take the marker out with Track Changes off, or move the nested items out first.";
+
 /** Why an item can't go up a level where the line after it would become part of its text. */
 const ABSORBED =
   "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
@@ -298,6 +307,112 @@ function absorbedBelow(state: EditorState, items: Item[], shifted: boolean): str
   return number !== undefined && number !== '1' ? OUTDENT_NUMBERED_CHILD : ABSORBED;
 }
 
+/** The column at `to` in `text`, a tab going on to the next multiple of four. */
+function columnAt(text: string, to: number): number {
+  let column = 0;
+  for (let i = 0; i < to; i++) column = text[i] === '\t' ? column + 4 - (column % 4) : column + 1;
+  return column;
+}
+
+/**
+ * The edits that take up to `by` columns of white space from the start of each line, after its
+ * quote markers, from `first` to `last`: where a line has less white space it loses what it has,
+ * and a blank line is left as it is. A tab is written as the spaces it came to, as far as it is cut.
+ */
+function takeColumns(state: EditorState, first: number, last: number, by: number): ChangeSpec[] {
+  const { doc } = state;
+  const changes: ChangeSpec[] = [];
+  for (let n = first; n <= last && n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    const white = /^[ \t]*/.exec(line.text.slice(quoted))![0];
+    if (!white || line.text.slice(quoted).trim() === '') continue;
+    const start = columnAt(line.text, quoted);
+    const columns = columnAt(line.text, quoted + white.length) - start;
+    const take = Math.min(columns, by);
+    if (take <= 0) continue;
+    const from = line.from + quoted;
+    changes.push(
+      white.includes('\t')
+        ? { from, to: from + white.length, insert: ' '.repeat(columns - take) }
+        : { from, to: from + take },
+    );
+  }
+  return changes;
+}
+
+/** The edits that put `by` spaces in at the start of each line, after its quote markers, that has text. */
+function putColumns(state: EditorState, first: number, last: number, by: number): ChangeSpec[] {
+  const { doc } = state;
+  const changes: ChangeSpec[] = [];
+  for (let n = first; n <= last && n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    if (line.text.slice(quoted).trim() === '') continue;
+    changes.push({ from: line.from + quoted, insert: ' '.repeat(by) });
+  }
+  return changes;
+}
+
+/**
+ * How far an item's text stands in from where its marker line starts after the quote markers: its
+ * indentation, its marker and the spaces after it (one to four, or one where the marker is alone
+ * or more follow), as CommonMark counts. The lines of what is in the item are indented this far or
+ * more (a line of its paragraph's text may be less).
+ */
+function textOffset(state: EditorState, item: SyntaxNode): number {
+  const mark = item.getChild('ListMark')!;
+  const line = state.doc.lineAt(mark.from);
+  const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+  const end = mark.to - line.from;
+  const rest = line.text.slice(end);
+  const white = /^[ \t]*/.exec(rest)![0];
+  const marked = columnAt(line.text, end);
+  const spans = columnAt(line.text, end + white.length) - marked;
+  const space = rest.trim() === '' || spans > 4 ? 1 : Math.max(spans, 1);
+  return marked + space - columnAt(line.text, quoted);
+}
+
+/**
+ * What an item takes out of its list with its marker (a paragraph that was its first block, which
+ * Backspace leaves where it is, or Delete joins into the text above) does to the blocks that were
+ * under it: they stood in the item, a line of them indented at least as far as its text. Taken as
+ * they are, a list or a block of text that would stand four columns or more past `into`, the column
+ * the text now stands at (`    - a` under `* note`, which is `note` at the start of the line: 0),
+ * is text of the paragraph, or code, and no item, in the file as it will be; and one that would
+ * stand before `into` has left the item that holds the text. So all the lines under the paragraph
+ * move together, by the difference between the item's text offset and `into`, which keeps their
+ * depth among themselves; where no block of them would be read otherwise, they stay as they are.
+ * `needed` says which.
+ */
+function leaving(
+  state: EditorState,
+  item: SyntaxNode,
+  after: number,
+  into = 0,
+): { needed: boolean; changes: ChangeSpec[] } {
+  const { doc } = state;
+  let needed = false;
+  for (let child = item.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'ListMark' || child.name === 'Task' || child.name === 'QuoteMark') continue;
+    const line = doc.lineAt(child.from);
+    // The item's own first block, on the marker line, or in the lines of the paragraph.
+    if (line.number <= after || child.name === 'CodeBlock') continue;
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    const white = /^[ \t]*/.exec(line.text.slice(quoted))![0];
+    const at = columnAt(line.text, quoted + white.length) - columnAt(line.text, quoted);
+    if (at < into || at - into >= 4) needed = true;
+  }
+  if (!needed) return { needed, changes: [] };
+  const last = doc.lineAt(item.to).number;
+  const by = textOffset(state, item) - into;
+  return {
+    needed,
+    changes:
+      by > 0 ? takeColumns(state, after + 1, last, by) : putColumns(state, after + 1, last, -by),
+  };
+}
+
 /** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
 const NUMBERED_IN_CONTAINER =
   "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
@@ -368,6 +483,21 @@ function join(
     changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
   } else if (blank !== null) {
     changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
+  }
+  if (taken) {
+    // What stood in the item whose marker goes follows the text into the block above: at that
+    // block's own text column, or it would be text of its paragraph, code, or out of its item.
+    const holder = containerNodes(state, above).at(-1);
+    const under = leaving(
+      state,
+      taken,
+      doc.lineAt(below.lines.to).number,
+      holder?.name === 'ListItem' ? textOffset(state, holder) : 0,
+    );
+    if (under.needed && state.field(trackingField, false)) {
+      return { ...nothing(state), userEvent, refusal: NESTED_STAY };
+    }
+    changes.push(...under.changes);
   }
   return edit(state, changes, from, userEvent);
 }
@@ -762,9 +892,18 @@ function outdent(state: EditorState, block: Block): KeyEdit {
   const line = own.line;
   const from = line.from;
   const markerAt = line.from + line.text.length - line.text.trimStart().length;
+  // What is nested in the item moves up with it, as the format writes it: its text column moves
+  // left by as many columns as the marker does, and a line left where it was would stand that much
+  // further in, four columns or more, as text or code.
+  const moved =
+    columnAt(line.text, markerAt - line.from) - columnAt(parent.indent, parent.indent.length);
+  const under =
+    moved > 0
+      ? takeColumns(state, line.number + 1, state.doc.lineAt(own.node.to).number, moved)
+      : [];
   return edit(
     state,
-    [{ from, to: markerAt, insert: parent.indent }],
+    [{ from, to: markerAt, insert: parent.indent }, ...under],
     block.text.from,
     userEvent,
     block.text.from,
@@ -804,6 +943,11 @@ function outOfList(
   }
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
+  // What stood in the item moves out of it with the paragraph, by the item's own offset.
+  const under = leaving(state, item, doc.lineAt(block.lines.to).number);
+  if (under.needed && state.field(trackingField, false)) {
+    return { ...nothing(state), userEvent, refusal: NESTED_STAY };
+  }
   // The first line of the file, Track Changes on: the format takes the marker out as a change of
   // its own, and the lines below it, up to a blank line, must not turn into text of this one or
   // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
@@ -854,6 +998,7 @@ function outOfList(
       changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
     }
   }
+  changes.push(...under.changes);
   // In front of the text, however the format writes the break: right after the break's line
   // breaks, which a marker's payload never holds as they are.
   if (before && prev) {

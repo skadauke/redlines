@@ -1476,6 +1476,22 @@ indented than the item, or as deep as the text of its child). The format's own r
 item at the item's indentation only, and is not made where it refuses first (tabs, a pending break):
 the key says so in the format's words for a numbered item, and in its own for the others.
 
+Taking an item's marker out leaves what is nested in it where it stood, in the file, unless the key
+that takes it writes the lines again: a list or a paragraph four columns or more in (`* note⏎    - a`)
+is more of the paragraph above it for micromark 4.0.2, or code, and the file would hold an item line
+that no reader reads as an item. Backspace at the first item of a list at the top level or in a quote,
+and Delete at the end of the paragraph above a list, take the white space of the lines under the item
+away by as many columns as its marker and the spaces after it take (or put it in, to the text column of
+the block above, for the join), so that those blocks stand where micromark reads them as the items,
+quotes and paragraphs they were, and where none would stand four columns in or out of the item that
+holds the text, they stay. With Track Changes on that is not written: the indentation of a line is
+no text a tracked change holds, and the format's block change to a paragraph refuses an item that
+holds a block of its own, so the key is refused in words and writes nothing (lane R widens it into a
+replacement of the whole item, #497). Shift-Tab in indented code takes only the columns past the four
+that make it code, as a line that gave them up would be text of the paragraph above and the list
+under it would read as that paragraph's too. Tested: `nested-keep.test.ts` of
+`packages/editor/src/blocks`, and the editor's walks.
+
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
 break syntax; a deleted hard break is a deletion whose payload is the break.
