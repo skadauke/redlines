@@ -64,7 +64,8 @@ export type KeyName =
 
 /**
  * A step of a script: a key, text typed over the selection as the keyboard types it, an agent's
- * edit (a paragraph of its own at the top of the document), a decision on the first pending
+ * edit (a paragraph of its own at the top of the document), a command of the registry run by its
+ * id (the image size's, #526), a decision on the first pending
  * change (accepted or rejected, where the format decides it), or Track Changes switched on or off
  * for this editor.
  */
@@ -73,6 +74,7 @@ export type Step =
   | { type: string }
   | { paste: string; plain?: boolean }
   | { agent: string }
+  | { command: string }
   | { decide: 'accept' | 'reject' }
   | { tracking: boolean };
 
@@ -424,6 +426,10 @@ function play(editor: Editor, step: Step): boolean {
       group: 'walk',
       agent: 'Claude',
     });
+  } else if ('command' in step) {
+    // The whole document parsed first: a command reads its place from the tree.
+    forceParsing(view, view.state.doc.length, 5000);
+    return editor.commands.run(step.command);
   } else if ('tracking' in step) {
     editor.setTracking(step.tracking, { inFile: false });
   } else {

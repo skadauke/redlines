@@ -281,8 +281,7 @@ applies its inverse:
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above. A point at the end of the header row's last cell (§3.7); other tools write a range around the table |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE` (an alert's
-  old type, below), and `md-image`, which restores Markdown image syntax when an image resize is
-  rejected.
+  old type, below).
 - Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
   ever parts two operations. A reader splits the payload at its spaces first, and then reads the
   escapes of each value.
@@ -2082,6 +2081,49 @@ the start of any line but the block's first. They never go inside a tag or insid
 An ordinary HTML comment is content. Inserting one is an insertion that contains it. Deleting one
 is a deletion whose payload holds it, escaped: `<!--del b4rt <!-\- TODO -\->-->`.
 Editing inside one is a substitution of the whole comment.
+
+### 3.5.1 Image size and alignment
+
+Markdown's `![alt](src "title")` has no size, so a size is written as an HTML `<img>` tag, which
+GitHub and every Markdown reader that passes HTML read (in every file type, as `<sub>` is, §2.6; a
+pandoc file's `{width=}` is not written yet). The rule:
+
+- **The first size.** An image that is given a width becomes the tag, with its attributes in this
+  order: `src`, `alt` (left out when empty), `title` (when it had one), `width`, `align`. Their
+  values are what the Markdown image meant (backslash escapes and character references read, the
+  `<…>` of a destination with spaces taken off) written as attribute values: `&` as `&amp;`, `"` as
+  `&quot;`, `<` as `&lt;`. `width` is a whole number of pixels at the theme's own text size, which
+  the text size multiplies when the image is drawn, and which never makes an image wider than the
+  text column. A tag that is already there keeps every attribute it has, as it wrote it, and a
+  width changes where it stands. A height is taken away with a new width, so that the aspect
+  follows the width.
+- **The image's own size.** An image without a width is as wide as it is, or as the column when
+  that is less, and never larger than its own size. Giving it its own size again takes the `width`
+  away, and the tag becomes `![alt](src "title")` again **only** when nothing would be lost: its
+  attributes are only `src`, `alt` and `title`, the destination has no space, parenthesis,
+  backslash or angle bracket, and the alt text and the title have nothing that Markdown would read
+  as more than text (no `[`, `]`, `\`, `*`, `_`, backtick, `<`, `&` or `!`; no `"` or `&` in a
+  title). Any other tag stays a tag, without its width.
+- **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
+  an image alone on its line is otherwise centered, which is the absence of the attribute, so
+  centering takes it away. Other readers float the image to that side. An image among words is not
+  placed.
+- **Track Changes.** An image is atomic content (above), and its size is its text: a new size or
+  alignment is a substitution of the whole image, `![alt](src)` the old text in the payload and the
+  tag the new text (or the other way round), which reads the same in every order of decisions. No
+  marker goes inside the tag. Undo takes the change back as one.
+- **A tag alone on a block's first line** is an HTML block (CommonMark's seventh kind), which runs
+  on to the next blank line and reads the lines under it as raw HTML. So an image that stands alone
+  on the first line of a paragraph with more lines under it is not turned into a tag as it is: the
+  paragraph is parted after the image, with a blank line (the container's, in a quote), and that
+  is the edit. With Track Changes on the part is a typed break that the writer does not take there
+  yet (it says so in its words), and the person is told so, in words about the image, and the file
+  is left as it is, until the widening of an edit that can't be tracked finely is built.
+- **Known: a lone tag in the file.** Where the tag stands alone in its paragraph (an HTML block)
+  and Track Changes is on, the closer of the substitution stands after the tag on its line, so that
+  micromark reads the file's tag in a `<p>` and the newest view's tag as a block: the same image,
+  one paragraph's wrapper apart. The closer belongs on the next line, as it does after an HTML
+  block (§3.3); the writer doesn't place it there yet.
 
 ### 3.6 Nesting
 
