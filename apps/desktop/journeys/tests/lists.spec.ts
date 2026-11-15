@@ -1,7 +1,7 @@
 // Lists, and the keys at speed that were the first thing to go wrong in them. Each journey is a
 // short note of Stephan's from testing build 18; the ones that fail today say which issue is open.
 
-import { expect, known, test } from '../src/journey.ts';
+import { expect, test } from '../src/journey.ts';
 
 test.describe('lists @lists', () => {
   test('Tab, then typing in a burst, in a bullet list @smoke', async ({ start }) => {
@@ -37,22 +37,71 @@ test.describe('lists @lists', () => {
     expect(await j.cmText()).toBe('- one\n  - twoabcdef\n  - ghi\n');
   });
 
-  known(
-    510,
-    'pasting a bullet into a list adds an item',
-    /the pasted bullet is an item of its own/,
-    async ({ start }) => {
-      const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
-      await j.caretAfter('two');
-      await j.paste('- pasted');
-      await j.shot('paste-bullet');
-      // Today the paste lands inside the item: "- two- pasted".
-      expect(
-        (await j.cmText()).trimEnd().split('\n'),
-        'the pasted bullet is an item of its own',
-      ).toEqual(['- one', '- two', '- pasted']);
-    },
-  );
+  // #510: a pasted bullet is an item of the list (the rules are in docs/design.md, 5.10).
+  test('pasting a bullet into a list adds an item', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
+    await j.caretAfter('two');
+    await j.paste('- pasted');
+    await j.shot('paste-bullet');
+    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['- one', '- two', '- pasted']);
+    expect((await j.caret()).lineText).toBe('- pasted');
+    // One Undo takes the whole paste back.
+    await j.press('ControlOrMeta+z');
+    expect(await j.cmText()).toBe('- one\n- two\n');
+  });
+
+  test('pasting a numbered item into a bullet list makes a bullet', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
+    await j.caretAfter('two');
+    await j.paste('1. pasted');
+    await j.shot('paste-numbered-into-bullets');
+    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['- one', '- two', '- pasted']);
+  });
+
+  test('pasting a bullet into a numbered list is the next number', async ({ start }) => {
+    const j = await start({ doc: '1. one\n2. two\n', tracking: false, view: 'clean' });
+    await j.caretAfter('two');
+    await j.paste('- pasted');
+    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['1. one', '2. two', '3. pasted']);
+  });
+
+  test('pasting two items, one nested, keeps the depth', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
+    await j.caretAfter('two');
+    await j.paste('- a\n  - b');
+    await j.shot('paste-two-nested');
+    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['- one', '- two', '- a', '  - b']);
+  });
+
+  test('pasting a bullet in the middle of an item splits it', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: false, view: 'clean' });
+    await j.caretAfter('tw');
+    await j.paste('- pasted');
+    await j.shot('paste-middle');
+    expect((await j.cmText()).trimEnd().split('\n')).toEqual(['- one', '- tw', '- pasted', '- o']);
+    await j.press('ControlOrMeta+z');
+    expect(await j.cmText()).toBe('- one\n- two\n');
+  });
+
+  test('pasting a bullet with Track Changes on is a tracked insertion', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: true, view: 'redlines' });
+    await j.caretAfter('two');
+    await j.paste('- pasted');
+    await j.shot('paste-bullet-tracked');
+    const file = await j.cmText();
+    expect(file).toContain('<!--ins ');
+    expect(file.split('<!-- redlines')[0]).toMatch(/- two<!--ins \w+--><!--split \w+-->\n- pasted/);
+    await j.press('ControlOrMeta+z');
+    expect((await j.cmText()).split('<!-- redlines')[0]).toBe('- one\n- two\n');
+  });
+
+  test('pasting a bullet into the middle of an item with Track Changes on', async ({ start }) => {
+    const j = await start({ doc: '- one\n- two\n', tracking: true, view: 'redlines' });
+    await j.caretAfter('tw');
+    await j.paste('- a\n  - b');
+    await j.shot('paste-middle-tracked');
+    expect(await j.cmText()).toContain('<!--ins ');
+  });
 
   // Stephan saw the checklist stay open (#513); in the page it ends, with Track Changes off and
   // on, so this guards it. If it fails in the app and not here, the app's own path differs.

@@ -33,6 +33,7 @@ export interface KeyEdit {
   userEvent:
     | 'input.break'
     | 'input.break.line'
+    | 'input.paste'
     | 'delete.selection'
     | 'delete.backward.block'
     | 'delete.forward.block'
@@ -272,7 +273,7 @@ function textLineAbove(state: EditorState, line: Line): Line | null {
 }
 
 /** Whether a block of an item is its last one, but for lists nested in it. */
-function lastInItem(state: EditorState, block: Block, item: Item): boolean {
+export function lastInItem(state: EditorState, block: Block, item: Item): boolean {
   let child: SyntaxNode | null = (
     ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state)
   ).resolveInner(block.text.from, 1);
@@ -848,7 +849,7 @@ function outsideEdges(state: EditorState, head: number): number {
  * the split goes outside the delimiters, after the break. An atom (an image, an autolink, a tag)
  * the caret is inside of is never parted: the break goes after it.
  */
-function splitAt(
+export function splitAt(
   state: EditorState,
   head: number,
   insert: string,

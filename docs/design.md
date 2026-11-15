@@ -992,6 +992,23 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **List items pasted into a list item.** A paste that is only list items (bullets, numbers or
+  tasks, nested or not, from Markdown or from a page's list) made at a caret, or over a selection,
+  inside a list item adds items to that list, as Return does, and never text inside the item. At
+  the end of an item they follow it at its level (after its nested items, when it has some); at the
+  start of a non-empty item they go before it; in an empty item they replace it; in the middle of
+  an item, or over a selection inside it (the selection is deleted first, and may reach into the
+  next item), the item splits at the caret and they go between the halves. Pasted nesting keeps
+  its relative depth. The pasted items take the target list's kind, so that the result is one
+  list: a `1.` item pasted into a bullet list is a bullet, a bullet pasted into a numbered list
+  is the next number (the same number in a list numbered alike), a task keeps its checkbox, and
+  nested items keep their own markers. A loose list stays as loose as it was. With Track Changes
+  on the new items are one insertion, written as Return and typing write them, and every order of
+  decisions reads alike. One Undo takes back the whole paste, the selection's deletion with it.
+  Pasting list items into a paragraph outside any list, a paste with a blank line between its
+  items, one with items that hold more than text and nested items, a selection over a marker, and
+  places where Return itself works another way (inside a code span's marks, at a line break inside
+  an item's text) go in as text, as they did.
 - **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
   in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
   asks for files in the system's panel) all do the same. The file is copied into the folder for

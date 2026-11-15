@@ -26,6 +26,7 @@ import {
 import { type FontStacks, destination, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
 import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
+import { pasteListItems } from '../blocks/keys.ts';
 import { heldRemoteImages } from '../preview/image.ts';
 import { headCell, rectOf } from '../table/cells.ts';
 import {
@@ -232,6 +233,12 @@ function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string |
   return pasteRange(view, [[value]]);
 }
 
+/** A paste of list items into a list item, made; false for any other paste. */
+function listPaste(view: EditorView, text: string): boolean {
+  const plain = plainText(text);
+  return plain !== '' && pasteListItems(view, plain);
+}
+
 /** Copy, cut, drag and paste of the newest text, outside Raw. */
 export function clipboard(): Extension {
   // The text this editor last put on the clipboard, which it knows again when it is pasted.
@@ -290,6 +297,12 @@ export function clipboard(): Extension {
           return true;
         }
         const markdown = pastedMarkdown(data, lastCopied);
+        // List items into a list item are items of that list, whether they came as Markdown or as
+        // plain text; one step to undo (blocks/paste.ts).
+        if (!plainPastes.has(event) && listPaste(view, markdown ?? data.getData('text/plain'))) {
+          event.preventDefault();
+          return true;
+        }
         if (markdown === null) return false;
         event.preventDefault();
         const { from, to } = view.state.selection.main;

@@ -70,6 +70,7 @@ export type KeyName =
 export type Step =
   | KeyName
   | { type: string }
+  | { paste: string }
   | { agent: string }
   | { decide: 'accept' | 'reject' }
   | { tracking: boolean };
@@ -408,6 +409,14 @@ function play(editor: Editor, step: Step): boolean {
   if (typeof step === 'string') return press(view, step);
   if ('type' in step) {
     view.dispatch(view.state.replaceSelection(step.type), { userEvent: 'input.type' });
+  } else if ('paste' in step) {
+    // The whole document parsed first, as for a key: the paste reads its place from the tree.
+    forceParsing(view, view.state.doc.length, 5000);
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', step.paste);
+    view.contentDOM.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+    );
   } else if ('agent' in step) {
     editor.applyAgentEdit(`${step.agent}\n\n${editor.getDoc()}`, {
       group: 'walk',
