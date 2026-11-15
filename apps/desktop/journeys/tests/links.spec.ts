@@ -12,6 +12,14 @@ test.describe('links @links', () => {
     const hint = j.page.locator('.rl-link-hint');
     await expect(hint).toBeVisible();
     await j.shot('link-hint');
+    // On the first line of the page, the hint is on the screen and clear of the title bar.
+    const box = await hint.boundingBox();
+    expect(box && box.y, 'the hint is on the screen').toBeGreaterThanOrEqual(0);
+    const bar = await j.page.locator('.rl-titlebar').first().boundingBox();
+    if (box && bar)
+      expect(box.y, 'the hint is below the title bar').toBeGreaterThanOrEqual(
+        bar.y + bar.height - 1,
+      );
     // ⌘ on a Mac (the editor says Ctrl elsewhere), which is where the journeys run.
     await expect(hint.locator('.rl-link-hint-do')).toHaveText('⌘-click to open');
     await expect(hint.locator('.rl-link-hint-address')).toHaveText('https://example.org');

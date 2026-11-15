@@ -346,7 +346,7 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()).toBeNull();
   });
 
-  it('is drawn in the theme’s hint (--rl-tip, white text) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
+  it('has a rule for the theme’s hint (--rl-tip, white text) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
     const editor = load(DOC, { openLink: vi.fn() });
     mouse(linkNamed(editor, 'web link'), 'mousemove', { clientX: 5, clientY: 5 });
     vi.advanceTimersByTime(400);
