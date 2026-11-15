@@ -1210,6 +1210,22 @@ Track Changes on, or goes up a level, in the indentation of a marker), it is ref
 for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
 `packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
 
+A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
+line of that text, as CommonMark reads it: only a list that starts at 1 interrupts a paragraph, and
+micromark 4.0.2 reads `<li>a⏎2. b</li>`. The editor's parse reads a sublist there, because it lets
+any numbered item interrupt a paragraph inside a numbered list. The editor's keys read the line as
+micromark does: the lines of such items, the ones that follow on the lines right after, up to the
+first that starts at 1 or that has a blank line before it, are lines of the paragraph above them,
+so Return at the end of `2. b` makes the next item of the list of `1. a` (`1. a⏎   2. b<!--split
+k3x9-->⏎2. `), not the item after a sublist's `2.` (which writes a `3.` line that micromark reads as
+text), and Tab, Shift-Tab and Backspace act on the item that holds the text. Where micromark reads
+a list, the keys are as they were: after a blank line, a list that starts at `1.`, a list that
+continues one above it. An empty numbered item, which the file doesn't hold (it is the open item of
+the editor's keys), and a numbered line that has a list or other blocks of its own under it, are
+not read so yet: the keys treat them by the parse, as before, and no write for them is known
+(lane R widens such an edit, #497). Tested: `sublist-two.test.ts` of
+`packages/editor/src/blocks`, and the editor's walks over lists side by side.
+
 ### 3.3 Marks that start or end a block
 
 A mark that starts at the beginning of a block puts its opener on the line before the block, with

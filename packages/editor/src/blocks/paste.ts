@@ -27,7 +27,7 @@ import {
 } from './edits.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { openBlock } from './open.ts';
-import { blockAt } from './structure.ts';
+import { blockAt, listItems } from './structure.ts';
 
 const markdown = parser.configure(GFM);
 
@@ -173,7 +173,7 @@ export function planListPaste(state: EditorState, pasted: PastedItem[]): KeyEdit
 
   // The markers: the item's own, and the numbers after it (the same in a list numbered alike).
   const number = /^(\d+)([.)])$/.exec(item.marker);
-  const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
+  const numbers = listItems(state, item.node.parent).map((other) => {
     const mark = other.getChild('ListMark');
     return mark ? Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) : Number.NaN;
   });

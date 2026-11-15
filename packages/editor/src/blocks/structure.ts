@@ -238,14 +238,17 @@ function emptyContainerOn(state: EditorState, line: Line): SyntaxNode | null {
 }
 
 /** Whether a list is loose: blank lines between its items, or between two blocks of an item. */
-export function loose(state: Pick<EditorState, 'sliceDoc'>, list: SyntaxNode): boolean {
+export function loose(
+  state: Pick<EditorState, 'sliceDoc'>,
+  list: SyntaxNode,
+  items = list.getChildren('ListItem'),
+): boolean {
   const between = (a: SyntaxNode, b: SyntaxNode) =>
     state
       .sliceDoc(a.to, b.from)
       .split('\n')
       .slice(1, -1)
       .some((text) => BLANK.test(text));
-  const items = list.getChildren('ListItem');
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
     if (i > 0 && between(items[i - 1]!, item)) return true;
@@ -301,7 +304,7 @@ function containersOf(state: EditorState, node: SyntaxNode, line: Line): Contain
       kind: 'item',
       prefix: { from: pos, to: pos },
       depth: items,
-      loose: list ? loose(state, list) : false,
+      loose: list ? loose(state, list, listItems(state, list)) : false,
     };
     if (list?.name === 'OrderedList') entry.ordered = true;
     if (task) entry.task = /\[[xX]\]/.test(state.sliceDoc(task.from, task.to)) ? 'done' : 'open';
@@ -337,18 +340,109 @@ function startsWithMarkerText(state: EditorState, node: SyntaxNode, first: Line)
   return shown.trim() !== '' && !/^<[!?/a-zA-Z]/.test(shown.trim());
 }
 
-/** The block a leaf node is, read on the line where it starts. */
-function blockOf(state: EditorState, node: SyntaxNode): Block {
+/**
+ * Whether a numbered item with text can't start a list that interrupts a paragraph, as CommonMark
+ * has it: only an item numbered `1` can. The parse lets any numbered item inside a
+ * numbered list do so (a sublist numbered `2.` under the text of its item), where micromark takes
+ * the line for more of the paragraph's text (#600).
+ */
+function cannotInterrupt(state: EditorState, item: SyntaxNode): boolean {
+  const mark = item.getChild('ListMark');
+  // An empty item is the open item of the editor's keys (`empty-item.ts`), kept out of the file.
+  if (!mark || !mark.nextSibling) return false;
+  return !/^1[.)]$/.test(state.sliceDoc(mark.from, mark.to));
+}
+
+/**
+ * The items of the numbered list that follows the paragraph `head` on the very next line that are
+ * text of that paragraph for CommonMark: the first, if it can't interrupt a paragraph, and the
+ * items after it on consecutive lines, as long as none can. Empty if the list starts any other way.
+ */
+function textualItems(state: EditorState, head: SyntaxNode): SyntaxNode[] {
+  // In a quote, the marks of its later lines are nodes between the blocks.
+  let list = head.nextSibling;
+  while (list?.name === 'QuoteMark') list = list.nextSibling;
+  if (head.name !== 'Paragraph' || !list || list.name !== 'OrderedList') return [];
   const { doc } = state;
+  let line = doc.lineAt(head.to).number;
+  const found: SyntaxNode[] = [];
+  for (let item = list.firstChild; item; item = item.nextSibling) {
+    if (item.name === 'QuoteMark') continue;
+    if (item.name !== 'ListItem' || doc.lineAt(item.from).number !== line + 1) break;
+    if (!cannotInterrupt(state, item)) break;
+    found.push(item);
+    line = doc.lineAt(item.to).number;
+  }
+  return found;
+}
+
+/** The items of a list as CommonMark reads them: not those that are text of the paragraph above it. */
+export function listItems(state: EditorState, list: SyntaxNode | null): SyntaxNode[] {
+  const items = list?.getChildren('ListItem') ?? [];
+  return items.filter((item) => !textualHead(state, item));
+}
+
+/** The paragraph whose text a list item is, for CommonMark, if it is one of `textualItems`. */
+function textualHead(state: EditorState, item: SyntaxNode): SyntaxNode | null {
+  if (item.name !== 'ListItem') return null;
+  let head = item.parent?.prevSibling ?? null;
+  while (head?.name === 'QuoteMark') head = head.prevSibling;
+  if (!head || head.name !== 'Paragraph') return null;
+  return textualItems(state, head).some((it) => it.from === item.from) ? head : null;
+}
+
+/** The end of the text of the paragraph `head`, with the lines of the lists that are its text. */
+function textEnd(state: EditorState, head: SyntaxNode): number {
+  let end = head.to;
+  for (const item of textualItems(state, head)) {
+    let last = item.to;
+    for (let child = item.firstChild; child; child = child.nextSibling) {
+      if (child.name === 'Paragraph') {
+        last = textEnd(state, child);
+        break;
+      }
+    }
+    end = Math.max(end, last);
+  }
+  return end;
+}
+
+/**
+ * The paragraph that a paragraph of the parse is part of the text of for CommonMark, with the end of
+ * that text: a numbered list under a paragraph that micromark reads as
+ * more of the paragraph (`1. a⏎   2. b`, where `2. b` is text of the item), which the parse reads as
+ * a sublist (#600). Null where the node is no part of such a text.
+ */
+function textRun(state: EditorState, node: SyntaxNode): { head: SyntaxNode; to: number } | null {
+  let head: SyntaxNode | null = null;
+  for (let up: SyntaxNode | null = node; up; up = up.parent) {
+    const above = textualHead(state, up);
+    if (above) {
+      head = above;
+      up = above;
+    }
+  }
+  if (!head && node.name === 'Paragraph') head = node;
+  if (!head) return null;
+  const to = textEnd(state, head);
+  return to > head.to ? { head, to } : null;
+}
+
+/** The block a leaf node is, read on the line where it starts. */
+function blockOf(state: EditorState, leaf: SyntaxNode): Block {
+  const { doc } = state;
+  // A paragraph with a numbered list under it that CommonMark reads as its text is one block.
+  const run = textRun(state, leaf);
+  const node = run ? run.head : leaf;
   const first = doc.lineAt(node.from);
-  const last = doc.lineAt(node.to);
+  const last = doc.lineAt(run ? run.to : node.to);
   const containers = containersOf(state, node, first);
   let kind = leafKind(node.name)!;
   // The parse reads a line that starts with a comment as an HTML block, and a mark's marker is one:
   // text that follows markers at the start of a block is a paragraph's (review I4).
   if (kind === 'html' && startsWithMarkerText(state, node, first)) kind = 'paragraph';
   const lines = { from: first.from, to: last.to };
-  let text = { from: node.from, to: node.to };
+  let text = { from: node.from, to: run ? run.to : node.to };
   const block: Block = {
     kind,
     text,
@@ -372,7 +466,7 @@ function blockOf(state: EditorState, node: SyntaxNode): Block {
     const end = underline ? doc.lineAt(underline.from).from - 1 : node.to;
     text = { from: node.from, to: Math.max(node.from, end) };
   } else if (kind === 'paragraph') {
-    const body = state.sliceDoc(node.from, node.to).trim();
+    const body = state.sliceDoc(text.from, text.to).trim();
     if (body.length >= 4 && body.startsWith('$$') && body.endsWith('$$')) block.kind = 'math';
   }
   block.text = text;

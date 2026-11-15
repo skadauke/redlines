@@ -211,7 +211,8 @@ its case; each is a bug. The list is what has been found, not a count of what is
   way (#443).
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
   as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
-  its list leaves that line as text, and the editor sees no change (#446).
+  its list leaves that line as text, and the editor sees no change (#446; the keys of Return, Tab,
+  Shift-Tab and Backspace read such a line as the text it is since #600, format §3.2).
 - Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
   reads as a heading in some order of decisions: the format refuses a numbered sibling that would
   become the item's first child, not an item with no text (#433; Backspace at a nested first item
