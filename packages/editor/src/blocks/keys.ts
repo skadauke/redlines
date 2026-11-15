@@ -30,6 +30,8 @@ import {
   planSelectionReturn,
   planShiftReturn,
   returnAtEnd,
+  textEnd,
+  textStart,
 } from './edits.ts';
 import { joinsStep } from '../history/index.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
@@ -45,9 +47,10 @@ import {
   planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
-import { blockAt } from './structure.ts';
-import { openIndentedLine, openLineSpaces, planCodeTab } from './code.ts';
+import { blockAt, neighbours } from './structure.ts';
+import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
+import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
   openBlock,
@@ -212,6 +215,93 @@ export function applyKeyEdit(
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
+  return true;
+}
+
+/**
+ * A paste of list items into a list item (`planListPaste`): one step to undo, a selection in the
+ * item deleted first as typing deletes it. False where the paste is not that, and goes in as text.
+ */
+export function pasteListItems(view: EditorView, text: string): boolean {
+  const pasted = pastedItems(text);
+  if (!pasted) return false;
+  const { state } = view;
+  const { main } = state.selection;
+  if (state.selection.ranges.length > 1) return false;
+  /** Whether the tracked layer would refuse an edit: it is not made, and the paste goes in as text. */
+  const refused = (at: EditorState, edit: KeyEdit) =>
+    at
+      .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
+      .effects.some((effect) => effect.is(refusedEditEffect));
+  if (main.empty) {
+    const bare = bareMarkerAt(state);
+    if (bare !== null) {
+      // The space after the marker first, written as it is, then the paste after it: one step.
+      const space: KeyEdit & { isolateBefore?: boolean } = {
+        changes: [{ from: bare, insert: ' ' }],
+        selection: EditorSelection.single(bare + 1),
+        userEvent: 'input.paste',
+        plain: true,
+        isolateBefore: true,
+      };
+      const after = state.update({
+        changes: space.changes,
+        selection: space.selection,
+        annotations: trackedEditAnnotation.of(true),
+      }).state;
+      const planned = planListPaste(after, pasted);
+      if (!planned || refused(after, planned)) return false;
+      applyKeyEdit(view, space);
+      const edit = planListPaste(view.state, pasted);
+      if (edit) applyKeyEdit(view, { ...edit, userEvent: 'delete.selection', join: true });
+      return true;
+    }
+    const edit = planListPaste(state, pasted);
+    return edit && !refused(state, edit) ? applyKeyEdit(view, edit) : false;
+  }
+  // Over a selection: planned on the text without it first, so that nothing is deleted for a paste
+  // that then goes in as text.
+  // Both ends in the text of an item (a selection over a marker or a checkbox is text's way).
+  const inText = (pos: number) => {
+    const block = blockAt(state, pos);
+    return (
+      block?.kind === 'paragraph' &&
+      block.containers.at(-1)?.kind === 'item' &&
+      pos >= textStart(state, block) &&
+      pos <= Math.max(textEnd(state, block), textStart(state, block))
+    );
+  };
+  if (!inText(main.from) || !inText(main.to)) return false;
+  const deletion: KeyEdit = {
+    changes: [{ from: main.from, to: main.to }],
+    selection: EditorSelection.single(main.from),
+    // Named as the paste is, which the history joins it to.
+    userEvent: 'input.paste',
+  };
+  if (refused(state, deletion)) return false;
+  const without = state.update({ ...deletion, changes: deletion.changes }).state;
+  const planned = planListPaste(without, pasted);
+  if (!planned || refused(without, planned)) return false;
+  const before = state.doc;
+  applyKeyEdit(view, { ...deletion, isolateBefore: true });
+  // Refused: nothing more.
+  if (view.state.doc.eq(before)) return true;
+  const edit = planListPaste(view.state, pasted);
+  // Named as a deletion, which the history joins to the step before it (only typing and deletions
+  // join); the step keeps the name of the first, Paste. The plan was made on the text without the
+  // selection above, and no shape the sweeps try (every selection of the swept lists, Track Changes on and
+  // off) plans differently after the real deletion: a plan that is gone is a bug, which is reported, not a paste to lose.
+  // The text goes in rather than lose the paste.
+  if (!edit) console.error('A list paste that planned before its deletion has no plan after it');
+  const at = view.state.selection.main.head;
+  applyKeyEdit(view, {
+    ...(edit ?? {
+      changes: [{ from: at, insert: text }],
+      selection: EditorSelection.single(at + text.length),
+    }),
+    userEvent: 'delete.selection',
+    join: true,
+  });
   return true;
 }
 
@@ -452,6 +542,78 @@ const returnAtEndKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/**
+ * ↓ from the last line of the last block of the document, when it is a block with nothing after it
+ * that a caret can take: a quote or an alert, code, a rule, an HTML block or a picture. It opens the
+ * empty paragraph below it, as Return at its end does (and as ↓ does in a table, which Word and Docs
+ * also keep one after), where the line after it would be one the block's own text goes on into: a
+ * quote or a list carries on over a line with no blank line above it. Null in every other place, for
+ * CodeMirror's ↓ (#514).
+ */
+export function planDownAtEnd(view: EditorView): KeyEdit | null {
+  const { state } = view;
+  const { main } = state.selection;
+  if (!main.empty || state.selection.ranges.length > 1) return null;
+  const block = blockAt(state, main.head);
+  if (!block || block.kind === 'table') return null;
+  const quoted = block.containers.some((c) => c.kind === 'quote');
+  const picture =
+    block.kind === 'paragraph' &&
+    /^!\[[^\]]*\]\([^)]*\)\s*$/.test(state.sliceDoc(block.text.from, block.text.to));
+  if (!quoted && !picture && !['code', 'rule', 'html'].includes(block.kind)) return null;
+  // Code with no closing fence runs to the end of the file: a line after it is code (Return writes
+  // a plain line break there). ↓ there writes the closing fence first (`closeFenceAtEnd`).
+  const unclosed = block.kind === 'code' && !shapeOf(state, block).closes;
+  if (unclosed && !shapeOf(state, block).opens) return null;
+  // A block in an item stays with its list's keys (Return leaves it).
+  if (block.containers.some((c) => c.kind === 'item')) return null;
+  if (neighbours(state, block).next) return null;
+  const { doc } = state;
+  const last = doc.lineAt(block.lines.to);
+  // On the block's last line; the lines above it are CodeMirror's.
+  if (main.head < last.from) return null;
+  const moved = view.moveVertically(main, true).head;
+  if (moved !== main.head && moved <= last.to) return null;
+  // Lines already there to go to: the file's last line break, and the lines of a gap, each a line
+  // the caret can rest in once there are two (a blank one and the one to type in). The ledger's
+  // gap is one line shorter, since the ledger's own line is no place for the caret.
+  const parsed = state.field(parsedField, false);
+  const end = parsed?.ledgerRange?.from ?? doc.length;
+  const breaks = (doc.sliceString(last.to, end).match(/\n/g) ?? []).length;
+  if (breaks - (end < doc.length ? 1 : 0) >= 2) return null;
+  if (unclosed) {
+    // The closing fence goes on the last line when that is empty (the code ends above it), and on
+    // a new line under it otherwise, in the opening fence's own container syntax and indentation.
+    const first = doc.lineAt(block.lines.from);
+    const fence = /^[ \t>]*(`{3,}|~{3,})/.exec(first.text)?.[0] ?? '```';
+    const empty = /^[ \t>]*$/.test(last.text) && last.number > first.number;
+    const from = empty ? last.from : last.to;
+    return {
+      changes: [{ from, to: last.to, insert: (empty ? '' : '\n') + fence }],
+      selection: EditorSelection.single(from + (empty ? 0 : 1) + fence.length),
+      userEvent: 'input.break',
+      closeFence: true,
+    };
+  }
+  return returnAtEnd(
+    state.update({ selection: EditorSelection.cursor(last.to) }).state,
+    block,
+    true,
+  );
+}
+
+const downKey = blockKey((view) => {
+  const edit = planDownAtEnd(view);
+  // Code that is never closed: the closing fence, then the empty paragraph below it, one step to
+  // undo (#570).
+  if (!edit?.closeFence) return edit ? applyKeyEdit(view, edit) : false;
+  applyKeyEdit(view, { ...edit, isolateBefore: true });
+  const below = planDownAtEnd(view);
+  if (below)
+    applyKeyEdit(view, { ...below, userEvent: 'delete.selection', join: true, record: true });
+  return true;
+});
+
 /** ⌃O: Return, with the caret left where it was. */
 const openLineKey = blockKey((view) => {
   const edit = planReturn(view.state);
@@ -529,6 +691,7 @@ export function blockKeys(): Extension {
         { key: 'Tab', run: tabKey(false) },
         { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
+        { key: 'ArrowDown', run: downKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
         // End, as ⌘→ goes: in front of the closers that end a block's text (#434).
         { key: 'End', run: lineBoundaryKey(true) },

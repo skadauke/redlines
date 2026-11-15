@@ -255,7 +255,7 @@ describe('the panes', () => {
     const shown = () => container.querySelector('[data-row="Zoom"] .rl-pref-size')?.textContent;
     expect(shown()).toBe('100%');
     expect(container.querySelector('[data-row="Zoom"]')?.textContent).toContain(
-      'Everything in Redlines’ windows',
+      'This window and windows you open next',
     );
     larger?.click();
     expect(setZoom).toHaveBeenLastCalledWith(1.1);

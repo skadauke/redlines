@@ -22,6 +22,7 @@ import {
   widthsOf,
 } from './widths.ts';
 import { tablesField, tablesOf } from './model.ts';
+import { deleteCols, insertCols } from './ops.ts';
 
 /** Ten pixels a character. */
 const tenPx = (text: string): Measured => ({
@@ -358,6 +359,41 @@ describe('the widths of a table in an editor', () => {
     expect(calls.available).toBeGreaterThan(0);
     expect(widthsOf(editor.view.state)).toHaveLength(1);
   });
+
+  // #520: a column added or deleted gives the widths a fresh load of the resulting text gives.
+  const SHAPES: Record<string, { doc: string; room: number }> = {
+    'two columns': { doc: '| a | b |\n| - | - |\n| one | two |', room: 200 },
+    'five columns, long and short cells': {
+      doc: '| Name | Role | City | Note | Id |\n| - | - | - | - | - |\n| Ada | Mathematician and programmer | London | x | 1 |\n| Bo | y | Paris | A long note with many words that wants a lot of room | 22 |',
+      room: 400,
+    },
+    'a table as wide as the page': {
+      doc: `| a | b | c |\n| - | - | - |\n| ${'word '.repeat(12)}| ${'text '.repeat(12)}| ${'more '.repeat(12)}|`,
+      room: 300,
+    },
+  };
+  for (const [name, shape] of Object.entries(SHAPES)) {
+    for (const edit of ['insert right', 'insert left', 'delete'] as const) {
+      it(`gives the widths of a fresh load after a column is changed: ${name}, ${edit}`, async () => {
+        room = shape.room;
+        const editor = await load(shape.doc);
+        const first = shape.doc.indexOf('|') + 2;
+        editor.view.dispatch({ selection: { anchor: first } });
+        await settle(editor);
+        if (edit === 'delete') expect(deleteCols(editor.view)).toBe(true);
+        else expect(insertCols(editor.view, edit === 'insert left')).toBe(true);
+        await settle(editor);
+        const text = editor.view.state.doc.toString();
+        expect(text).not.toBe(shape.doc);
+        const edited = widthsOf(editor.view.state);
+        const fresh = widthsOf((await load(text)).view.state);
+        expect(edited).toHaveLength(1);
+        expect(edited[0]!.columns).toEqual(fresh[0]!.columns);
+        expect(edited[0]!.scrolls).toBe(fresh[0]!.scrolls);
+        expect(edited[0]!.columns).toHaveLength(tablesOf(editor.view.state)[0]!.columns);
+      }, 60_000);
+    }
+  }
 
   it('measures nothing where nothing is laid out', async () => {
     room = 0;

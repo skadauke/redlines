@@ -1,12 +1,16 @@
 // Dragging rows or columns by their grip (design: tables, "Grips and +"): the rows (or columns) that
 // are selected with the one dragged move to any boundary, the last included. The moving ones dim, a copy
-// of them follows the pointer, a 2 px line in the theme's ink marks the drop, the page scrolls near its
+// of them follows the pointer, a 3 px gray line (`--rl-ink-2`) marks the drop and shows only where the
+// rows would go (never at their own place, where a drop changes nothing), the page scrolls near its
 // edges, and Esc cancels. The drop is the move command's operation with `to`.
 
 import type { EditorView } from '@codemirror/view';
 
 /** How far the pointer goes before a press on a grip is a drag, in px. */
 export const DRAG_SLOP = 4;
+
+/** The drop line's thickness, in px: it keeps its size at every text size, as the borders do. */
+export const DROP_LINE = 3;
 
 /** How near the scroller's edge the page starts to scroll, in px. */
 export const EDGE = 36;
@@ -38,6 +42,8 @@ export function scrollSpeed(y: number, top: number, bottom: number): number {
 export interface Drag {
   /** The boundary the rows would be dropped at. */
   boundary(): number;
+  /** Whether that boundary is the moving rows' own place, where a drop changes nothing. */
+  atOwn(): boolean;
   /** The pointer moved. */
   move(x: number, y: number): void;
   /** Ends it: the boundary to drop at, or null when it was cancelled. */
@@ -49,6 +55,9 @@ interface DragOptions {
   /** Dims the dragged rows, or not: by a decoration of the editor, for the page redraws its lines and
    * wipes a class set on them from outside. */
   dim: (on: boolean) => void;
+  /** The first and last of the rows (or columns) that move: a drop at a boundary from the first to
+   * just after the last leaves them where they are. */
+  moving: { first: number; last: number };
   /** The boundaries' `y`s (`x`s for columns), read again as the page scrolls. */
   boundaries: () => number[];
   /** Where the drop line goes: the table's box. */
@@ -77,11 +86,15 @@ export function beginDrag(options: DragOptions): Drag {
   let x = 0;
   let y = 0;
   let current = 0;
+  let own = false;
   let timer: number | undefined;
   const place = () => {
     const base = layer.getBoundingClientRect();
     const edges = options.boundaries();
     current = dropBoundary(columns ? x : y, edges);
+    own = current >= options.moving.first && current <= options.moving.last + 1;
+    // The line shows only where the rows would go: never at their own place.
+    line.hidden = own;
     line.dataset['boundary'] = String(current);
     line.dataset['y'] = String(columns ? x : y);
     line.dataset['edges'] = edges.map((edge) => Math.round(edge)).join(',');
@@ -90,11 +103,12 @@ export function beginDrag(options: DragOptions): Drag {
       const top = box.top ?? 0;
       line.style.top = `${top - base.top}px`;
       line.style.height = `${Math.max(0, (box.bottom ?? top) - top)}px`;
-      line.style.left = `${(edges[current] ?? 0) - base.left - 1}px`;
-      line.style.width = '2px';
+      line.style.left = `${(edges[current] ?? 0) - base.left - DROP_LINE / 2}px`;
+      line.style.width = `${DROP_LINE}px`;
       return;
     }
-    line.style.top = `${(edges[current] ?? 0) - base.top - 1}px`;
+    line.style.height = `${DROP_LINE}px`;
+    line.style.top = `${(edges[current] ?? 0) - base.top - DROP_LINE / 2}px`;
     line.style.left = `${box.left - base.left}px`;
     line.style.width = `${Math.max(0, box.right - box.left)}px`;
   };
@@ -120,6 +134,7 @@ export function beginDrag(options: DragOptions): Drag {
   timer = window.setInterval(scroll, 16);
   return {
     boundary: () => current,
+    atOwn: () => own,
     move(nextX, nextY) {
       x = nextX;
       y = nextY;

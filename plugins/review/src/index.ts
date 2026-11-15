@@ -4,7 +4,7 @@ import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import { type Author, barClickHandlers, type Editor } from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
-import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
+import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar, start } from './bar.ts';
 import { cards } from './cards.ts';
 import { highlightsAt, highlightTitle, toggleHighlight } from './highlight.ts';
 import { type PinnedElement, rail, type RailOptions } from './rail.ts';
@@ -36,6 +36,11 @@ export const HIGHLIGHT_COMMAND = 'highlight.toggle';
 export interface ReviewController {
   /** Opens the review bar, which is hidden until asked for. */
   openBar(): void;
+  /**
+   * Review Changes: opens the bar on the first change of the document, or the first the selection
+   * touches (the selection goes), marked in the text and on its bars.
+   */
+  startReview(): void;
   closeBar(): void;
   isBarOpen(): boolean;
   /** Selects the next change and opens the bar (⌥⌘]). */
@@ -197,6 +202,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
   return {
     openBar() {
       openBar(view, ctx);
+      report();
+    },
+    startReview() {
+      start(view, ctx);
       report();
     },
     closeBar() {

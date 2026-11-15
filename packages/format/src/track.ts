@@ -113,6 +113,7 @@ import { scan } from './scan.ts';
 import type { Verbatim } from './scan.ts';
 import {
   assertStillBlock,
+  closesAtEnd,
   codeBlockOf,
   edited,
   holdersOf,
@@ -1135,6 +1136,13 @@ function spacesBefore(plan: Plan, position: number): { spaces: number; together:
   return { spaces, together };
 }
 
+/** Why two spaces at a line's end are refused when the next line starts with something that the
+ * change can't take in: it would have to go on past the line break (format §3.1, 6). */
+const HARD_BREAK_SYNTAX =
+  'Two spaces make a hard break, and the next line takes no marker (a link definition, for one). Type the spaces somewhere else.';
+const HARD_BREAK_NEXT_LINE =
+  "Two spaces make a hard break, and another person's change starts the next line. Decide it first.";
+
 /** Why a change on the blank line under a line that ends in two spaces is refused when another
  * change stands between them and the end of the line: what is typed there goes on the paragraph,
  * which makes the spaces a hard break, and no change may stand between them and the line end. */
@@ -1750,20 +1758,36 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
     blank = true;
   }
   if (line >= limit) return undefined;
-  const end = lineEnd(text, line);
+  let end = lineEnd(text, line);
   const lineText = text.slice(line, end);
   const lead = prefixLength(lineText);
+  // The author's own markers at the start of the text go into the change, which may rewrite them;
+  // another person's, or a comment that is no mark, are no place for it.
+  let start = line + lead;
+  while (text.startsWith('<!--', start)) {
+    const marker = markers.find((m) => m.from === start && m.role !== 'ledger');
+    if (!marker?.mark || marker.mark.entry.by !== plan.ctx.author.handle) return undefined;
+    start = marker.to;
+  }
+  end = lineEnd(text, start);
   // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
   // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
-  const rest = lineText.slice(lead);
+  const rest = text.slice(start, end);
   // A line that opens a container (a deeper quote, a list item) starts the first block of it: a tag
   // alone on it is an HTML block there, as after a blank line.
   const above = text.slice(lineStart(text, line - 1), Math.max(0, line - 1));
   const opens = !blank && line > 0 && opensContainer(above, lineText.slice(0, lead));
   if (SYNTAX_LINE.test(rest) || startsHtmlBlock(rest, blank || opens)) return undefined;
-  let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
-  if (p >= end || text.startsWith('<!--', p)) return undefined;
-  while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  let p = start + (/^#{1,6}[ \t]+/.exec(rest)?.[0].length ?? 0);
+  if (p >= end) return undefined;
+  // The word, markers in it included, and not the line break behind a marker that ends it.
+  const skip = (q: number): number => {
+    const m = markers.find((r) => r.from === q && r.to > q && r.role !== 'ledger');
+    return m ? skip(m.to) : q;
+  };
+  for (p = skip(p); p < end && !/\s/.test(text[p] ?? ' '); p = skip(p + 1)) {
+    // A character of the word.
+  }
   // Not inside a code span, which takes no marker: after it, and the rest of the word. Nor right
   // after a backslash that the word ends with, which would escape it: the character after it goes
   // too, or the line break and the first word of the next line.
@@ -1876,6 +1900,14 @@ function endOfBody(plan: Plan, at: number): { end: number; bring: boolean } | un
  * starts what follows (named, as `backslashBeforeAt` names it), or the next line takes no closer.
  */
 function noWordReason(plan: Plan, at: number): string {
+  const found = otherMarkerAhead(plan, at);
+  return found
+    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
+    : BACKSLASH_BEFORE_SYNTAX;
+}
+
+/** Another person's marker that starts the text at `at` or the first line with text after it. */
+function otherMarkerAhead(plan: Plan, at: number): MarkerRange | undefined {
   const { text, markers } = plan;
   const starts = (position: number) =>
     markers.find(
@@ -1888,9 +1920,7 @@ function noWordReason(plan: Plan, at: number): string {
     if (lead < lineEnd(text, line)) break;
     line = nextLineStart(text, line);
   }
-  return found
-    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
-    : BACKSLASH_BEFORE_SYNTAX;
+  return found;
 }
 
 /**
@@ -2290,6 +2320,21 @@ function coversTable(plan: Plan, where: number, from: number, to: number): boole
 }
 
 /**
+ * Whether the author's own insertion, with `inner` as its text before the caret, would end in two
+ * spaces or more after text, with a line break behind its closer (comments, which are no text, may
+ * stand between): its closer would then stand between a hard break's spaces and the line end.
+ */
+function endsHardBreak(plan: Plan, own: Container, inner: string): boolean {
+  const written = visibleBefore(plan, own.content.from) + inner;
+  const line = written.slice(written.lastIndexOf('\n') + 1);
+  return (
+    / {2,}$/.test(line) &&
+    /[^ \t>]/.test(line) &&
+    /^(?:<!--[^]*?-->)*\r?\n/.test(plan.text.slice(own.close.to))
+  );
+}
+
+/**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
  * marker would change how emphasis flanks, over the line break in front of a wrapped line. The text
@@ -2311,12 +2356,12 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   const own = plan.containers.find((c) => c.own && c.content.from <= from && to <= c.content.to);
   // Unless the typed text ends the insertion's text with a backslash, which would escape its
   // closer: then the insertion takes the character after it as well, below.
+  // Nor if it ends in two spaces or more with a line break after its closer: those are a hard break,
+  // and no marker may stand between them and the line end (format §3.1, rule 6).
+  const typed = own ? visibleText(text, markers, own.content.from, from) + typing.inner : '';
   if (
     own &&
-    !(
-      to === own.content.to &&
-      oddBackslashes(visibleText(text, markers, own.content.from, from) + typing.inner)
-    )
+    !(to === own.content.to && (oddBackslashes(typed) || endsHardBreak(plan, own, typed)))
   ) {
     return { from, to, left, right };
   }
@@ -2480,7 +2525,9 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         // Among or behind the trailing spaces of a hard break: the change goes on past the line
         // break, to the end of the first word of the next line.
         const ahead = nextWordEnd(plan, nextLineStart(text, to));
-        if (ahead === undefined) refuse(close.reason);
+        if (ahead === undefined) {
+          refuse(otherMarkerAhead(plan, to) ? HARD_BREAK_NEXT_LINE : HARD_BREAK_SYNTAX);
+        }
         grow(from, ahead ?? to);
       } else if (close.kind === 'refuse') refuse(close.reason + tookBackslash);
       else if (close.kind === 'construct') grow(close.from, close.to);
@@ -5113,13 +5160,22 @@ function codeEdits(
   // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
   const body = plan.parsed.ledgerRange?.from ?? text.length;
   const roomy =
+    !block.unclosed &&
     block.prefix === '' &&
     text.startsWith(plan.eol + plan.eol, block.to) &&
     block.to + 2 * plan.eol.length <= body;
   const closer = `<!--/${id}-->`;
   const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
   const tail = roomy ? block.to + plan.eol.length : block.to;
-  const content = now.slice(block.prefix.length) + (roomy ? plan.eol : plan.eol + block.prefix);
+  // A block with no closing fence gets one: the closer would stand inside its code otherwise. The
+  // old block is the payload and stays as it was, so rejecting gives the unclosed block back.
+  const fence = /`{3,}|~{3,}/.exec(block.open)?.[0] ?? '```';
+  const added =
+    block.unclosed && !closesAtEnd(block, now)
+      ? (/\n$/.test(now) ? '' : plan.eol) + block.prefix + fence
+      : '';
+  const content =
+    now.slice(block.prefix.length) + added + (roomy ? plan.eol : plan.eol + block.prefix);
   const changes = commitEdit(
     text,
     [
@@ -5129,9 +5185,10 @@ function codeEdits(
         insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
       ...typed,
+      // The closing fence (an unclosed block's) and the closer follow the block's last character.
       roomy
         ? { from: tail, to: tail, insert: closer }
-        : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
+        : { from: block.to, to: block.to, insert: `${added}${plan.eol}${block.prefix}${closer}` },
     ],
     plan.ledger,
     {
@@ -5188,6 +5245,11 @@ function editsOnce(
   if (code) return code;
   checkTableEdits(text, edits, plan.parsed);
   checkAlignGap(text, edits, plan.parsed);
+  // Text that starts with a space, typed right after a bare list marker, is written after the
+  // marker's space, which is written as it is (format §3.2): the insertion never stands between
+  // a marker and the space after it.
+  const spaced = bareMarkerSpaces(text, edits, plan);
+  if (spaced) return withPipes(text, spaced.edits, ctx, spaced.writes);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
   // plain one first, and make the edit after it. A row has one leading pipe: where `leadingPipeAt`
   // writes it (at the start of the text, after the row's indent), the one that an emptied first cell
@@ -5296,6 +5358,43 @@ function editsOnce(
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
+}
+
+/** A list marker at the start of a line, after its quote markers and the markers of the items it
+ * is nested in (each space belongs to one quantifier only, so that no line backtracks), with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
+export const BARE_MARKER =
+  /^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
+
+/**
+ * The edits that write text with a space first right after a bare list marker (`-` or `2.` alone
+ * on its line, an empty item to Markdown), as the space written as it is, with no mark, and the
+ * rest of the text after it (format §3.2). An insertion that began with the space would stand
+ * between the marker and its space: `-<!--ins x--> a<!--/x-->` is a paragraph to a reader that
+ * doesn't know the markers, though the newest view has an item. Written as
+ * `- <!--ins x-->a<!--/x-->` it reads as an item in every order of decisions, and rejected leaves
+ * `- `, an empty item, as the bare marker was. A lone space is the space alone, with no mark at
+ * all. A tab first is the marker's separator, written as typed. Undefined where no edit is such: a marker with text after it is no bare marker, and text
+ * that doesn't start with a space needs none.
+ */
+function bareMarkerSpaces(
+  text: string,
+  edits: readonly TextChange[],
+  plan: Plan,
+): { edits: TextChange[]; writes: PipeWrite[] } | undefined {
+  const writes: PipeWrite[] = [];
+  const rest = edits.map((edit) => {
+    if (edit.from !== edit.to || !/^[ \t]/.test(edit.insert)) return edit;
+    if (plan.parsed.ledgerRange !== null && edit.from >= plan.parsed.ledgerRange.to) return edit;
+    const at = snapOut(plan.markers, edit.from, false);
+    const start = lineStart(text, at);
+    if (!BARE_MARKER.test(text.slice(start, at))) return edit;
+    // Nothing after it on the line but markers.
+    if (!/^(?:<!--[^]*?-->)*\r?$/.test(text.slice(at, lineEnd(text, at)))) return edit;
+    // A tab is the marker's separator as typed: its content column is the tab's, not a space's.
+    writes.push({ at, insert: edit.insert[0] ?? ' ', leading: true });
+    return { ...edit, from: at, to: at, insert: edit.insert.slice(1) };
+  });
+  return writes.length > 0 ? { edits: rest, writes } : undefined;
 }
 
 /** The edits of `text` made as they are after the plain pipes `writes` (a leading `| ` before a marker

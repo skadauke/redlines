@@ -173,6 +173,30 @@ describe('markdownPreview', () => {
     expect(marks.map((mark) => mark.textContent)).toEqual(['1.', '◦', '▪', '▪']);
   });
 
+  it('indents a level the same for bullets and numbers, whatever their source says (#511)', () => {
+    const box = (doc: string) => {
+      const editor = editorAt(doc, doc.length);
+      const hangs = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-hang')].map(
+        (line) => line.style.getPropertyValue('--rl-hang'),
+      );
+      const sizes = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-indent')].map(
+        (span) => span.style.fontSize,
+      );
+      const cols = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-list-mark')].map(
+        (mark) => mark.style.getPropertyValue('--rl-cols'),
+      );
+      return { hangs, sizes, cols };
+    };
+    const bullets = box('- a\n  - b\n    - c\n\nEnd');
+    const numbers = box('1. a\n   1. b\n      1. c\n\nEnd');
+    expect(bullets.hangs).toEqual(['3', '6', '9']);
+    expect(numbers.hangs).toEqual(bullets.hangs);
+    expect(numbers.cols).toEqual(bullets.cols);
+    // The source's whitespace (two columns a level, or three) is drawn three columns a level.
+    expect(bullets.sizes).toEqual(['1.5em', '1.5em']);
+    expect(numbers.sizes).toEqual(['', '']); // already as wide as drawn
+  });
+
   it('hides blank lines between blocks, but not in code or Raw', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);

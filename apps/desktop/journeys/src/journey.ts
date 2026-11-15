@@ -35,6 +35,8 @@ export interface StartOptions {
   scheme?: Scheme;
   /** Overrides the run's text size, as a multiple of the theme's (1 is 100%, 2 is 200%). */
   textSize?: number;
+  /** Shows the word count in the corner. Default: hidden, for a quiet window. */
+  wordCount?: boolean;
 }
 
 export interface JourneyOptions {
@@ -63,11 +65,13 @@ interface Hook {
       dispatch(spec: unknown): void;
     };
     getDoc(): string;
+    setDoc(doc: string): void;
     setTracking(on: boolean, options?: { inFile?: boolean }): unknown;
     setViewMode(mode: string): void;
     getUiState(): Record<string, unknown>;
   };
   controller: { createWith(text: string): Promise<void> };
+  menuRow(text: string): { enabled: boolean; run(): boolean } | null;
 }
 
 declare global {
@@ -301,6 +305,29 @@ export class Journey {
 
   // ----- Waiting and looking -----
 
+  /**
+   * Whether a row of the app's menu bar is enabled. The page has no menu bar, so the page's hook
+   * answers as the menu would: from the same row and state.
+   */
+  menuEnabled(text: string): Promise<boolean> {
+    return this.page.evaluate((row) => {
+      const found = window.__redlines!.menuRow(row);
+      if (!found) throw new Error(`There is no menu row ${row}`);
+      return found.enabled;
+    }, text);
+  }
+
+  /** Chooses a row of the menu bar, if it is enabled; false when it is not (nothing happens). */
+  async menu(text: string): Promise<boolean> {
+    const ran = await this.page.evaluate((row) => {
+      const found = window.__redlines!.menuRow(row);
+      if (!found) throw new Error(`There is no menu row ${row}`);
+      return found.run();
+    }, text);
+    await this.settle();
+    return ran;
+  }
+
   /** Waits for the page to draw what it has: two frames, and the editor's measuring. */
   async settle(): Promise<void> {
     await this.page.evaluate(
@@ -420,17 +447,17 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
   await page.emulateMedia({ colorScheme: look.scheme, reducedMotion: 'reduce' });
   // The settings the page reads at its start, in its own storage: the look, and a quiet window.
   await page.addInitScript(
-    ([scheme, textSize]) => {
+    ([scheme, textSize, showWordCount]) => {
       try {
         localStorage.setItem(
           'redlines.settings',
-          JSON.stringify({ appearance: scheme, textSize, showWordCount: false }),
+          JSON.stringify({ appearance: scheme, textSize, showWordCount }),
         );
       } catch {
         // A page without storage keeps its defaults.
       }
     },
-    [look.scheme, look.textSize] as const,
+    [look.scheme, look.textSize, options.wordCount === true] as const,
   );
   // A dev server that has not seen a dependency before reloads the page once when it finds it, which
   // destroys the context under a wait: a start is tried again.

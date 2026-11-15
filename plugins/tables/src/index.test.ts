@@ -359,10 +359,17 @@ describe('the row commands', () => {
     ).toEqual(['21', '22', '31', '32']);
     expect(editor.commands.run('table.moveRowDown')).toBe(true);
     expect(rowsOf(editor)).toEqual(['a', '11', '21', '31', '41']);
+    // At the first row Move Row Up is disabled, as is Move Row Down at the last.
     const top = mount(doc);
     select(top, at('a |'));
-    expect(top.commands.run('table.moveRowUp')).toBe(true);
+    expect(top.getUiState().enabledCommands).not.toContain('table.moveRowUp');
+    expect(top.getUiState().enabledCommands).toContain('table.moveRowDown');
+    expect(top.commands.run('table.moveRowUp')).toBe(false);
     expect(top.getDoc()).toBe(doc);
+    const bottom = mount(doc);
+    select(bottom, at('41'));
+    expect(bottom.getUiState().enabledCommands).toContain('table.moveRowUp');
+    expect(bottom.getUiState().enabledCommands).not.toContain('table.moveRowDown');
   });
 
   it('is one step to undo, which brings back the selection it was made with', () => {
@@ -510,8 +517,14 @@ describe('the column commands', () => {
     expect(headers(editor)).toEqual(['a', 'b', 'c', 'd']);
     const edge = mount(doc);
     select(edge, at('a |'));
-    expect(edge.commands.run('table.moveColumnLeft')).toBe(true);
+    expect(edge.getUiState().enabledCommands).not.toContain('table.moveColumnLeft');
+    expect(edge.getUiState().enabledCommands).toContain('table.moveColumnRight');
+    expect(edge.commands.run('table.moveColumnLeft')).toBe(false);
     expect(edge.getDoc()).toBe(doc);
+    const last = mount(doc);
+    select(last, at('d'));
+    expect(last.getUiState().enabledCommands).toContain('table.moveColumnLeft');
+    expect(last.getUiState().enabledCommands).not.toContain('table.moveColumnRight');
     const tracked = mount(doc, true);
     select(tracked, at('11'));
     expect(tracked.commands.run('table.moveColumnRight')).toBe(true);

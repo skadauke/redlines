@@ -72,6 +72,11 @@ export interface EditorUiState {
   redo: string | null;
   /** Whether there is a step to undo: the Edit menu's Undo is enabled only then. */
   canUndo: boolean;
+  /**
+   * Whether Accept All Changes and Stop Tracking has something to accept: a pending change in the
+   * selection, or with only a caret, in the document.
+   */
+  canAcceptAll: boolean;
   /** Whether there is a step to redo. */
   canRedo: boolean;
 }
@@ -103,9 +108,10 @@ export interface EditorCommand {
   /**
    * Whether its key goes on to the core's binding when the command is disabled or did nothing, as
    * ⌘↩ does outside a table, where it is Return at the end of a block. Default: false, a key
-   * belongs to its command.
+   * belongs to its command. A function decides by the state: a table's ⌥↑ at the first row is
+   * disabled and still the table's, and outside a table it is the core's.
    */
-  keyFallsThrough?: boolean;
+  keyFallsThrough?: boolean | ((state: EditorState) => boolean);
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
@@ -235,6 +241,15 @@ export interface EditorOptions {
    * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
    */
   resolveImage?: (src: string) => string | null;
+  /**
+   * Opens the file of a local image in another app, for a double-click on the image, and for the
+   * `image.edit` command (Edit Image in Preview): given the image's path as the document writes it,
+   * decoded and relative to the document (`img/a b.png`). The host knows where the document is and
+   * what may be opened. A remote image is never given: it has no file, and a double-click on it
+   * does nothing. Default: none, and a double-click does what it does anywhere in the text, and
+   * the command isn't registered.
+   */
+  openImage?: (src: string) => void;
   /**
    * Called when image files are pasted into the document, or dropped on it, with the files and the
    * spot their links will go to (`ImageSpot`). The host saves each file where the document can
@@ -437,6 +452,15 @@ export interface Editor {
    *   decide its kind.
    */
   accept(id: string | readonly string[]): void;
+  /**
+   * Accepts every pending change the selection touches, or with only a caret every change of the
+   * document, and turns Track Changes off, in one step that Undo takes back with the switch.
+   * Comments and highlights stay. Returns false, and does nothing, when there is nothing to
+   * accept (`EditorUiState.canAcceptAll`).
+   *
+   * @throws EditError when the format can't write the decision.
+   */
+  acceptAllAndStopTracking(): boolean;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string | readonly string[]): void;
   /**

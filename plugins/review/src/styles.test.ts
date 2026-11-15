@@ -69,3 +69,11 @@ describe('the review styles at a text size', () => {
     }
   });
 });
+
+describe('the mark of the current change', () => {
+  it('is a ring and no wash, so that no text changes ground under it (contrast stays the theme’s)', () => {
+    const mark = reviewThemeSpec['.rl-review-current'] as Record<string, string>;
+    expect(mark['boxShadow']).toContain('--rl-ink-2');
+    for (const key of ['backgroundColor', 'background']) expect(mark[key], key).toBeUndefined();
+  });
+});

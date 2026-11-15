@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { barClickHandlers, type Editor } from '@redlines/editor';
+import { barClickHandlers, currentChange, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { barNarrow } from './bar.ts';
 import {
@@ -40,10 +40,12 @@ const doc = file(
 const bar = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-review-bar');
 const count = (editor: Editor) => bar(editor)?.querySelector('.rl-bar-count')?.textContent;
 
-/** The text the selection covers, markers included. */
+/** The text of the change the review is on (its marks, markers included), and nothing selected. */
 function selected(editor: Editor): string {
-  const { from, to } = editor.view.state.selection.main;
-  return editor.view.state.sliceDoc(from, to);
+  const { state } = editor.view;
+  expect(state.selection.main.empty, 'the review leaves nothing selected').toBe(true);
+  const ranges = state.field(currentChange)?.ranges ?? [];
+  return ranges.map(({ from, to }) => state.sliceDoc(from, to)).join('');
 }
 
 describe('review bar', () => {
@@ -92,6 +94,133 @@ describe('review bar', () => {
     });
     review.next();
     expect(count(editor)).toBe('Change 2 of 3');
+  });
+
+  describe('Review Changes starts at once', () => {
+    const at = (editor: Editor, what: string, start = 0) =>
+      editor.view.state.doc.toString().indexOf(what, start);
+
+    it('on the first change, wherever the caret is, and marks it', () => {
+      const { editor, review } = mount(doc);
+      editor.view.dispatch({ selection: { anchor: at(editor, 'Third') } });
+      review.startReview();
+      expect(review.isBarOpen()).toBe(true);
+      expect(count(editor)).toBe('Change 1 of 3');
+      expect(selected(editor)).toBe('<!--ins k3x9-->new<!--/k3x9-->');
+      expect(editor.view.dom.querySelector('.rl-review-current')?.textContent).toBe('new');
+    });
+
+    it('on the first change the selection touches, which it deselects', () => {
+      const { editor, review } = mount(doc);
+      const from = at(editor, 'Third');
+      editor.view.dispatch({ selection: { anchor: from, head: editor.view.state.doc.length } });
+      review.startReview();
+      expect(count(editor)).toBe('Change 3 of 3');
+      expect(selected(editor)).toBe('<!--sub p7qd March-->April<!--/p7qd-->');
+    });
+
+    it('on the first change after a selection that touches none, round to the top', () => {
+      const { editor, review } = mount(doc);
+      const from = at(editor, 'Second');
+      editor.view.dispatch({ selection: { anchor: from, head: from + 4 } });
+      review.startReview();
+      expect(count(editor)).toBe('Change 2 of 3');
+      const last = at(editor, ' line.', at(editor, 'Third'));
+      editor.view.dispatch({ selection: { anchor: last, head: last + 3 } });
+      review.startReview();
+      expect(count(editor)).toBe('Change 1 of 3');
+    });
+
+    it('then Next and Previous walk the whole document, and the mark moves and goes', () => {
+      const { editor, review } = mount(doc);
+      review.startReview();
+      review.next();
+      expect(count(editor)).toBe('Change 2 of 3');
+      expect(selected(editor)).toBe('<!--del w2rf  old-->');
+      review.previous();
+      review.previous();
+      expect(count(editor)).toBe('Change 3 of 3');
+      expect(editor.view.dom.querySelectorAll('.rl-review-current')).toHaveLength(1);
+      button(bar(editor)!, 'Close').click();
+      expect(editor.view.dom.querySelector('.rl-review-current')).toBeNull();
+      expect(editor.view.state.field(currentChange)).toBeNull();
+    });
+
+    it('goes when the selection moves elsewhere', () => {
+      const { editor, review } = mount(doc);
+      review.startReview();
+      editor.view.dispatch({ selection: { anchor: at(editor, 'Second') } });
+      expect(editor.view.state.field(currentChange)).toBeNull();
+    });
+
+    it('with no changes, just opens the bar', () => {
+      const { editor, review } = mount(file('Plain text.', []));
+      review.startReview();
+      expect(count(editor)).toBe('No changes');
+    });
+  });
+
+  describe('the mark of the current change', () => {
+    const marked = (editor: Editor) => editor.view.state.field(currentChange);
+
+    it('goes when the change is accepted from its card or rail note, which send no selection', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.startReview();
+      expect(marked(editor)).not.toBeNull();
+      editor.accept('k3x9');
+      expect(marked(editor)).toBeNull();
+      expect(editor.view.dom.querySelector('.rl-review-current')).toBeNull();
+    });
+
+    it('goes when the change is rejected from elsewhere', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.next();
+      review.next();
+      expect(marked(editor)?.ids).toEqual(['w2rf']);
+      editor.reject('w2rf');
+      expect(marked(editor)).toBeNull();
+    });
+
+    it('goes when the bar’s Accept decides the last change, with no next one to move to', () => {
+      const one = file('Only <!--ins k3x9-->one<!--/k3x9--> here.', [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+      ]);
+      const { editor, review } = mount(one, { real: true });
+      review.startReview();
+      button(bar(editor)!, 'Accept').click();
+      expect(count(editor)).toBe('No changes');
+      expect(marked(editor)).toBeNull();
+      expect(editor.view.dom.querySelector('.rl-review-current')).toBeNull();
+    });
+
+    it('goes when an edit removes the change, and stays when an edit elsewhere leaves it', () => {
+      const { editor, review } = mount(doc, { real: true });
+      review.startReview();
+      editor.view.dispatch({ changes: { from: 0, to: 0, insert: 'X' } });
+      expect(marked(editor)?.ids).toEqual(['k3x9']);
+      const text = editor.view.state.doc.toString();
+      const from = text.indexOf('<!--ins k3x9-->');
+      const to = text.indexOf('<!--/k3x9-->') + '<!--/k3x9-->'.length;
+      editor.view.dispatch({ changes: { from, to } });
+      expect(marked(editor)).toBeNull();
+    });
+
+    it('is on the change that starts at a caret on an edge two changes share', () => {
+      const replaced = file('A <!--del w2rf  old--><!--ins p7qd-->new<!--/p7qd--> b.', [
+        ...PEOPLE,
+        'marks:',
+        '  w2rf: {by: ada, at: 2026-10-31T09:30Z}',
+        '  p7qd: {by: ada, at: 2026-10-31T09:30Z}',
+      ]);
+      const { editor, review } = mount(replaced, { real: true });
+      review.openBar();
+      const at = editor.view.state.doc.toString().indexOf('<!--ins p7qd-->');
+      editor.view.dispatch({ selection: { anchor: at } });
+      // The caret is where the deletion ends and the insertion starts: it is on the insertion.
+      expect(count(editor)).toBe('Change 2 of 2');
+    });
   });
 
   it('accept decides and moves on', () => {

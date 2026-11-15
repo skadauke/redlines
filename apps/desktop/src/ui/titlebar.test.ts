@@ -9,8 +9,8 @@ import {
   TOOLTIP_MS,
   TRACKING_ARIA_KEY,
   TRACKING_KEY,
-  LOOK_KEY,
   VIEW_ARIA_KEYS,
+  EYE_FLASH_MS,
   VIEW_KEYS,
   wordCount,
   type TitleBarState,
@@ -565,21 +565,31 @@ describe('title bar', () => {
     expect(shown(menu('View'))).toBe(false);
   });
 
-  it('offers Redlines whatever the document holds', () => {
+  it('disables Redlines in a file with no changes and no ledger, and enables it once there is something to show (#499)', () => {
     const { actions, bar, button, menu } = setup({ hasRedlines: false, view: 'clean' });
     hover(button('View'));
     const redlines = () => item(menu('View'), 'Redlines');
     expect(shown(redlines())).toBe(true);
-    expect(redlines().disabled).toBe(false);
+    expect(redlines().disabled).toBe(true);
     expect(redlines().textContent).toContain('⌥⌘2');
     redlines().click();
-    expect(actions.setView).toHaveBeenCalledWith('redlines');
-    // With redlines, or with the last one gone while it is the view that is shown.
+    expect(actions.setView).not.toHaveBeenCalled();
+    // Clean and Raw stay open to choose.
+    expect(item(menu('View'), 'Clean').disabled).toBe(false);
+    expect(item(menu('View'), 'Raw').disabled).toBe(false);
     bar.update({ ...BASE, hasRedlines: true });
     expect(shown(redlines()) && !redlines().disabled).toBe(true);
+    redlines().click();
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+    // The view that is shown stays checked, and enabled, when its last change goes: the menu opens
+    // on the checked row, and a disabled row can't be focused.
     bar.update({ ...BASE, hasRedlines: false, view: 'redlines' });
-    expect(shown(redlines()) && !redlines().disabled).toBe(true);
     expect(redlines().getAttribute('aria-checked')).toBe('true');
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'simple' });
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'raw' });
+    expect(redlines().disabled).toBe(true);
   });
 
   it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {
@@ -595,31 +605,19 @@ describe('title bar', () => {
     expect(actions.setView).toHaveBeenCalledWith('redlines');
   });
 
-  it('has a Simple Look switch below the views with ⌥⌘4, on in the simple look, off in the full markup', () => {
-    const { actions, menu, button, bar } = setup({ view: 'redlines' });
+  it('has no Simple Look row, and Raw sits below a separator (#499)', () => {
+    const { menu, button } = setup({ view: 'redlines' });
     hover(button('View'));
-    const look = () => item(menu('View'), 'Simple Look');
-    expect(look().getAttribute('role')).toBe('menuitemcheckbox');
-    expect(look().textContent).toBe('Simple Look⌥⌘4');
-    expect(look().getAttribute('aria-checked')).toBe('false');
-    expect(look().disabled).toBe(false);
-    // It is no view: the radio items stay three.
-    expect(menu('View').querySelectorAll('[role="menuitemradio"]')).toHaveLength(3);
-    look().click();
-    expect(actions.switchLook).toHaveBeenCalledOnce();
-    expect(actions.setView).not.toHaveBeenCalled();
-    bar.update({ ...BASE, hasRedlines: true, view: 'simple' });
-    expect(look().getAttribute('aria-checked')).toBe('true');
-    expect(look().disabled).toBe(false);
-  });
-
-  it('has no Simple Look to choose in Clean or Raw', () => {
-    const { actions, menu, bar, button } = setup({ view: 'clean' });
-    hover(button('View'));
-    expect(item(menu('View'), 'Simple Look').disabled).toBe(true);
-    bar.update({ ...BASE, view: 'raw' });
-    expect(item(menu('View'), 'Simple Look').disabled).toBe(true);
-    expect(actions.switchLook).not.toHaveBeenCalled();
+    const view = menu('View');
+    expect(() => item(view, 'Simple Look')).toThrow();
+    expect(view.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(0);
+    // Clean, Redlines, a separator, Raw: and nothing after Raw.
+    const order = [...view.children]
+      .filter((el) => el.matches('[role^="menuitem"], [role="separator"]'))
+      .map((el) =>
+        el.matches('[role="separator"]') ? '—' : el.querySelector('.rl-menu-label')?.textContent,
+      );
+    expect(order).toEqual(['Clean', 'Redlines', '—', 'Raw']);
   });
 
   it('checks Redlines, and no other view, in its simple look', () => {
@@ -628,11 +626,11 @@ describe('title bar', () => {
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
   });
 
-  it('keeps Review changes for documents with redlines', () => {
+  it('keeps Review Changes for documents with redlines', () => {
     const { bar, menu } = setup({ hasRedlines: false, view: 'clean' });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(true);
     bar.update({ ...BASE, hasRedlines: true });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(false);
   });
 
   it('tints the current view', () => {
@@ -654,7 +652,7 @@ describe('title bar', () => {
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
     bar.update({ ...BASE, tracking: true });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(true);
-    expect(item(menu('Review'), 'Track changes').getAttribute('aria-checked')).toBe('true');
+    expect(item(menu('Review'), 'Track Changes').getAttribute('aria-checked')).toBe('true');
     bar.update({ ...BASE, tracking: false });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
   });
@@ -663,20 +661,21 @@ describe('title bar', () => {
     const { actions, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    expect(item(review, 'Track changes').textContent).toContain('⇧⌘E');
-    expect(item(review, 'Review changes').textContent).toContain('⌥⌘]');
-    item(review, 'Track changes').click();
+    expect(item(review, 'Track Changes').textContent).toContain('⇧⌘E');
+    // ⌥⌘] is Next Change's key; the menu bar's Review Changes has none, and so has this row.
+    expect(item(review, 'Review Changes').textContent).not.toMatch(/[⌘⌥⇧⌃]/);
+    item(review, 'Track Changes').click();
     expect(actions.toggleTracking).toHaveBeenCalledOnce();
-    item(review, 'Review changes').click();
+    item(review, 'Review Changes').click();
     expect(actions.openReview).toHaveBeenCalledOnce();
     expect(shown(review)).toBe(false);
   });
 
-  it('the Review menu checks Show resolved comments, and switches it', () => {
+  it('the Review menu checks Show Resolved Comments, and switches it', () => {
     const { actions, bar, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    const row = item(review, 'Show resolved comments');
+    const row = item(review, 'Show Resolved Comments');
     expect(row.getAttribute('role')).toBe('menuitemcheckbox');
     expect(row.getAttribute('aria-checked')).toBe('false');
     // Its own glyph, not the View button's eye.
@@ -684,13 +683,13 @@ describe('title bar', () => {
       button('View').querySelector('svg')?.innerHTML,
     );
     bar.update({ ...BASE, showResolved: true });
-    expect(item(menu('Review'), 'Show resolved comments').getAttribute('aria-checked')).toBe(
+    expect(item(menu('Review'), 'Show Resolved Comments').getAttribute('aria-checked')).toBe(
       'true',
     );
     // Any document can show them: it isn't tied to the document having redlines.
     bar.update({ ...BASE, hasRedlines: false });
-    expect(item(menu('Review'), 'Show resolved comments').disabled).toBe(false);
-    item(menu('Review'), 'Show resolved comments').click();
+    expect(item(menu('Review'), 'Show Resolved Comments').disabled).toBe(false);
+    item(menu('Review'), 'Show Resolved Comments').click();
     expect(actions.toggleResolved).toHaveBeenCalledOnce();
   });
 
@@ -741,7 +740,7 @@ describe('title bar', () => {
   });
 
   it('the arrow keys move between items', () => {
-    const { button, menu } = setup({ hasRedlines: false, view: 'clean' });
+    const { button, menu } = setup({ hasRedlines: true, view: 'clean' });
     press(button('View'), 'ArrowDown');
     const view = menu('View');
     expect(shown(view)).toBe(true);
@@ -759,16 +758,17 @@ describe('title bar', () => {
     expect(document.activeElement).toBe(button('View'));
   });
 
-  it('the keys reach Simple Look when it can be chosen, and skip it in Clean and Raw', () => {
-    const redlines = setup({ view: 'redlines' });
+  it('the keys go through the enabled rows, skipping Redlines in a file with no changes', () => {
+    const redlines = setup({ view: 'clean', hasRedlines: false });
     press(redlines.button('View'), 'ArrowDown');
     const open = redlines.menu('View');
-    press(open, 'End');
-    expect(document.activeElement).toBe(item(open, 'Simple Look'));
+    expect(document.activeElement).toBe(item(open, 'Clean'));
+    press(open, 'ArrowDown');
+    expect(document.activeElement).toBe(item(open, 'Raw'));
     press(open, 'ArrowDown');
     expect(document.activeElement).toBe(item(open, 'Clean'));
     press(open, 'ArrowUp');
-    expect(document.activeElement).toBe(item(open, 'Simple Look'));
+    expect(document.activeElement).toBe(item(open, 'Raw'));
     redlines.bar.destroy();
     document.body.replaceChildren();
     const clean = setup({ view: 'clean' });
@@ -912,6 +912,29 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
   });
 
+  it('shows that a click on the eye did something: its pupil is red for a moment, then not (#499)', () => {
+    const { button } = setup({ view: 'clean', hasRedlines: false });
+    const eye = button('View');
+    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
+    click(eye);
+    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
+    vi.advanceTimersByTime(EYE_FLASH_MS - 1);
+    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
+    // Another click while it shows starts the moment again, in full.
+    click(eye);
+    vi.advanceTimersByTime(EYE_FLASH_MS - 100);
+    click(eye);
+    vi.advanceTimersByTime(EYE_FLASH_MS - 100);
+    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
+    vi.advanceTimersByTime(100);
+    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
+    // The pen does not flash.
+    click(button('Track Changes'));
+    expect(button('Track Changes').classList.contains('rl-eye-flash')).toBe(false);
+  });
+
   it('opens no menu, which hover and the arrow keys do', () => {
     const { button, menu } = setup();
     click(button('View'));
@@ -920,7 +943,7 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
     press(button('Track Changes'), 'ArrowDown');
     expect(shown(menu('Review'))).toBe(true);
-    expect(document.activeElement).toBe(item(menu('Review'), 'Track changes'));
+    expect(document.activeElement).toBe(item(menu('Review'), 'Track Changes'));
     press(menu('Review'), 'Escape');
     press(button('View'), 'ArrowUp');
     expect(shown(menu('View'))).toBe(true);
@@ -1023,7 +1046,6 @@ describe('the keys the icons name', () => {
       expect(VIEW_KEYS[view], view).toBe(mac(accelerator(text)));
       expect(VIEW_ARIA_KEYS[view], view).toBe(aria(accelerator(text)));
     }
-    expect(LOOK_KEY).toBe(mac(accelerator('Simple Look')));
     expect(TRACKING_KEY).toBe(mac(accelerator('Track Changes')));
     expect(TRACKING_ARIA_KEY).toBe(aria(accelerator('Track Changes')));
   });

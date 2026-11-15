@@ -262,6 +262,8 @@ const routeEdits = Prec.lowest(
         rect,
         change.insert,
         tr.annotation(Transaction.userEvent) ?? event,
+        // Typing clears the top-left cell alone; a paste, a drop or a cut clears them all.
+        tr.isUserEvent('input.type') && change.insert !== '',
       );
       return spec ? [spec] : [{}];
     }
@@ -319,7 +321,15 @@ const selectedField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+/** The class the editor's root has while cells are selected (`selectedField` marks some): the theme
+ * hides the page's own text highlight in the table's rows by it. A class on the root, from the state,
+ * and not a `:has()` on the content, which WebKit rechecks as the DOM changes. */
+export const CELL_SELECTING = 'rl-cell-selecting';
+const selectingAttributes = EditorView.editorAttributes.compute([selectedField], (state) =>
+  state.field(selectedField).size > 0 ? { class: CELL_SELECTING } : { class: '' },
+);
+
 /** The keys and the filter that act on selections reaching into a table, and their drawing. */
 export function tableReach() {
-  return [selectedField, routeEdits, composeOverCells];
+  return [selectedField, selectingAttributes, routeEdits, composeOverCells];
 }

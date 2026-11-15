@@ -266,6 +266,16 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // The anchor of the selected note: its tint doubled. A resolved thread's text has none at rest,
   // so its selected anchor takes only a light one.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
+  // The change Review Changes is on: a ring around its text in the theme's inks, so that it reads
+  // as "this one" and never as a selection (the system's blue) or a comment's tint (an author's
+  // color). It has no wash: text sits on the page, or on the tint of code blocks and tables, and
+  // any wash takes some author colors under 4.5:1 there (measured over every theme; Book's red on
+  // its tint is already 4.49 bare), so the ring and the wider bar carry the mark.
+  '.rl-review-current': {
+    boxShadow:
+      '0 0 0 1px color-mix(in srgb, var(--rl-page) 80%, transparent), 0 0 0 2.5px color-mix(in srgb, var(--rl-ink-2) 75%, transparent)',
+    borderRadius: '2px',
+  },
   '.rl-anchor-resolved': {
     backgroundColor: 'color-mix(in srgb, var(--rl-ink-3) 18%, transparent)',
   },

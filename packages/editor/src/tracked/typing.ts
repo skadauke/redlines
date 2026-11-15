@@ -72,12 +72,26 @@ import {
 export const setTrackingEffect = StateEffect.define<boolean>();
 
 /**
+ * Switches Track Changes as part of a step that changes the text too (Accept All Changes and Stop
+ * Tracking): `set` is the new state, and `back` the one that taking the step back, or doing it
+ * again, sets. Its inverse swaps the two, so Undo gives back what the person had, and Redo always
+ * does what the step did, whatever was switched by hand in between.
+ */
+export const trackingStepEffect = StateEffect.define<{ set: boolean; back: boolean }>();
+
+/**
  * Whether the author's edits are tracked (design §5.4). It starts on when the file asks for it
  * (`tracking: everyone`, format §5.6).
  */
 export const trackingField = StateField.define<boolean>({
   create: (state) => state.field(parsedField).ledger.tracking === 'everyone',
-  update: (on, tr) => tr.effects.findLast((effect) => effect.is(setTrackingEffect))?.value ?? on,
+  update(on, tr) {
+    for (const effect of tr.effects.toReversed()) {
+      if (effect.is(setTrackingEffect)) return effect.value;
+      if (effect.is(trackingStepEffect)) return effect.value.set;
+    }
+    return on;
+  },
 });
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */

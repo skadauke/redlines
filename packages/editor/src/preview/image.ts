@@ -5,10 +5,10 @@
 // read through an image URL the moment its edit lands, so the image shows its alt text until the
 // change is accepted.
 
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import { Facet, StateEffect } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
-import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { parsedField } from '../tracked/field.ts';
 import { textPx } from './theme.ts';
 
@@ -140,6 +140,26 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** A pending change's markers, as docs/format.md §2.1 defines them: `<!--ins k3x9-->`, `<!--/k3x9-->`,
+ * `<!--del k3x9 payload-->` (the payload on one line, any text but `-->`). */
+const ID = '[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}';
+const MARKER = new RegExp(
+  `<!--(?:/${ID}|(?:ins|del|sub|fmt|hl|cmt|split) ${ID}(?: (?:(?!-->).)*)?)-->`,
+  'g',
+);
+
+/**
+ * Whether the image stands alone in its paragraph's line: nothing but space and the markers of a
+ * pending change around it. Track Changes on writes the markers beside an image it adds, which must
+ * not draw it at the left where the same image is centered with it off.
+ */
+function aloneInItsLine(state: EditorState, node: SyntaxNode): boolean {
+  const line = state.doc.lineAt(node.from);
+  if (node.to > line.to) return false;
+  const around = state.sliceDoc(line.from, node.from) + state.sliceDoc(node.to, line.to);
+  return around.replace(MARKER, '').trim() === '';
+}
+
 /** The decoration that draws an `Image` node, or null for one that stays source. */
 export function imageDecoration(state: EditorState, node: SyntaxNode): Decoration | null {
   const marks = node.getChildren('LinkMark');
@@ -155,8 +175,7 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
-  const line = state.doc.lineAt(node.from);
-  const own = line.text.trim() === state.sliceDoc(node.from, node.to) && node.to <= line.to;
+  const own = aloneInItsLine(state, node);
   return Decoration.replace({ widget: new ImageWidget(alt, url, own) });
 }
 
@@ -182,4 +201,110 @@ export function heldRemoteImages(state: EditorState): Set<string> | null {
     });
   }
   return held;
+}
+
+/** The local path, as the document writes it and decoded, of an `Image` node; null for a remote one. */
+function localPathOf(state: EditorState, node: SyntaxNode): string | null {
+  const urlNode = node.getChild('URL');
+  if (!urlNode) return null;
+  const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+  return source.kind === 'local' ? source.path : null;
+}
+
+/** The `Image` node that holds or touches `pos`, or null. */
+function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
+  for (const side of [1, -1] as const) {
+    for (
+      let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
+      node;
+      node = node.parent
+    ) {
+      if (node.name === 'Image') return node;
+    }
+  }
+  return null;
+}
+
+/**
+ * The local image under the caret, or the first in the selection: its path as the document writes
+ * it, decoded (`img/a b.png`). Null when there is none, or it is a remote one, which no other app
+ * edits. What `openImage` is given, and what the command that edits an image answers to.
+ */
+export function localImageAt(state: EditorState): string | null {
+  const { from, to, empty } = state.selection.main;
+  if (empty) {
+    const node = imageNodeAt(state, from);
+    return node ? localPathOf(state, node) : null;
+  }
+  let found: string | null = null;
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter(node) {
+      if (found !== null || node.name !== 'Image') return;
+      found = localPathOf(state, node.node);
+    },
+  });
+  return found;
+}
+
+/** How long after the first click of a double-click the second may come, and how far it may move. */
+const DOUBLE_CLICK_MS = 700;
+const DOUBLE_CLICK_SLOP = 6;
+
+/**
+ * A double-click on an image hands its path to `open` (`EditorOptions.openImage`), the host's to
+ * open in an app. The first click does what a click on an image does, puts the caret on it and so
+ * shows its source, where the second lands; so the pair is told by the first click's image, and the
+ * second press is taken whole: no word is selected. A remote image has no file: the pair does
+ * nothing for it, not even select.
+ */
+export function imageOpening(open: (src: string) => void): Extension {
+  return EditorView.domEventHandlers({ mousedown: imagePress(open) });
+}
+
+/** The press handler of `imageOpening`, for a test to call without the editor's own handling. */
+export function imagePress(
+  open: (src: string) => void,
+): (event: MouseEvent, view: EditorView) => boolean {
+  let first: { from: number; doc: EditorState['doc']; at: number; x: number; y: number } | null =
+    null;
+  return (event, view) => {
+    if (event.button !== 0) return false;
+    if (event.detail === 2 && first) {
+      const press = first;
+      first = null;
+      const near =
+        Date.now() - press.at <= DOUBLE_CLICK_MS &&
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) <= DOUBLE_CLICK_SLOP;
+      if (!near || view.state.doc !== press.doc) return false;
+      const node = imageNodeAt(view.state, press.from);
+      if (!node) return false;
+      const path = localPathOf(view.state, node);
+      if (path !== null) {
+        try {
+          open(path);
+        } catch (error) {
+          console.warn('Could not open the image', error);
+        }
+      }
+      return true;
+    }
+    first = null;
+    const target = event.target;
+    const wrap = target instanceof Element ? target.closest('.rl-image') : null;
+    if (event.detail === 1 && wrap && view.contentDOM.contains(wrap)) {
+      const node = imageNodeAt(view.state, view.posAtDOM(wrap));
+      if (node) {
+        first = {
+          from: node.from,
+          doc: view.state.doc,
+          at: Date.now(),
+          x: event.clientX,
+          y: event.clientY,
+        };
+      }
+    }
+    return false;
+  };
 }

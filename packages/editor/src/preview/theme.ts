@@ -323,6 +323,7 @@ export const baseThemeSpec: ThemeSpec = {
   '.cm-line.rl-trow': { display: 'table-row', padding: '0' },
   '.rl-tc': {
     display: 'table-cell',
+    position: 'relative',
     // The widths (`table/widths.ts`) are of the whole cell, its padding in them.
     boxSizing: 'border-box',
     padding: `${s(10)} ${s(16)} ${s(10)} 0`,
@@ -331,6 +332,19 @@ export const baseThemeSpec: ThemeSpec = {
     borderBottom: '1px solid var(--rl-rule)',
   },
   '.rl-tc:last-child': { paddingRight: '0' },
+  // Faint lines divide the columns: each cell but the first draws one at its left, halfway across the
+  // gap the cell before it keeps (its right padding). It is drawn, not a border or a padding, so that
+  // it changes no cell's measure (`table/widths.ts` reads one cell's padding for every column).
+  '.rl-tc:not(:first-child)::after': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: s(-8),
+    borderLeft: '1px solid var(--rl-rule)',
+    pointerEvents: 'none',
+  },
+  '.rl-tc-hidden + .rl-tc::after, .rl-tc-hidden::after': { display: 'none' },
   '.rl-tc-hidden': { display: 'none' },
   '.rl-tc[data-align="left"]': { textAlign: 'left' },
   '.rl-tc[data-align="center"]': { textAlign: 'center' },
@@ -379,8 +393,13 @@ export const baseThemeSpec: ThemeSpec = {
     color: 'HighlightText',
   },
   '.rl-sel': { color: 'inherit' },
-  // The text highlight stays out of selected cells: the cell is the selection.
-  '.rl-sel::selection, .rl-sel *::selection': {
+  // The text highlight stays out of the table's rows while cells are selected: the cells are the
+  // selection. The page's own highlight of the text between the first and the last cell reached
+  // boxes on the hidden pipes' widgets and CodeMirror's buffers, over and beside the cells' color, and
+  // on the cells of the rows between that are not selected (a column's, a rectangle's) (#522). Text
+  // outside the table keeps its highlight, and with no cell selected (a caret, or text inside one
+  // cell) nothing here applies.
+  '&.rl-cell-selecting .rl-trow::selection, &.rl-cell-selecting .rl-trow *::selection': {
     backgroundColor: 'transparent',
     color: 'inherit',
   },
@@ -390,12 +409,13 @@ export const baseThemeSpec: ThemeSpec = {
     paddingBottom: s(8),
     color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-th-font)',
-    fontSize: 'var(--rl-th-size)',
     fontWeight: '700',
     textTransform: 'var(--rl-th-case)',
     letterSpacing: 'var(--rl-th-track)',
     borderBottomColor: 'var(--rl-ink-3)',
   },
+  // A selected header cell reads as the others do: the quieter gray on the selection's blue was 3.4:1.
+  '.rl-th .rl-tc:has(.rl-sel)': { color: 'HighlightText' },
 };
 
 export const baseTheme = EditorView.baseTheme(baseThemeSpec);

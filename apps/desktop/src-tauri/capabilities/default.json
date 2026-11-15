@@ -35,6 +35,7 @@
     "allow-folder-exists",
     "allow-forget-documents",
     "allow-identity",
+    "allow-image-stamps",
     "allow-keep-running",
     "allow-list-folder",
     "allow-open-about",

@@ -238,8 +238,7 @@ The window, on the desktop:
   size at 100%. The text column grows with the text until it meets the margins, and only then do
   lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
   and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
-  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each person's, for every window, kept across launches;
-  neither reaches the file, a print, the clipboard or an export.
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each window's own: a zoom changes only the window it is made in, and a window opened later starts at the last level set anywhere, kept across launches (Preferences sets that level for new windows); neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, the default folder for new documents, automatic updates, the Dock icon, the
   default app for Markdown, the Quick Look preview of Markdown files, and installing the
@@ -306,8 +305,8 @@ The window, on the desktop:
   › Rotate the Dock Icon keeps the caret. About Redlines is a small window of the app's own, as
   Preferences is, on every system: the icon, the name, the version and build, and the copyright,
   as the system's panel has them. It opens once, and Esc and ⌘W close it. A click on its icon
-  changes it to the next mark of the family, drawn as a tracked change, the old mark struck through
-  with a red line and the new one underlined, in about half a second (a plain crossfade under
+  changes it to the next mark of the family, the old mark fading out and the new one coming in from
+  below, with no line drawn across either, in about half a second (a plain crossfade under
   Reduce Motion); nothing says so, and the Dock icon follows the mark until the next launch.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
@@ -388,15 +387,21 @@ another document doesn't open yet.
 
 The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
 the eye switches between Clean and Redlines, and from Raw goes back to whichever of the two was shown
-last; Raw is for the menu.
+last; Raw is for the menu, below a separator. The click shows that it did something, for Clean and
+Redlines look alike in a document without redlines: the eye's pupil is red for a moment (the one use
+of red there besides the pen).
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
-  always there, with its shortcut, whatever the document holds and whether Track Changes is on or
-  off, so the View menu always offers the same three views. A document without redlines looks
-  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
-  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  always there in the menu bar's View menu, with its shortcut, whatever the document holds and
+  whether Track Changes is on or off, since a disabled item would take its key away. The eye's menu
+  is for what there is to see: Redlines is disabled in it for a document with no changes and no
+  ledger (no pending change, highlight or comment), where it would look nearly the same as Clean
+  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the eye still
+  show it. The eye's menu has no Simple Look row. Redlines has two
+  looks, and a click on a change bar in the margin or the menu bar's View ›
+  **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
   **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
@@ -405,8 +410,9 @@ last; Raw is for the menu.
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
   checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
-  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
-  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
+  have no look); the eye's menu has no row for it. A change bar is a pointer's way, and the
+  menu bar's switch (⌥⌘4) is the way for the keyboard and VoiceOver (#330): nobody needs a pointer
+  to choose a look.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
@@ -545,6 +551,18 @@ mode has no counterpart in the desktop app.
 
 ### 5.6 Reviewing
 
+- **Review Changes starts at once.** Choosing it goes straight to the document's first change,
+  wherever the caret is. With a selection it goes to the first change the selection touches and the
+  selection goes; if the selection touches none, to the first change after it, round to the top.
+  The next- and previous-change shortcuts (⌘⌥], ⌘⌥[) still go from the caret. The current change is
+  marked, not selected: its text gets a thin gray ring, its change bar is drawn wider
+  (4 px), and its note in the rail is the selected one, all in the theme's inks, so it never looks
+  like a selection. The mark moves with Previous and Next and goes when the bar closes or the
+  caret moves elsewhere, and when the change is decided or edited away from anywhere (its card, its
+  note, the bar, an agent). It has no wash, so no text changes ground and every author's color keeps
+  the contrast its theme gives it. **Next and Previous no longer select the change:** they put the caret at its start
+  and mark it, so copying or typing after them acts at the caret, not on the change; the panel
+  planned for it (§5.6 below) holds the keyboard. With no changes the command is disabled.
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
   next-change shortcut (⌘⌥]). Opening it, or moving it to a change, shows the full markup, from
   Clean, from the simple look and from Raw, so that each change shows while you decide it. Showing
@@ -564,6 +582,13 @@ mode has no counterpart in the desktop app.
   section, all from one agent run, or all. Each asks first, with counts ("Accept 12 changes: Ada 9,
   Claude for Ada 3?"), and one Undo reverses it. Linked changes, such as the two halves of a move,
   are decided together.
+- **Accept All Changes and Stop Tracking** is a row of the app's Review menu (the menu bar, not
+  the toolbar's Review menu), after Track Changes. With a caret it accepts every pending change of
+  the document; with a selection, only the changes the selection touches. Either way it then turns
+  Track Changes off, and comments and highlights stay. It is disabled when there is nothing to
+  accept, in the document or in the selection, and never refuses. It is one step: one Undo brings
+  the changes back and turns Track Changes on again, and Redo does both once more. It writes the
+  file as Accept does for each change, and the switch itself writes nothing (§5.4).
 - **Reviewers who can't accept** (in an app with roles) get the same bar for moving through
   changes and replying.
 - **Saving is independent of review.** A document can be saved, shared or committed with any
@@ -748,7 +773,12 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
   above or below at the same x (an empty cell too), and out of the table at its first and last
   row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
-  Docs keep one). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
+  Docs keep one; ↓ from the last line of a quote, an alert, code, a rule or a picture that ends the
+  document does the same, outside the quote, where a line after it would be read as more of it; ↓ from
+  the last line of code that has no closing fence, at the end of the document, first writes the
+  closing fence, since a line after it would be code, then opens the empty paragraph: one edit,
+  tracked with Track Changes on, which one Undo takes back; in a list item, ↓ is the list's own).
+  Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
   adds a row; ⌘↩ and ⌥⌘↓ are Insert Row Below, in the Table menu. To leave the table by keyboard, press
   Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
   (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
@@ -776,7 +806,10 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   caret can stand in (`cellIsEmpty`, `cells.ts`): deleted text counts as gone, a line break as text,
   and an author's own HTML comment as empty in Clean and Simple, where it is hidden, and not in
   Redlines, which draws it as a note. A row with text is never deleted by one keystroke: the first
-  press clears it. Typing clears the cells and types into the top-left one; ⌘B, ⌘I and the Format
+  press clears it. Typing clears the top-left cell alone and types there, and leaves the other cells as they are
+  (tracked, a deletion of its text and an insertion of the typed text; the caret ends after the
+  typed text, the selection gone, one Undo); an input method composing does the same. ⌫, ⌦, Cut
+  and a paste over the cells clear or replace every cell. ⌘B, ⌘I and the Format
   menu format each cell's text as one change; ⌘K is unavailable; a new comment is on the selected
   cells' text in one row and on the whole rows across rows.
 - **Copy, cut and paste of cells.** Copying or cutting a rectangle puts tab-separated text (a cell
@@ -797,12 +830,15 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   insertion adds as many rows as the selection touches, with the caret in the first new cell;
   deletion takes the rows the selection touches and puts the caret in the row that is then there;
   moving takes them one place, and they stay selected. A grip (⋮⋮) shows in the left margin beside
-  the row under the pointer, left of the change bars and inside the window, in a layer over the
-  editor that assistive technology does not see (the menu bar has every command); a press selects
-  the row (⇧ extends) and opens its menu (Insert Above and Below, Delete, Delete Table, Move Up and
-  Down, Clear Contents), Esc closes it and keeps the selection; a drag moves the rows, and the
-  others selected with it, to any boundary, the last included: they dim, a copy follows the
-  pointer, a 2 px line marks the drop, the page scrolls near its edges, Esc cancels. A + shows
+  the row under the pointer, left of the change bars and inside the window (where the margin is
+  too narrow for that, a narrow window or a large text size, it stands at the table's edge), in a
+  layer over the editor that assistive technology does not see (the menu bar has every command); a
+  click selects the row (⇧ extends) when it is released, and a right-click selects it and opens its
+  menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
+  it and keeps the selection; a drag moves the rows, and the others selected with it, to any
+  boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
+  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
 - **Columns, the same.** Insert Column Left and Right (⌥⌘← and ⌥⌘→), Delete Column (⌃⌘⌫) and Move
@@ -810,8 +846,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
   deletes the whole table the caret or the selection is in. A column's grip (⋯) stands above the
-  column in the strip above the table, and never leaves it; a press selects the column (⇧ extends)
-  and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
+  column in the strip above the table, and never leaves it; a click selects the column (⇧ extends)
+  when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
   page's table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the
@@ -966,6 +1002,23 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **List items pasted into a list item.** A paste that is only list items (bullets, numbers or
+  tasks, nested or not, from Markdown or from a page's list) made at a caret, or over a selection,
+  inside a list item adds items to that list, as Return does, and never text inside the item. At
+  the end of an item they follow it at its level (after its nested items, when it has some); at the
+  start of a non-empty item they go before it; in an empty item they replace it; in the middle of
+  an item, or over a selection inside it (the selection is deleted first, and may reach into the
+  next item), the item splits at the caret and they go between the halves. Pasted nesting keeps
+  its relative depth. The pasted items take the target list's kind, so that the result is one
+  list: a `1.` item pasted into a bullet list is a bullet, a bullet pasted into a numbered list
+  is the next number (the same number in a list numbered alike), a task keeps its checkbox, and
+  nested items keep their own markers. A loose list stays as loose as it was. With Track Changes
+  on the new items are one insertion, written as Return and typing write them, and every order of
+  decisions reads alike. One Undo takes back the whole paste, the selection's deletion with it.
+  Pasting list items into a paragraph outside any list, a paste with a blank line between its
+  items, one with items that hold more than text and nested items, a selection over a marker, and
+  places where Return itself works another way (inside a code span's marks, at a line break inside
+  an item's text) go in as text, as they did.
 - **Images.** Image files dropped on the editor, image data pasted (a screenshot, an image copied
   in Preview, an image file copied in Finder) and Format › Image… (the Insert Image command, which
   asks for files in the system's panel) all do the same. The file is copied into the folder for
@@ -998,6 +1051,20 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
   pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
   browser, is left to the HTML.
+- **Editing an image in Preview.** A double-click on an image opens its file in Preview (and the
+  command Edit Image in Preview, `image.edit`, does the same for the image under the caret or in
+  the selection, which the toolbar's Image menu offers). The editor only hands the host the
+  image's path as the document writes it (`EditorOptions.openImage`); the app resolves it from the
+  document, and opens it only if it is an image inside the project folder the sidebar shows, below
+  no hidden name, not a program, an alias or a link that leads out (the rule of a link to an image
+  in the sidebar, `open_default`), and says why when it isn't. A remote image has no file, and a
+  double-click on it does nothing (it selects no word either). A page or an embed gives no hook:
+  a double-click there does what it does anywhere in the text. The second click of the pair
+  selects no word. When the person saves in Preview and comes back to the window, the app asks the
+  stamps (modification time and size) of the images the document drew, and loads again, from a
+  URL with a version, the ones that changed and no other; the document's text is never touched. It
+  looks when the window regains the focus rather than watching the files, since the app watches a
+  document's own file alone, and the picture of a file that is gone stays as it was.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
   someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
@@ -1124,6 +1191,26 @@ syntax Markdown needs, and never shows them.
   Nothing joins into code, a table or front matter: the caret goes there instead. At the start of
   a list item, the first Backspace takes the bullet off and keeps the text where it is, the second
   joins it to the item above, as in Word.
+- **What is nested under an item stays a list when the item's marker goes.** Backspace at the start
+  of the first item of a list takes its marker away and leaves its text a paragraph, and Delete
+  at the end of the paragraph above a list takes the first item's marker into it. A list, a quote
+  or a paragraph under the item moves out with the text, a level up, by as many columns as the
+  item's marker and the spaces after it take, so that the depth among them is kept (Word and Google
+  Docs promote the items under it the same way): `* note⏎    - a` becomes `note⏎  - a`, where it
+  would have been one paragraph of two lines, which Markdown reads as text. Where nothing under the
+  item would stand four columns in, nothing moves. With Track Changes on the move is one
+  substitution that holds the old lines, written beside the deletion of the marker (`* note⏎    - a`
+  gives `<!--del * -->⏎⏎note<!--sub \n    - a-->⏎  - a<!--/-->`), which reads the same in every
+  order of decisions; where fenced or indented code stands among the lines that move, or the
+  tracked layer can't hold the lines, the key says so in words and writes nothing (lane R widens it
+  into a replacement of the whole item, #497). Shift-Tab and the first Backspace in a nested
+  list move what is nested in the item along, as before. Shift-Tab in indented code outdents it
+  to a paragraph, and where a line stands right under the code (an item, or text) it keeps the four
+  columns that make it code and says so, since the line would else join the paragraph.
+- **The keys read a list as CommonMark does.** A numbered line other than `1.` right under an
+  item's text (`1. a⏎   2. b`) is more of that text, not a sublist, so Return at its end makes the
+  next item of the list that holds `a`, and the file reads, in every order of decisions, as the
+  view shows it (format §3.2).
 - **The caret crosses a break in one press,** ← and → over hidden syntax and blank lines alike.
 
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because

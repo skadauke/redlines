@@ -16,7 +16,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::http::header::{
-    CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue,
+    X_CONTENT_TYPE_OPTIONS,
 };
 use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::plugin::TauriPlugin;
@@ -174,6 +175,49 @@ const RASTER_TYPES: [(Signature, &str); 10] = [
     (infer::image::is_tiff, "image/tiff"),
 ];
 
+/// What tells that the file at `real` has been saved again: its modification time to the
+/// nanosecond, and its size, one text to compare. None for what isn't a plain file.
+fn stamp_of(real: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(real)
+        .ok()
+        .filter(|metadata| metadata.is_file())?;
+    let since_epoch = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!("{}-{}", since_epoch.as_nanos(), metadata.len()))
+}
+
+/// The stamp (`stamp_of`) of each file the page asks about, in order: of the file as it really is,
+/// and only if the page may load it (`Images::may_load`), so that it learns nothing of a file it
+/// can't see. None for a file that is outside, hidden, missing or no file.
+fn stamps(images: &Images, paths: &[String]) -> Vec<Option<String>> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = Path::new(path);
+            let real = path
+                .is_absolute()
+                .then(|| images.may_load(path).ok())
+                .flatten()?;
+            stamp_of(&real)
+        })
+        .collect()
+}
+
+/// Tells which of the images the preview shows were saved again, since the page last asked: the
+/// stamp of each (`stamps`). The page compares them when its window regains the focus, after the
+/// person saved an image in Preview, and loads the ones that changed again. A command, not a watch:
+/// the app watches a document's own file alone (`watch.rs`).
+#[tauri::command(async)]
+pub fn image_stamps(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
+    match app.try_state::<Images>() {
+        Some(images) => stamps(&images, &paths),
+        None => vec![None; paths.len()],
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
@@ -252,6 +296,8 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
     let headers = response.headers_mut();
     headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(POLICY));
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    // A file saved again in another app must show its new bytes: the webview asks every time.
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
 
@@ -380,6 +426,54 @@ mod tests {
                 fs::write(&path, "").unwrap();
             }
         }
+    }
+
+    #[test]
+    fn tells_which_images_were_saved_again_by_a_stamp_and_only_for_those_the_page_may_load() {
+        let folder = folder("stamps");
+        make(
+            &folder,
+            &[
+                "repo/.git/",
+                "repo/docs/plan.md",
+                "repo/cat.png",
+                "repo/.hidden.png",
+                "other/owl.png",
+            ],
+        );
+        symlink(folder.join("other/owl.png"), folder.join("repo/linked.png")).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let ask = |names: &[&str]| {
+            let paths: Vec<String> = names
+                .iter()
+                .map(|name| folder.join(name).to_string_lossy().into_owned())
+                .collect();
+            stamps(&images, &paths)
+        };
+        let before = ask(&["repo/cat.png"]);
+        assert!(before[0].is_some());
+        // Asked again with nothing saved: the same.
+        assert_eq!(ask(&["repo/cat.png"]), before);
+        // Saved again, with other bytes: another stamp.
+        fs::write(folder.join("repo/cat.png"), "newer bytes").unwrap();
+        assert_ne!(ask(&["repo/cat.png"]), before);
+        // Nothing for a file outside, hidden, missing, a folder, or a link out.
+        assert_eq!(
+            ask(&[
+                "other/owl.png",
+                "repo/.hidden.png",
+                "repo/missing.png",
+                "repo/docs",
+                "repo/linked.png"
+            ]),
+            vec![None; 5]
+        );
+        // Nor for a path that isn't absolute.
+        assert_eq!(stamps(&images, &["cat.png".to_string()]), vec![None]);
+        fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

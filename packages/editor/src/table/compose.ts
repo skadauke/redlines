@@ -3,7 +3,7 @@
 // collapses to a caret at the start of the first cell when the composition starts, and the document
 // is not touched: the composition goes in beside the first cell's text, as any composition does.
 // When it ends, a composition that committed text finishes the job of typing over cells (the text
-// that was in the first cell and the other cells' text go, in a step that history joins to the
+// that was in the first cell goes, and the other cells stay, in a step that history joins to the
 // composition's, so one Undo gives every cell back); one that committed nothing, Esc or an empty
 // commit, leaves every cell exactly as it was and selects the cells again.
 //
@@ -86,12 +86,11 @@ export const composeOverCells = ViewPlugin.fromClass(
         reselect(view, rect);
         return;
       }
-      // Committed: the first cell's old text is after the composed text; the other cells go whole.
+      // Committed: the first cell's old text is after the composed text, and goes; the other cells
+      // are left alone, as they are when typing over cells.
+      const from = first.textTo - held.old.length;
       const changes: { from: number; to: number }[] = [];
-      for (const cell of cellsOfRect(rect)) {
-        const from = cell === first ? cell.textTo - held.old.length : cell.textFrom;
-        if (from < cell.textTo) changes.push({ from, to: cell.textTo });
-      }
+      if (from < first.textTo) changes.push({ from, to: first.textTo });
       if (changes.length === 0) return;
       view.dispatch({
         changes,

@@ -1083,7 +1083,13 @@ at the outer edge of a whole inline construct. A marker never goes:
    substitution: that is not the author's to write again (a deletion holds no text, and the change
    may stand behind its marker). Where no way reads alike, the change is refused, in words that name
    the other person's change and ask for it to be decided first;
-6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
+6. between a hard break's trailing spaces or backslash and the line end. It goes before them. The
+   spaces are those of the newest view, whoever types them: two spaces typed at the end of a line
+   that another line follows (or one typed after a space, or next to the spaces of another
+   change) are a hard break, so the insertion's closer is not written after them. The change goes
+   on past the line break, to the end of the first word of the next line, like any change that
+   would end behind the spaces; and a space typed in the author's own insertion that makes two at
+   a line's end does the same, instead of extending the insertion in place;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
    underline only in the container of the line of text above it: under a list item's line and to
@@ -1171,6 +1177,60 @@ middle of a paragraph it splits the paragraph.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
   break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
+
+A tracked insertion never stands between a list marker and the space after it. A marker with no
+space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
+is a paragraph with a marker's character in it, in a renderer that doesn't know the markers, though the
+newest view is an item. Every edit that writes text after a bare marker with a space first (typing,
+autocorrect, a paste of plain text, the paste of list items (#510), an agent's insertion through the
+library, the `redlines` command or the MCP tools) therefore writes the space first, as untracked
+text, and the insertion opens after it, on the line before the text as §3.3 has it for a mark that
+starts a block: `- <!--ins x-->⏎  a<!--/x-->`. Accepting gives `- a`; rejecting gives `- `, an empty
+item, as the bare marker was. A tab typed there is the marker's separator and is written as typed,
+untracked (`-\t<!--ins x-->⏎    a<!--/x-->`), with the lines after the opener indented to the content
+column that the tab makes (a tab goes on to the next multiple of four columns, CommonMark), not to a
+space's. The bare marker may stand after quote markers and list markers in any order (`- > -`,
+`> - -`, `1. > 2.`). A lone space is the space alone, with no mark at all: it reads as the same empty item
+in every order of decisions, and there is no change to decide. Text typed with no space first
+(`-a`) is text of a paragraph in both views, and is written as it is, `-<!--ins x-->a<!--/x-->`.
+The rule applies where the marker is the only thing on its line, but for markers of changes after
+it: a marker with text after it (`-x`) is no empty item, and takes the insertion as it was. Tested:
+`bare-marker.test.ts` of
+`packages/format`, of `packages/editor/src/blocks` and of `packages/agent-tools`, with random lists
+that have bare markers (`bareMarkerDocument`, `random-docs.ts`) in the format's and the editor's
+walks.
+
+No mark stands right behind a bare marker in any other edit either: a bare marker followed by a
+comment is a paragraph with a marker's character in it, whatever the newest view has. The
+editor's keys read a bare marker as an empty item, as CommonMark does, and write so. Backspace in
+an empty item right under a bare marker (`- a⏎  - b⏎  -⏎-‸`) takes the break and the bare marker
+with the item, as it does when the marker above has a space after it (`b<!--del k3x9 ⏎  -⏎-
+-->`, tracked, one mark, the item above gone with the break); the deletion never starts behind
+the bare marker (`  -<!--del k3x9 ⏎--->`). Return in a bare marker that starts a list of its own
+under the text of an item of another kind of list (`1. text⏎-‸`, or a number under a bullet, or
+the other delimiter), which the editor's parse takes for a line of that text because it lets no
+empty marker interrupt a paragraph, is Return in an empty item: the list ends, as Word ends it,
+and the split is not written behind the marker (`-<!--split k3x9-->⏎2. ` read as text of the
+item). Where the write for that Return is not known yet (the empty item has a line after it with
+Track Changes on, or goes up a level, in the indentation of a marker), it is refused, as it is
+for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
+`packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
+
+A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
+line of that text, as CommonMark reads it: only a list that starts at 1 interrupts a paragraph, and
+micromark 4.0.2 reads `<li>a⏎2. b</li>`. The editor's parse reads a sublist there, because it lets
+any numbered item interrupt a paragraph inside a numbered list. The editor's keys read the line as
+micromark does: the lines of such items, the ones that follow on the lines right after, up to the
+first that starts at 1 or that has a blank line before it, are lines of the paragraph above them,
+so Return at the end of `2. b` makes the next item of the list of `1. a` (`1. a⏎   2. b<!--split
+k3x9-->⏎2. `), not the item after a sublist's `2.` (which writes a `3.` line that micromark reads as
+text), and Tab, Shift-Tab and Backspace act on the item that holds the text. Where micromark reads
+a list, the keys are as they were: after a blank line, a list that starts at `1.`, a list that
+continues one above it. An empty numbered item, which the file doesn't hold (it is the open item of
+the editor's keys), and a numbered line that has a list or other blocks of its own under it, are
+not read so yet: the keys treat them by the parse, as before, and no write for them is known
+(lane R widens such an edit, #497). Tested: `sublist-two.test.ts` of
+`packages/editor/src/blocks`, and the editor's walks over lists side by side.
 
 ### 3.3 Marks that start or end a block
 
@@ -1415,6 +1475,24 @@ or an underline (a numbered item, the first of another list in the parent item, 
 indented than the item, or as deep as the text of its child). The format's own refusal reads the next
 item at the item's indentation only, and is not made where it refuses first (tabs, a pending break):
 the key says so in the format's words for a numbered item, and in its own for the others.
+
+Taking an item's marker out leaves what is nested in it where it stood, in the file, unless the key
+that takes it writes the lines again: a list or a paragraph four columns or more in (`* note⏎    - a`)
+is more of the paragraph above it for micromark 4.0.2, or code, and the file would hold an item line
+that no reader reads as an item. Backspace at the first item of a list at the top level or in a quote,
+and Delete at the end of the paragraph above a list, take the white space of the lines under the item
+away by as many columns as its marker and the spaces after it take (or put it in, to the text column of
+the block above, for the join), so that those blocks stand where micromark reads them as the items,
+quotes and paragraphs they were, and where none would stand four columns in or out of the item that
+holds the text, they stay. With Track Changes on the lines are written again as one substitution that holds the old lines, from
+the end of the paragraph's last line (or the break above it) through the item's last line, beside the
+deletion of the marker (`<!--del k3x9 * -->⏎⏎note<!--sub m2bd \n    - a-->⏎  - a<!--/m2bd-->`): it reads
+alike in every order of decisions. A fence or indented code among those lines is not held by a
+substitution in an item, so the key is refused in words (lane R widens it into a replacement of the
+whole item, #497). Shift-Tab in indented code outdents it as it always did, to a paragraph at the end,
+and keeps the four columns that make it code only where a line stands right under the code (an item
+or text), which the paragraph would take in; there it is refused in words, with Track Changes off too. Tested: `nested-keep.test.ts` of
+`packages/editor/src/blocks`, and the editor's walks.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
@@ -1928,6 +2006,26 @@ Next paragraph.
   does (§3.3). Rejecting gives the old block back, byte for byte. In a quote or a list item the
   opener stands on a line of its own with the container's prefix, and every line of the block keeps
   it.
+- A fenced block with no closing fence runs to the end of its container, or of the file
+  (CommonMark), so that the closer of a substitution would stand inside its code and be read as
+  code. The substitution of such a block therefore writes the block with a closing fence, the
+  opening fence's character and length, after the container's prefix, as the last line of the
+  new text (a block whose new text already ends in a closing line, as ↓ at its end writes it, has
+  that one); the payload is the old block as it was, unclosed. Accepting gives the block closed, which every reader reads as the same
+  code. Typing, Backspace and Return in it, at its last line (the end of the file or of the
+  container) or anywhere else in it, are written so, in a quote and in a list item (not in a fence
+  that starts an item), in LF and CRLF files alike; a following key edits the closed block in the
+  pending substitution, as in any. A block whose last line is its opening fence (nothing after it
+  to change) takes no such write, and a block that holds a ledger's head, a ledger that the open
+  fence swallowed, neither: both are refused as code is, in the words above. A decision that gives
+  an unclosed block back is never refused for it: with no ledger left after it (nothing else in
+  the ledger, no comment, no setting such as `tracking` or `history`), the block comes back as it
+  was, byte for byte, and the ledger goes with it; where the ledger stays (other marks pending, a
+  comment thread, any setting), it would be code after an open block, so the old code is written
+  with a closing fence added, the opening fence's character and length, after its indentation and
+  container prefix, which every reader reads as the same code. A
+  file that ends in such a block and has no ledger yet can't take a tracked change elsewhere
+  either, and says so (§5.1, "Close it first").
 - The code of a raw-text element is what stands between its opening tag's `>` and its closing tag
   (also on one line: `<title>Docs</title>`); of display math, what stands between its two `$$`.
   A change on a fence's line, in a tag, on a `$$` line outside the two `$$`, is not a change of the

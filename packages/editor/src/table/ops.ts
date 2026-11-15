@@ -252,6 +252,22 @@ export function insertRowsAt(view: EditorView, table: Table, at: number, count =
   return perform(view, { kind: 'insertRows', table: table.from, after: at - 1, count });
 }
 
+/** Whether the rows the selection touches have a place to move to: false at the top (up) or the
+ * bottom (down) of the table, and outside one. */
+export function canMoveRows(state: EditorState, up: boolean): boolean {
+  const touched = touchedRows(state);
+  if (!touched) return false;
+  return up ? touched.first > 0 : touched.last < touched.table.rows.length - 1;
+}
+
+/** Whether the columns the selection touches have a place to move to: false at the left (left) or
+ * the right edge, and outside a table. */
+export function canMoveCols(state: EditorState, left: boolean): boolean {
+  const touched = touchedCols(state);
+  if (!touched) return false;
+  return left ? touched.first > 0 : touched.last < touched.table.columns - 1;
+}
+
 /** Moves the rows the selection touches one place up or down; they stay selected. At the top or the
  * bottom there is no place: it says so. */
 export function moveRows(view: EditorView, up: boolean): boolean {

@@ -31,7 +31,7 @@ interface Shape {
   closes: boolean;
 }
 
-function shapeOf(state: EditorState, block: Block): Shape {
+export function shapeOf(state: EditorState, block: Block): Shape {
   const { doc } = state;
   const first = doc.lineAt(block.lines.from);
   const last = doc.lineAt(block.lines.to);
@@ -260,6 +260,10 @@ function linesOf(state: EditorState, from: number, to: number): Line[] {
   return lines;
 }
 
+/** Why indented code with a line right under it can't be outdented to a paragraph. */
+const KEEP_CODE =
+  "This code can't be outdented any further: the line right under it would become part of the paragraph it turns into. Put a blank line under the code first.";
+
 /**
  * Tab and Shift-Tab in code, math, an HTML block or front matter. Tab at the caret puts in the
  * indentation unit; over a selection, in front of each line it touches. Shift-Tab takes one unit
@@ -288,6 +292,16 @@ export function planCodeTab(state: EditorState, block: Block, outdent: boolean):
   const lines = linesOf(state, from, to).filter((line) => !onFence(line));
   if (lines.length === 0) return nothing(state);
   const changes: ChangeSpec[] = [];
+  // Indented code whose last line has a line right under it (an item, or text): outdented to a
+  // paragraph it would take that line in as its own, and an item under it would read as text.
+  const lastLine = doc.lineAt(block.lines.to);
+  const guarded =
+    block.kind === 'code' &&
+    !shape.opens &&
+    lastLine.number < doc.lines &&
+    !/^[ \t>]*$/.test(doc.line(lastLine.number + 1).text);
+  const syntax = block.text.from - block.lines.from;
+  let blocked = false;
   for (const line of lines) {
     const start = line.from + (line.text.startsWith(cont) ? cont.length : 0);
     if (!outdent) {
@@ -301,9 +315,18 @@ export function planCodeTab(state: EditorState, block: Block, outdent: boolean):
     const take = lead.startsWith('\t')
       ? 1
       : Math.min(/^ */.exec(lead)?.[0].length ?? 0, unit === '\t' ? 4 : unit.length);
-    if (take > 0) changes.push({ from: start, to: start + take });
+    // The first four columns of indented code, past its container's, are what make it code: a
+    // line that gave them up would be text of a paragraph, and take the list under it along.
+    const kept = guarded ? Math.max(0, start - line.from + lead.length - syntax) : Infinity;
+    const taken = Math.min(take, kept);
+    if (taken < take) blocked = true;
+    if (taken > 0) changes.push({ from: start, to: start + taken });
   }
-  if (changes.length === 0) return nothing(state);
+  if (changes.length === 0) {
+    return blocked
+      ? { ...nothing(state), userEvent: 'indent', refusal: KEEP_CODE }
+      : nothing(state);
+  }
   const mapped = state.changes(changes);
   return {
     changes,

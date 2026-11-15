@@ -20,6 +20,7 @@ import {
   blockAt,
   holdsMarkersOnly,
   isGapLine,
+  listItems,
   neighbours,
   openConstructs,
 } from './structure.ts';
@@ -33,6 +34,7 @@ export interface KeyEdit {
   userEvent:
     | 'input.break'
     | 'input.break.line'
+    | 'input.paste'
     | 'delete.selection'
     | 'delete.backward.block'
     | 'delete.forward.block'
@@ -71,6 +73,9 @@ export interface KeyEdit {
   caretAfterText?: { from: number; text: string };
   /** Joins the step before it in the history, so that the two are one step to undo. */
   join?: boolean;
+  /** ↓ at the end of code that is never closed: the changes write its closing fence, and the key
+   * goes on to open the empty paragraph below it. */
+  closeFence?: boolean;
   /** Kept in the record of Returns (Return and Shift-Return are, whatever their user event). */
   record?: boolean;
   /**
@@ -218,7 +223,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
       marker: state.sliceDoc(mark.from, mark.to),
       after: space || ' ',
       task: node.getChild('Task') !== null,
-      loose: !!container?.loose && (list?.getChildren('ListItem').length ?? 0) > 1,
+      loose: !!container?.loose && listItems(state, list).length > 1,
     });
   }
   return items;
@@ -229,7 +234,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
 export function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
-  const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
+  const numbers = listItems(state, item.node.parent).map((other) => {
     const mark = other.getChild('ListMark');
     return mark ? Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) : NaN;
   });
@@ -272,12 +277,14 @@ function textLineAbove(state: EditorState, line: Line): Line | null {
 }
 
 /** Whether a block of an item is its last one, but for lists nested in it. */
-function lastInItem(state: EditorState, block: Block, item: Item): boolean {
+export function lastInItem(state: EditorState, block: Block, item: Item): boolean {
   let child: SyntaxNode | null = (
     ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state)
   ).resolveInner(block.text.from, 1);
   while (child && child.parent && child.parent.from !== item.node.from) child = child.parent;
   for (let next = child?.nextSibling ?? null; next; next = next.nextSibling) {
+    // In a quote, the marks of its later lines are nodes between the blocks.
+    if (next.name === 'QuoteMark') continue;
     if (next.name !== 'BulletList' && next.name !== 'OrderedList') return false;
   }
   return true;
@@ -307,12 +314,66 @@ function splitAbove(state: EditorState, line: Line): 'own' | 'theirs' | null {
 const THEIR_SPLIT =
   "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
 
+/**
+ * A bare marker (`-`, `*`, `+`, `1.` or `1)` alone on its line) at the end of an item's text,
+ * which the syntax tree reads as a line of that text, though the item's text ends before it and
+ * CommonMark reads the line as an empty item of a list of its own: `1. text⏎-`, a bullet under
+ * a numbered item, or a number under a bullet, or the other delimiter. The parse (like the
+ * rule that an empty item can't interrupt a paragraph) takes it for more of the paragraph, and
+ * a Return there would split the item, writing the split right behind the marker (`-<split>`),
+ * which reads as text, not as the item (#581). It is the Return in an empty item: the item's
+ * line as a block of its own, and the items around it, from the one whose text it is no more of.
+ * Null for any other caret.
+ */
+function bareItemAt(
+  state: EditorState,
+  block: Block,
+  head: number,
+): { block: Block; items: Item[] } | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  if (head !== line.to || line.to > block.text.to) return null;
+  if (line.number <= doc.lineAt(block.lines.from).number) return null;
+  const found = /^((?:[ \t]*>)*[ \t]*)([-+*]|\d{1,9}[.)])$/.exec(line.text);
+  if (!found) return null;
+  const column = found[1]!.length;
+  const items = itemsAround(state, block);
+  const text = (item: Item) => item.indent.length + item.marker.length + item.after.length;
+  // As far in as the text of the innermost item, the line is more of its paragraph for CommonMark too.
+  if (!items[0] || column >= text(items[0])) return null;
+  // A line after it indented to its content column is its content: the item is not empty.
+  if (line.number < doc.lines) {
+    const next = doc.line(line.number + 1).text;
+    const lead = /^(?:[ \t]*>)*[ \t]*/.exec(next)![0].length;
+    if (next.trim() && lead >= column + found[2]!.length + 1 && /[^ \t>]/.test(next)) return null;
+  }
+  const outer = items.findIndex((item) => column >= text(item));
+  const parents = outer < 0 ? [] : items.slice(outer);
+  const bare: Item = {
+    node: items[0].node,
+    line,
+    indent: found[1]!,
+    marker: found[2]!,
+    after: ' ',
+    task: false,
+    loose: false,
+  };
+  const own: Block = {
+    ...block,
+    lines: { from: line.from, to: line.to },
+    text: { from: line.to, to: line.to },
+  };
+  return { block: own, items: [bare, ...parents] };
+}
+
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
-function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): KeyEdit {
+function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare = false): KeyEdit {
   const { doc } = state;
   const item = items[0]!;
   const line = doc.lineAt(block.lines.from);
-  const nested = item.node.getChild('BulletList') ?? item.node.getChild('OrderedList');
+  const nested = bare
+    ? null
+    : (item.node.getChild('BulletList') ?? item.node.getChild('OrderedList'));
   const parent = items[1];
   if (parent && !nested) {
     // Up one level: the item's syntax as its parent's next item has it.
@@ -674,15 +735,18 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   };
 }
 
-/** Return at the end of a block's text: an empty paragraph below it. */
-export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+/**
+ * Return at the end of a block's text: an empty paragraph below it. With `outside` the paragraph
+ * is outside the block's quotes (↓ from the end of the document), not one more in them.
+ */
+export function returnAtEnd(state: EditorState, block: Block, outside = false): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
-  const cont = continuation(state, block);
+  const cont = outside ? '' : continuation(state, block);
   const at = last.to;
   const changes: ChangeSpec[] = [];
   let insert: string;
-  if (isAlertLine(state, block)) {
+  if (!outside && isAlertLine(state, block)) {
     // Into the alert's body, on the line under its marker.
     insert = `\n${cont}`;
   } else {
@@ -691,7 +755,7 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const caret = at + insert.length;
   let merged = false;
   changes.push({ from: at, insert });
-  if (!isAlertLine(state, block) && !blankAfter(state, last)) {
+  if (!(!outside && isAlertLine(state, block)) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';
@@ -845,7 +909,7 @@ function outsideEdges(state: EditorState, head: number): number {
  * the split goes outside the delimiters, after the break. An atom (an image, an autolink, a tag)
  * the caret is inside of is never parted: the break goes after it.
  */
-function splitAt(
+export function splitAt(
   state: EditorState,
   head: number,
   insert: string,
@@ -1007,6 +1071,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
     return planCodeReturn(state, block, head);
   }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
+    const bare = bareItemAt(state, block, head);
+    if (bare) return returnInEmptyItem(state, bare.block, bare.items, true);
     return returnInItem(state, block, head);
   }
   const start = textStart(state, block);

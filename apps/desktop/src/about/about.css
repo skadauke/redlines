@@ -1,8 +1,8 @@
 /*
  * About Redlines (about.html): the app's icon, its name, its version and build, and the copyright,
  * centered, in the theme's grays and interface font, as the system's About panel shows them. Its
- * window draws no title. Nothing in it is colored but the red lines that the icon draws when it is
- * clicked (marks.ts): a tracked change, in the author color that is yours.
+ * window draws no title. Nothing in it is colored: a click on the icon changes its mark, and draws
+ * nothing across it (marks.ts).
  */
 
 :root {
@@ -58,32 +58,6 @@ body {
   width: 100%;
   height: 100%;
   -webkit-user-drag: none;
-}
-
-/*
- * The change drawn as a tracked change: a red line struck through the mark that goes, drawn from
- * the left, and a red underline under the one that comes, drawn the same way and gone again.
- */
-.rl-strike,
-.rl-underline {
-  position: absolute;
-  right: 8%;
-  left: 8%;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--rl-red, #d42a1e);
-  pointer-events: none;
-  transform: scaleX(0);
-  transform-origin: left center;
-}
-
-.rl-strike {
-  top: 50%;
-  margin-top: -2px;
-}
-
-.rl-underline {
-  bottom: -9px;
 }
 
 .rl-about-name {

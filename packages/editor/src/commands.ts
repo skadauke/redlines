@@ -93,7 +93,11 @@ export function createCommandRegistry(editor: () => Editor, changed: () => void)
   /** Keeps the key whatever the command does, unless the command lets it go on. */
   const binding = (command: EditorCommand, key: string): KeyBinding => ({
     key,
-    run: () => run(command) || !command.keyFallsThrough,
+    run: () => {
+      if (run(command)) return true;
+      const falls = command.keyFallsThrough;
+      return !(typeof falls === 'function' ? falls(editor().view.state) : falls);
+    },
   });
   const bindings = (added: readonly EditorCommand[]) =>
     added.flatMap((command) => (command.shortcut ? [binding(command, command.shortcut)] : []));

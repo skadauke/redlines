@@ -13,6 +13,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
   accept as acceptChange,
   acceptMarks,
@@ -74,7 +75,7 @@ import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
-import { imageResolver, refreshImagesEffect } from './preview/image.ts';
+import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -107,6 +108,7 @@ import {
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
+  trackingStepEffect,
   trackedTyping,
   trackingField,
 } from './tracked/typing.ts';
@@ -125,6 +127,7 @@ export {
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
+export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
@@ -142,6 +145,8 @@ export {
   insertRowsAt,
   moveCols,
   moveColsTo,
+  canMoveCols,
+  canMoveRows,
   moveRows,
   moveRowsTo,
   rowCount,
@@ -198,7 +203,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
-  a.canRedo === b.canRedo;
+  a.canRedo === b.canRedo &&
+  a.canAcceptAll === b.canAcceptAll;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -277,7 +283,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.openImage ? imageOpening(options.openImage) : [],
     undoHistory(),
+    trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
     baseTheme,
     EditorView.lineWrapping,
@@ -305,6 +313,25 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         startState.field(viewModeField) !== state.field(viewModeField) ||
         startState.facet(markupViewFacet) !== markupView;
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
+      // Undo and Redo of a step that stopped Track Changes switch it with the text: the file's
+      // record follows, as for a switch of the person's.
+      if (trackingChanged && update.docChanged && saveTracking) {
+        trackingChosen = state.field(trackingField);
+      }
+      // Every switch says so (design §5.4), also one that Undo or Redo makes with the text; the
+      // step's own message is the host's, which says what was accepted.
+      if (
+        trackingChanged &&
+        update.transactions.some(
+          (tr) =>
+            tr.effects.some((effect) => effect.is(trackingStepEffect)) &&
+            tr.annotation(Transaction.userEvent) !== 'accept',
+        )
+      ) {
+        options.onNotice?.(
+          state.field(trackingField) ? 'Track Changes is on' : 'Track Changes is off',
+        );
+      }
       // A command's state may read the syntax tree, which a background parse brings further along
       // in a transaction that changes nothing else.
       const parsedFurther = syntaxTree(startState) !== syntaxTree(state);
@@ -361,6 +388,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
+      canAcceptAll: changesToAccept(state).length > 0,
     };
   };
   let reported = uiFor(initial);
@@ -560,6 +588,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const text = view.state.doc.toString();
       decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
     },
+    acceptAllAndStopTracking: () => {
+      const tr = acceptAndStop(view.state);
+      if (!tr) return false;
+      view.dispatch(tr);
+      if (saveTracking) trackingChosen = false;
+      return true;
+    },
     reject: (id) => {
       const text = view.state.doc.toString();
       decide(typeof id === 'string' ? rejectChange(text, id) : rejectMarks(text, id), 'reject');
@@ -618,6 +653,23 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
+  const { openImage } = options;
+  if (openImage) {
+    // For a host's Image menu: the image under the caret or in the selection.
+    commands.register([
+      {
+        id: 'image.edit',
+        title: 'Edit Image in Preview',
+        isEnabled: (state) => localImageAt(state) !== null,
+        run: ({ view: { state } }) => {
+          const src = localImageAt(state);
+          if (src === null) return false;
+          openImage(src);
+          return true;
+        },
+      },
+    ]);
+  }
   return editor;
 }
 

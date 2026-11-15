@@ -6,6 +6,8 @@
 
 import {
   alignCols,
+  canMoveCols,
+  canMoveRows,
   caretAlign,
   colTitles,
   type Editor,
@@ -39,8 +41,8 @@ const ALIGNS = [
  * Registers the Table menu's commands and returns a function that takes them out again. Register
  * before the menu bar is drawn, as every plugin with commands does.
  */
-export function createTables(editor: Editor): () => void {
-  const removeGrips = editor.addExtension(tableGrips());
+export function createTables(editor: Editor, options: { tooltipMs?: number } = {}): () => void {
+  const removeGrips = editor.addExtension(tableGrips(options));
   const select = (
     id: string,
     title: string,
@@ -63,14 +65,16 @@ export function createTables(editor: Editor): () => void {
     shortcut: string,
     run: (view: EditorView) => boolean,
     group = 'rows',
+    isEnabled: (state: EditorState) => boolean = headInTable,
   ): EditorCommand => ({
     id,
     title,
     shortcut,
-    keyFallsThrough: true,
+    // A move's command is disabled at the edge, and in a table its key stays the table's there.
+    keyFallsThrough: isEnabled === headInTable ? true : (state) => !headInTable(state),
     menu: 'table',
     group,
-    isEnabled: headInTable,
+    isEnabled,
     run: (target) => run(target.view),
   });
   const commands: EditorCommand[] = [
@@ -82,13 +86,21 @@ export function createTables(editor: Editor): () => void {
       insertRows(view, false),
     ),
     row('table.deleteRow', rowTitles.delete, 'Alt-Mod-Backspace', deleteRows),
-    row('table.moveRowUp', rowTitles.moveUp, 'Alt-ArrowUp', (view) => moveRows(view, true), 'move'),
+    row(
+      'table.moveRowUp',
+      rowTitles.moveUp,
+      'Alt-ArrowUp',
+      (view) => moveRows(view, true),
+      'move',
+      (state) => canMoveRows(state, true),
+    ),
     row(
       'table.moveRowDown',
       rowTitles.moveDown,
       'Alt-ArrowDown',
       (view) => moveRows(view, false),
       'move',
+      (state) => canMoveRows(state, false),
     ),
     row(
       'table.insertColumnLeft',
@@ -120,7 +132,7 @@ export function createTables(editor: Editor): () => void {
       title: colTitles.moveLeft,
       menu: 'table',
       group: 'move',
-      isEnabled: headInTable,
+      isEnabled: (state) => canMoveCols(state, true),
       run: (target) => moveCols(target.view, true),
     },
     {
@@ -128,7 +140,7 @@ export function createTables(editor: Editor): () => void {
       title: colTitles.moveRight,
       menu: 'table',
       group: 'move',
-      isEnabled: headInTable,
+      isEnabled: (state) => canMoveCols(state, false),
       run: (target) => moveCols(target.view, false),
     },
     // The selected columns' alignment, checked for the caret's column. No default key: Word's keys

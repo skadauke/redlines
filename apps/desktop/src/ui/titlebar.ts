@@ -92,8 +92,6 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
-/** The key of the Simple Look switch (menu-model.ts, which a test compares). */
-export const LOOK_KEY = '⌥⌘4';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 
@@ -104,6 +102,9 @@ export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
  */
 export const BAR_PT = 52;
 export const FADE_PT = 64;
+
+/** How long the eye's pupil stays red after a click on it, in milliseconds. */
+export const EYE_FLASH_MS = 450;
 
 /** How far the pointer moves, with the button down, before the document icon's drag starts. */
 const DRAG_START_PX = 4;
@@ -345,17 +346,29 @@ export function createTitleBar(
     return shownNow === 'clean' ? 'redlines' : 'clean';
   };
 
-  // All three views are there for any document (design §5.3): Redlines too, with or without
-  // redlines, whether Track Changes is on or off. Redlines is checked in both its looks, and the
-  // simple look has a switch of its own below them (#330).
-  const viewItem = (view: MenuView, label: string, shortcut: string) => ({
+  // Redlines is checked in both its looks. The simple look is no row of this menu (it is reached by
+  // a click on a change bar, ⌥⌘4 and the View menu of the menu bar, #499). The menu bar keeps
+  // Redlines there for any document, since a disabled item would take its key away (design §5.3);
+  // this menu has nothing to show in a file with no changes and no ledger, and says so.
+  const viewItem = (view: MenuView, label: string, shortcut: string, disabled = false) => ({
     role: 'menuitemradio' as const,
     label,
     icon: view,
     shortcut,
     checked: menuViewOf(state.view) === view,
+    disabled,
     select: () => actions.setView(view),
   });
+  /**
+   * A click on the eye shows that it did something, though Clean and Redlines look alike in a file
+   * with no changes: the pupil is red for a moment (the pen is red as long as it is on).
+   */
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  const flashEye = () => {
+    clearTimeout(flashTimer);
+    viewButton.classList.add('rl-eye-flash');
+    flashTimer = setTimeout(() => viewButton.classList.remove('rl-eye-flash'), EYE_FLASH_MS);
+  };
   const viewMenu: Menu = createMenu({
     label: 'View',
     container: viewControl,
@@ -363,24 +376,21 @@ export function createTitleBar(
     // The keys are the menu bar's, as in menu-model.ts.
     entries: () => [
       viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
-      viewItem('redlines', VIEW_NAMES.redlines, VIEW_KEYS.redlines),
-      viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
+      // Not disabled while it is the view shown: the menu opens on the row that is checked, and
+      // a disabled row can't be focused (the keys and VoiceOver would not find the current view).
+      viewItem(
+        'redlines',
+        VIEW_NAMES.redlines,
+        VIEW_KEYS.redlines,
+        !state.hasRedlines && menuViewOf(state.view) !== 'redlines',
+      ),
       'divider',
-      // The simple look is a switch of Redlines', no view: on while it shows, and only there to
-      // choose while Redlines shows. It does what a click on a change bar does.
-      {
-        role: 'menuitemcheckbox',
-        label: 'Simple Look',
-        icon: 'simple',
-        shortcut: LOOK_KEY,
-        checked: state.view === 'simple',
-        disabled: menuViewOf(state.view) !== 'redlines',
-        select: () => actions.switchLook(),
-      },
+      viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
     ],
     // A click switches Clean and Redlines; Raw is for the menu.
     activate: (event) => {
       actions.setView(viewAfterClick(state.view));
+      flashEye();
       // The pointer is still there: what the next click will do is said once it has rested.
       if (event.detail > 0) viewTip.arm();
     },
@@ -394,7 +404,7 @@ export function createTitleBar(
     entries: () => [
       {
         role: 'menuitemcheckbox',
-        label: 'Track changes',
+        label: 'Track Changes',
         icon: 'tracking',
         iconClass: state.tracking ? 'rl-pen-on' : undefined,
         shortcut: TRACKING_KEY,
@@ -404,9 +414,9 @@ export function createTitleBar(
       'divider',
       {
         role: 'menuitem',
-        label: 'Review changes',
+        label: 'Review Changes',
         icon: 'list',
-        shortcut: '⌥⌘]',
+        // No key, as in the menu bar: ⌥⌘] is Next Change.
         // Nothing to review in a document without redlines.
         disabled: !state.hasRedlines,
         select: () => actions.openReview(),
@@ -414,7 +424,7 @@ export function createTitleBar(
       'divider',
       {
         role: 'menuitemcheckbox',
-        label: 'Show resolved comments',
+        label: 'Show Resolved Comments',
         icon: 'resolved',
         checked: state.showResolved,
         select: () => actions.toggleResolved(),
@@ -470,6 +480,7 @@ export function createTitleBar(
     height: () => bar.getBoundingClientRect().height,
     room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
+      clearTimeout(flashTimer);
       for (const tip of tips) tip.destroy();
       forgetPress?.();
       for (const menu of menus) menu.destroy();

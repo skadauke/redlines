@@ -140,8 +140,22 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
   ]);
 });
 
+it('disables Check Item outside a task item, and enables it inside one', () => {
+  const { editor, model } = mount('Some text.\n\n- [ ] a task\n');
+  const row = rowsOf(model, 'Paragraph')
+    .filter(isAction)
+    .find((candidate) => candidate.text === 'Check Item');
+  const enabledAt = (pos: number) => {
+    editor.view.dispatch({ selection: { anchor: pos } });
+    return row?.enabled?.({ ...STATE, ...editor.getUiState() } satisfies MenuState);
+  };
+  expect(enabledAt(2)).toBe(false);
+  expect(enabledAt(editor.getDoc().indexOf('a task'))).toBe(true);
+});
+
 it('gives every row its command, key and state, and runs the command from the row', () => {
-  const { editor, model } = mount('Some text.\n');
+  // The caret in a task item, where Check Item has something to do.
+  const { editor, model } = mount('- [ ] a task\n');
   const commands = editor.commands.list();
   const ui = editor.getUiState();
   const state = { ...STATE, ...ui } satisfies MenuState;
