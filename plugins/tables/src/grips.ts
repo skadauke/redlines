@@ -59,22 +59,46 @@ function cellsToClear(state: EditorState): readonly TableCell[] {
   return cell ? [cell] : [];
 }
 
-/** How far above a table its column grips stand: the strip above it. */
+/** How far above a table its column handles are looked for: the strip above it. */
 const COL_STRIP = 28;
+/** A handle's reach, across and along its edge, in px; its pill is smaller and grows within it. */
+const GRIP_REACH = 14;
+const GRIP_SPAN = 26;
+/** The room between a handle's reach and the table's edge. */
+const GRIP_GAP = 2;
 
 export const GRIPS_STYLE = `
 .rl-grips { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
 .rl-grips > * { pointer-events: auto; }
-.rl-grip, .rl-plus, .rl-col-grip, .rl-col-plus {
+.rl-plus, .rl-col-plus {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 22px; border-radius: 4px; cursor: grab; user-select: none;
-  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1; letter-spacing: -2px;
+  width: 18px; height: 22px; border-radius: 4px; user-select: none;
+  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1;
 }
-.rl-grip:hover, .rl-plus:hover, .rl-col-grip:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
-.rl-plus, .rl-col-plus { cursor: pointer; letter-spacing: 0; border: 1px solid var(--rl-rule); background: var(--rl-page); }
+.rl-plus:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
+.rl-plus, .rl-col-plus { cursor: pointer; border: 1px solid var(--rl-rule); background: var(--rl-page); }
+/* A handle is a small pill at the table's edge: the element is its reach (wider than the pill, so it
+   is easy to hit), the pill is its ::before, which grows when the pointer is over it to say it can be
+   dragged. A row's and a column's are the same pill, turned. */
+.rl-grip, .rl-col-grip {
+  position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  cursor: grab; user-select: none;
+}
+.rl-grip { width: ${GRIP_REACH}px; height: ${GRIP_SPAN}px; }
+.rl-col-grip { width: ${GRIP_SPAN}px; height: ${GRIP_REACH}px; }
+.rl-grip::before, .rl-col-grip::before {
+  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-2);
+  background: var(--rl-rule); transition: width 0.1s, height 0.1s, background-color 0.1s;
+}
+.rl-grip::before { width: 5px; height: 16px; }
+.rl-col-grip::before { width: 16px; height: 5px; }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-2); }
+.rl-grip:hover::before { width: 8px; height: 22px; }
+.rl-col-grip:hover::before { width: 22px; height: 8px; }
+.rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) { .rl-grip::before, .rl-col-grip::before { transition: none; } }
 .rl-plus-line, .rl-col-plus-line { position: absolute; height: 1px; background: var(--rl-ink-3); pointer-events: none; }
 .rl-col-plus-line { width: 1px; }
-.rl-col-grip { width: 22px; height: 18px; cursor: grab; letter-spacing: 0; }
 .rl-drop-line { position: absolute; height: 3px; border-radius: 2px; background: var(--rl-ink-2); pointer-events: none; }
 .rl-drop-line[hidden] { display: none; }
 .rl-drag-copy {
@@ -115,16 +139,22 @@ function installStyle(): void {
 }
 
 /**
- * Where the row grip and the + stand, as a `left` in the editor's box: left of the change bars (24 px
- * left of the column) with 4 px between. When the margin is too narrow for that (a narrow window, a
- * large text size), the grip moves up to the table's edge, 6 px from it, over the bars' strip, and
- * never off the window (4 px in), so it stays within reach of the table.
+ * Where the row handle stands, as a `left` in the editor's box: its reach ends 2 px before the table's
+ * edge, so its pill is close to the table, over the strip of the change bars (a bar is a mark on a
+ * changed row, and a handle is drawn over it). It never goes off the window (4 px in).
  */
 export function gripLeft(tableLeft: number, editorLeft: number): number {
-  const usual = tableLeft - 24 - 4 - 18;
-  const left = usual >= 4 ? usual : Math.max(4, tableLeft - 18 - 6);
-  return left - editorLeft;
+  return Math.max(4, tableLeft - GRIP_GAP - GRIP_REACH) - editorLeft;
 }
+
+/** Where the + between rows stands: where the row handle's reach ends, 18 px wide and, as the handle
+ * does, 2 px from the table, so that the + comes up under the pointer where the handle was. */
+export function plusLeft(tableLeft: number, editorLeft: number): number {
+  return Math.max(4, tableLeft - GRIP_GAP - 18) - editorLeft;
+}
+
+/** How far above the table a column handle's reach begins. */
+export const colGripTop = (tableTop: number): number => tableTop - GRIP_GAP - GRIP_REACH;
 
 /** A table drawn: its id, its box and the line of each of its real rows. */
 interface Drawn {
@@ -463,7 +493,6 @@ class Grips {
     const grip = this.colGrip ?? document.createElement('div');
     if (!this.colGrip) {
       grip.className = 'rl-col-grip';
-      grip.textContent = '⋯';
       grip.addEventListener('mousedown', (event) => this.pressedCol(event));
       grip.addEventListener('contextmenu', (event) => this.menuOf(event, 'col'));
       this.hint(grip, 'Drag to move the column, right-click for its menu');
@@ -471,10 +500,12 @@ class Grips {
       this.colGrip = grip;
     }
     const base = this.view.dom.getBoundingClientRect();
-    // Above the column, in the strip above the table, and never above the window's top.
-    const centered = rect.left + (rect.right - rect.left - 22) / 2 - base.left;
-    grip.style.left = `${Math.max(4, Math.min(centered, base.width - 22 - 4))}px`;
-    grip.style.top = `${Math.max(4 - base.top, at.drawn.top - COL_STRIP + 2 - base.top)}px`;
+    // Above the column, just over the table's edge, and never above the window's top.
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.right - rect.left));
+    const centered = rect.left + (rect.right - rect.left - span) / 2 - base.left;
+    grip.style.width = `${span}px`;
+    grip.style.left = `${Math.max(4, Math.min(centered, base.width - span - 4))}px`;
+    grip.style.top = `${Math.max(4 - base.top, colGripTop(at.drawn.top) - base.top)}px`;
     grip.dataset['col'] = String(at.col);
   }
 
@@ -654,7 +685,6 @@ class Grips {
     const grip = this.grip ?? document.createElement('div');
     if (!this.grip) {
       grip.className = 'rl-grip';
-      grip.textContent = '⋮⋮';
       grip.addEventListener('mousedown', (event) => this.pressed(event));
       grip.addEventListener('contextmenu', (event) => this.menuOf(event, 'row'));
       this.hint(grip, 'Drag to move the row, right-click for its menu');
@@ -663,8 +693,11 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     const left = gripLeft(at.drawn.left, base.left);
+    // As tall as its row when the row is shorter than the usual reach, so it never stands over the next.
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.bottom - rect.top));
     grip.style.left = `${left}px`;
-    grip.style.top = `${rect.top + (rect.bottom - rect.top - 22) / 2 - base.top}px`;
+    grip.style.height = `${span}px`;
+    grip.style.top = `${rect.top + (rect.bottom - rect.top - span) / 2 - base.top}px`;
     grip.dataset['row'] = String(at.row);
   }
 
@@ -691,8 +724,7 @@ class Grips {
       this.plus = plus;
       this.plusLine = line;
     }
-    const left = gripLeft(drawn.left, base.left);
-    this.plus.style.left = `${left}px`;
+    this.plus.style.left = `${plusLeft(drawn.left, base.left)}px`;
     this.plus.style.top = `${y - 11 - base.top}px`;
     if (this.plusLine) {
       this.plusLine.style.left = `${drawn.left - base.left}px`;

@@ -80,14 +80,16 @@ const menuItems = (editor: Editor) =>
   [...editor.view.dom.querySelectorAll('.rl-grip-item')].map((el) => el.textContent);
 
 describe('row grips', () => {
-  it('draws the grip beside the hovered row, left of the change bars, in a layer hidden from assistive technology', () => {
+  it('draws the handle beside the hovered row, close to the table edge, in a layer hidden from assistive technology', () => {
     const editor = mount();
     expect(layer(editor)?.getAttribute('aria-hidden')).toBe('true');
     expect(grip(editor)).toBeNull();
     move(editor, LEFT + 50, rowY(2));
     expect(grip(editor)?.dataset['row']).toBe('2');
     const left = parseFloat(grip(editor)?.style.left ?? '');
-    expect(left).toBeLessThan(LEFT - 24);
+    // 14 px of reach, ending a hair before the table: its pill is close to the table, not floating off.
+    expect(left + 14).toBeLessThanOrEqual(LEFT);
+    expect(LEFT - (left + 14)).toBeLessThanOrEqual(4);
     // Over the strip beside the table too.
     move(editor, LEFT - 30, rowY(3));
     expect(grip(editor)?.dataset['row']).toBe('3');
@@ -126,16 +128,16 @@ describe('row grips', () => {
 
   it('moves up to the table when the margin is narrow, and stays 4 px inside the window', () => {
     for (const [table, near] of [
-      [48, 8],
-      [30, 12],
+      [48, 4],
+      [30, 4],
     ] as const) {
       tableLeft = table;
       const editor = mount();
       move(editor, table + 50, rowY(1));
       const left = parseFloat(grip(editor)?.style.left ?? '');
-      // 18 px wide: its right edge is close to the table's, never over it.
-      expect(left + 18).toBeLessThanOrEqual(table);
-      expect(table - (left + 18)).toBeLessThanOrEqual(near);
+      // 14 px of reach: its right edge is close to the table's, never over it.
+      expect(left + 14).toBeLessThanOrEqual(table);
+      expect(table - (left + 14)).toBeLessThanOrEqual(near);
       expect(left).toBeGreaterThanOrEqual(4);
     }
   });
@@ -269,7 +271,9 @@ describe('column grips', () => {
     const top = parseFloat(colGrip(editor)?.style.top ?? '');
     // In the strip above the table, which is 28 px, and in the window.
     expect(top).toBeGreaterThanOrEqual(TOP - 28);
-    expect(top + 18).toBeLessThanOrEqual(TOP);
+    // Close to the table's top edge: its pill is not floating above it.
+    expect(top + 14).toBeLessThanOrEqual(TOP);
+    expect(TOP - (top + 14)).toBeLessThanOrEqual(4);
     // Over the table too, and not away from it.
     move(editor, colX(0), rowY(2));
     expect(colGrip(editor)?.dataset['col']).toBe('0');
