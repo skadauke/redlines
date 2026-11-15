@@ -239,11 +239,38 @@ export function scan(text: string): Scan {
 const recent: { text: string; scanned: Scan }[] = [];
 const RECENT = 4;
 
-function scanText(text: string): Scan {
+/**
+ * Finds the markers in a decoded payload: the old text of a substitution that holds other people's
+ * marks (format §3.12). A payload is a piece of the body, so it has no front matter and no ledger
+ * of its own: a `---` at its start is a thematic break, and what looks like a ledger is text.
+ */
+export function scanPayload(text: string): Scan {
+  for (const known of recentPayloads) if (known.text === text) return known.scanned;
+  const scanned = scanText(text, false);
+  recentPayloads.unshift({ text, scanned });
+  if (recentPayloads.length > RECENT) recentPayloads.pop();
+  return scanned;
+}
+
+const recentPayloads: { text: string; scanned: Scan }[] = [];
+
+/** The kinds of mark whose payload can hold other people's marks (format §3.12): the old text of a
+ * substitution, and the text of a deletion (a table's deletion, which holds the table). The lines of
+ * a deleted row or column are no such text. */
+export function holdsMarks(marker: Extract<Marker, { type: 'open' }>): boolean {
+  return (
+    (marker.kind === 'sub' || marker.kind === 'del') &&
+    marker.payload !== undefined &&
+    marker.payload.includes('<!--') &&
+    !/^(?:row|col)=/.test(marker.payload)
+  );
+}
+
+function scanText(text: string, front = true): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
   const verbatim: Verbatim[] = [];
-  const body = bodyStart(text);
+  const body = front ? bodyStart(text) : 0;
   const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false, body };
   let at = 0;
   let atLineStart = true;

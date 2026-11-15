@@ -20,6 +20,7 @@ import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { payloadMarksOf } from './payload-marks.ts';
 import { randomDocument, seeded } from './random-docs.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
@@ -880,10 +881,12 @@ export function everyOrder(
     const key = `${current}|${decided.toSorted().join(' ')}`;
     if (seen.has(key)) return;
     seen.add(key);
+    const now = parse(current);
+    // The marks in the old text of a replacement are decided too, by id (format §3.12).
     const left = [
       ...new Set(
-        parse(current)
-          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        [...now.marks, ...payloadMarksOf(now).map((found) => found.mark)]
+          .filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
           .map((mark) => mark.id),
       ),
     ];
@@ -967,10 +970,12 @@ export function expectNoDecisionRefused(
   const walk = (current: string, path: string[]) => {
     if (seen.has(current)) return;
     seen.add(current);
+    const now = parse(current);
+    // The marks in the old text of a replacement are decided too, by id (format §3.12).
     const left = [
       ...new Set(
-        parse(current)
-          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        [...now.marks, ...payloadMarksOf(now).map((found) => found.mark)]
+          .filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
           .map((mark) => mark.id),
       ),
     ];
