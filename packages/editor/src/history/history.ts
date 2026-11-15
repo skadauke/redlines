@@ -146,9 +146,9 @@ export interface HistoryConfig {
    */
   agentCaret?: (tr: Transaction) => EditorSelection;
   /**
-   * The selection an undo or redo of the person's own steps ends with (Redlines), given that undo
-   * or redo as made: the step's start selection can fall in text that the change made hidden, and
-   * an undo runs no transaction filter that would move it out (#461). By default, as made.
+   * The selection a redo of the person's own step ends with (Redlines), given that redo as made:
+   * the step's start selection can fall in text that the change made hidden, and a redo runs no
+   * transaction filter that would move it out (#461). By default, as made.
    */
   visibleCaret?: (tr: Transaction) => EditorSelection;
   /**
@@ -793,7 +793,9 @@ class HistoryState {
       // Redlines: an agent's step puts the caret where it changed, which the made step tells.
       const config = state.facet(historyConfig);
       if (event.owner) return state.update({ ...spec, selection: config.agentCaret(tr) });
-      const shown = config.visibleCaret(tr);
+      // Undo puts the selection back where the person had it, a place they were in; a redo has the
+      // selection from before the change, which the change can have put inside hidden text.
+      const shown = side === UNDONE ? config.visibleCaret(tr) : tr.state.selection;
       return shown.eq(tr.state.selection) ? tr : state.update({ ...spec, selection: shown });
     }
   }

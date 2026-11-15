@@ -667,9 +667,13 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   const selection = tr.newSelection;
   if (end === null || selection.ranges.every((r) => r.anchor <= end && r.head <= end)) return tr;
   let stop = end;
-  atomsOf(tr.startState).between(end, end, (from, to) => {
-    if (from < end && end < to) stop = from;
-  });
+  // The end of the body inside the closers that end its text: in front of them. (Inside only line
+  // breaks that end it, the end is where a new line goes.)
+  if (!tr.docChanged) {
+    atomsOf(tr.startState).between(end, end, (from, to) => {
+      if (from < end && end < to && tr.startState.sliceDoc(from, end).trim() !== '') stop = from;
+    });
+  }
   const ranges = selection.ranges.map((r) =>
     EditorSelection.range(r.anchor > end ? stop : r.anchor, r.head > end ? stop : r.head),
   );

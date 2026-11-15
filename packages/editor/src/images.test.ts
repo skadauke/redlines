@@ -393,6 +393,9 @@ describe('after the links are written', () => {
     expect(new Set(marks.map((mark) => mark.entry.by))).toEqual(new Set(['ada']));
     expect(editor.getDoc()).toContain('![](shot.png)');
     expect(parse(editor.getDoc()).warnings.map((warning) => warning.code)).toEqual([]);
+    // The caret rests in front of the closer that ends the links, touching them (#393: it used to
+    // be inside the closer, which is hidden), so their source shows until it moves away.
+    editor.view.dispatch({ selection: { anchor: 0 } });
     expect(drawn(editor)).toBe(1);
   });
 
