@@ -50,7 +50,7 @@ import {
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
-import { pastedItems, planListPaste } from './paste.ts';
+import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
   openBlock,
@@ -234,6 +234,28 @@ export function pasteListItems(view: EditorView, text: string): boolean {
       .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
       .effects.some((effect) => effect.is(refusedEditEffect));
   if (main.empty) {
+    const bare = bareMarkerAt(state);
+    if (bare !== null) {
+      // The space after the marker first, written as it is, then the paste after it: one step.
+      const space: KeyEdit & { isolateBefore?: boolean } = {
+        changes: [{ from: bare, insert: ' ' }],
+        selection: EditorSelection.single(bare + 1),
+        userEvent: 'input.paste',
+        plain: true,
+        isolateBefore: true,
+      };
+      const after = state.update({
+        changes: space.changes,
+        selection: space.selection,
+        annotations: trackedEditAnnotation.of(true),
+      }).state;
+      const planned = planListPaste(after, pasted);
+      if (!planned || refused(after, planned)) return false;
+      applyKeyEdit(view, space);
+      const edit = planListPaste(view.state, pasted);
+      if (edit) applyKeyEdit(view, { ...edit, userEvent: 'delete.selection', join: true });
+      return true;
+    }
     const edit = planListPaste(state, pasted);
     return edit && !refused(state, edit) ? applyKeyEdit(view, edit) : false;
   }
@@ -266,8 +288,17 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   if (view.state.doc.eq(before)) return true;
   const edit = planListPaste(view.state, pasted);
   // Named as a deletion, which the history joins to the step before it (only typing and deletions
-  // join); the step keeps the name of the first, Paste.
-  if (edit) applyKeyEdit(view, { ...edit, userEvent: 'delete.selection', join: true });
+  // join); the step keeps the name of the first, Paste. A plan that is gone leaves the text itself,
+  // in the same step, so that the paste is never lost.
+  const at = view.state.selection.main.head;
+  applyKeyEdit(view, {
+    ...(edit ?? {
+      changes: [{ from: at, insert: text }],
+      selection: EditorSelection.single(at + text.length),
+    }),
+    userEvent: 'delete.selection',
+    join: true,
+  });
   return true;
 }
 

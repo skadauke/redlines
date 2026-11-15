@@ -12,6 +12,7 @@ import {
   type Script,
   scriptRows,
 } from './script.ts';
+import { pastedItems } from './paste.ts';
 
 interface Row {
   name: string;
@@ -291,6 +292,126 @@ describe('a selection across two items', () => {
   );
 });
 
+describe('pasting next to bare markers, other paragraphs, pending changes and other blocks', () => {
+  scriptRows(
+    both([
+      {
+        name: 'after a bare bullet marker: the space is written first, as it is',
+        doc: '- one⏎-‸⏎',
+        paste: '- a',
+        off: { file: '- one⏎- a⏎' },
+        on: { newest: '- one⏎- a⏎', original: '- one⏎- ⏎' },
+      },
+      {
+        name: 'after a bare number marker',
+        doc: '1. one⏎2.‸⏎',
+        paste: '- a⏎- b',
+        off: { file: '1. one⏎2. a⏎3. b⏎' },
+        on: { newest: '1. one⏎2. a⏎3. b⏎' },
+      },
+      {
+        name: 'after a bare star marker at the end of the file',
+        doc: '* one⏎*‸',
+        paste: '- a',
+        off: { file: '* one⏎* a' },
+        on: { newest: '* one⏎* a' },
+      },
+      {
+        name: 'after a bare marker with a line after it',
+        doc: '- one⏎-‸⏎- three⏎',
+        paste: '- a',
+        off: { file: '- one⏎- a⏎- three⏎' },
+        on: { newest: '- one⏎- a⏎- three⏎' },
+      },
+      {
+        name: 'at the start of a later paragraph of an item: as text',
+        doc: '- one⏎⏎  ‸two⏎- three⏎',
+        paste: '- a',
+        off: { file: '- one⏎⏎  - atwo⏎- three⏎' },
+        on: { newest: '- one⏎⏎  - atwo⏎- three⏎' },
+      },
+      {
+        name: 'in the middle of a later paragraph of an item',
+        doc: '- one⏎⏎  tw‸o⏎- three⏎',
+        paste: '- a',
+        off: { file: '- one⏎⏎  tw⏎⏎- a⏎⏎- o⏎- three⏎' },
+        on: { newest: '- one⏎⏎  tw⏎⏎- a⏎⏎- o⏎- three⏎' },
+      },
+      {
+        name: 'at the end of a later paragraph of an item',
+        doc: '- one⏎⏎  two‸⏎- three⏎',
+        paste: '- a',
+        off: { file: '- one⏎⏎  two⏎⏎- a⏎- three⏎' },
+        on: { newest: '- one⏎⏎  two⏎⏎- a⏎- three⏎' },
+      },
+      {
+        name: 'right after the end of its own pending insertion',
+        doc: '- one⏎- two<ins>X</ins>‸⏎',
+        paste: '- a',
+        off: { file: '- one⏎- two<ins>X</ins>⏎- a' },
+        on: { newest: '- one⏎- twoX⏎- a⏎' },
+      },
+      {
+        name: 'inside its own pending insertion',
+        doc: '- one⏎- two<ins>X‸Y</ins>⏎',
+        paste: '- a',
+        off: { file: '- one⏎- two<ins>X</ins>⏎- a⏎- <ins>⏎  Y</ins>' },
+        on: { newest: '- one⏎- twoX⏎- a⏎- Y⏎' },
+      },
+      {
+        name: 'in a table cell: text, unchanged',
+        doc: '| a | b |⏎|---|---|⏎| x‸ | y |⏎',
+        paste: '- a',
+        off: { file: '| a | b |⏎|---|---|⏎| x- a | y |⏎' },
+        on: { newest: '| a | b |⏎|---|---|⏎| x- a | y |⏎' },
+      },
+      {
+        name: 'in a code block: text, unchanged',
+        doc: '```⏎x‸⏎```⏎',
+        paste: '- a',
+        off: { file: '```⏎x- a⏎```⏎' },
+        on: { newest: '```⏎x- a⏎```⏎⏎' },
+      },
+    ]),
+  );
+
+  for (const tc of [false, true]) {
+    it(`a paste with CRLF line breaks, Track Changes ${tc ? 'on' : 'off'}`, () => {
+      const result = runScript({
+        name: 'crlf',
+        doc: '- one⏎- two‸⏎',
+        keys: [{ paste: '- a\r\n  - b\r\n- c\r\n' }],
+        tc,
+        expect: tc
+          ? { newest: '- one⏎- two⏎- a⏎  - b⏎- c⏎' }
+          : { file: '- one⏎- two⏎- a⏎  - b⏎- c⏎' },
+      });
+      checkInvariants(result);
+    });
+
+    it(`paste, Backspace, then Undo leaves the paste, Track Changes ${tc ? 'on' : 'off'}`, () => {
+      const result = runScript({
+        name: 'history',
+        doc: '- one⏎- two‸⏎',
+        keys: [{ paste: '- pasted' }, 'Backspace', 'Mod-z'],
+        tc,
+        expect: tc ? { newest: '- one⏎- two⏎- pasted⏎' } : { file: '- one⏎- two⏎- pasted⏎' },
+      });
+      checkInvariants(result);
+    });
+  }
+});
+
+describe('a long paste that is no list', () => {
+  it('is turned down at its first line, at no cost', () => {
+    const long = `${'word '.repeat(2_000_000)}\n- a\n`;
+    const started = performance.now();
+    expect(pastedItems(long)).toBeNull();
+    expect(pastedItems(`\n\n${' '.repeat(100_000)}x`)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
 describe('Undo takes the whole paste back', () => {
   const docs = [
     '- one⏎- two‸⏎',
@@ -335,6 +456,11 @@ describe('a paste at every caret of a list', () => {
     '- **bo** and `code`⏎- [a link](x.md) end⏎',
     '- one⏎  more of one⏎- two⏎',
     '- one⏎- ⏎- three⏎',
+    '- one⏎-⏎- three⏎',
+    '1. one⏎2.⏎',
+    '* one⏎*',
+    '- one⏎⏎  two⏎⏎  three⏎- four⏎',
+    '1. one⏎⏎   two⏎2. three⏎',
   ];
   const pastes = ['- a', '1. a⏎2. b', '- a⏎  - b⏎- c', '- [x] a'];
   for (const doc of docs) {
@@ -358,8 +484,12 @@ describe('a paste at every caret of a list', () => {
               // A place where the paste goes in as text, as before (inside a code span, at the
               // start of a later line of an item's text), and plain text pasted there is
               // refused too: that refusal is today's, not the list paste's.
-              const as = runScript({ ...script, keys: [{ paste: 'zz' }] });
+              const as = runScript({
+                ...script,
+                keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
+              });
               if (as.refusals.length > 0) continue;
+              if (Object.values(invariantProblems(as)).some((found) => found.length > 0)) continue;
               failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`);
             }
           }
@@ -393,7 +523,10 @@ describe('a paste over every selection of a list', () => {
                 checkInvariants(runScript(script));
               } catch (error) {
                 // A selection that goes in as text (over a marker): what text does is today's.
-                const as = runScript({ ...script, keys: [{ paste: 'zz' }] });
+                const as = runScript({
+                  ...script,
+                  keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
+                });
                 if (as.refusals.length > 0) continue;
                 if (Object.values(invariantProblems(as)).some((found) => found.length > 0))
                   continue;

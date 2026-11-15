@@ -25,6 +25,7 @@ import {
   textEnd,
   textStart,
 } from './edits.ts';
+import { trackingField } from '../tracked/typing.ts';
 import { openBlock } from './open.ts';
 import { blockAt } from './structure.ts';
 
@@ -80,13 +81,17 @@ function itemOf(text: string, node: Node): PastedItem | null {
   return content;
 }
 
+/** The start of a paste of list items: a marker and text, after any line breaks and up to 3 spaces. */
+export const LOOKS_LIKE_ITEMS = /^[\r\n]*[ ]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\S/;
+
 /**
  * The list items a pasted text is, or null when it is anything else: a text whose blocks are all
  * lists, with no blank line in it, whose items hold only text and nested items.
  */
 export function pastedItems(raw: string): PastedItem[] | null {
-  const text = raw.replace(/\r\n?/g, '\n').replace(/^\n+/, '').replace(/\s+$/, '');
-  if (!/^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\S/.test(text)) return null;
+  // The head first, on the text as it is, so that a long paste that is no list costs nothing.
+  if (!LOOKS_LIKE_ITEMS.test(raw)) return null;
+  const text = raw.replace(/\r\n?/g, '\n').replace(/^\n+/, '').trimEnd();
   if (/\n[ \t]*\n/.test(text)) return null;
   const items: PastedItem[] = [];
   for (let list = markdown.parse(text).topNode.firstChild; list; list = list.nextSibling) {
@@ -118,6 +123,25 @@ function chunk(
     out.push(chunk(kid, `${indent}${width}`, kid.marker, ' ', kid.box));
   }
   return out.join('\n');
+}
+
+/**
+ * Where the caret is right after a bare marker (`-` or `2.` with no space after it) in an empty
+ * item, with Track Changes on: a space typed there would be written inside the insertion, right
+ * after the marker, which Markdown reads as no item (`-<ins> a</ins>`). The paste writes that
+ * space first, as it is, so that the insertion starts after it (`- <ins>a</ins>`).
+ */
+export function bareMarkerAt(state: EditorState): number | null {
+  const { selection } = state;
+  if (selection.ranges.length > 1 || !selection.main.empty || !state.field(trackingField, false)) {
+    return null;
+  }
+  const block = blockAt(state, selection.main.head);
+  if (!block || block.kind !== 'paragraph' || block.containers.at(-1)?.kind !== 'item') return null;
+  if (state.sliceDoc(block.text.from, block.text.to).trim()) return null;
+  const line = state.doc.lineAt(block.text.to);
+  if (selection.main.head !== line.to || /[ \t]$/.test(line.text)) return null;
+  return /(?:[-+*]|\d{1,9}[.)])$/.test(line.text) ? line.to : null;
 }
 
 /** A Return's plan for a paste of `pasted` at the caret of `state`, or null where it declines. */
@@ -185,14 +209,18 @@ export function planListPaste(state: EditorState, pasted: PastedItem[]): KeyEdit
   });
 
   if (empty) {
-    if (!first) return null;
-    const lead = /[ \t]$/.test(
-      doc.lineAt(block.text.to).text.slice(0, block.text.to - doc.lineAt(block.text.to).from),
-    )
-      ? ''
-      : ' ';
-    return done(block.text.to, lead + inPlace() + rest());
+    // Only with the caret at the end of the item's own line (not inside its marker, nor on a line
+    // after it), and, with Track Changes on, after a space: a bare marker is `bareMarkerAt`'s.
+    if (!first || head !== block.text.to || doc.lineAt(head).number !== item.line.number) {
+      return null;
+    }
+    const spaced = /[ \t]$/.test(doc.lineAt(head).text);
+    if (!spaced && state.field(trackingField, false)) return null;
+    return done(block.text.to, (spaced ? '' : ' ') + inPlace() + rest());
   }
+  // The start of a later paragraph of the item: no item of its own to put them before, so the
+  // text way takes it (a middle split there would leave a line of white space behind).
+  if (head <= start && !first) return null;
   if (head <= start && first) {
     // Before the item: the first pasted item takes the item's own marker, and the item's text goes
     // on in a new item after the pasted ones, with a copy of the item's checkbox.

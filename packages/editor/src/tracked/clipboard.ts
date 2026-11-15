@@ -27,6 +27,7 @@ import { type FontStacks, destination, fontStack, markdownToHtml } from '../clip
 import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
+import { LOOKS_LIKE_ITEMS } from '../blocks/paste.ts';
 import { heldRemoteImages } from '../preview/image.ts';
 import { headCell, rectOf } from '../table/cells.ts';
 import {
@@ -235,6 +236,7 @@ function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string |
 
 /** A paste of list items into a list item, made; false for any other paste. */
 function listPaste(view: EditorView, text: string): boolean {
+  if (!LOOKS_LIKE_ITEMS.test(text)) return false;
   const plain = plainText(text);
   return plain !== '' && pasteListItems(view, plain);
 }
