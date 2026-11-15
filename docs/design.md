@@ -761,7 +761,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **Moving.** The arrows cross cells and rows; ↑ and ↓ go by visual line in a cell, then to the cell
   above or below at the same x (an empty cell too), and out of the table at its first and last
   row (↓ from a table that ends the document opens the empty paragraph after it, as Word and
-  Docs keep one). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
+  Docs keep one; ↓ from the last line of a quote, an alert, code, a rule or a picture that ends the
+  document does the same, outside the quote, where a line after it would be read as more of it). Tab and ⇧Tab select the next and previous cell's text, and Tab in the last cell
   adds a row; ⌘↩ and ⌥⌘↓ are Insert Row Below, in the Table menu. To leave the table by keyboard, press
   Escape and then Tab (the editor's own way out of a text area, for two seconds) or use the system's
   (⌃M, ⇧⌥M); Tab with a selection that reaches out of its cell acts on the cell of its head. A press
