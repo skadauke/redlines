@@ -415,11 +415,12 @@ Raw shows them.
 
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
-A document opens in the view it was saved in, which its ledger records
-([format §5.6](format.md#56-settings)): `view: clean` opens it in Clean, `view: redlines` in the
-full markup and `view: simple` in the simple look. A document that records none opens in Redlines,
-in the look remembered, when it has redlines (pending changes, highlights or comment threads), and
-in Clean when it has none. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
+A document that has redlines (pending changes, highlights or comment threads) opens in the view it
+was saved in, which its ledger records ([format §5.6](format.md#56-settings)): `view: clean` opens it
+in Clean, `view: redlines` in the full markup and `view: simple` in the simple look. One that
+records none opens in Redlines, in the look remembered. A document that has none, a new document or
+a plain Markdown file, always opens in Clean, whatever view was used last and whatever its ledger
+says: there are no redlines to show. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
 bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
@@ -433,7 +434,7 @@ write: a Save, made for another reason, records the view (Clean, the full markup
 never Raw) in a file that has a ledger, so that reading a document leaves its git history quiet,
 and a view alone never adds a ledger to a plain file. A save made in Raw leaves the view the file
 had. The look remembered is each person's own: it is kept in the app's settings, opens the files
-that record no view, and reaches every window for the documents each opens next, without changing
+with redlines that record no view, and reaches every window for the documents each opens next, without changing
 the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
 menu also previews the original (every change rejected) and one person's changes alone (everyone
 else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it
@@ -451,15 +452,17 @@ mode has no counterpart in the desktop app.
   ⌘⇧E does in Word; hovering over it opens the Review menu, whose first item is the same switch.
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
-- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes).
-  Turning Track Changes on writes `tracking: everyone` into the file's ledger, and turning it off
-  takes it out ([format §5.6](format.md#56-settings)). The switch makes the document edited, like
-  any change to it, so the next Save keeps it, and a step of its own, which Undo takes back.
-  Someone who turns it on, saves, and opens the file again, or sends it to someone else, finds it
-  still on. A file with no ledger gets one for it, and turning it off again leaves the file as it
-  was. A file that can't take a ledger (an unreadable one, or an end inside a code block that is
-  never closed) can't have it turned on, and says why. Preferences' Track Changes for new
-  documents is the person's own start: it writes nothing to the file until they switch it.
+- **The document remembers it,** as Word does (`w:trackRevisions`, which Word export writes). The
+  switch itself changes nothing in the file: turning Track Changes on or off never makes the
+  document edited, so a document that was only switched asks nothing when it is closed, and it has
+  no step for Undo. The ledger records the setting when the file is saved for another reason
+  (`tracking: everyone`, [format §5.6](format.md#56-settings)), as it records the view, so someone
+  who turns it on, makes a change, saves, and opens the file again, or sends it to someone else,
+  finds it still on. Turning it off in a tracked file and saving takes the line out. A plain
+  Markdown file gets no ledger for it: the ledger comes with the first tracked change. A file that
+  can't take a ledger (an unreadable one, or an end inside a code block that is never closed) can
+  have it turned on, and refuses each tracked edit with the reason, as it always did. Preferences'
+  Track Changes for new documents is the person's own start: it is never recorded in the file.
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
@@ -467,7 +470,7 @@ mode has no counterpart in the desktop app.
   reloads it from disk (the change came by git or a shared folder), is read as one that is opened:
   Track Changes turns on, under the same notice, and nothing is written, since the file asks
   already. A file that stops asking leaves the window's Track Changes as it is, so that nobody's
-  tracking is switched off under them; the next switch they make writes the file's setting again.
+  tracking is switched off under them; the next switch they make is recorded at the next save.
   A window with unsaved edits doesn't reload, and so reads nothing until it does. There is no "Just
   Mine" for now: a person's own tracking, apart from the file's, is left for later.
 - **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
@@ -1067,7 +1070,7 @@ Syrus and GitHub notify); paragraph locking.
 ### 5.13 Undo
 
 Undo goes back in time through what this window did: your edits, decisions, comments and replies,
-turning Track Changes on or off, and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+and the runs of your agents (§8). Turning Track Changes on or off is no step: it changes nothing in the file (§5.4). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
 between its edits, each stretch is a step, in time order. Your agent's changes from outside, made

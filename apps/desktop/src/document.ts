@@ -59,7 +59,13 @@ const UNTITLED = 'Untitled';
 /** What the controller needs of the editor. */
 type DocumentEditor = Pick<
   Editor,
-  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit' | 'recordView'
+  | 'getDoc'
+  | 'getParsed'
+  | 'setDoc'
+  | 'reloadDoc'
+  | 'applyAgentEdit'
+  | 'recordView'
+  | 'recordTracking'
 >;
 
 export interface DocumentOptions {
@@ -265,7 +271,8 @@ export class DocumentController {
       if (choice === 'cancel') return false;
       if (choice === 'saveAs') return this.saveAs();
     }
-    // The view the document is in goes into the file with the edits (format §5.6).
+    // Track Changes and the view the document is in go into the file with the edits (format §5.6).
+    this.#editor.recordTracking();
     this.#editor.recordView();
     const text = this.#editor.getDoc();
     try {
@@ -280,9 +287,12 @@ export class DocumentController {
 
   /** Asks where to save, then saves there. Resolves to whether it saved. */
   async saveAs(): Promise<boolean> {
-    // As Save does: a document with edits, or no file yet, takes its view into the file. One with
-    // neither isn't made edited by asking where to write a copy.
-    if (this.#state.dirty || this.#state.path === null) this.#editor.recordView();
+    // As Save does: a document with edits, or no file yet, takes Track Changes and its view into the
+    // file. One with neither isn't made edited by asking where to write a copy.
+    if (this.#state.dirty || this.#state.path === null) {
+      this.#editor.recordTracking();
+      this.#editor.recordView();
+    }
     const text = this.#editor.getDoc();
     let path: string | null;
     try {

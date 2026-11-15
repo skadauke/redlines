@@ -28,3 +28,6 @@ apps/desktop/quicklook/build/
 # screenshots of the run.
 apps/desktop/journeys/test-results/
 apps/desktop/journeys/playwright-report/
+
+# The screenshots of the app's own windows (apps/desktop/scripts/app-windows)
+apps/desktop/app-windows/

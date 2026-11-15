@@ -149,6 +149,11 @@ interface Model {
   comments: Span[];
   /** Whole-block deletions drawn as blocks, in Redlines. */
   struck: Struck[];
+  /**
+   * Lines of markers alone that the join of a bullet's marker took along, by where each starts,
+   * with where the bullet's line starts: what is drawn at such a line is drawn there.
+   */
+  carriedLines: Map<number, number>;
 }
 
 /** A stretch of a struck block's text and the color of whoever deleted it. */
@@ -461,6 +466,7 @@ function analyze(state: EditorState, kept: number | null): Model {
   const model: Model = {
     hidden: [],
     blocks: [],
+    carriedLines: new Map(),
     placed: [],
     layers: [],
     rows: [],
@@ -756,7 +762,20 @@ function hideMarkerLines(
     model.blocks.push(linesBlock(doc, line.number, last.number, 'either', drawn));
   }
   const joined = new Map<Hidden, Hidden | null>();
+  /** Lines of markers alone that the join of a bullet's marker took along. */
+  const absorbed = new Set<number>();
+  /** What a line has besides the markers on it. */
+  const markersOutside = (line: Line, markers: Hidden[]) => {
+    let rest = '';
+    let at = line.from;
+    for (const marker of markers) {
+      rest += doc.sliceString(at, marker.from);
+      at = marker.to;
+    }
+    return rest + doc.sliceString(at, line.to);
+  };
   for (const [n, markers] of byLine) {
+    if (absorbed.has(n)) continue;
     const line = doc.line(n);
     const first = markers[0]!;
     const last = markers.at(-1)!;
@@ -783,13 +802,30 @@ function hideMarkerLines(
       );
       if (parts.length) moved.push({ line: n, parts });
     } else if (opener && CONTAINER_PREFIX.test(before) && /^[ \t]*$/.test(between + after)) {
+      const all = [...markers];
+      const carried = [...parts];
       let next = n + 1;
-      while (next <= doc.lines && BLANK.test(doc.line(next).text)) next++;
+      for (;;) {
+        while (next <= doc.lines && BLANK.test(doc.line(next).text)) next++;
+        if (next > doc.lines) break;
+        // Another marker alone on the next line, as a change typed at the start of the item's text
+        // writes it (`- <!--fmt …-->`, `<!--ins …-->`, the text): the item's text comes up past it
+        // too, or the line it is on would stand between the bullet and the text.
+        const more = byLine.get(next);
+        if (!more || more.some((marker) => marker.split)) break;
+        const rest = markersOutside(doc.line(next), more);
+        if (!BLANK.test(rest)) break;
+        all.push(...more);
+        carried.push(...more.flatMap((marker) => marker.parts));
+        absorbed.add(next);
+        model.carriedLines.set(doc.line(next).from, line.from);
+        next++;
+      }
       if (next > doc.lines) continue;
       const text = doc.line(next);
       const to = text.from + /^[ \t>]*/.exec(text.text)![0].length;
-      for (const marker of markers) joined.set(marker, null);
-      joined.set(first, { from: first.from, to, opener: true, parts });
+      for (const marker of all) joined.set(marker, null);
+      joined.set(first, { from: first.from, to, opener: true, parts: carried });
     }
   }
 
@@ -1150,7 +1186,13 @@ function display(state: EditorState): Display {
       ? { at: span.from, to: span.to, side: 0 as const }
       : item.where === 'after'
         ? { at: item.at, to: item.at, side: 1 as const }
-        : { at: doc.lineAt(item.at).from, to: doc.lineAt(item.at).from, side: -1 as const };
+        : (() => {
+            // A line the join of a bullet took along has no place of its own: its struck blocks
+            // are drawn at the bullet's line, above the join.
+            const at = doc.lineAt(item.at).from;
+            const place = model.carriedLines.get(at) ?? at;
+            return { at: place, to: place, side: -1 as const };
+          })();
     const key = `${slot.at} ${slot.side}`;
     const same = slots.get(key);
     if (same) same.items.push(item);
