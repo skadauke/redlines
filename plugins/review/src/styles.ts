@@ -449,7 +449,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     padding: '1px 4px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '4px',
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small)',
     lineHeight: '1.2',
     textAlign: 'center',
