@@ -438,10 +438,11 @@ class WidthPlugin {
     const mode =
       update.startState.field(viewModeField, false) !== update.state.field(viewModeField, false);
     const pasted = update.transactions.some(isPaste);
-    if (!this.measured || structure || ghosts || leaves || mode || pasted) this.measure();
+    const immediate = !this.measured || structure || ghosts || leaves || mode || pasted;
+    if (immediate) this.measure();
     else if (update.geometryChanged) this.checkEnvironment();
-    // Typing in a table: after a pause, not on each keystroke.
-    if (update.docChanged && tableOfCaret(update.state) >= 0 && !this.destroyed) {
+    // Typing in a table: after a pause, not on each keystroke. Not when it was just measured.
+    if (!immediate && update.docChanged && tableOfCaret(update.state) >= 0 && !this.destroyed) {
       this.cancelPause();
       this.timer = setTimeout(() => {
         this.timer = null;
