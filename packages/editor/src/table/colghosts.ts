@@ -82,6 +82,14 @@ export interface InsertedColumn {
   col: number;
   color: number;
   moved: boolean;
+  /** Drawn in Simple: the author's color only, with no tint and no underline. */
+  plain: boolean;
+}
+
+/** The classes of an inserted column's cells (the author's color is a class of its own). */
+export function insertedColumnClass(added: InsertedColumn): string {
+  if (added.plain) return `rl-ins-col-plain ${colorClass(added.color)}`;
+  return `rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}`;
 }
 
 /** The columns changed in each table, and the stretches of text they stand for. */
@@ -96,9 +104,12 @@ export interface ColGhosts {
 const NONE: ColGhosts = { byTable: new Map(), inserted: new Map(), spans: [], key: '' };
 
 function build(state: EditorState): ColGhosts {
-  if (state.field(viewModeField, false) !== 'redlines') return NONE;
+  const mode = state.field(viewModeField, false);
+  if (mode !== 'redlines' && mode !== 'simple') return NONE;
+  const plain = mode === 'simple';
   const tables = state.field(tablesField, false) ?? [];
-  const ghosts = colGhostsOf(state);
+  // Simple hides the deleted columns, and draws the inserted ones in their author's color.
+  const ghosts = plain ? [] : colGhostsOf(state);
   const parsed = state.field(parsedField);
   const insertions = parsed.marks.filter(isColInsertion);
   if (ghosts.length === 0 && insertions.length === 0) return NONE;
@@ -127,6 +138,7 @@ function build(state: EditorState): ColGhosts {
         col: at.col,
         color: colors.get(mark.entry.by) ?? 0,
         moved: mark.entry.move !== undefined,
+        plain,
       },
     ]);
     span(at.table);
@@ -181,12 +193,12 @@ export const colGhostField = StateField.define<ColGhosts>({
   },
 });
 
-/** The deleted columns of a table, drawn in this state: none outside Redlines. */
+/** The deleted columns of a table, drawn in this state: none outside Redlines (Simple hides them). */
 export function ghostColumnsOf(state: EditorState, tableId: number): readonly ColGhost[] {
   return state.field(colGhostField, false)?.byTable.get(tableId) ?? [];
 }
 
-/** The inserted columns of a table, drawn in this state: none outside Redlines. */
+/** The inserted columns of a table, drawn in this state: none outside Redlines and Simple. */
 export function insertedColumnsOf(state: EditorState, tableId: number): readonly InsertedColumn[] {
   return state.field(colGhostField, false)?.inserted.get(tableId) ?? [];
 }

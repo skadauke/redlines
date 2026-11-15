@@ -129,7 +129,11 @@ describe('a cell cleared with Track Changes on', () => {
 
 describe('an inserted row in Simple', () => {
   const classesOf = (editor: Editor) =>
-    rows(editor).map((line) => [...line.classList].filter((name) => name !== 'rl-ins-row').sort());
+    rows(editor).map((line) =>
+      [...line.classList]
+        .filter((name) => name !== 'rl-ins-row' && name !== 'rl-ins-row-plain')
+        .sort(),
+    );
 
   it('has the bars Redlines has, on the same rows, and no tint, no underline', () => {
     const simple = load('simple');
@@ -139,6 +143,8 @@ describe('an inserted row in Simple', () => {
     expect(pears.classList.contains('rl-bar')).toBe(true);
     expect([...pears.classList].some((name) => /^rl-author-\d$/.test(name))).toBe(true);
     expect(lines.filter((line) => line.classList.contains('rl-ins-row'))).toHaveLength(0);
+    // The text of the inserted row is in the author's color alone (`.rl-ins-row-plain`).
+    expect(pears.classList.contains('rl-ins-row-plain')).toBe(true);
     expect(simple.view.contentDOM.querySelectorAll('.rl-ins, .rl-del, .rl-ins-row')).toHaveLength(
       0,
     );
