@@ -560,7 +560,11 @@ function appearance(deps: PaneDeps): Section[] {
       rows: [
         row('Appearance', lightOrDark),
         row('Theme', theme),
-        row('Text size', text, line('For windows you open next')),
+        row(
+          'Default text size',
+          text,
+          line('The size windows open at. It does not change a window that is open.'),
+        ),
       ],
     },
   ];

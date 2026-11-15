@@ -94,7 +94,11 @@ describe('the panes', () => {
       'Command line',
       iconRotationLabel(),
     ]);
-    expect(rowLabels(draw('appearance').container)).toEqual(['Appearance', 'Theme', 'Text size']);
+    expect(rowLabels(draw('appearance').container)).toEqual([
+      'Appearance',
+      'Theme',
+      'Default text size',
+    ]);
     expect(rowLabels(draw('editor').container)).toEqual([
       'Spell check',
       'Smart quotes and dashes',
@@ -147,7 +151,7 @@ describe('the panes', () => {
     });
 
     it('matches every word, in any order, ignoring case', () => {
-      expect(rowLabels(filtered('SIZE text'))).toEqual(['Text size']);
+      expect(rowLabels(filtered('SIZE text'))).toEqual(['Default text size']);
     });
 
     it('says when nothing matches, and its rows work as they do in their pane', () => {
@@ -284,10 +288,12 @@ describe('the panes', () => {
   it('steps the text size through the ladder and stops at its ends', () => {
     const { container, now } = draw('appearance');
     const [smaller, larger] = [
-      ...container.querySelectorAll<HTMLButtonElement>('[data-row="Text size"] .rl-pref-step'),
+      ...container.querySelectorAll<HTMLButtonElement>(
+        '[data-row="Default text size"] .rl-pref-step',
+      ),
     ];
     const shown = () =>
-      container.querySelector('[data-row="Text size"] .rl-pref-size')?.textContent;
+      container.querySelector('[data-row="Default text size"] .rl-pref-size')?.textContent;
     expect(shown()).toBe('100%');
     larger?.click();
     expect(now().textSize).toBe(1.1);
@@ -309,7 +315,7 @@ describe('the panes', () => {
       const made = setup();
       made.update({ textSize: size });
       renderPane('appearance', made.container, made.deps);
-      const row = made.container.querySelector('[data-row="Text size"]')!;
+      const row = made.container.querySelector('[data-row="Default text size"]')!;
       const shown = row.querySelector('.rl-pref-size')?.textContent;
       row.querySelectorAll<HTMLButtonElement>('.rl-pref-step')[button]?.click();
       return { shown, saved: made.now().textSize };

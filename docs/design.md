@@ -238,7 +238,7 @@ The window, on the desktop:
   size at 100%. The text column grows with the text until it meets the margins, and only then do
   lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
   and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
-  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each window's own: a zoom changes only the window it is made in, and a window opened later starts at the last level set anywhere, kept across launches (Preferences sets that level for new windows); neither reaches the file, a print, the clipboard or an export.
+  are dots that open on hover wherever the window is too narrow for them beside the column. Both are each window's own: a zoom changes only the window it is made in, and a window opened later starts at the last window zoom set anywhere, kept across launches, and its text at the Default text size of Preferences › Appearance, which no window's own text size changes and which changes no window that is open; neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with labeled tabs: General, Editor, Appearance and Agents
   (Shortcuts, a fifth, is still to come). The rows of each pane are in groups under small headings:
   General has You (name and handle), Opening (what opens at launch, the default folder for new
@@ -246,8 +246,8 @@ The window, on the desktop:
   Markdown files, installing the `redlines` command line, the Dock icon's rotation); Editor has
   Writing (spell check, smart quotes and dashes, closing brackets, the emoji list), Display
   (whether line breaks show their marks, §5.5, whether the word count shows) and Images (where
-  images are saved, §5.10); Appearance has Match System, Light or Dark, the theme and the text size
-  new windows open at; Agents is §8.6. There is no search field until a key is typed: then a Filter
+  images are saved, §5.10); Appearance has Match System, Light or Dark, the theme and the Default
+  text size new windows open at; Agents is §8.6. There is no search field until a key is typed: then a Filter
   appears over the rows, which shows the matching rows of every pane, each under the pane and
   section it is in ("Editor › Writing"), and Escape clears it. Preferences has no row for the
   window's own zoom (⌘+ and ⌘−, and the palette's Text Size, change one window), for Track Changes
