@@ -1,19 +1,8 @@
 // @vitest-environment happy-dom
 import { barClickHandlers, currentChange, type Editor } from '@redlines/editor';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { barNarrow } from './bar.ts';
-import {
-  button,
-  file,
-  frame,
-  mount,
-  PEOPLE,
-  press,
-  REFUSAL,
-  stubRect,
-  thread,
-  unmountAll,
-} from './test-helpers.ts';
+import { afterEach, describe, expect, it } from 'vitest';
+import { panelPlace } from './bar.ts';
+import { button, file, mount, PEOPLE, press, REFUSAL, thread, unmountAll } from './test-helpers.ts';
 
 afterEach(unmountAll);
 
@@ -37,7 +26,7 @@ const doc = file(
   ],
 );
 
-const bar = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-review-bar');
+const bar = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-review-panel');
 const count = (editor: Editor) => bar(editor)?.querySelector('.rl-bar-count')?.textContent;
 
 /** The text of the change the review is on (its marks, markers included), and nothing selected. */
@@ -55,7 +44,7 @@ describe('review bar', () => {
     expect(bar(editor)).toBeNull();
     review.openBar();
     expect(review.isBarOpen()).toBe(true);
-    expect(bar(editor)?.getAttribute('role')).toBe('toolbar');
+    expect(bar(editor)?.getAttribute('role')).toBe('dialog');
     // No change is selected yet: the bar counts them.
     expect(count(editor)).toBe('3 changes');
     expect(count(editor)).toBe(`${editor.getUiState().changes.length} changes`);
@@ -479,7 +468,7 @@ describe('review bar', () => {
     expect(editor.view.dom.querySelectorAll('.rl-rail')).toHaveLength(1);
     review.next();
     review.next();
-    expect(editor.view.dom.querySelectorAll('.rl-review-bar')).toHaveLength(1);
+    expect(editor.view.dom.querySelectorAll('.rl-review-panel')).toHaveLength(1);
     expect(count(editor)).toBe('Change 2 of 3');
     button(bar(editor)!, 'Accept').click();
     expect(count(editor)).toBe('Change 2 of 2');
@@ -649,79 +638,204 @@ describe('review bar', () => {
     expect(selected(editor)).toBe('<!--sub p7qd March-->April<!--/p7qd-->');
   });
 
-  it('centers under the text column and the notes beside it', async () => {
+  it('has no bottom bar: the panel is fixed in the window, with its title as the handle', () => {
     const { editor, review } = mount(doc);
-    const { contentDOM, scrollDOM } = editor.view;
-    scrollDOM.style.overflowY = 'auto';
-    stubRect(scrollDOM, { left: 0, right: 1280, top: 52, bottom: 3000 });
-    // The column's box holds the column and, in its right padding, the rail.
-    stubRect(contentDOM, { left: 130, right: 1150, top: 52, bottom: 3000 });
-    contentDOM.style.paddingLeft = '24px';
-    contentDOM.style.paddingRight = '316px';
     review.openBar();
-    await frame();
-    expect(bar(editor)?.style.left).toBe('640px');
-  });
-
-  it('floats 22px above the window’s bottom, over the text column, however long the document', async () => {
-    const short = file('One <!--ins k3x9-->short<!--/k3x9--> paragraph.', [
-      ...PEOPLE,
-      'marks:',
-      '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
-    ]);
-    for (const [text, documentBottom] of [
-      [short, 300],
-      [doc, 3000],
-    ] as const) {
-      const { editor, review } = mount(text);
-      const { contentDOM, scrollDOM } = editor.view;
-      // The page scrolls in the host's scroller. The editor's own scroller computes overflow
-      // `auto` without scrolling, and ends where the document ends.
-      scrollDOM.style.overflowY = 'auto';
-      stubRect(scrollDOM, { left: 0, right: 1000, top: 52, bottom: documentBottom });
-      stubRect(contentDOM, { left: 100, right: 900, top: 52, bottom: documentBottom });
-      contentDOM.style.paddingLeft = '24px';
-      contentDOM.style.paddingRight = '24px';
-      review.openBar();
-      await frame();
-      expect(bar(editor)?.style.bottom).toBe('22px');
-      expect(bar(editor)?.style.left).toBe('500px');
-      unmountAll();
-    }
+    const panel = bar(editor)!;
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(panel.querySelector('.rl-rp-top')).not.toBeNull();
+    expect(editor.view.dom.querySelector('.rl-review-bar')).toBeNull();
   });
 });
 
-describe('the review bar in a narrow window', () => {
-  it('is narrow when it does not fit the window less 16 px on each side', () => {
-    expect(barNarrow(420, 452)).toBe(false);
-    expect(barNarrow(421, 452)).toBe(true);
+describe('where the panel goes', () => {
+  const visible = { left: 0, top: 52, right: 1280, bottom: 800 };
+  const size = { width: 304, height: 200 };
+
+  it('goes beside the change, in the margin right of the column, level with its top', () => {
+    const at = panelPlace(
+      {
+        change: { left: 200, right: 500, top: 300, bottom: 322 },
+        column: { left: 130, right: 900 },
+        visible,
+      },
+      size,
+    );
+    expect(at).toEqual({ left: 916, top: 294, width: 304 });
   });
 
-  it("shows Accept and Reject as icons, named in their hints, when the bar doesn't fit the window", async () => {
-    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(420);
-    const inner = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(400);
-    try {
-      const { editor, review } = mount(doc);
-      review.openBar();
-      await frame();
-      expect(bar(editor)?.classList).toContain('rl-review-bar-narrow');
-      const accept = button(bar(editor)!, 'Accept');
-      expect(accept.getAttribute('aria-label')).toBe('Accept');
-      expect(accept.querySelector('.rl-hint')?.textContent).toBe('Accept');
-      expect(button(bar(editor)!, 'Reject').querySelector('.rl-hint')?.textContent).toBe('Reject');
-      // The bar is placed again at its new width, inside the window.
-      expect(bar(editor)?.style.left).not.toBe('');
+  it('is made narrower to fit a margin that is not wide enough, down to 240 px', () => {
+    const change = { left: 200, right: 500, top: 300, bottom: 322 };
+    const at = panelPlace({ change, column: { left: 130, right: 980 }, visible }, size);
+    expect(at).toEqual({ left: 996, top: 294, width: 272 });
+  });
 
-      // A wider window: the bar, opened again, keeps its labels.
-      inner.mockReturnValue(800);
-      review.closeBar();
-      review.openBar();
-      await frame();
-      expect(bar(editor)).not.toBeNull();
-      expect(bar(editor)?.classList).not.toContain('rl-review-bar-narrow');
-    } finally {
-      width.mockRestore();
-      inner.mockRestore();
-    }
+  it('goes below the change where the margin has no room, never over it', () => {
+    const change = { left: 40, right: 300, top: 300, bottom: 322 };
+    const at = panelPlace(
+      { change, column: { left: 20, right: 460 }, visible: { ...visible, right: 600 } },
+      size,
+    );
+    expect(at.left).toBeGreaterThanOrEqual(12);
+    expect(at.top).toBeGreaterThanOrEqual(change.bottom);
+  });
+
+  it('goes above the change when it does not fit below', () => {
+    const change = { left: 40, right: 300, top: 700, bottom: 722 };
+    const at = panelPlace(
+      { change, column: { left: 20, right: 460 }, visible: { ...visible, right: 600 } },
+      size,
+    );
+    expect(at.top + size.height).toBeLessThanOrEqual(change.top);
+  });
+
+  it('stays inside the window', () => {
+    const at = panelPlace(
+      {
+        change: { left: 200, right: 500, top: 790, bottom: 800 },
+        column: { left: 130, right: 900 },
+        visible,
+      },
+      size,
+    );
+    expect(at.top + size.height).toBeLessThanOrEqual(visible.bottom - 12);
+    expect(at.top).toBeGreaterThanOrEqual(visible.top + 12);
+  });
+});
+
+describe('the review panel', () => {
+  const panelOf = (editor: Editor) => bar(editor)!;
+  const key = (editor: Editor, k: string, init: KeyboardEventInit = {}) =>
+    press(panelOf(editor), k, init);
+
+  it('names the change: who, when and what', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    const text = panelOf(editor).textContent ?? '';
+    expect(text).toContain('Review Changes');
+    expect(text).toContain('Change 1 of 3');
+    expect(panelOf(editor).querySelector('.rl-rp-name')?.textContent).toBe('Ada Lovelace');
+    expect(panelOf(editor).querySelector('.rl-rp-what')?.textContent).toBe('Inserted “new”');
+  });
+
+  it('takes the keyboard when it opens and after each change', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    expect(document.activeElement).toBe(panelOf(editor));
+    editor.view.focus();
+    key(editor, 'ArrowRight');
+    expect(count(editor)).toBe('Change 2 of 3');
+    expect(document.activeElement).toBe(panelOf(editor));
+  });
+
+  it('A accepts and R rejects, each moving on; the arrows move between changes', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'ArrowRight');
+    key(editor, 'ArrowLeft');
+    expect(count(editor)).toBe('Change 1 of 3');
+    key(editor, 'a');
+    expect(editor.getDoc()).not.toContain('<!--ins k3x9-->');
+    expect(count(editor)).toBe('Change 1 of 2');
+    key(editor, 'R');
+    expect(editor.getDoc()).not.toContain('<!--del w2rf');
+    expect(count(editor)).toBe('Change 1 of 1');
+  });
+
+  it('keys with a modifier are left alone', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'a', { metaKey: true });
+    key(editor, 'ArrowRight', { altKey: true });
+    expect(count(editor)).toBe('Change 1 of 3');
+    expect(editor.getDoc()).toContain('<!--ins k3x9-->');
+  });
+
+  it('says there are no more changes after the last, and Done closes it', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'a');
+    key(editor, 'a');
+    key(editor, 'a');
+    expect(panelOf(editor).textContent).toContain('No more changes to review.');
+    expect(panelOf(editor).querySelector('.rl-rp-actions')).toHaveProperty('hidden', true);
+    button(panelOf(editor), 'Done').click();
+    expect(bar(editor)).toBeNull();
+    expect(review.isBarOpen()).toBe(false);
+  });
+
+  it('Esc closes it', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'Escape');
+    expect(bar(editor)).toBeNull();
+  });
+
+  it('C opens the comment field, and Return posts it as a comment on the change', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    const form = panelOf(editor).querySelector<HTMLElement>('.rl-rp-form')!;
+    expect(form.hidden).toBe(true);
+    key(editor, 'c');
+    expect(form.hidden).toBe(false);
+    const field = form.querySelector('textarea')!;
+    expect(document.activeElement).toBe(field);
+    // Typing letters in the field is typing: A does not accept.
+    press(field, 'a');
+    expect(editor.getDoc()).toContain('<!--ins k3x9-->');
+    field.value = 'Why add this?';
+    press(field, 'Enter');
+    const posted = editor.getDoc();
+    expect(posted).toContain('Why add this?');
+    expect(posted).toMatch(/<!--cmt \w{4}-->/);
+    // The change is still pending, and the panel is on it, with the field closed.
+    expect(posted).toContain('<!--ins k3x9-->');
+    expect(count(editor)).toBe('Change 1 of 3');
+    expect(form.hidden).toBe(true);
+  });
+
+  it('Esc in the comment field closes the field, not the panel', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    key(editor, 'c');
+    const field = panelOf(editor).querySelector('textarea')!;
+    press(field, 'Escape');
+    expect(bar(editor)).not.toBeNull();
+    expect(panelOf(editor).querySelector<HTMLElement>('.rl-rp-form')!.hidden).toBe(true);
+  });
+
+  it('is dragged by its title and stays where it was put, for the next change too', () => {
+    const { editor, review } = mount(doc);
+    review.startReview();
+    const handle = panelOf(editor).querySelector<HTMLElement>('.rl-rp-top')!;
+    const at = (type: string, x: number, y: number) =>
+      handle.dispatchEvent(
+        new MouseEvent(type.replace('pointer', 'pointer'), {
+          clientX: x,
+          clientY: y,
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    handle.getBoundingClientRect = panelOf(editor).getBoundingClientRect = () => ({
+      left: 100,
+      top: 100,
+      right: 404,
+      bottom: 300,
+      width: 304,
+      height: 200,
+      x: 100,
+      y: 100,
+      toJSON() {},
+    });
+    at('pointerdown', 150, 110);
+    at('pointermove', 450, 410);
+    at('pointerup', 450, 410);
+    expect(panelOf(editor).style.left).toBe('400px');
+    expect(panelOf(editor).style.top).toBe('400px');
+    key(editor, 'ArrowRight');
+    expect(panelOf(editor).style.left).toBe('400px');
+    expect(panelOf(editor).style.top).toBe('400px');
   });
 });

@@ -784,10 +784,10 @@ async function surfacesFit({
   await settle();
   fits('view menu', document.querySelector('.rl-menu-anchor:not([hidden]) .rl-menu'));
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  // The review bar.
+  // The review panel.
   surfaces.review.openBar();
   await settle();
-  fits('review bar', document.querySelector('.rl-review-bar'), { margin: 16 });
+  fits('review panel', document.querySelector('.rl-review-panel'), { margin: 12 });
   surfaces.review.closeBar();
   // The sidebar, open and covering the page: the page keeps its whole width under it.
   surfaces.setSidebar(true);
