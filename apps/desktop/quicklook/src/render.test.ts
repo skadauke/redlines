@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MAX_CHARS, firstPart, previewImages, renderPreview } from './render.ts';
+import { ruleBody } from './theme.ts';
 
 const fixture = (name: string) =>
   readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf8');
@@ -141,6 +142,25 @@ describe('renderPreview', () => {
       expect(html).toContain('<th align="right">Runs</th>');
       expect(html).toContain('<td align="center">41.2</td>');
       expect(html).toContain('<em>current</em>');
+    });
+  });
+
+  describe("a table's look", () => {
+    const css = readFileSync(new URL('./document.css', import.meta.url), 'utf8');
+    const rule = (selector: string) => ruleBody(css, selector);
+
+    it('gives the header the size of the data cells', () => {
+      expect(rule('th')).not.toContain('font-size');
+      expect(rule('table')).toContain('font-size: 0.94em');
+    });
+
+    it('draws faint lines between the columns, none before the first, in the theme rule color', () => {
+      const line = rule('th:not(:first-child)::after,\ntd:not(:first-child)::after');
+      expect(line).toContain('border-left: 1px solid var(--rl-rule)');
+      expect(line).toContain('left: -8px');
+      // Drawn, not a border or a padding: no column's measure changes.
+      expect(rule('th,\ntd')).toContain('position: relative');
+      expect(rule('th,\ntd')).toContain('padding: 10px 16px 10px 0');
     });
   });
 
