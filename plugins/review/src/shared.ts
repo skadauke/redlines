@@ -455,6 +455,26 @@ export function button(
     el.textContent = label;
   }
   el.addEventListener('mousedown', (event) => event.preventDefault());
-  el.addEventListener('click', () => run());
+  // A button grayed with a reason (`setReason`) stays under the pointer, so its hint shows.
+  el.addEventListener('click', () => {
+    if (el.getAttribute('aria-disabled') !== 'true') run();
+  });
   return el;
+}
+
+/**
+ * Grays a button and gives its hint the reason it can't be used ("This change can only be
+ * accepted: its block no longer has that syntax."), or makes it usable again with `undefined`. The
+ * button isn't `disabled`, which would let go of the pointer and its hint: it says it is disabled
+ * to assistive technology, and takes no click (`button`).
+ */
+export function setReason(el: HTMLButtonElement, reason: string | undefined): void {
+  el.classList.toggle('rl-reason-disabled', reason !== undefined);
+  if (reason === undefined) {
+    el.removeAttribute('aria-disabled');
+    el.removeAttribute('title');
+    return;
+  }
+  el.setAttribute('aria-disabled', 'true');
+  el.title = reason;
 }

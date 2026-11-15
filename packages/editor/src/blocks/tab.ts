@@ -35,8 +35,10 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const THEIR_SPLIT =
   "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
-const NOT_UNDER_TEXT =
-  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
+const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
+const NOT_ITEM = 'Only a list item can be indented or outdented.';
+const NO_PARENT =
+  "This item isn't under another item. Backspace at its start takes the bullet away.";
 
 /**
  * A plain edit of an empty item's line, with the caret kept in place. With Track Changes on the
@@ -169,4 +171,37 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
     final: true,
     ...kept,
   };
+}
+
+/**
+ * Why Indent or Outdent (⌘] and ⌘[, Tab and Shift-Tab) can't act where the selection is, or
+ * undefined: not in a list item, the first item of a list (nothing to go under), a top-level item
+ * (nothing to come out of), or an empty item that would follow a line of text. It reads the shape of
+ * the list only: what the format refuses beyond that (pending changes in the way) is widened, not
+ * said here.
+ */
+export function indentReason(state: EditorState, outdent: boolean): string | undefined {
+  const { selection } = state;
+  if (selection.ranges.length > 1) return undefined;
+  const { from } = selection.main;
+  let { to } = selection.main;
+  // A selection that ends at the start of a line (a triple-click) doesn't take that line.
+  if (to > from && state.doc.lineAt(to).from === to) to = state.doc.lineAt(to).from - 1;
+  const start = blockAt(state, from);
+  const end = from === to ? start : blockAt(state, to);
+  const first = start && itemOf(state, start, from);
+  const last = end && itemOf(state, end, to);
+  if (!start || !end || !first || !last) return NOT_ITEM;
+  if (outdent) return !nested(state, start) && !nested(state, end) ? NO_PARENT : undefined;
+  if (first.item.node !== last.item.node) return undefined;
+  const empty =
+    from === to && start.text.from >= start.text.to && start.lines.from === first.item.line.from;
+  if (empty) {
+    // An empty item's line is edited, and the plan says what is in its way.
+    const { refusal } = planEmptyItem(state, first.item, false);
+    return refusal === FIRST_ITEM || refusal === NOT_UNDER_TEXT ? refusal : undefined;
+  }
+  let before = first.item.node.prevSibling;
+  while (before && before.name !== 'ListItem') before = before.prevSibling;
+  return before ? undefined : FIRST_ITEM;
 }

@@ -1,12 +1,23 @@
 // The review interface (design §5.5–§5.7): margin notes, change cards and the review bar.
 
-import type { Extension } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
-import { type Author, barClickHandlers, type Editor } from '@redlines/editor';
+import {
+  type Author,
+  barClickHandlers,
+  type Editor,
+  inFrontMatter,
+  viewModeField,
+} from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
 import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar, start } from './bar.ts';
 import { cards } from './cards.ts';
-import { highlightsAt, highlightTitle, toggleHighlight } from './highlight.ts';
+import {
+  highlightDisabledReason,
+  highlightsAt,
+  highlightTitle,
+  toggleHighlight,
+} from './highlight.ts';
 import { type PinnedElement, rail, type RailOptions } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
@@ -141,6 +152,17 @@ export interface ReviewOptions extends RailOptions {
   onOpenChange?: (open: boolean) => void;
 }
 
+/** Why Add Comment can't run where the selection is, or undefined: Raw shows markers as text, and
+ * front matter has no text to anchor in (format §3.8). */
+function commentDisabledReason(state: EditorState): string | undefined {
+  if (state.field(viewModeField, false) === 'raw') {
+    return "A comment can't be made in Raw. Switch to Clean or Redlines.";
+  }
+  if (inFrontMatter(state))
+    return "A comment can't be anchored in front matter. Select text in the body.";
+  return undefined;
+}
+
 /**
  * Adds the review interface to an editor: notes in the right margin, cards on changes, and the
  * review bar. The host routes its menu commands and shortcuts to the controller, and draws Add
@@ -186,6 +208,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       shortcut: 'Mod-Alt-m',
       menu: 'format',
       group: 'comment',
+      disabledReason: commentDisabledReason,
       run: () => notes.startComment(),
     },
     {
@@ -194,6 +217,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       shortcut: 'Mod-Shift-h',
       menu: 'format',
       group: 'comment',
+      disabledReason: highlightDisabledReason,
       run: () => toggleHighlight(ctx),
       isActive: (state) => highlightsAt(state).length > 0,
     },

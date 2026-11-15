@@ -17,7 +17,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
-import { canReject, isAlignMark } from '@redlines/format';
+import { isAlignMark, rejectReason } from '@redlines/format';
 import type { MarkRange, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -36,6 +36,7 @@ import {
   suggestionIn,
   visibleSpace,
   visibleStart,
+  setReason,
 } from './shared.ts';
 
 // What a card says of a change, in Word's words, is `describeChange` in shared.ts: the notes of the
@@ -216,17 +217,19 @@ class Card implements TooltipView {
         icon('accept'),
       ),
     );
-    // A format change whose text has lost the formatting can only be accepted.
-    if (marks.every((mark) => canReject(parsed, mark))) {
-      buttons.append(
-        button(
-          'rl-card-button',
-          'Reject',
-          () => attempt(error, () => decideSuggestion(ctx, 'reject', change.id)),
-          icon('reject'),
-        ),
-      );
-    }
+    // A format change whose text has lost the formatting can only be accepted: Reject is grayed,
+    // and its hint says why.
+    const reject = button(
+      'rl-card-button',
+      'Reject',
+      () => attempt(error, () => decideSuggestion(ctx, 'reject', change.id)),
+      icon('reject'),
+    );
+    setReason(
+      reject,
+      marks.map((mark) => rejectReason(parsed, mark)).find((reason) => reason !== undefined),
+    );
+    buttons.append(reject);
     head.append(buttons);
     const what = describeChanges(parsed, marks.length > 1 ? marks : [change]);
     this.dom.setAttribute('aria-label', what);

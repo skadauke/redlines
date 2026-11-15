@@ -23,6 +23,7 @@ export {
 export {
   changedOutside,
   REDO_AFTER_RELOAD,
+  redoDisabledReason,
   redoHasSomething,
   redoSayingWhy,
   refusedStep,
@@ -30,6 +31,7 @@ export {
   startsOver,
   UNDO_AFTER_RELOAD,
   undoHistory,
+  undoDisabledReason,
   undoHasSomething,
   undoKeymap,
   undoKeys,

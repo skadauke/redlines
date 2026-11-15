@@ -11,8 +11,12 @@ import { EditorState, Prec } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
 
+/** Why `command` can't run in `state`, or undefined when it can. */
+export const disabledReasonOf = (command: EditorCommand, state: EditorState): string | undefined =>
+  command.disabledReason?.(state);
+
 const isEnabled = (command: EditorCommand, state: EditorState) =>
-  command.isEnabled?.(state) ?? true;
+  disabledReasonOf(command, state) === undefined;
 
 /** The ids of the commands that are active in `state`. */
 export const activeCommands = (commands: readonly EditorCommand[], state: EditorState) =>
@@ -21,6 +25,19 @@ export const activeCommands = (commands: readonly EditorCommand[], state: Editor
 /** The ids of the commands that can run in `state`. */
 export const enabledCommands = (commands: readonly EditorCommand[], state: EditorState) =>
   commands.filter((command) => isEnabled(command, state)).map(({ id }) => id);
+
+/** The reason of each registered command that can't run in `state`, by id. */
+export function disabledReasons(
+  commands: readonly EditorCommand[],
+  state: EditorState,
+): Record<string, string> {
+  const reasons: Record<string, string> = {};
+  for (const command of commands) {
+    const reason = disabledReasonOf(command, state);
+    if (reason !== undefined) reasons[command.id] = reason;
+  }
+  return reasons;
+}
 
 /** A command's title in `state`. */
 export const titleOf = (command: EditorCommand, state: EditorState): string =>
@@ -82,21 +99,37 @@ function focusInOtherField(view: EditorView): boolean {
 
 /**
  * Makes the registry of an editor that doesn't exist yet: `editor` is asked for it when a command
- * is registered or run. `changed` is told when the list of commands has changed.
+ * is registered or run. `changed` is told when the list of commands has changed. `notice` says why a
+ * key does nothing: the key of a disabled command says its reason (`EditorCommand.disabledReason`),
+ * unless the key goes on to the core's binding.
  */
-export function createCommandRegistry(editor: () => Editor, changed: () => void): CommandRegistry {
+export function createCommandRegistry(
+  editor: () => Editor,
+  changed: () => void,
+  notice: (message: string) => void = () => {},
+): CommandRegistry {
   let commands: readonly EditorCommand[] = [];
 
-  const run = (command: EditorCommand) =>
-    isEnabled(command, editor().view.state) && command.run(editor());
+  /** Runs a command, or says why it can't be run: a disabled command (its key, or a click that got
+   * past a grayed menu item or button) is told, since a command that does nothing and says nothing
+   * is a bug. */
+  const run = (command: EditorCommand) => {
+    const reason = disabledReasonOf(command, editor().view.state);
+    if (reason === undefined) return command.run(editor());
+    notice(reason);
+    return false;
+  };
 
   /** Keeps the key whatever the command does, unless the command lets it go on. */
   const binding = (command: EditorCommand, key: string): KeyBinding => ({
     key,
     run: () => {
-      if (run(command)) return true;
+      const state = editor().view.state;
       const falls = command.keyFallsThrough;
-      return !(typeof falls === 'function' ? falls(editor().view.state) : falls);
+      const goesOn = typeof falls === 'function' ? falls(state) : falls;
+      // A key that goes on to the core's binding when its command can't run says nothing.
+      if (goesOn && disabledReasonOf(command, state) !== undefined) return false;
+      return run(command) || !goesOn;
     },
   });
   const bindings = (added: readonly EditorCommand[]) =>

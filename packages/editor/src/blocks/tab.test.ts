@@ -41,8 +41,7 @@ const both = (rows: Row[]): Script[] =>
 
 const NUMBERED_UNDER =
   "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
-const NOT_UNDER_TEXT =
-  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
+const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 
 describe('Tab in a list item', () => {
