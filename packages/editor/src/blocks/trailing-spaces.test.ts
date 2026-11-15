@@ -58,6 +58,20 @@ const shapes: [string, string, Step[], Partial<Script>?][] = [
     '<div>‸⏎a a a',
     ['Tab', 'Alt-ArrowUp', 'Delete'],
   ],
+  ['an HTML block', '<div>abc‸⏎def</div>', [{ type: '  ' }]],
+  [
+    'the next line starts with an insertion of the author',
+    'abc‸⏎<ins>de</ins> fg',
+    [{ type: '  ' }],
+  ],
+  ['the next line starts with a deletion of the author', 'abc‸⏎<del de> fg', [{ type: '  ' }]],
+  ['the first word of the next line holds an insertion', 'abc‸⏎d<ins>e</ins>', [{ type: '  ' }]],
+  [
+    'the first word of the next line holds an insertion of another person',
+    'abc‸⏎d<ins>e</ins>',
+    [{ type: '  ' }],
+    { others: 'bo', ids: ['b2b2', 'c3c3', 'd4d4'] },
+  ],
   ['Tab in a code-less paragraph line', 'abc‸⏎def', ['Tab']],
   ['spaces, then a letter, then Undo-free typing', 'abc‸⏎def', [{ type: '  ' }, { type: 'x' }]],
   ['spaces then Backspace', 'abc‸⏎def', [{ type: '  ' }, 'Backspace']],
@@ -67,6 +81,29 @@ describe('spaces typed at the end of a line (#603)', () => {
   for (const [name, doc, keys, extra] of shapes) {
     it(name, () => {
       const result = runScript({ name, doc, keys, tc: true, expect: {}, ...extra });
+      checkInvariants(result);
+    });
+  }
+
+  for (const [name, doc] of [
+    ['an insertion', 'abc‸⏎<ins>de</ins> fg'],
+    ['a deletion', 'abc‸⏎<del de> fg'],
+  ] as [string, string][]) {
+    it(`says why where the next line starts with another person's ${name}`, () => {
+      const result = runScript({
+        name,
+        doc,
+        keys: [{ type: '  ' }],
+        tc: true,
+        others: 'bo',
+        ids: ['b2b2', 'c3c3', 'd4d4'],
+        // The document starts a line with a marker, which micromark reads as an HTML block.
+        skip: { render: 'the starting document' },
+        expect: {
+          refusal:
+            "Two spaces make a hard break, and another person's change starts the next line. Decide it first.",
+        },
+      });
       checkInvariants(result);
     });
   }

@@ -1136,6 +1136,11 @@ function spacesBefore(plan: Plan, position: number): { spaces: number; together:
   return { spaces, together };
 }
 
+/** Why two spaces at a line's end are refused when the next line starts with something that the
+ * change can't take in: it would have to go on past the line break (format §3.1, 6). */
+const HARD_BREAK_NEXT_LINE =
+  "Two spaces make a hard break, and another person's change starts the next line. Decide it first.";
+
 /** Why a change on the blank line under a line that ends in two spaces is refused when another
  * change stands between them and the end of the line: what is typed there goes on the paragraph,
  * which makes the spaces a hard break, and no change may stand between them and the line end. */
@@ -1754,17 +1759,32 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
   const end = lineEnd(text, line);
   const lineText = text.slice(line, end);
   const lead = prefixLength(lineText);
+  // The author's own markers at the start of the text go into the change, which may rewrite them;
+  // another person's, or a comment that is no mark, are no place for it.
+  let start = line + lead;
+  while (text.startsWith('<!--', start)) {
+    const marker = markers.find((m) => m.from === start && m.role !== 'ledger');
+    if (!marker?.mark || marker.mark.entry.by !== plan.ctx.author.handle) return undefined;
+    start = marker.to;
+  }
   // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
   // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
-  const rest = lineText.slice(lead);
+  const rest = text.slice(start, end);
   // A line that opens a container (a deeper quote, a list item) starts the first block of it: a tag
   // alone on it is an HTML block there, as after a blank line.
   const above = text.slice(lineStart(text, line - 1), Math.max(0, line - 1));
   const opens = !blank && line > 0 && opensContainer(above, lineText.slice(0, lead));
   if (SYNTAX_LINE.test(rest) || startsHtmlBlock(rest, blank || opens)) return undefined;
-  let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
-  if (p >= end || text.startsWith('<!--', p)) return undefined;
-  while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  let p = start + (/^#{1,6}[ \t]+/.exec(rest)?.[0].length ?? 0);
+  if (p >= end) return undefined;
+  // The word, markers in it included, and not the line break behind a marker that ends it.
+  const skip = (q: number): number => {
+    const m = markers.find((r) => r.from === q && r.to > q && r.role !== 'ledger');
+    return m ? skip(m.to) : q;
+  };
+  for (p = skip(p); p < end && !/\s/.test(text[p] ?? ' '); p = skip(p + 1)) {
+    // A character of the word.
+  }
   // Not inside a code span, which takes no marker: after it, and the rest of the word. Nor right
   // after a backslash that the word ends with, which would escape it: the character after it goes
   // too, or the line break and the first word of the next line.
@@ -2296,15 +2316,13 @@ function coversTable(plan: Plan, where: number, from: number, to: number): boole
  * stand between): its closer would then stand between a hard break's spaces and the line end.
  */
 function endsHardBreak(plan: Plan, own: Container, inner: string): boolean {
-  // The spaces may start in front of the insertion, and the text before them too.
   const written = visibleBefore(plan, own.content.from) + inner;
   const line = written.slice(written.lastIndexOf('\n') + 1);
-  if (!/ {2,}$/.test(line) || !/[^ \t>]/.test(line.trimEnd())) return false;
-  let rest = plan.text.slice(own.close.to);
-  for (let m = /^<!--[^]*?-->/.exec(rest); m; m = /^<!--[^]*?-->/.exec(rest)) {
-    rest = rest.slice(m[0].length);
-  }
-  return /^\r?\n/.test(rest);
+  return (
+    / {2,}$/.test(line) &&
+    /[^ \t>]/.test(line) &&
+    /^(?:<!--[^]*?-->)*\r?\n/.test(plan.text.slice(own.close.to))
+  );
 }
 
 /**
@@ -2331,13 +2349,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   // closer: then the insertion takes the character after it as well, below.
   // Nor if it ends in two spaces or more with a line break after its closer: those are a hard break,
   // and no marker may stand between them and the line end (format §3.1, rule 6).
+  const typed = own ? visibleText(text, markers, own.content.from, from) + typing.inner : '';
   if (
     own &&
-    !(
-      to === own.content.to &&
-      (oddBackslashes(visibleText(text, markers, own.content.from, from) + typing.inner) ||
-        endsHardBreak(plan, own, visibleText(text, markers, own.content.from, from) + typing.inner))
-    )
+    !(to === own.content.to && (oddBackslashes(typed) || endsHardBreak(plan, own, typed)))
   ) {
     return { from, to, left, right };
   }
@@ -2501,7 +2516,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         // Among or behind the trailing spaces of a hard break: the change goes on past the line
         // break, to the end of the first word of the next line.
         const ahead = nextWordEnd(plan, nextLineStart(text, to));
-        if (ahead === undefined) refuse(close.reason);
+        if (ahead === undefined) refuse(HARD_BREAK_NEXT_LINE);
         grow(from, ahead ?? to);
       } else if (close.kind === 'refuse') refuse(close.reason + tookBackslash);
       else if (close.kind === 'construct') grow(close.from, close.to);

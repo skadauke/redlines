@@ -8,6 +8,7 @@ import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
+import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { ada, bodyOf, expectEveryOrderAlike, file, TIME } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
@@ -41,6 +42,27 @@ function typedAt(text: string, at: number, typed: string, random?: (n: number) =
   return applyChanges(text, result.changes);
 }
 
+/** The file with every change decided, one at a time: a decision that has no form in one state is
+ * tried again later, and in the other order; some order must come to the end. */
+function decideAll(after: string, how: typeof accept): string {
+  const ids = parse(after).marks.map((mark) => mark.id);
+  for (const order of [ids, [...ids].reverse()]) {
+    let now = after;
+    for (let pass = 0; pass < order.length + 1; pass++) {
+      for (const id of order) {
+        if (!parse(now).marks.some((mark) => mark.id === id)) continue;
+        try {
+          now = applyChanges(now, how(now, id));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      }
+    }
+    if (parse(now).marks.length === 0) return now;
+  }
+  throw new Error('no order of decisions comes to the end');
+}
+
 /** The edit must write the file so that micromark reads what the newest view reads, in every order
  * of decisions, and accepting gives the typed text and rejecting the old one. */
 function expectSound(label: string, text: string, after: string) {
@@ -48,18 +70,25 @@ function expectSound(label: string, text: string, after: string) {
   expect(read(bodyOf(after)), `${label}: the file as other readers read it`).toBe(read(newest));
   expect(parse(after).warnings, label).toEqual([]);
   expectEveryOrderAlike(label, after);
-  const ids = parse(after).marks.map((mark) => mark.id);
-  let accepted = after;
-  let rejected = after;
-  for (const id of ids) {
-    accepted = applyChanges(accepted, accept(accepted, id));
-    rejected = applyChanges(rejected, reject(rejected, id));
-  }
+  const accepted = decideAll(after, accept);
+  const rejected = decideAll(after, reject);
   expect(newestView(accepted).text.trim(), `${label}: accepting`).toBe(newest.trim());
   expect(newestView(rejected).text.trim(), `${label}: rejecting`).toBe(
     originalView(text).text.trim(),
   );
 }
+
+const WRITES: Record<string, string> = {
+  'an insertion of their own': 'abc<!--del fpxh \\n--><!--ins c3c3-->  \nde<!--/c3c3--> fg',
+  'a deletion of their own':
+    'abc<!--del rbkt \\n--><!--del c3c3 de--><!--del rbkt  fg--><!--ins fpxh-->  \n fg<!--/fpxh-->',
+  'an insertion of their own in the first word':
+    'abc<!--del fpxh \\nd--><!--ins c3c3-->  \nde<!--/c3c3-->',
+  'a deletion of their own in the first word':
+    'abc<!--del rbkt \\nd--><!--del c3c3 e--><!--del rbkt f--><!--ins fpxh-->  \ndf<!--/fpxh-->',
+  'an insertion of another in the first word':
+    'abc<!--del rbkt \\nd--><!--ins b2b2--><!--del rbkt e--><!--/b2b2--><!--ins fpxh-->  \nde<!--/fpxh-->',
+};
 
 describe('two spaces typed at the end of a line (#603)', () => {
   it('goes past the line break, as a change behind a hard break does', () => {
@@ -119,27 +148,92 @@ describe('two spaces typed at the end of a line (#603)', () => {
     expectSound('one by one', text, after);
   });
 
-  describe('next to another person pending change', () => {
+  /** The file after typing at `at` of the file's own text (a place among the markers). */
+  const typedInFile = (text: string, at: number, typed: string) => {
+    const result = trackedEdits(text, [{ from: at, to: at, insert: typed }], {
+      author: ada,
+      time: TIME,
+      random: counting(),
+    });
+    return applyChanges(text, result.changes);
+  };
+
+  describe('next to a pending change at the end of the line', () => {
     const marks = { b2b2: 'bo' };
-    it('at the end of their insertion', () => {
+    it('behind the end of their insertion', () => {
       const text = file('abc<!--ins b2b2-->de<!--/b2b2-->\nfgh', marks);
-      const after = typedAt(text, 5, '  ');
+      const after = typedInFile(text, text.indexOf('\n'), '  ');
+      expect(bodyOf(after).trim()).toBe(
+        'abc<!--ins b2b2-->de<!--/b2b2--><!--sub fpxh \\nfgh-->  \nfgh<!--/fpxh-->',
+      );
       expectSound('behind an insertion', text, after);
     });
-    it('in front of their deletion at the line end', () => {
+    it('in front of their deletion', () => {
       const text = file('abc<!--del b2b2 de-->\nfgh', marks);
-      const after = typedAt(text, 3, '  ');
+      const after = typedInFile(text, 3, '  ');
+      expect(bodyOf(after).trim()).toBe(
+        'abc<!--del b2b2 de--><!--del rbkt \\nfgh--><!--ins fpxh-->  \nfgh<!--/fpxh-->',
+      );
       expectSound('in front of a deletion', text, after);
     });
-    it('behind their deletion at the line end', () => {
+    it('behind their deletion', () => {
       const text = file('abc<!--del b2b2 de-->\nfgh', marks);
-      const after = typedAt(text, 3, '  ');
-      expect(newestView(after).text.trim()).toBe('abc  \nfgh');
+      const after = typedInFile(text, text.indexOf('\n'), '  ');
+      expect(bodyOf(after).trim()).toBe(
+        'abc<!--del b2b2 de--><!--sub fpxh \\nfgh-->  \nfgh<!--/fpxh-->',
+      );
+      expectSound('behind a deletion', text, after);
     });
-    it('in front of their insertion at the line end', () => {
+    it('in front of their insertion', () => {
       const text = file('abc<!--ins b2b2-->de<!--/b2b2-->\nfgh', marks);
-      const after = typedAt(text, 3, '  ');
+      const after = typedInFile(text, 3, '  ');
+      expect(bodyOf(after).trim()).toBe(
+        'abc<!--ins fpxh-->  <!--/fpxh--><!--ins b2b2-->de<!--/b2b2-->\nfgh',
+      );
       expectSound('in front of an insertion', text, after);
     });
+  });
+
+  describe('the next line starts with a pending change', () => {
+    const bo = { b2b2: 'bo' };
+    const own = { c3c3: 'ada' };
+    const starts: [string, string, Record<string, string>][] = [
+      ['an insertion of their own', 'abc\n<!--ins c3c3-->de<!--/c3c3--> fg', own],
+      ['a deletion of their own', 'abc\n<!--del c3c3 de--> fg', own],
+      ['an insertion of their own in the first word', 'abc\nd<!--ins c3c3-->e<!--/c3c3-->', own],
+      ['a deletion of their own in the first word', 'abc\nd<!--del c3c3 e-->f', own],
+      ['an insertion of another in the first word', 'abc\nd<!--ins b2b2-->e<!--/b2b2-->', bo],
+    ];
+    for (const [label, body, marks] of starts) {
+      it(`is written soundly over ${label}`, () => {
+        const text = file(body, marks);
+        const after = typedAt(text, 3, '  ');
+        expect(bodyOf(after).trim()).toBe(WRITES[label]);
+        expectSound(label, text, after);
+      });
+    }
+
+    const refused: [string, string][] = [
+      ['an insertion', 'abc\n<!--ins b2b2-->de<!--/b2b2--> fg'],
+      ['a deletion', 'abc\n<!--del b2b2 de--> fg'],
+    ];
+    for (const [label, body] of refused) {
+      it(`says what is going on where it starts with another person's ${label}`, () => {
+        const text = file(body, bo);
+        expect(() => typedAt(text, 3, '  ')).toThrow(/hard break.*another person's change/);
+      });
+    }
+  });
+
+  it('goes past the line break in an HTML block too, where a block change may make them a hard break', () => {
+    // The spaces read as nothing there, but deleting the `<` of the tag makes the block a paragraph
+    // and them a hard break (the second way in of #603): the closer is never left behind them.
+    const text = file('<div>abc\ndef</div>', {});
+    const after = typedAt(text, 8, '  ');
+    expect(bodyOf(after).trim()).toBe(
+      '<div>abc<!--sub fpxh \\ndef</div>-->  \ndef</div><!--/fpxh-->',
+    );
+    expect(newestView(after).text.trim()).toBe('<div>abc  \ndef</div>');
+    expectEveryOrderAlike('html block', after);
   });
 });
