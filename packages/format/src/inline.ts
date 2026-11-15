@@ -647,12 +647,40 @@ export function inspectPlace(
   }
 
   // The trailing spaces of a hard break.
-  const trailing = / {2,}$/.exec(lineText);
-  if (trailing && column > trailing.index && newline !== -1) {
+  // The line as the change leaves it: where `around` gives the text typed before a closer, the last
+  // line of it is the head (spaces typed at a line's end are its trailing spaces, though they are
+  // in no file yet); the tail is what the file has after the marker.
+  const headLine =
+    around.before !== undefined
+      ? around.before.slice(around.before.lastIndexOf('\n') + 1)
+      : lineText.slice(0, column);
+  const spaces = / {2,}$/.exec(headLine + lineText.slice(column));
+  // Spaces are a hard break only after text: a line that is blank (or only a quote's `>`) has none.
+  const hardBreak =
+    spaces !== null &&
+    (around.before === undefined || /[^ \t>]/.test((headLine + lineText.slice(column)).trimEnd()));
+  // An opener in front of text typed there, which starts with spaces that the line's own end
+  // continues (`around.after` is that text and what follows it): the spaces before it and the ones
+  // typed are one run, and the opener stands among them.
+  const typedRun =
+    around.before === undefined && around.after !== undefined && / $/.test(headLine)
+      ? /^( +)(?:\r?\n|$)/.exec(around.after)
+      : null;
+  if (typedRun && around.after?.includes('\n') && /[^ \t>]/.test(headLine.trimEnd())) {
+    const run = / +$/.exec(headLine);
+    if (run && run[0].length + (typedRun[1]?.length ?? 0) >= 2) {
+      return {
+        kind: 'refuse',
+        reason: 'A marker can not go between a hard break and the line end.',
+        trailing: offsetAt(start + run.index),
+      };
+    }
+  }
+  if (spaces && hardBreak && headLine.length > spaces.index && newline !== -1) {
     return {
       kind: 'refuse',
       reason: 'A marker can not go between a hard break and the line end.',
-      trailing: offsetAt(start + trailing.index),
+      trailing: offsetAt(start + Math.min(spaces.index, column)),
     };
   }
   if (changesFlanking(v, index, around)) return { kind: 'flank' };

@@ -2291,6 +2291,23 @@ function coversTable(plan: Plan, where: number, from: number, to: number): boole
 }
 
 /**
+ * Whether the author's own insertion, with `inner` as its text before the caret, would end in two
+ * spaces or more after text, with a line break behind its closer (comments, which are no text, may
+ * stand between): its closer would then stand between a hard break's spaces and the line end.
+ */
+function endsHardBreak(plan: Plan, own: Container, inner: string): boolean {
+  // The spaces may start in front of the insertion, and the text before them too.
+  const written = visibleBefore(plan, own.content.from) + inner;
+  const line = written.slice(written.lastIndexOf('\n') + 1);
+  if (!/ {2,}$/.test(line) || !/[^ \t>]/.test(line.trimEnd())) return false;
+  let rest = plan.text.slice(own.close.to);
+  for (let m = /^<!--[^]*?-->/.exec(rest); m; m = /^<!--[^]*?-->/.exec(rest)) {
+    rest = rest.slice(m[0].length);
+  }
+  return /^\r?\n/.test(rest);
+}
+
+/**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
  * marker would change how emphasis flanks, over the line break in front of a wrapped line. The text
@@ -2312,11 +2329,14 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   const own = plan.containers.find((c) => c.own && c.content.from <= from && to <= c.content.to);
   // Unless the typed text ends the insertion's text with a backslash, which would escape its
   // closer: then the insertion takes the character after it as well, below.
+  // Nor if it ends in two spaces or more with a line break after its closer: those are a hard break,
+  // and no marker may stand between them and the line end (format §3.1, rule 6).
   if (
     own &&
     !(
       to === own.content.to &&
-      oddBackslashes(visibleText(text, markers, own.content.from, from) + typing.inner)
+      (oddBackslashes(visibleText(text, markers, own.content.from, from) + typing.inner) ||
+        endsHardBreak(plan, own, visibleText(text, markers, own.content.from, from) + typing.inner))
     )
   ) {
     return { from, to, left, right };
