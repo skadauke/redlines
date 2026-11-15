@@ -10,6 +10,8 @@ const DOC = `Intro.\n\n| a | b |\n| - | - |\n| 11 | 12 |\n| 21 | 22 |\n| 31 | 32
 const LEFT = 100;
 const TOP = 100;
 let tableLeft = LEFT;
+/** Where a second table in the document is drawn (its top), when a test has one. */
+let secondTop: number | null = null;
 
 const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
   left,
@@ -28,7 +30,10 @@ beforeEach(() => {
     this: HTMLElement,
   ) {
     if (this.classList.contains('cm-editor')) return rect(0, 0, 800, 600);
-    if (this.classList.contains('rl-tbl')) return rect(tableLeft, TOP, 400, 160);
+    if (this.classList.contains('rl-tbl')) {
+      const second = secondTop !== null && this !== document.querySelector('.rl-tbl');
+      return rect(tableLeft, second ? (secondTop ?? TOP) : TOP, 400, 160);
+    }
     const line = this.closest('.rl-trow');
     // The cells are 200 px wide, side by side: the columns' boxes.
     if (this.classList.contains('rl-tc') && line && !this.classList.contains('rl-ghost-col')) {
@@ -64,6 +69,7 @@ afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   tableLeft = LEFT;
+  secondTop = null;
 });
 
 const layer = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-grips');
@@ -596,5 +602,35 @@ describe('edge widgets', () => {
     expect(q(editor, '.rl-edge-col')).toBeNull();
     expect(q(editor, '.rl-edge-row')).toBeNull();
     expect(q(editor, '.rl-table-select')).toBeNull();
+  });
+});
+
+describe('edge widgets, the corner and crowding', () => {
+  const q = (editor: Editor, selector: string) =>
+    editor.view.dom.querySelector<HTMLElement>(selector);
+
+  it('keeps the corner square while the pointer moves along the strips, and over it no + takes it', () => {
+    const editor = mount();
+    // Over the corner's lower half, where the + at the first row boundary would be: the square stays.
+    move(editor, LEFT - 8, TOP - 6);
+    expect(q(editor, '.rl-table-select')).not.toBeNull();
+    expect(q(editor, '.rl-plus')).toBeNull();
+    // Along the left strip at the boundary between two rows: the + shows and the square stays.
+    move(editor, LEFT - 8, TOP + 40);
+    expect(q(editor, '.rl-plus')).not.toBeNull();
+    expect(q(editor, '.rl-table-select')).not.toBeNull();
+  });
+
+  it('shows no Add row where another table is within the reach of its own strip', () => {
+    const editor = mount(`${DOC}\n| x | y |\n| - | - |\n| 1 | 2 |\n\nEnd.\n`);
+    // Alone, the bottom row has its Add row.
+    secondTop = TOP + 1000;
+    move(editor, LEFT + 100, TOP + 160 - 10);
+    expect(q(editor, '.rl-edge-row')).not.toBeNull();
+    move(editor, 700, 700);
+    // The second table is 20 px below the first: its strip above it is where Add row would be.
+    secondTop = TOP + 160 + 20;
+    move(editor, LEFT + 100, TOP + 160 - 10);
+    expect(q(editor, '.rl-edge-row')).toBeNull();
   });
 });
