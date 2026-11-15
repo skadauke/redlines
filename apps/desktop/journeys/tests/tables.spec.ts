@@ -403,6 +403,74 @@ test.describe('tables @tables', () => {
     await j.shot('column-handle-menu');
   });
 
+  // #622, decided 2026-11-15: Add column (right of the table, over the rightmost column), Add row
+  // (below it, over the bottom row) and a corner widget that selects the table.
+  for (const tracking of [false, true]) {
+    const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
+    const view = tracking ? 'redlines' : 'clean';
+    test(`Add column, Add row and Select table widgets at the table's edges, ${mode}`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: `Intro\n\n${MOVE}`, tracking, view });
+      await j.settle();
+      const box = async (sel: string) => (await j.page.locator(sel).first().boundingBox())!;
+      // A cell of a row by its place (the markers of tracked edits hold digits of their own).
+      const cell = (row: number) =>
+        j.page.locator('.rl-trow:not(.rl-ghost)').nth(row).locator('.rl-tc').first();
+      const addCol = j.page.locator('.rl-edge-col');
+      const addRow = j.page.locator('.rl-edge-row');
+      const corner = j.page.locator('.rl-table-select');
+      const tbl = await box('.rl-tbl');
+      // Over the first column: none of Add column; the corner widget shows with the table's handles.
+      await j.hover('1');
+      await expect(addCol, 'Add column is not shown over the first column').toBeHidden();
+      await expect(corner, 'the corner widget shows over the table').toBeVisible();
+      const c = await box('.rl-table-select');
+      expect(c.x + c.width, 'the corner widget is left of the table').toBeLessThanOrEqual(tbl.x);
+      expect(c.y + c.height, 'and above it').toBeLessThanOrEqual(tbl.y);
+      expect(tbl.x - (c.x + c.width), 'close to the corner').toBeLessThanOrEqual(4);
+      // Over the rightmost column: Add column, just right of the table.
+      await j.hover('2');
+      await expect(addCol, 'Add column is shown over the last column').toBeVisible();
+      const a = await box('.rl-edge-col');
+      expect(a.x, 'just right of the table').toBeGreaterThanOrEqual(tbl.x + tbl.width);
+      expect(a.x - (tbl.x + tbl.width), 'close to the table').toBeLessThanOrEqual(6);
+      expect(a.height, 'as tall as the table').toBeGreaterThan(tbl.height - 4);
+      await j.shot('add-column-widget');
+      // Reached from the table, it keeps showing, and a click adds a column at the end.
+      await addCol.hover();
+      await expect(addCol).toBeVisible();
+      await expect(j.page.locator('.rl-grip-hint')).toHaveText(/Add a column/);
+      await addCol.click();
+      expect(await j.cmText(), 'a column is added at the end').toMatch(/\| A \| B \|[^|\n]*\|/);
+      await expect(j.page.locator('.rl-th .rl-tc[data-col]')).toHaveCount(3);
+      // Over the bottom row: Add row, just below the table.
+      await j.hover(cell(-1));
+      await expect(addRow, 'Add row is shown over the bottom row').toBeVisible();
+      const tbl2 = await box('.rl-tbl');
+      const r = await box('.rl-edge-row');
+      expect(r.y - (tbl2.y + tbl2.height), 'just below the table').toBeLessThanOrEqual(6);
+      expect(r.y).toBeGreaterThanOrEqual(tbl2.y + tbl2.height);
+      await j.shot('add-row-widget');
+      await j.hover(cell(2));
+      await expect(addRow, 'Add row is not shown over a middle row').toBeHidden();
+      await j.hover(cell(-1));
+      const rows = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      await addRow.click();
+      const after = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      expect(after, 'a row is added at the end').toBe(rows + 1);
+      // The corner widget selects the table.
+      await j.hover(cell(1));
+      await corner.click();
+      expect(await selected(j.page), 'the whole table is selected').toBeGreaterThanOrEqual(10);
+      await j.shot('table-selected-by-widget');
+      // With Track Changes on the added row and column are the tracked insertions the Table menu makes.
+      const file = await j.text();
+      if (tracking) expect(file, 'the additions are tracked insertions').toContain('<!--ins ');
+      else expect(file).not.toContain('<!--ins ');
+    });
+  }
+
   test('the + and the column grip have hover hints too', async ({ start }) => {
     const j = await start({ doc: `Intro\n\n${MOVE}`, tracking: false, view: 'clean' });
     await j.settle();
