@@ -131,11 +131,68 @@ const UNDRAWN = [
  * number of times, on its lines and in its own).
  */
 function undrawn(state: EditorState, pos: number): boolean {
-  if (within(state, pos, -1, UNDRAWN) && within(state, pos, 1, UNDRAWN)) return true;
+  const node = undrawnNodeAt(state, pos);
+  if (node && !(BLOCKS.has(node.name) && markerLed(state, node, pos))) return true;
+  return insideMath(state, pos);
+}
+
+/** The nodes that are whole blocks, which a tracked change's marker at a line's start makes of a paragraph. */
+const BLOCKS = new Set(['HTMLBlock', 'CommentBlock']);
+
+/** A pending change's marker, as docs/format.md §2.1 writes it. */
+const MARKER =
+  /<!--(?:\/[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}|(?:ins|del|sub|fmt|hl|cmt|split) [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}(?: (?:(?!-->).)*)?)-->/g;
+
+/**
+ * The node, of the kinds in `UNDRAWN`, that `pos` is strictly inside: the same one on both sides of
+ * it, so that the gap between two images or two tags, or between a comment's closer and the next
+ * marker, is inside neither.
+ */
+function undrawnNodeAt(state: EditorState, pos: number): SyntaxNode | null {
+  const around = (side: -1 | 1) => {
+    for (
+      let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
+      node;
+      node = node.parent
+    ) {
+      if (UNDRAWN.includes(node.name)) return node;
+    }
+    return null;
+  };
+  const before = around(-1);
+  const after = around(1);
+  return before && after && before.from === after.from && before.to === after.to ? before : null;
+}
+
+/**
+ * Whether the block `node`, which holds `pos`, is a paragraph that a pending change's marker at its
+ * start made an HTML block (a line that begins `<!--` is one to the `-->`), and `pos` is outside the
+ * markers in it: an image goes there, as in any paragraph.
+ */
+function markerLed(state: EditorState, node: SyntaxNode, pos: number): boolean {
+  const text = state.sliceDoc(node.from, node.to);
+  const first = new RegExp(MARKER.source, 'y').exec(text);
+  if (!first) return false;
+  for (const found of text.matchAll(MARKER)) {
+    const from = node.from + found.index;
+    if (pos > from && pos < from + found[0].length) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether `pos` is inside display math, which the parse doesn't know: the `$$` before it, counted
+ * outside fenced code and inline code, are odd in number.
+ */
+function insideMath(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);
-  let opened = (line.text.slice(0, pos - line.from).match(/\$\$/g) ?? []).length;
-  for (let n = line.number - 1; n >= 1; n--) {
-    if (state.doc.line(n).text.trim() === '$$') opened++;
+  const count = (text: string) => (text.replace(/`+[^`]*`+/g, '').match(/\$\$/g) ?? []).length;
+  let opened = count(line.text.slice(0, pos - line.from));
+  let fence = false;
+  for (let n = 1; n < line.number; n++) {
+    const text = state.doc.line(n).text;
+    if (/^\s*(?:```|~~~)/.test(text)) fence = !fence;
+    else if (!fence) opened += count(text);
   }
   return opened % 2 === 1;
 }

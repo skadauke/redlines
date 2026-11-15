@@ -136,13 +136,21 @@ fn too_large(name: &str) -> String {
 }
 
 /// Whether `error` is the system refusing to open a link (`images::open` doesn't follow one): the
-/// loop of links it names on a Mac (62) and on Linux (40).
+/// loop of links it names (`ELOOP`).
 fn is_link_refusal(error: &io::Error) -> bool {
-    matches!(error.raw_os_error(), Some(62 | 40))
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 fn is_a_link(name: &str) -> String {
-    format!("“{name}” is a link to a file, which Redlines doesn’t follow. Add the image itself.")
+    format!("“{name}” is a link, which Redlines doesn’t follow. Add the image itself.")
 }
 
 fn cannot_add(name: &str, error: &io::Error) -> String {

@@ -648,6 +648,28 @@ describe('where the editor takes no image', () => {
     }
   });
 
+  it('takes one where nothing is undrawn though a rule might say so (review of #375)', () => {
+    const cases: [string, string][] = [
+      // A line that starts with a pending change's marker is an HTML block as far as the parse goes.
+      ['<!--ins k3x9-->hello<!--/k3x9--> world and more\n', 'world and'],
+      // The gap between two nodes of a kind is inside neither.
+      ['![a](x.png)![b](y.png)\n', '![a](x.png)'],
+      ['A <img src="a"><img src="b"> B\n', '<img src="a">'],
+      ['Hi <!--del k3x9-->old<!--/k3x9--><!--ins k3x8-->new<!--/k3x8--> end\n', 'old<!--/k3x9-->'],
+      // Math that closes on a line of text, math in fenced code or in a span: not open any more.
+      ['$$\nx $$\n\nNext\n', 'Nex'],
+      ['```\n$$\n```\n\nNext\n', 'Nex'],
+      ['Use `$$` here\n', 'Use `$$` '],
+    ];
+    for (const [doc, before] of cases) {
+      expect(pasteAfter(doc, before), `${JSON.stringify(doc)} after ${before}`).toEqual([]);
+    }
+    // But inside a marker, an image still doesn't go.
+    expect(pasteAfter('<!--ins k3x9-->hello<!--/k3x9--> more\n', '<!--ins k3')).toEqual([
+      IMAGE_NOT_DRAWN,
+    ]);
+  });
+
   it('still takes one at the edges of those, and in the text of a link', () => {
     const cases: [string, string][] = [
       ['---\ntitle: Plan\n---\n\nText\n', '---\n\n'],
