@@ -56,6 +56,9 @@ const isEmpty = (state: EditorState, block: Block) =>
   block.kind !== 'rule' &&
   !state.sliceDoc(block.text.from, block.text.to).trim();
 
+/** A line that is a list marker and nothing else, after its quote markers and the markers of the items it is in. */
+const BARE_LINE = /(?:^|[ \t>])(?:[-+*]|\d{1,9}[.)])$/;
+
 const tree = (state: EditorState, to: number) =>
   ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
 
@@ -515,6 +518,23 @@ function removeEmpty(
         next.text.from,
       ),
     };
+  }
+  // A bare marker right above (`-` alone on its line, an empty item): the deletion of the break
+  // after it would stand right behind the marker (`-<del ⏎->`), which reads as text of a
+  // paragraph with a marker's character in it, not as the item the newest view has. The
+  // deletion starts at the end of the line before the bare marker instead, as the format
+  // writes it where the marker has a space after it (`b<del ⏎  - ⏎- >`), so that the empty item
+  // above goes with the break, and the item stays an item in every order of decisions (#581).
+  if (
+    prev &&
+    userEvent === 'delete.backward.block' &&
+    state.field(trackingField, false) &&
+    isEmpty(state, prev) &&
+    BARE_LINE.test(state.doc.lineAt(prev.lines.to).text)
+  ) {
+    const { prev: before } = neighbours(state, prev);
+    const from = before ? before.lines.to : prev.lines.from;
+    return edit(state, [{ from, to: block.lines.to }], from, userEvent);
   }
   if (prev)
     return edit(state, [{ from: prev.lines.to, to: block.lines.to }], prev.lines.to, userEvent);
