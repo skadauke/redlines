@@ -24,10 +24,11 @@ describe('styles.css', () => {
     expect(all.length).toBeGreaterThan(50);
   });
 
-  it('uses red only for the Track Changes pen', () => {
+  it('uses red only for the Track Changes pen, and the eye’s pupil for a moment after a click', () => {
     const red = all.filter(({ declarations }) => /--rl-red|#d42a1e/i.test(declarations));
     expect(red.map(({ selector }) => selector)).toEqual([
       '.rl-pen-on',
+      '.rl-eye-flash svg circle',
       '.rl-menu-item .rl-menu-icon.rl-pen-on',
     ]);
   });

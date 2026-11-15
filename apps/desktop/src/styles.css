@@ -325,6 +325,12 @@ body {
   color: var(--rl-red, #d42a1e);
 }
 
+/* A click on the eye: the pupil is red for a moment (titlebar.ts). */
+.rl-eye-flash svg circle {
+  fill: var(--rl-red, #d42a1e);
+  stroke: var(--rl-red, #d42a1e);
+}
+
 /* The hover hint under Files. */
 
 .rl-tip {
