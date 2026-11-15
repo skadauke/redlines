@@ -186,7 +186,7 @@ export const baseThemeSpec: ThemeSpec = {
     border: 'none',
     borderRadius: '4px',
     background: 'transparent',
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     opacity: '0',
     cursor: 'pointer',
     font: 'inherit',
@@ -221,7 +221,7 @@ export const baseThemeSpec: ThemeSpec = {
     verticalAlign: 'top',
   },
   '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
-  '.rl-image-missing': { color: 'var(--rl-ink-3)' },
+  '.rl-image-missing': { color: 'var(--rl-ink-2)' },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
   // Each is a strip along its edge, wide enough to grab, with a light pill that shows on any picture.
   '.rl-image-handle': {
