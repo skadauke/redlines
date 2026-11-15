@@ -673,6 +673,8 @@ describe('walk seed 331 of the lists side by side (#598): Return at the start of
       tc: true,
       expect: {},
     })),
+  ]);
+});
 
 describe('walk seed 586 of the lists side by side (#602): an agent’s edit while an item opened by Return is open', () => {
   // The depth run of #586 found a file that took the open item with the agent's edit and wrote the
