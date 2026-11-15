@@ -25,13 +25,13 @@ import { ignorePinch } from '../text-size.ts';
 import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
+import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import {
   PANES,
+  renderFilter,
   renderPane,
-  showZoom,
   type CommandLineInstall,
   type CommandLineLink,
   type DefaultApp,
@@ -55,8 +55,6 @@ const theme = followTheme(document.documentElement, settings, {
 
 // The window zoom the app handed this page, before anything draws (zoom.ts).
 applyZoom(document.documentElement, initialZoom() ?? 1);
-/** The app's zoom, followed once the first pane is drawn; none in a browser. */
-let zoom: PageZoom | null = null;
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -127,12 +125,6 @@ const deps: PaneDeps = {
     settings = updateSettings(change);
     theme.show(settings);
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
-  },
-  setZoom: (level) => {
-    // In the app the zoom is the app's: it keeps the level, zooms every window and hears of it
-    // back (zoom.ts). In a browser there is only the setting.
-    if (zoom) void zoom.ask(level);
-    else settings = updateSettings({ zoom: level });
   },
   gitIdentity: git,
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
@@ -232,7 +224,10 @@ watchSettings((next) => {
   // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
   const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
-  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
+  if (!editing && !pane?.querySelector('[data-waiting]')) {
+    if (filter.hidden) show(current);
+    else showFilter();
+  }
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');
@@ -268,49 +263,91 @@ for (const { id, label } of PANES) {
   button.className = 'rl-pref-tab';
   button.id = `rl-pref-tab-${id}`;
   button.setAttribute('role', 'tab');
-  button.setAttribute('aria-label', label);
-  button.dataset['hint'] = label;
-  button.append(icon(ICONS[id], 20));
-  const hint = document.createElement('span');
-  hint.className = 'rl-pref-hint';
-  hint.setAttribute('aria-hidden', 'true');
-  hint.textContent = label;
-  button.append(hint);
-  button.addEventListener('click', () => show(id));
-  // The arrow keys move between the panes, as in any row of tabs.
+  button.append(icon(ICONS[id], 20), label);
+  button.addEventListener('click', () => {
+    clearFilter();
+    show(id);
+  });
   button.addEventListener('keydown', (event) => {
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
     event.preventDefault();
     const index = (PANES.findIndex((p) => p.id === id) + step + PANES.length) % PANES.length;
     const next = PANES[index]!.id;
+    clearFilter();
     show(next);
     buttons.get(next)?.focus();
   });
   buttons.set(id, button);
   tabs.append(button);
 }
-// A window that asks for a pane (a failed run's line offers Preferences › Agents) is shown it, as
-// it opens and while it is open.
+
+// The filter: not there until a key is typed with nothing to type in; then it holds that key and
+// shows the matching rows of every pane, each under its pane and section. Escape clears it.
+const filter = document.createElement('input');
+filter.type = 'search';
+filter.className = 'rl-pref-filter';
+filter.placeholder = 'Filter';
+filter.setAttribute('aria-label', 'Filter');
+filter.autocomplete = 'off';
+filter.spellcheck = false;
+filter.hidden = true;
+pane.before(filter);
+function showFilter(): void {
+  for (const button of buttons.values()) {
+    button.setAttribute('aria-selected', 'false');
+    button.tabIndex = -1;
+  }
+  tidy();
+  tidy = () => {};
+  detections.clear();
+  renderFilter(filter.value, pane!, deps);
+  pane!.removeAttribute('aria-labelledby');
+}
+function clearFilter(): void {
+  if (filter.hidden) return;
+  filter.value = '';
+  filter.hidden = true;
+}
+filter.addEventListener('input', () => {
+  if (filter.value === '') {
+    filter.hidden = true;
+    show(current);
+  } else showFilter();
+});
+filter.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  clearFilter();
+  show(current);
+  buttons.get(current)?.focus();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+  if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select'))
+    return;
+  event.preventDefault();
+  filter.hidden = false;
+  filter.value = event.key;
+  filter.focus();
+  showFilter();
+});
+
 show(takePaneRequest() ?? 'general');
-watchPaneRequests((id) => show(id));
+watchPaneRequests((id) => {
+  clearFilter();
+  show(id);
+});
 
 if (isTauri) {
-  // The app zooms this window (and grows it) as the person's zoom changes anywhere; the stepper
-  // shows the level then.
-  zoom = await followZoom(tauriZoomLink(), {
+  // The app zooms this window (and grows it) as the person's zoom changes anywhere.
+  await followZoom(tauriZoomLink(), {
     root: document.documentElement,
     win: window,
     level: initialZoom() ?? 1,
     settings: () => settings.zoom,
     save: (level) => {
       settings = updateSettings({ zoom: level });
-    },
-    after: () => {
-      // Shown in place: drawing the pane again would take the focus from the button pressed and
-      // replace the live region that says the new level.
-      settings = loadSettings();
-      showZoom(pane, settings.zoom);
     },
   }).catch((error: unknown) => {
     console.error('Could not follow the window zoom', error);

@@ -14,17 +14,23 @@ import {
   type ImagePlace,
   type Settings,
 } from '../settings.ts';
-import { stepSize, ZOOM_LADDER } from '../text-size.ts';
+import { stepSize } from '../text-size.ts';
 
-export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
+export type PaneId = 'general' | 'editor' | 'appearance' | 'agents';
 
-/** The panes, left to right along the top, with the hint each icon shows. */
+/** The panes, left to right along the top, each with its label under its icon. */
 export const PANES: readonly { id: PaneId; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'appearance', label: 'Appearance' },
   { id: 'editor', label: 'Editor' },
+  { id: 'appearance', label: 'Appearance' },
   { id: 'agents', label: 'Agents' },
 ];
+
+/** A group of rows under a small heading: what the filter names beside each result. */
+export interface Section {
+  title: string;
+  rows: HTMLElement[];
+}
 
 /** Where the command line's link is, and whether its folder is on the shell's PATH. */
 export interface CommandLineLink {
@@ -60,8 +66,6 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms Preferences, and sets the level new windows open at (zoom.ts); other open windows keep theirs. */
-  setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
   /**
@@ -102,9 +106,6 @@ export interface PaneDeps {
 type Control = HTMLElement;
 
 let nextId = 0;
-
-/** What a stepper hears when its size is set from outside (`showZoom`). */
-const SHOW_SIZE = 'rl-show-size';
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -184,7 +185,7 @@ function line(text: string, className = 'rl-pref-note'): HTMLElement {
   return el('div', className, text);
 }
 
-function general(deps: PaneDeps): HTMLElement[] {
+function general(deps: PaneDeps): Section[] {
   const { settings, update } = deps;
   const current = settings();
   const name = el('input', 'rl-pref-text');
@@ -305,20 +306,27 @@ function general(deps: PaneDeps): HTMLElement[] {
   command.append(install, atHome);
 
   return [
-    row('Name and handle', identity, line('As they appear on your changes.')),
-    row('On launch', onLaunch),
-    newDocumentFolderRow(deps),
-    row(
-      'Check for updates automatically',
-      toggle(current.checkForUpdates, (value) => update({ checkForUpdates: value })),
-    ),
-    row(
-      iconRotationLabel(),
-      toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
-    ),
-    defaultAppRow(deps),
-    ...(deps.openQuickLookSettings ? [quickLookRow(deps.openQuickLookSettings)] : []),
-    row('Command line', command, status),
+    {
+      title: 'You',
+      rows: [row('Name and handle', identity, line('As they appear on your changes.'))],
+    },
+    { title: 'Opening', rows: [row('On launch', onLaunch), newDocumentFolderRow(deps)] },
+    {
+      title: 'The app',
+      rows: [
+        row(
+          'Check for updates automatically',
+          toggle(current.checkForUpdates, (value) => update({ checkForUpdates: value })),
+        ),
+        defaultAppRow(deps),
+        ...(deps.openQuickLookSettings ? [quickLookRow(deps.openQuickLookSettings)] : []),
+        row('Command line', command, status),
+        row(
+          iconRotationLabel(),
+          toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
+        ),
+      ],
+    },
   ];
 }
 
@@ -527,7 +535,7 @@ function defaultAppRow(deps: PaneDeps): HTMLElement {
   return row('Default app for Markdown', control, status);
 }
 
-function appearance(deps: PaneDeps): HTMLElement[] {
+function appearance(deps: PaneDeps): Section[] {
   const { settings, update } = deps;
   const current = settings();
   // Light or dark for every window, and one theme for both (design §6.6).
@@ -543,30 +551,27 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  // They walk the ladders of text-size.ts: the zoom a new window opens at, which stops at 200%, and the
-  // text alone, which goes on to 400%.
-  const zoom = stepper(current.zoom, (level) => deps.setZoom(level), ZOOM_LADDER);
+  // It walks the ladder of text-size.ts, to 400%. The window's own zoom is not here: ⌘+ and ⌘−, and
+  // the palette's Text Size, are each window's own (#557).
   const text = stepper(current.textSize, (textSize) => update({ textSize }));
 
   return [
-    row('Appearance', lightOrDark),
-    row('Theme', theme),
-    row('Zoom', zoom, line('This window and windows you open next')),
-    row('Text size', text, line('For windows you open next')),
+    {
+      title: 'Appearance',
+      rows: [
+        row('Appearance', lightOrDark),
+        row('Theme', theme),
+        row('Text size', text, line('For windows you open next')),
+      ],
+    },
   ];
 }
 
 /**
- * A − 100% + control that steps `start` along the ladder and calls `change` with each size. The
+ * A − 100% + control that steps `start` along the text sizes and calls `change` with each size. The
  * value is a live region, so that VoiceOver reads it as it changes.
  */
-function stepper(
-  start: number,
-  change: (size: number) => void,
-  ladder?: readonly number[],
-): HTMLElement {
-  // Another level lands from outside (`showZoom`): shown in place, so that the button pressed
-  // keeps the focus and the live region is read.
+function stepper(start: number, change: (size: number) => void): HTMLElement {
   let size = start;
   const value = el('span', 'rl-pref-size');
   value.setAttribute('aria-live', 'polite');
@@ -577,11 +582,11 @@ function stepper(
   larger.setAttribute('aria-label', 'Larger');
   const show = () => {
     value.textContent = `${Math.round(size * 100)}%`;
-    smaller.disabled = stepSize(size, -1, ladder) === size;
-    larger.disabled = stepSize(size, 1, ladder) === size;
+    smaller.disabled = stepSize(size, -1) === size;
+    larger.disabled = stepSize(size, 1) === size;
   };
   const move = (by: number) => {
-    size = stepSize(size, by, ladder);
+    size = stepSize(size, by);
     show();
     change(size);
   };
@@ -590,10 +595,6 @@ function stepper(
   show();
   const group = el('div', 'rl-pref-inline');
   group.setAttribute('role', 'group');
-  group.addEventListener(SHOW_SIZE, (event) => {
-    size = (event as CustomEvent<number>).detail;
-    show();
-  });
   group.append(smaller, value, larger);
   return group;
 }
@@ -668,40 +669,46 @@ function imagesRow(deps: PaneDeps): HTMLElement {
   return row('Images', stack);
 }
 
-function editing(deps: PaneDeps): HTMLElement[] {
+function editing(deps: PaneDeps): Section[] {
   const { settings, update } = deps;
   const current = settings();
   return [
-    row(
-      'Spell check',
-      toggle(current.spellCheck, (value) => update({ spellCheck: value })),
-    ),
-    row(
-      'Smart quotes and dashes',
-      toggle(current.smartPunctuation, (value) => update({ smartPunctuation: value })),
-    ),
-    row(
-      'Close brackets and Markdown pairs',
-      toggle(current.closePairs, (value) => update({ closePairs: value })),
-    ),
-    row(
-      'Suggest emoji after a colon',
-      toggle(current.emojiSuggestions, (value) => update({ emojiSuggestions: value })),
-      line('Type a colon and two letters, as in :te, to choose an emoji.'),
-    ),
-    row(
-      'Track Changes on for new documents',
-      toggle(current.trackNewDocuments, (value) => update({ trackNewDocuments: value })),
-    ),
-    row(
-      'Show line break marks (¶)',
-      toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
-    ),
-    row(
-      'Show word count',
-      toggle(current.showWordCount, (value) => update({ showWordCount: value })),
-    ),
-    imagesRow(deps),
+    {
+      title: 'Writing',
+      rows: [
+        row(
+          'Spell check',
+          toggle(current.spellCheck, (value) => update({ spellCheck: value })),
+        ),
+        row(
+          'Smart quotes and dashes',
+          toggle(current.smartPunctuation, (value) => update({ smartPunctuation: value })),
+        ),
+        row(
+          'Close brackets and Markdown pairs',
+          toggle(current.closePairs, (value) => update({ closePairs: value })),
+        ),
+        row(
+          'Suggest emoji after a colon',
+          toggle(current.emojiSuggestions, (value) => update({ emojiSuggestions: value })),
+          line('Type a colon and two letters, as in :te, to choose an emoji.'),
+        ),
+      ],
+    },
+    {
+      title: 'Display',
+      rows: [
+        row(
+          'Show line break marks (¶)',
+          toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
+        ),
+        row(
+          'Show word count',
+          toggle(current.showWordCount, (value) => update({ showWordCount: value })),
+        ),
+      ],
+    },
+    { title: 'Images', rows: [imagesRow(deps)] },
   ];
 }
 
@@ -735,6 +742,18 @@ function contributed(pane: PaneId, deps: PaneDeps): HTMLElement[] {
     });
 }
 
+/** The sections of a pane that is made of rows: what the rows are drawn from, and what the filter reads. */
+function sectionsOf(pane: PaneId, deps: PaneDeps): Section[] {
+  if (pane === 'agents') return [];
+  const sections = { general, appearance, editor: editing }[pane](deps);
+  const more = contributed(pane, deps);
+  return more.length ? [...sections, { title: 'More', rows: more }] : sections;
+}
+
+function heading(title: string): HTMLElement {
+  return el('h2', 'rl-pref-section', title);
+}
+
 /**
  * Draws a pane in `container`, replacing what it held. Returns a function that tidies up what the
  * pane started, such as the agents' own.
@@ -742,8 +761,12 @@ function contributed(pane: PaneId, deps: PaneDeps): HTMLElement[] {
 export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps): () => void {
   container.replaceChildren();
   container.dataset['pane'] = pane;
-  const rows = { general, appearance, editor: editing, agents: () => [] }[pane](deps);
-  container.append(...rows, ...contributed(pane, deps));
+  for (const { title, rows } of sectionsOf(pane, deps)) {
+    const group = el('section', 'rl-pref-group');
+    group.setAttribute('aria-label', title);
+    group.append(heading(title), ...rows);
+    container.append(group);
+  }
   if (pane !== 'agents') return () => {};
   if (deps.agentsPane) {
     const tidy = deps.agentsPane(container);
@@ -754,14 +777,34 @@ export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps)
   return () => {};
 }
 
-/** The labels of the rows a pane holds, in order. */
-/** Shows `level` in the Zoom stepper where it is, without drawing the pane again. */
-export function showZoom(container: HTMLElement, level: number): void {
-  container
-    .querySelector('[data-row="Zoom"] [role="group"]')
-    ?.dispatchEvent(new CustomEvent(SHOW_SIZE, { detail: level }));
+/** What a row says that the filter reads: its label and its notes. */
+const textOf = (row: HTMLElement) => (row.textContent ?? '').toLowerCase();
+
+/**
+ * Draws the rows that match `query` from every pane that is made of rows, each result under the
+ * pane and section it belongs to ("Editor › Writing"); "Nothing matches" when none does. The rows
+ * are the panes' own, so a control works as it does there.
+ */
+export function renderFilter(query: string, container: HTMLElement, deps: PaneDeps): void {
+  container.replaceChildren();
+  container.dataset['pane'] = 'filter';
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  let found = 0;
+  for (const { id, label } of PANES) {
+    for (const { title, rows } of sectionsOf(id, deps)) {
+      const matching = rows.filter((row) => words.every((word) => textOf(row).includes(word)));
+      if (!matching.length) continue;
+      found += matching.length;
+      const group = el('section', 'rl-pref-group');
+      group.setAttribute('aria-label', `${label} › ${title}`);
+      group.append(heading(`${label} › ${title}`), ...matching);
+      container.append(group);
+    }
+  }
+  if (!found) container.append(line('Nothing matches.', 'rl-pref-empty'));
 }
 
+/** The labels of the rows a pane holds, in order. */
 export function rowLabels(container: HTMLElement): string[] {
   return [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map(
     (found) => found.dataset['row'] ?? '',
