@@ -52,7 +52,7 @@ export const linkTheme = EditorView.baseTheme({
     outline: 'none',
   },
   '.rl-link-popover input:focus': { borderColor: 'var(--rl-ink-3)' },
-  '.rl-link-popover input::placeholder': { color: 'var(--rl-ink-3)' },
+  '.rl-link-popover input::placeholder': { color: 'var(--rl-ink-2)' },
 });
 
 /** Closes the popover open on `view`, if any, without applying it. */
