@@ -625,6 +625,57 @@ describe('#440: Return twice at the end of a nested item whose marker is another
   ]);
 });
 
+describe('walk seed 331 of the lists side by side (#598): Return at the start of a lazy line the substitution holds', () => {
+  const MARKER_AT_START =
+    'A line break here would leave a change marker at the start of the new line.';
+  scriptRows([
+    {
+      name: 'Backspace outdents the lazy line of a loose item, Return is refused, Track Changes on',
+      doc: '* a a⏎⏎* a a⏎  ‸review a',
+      keys: ['Backspace', 'Enter'],
+      tc: true,
+      expect: { refusal: MARKER_AT_START },
+    },
+    {
+      name: 'the same with Track Changes off writes the new item',
+      doc: '* a a⏎⏎* a a⏎  ‸review a',
+      keys: ['Backspace', 'Enter'],
+      tc: false,
+      expect: {},
+    },
+    // The adversarial review's finding: where the break replaces the line break and the indent of
+    // the line (the caret at its start, or a key before it took text), the tracked layer writes the
+    // split at the end of the line before, which is sound, and no refusal applies.
+    ...(
+      [
+        [
+          'a typed change at the end of the item, → and Return',
+          '- one‸⏎  more',
+          [{ type: 'x' }, 'ArrowRight', 'Enter'],
+        ],
+        [
+          'the same in a numbered list',
+          '1. one‸⏎   more⏎2. two',
+          [{ type: 'x' }, 'ArrowRight', 'Enter'],
+        ],
+        [
+          'Backspace at the end of the item, → and Return',
+          '- one‸⏎  more',
+          ['Backspace', 'ArrowRight', 'Enter'],
+        ],
+        ['Delete after the indent, then Return', '- one⏎  ‸more', ['Delete', 'Enter']],
+        ['Delete at a quoted item, then Return', '> - one⏎> ‸- two', ['Delete', 'Enter']],
+      ] as const
+    ).map(([name, doc, keys]) => ({
+      name: `${name}, Track Changes on`,
+      doc,
+      keys: [...keys] as Step[],
+      tc: true,
+      expect: {},
+    })),
+  ]);
+});
+
 describe('walk seed 586 of the lists side by side (#602): an agent’s edit while an item opened by Return is open', () => {
   // The depth run of #586 found a file that took the open item with the agent's edit and wrote the
   // closer at the start of a quote line, which turned the next item into code. It holds on main
