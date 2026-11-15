@@ -674,15 +674,18 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   };
 }
 
-/** Return at the end of a block's text: an empty paragraph below it. */
-export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+/**
+ * Return at the end of a block's text: an empty paragraph below it. With `outside` the paragraph
+ * is outside the block's quotes (↓ from the end of the document), not one more in them.
+ */
+export function returnAtEnd(state: EditorState, block: Block, outside = false): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
-  const cont = continuation(state, block);
+  const cont = outside ? '' : continuation(state, block);
   const at = last.to;
   const changes: ChangeSpec[] = [];
   let insert: string;
-  if (isAlertLine(state, block)) {
+  if (!outside && isAlertLine(state, block)) {
     // Into the alert's body, on the line under its marker.
     insert = `\n${cont}`;
   } else {
@@ -691,7 +694,7 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const caret = at + insert.length;
   let merged = false;
   changes.push({ from: at, insert });
-  if (!isAlertLine(state, block) && !blankAfter(state, last)) {
+  if (!(!outside && isAlertLine(state, block)) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';

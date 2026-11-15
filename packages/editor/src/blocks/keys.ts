@@ -45,8 +45,8 @@ import {
   planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
-import { blockAt } from './structure.ts';
-import { openIndentedLine, openLineSpaces, planCodeTab } from './code.ts';
+import { blockAt, neighbours } from './structure.ts';
+import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -452,6 +452,56 @@ const returnAtEndKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/**
+ * ↓ from the last line of the last block of the document, when it is a block with nothing after it
+ * that a caret can take: a quote or an alert, code, a rule, an HTML block or a picture. It opens the
+ * empty paragraph below it, as Return at its end does (and as ↓ does in a table, which Word and Docs
+ * also keep one after), where the line after it would be one the block's own text goes on into: a
+ * quote or a list carries on over a line with no blank line above it. Null in every other place, for
+ * CodeMirror's ↓ (#514).
+ */
+export function planDownAtEnd(view: EditorView): KeyEdit | null {
+  const { state } = view;
+  const { main } = state.selection;
+  if (!main.empty || state.selection.ranges.length > 1) return null;
+  const block = blockAt(state, main.head);
+  if (!block || block.kind === 'table') return null;
+  const quoted = block.containers.some((c) => c.kind === 'quote');
+  const picture =
+    block.kind === 'paragraph' &&
+    /^!\[[^\]]*\]\([^)]*\)\s*$/.test(state.sliceDoc(block.text.from, block.text.to));
+  if (!quoted && !picture && !['code', 'rule', 'html'].includes(block.kind)) return null;
+  // Code with no closing fence runs to the end of the file: a line after it is code (Return writes
+  // a plain line break there).
+  if (block.kind === 'code' && !shapeOf(state, block).closes) return null;
+  // A block in an item stays with its list's keys (Return leaves it).
+  if (block.containers.some((c) => c.kind === 'item')) return null;
+  if (neighbours(state, block).next) return null;
+  const { doc } = state;
+  const last = doc.lineAt(block.lines.to);
+  // On the block's last line; the lines above it are CodeMirror's.
+  if (main.head < last.from) return null;
+  const moved = view.moveVertically(main, true).head;
+  if (moved !== main.head && moved <= last.to) return null;
+  // Lines already there to go to: the file's last line break, and the lines of a gap, each a line
+  // the caret can rest in once there are two (a blank one and the one to type in). The ledger's
+  // gap is one line shorter, since the ledger's own line is no place for the caret.
+  const parsed = state.field(parsedField, false);
+  const end = parsed?.ledgerRange?.from ?? doc.length;
+  const breaks = (doc.sliceString(last.to, end).match(/\n/g) ?? []).length;
+  if (breaks - (end < doc.length ? 1 : 0) >= 2) return null;
+  return returnAtEnd(
+    state.update({ selection: EditorSelection.cursor(last.to) }).state,
+    block,
+    true,
+  );
+}
+
+const downKey = blockKey((view) => {
+  const edit = planDownAtEnd(view);
+  return edit ? applyKeyEdit(view, edit) : false;
+});
+
 /** ⌃O: Return, with the caret left where it was. */
 const openLineKey = blockKey((view) => {
   const edit = planReturn(view.state);
@@ -529,6 +579,7 @@ export function blockKeys(): Extension {
         { key: 'Tab', run: tabKey(false) },
         { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
+        { key: 'ArrowDown', run: downKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
         // End, as ⌘→ goes: in front of the closers that end a block's text (#434).
         { key: 'End', run: lineBoundaryKey(true) },

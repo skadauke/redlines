@@ -31,7 +31,7 @@ interface Shape {
   closes: boolean;
 }
 
-function shapeOf(state: EditorState, block: Block): Shape {
+export function shapeOf(state: EditorState, block: Block): Shape {
   const { doc } = state;
   const first = doc.lineAt(block.lines.from);
   const last = doc.lineAt(block.lines.to);
