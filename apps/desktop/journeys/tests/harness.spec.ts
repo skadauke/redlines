@@ -33,5 +33,5 @@ test('places the caret, clicks text, and takes a named screenshot', async ({ sta
   await j.type('X', 'burst');
   expect(await j.text()).toBe('alpha beta Xgamma\n');
   const path = await j.shot('harness');
-  expect(path).toMatch(/harness\.png$/);
+  expect(path).toMatch(/harness(-dark)?(-200)?\.png$/);
 });
