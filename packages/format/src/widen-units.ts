@@ -355,3 +355,20 @@ export function withPrefixes(text: string, units: readonly Unit[]): void {
     withPrefixes(text, unit.children);
   }
 }
+
+/**
+ * Which lists a file has, and whether each is tight, with the lists in them: what a blank line in a
+ * tight list changes, and what a reader that does not know the markers reads differently from the
+ * newest view. A replacement must leave the shape that the newest view has: the gate of `widen.ts`
+ * compares the two.
+ */
+export function shapeOf(units: readonly Unit[]): string {
+  return units
+    .flatMap((unit) =>
+      unit.kind === 'list'
+        ? [`${unit.tight ? 'T' : 'L'}(${shapeOf(unit.children)})`]
+        : [shapeOf(unit.children)],
+    )
+    .filter((shape) => shape !== '')
+    .join(',');
+}

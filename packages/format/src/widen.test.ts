@@ -101,6 +101,27 @@ describe('every kind of unit', () => {
   });
 });
 
+describe('CRLF files', () => {
+  const crlf = (text: string) => text.replaceAll('\n', '\r\n');
+
+  it('a paragraph, a table and a list item come back byte for byte, in the file’s line breaks', () => {
+    const table = ['| Fruit | Count |', '| ----- | ----- |', '| Apples | <!--ins k3x9-->3<!--/k3x9--> |', '| Pears | 5 |'];
+    const cases: [string, string, string, string][] = [
+      ['Intro.\n\n<!--ins k3x9-->\n\nFast <!--/k3x9-->importer ships.\n\nOutro.', 'Fast importer', '## Fast importer', 'block'],
+      [`Intro.\n\n${table.join('\n')}\n\nOutro.`, 'Pears | 5', 'Pears | 6', 'table'],
+      ['Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.', 'one two', '## one two', 'block'],
+      ['Intro.\n\n```js\nlet a = 1;\n```\n\nOutro <!--ins k3x9-->more<!--/k3x9-->.', 'let a = 1;', 'let a = 2;\nlet b;', 'code'],
+    ];
+    for (const [body, find, insert, kind] of cases) {
+      const text = crlf(file(body, { k3x9: 'bo' }));
+      const done = widen(text, replacing(text, find, crlf(insert)), context(ada, ['r2zd']));
+      expect(done.unit.kind).toBe(kind);
+      expect(applyChanges(applyChanges(text, done.changes), reject(done.text, done.id))).toBe(text);
+      expect(done.text.replace(/\r\n/g, '').includes('\n')).toBe(false);
+    }
+  });
+});
+
 describe('stacked replacements (format §3.12, Editing it)', () => {
   it('another person’s edit in the new text is written inside the first replacement', () => {
     const text = file('Intro.\n\nThe importer ships in April.\n\nOutro.');

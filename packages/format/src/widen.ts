@@ -9,7 +9,7 @@
 
 import { scaffold, continuationPrefix, bodyStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
-import { isDecidable, rejectMarks } from './decide.ts';
+import { accept, isDecidable, reject, rejectMarks } from './decide.ts';
 import { addPerson, changesBetween, paragraphBreaks, workingLedger } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
@@ -18,7 +18,7 @@ import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { ledgerTextOf, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
 import { encodePayload } from './payload.ts';
-import { unitsOf } from './widen-units.ts';
+import { shapeOf, unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
 import type { EditContext, MarkEntry, MarkRange, Parsed, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -372,8 +372,16 @@ function tryRung(
   const next = before.slice(to);
   // A block that is atomic, or a table, stands in the form of rule 9: where a blank line follows at
   // the top level, the closer stands in it and the payload ends with the block's line break.
+  // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
+  // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
+  if (endsInDelimiter(now) && rung.prefix !== '' && !rung.atomic) return giveUp('delimiter');
   const atomic =
-    rung.atomic || rung.kind === 'table' || endsInFence(old) || endsInFence(now) || endsInBare(now);
+    rung.atomic ||
+    rung.kind === 'table' ||
+    endsInFence(old) ||
+    endsInFence(now) ||
+    endsInBare(now) ||
+    endsInDelimiter(now);
   const blankAfter = atomic && rung.prefix === '' && /^\r?\n\r?\n[ \t]*\S/.test(next) && !/^\r?\n\r?\n<!-- redlines/.test(next);
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
@@ -415,6 +423,12 @@ function endsInFence(text: string): boolean {
  * list markers): no mark stands right behind one (format §3.2). */
 function endsInBare(text: string): boolean {
   return /(?:^|\n)[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]*)+$/.test(text);
+}
+
+/** Whether a text ends in an emphasis delimiter, whose flanking looks at the character after it, or
+ * in a backslash, which would escape a marker written right after it. */
+function endsInDelimiter(text: string): boolean {
+  return /[*_~\\]$/.test(text);
 }
 
 function giveUp(why: string): undefined {
@@ -474,8 +488,18 @@ function failure(
   ].find(grew);
   if (bad) return `warning ${bad}`;
   if (paragraphBreaks(newestView(after).text) !== paragraphBreaks(intended)) return 'newest';
+  if (shapeOf(unitsOf(after, read)) !== shapeOf(unitsOf(intended, parse(intended)))) return 'shape';
   if (paragraphBreaks(originalView(after).text) !== paragraphBreaks(originalView(text).text)) {
     return 'original';
+  }
+  // Both decisions of the replacement can be made, and the new text is what it was meant to be.
+  try {
+    const kept = applyChanges(after, accept(after, id));
+    if (paragraphBreaks(newestView(kept).text) !== paragraphBreaks(intended)) return 'accept';
+    reject(after, id);
+  } catch (error) {
+    if (error instanceof EditError) return `decide: ${error.message.slice(0, 60)}`;
+    throw error;
   }
   return undefined;
 }

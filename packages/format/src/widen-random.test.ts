@@ -156,9 +156,11 @@ describe('random widened replacements', () => {
         expect(applyChanges(text, done.changes), label).toBe(after);
         const intended = applyChanges(view, [edit]);
         expect(parse(after).warnings.map((w) => w.code), `${label}: warnings`).toEqual([]);
-        expect(readAs(bodyOf(after)), `${label}: reads as its newest view`).toBe(
-          readAs(newestView(after).text),
-        );
+        if (readAs(bodyOf(after)) !== readAs(newestView(after).text)) {
+          throw new Error(
+            `${label}: reads as its newest view\nBODY ${JSON.stringify(readAs(bodyOf(after)))}\nVIEW ${JSON.stringify(readAs(newestView(after).text))}`,
+          );
+        }
         expect(readAs(newestView(after).text), `${label}: newest`).toBe(readAs(intended));
         expect(originalView(after).text, `${label}: original`).toBe(originalView(text).text);
         const rejected = applyChanges(after, reject(after, done.id));
@@ -225,7 +227,7 @@ describe('random widened replacements', () => {
         randomOrders(label, after, below, 6, ids);
       } catch (error) {
         failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}\nedit ${JSON.stringify(edit)} by ${author.handle}\n${text}\n----after----\n${after}`);
-        if (failures.length > 3) break;
+        if (failures.length > 9) break;
       }
     }
     console.log(JSON.stringify({ total, ...seen, reasons }));
