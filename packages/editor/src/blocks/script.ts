@@ -478,15 +478,33 @@ function hiddenAt(editor: Editor): string | null {
 /** The lines of a body that start a list item, outside fenced code. */
 function itemLines(body: string): number {
   let fence: string | null = null;
+  let where = { indent: 0, quotes: 0 };
   let count = 0;
+  const shape = (line: string) => ({
+    indent: /^[ \t>]*/.exec(line.replace(/^(?:[ \t]*>)+/, ''))?.[0].length ?? 0,
+    quotes: (/^(?:[ \t]*>)*/.exec(line)?.[0].match(/>/g) ?? []).length,
+  });
   for (const line of body.split('\n')) {
     const opens = FENCE.exec(line)?.[1];
     if (fence) {
-      if (opens && opens.startsWith(fence[0]!) && opens.length >= fence.length) fence = null;
-      continue;
+      // A fence that is never closed ends where its container does: a line of text with fewer
+      // quote markers, or indented less than the fence is, which leaves its list item.
+      const now = shape(line);
+      const ends =
+        line.trim() !== '' &&
+        (now.quotes < where.quotes || (now.quotes === where.quotes && now.indent < where.indent));
+      if (opens && opens.startsWith(fence[0]!) && opens.length >= fence.length) {
+        fence = null;
+        continue;
+      }
+      if (!ends) continue;
+      fence = null;
     }
     if (/^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
-    if (opens) fence = opens;
+    if (opens) {
+      fence = opens;
+      where = shape(line);
+    }
   }
   return count;
 }

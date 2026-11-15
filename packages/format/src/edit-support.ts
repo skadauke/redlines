@@ -13,7 +13,7 @@ import {
   readsAlike,
 } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
-import { setLedger } from './ledger-write.ts';
+import { keepsLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
@@ -655,9 +655,26 @@ export function commitEdit(
   ledger: Ledger,
   options: CommitOptions = {},
 ): TextChange[] {
-  const sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  let sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
+  // A decision that gives back a code block that is never closed would leave the ledger inside it.
+  // Where the ledger stays (other marks, a comment, a setting), the code gets a closing fence, the
+  // same code to every reader; with no mark left, the ledger goes and the block comes back as it
+  // was.
+  let fenced = false;
+  const range = before?.ledgerRange;
+  if (range && removing && !options.keepLedger) {
+    const bare = applyChanges(text, sorted);
+    if (parse(bare).ledgerRange === null) {
+      const keeps = keepsLedger(normalizeLedger(bare, ledger));
+      const fix = keeps
+        ? closingFenceFor(text, sorted, bare, range.from)
+        : { from: range.from, to: range.to, insert: '' };
+      if (fix) sorted = [...sorted, fix].sort((a, b) => a.from - b.from || a.to - b.to);
+      fenced = keeps;
+    }
+  }
   const changes = before
     ? withPlacement(
         text,
@@ -688,7 +705,9 @@ export function commitEdit(
     if (!removing) assertPointsRead(text, before, after, parsedAfter, changes);
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
-    if (options.keeps) assertViewsKept(text, after, options.keeps);
+    if (options.keeps && !(fenced && options.keeps === 'original')) {
+      assertViewsKept(text, after, options.keeps);
+    }
     assertPlaced(
       before,
       parsedAfter,
@@ -704,6 +723,29 @@ export function commitEdit(
   // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
   if (before && !removing) assertPointHolds(text, before, done);
   return done;
+}
+
+/**
+ * The closing fence that a decision writes after an unclosed code block it gives back, where the
+ * ledger stays after it: the opening fence's character and length, after the container's prefix,
+ * at the end of the last change before the ledger. Undefined when the new text doesn't end in one.
+ */
+function closingFenceFor(
+  text: string,
+  changes: readonly TextChange[],
+  after: string,
+  ledgerFrom: number,
+): TextChange | undefined {
+  const open = scan(after).verbatim.findLast((range) => range.kind === 'fence');
+  const last = changes.filter((change) => change.to <= ledgerFrom).at(-1);
+  const found = open && /^([ \t>]*)(`{3,}|~{3,})/.exec(after.slice(open.from, open.from + 99));
+  // Only where nothing but white space stands between it and the ledger: the block ends the body.
+  if (!found || !last || open.to < after.length || /\S/.test(text.slice(last.to, ledgerFrom))) {
+    return undefined;
+  }
+  const end = after.length - text.length + last.to;
+  const eol = after.slice(end - 1, end) === '\n' ? '' : text.includes('\r\n') ? '\r\n' : '\n';
+  return { from: last.to, to: last.to, insert: eol + found[1] + found[2] };
 }
 
 /** How many markers of a file's body stand right after an unescaped backslash, which escapes them

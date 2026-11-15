@@ -113,6 +113,7 @@ import { scan } from './scan.ts';
 import type { Verbatim } from './scan.ts';
 import {
   assertStillBlock,
+  closesAtEnd,
   codeBlockOf,
   edited,
   holdersOf,
@@ -5113,13 +5114,22 @@ function codeEdits(
   // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
   const body = plan.parsed.ledgerRange?.from ?? text.length;
   const roomy =
+    !block.unclosed &&
     block.prefix === '' &&
     text.startsWith(plan.eol + plan.eol, block.to) &&
     block.to + 2 * plan.eol.length <= body;
   const closer = `<!--/${id}-->`;
   const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
   const tail = roomy ? block.to + plan.eol.length : block.to;
-  const content = now.slice(block.prefix.length) + (roomy ? plan.eol : plan.eol + block.prefix);
+  // A block with no closing fence gets one: the closer would stand inside its code otherwise. The
+  // old block is the payload and stays as it was, so rejecting gives the unclosed block back.
+  const fence = /`{3,}|~{3,}/.exec(block.open)?.[0] ?? '```';
+  const added =
+    block.unclosed && !closesAtEnd(block, now)
+      ? (/\n$/.test(now) ? '' : plan.eol) + block.prefix + fence
+      : '';
+  const content =
+    now.slice(block.prefix.length) + added + (roomy ? plan.eol : plan.eol + block.prefix);
   const changes = commitEdit(
     text,
     [
@@ -5129,9 +5139,10 @@ function codeEdits(
         insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
       ...typed,
+      // The closing fence (an unclosed block's) and the closer follow the block's last character.
       roomy
         ? { from: tail, to: tail, insert: closer }
-        : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
+        : { from: block.to, to: block.to, insert: `${added}${plan.eol}${block.prefix}${closer}` },
     ],
     plan.ledger,
     {

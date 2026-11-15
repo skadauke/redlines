@@ -1966,6 +1966,26 @@ Next paragraph.
   does (§3.3). Rejecting gives the old block back, byte for byte. In a quote or a list item the
   opener stands on a line of its own with the container's prefix, and every line of the block keeps
   it.
+- A fenced block with no closing fence runs to the end of its container, or of the file
+  (CommonMark), so that the closer of a substitution would stand inside its code and be read as
+  code. The substitution of such a block therefore writes the block with a closing fence, the
+  opening fence's character and length, after the container's prefix, as the last line of the
+  new text (a block whose new text already ends in a closing line, as ↓ at its end writes it, has
+  that one); the payload is the old block as it was, unclosed. Accepting gives the block closed, which every reader reads as the same
+  code. Typing, Backspace and Return in it, at its last line (the end of the file or of the
+  container) or anywhere else in it, are written so, in a quote and in a list item (not in a fence
+  that starts an item), in LF and CRLF files alike; a following key edits the closed block in the
+  pending substitution, as in any. A block whose last line is its opening fence (nothing after it
+  to change) takes no such write, and a block that holds a ledger's head, a ledger that the open
+  fence swallowed, neither: both are refused as code is, in the words above. A decision that gives
+  an unclosed block back is never refused for it: with no ledger left after it (nothing else in
+  the ledger, no comment, no setting such as `tracking` or `history`), the block comes back as it
+  was, byte for byte, and the ledger goes with it; where the ledger stays (other marks pending, a
+  comment thread, any setting), it would be code after an open block, so the old code is written
+  with a closing fence added, the opening fence's character and length, after its indentation and
+  container prefix, which every reader reads as the same code. A
+  file that ends in such a block and has no ledger yet can't take a tracked change elsewhere
+  either, and says so (§5.1, "Close it first").
 - The code of a raw-text element is what stands between its opening tag's `>` and its closing tag
   (also on one line: `<title>Docs</title>`); of display math, what stands between its two `$$`.
   A change on a fence's line, in a tag, on a `$$` line outside the two `$$`, is not a change of the
