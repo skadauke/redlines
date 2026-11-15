@@ -80,6 +80,11 @@ export default defineConfig<JourneyOptions>({
   },
   projects: chosen.map((name) => ({
     name,
+    // JOURNEYS_OTHER_GREP limits the looks other than the light one to some journeys: main runs
+    // every journey in the light look and only the smoke ones (`@smoke`) in the other three.
+    ...(name !== 'light' && process.env['JOURNEYS_OTHER_GREP']
+      ? { grep: new RegExp(process.env['JOURNEYS_OTHER_GREP']) }
+      : {}),
     // One size and one pixel density, so that a screenshot is the same on every run.
     use: {
       ...devices['Desktop Safari'],
