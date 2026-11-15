@@ -9,6 +9,13 @@ import type { EditorState, Extension } from '@codemirror/state';
 import { Facet, StateEffect } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import {
+  type ImageAlign,
+  IMAGE_NODES,
+  imageOfNode,
+  noticeFacet,
+  setImageLook,
+} from '../image-size.ts';
 import { parsedField } from '../tracked/field.ts';
 import { textPx } from './theme.ts';
 
@@ -87,6 +94,32 @@ function misread(state: EditorState): boolean {
   return state.field(parsedField).warnings.some((warning) => UNRELIABLE.has(warning.code));
 }
 
+/** The least width of an image that is dragged smaller, in px at the theme's own text size. */
+const LEAST_WIDTH = 24;
+
+/** How near the image's own size a drag ends to give the image its own size again, in px. */
+const SNAP = 4;
+
+/** The text column's width at `line`, in px as it is on screen: what an image may fill. */
+function columnPx(view: EditorView, line: Element | null): number {
+  const el = line ?? view.contentDOM;
+  const style = getComputedStyle(el);
+  return (
+    el.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0')
+  );
+}
+
+/**
+ * The width of the text column in the unit a width is written in: px at the theme's own text size,
+ * which the text size multiplies when the image is drawn. What the Small, Medium and Large of an
+ * Image menu are fractions of.
+ */
+export function columnWidth(view: EditorView): number {
+  const scale = parseFloat(getComputedStyle(view.contentDOM).getPropertyValue('--rl-text-scale'));
+  const width = columnPx(view, null) / (scale || 1);
+  return width > 0 ? width : 720;
+}
+
 /** The picture, or its alt text. */
 class ImageWidget extends WidgetType {
   readonly alt: string;
@@ -94,21 +127,39 @@ class ImageWidget extends WidgetType {
   readonly url: string | null;
   /** The image is a line of its own, which centers it. */
   readonly own: boolean;
+  /** The width the document gives it, in px at the theme's own text size, or null. */
+  readonly width: number | null;
+  readonly align: ImageAlign;
 
-  constructor(alt: string, url: string | null, own: boolean) {
+  constructor(
+    alt: string,
+    url: string | null,
+    own: boolean,
+    width: number | null = null,
+    align: ImageAlign = 'center',
+  ) {
     super();
     this.alt = alt;
     this.url = url;
     this.own = own;
+    this.width = width;
+    this.align = align;
   }
 
   override eq(other: ImageWidget): boolean {
-    return other.alt === this.alt && other.url === this.url && other.own === this.own;
+    return (
+      other.alt === this.alt &&
+      other.url === this.url &&
+      other.own === this.own &&
+      other.width === this.width &&
+      other.align === this.align
+    );
   }
 
   override toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = this.own ? 'rl-image rl-image-own' : 'rl-image';
+    if (this.own && this.align !== 'center') wrap.classList.add(`rl-image-${this.align}`);
     const showAlt = () => {
       wrap.className += ' rl-image-missing';
       wrap.replaceChildren(this.alt || 'image');
@@ -123,21 +174,153 @@ class ImageWidget extends WidgetType {
     img.draggable = false;
     // A remote image learns nothing of the document it is in.
     img.referrerPolicy = 'no-referrer';
+    // The width that is written, times the text size, which a CSS max-width keeps within the column.
+    if (this.width !== null) img.style.setProperty('width', textPx(this.width));
     img.addEventListener('load', () => {
-      // At its natural width times the text size, which a CSS max-width keeps within the column.
-      if (img.naturalWidth > 0) img.style.setProperty('width', textPx(img.naturalWidth));
+      // At its natural width times the text size, unless the document says another.
+      if (this.width === null && img.naturalWidth > 0) {
+        img.style.setProperty('width', textPx(img.naturalWidth));
+      }
       view.requestMeasure();
     });
     img.addEventListener('error', showAlt);
     img.src = this.url;
-    wrap.append(img);
+    // An image on a line of its own sits in a frame as wide as it is, so that its handles are at
+    // its edges and not at the text column's.
+    const frame = this.own ? document.createElement('span') : wrap;
+    if (this.own) {
+      frame.className = 'rl-image-frame';
+      wrap.append(frame);
+    }
+    frame.append(img);
+    for (const side of ['left', 'right'] as const) {
+      const handle = document.createElement('span');
+      handle.className = `rl-image-handle rl-image-handle-${side}`;
+      handle.title = 'Drag to resize';
+      handle.addEventListener('pointerdown', (event) =>
+        beginResize(view, { wrap, frame, img, side, event, own: this.own, align: this.align }),
+      );
+      // The press is the handle's: the caret stays where it is, and the source stays hidden.
+      handle.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      frame.append(handle);
+    }
     return wrap;
   }
 
-  /** Clicking the image puts the caret on it, which shows its source. */
-  override ignoreEvent(): boolean {
-    return false;
+  /** A drag on a handle ends with the widget, whose pointer events then have nowhere to go. */
+  override destroy(dom: HTMLElement): void {
+    drags.get(dom)?.();
   }
+
+  /** Clicking the image puts the caret on it, which shows its source; a handle is pressed instead. */
+  override ignoreEvent(event: Event): boolean {
+    return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
+  }
+}
+
+/** The drags that are going on, by the image they resize, which a widget that goes ends. */
+const drags = new WeakMap<HTMLElement, () => void>();
+
+/** What a drag on a handle is told about the image it resizes. */
+interface Drag {
+  wrap: HTMLElement;
+  frame: HTMLElement;
+  img: HTMLImageElement;
+  side: 'left' | 'right';
+  event: PointerEvent;
+  own: boolean;
+  align: ImageAlign;
+}
+
+/**
+ * A drag on a handle: the image takes the width of the pointer as it moves (nothing is written),
+ * and the width is written when the pointer is released, as one change that one Undo takes back. It
+ * keeps its aspect, as its height follows its width. A centered image grows at both edges, so its
+ * edge follows the pointer at twice the distance. A drag that ends at the image's own size, or
+ * beyond what the column holds, gives it no width, so that it is `![]()` again; Escape gives the
+ * size it had.
+ */
+function beginResize(view: EditorView, drag: Drag): void {
+  const { wrap, frame, img, side, event, own, align } = drag;
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const handle = event.currentTarget as HTMLElement;
+  const scale =
+    parseFloat(getComputedStyle(view.contentDOM).getPropertyValue('--rl-text-scale')) || 1;
+  const column = columnPx(view, wrap.closest('.cm-line'));
+  const startWidth = img.getBoundingClientRect().width;
+  const startX = event.clientX;
+  const written = img.style.getPropertyValue('width');
+  // The edge follows the pointer when the image grows at both of its edges.
+  const gain = own && align === 'center' ? 2 : 1;
+  const least = Math.min(LEAST_WIDTH * scale, column);
+  const natural = img.naturalWidth * scale;
+  let width = startWidth;
+  const badge = document.createElement('span');
+  badge.className = 'rl-image-badge';
+  frame.append(badge);
+  const show = () => {
+    badge.textContent = `${Math.round(width / scale)} px`;
+  };
+  show();
+  wrap.classList.add('rl-image-resizing');
+  try {
+    handle.setPointerCapture(event.pointerId);
+  } catch {
+    // A pointer that is gone already: the drag has nothing to follow.
+  }
+
+  const move = (at: PointerEvent) => {
+    const delta = (side === 'right' ? at.clientX - startX : startX - at.clientX) * gain;
+    width = Math.min(Math.max(startWidth + delta, least), column);
+    img.style.setProperty('width', `${width}px`);
+    show();
+  };
+  const finish = (commit: boolean) => {
+    drags.delete(wrap);
+    handle.removeEventListener('lostpointercapture', cancel);
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', up);
+    handle.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('keydown', key, true);
+    badge.remove();
+    wrap.classList.remove('rl-image-resizing');
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    } catch {
+      // Released already.
+    }
+    img.style.setProperty('width', written);
+    if (!commit || width === startWidth) return;
+    // The image's own size, or the column's if that is less, is no width at all.
+    const fit = natural > 0 ? Math.min(natural, column) : 0;
+    const asked = fit > 0 && Math.abs(width - fit) <= SNAP ? null : Math.round(width / scale);
+    let at: number;
+    try {
+      at = view.posAtDOM(wrap);
+    } catch {
+      // The widget was replaced while the pointer was down: the image is another now.
+      return;
+    }
+    setImageLook(view, { width: asked }, at, view.state.facet(noticeFacet));
+  };
+  const up = () => finish(true);
+  const cancel = () => finish(false);
+  const key = (at: Event) => {
+    if ((at as KeyboardEvent).key !== 'Escape') return;
+    at.stopPropagation();
+    finish(false);
+  };
+  drags.set(wrap, cancel);
+  handle.addEventListener('lostpointercapture', cancel);
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+  handle.addEventListener('pointercancel', cancel);
+  window.addEventListener('keydown', key, true);
 }
 
 /** A pending change's markers, as docs/format.md §2.1 defines them: `<!--ins k3x9-->`, `<!--/k3x9-->`,
@@ -160,15 +343,11 @@ function aloneInItsLine(state: EditorState, node: SyntaxNode): boolean {
   return around.replace(MARKER, '').trim() === '';
 }
 
-/** The decoration that draws an `Image` node, or null for one that stays source. */
+/** The decoration that draws an image node, or null for one that stays source. */
 export function imageDecoration(state: EditorState, node: SyntaxNode): Decoration | null {
-  const marks = node.getChildren('LinkMark');
-  const urlNode = node.getChild('URL');
-  const [open, close] = marks;
-  // A reference-style image has no destination here.
-  if (!urlNode || !open || !close) return null;
-  const alt = state.sliceDoc(open.to, close.from);
-  const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+  const image = imageOfNode(state, node);
+  if (!image) return null;
+  const source = sourceOf(image.src);
   let url: string | null = null;
   if (source.kind === 'remote') {
     url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
@@ -176,7 +355,9 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
   const own = aloneInItsLine(state, node);
-  return Decoration.replace({ widget: new ImageWidget(alt, url, own) });
+  return Decoration.replace({
+    widget: new ImageWidget(image.alt, url, own, image.width, image.align),
+  });
 }
 
 /**
@@ -192,10 +373,10 @@ export function heldRemoteImages(state: EditorState): Set<string> | null {
       from,
       to,
       enter(node) {
-        if (node.name !== 'Image') return;
-        const urlNode = node.node.getChild('URL');
-        if (!urlNode) return;
-        const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+        if (!IMAGE_NODES.has(node.name)) return;
+        const image = imageOfNode(state, node.node);
+        if (!image) return;
+        const source = sourceOf(image.src);
         if (source.kind === 'remote' && pending(state, node.from, node.to)) held.add(source.url);
       },
     });
@@ -203,15 +384,15 @@ export function heldRemoteImages(state: EditorState): Set<string> | null {
   return held;
 }
 
-/** The local path, as the document writes it and decoded, of an `Image` node; null for a remote one. */
+/** The local path, as the document writes it and decoded, of an image node; null for a remote one. */
 function localPathOf(state: EditorState, node: SyntaxNode): string | null {
-  const urlNode = node.getChild('URL');
-  if (!urlNode) return null;
-  const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+  const image = imageOfNode(state, node);
+  if (!image) return null;
+  const source = sourceOf(image.src);
   return source.kind === 'local' ? source.path : null;
 }
 
-/** The `Image` node that holds or touches `pos`, or null. */
+/** The image node, a `![]()` or an `<img>`, that holds or touches `pos`, or null. */
 function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
   for (const side of [1, -1] as const) {
     for (
@@ -219,7 +400,7 @@ function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
       node;
       node = node.parent
     ) {
-      if (node.name === 'Image') return node;
+      if (IMAGE_NODES.has(node.name) && imageOfNode(state, node)) return node;
     }
   }
   return null;
@@ -241,7 +422,7 @@ export function localImageAt(state: EditorState): string | null {
     from,
     to,
     enter(node) {
-      if (found !== null || node.name !== 'Image') return;
+      if (found !== null || !IMAGE_NODES.has(node.name)) return;
       found = localPathOf(state, node.node);
     },
   });
