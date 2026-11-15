@@ -23,6 +23,8 @@ function load(doc: string, at = 0, notices: string[] = []) {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
     onNotice: (message) => notices.push(message),
+    // A host with an Image menu, which is what has the commands.
+    openImage: () => {},
   });
   open.push(editor);
   editor.view.dispatch({ selection: { anchor: at } });

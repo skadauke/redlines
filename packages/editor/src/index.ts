@@ -656,11 +656,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
-  // For a host's Image menu: the size and the alignment of the image under the caret.
-  commands.register(imageSizeCommands(options.onNotice));
   const { openImage } = options;
   if (openImage) {
-    // For a host's Image menu: the image under the caret or in the selection.
+    // For a host's Image menu (a host that has one gives `openImage`): the image under the caret or
+    // in the selection, its size and its alignment.
+    commands.register(imageSizeCommands(options.onNotice));
     commands.register([
       {
         id: 'image.edit',

@@ -384,6 +384,8 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     tracking: script.tc,
     showLineBreakMarks: script.lineBreakMarks ?? false,
     onNotice: (message) => refusals.push(message),
+    // A host with an Image menu, whose commands a script may run (#526).
+    openImage: () => {},
     extensions: [
       editSourceFacet.of({ now: () => NOW, random: randomIds(ids) }),
       // Every text the document has, for the history invariant.
