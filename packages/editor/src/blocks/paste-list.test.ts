@@ -403,7 +403,8 @@ describe('pasting next to bare markers, other paragraphs, pending changes and ot
 });
 
 describe('a long paste that is no list', () => {
-  it('is turned down at its first line, at no cost', () => {
+  // A timing test: it runs with REDLINES_COST set, as CI's check job does (see blocks/cost.test.ts).
+  it.skipIf(!process.env['REDLINES_COST'])('is turned down at its first line, at no cost', () => {
     const long = `${'word '.repeat(2_000_000)}\n- a\n`;
     const started = performance.now();
     expect(pastedItems(long)).toBeNull();
@@ -478,8 +479,9 @@ describe('a paste at every caret of a list', () => {
               tc,
               expect: {},
             };
+            const result = runScript(script);
             try {
-              checkInvariants(runScript(script));
+              checkInvariants(result);
             } catch (error) {
               // A place where the paste goes in as text, as before (inside a code span, at the
               // start of a later line of an item's text), and plain text pasted there is
@@ -488,8 +490,11 @@ describe('a paste at every caret of a list', () => {
                 ...script,
                 keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
               });
-              if (as.refusals.length > 0) continue;
-              if (Object.values(invariantProblems(as)).some((found) => found.length > 0)) continue;
+              // Only where the list paste fell back to the text path: its file is the text's.
+              const asText = as.file === result.file;
+              if (asText && as.refusals.length > 0) continue;
+              if (asText && Object.values(invariantProblems(as)).some((f) => f.length > 0))
+                continue;
               failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`);
             }
           }
@@ -519,17 +524,20 @@ describe('a paste over every selection of a list', () => {
                 tc,
                 expect: {},
               };
+              const result = runScript(script);
               try {
-                checkInvariants(runScript(script));
+                checkInvariants(result);
               } catch (error) {
                 // A selection that goes in as text (over a marker): what text does is today's.
                 const as = runScript({
                   ...script,
                   keys: [{ paste: paste.replaceAll('⏎', '\n'), plain: true }],
                 });
-                if (as.refusals.length > 0) continue;
-                if (Object.values(invariantProblems(as)).some((found) => found.length > 0))
+                const asText = as.file === result.file;
+                if (asText && as.refusals.length > 0) continue;
+                if (asText && Object.values(invariantProblems(as)).some((f) => f.length > 0)) {
                   continue;
+                }
                 failures.push(`${script.name}: ${(error as Error).message.split('\n')[0]}`);
               }
             }

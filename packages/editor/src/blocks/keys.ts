@@ -288,17 +288,11 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   if (view.state.doc.eq(before)) return true;
   const edit = planListPaste(view.state, pasted);
   // Named as a deletion, which the history joins to the step before it (only typing and deletions
-  // join); the step keeps the name of the first, Paste. A plan that is gone leaves the text itself,
-  // in the same step, so that the paste is never lost.
-  const at = view.state.selection.main.head;
-  applyKeyEdit(view, {
-    ...(edit ?? {
-      changes: [{ from: at, insert: text }],
-      selection: EditorSelection.single(at + text.length),
-    }),
-    userEvent: 'delete.selection',
-    join: true,
-  });
+  // join); the step keeps the name of the first, Paste. The plan was made on the text without the
+  // selection above, and no shape the sweeps try (every selection of the swept lists, Track Changes on and
+  // off) plans differently after the real deletion: a plan that is gone is a bug, not a paste to lose.
+  if (!edit) throw new Error('A list paste that planned before its deletion has no plan after it');
+  applyKeyEdit(view, { ...edit, userEvent: 'delete.selection', join: true });
   return true;
 }
 

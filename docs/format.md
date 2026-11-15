@@ -1176,9 +1176,9 @@ A tracked insertion never stands between a list marker and the space after it. A
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
 is a paragraph with a marker's character in it, in a renderer that doesn't know the markers, though the
 newest view is an item. An edit that writes text after a bare marker (the paste of list items,
-#510) therefore writes the space first, as untracked text, and starts the insertion after it:
-`- <!--ins x-->a<!--/x-->`. Rejecting the insertion leaves `- `, an empty item, as the bare marker
-was.
+#510) therefore writes the space first, as untracked text, and the insertion opens after it, on the
+line before the text as §3.3 has it for a mark that starts a block: `- <!--ins x-->⏎  a<!--/x-->`.
+Accepting gives `- a`; rejecting gives `- `, an empty item, as the bare marker was.
 
 ### 3.3 Marks that start or end a block
 
