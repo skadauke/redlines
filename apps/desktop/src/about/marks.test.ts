@@ -155,7 +155,7 @@ describe('the icon cycler', () => {
   });
 
   it('finishes a change that is going when the icon is clicked again, and goes on from there', async () => {
-    const { stage, running, marks, shown, cycler, settle } = setup('caret');
+    const { running, marks, shown, cycler, settle } = setup('caret');
     cycler.click();
     const first = [...running];
     // Not finished yet: another click.
