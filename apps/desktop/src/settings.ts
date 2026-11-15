@@ -39,7 +39,7 @@ export function imageFolderNameProblem(typed: string): string | null {
   const control = (char: string) => char < ' ' || (char >= '\u007f' && char <= '\u009f');
   const plain =
     !name.startsWith('.') &&
-    ![...name].some((char) => char === '/' || char === '\\' || control(char));
+    ![...name].some((char) => char === '/' || char === '\\' || char === ':' || control(char));
   return plain ? null : 'A folder’s name has no slash and doesn’t start with a dot.';
 }
 

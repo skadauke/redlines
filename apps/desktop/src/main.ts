@@ -307,7 +307,7 @@ const editor = createEditor(element('#editor'), {
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
   // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
-  // browser tab): saved beside the document, and linked at the place they came to.
+  // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
   // An Undo or Redo with nothing to take: the Mac's beep.

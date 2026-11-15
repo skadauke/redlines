@@ -792,7 +792,7 @@ describe('adding images in the app', () => {
 
   it('tells of an image the app couldn’t take as it tells of any other it refuses', async () => {
     vi.mocked(invoke).mockRejectedValueOnce(
-      'The folder for images leads outside the document’s folder.',
+      'The folder for images leads outside the project’s folder.',
     );
     const added = await createHost().addImages('/docs/plan.md', 'images', {
       kind: 'files',
@@ -801,7 +801,7 @@ describe('adding images in the app', () => {
     });
     expect(added).toEqual({
       paths: [],
-      refused: ['The folder for images leads outside the document’s folder.'],
+      refused: ['The folder for images leads outside the project’s folder.'],
     });
   });
 

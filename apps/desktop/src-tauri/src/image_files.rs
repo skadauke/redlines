@@ -150,7 +150,7 @@ fn folder_name(folder: &str) -> Result<&str, String> {
     }
     let plain = !folder.starts_with('.')
         && !folder.trim().is_empty()
-        && !folder.contains(['/', '\\'])
+        && !folder.contains(['/', '\\', ':'])
         && !folder.chars().any(char::is_control);
     if plain {
         Ok(folder)
@@ -291,6 +291,23 @@ fn spoiled(folder: &Path, made: &str, name: &str, error: &io::Error) -> String {
     cannot_add(name, error)
 }
 
+/// Whether the file at `path` holds exactly `bytes`, read in pieces and no further than they go, so
+/// that a file that grew since its size was looked at is not read whole.
+fn holds(path: &Path, bytes: &[u8]) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut piece = [0u8; 64 * 1024];
+    let mut at = 0;
+    loop {
+        match file.read(&mut piece) {
+            Ok(0) => return at == bytes.len(),
+            Ok(n) if bytes.len() >= at + n && bytes[at..at + n] == piece[..n] => at += n,
+            _ => return false,
+        }
+    }
+}
+
 /// The name of the file in `folder` that holds the same bytes as `file`, which is `len` bytes long
 /// and begins with `head`, among those a copy of it would have been given: `name`, `name-2`, and so
 /// on while there are files of those names. None when there is none, or `file` can't be read again.
@@ -307,15 +324,22 @@ fn identical_copy(
         _ => (name, ""),
     };
     let mut whole: Option<Vec<u8>> = None;
+    let mut misses = 0;
     for number in 1..=10_000u32 {
         let candidate = if number == 1 {
             name.to_owned()
         } else {
             format!("{stem}-{number}{extension}")
         };
+        // A gap in the numbering (a copy that was deleted) doesn't end the search, a few do.
         let Ok(metadata) = std::fs::symlink_metadata(folder.join(&candidate)) else {
-            return None;
+            misses += 1;
+            if misses > 3 {
+                return None;
+            }
+            continue;
         };
+        misses = 0;
         if !metadata.is_file() || metadata.len() != len {
             continue;
         }
@@ -325,7 +349,10 @@ fn identical_copy(
             (&mut *file).take(len).read_to_end(&mut bytes).ok()?;
             whole = Some(bytes);
         }
-        if std::fs::read(folder.join(&candidate)).ok().as_ref() == whole.as_ref() {
+        if whole
+            .as_deref()
+            .is_some_and(|bytes| holds(&folder.join(&candidate), bytes))
+        {
             // The copy goes on from where it was: the head and the rest are read again below.
             file.seek(SeekFrom::Start(head.len() as u64)).ok()?;
             return Some(candidate);
@@ -801,6 +828,7 @@ mod tests {
             "a\\b",
             " ",
             "a\nb",
+            "a:b",
         ] {
             assert!(folder_name(name).is_err(), "{name:?}");
         }
@@ -1025,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_pasted_data_beside_the_document() {
+    fn adds_pasted_data_to_the_folder_the_settings_name() {
         let (own, document) = document("adds-data");
         let added = put(&document, "plan.assets", false, "image.png", PNG, 1000).unwrap();
         assert_eq!(added.paths, ["plan.assets/image.png"]);
@@ -1043,7 +1071,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn refuses_a_folder_that_leads_out_of_the_documents_folder() {
+    fn refuses_a_folder_that_leads_out_of_the_projects_folder() {
         let (own, document) = document("outside");
         let elsewhere = folder("outside-elsewhere");
         std::os::unix::fs::symlink(&elsewhere, own.join("images")).unwrap();
@@ -1413,5 +1441,18 @@ mod tests {
         .unwrap();
         assert_eq!(added.paths, ["images/a.png"]);
         assert!(own.join("images/a.png").is_file());
+    }
+
+    #[test]
+    fn a_gap_in_the_numbering_does_not_hide_a_copy_that_is_there() {
+        let (own, _) = document("gap");
+        let source = folder("gap-from").join("shot.png");
+        std::fs::write(&source, PNG).unwrap();
+        // `shot.png` was deleted since, and `shot-2.png` holds the same bytes.
+        std::fs::write(own.join("shot-2.png"), PNG).unwrap();
+        assert_eq!(copy_image(&own, &source, 1000), Ok("shot-2.png".to_owned()));
+        // Bytes that differ in the last byte, the same size, are another file.
+        std::fs::write(own.join("shot-2.png"), b"\x89PNG\r\n\x1a\n0001").unwrap();
+        assert_eq!(copy_image(&own, &source, 1000), Ok("shot.png".to_owned()));
     }
 }

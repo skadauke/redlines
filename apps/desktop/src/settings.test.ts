@@ -393,7 +393,16 @@ describe('settings', () => {
     expect(imageFolderNameProblem('x'.repeat(101))).toBe(
       'A folder’s name can’t be longer than 100 characters.',
     );
-    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a\u0007b', 'a\u0085b', 'a\u007fb']) {
+    for (const typed of [
+      '.images',
+      'a/b',
+      '../x',
+      'a\\b',
+      'a:b',
+      'a\u0007b',
+      'a\u0085b',
+      'a\u007fb',
+    ]) {
       expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
         'A folder’s name has no slash and doesn’t start with a dot.',
       );

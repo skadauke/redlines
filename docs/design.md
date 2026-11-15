@@ -1055,7 +1055,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
   undoing it takes back the link only: the file stays in the project’s folder for images, where it can be seen and
   deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
-  document with no file yet asks to be saved first, since there is no folder to save beside. The
+  document with no file yet asks to be saved first, since there is no project folder to save in. The
   person may go on writing while the images are saved: the links go in where the paste or drop was,
   ahead of what was typed there meanwhile. A selection that a paste replaces is replaced only while
   all of it is still there; what was typed in it stays, and the links go after it. A document that
