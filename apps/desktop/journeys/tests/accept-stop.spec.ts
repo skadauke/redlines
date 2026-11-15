@@ -55,6 +55,10 @@ test.describe('accept all and stop tracking @views', () => {
     await j.press('ControlOrMeta+z');
     expect(await pending(j), 'the changes are back').toBe(2);
     expect(await tracking(j), 'Track Changes is on again').toBe(true);
+    await expect(
+      j.page.getByText('Track Changes is on', { exact: true }),
+      'Undo says that Track Changes is on',
+    ).toBeVisible();
     await j.shot('after-undo');
   });
 

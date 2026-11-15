@@ -574,6 +574,46 @@ function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRa
   );
 }
 
+/** Where a mark is: from its first opener to the end of its last segment. */
+function extentOf(mark: MarkRange): Range {
+  return {
+    from: Math.min(...mark.segments.map((segment) => segment.open.from)),
+    to: Math.max(...mark.segments.map((segment) => (segment.close ?? segment.content).to)),
+  };
+}
+
+/**
+ * The changes `acceptAll` would decide that `range` touches, with the other marks of their
+ * suggestions (marks of one `group` are decided together), or all of them without a range. A
+ * range touches a change when it has some of its text (a caret or an edge alone does not). A
+ * deleted row or column, which is kept below its table, and an inserted column, which stands in
+ * the header, are touched by a range that touches the table, deletions included; an inserted
+ * row, by one that touches the row.
+ */
+export function changesIn(parsed: Parsed, range?: Range): MarkRange[] {
+  const all = selected(parsed);
+  if (!range) return all;
+  const extents = new Map<string, Range>();
+  if (all.some((mark) => isRowMark(mark) || isColMark(mark))) {
+    for (const table of tablesOfText(parsed.text, parsed)) {
+      const whole = {
+        from: table.from,
+        to: Math.max(table.to, ...table.deletions.map(({ mark }) => extentOf(mark).to)),
+      };
+      for (const id of rowMarkIds(table)) extents.set(id, whole);
+      for (const id of colMarkIds(table)) extents.set(id, whole);
+      for (const row of table.rows) if (row.insertion) extents.set(row.insertion.id, row);
+    }
+  }
+  const touched = all.filter((mark) => {
+    const { from, to } = extents.get(mark.id) ?? extentOf(mark);
+    return range.from < to && from < range.to;
+  });
+  const groups = new Set(touched.flatMap((mark) => (mark.entry.group ? [mark.entry.group] : [])));
+  const ids = new Set(touched.map((mark) => mark.id));
+  return all.filter((mark) => ids.has(mark.id) || groups.has(mark.entry.group ?? ''));
+}
+
 /**
  * Rejects `marks` in one list of changes: format changes after the others, because rejecting a
  * deletion can bring back the syntax that a format change undoes. A format change that can't be

@@ -304,7 +304,6 @@ export class Journey {
 
   // ----- Waiting and looking -----
 
-  /** Waits for the page to draw what it has: two frames, and the editor's measuring. */
   /**
    * Whether a row of the app's menu bar is enabled. The page has no menu bar, so the page's hook
    * answers as the menu would: from the same row and state.
@@ -328,6 +327,7 @@ export class Journey {
     return ran;
   }
 
+  /** Waits for the page to draw what it has: two frames, and the editor's measuring. */
   async settle(): Promise<void> {
     await this.page.evaluate(
       () =>
