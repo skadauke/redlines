@@ -20,6 +20,7 @@ import { leafKind } from '../blocks/structure.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { freshlyAdded } from './fresh.ts';
+import { imageOfNode } from '../image-size.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
@@ -492,6 +493,8 @@ function autolink(b: Builder, node: SyntaxNode): void {
 
 /** An image drawn in place of its syntax, while the selection is elsewhere. */
 function image(b: Builder, node: SyntaxNode): void {
+  // A tag that is no image, or a block that holds more than one, stays source.
+  if (!imageOfNode(b.state, node)) return;
   // A link a paste or a drop has just added is drawn with the caret at its end (`freshlyAdded`).
   if (touches(b.state, node.from, node.to) && !freshlyAdded(b.state, node.to)) {
     // Its source shows, and the spell check leaves the path alone.
@@ -581,9 +584,13 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
-      else if (name === 'Image') {
-        image(b, node);
-        return false;
+      else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
+        // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
+        if (imageOfNode(state, node.node)) {
+          image(b, node.node);
+          return false;
+        }
+        return true;
       } else if (name === 'URL') {
         // A URL is never spell checked: a bare one is drawn as a link, the one of an autolink is
         // drawn by `autolink`, and the others show only as syntax around the caret.
