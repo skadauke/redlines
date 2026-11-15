@@ -305,6 +305,46 @@ describe('the click on a change bar', () => {
     expect(hot()).toBeNull();
   });
 
+  it('marks the whole editor while the pointer is over any bar, so that every bar is wider and the hand shows (#501)', () => {
+    const editor = load({ view: 'simple' });
+    const { scrollDOM, dom } = editor.view;
+    const marked = () => dom.classList.contains('rl-bars-hot');
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    // Off the target, and out of the editor, the bars are as they were.
+    scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
+    expect(marked()).toBe(false);
+    // A press on the bar takes it away.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mousedown', ON_BAR));
+    expect(marked()).toBe(false);
+    // (Its release is the click, which switches the look.)
+    document.dispatchEvent(mouse('mouseup', ON_BAR));
+    editor.setViewMode('simple');
+    scrollDOM.scrollTop = 0;
+    // A switch of the look takes it away, and so does the text's changing.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    editor.setViewMode('redlines');
+    expect(marked()).toBe(false);
+    editor.setViewMode('simple');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' }, annotations: [] });
+    expect(marked(), 'an edit').toBe(false);
+    // A drag from elsewhere that crosses the margin is no hover.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR, { buttons: 1 }));
+    expect(marked()).toBe(false);
+    // In Clean there is no bar to be over.
+    editor.setViewMode('clean');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(false);
+  });
+
   it('shows no hint, however long the pointer rests on a bar', async () => {
     const editor = load({ view: 'simple' });
     editor.view.scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
