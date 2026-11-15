@@ -47,6 +47,24 @@ export function tierOfCode(code: EditErrorCode | undefined): RefusalTier {
 
 export const REFUSALS: readonly RefusalEntry[] = [
   [
+    'packages/editor/src/image-size.ts',
+    'IMAGE_IN_HEADING',
+    'widen',
+    'a refusal of a lane that came with main: the heading is written as a replacement of its block (format §3.12), when its lane is widened',
+  ],
+  [
+    'packages/editor/src/image-size.ts',
+    'IMAGE_PARTS_PARAGRAPH',
+    'widen',
+    'a refusal of a lane that came with main: the paragraph is written as a replacement of its block (format §3.12)',
+  ],
+  [
+    'packages/format/src/decide.ts',
+    'This change is in text that ends inside a commen',
+    'keep',
+    'the old text of a replacement takes the ledger into itself, so no decision in it can be written (format §3.12)',
+  ],
+  [
     'packages/editor/src/blocks/code.ts',
     'KEEP_CODE',
     'widen',
