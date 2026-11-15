@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, acceptAll, rejectAll } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { decodePayload } from './payload.ts';
@@ -641,5 +641,61 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
       const text = file(body, { k3x9: 'bo' });
       expect(type(text, text.indexOf('more') + 1).error, body).toBeUndefined();
     }
+  });
+});
+
+describe('a fenced code block that is never closed, changed with Track Changes on (#570)', () => {
+  const open = 'Intro.\n\n```js\nlet x = 1';
+
+  it('is replaced with a closed block: the closer would stand in the code otherwise', () => {
+    const edit = trackedEdits(
+      open,
+      [{ from: open.length, to: open.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    const text = applyChanges(open, edit.changes);
+    expect(bodyOf(text)).toBe(
+      'Intro.\n\n<!--sub m2bd \\x60\\x60\\x60js\\nlet x = 1-->\n\n```js\nlet x = 1a\n```\n<!--/m2bd-->',
+    );
+    expect(parse(text).ledgerRange).not.toBeNull();
+    // Rejecting gives the unclosed block back, byte for byte; accepting gives the closed one.
+    expect(back(text)).toBe(open);
+    expect(newestView(text).text.trimEnd()).toBe('Intro.\n\n```js\nlet x = 1a\n```');
+    expect(originalView(text).text).toBe(open);
+    expectEveryOrderAlike('unclosed code', text);
+  });
+
+  it('leaves the ledger after the closed block, where it is read', () => {
+    const edit = trackedEdits(open, [{ from: 14, to: 14, insert: 'a' }], context(ada, ['m2bd']));
+    expect(parse(applyChanges(open, edit.changes)).warnings).toEqual([]);
+  });
+
+  it('can be rejected whole once no other change needs the ledger, and not before', () => {
+    const first = trackedEdits(
+      open,
+      [{ from: open.length, to: open.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    let text = applyChanges(open, first.changes);
+    const second = trackedEdits(text, [{ from: 3, to: 3, insert: 'Z' }], context(ada, ['n8fx']));
+    text = applyChanges(text, second.changes);
+    // The original block is open to the end of the file: with a ledger left after it, the ledger
+    // would be code. The decision waits (it is refused, in words) for the other change.
+    expect(() => reject(text, 'm2bd')).toThrow('leave a code block open to the end of the file');
+    expect(() => accept(text, 'm2bd')).not.toThrow();
+    expect(back(text)).toBe(open);
+    expectEveryOrderAlike('unclosed code and a change above it', text);
+  });
+
+  it('keeps the container’s prefix on the fence it writes', () => {
+    const quote = '> ```js\n> let x = 1';
+    const edit = trackedEdits(
+      quote,
+      [{ from: quote.length, to: quote.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    const text = applyChanges(quote, edit.changes);
+    expect(bodyOf(text)).toContain('> ```js\n> let x = 1a\n> ```\n> <!--/m2bd-->');
+    expect(back(text)).toBe(quote);
   });
 });

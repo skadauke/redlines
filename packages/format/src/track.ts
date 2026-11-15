@@ -113,6 +113,7 @@ import { scan } from './scan.ts';
 import type { Verbatim } from './scan.ts';
 import {
   assertStillBlock,
+  closesAtEnd,
   codeBlockOf,
   edited,
   holdersOf,
@@ -5036,6 +5037,7 @@ function codeEdits(
     edits.map((edit) => ({ ...edit, insert: inEol(edit.insert, plan.eol) })),
     plan.frontEnd,
     plan.markers,
+    plan.parsed.ledgerRange?.from ?? text.length,
   );
   if (!found) {
     // Text that follows a pending deletion of a break, indented as code is: code in the original
@@ -5113,13 +5115,33 @@ function codeEdits(
   // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
   const body = plan.parsed.ledgerRange?.from ?? text.length;
   const roomy =
+    !block.unclosed &&
     block.prefix === '' &&
     text.startsWith(plan.eol + plan.eol, block.to) &&
     block.to + 2 * plan.eol.length <= body;
   const closer = `<!--/${id}-->`;
   const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
   const tail = roomy ? block.to + plan.eol.length : block.to;
-  const content = now.slice(block.prefix.length) + (roomy ? plan.eol : plan.eol + block.prefix);
+  // A block with no closing fence gets one: the closer would stand inside its code otherwise. The
+  // old block is the payload and stays as it was, so rejecting gives the unclosed block back.
+  const fence = OPEN_RUN.exec(block.open)?.[1] ?? '```';
+  const added =
+    block.unclosed && !closesAtEnd(block, now)
+      ? (/\n$/.test(now) ? '' : plan.eol) + block.prefix + fence
+      : '';
+  const content =
+    now.slice(block.prefix.length) + added + (roomy ? plan.eol : plan.eol + block.prefix);
+  // The closing fence and the closer follow the block's last character, where an edit that ends the
+  // block (typing at its end) writes its own text: one change, so that they keep their order.
+  const after = block.unclosed
+    ? added + plan.eol + block.prefix + closer
+    : roomy
+      ? ''
+      : plan.eol + block.prefix + closer;
+  const typedAll = [...typed];
+  const lastAt = typedAll.findIndex((edit) => edit.to === block.to && block.unclosed);
+  const lastEdit = typedAll[lastAt];
+  if (lastEdit) typedAll[lastAt] = { ...lastEdit, insert: lastEdit.insert + after };
   const changes = commitEdit(
     text,
     [
@@ -5128,10 +5150,14 @@ function codeEdits(
         to: block.from,
         insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
-      ...typed,
-      roomy
-        ? { from: tail, to: tail, insert: closer }
-        : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
+      ...typedAll,
+      ...(lastEdit
+        ? []
+        : [
+            roomy
+              ? { from: tail, to: tail, insert: closer }
+              : { from: block.to, to: block.to, insert: after },
+          ]),
     ],
     plan.ledger,
     {
@@ -5160,6 +5186,9 @@ function codeEdits(
   );
   return { changes, markIds: [id], extendedIds: [] };
 }
+
+/** The run of an opening fence, after its container's prefix. */
+const OPEN_RUN = /^[ \t>]*(`{3,}|~{3,})/;
 
 /** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
 const MOST_MODES = 8;

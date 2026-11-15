@@ -72,6 +72,9 @@ export interface KeyEdit {
   caretAfterText?: { from: number; text: string };
   /** Joins the step before it in the history, so that the two are one step to undo. */
   join?: boolean;
+  /** ↓ at the end of code that is never closed: the changes write its closing fence, and the key
+   * goes on to open the empty paragraph below it. */
+  closeFence?: boolean;
   /** Kept in the record of Returns (Return and Shift-Return are, whatever their user event). */
   record?: boolean;
   /**

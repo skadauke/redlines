@@ -13,7 +13,8 @@ import {
   readsAlike,
 } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
-import { setLedger } from './ledger-write.ts';
+import { keepsLedger, setLedger } from './ledger-write.ts';
+import { findLedger } from './ledger-read.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
@@ -681,6 +682,17 @@ export function commitEdit(
       ledgerChanges = error;
     }
   }
+  // A decision that gives back a code block that is never closed leaves the ledger inside it: the
+  // ledger in the new text can't be found, so it is taken out of the old one, where it stands
+  // after the body, when no mark is left for it to hold.
+  let swallowed: TextChange | undefined;
+  if (before && !options.keepLedger && Array.isArray(ledgerChanges) && ledgerChanges.length === 0) {
+    const was = before.ledgerRange === null ? null : findLedger(text);
+    if (was && findLedger(after) === null && !keepsLedger(normalizeLedger(after, ledger))) {
+      swallowed = { from: was.range.from, to: was.range.to, insert: '' };
+      ledgerChanges = [];
+    }
+  }
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
@@ -688,7 +700,18 @@ export function commitEdit(
     if (!removing) assertPointsRead(text, before, after, parsedAfter, changes);
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
-    if (options.keeps) assertViewsKept(text, after, options.keeps);
+    if (options.keeps) {
+      // With the ledger as it ends up: a block left open at the end of the body (a decision that
+      // gives back an unclosed code block) would swallow a ledger that the decision is about to
+      // take out.
+      const final =
+        swallowed !== undefined
+          ? applyChanges(text, [...changes, swallowed])
+          : ledgerChanges === undefined || ledgerChanges instanceof EditError
+            ? after
+            : applyChanges(text, joinChanges(text, changes, after, ledgerChanges));
+      assertViewsKept(text, final, options.keeps);
+    }
     assertPlaced(
       before,
       parsedAfter,
@@ -698,8 +721,11 @@ export function commitEdit(
     );
   }
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
-  const done =
-    ledgerChanges === undefined ? changes : joinChanges(text, changes, after, ledgerChanges);
+  const done = swallowed
+    ? [...changes, swallowed].sort((a, b) => a.from - b.from || a.to - b.to)
+    : ledgerChanges === undefined
+      ? changes
+      : joinChanges(text, changes, after, ledgerChanges);
   // An edit in the cell that a pending alignment change ends is held to every order of decisions of the changes
   // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
   if (before && !removing) assertPointHolds(text, before, done);
