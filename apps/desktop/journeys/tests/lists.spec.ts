@@ -114,4 +114,59 @@ test.describe('lists @lists', () => {
     await j.press('Enter');
     expect((await j.cmText()).split('\n').filter((line) => /^- *$/.test(line))).toEqual([]);
   });
+
+  // #511: a bullet and a number at the same level start at the same place, as does their text,
+  // at every level, in the four looks (`JOURNEYS_PROJECTS=all`).
+  test('bullets and numbers indent to exactly the same place', async ({ start }) => {
+    const bullets = '- aaa\n  - bbb\n    - ccc\n      - ddd\n';
+    const numbers = '1. aaa\n   1. bbb\n      1. ccc\n         1. ddd\n';
+    const mixed = '- aaa\n  1. bbb\n     - ccc\n       1. ddd\n';
+    const places = async (doc: string) => {
+      const j = await start({ doc, tracking: false, view: 'clean' });
+      await j.caretAtEnd();
+      const out: { mark: number; text: number }[] = [];
+      for (const word of ['aaa', 'bbb', 'ccc', 'ddd']) {
+        const text = (await j.pointOf(word)).x;
+        const mark = await j.page.evaluate((w) => {
+          const lines = [...document.querySelectorAll<HTMLElement>('.cm-line')];
+          const line = lines.find((l) => l.textContent?.includes(w))!;
+          return line.querySelector('.rl-list-mark')!.getBoundingClientRect().left;
+        }, word);
+        out.push({ mark, text });
+      }
+      return { j, out };
+    };
+    const a = await places(bullets);
+    await a.j.shot('indent-bullets');
+    const b = await places(numbers);
+    await b.j.shot('indent-numbers');
+    const c = await places(mixed);
+    await c.j.shot('indent-mixed');
+    const close = (x: number, y: number) => Math.abs(x - y) <= 0.6;
+    for (let level = 0; level < 4; level++) {
+      for (const other of [b.out, c.out]) {
+        expect(close(a.out[level]!.text, other[level]!.text), `text, level ${level + 1}`).toBe(
+          true,
+        );
+        expect(close(a.out[level]!.mark, other[level]!.mark), `marker, level ${level + 1}`).toBe(
+          true,
+        );
+      }
+    }
+    // Each level is further right than the one above it.
+    for (let level = 1; level < 4; level++) {
+      expect(a.out[level]!.text).toBeGreaterThan(a.out[level - 1]!.text + 10);
+    }
+  });
+
+  test("showing a marker's source does not move the item's text", async ({ start }) => {
+    const j = await start({ doc: '- aaa\n  - bbb\n1. ccc\n', tracking: false, view: 'clean' });
+    for (const word of ['aaa', 'bbb', 'ccc']) {
+      await j.caretAtEnd();
+      const before = (await j.pointOf(word)).x;
+      await j.place((await j.cmText()).indexOf(word) - 1);
+      await j.shot(`source-shown-${word}`);
+      expect(Math.abs((await j.pointOf(word)).x - before), `${word} stays`).toBeLessThan(0.6);
+    }
+  });
 });

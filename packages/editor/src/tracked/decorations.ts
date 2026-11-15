@@ -39,7 +39,7 @@ import {
 } from '@redlines/format';
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
-import { BULLETS } from '../preview/decorations.ts';
+import { BULLETS, LEVEL_COLS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
 import {
   GHOST_ROWS,
@@ -1035,6 +1035,7 @@ class StruckWidget extends WidgetType {
     wrap.className = 'rl-struck-blocks';
     if (this.after) wrap.dataset['after'] = 'true';
     let item = this.afterItem;
+    const indents: number[] = [];
     for (const deleted of this.deleted) {
       const bar = barClass(deleted.colors);
       for (const block of deleted.blocks) {
@@ -1045,6 +1046,7 @@ class StruckWidget extends WidgetType {
           continue;
         }
         const { kind } = block;
+        if (kind.kind !== 'item') indents.length = 0;
         const div = document.createElement('div');
         div.dataset['mark'] = deleted.id;
         const classes = ['rl-struck', bar];
@@ -1059,16 +1061,26 @@ class StruckWidget extends WidgetType {
         item = kind.kind === 'item';
         div.className = classes.join(' ');
         if (kind.kind === 'item') {
-          const depth = Math.min(Math.floor(kind.indent / 2) + 1, BULLETS.length);
+          // The item's level, from the indents of the items before it in this run (the parse's
+          // nesting isn't there): one deeper than the nearest item it is indented past.
+          while (indents.length && indents[indents.length - 1]! >= kind.indent) indents.pop();
+          indents.push(kind.indent);
+          const level = indents.length + (indents.length === 1 && kind.indent > 0 ? 1 : 0);
+          const depth = Math.min(level, BULLETS.length);
           const mark = document.createElement('span');
           mark.className = 'rl-list-mark';
-          mark.style.setProperty('--rl-cols', String(kind.width));
-          mark.textContent = /^[-*+]$/.test(kind.marker) ? BULLETS[depth - 1]! : kind.marker;
-          div.style.setProperty('--rl-hang', String(kind.indent + kind.width));
+          const drawn = /^[-*+]$/.test(kind.marker) ? BULLETS[depth - 1]! : kind.marker;
+          // As the preview draws an item: a level is as deep for a bullet as for a number.
+          const cols = Math.max(LEVEL_COLS, drawn.length + 1);
+          const start = (level - 1) * LEVEL_COLS;
+          mark.style.setProperty('--rl-cols', String(cols));
+          mark.textContent = drawn;
+          div.style.setProperty('--rl-hang', String(start + cols));
           if (kind.indent > 0) {
             const indent = document.createElement('span');
             indent.className = 'rl-indent';
             indent.textContent = ' '.repeat(kind.indent);
+            if (kind.indent !== start) indent.style.fontSize = `${start / kind.indent}em`;
             div.append(indent);
           }
           div.append(mark);

@@ -556,7 +556,7 @@ describe('Deleted blocks', () => {
       item.view.contentDOM
         .querySelector<HTMLElement>('.rl-struck')
         ?.style.getPropertyValue('--rl-hang'),
-    ).toBe('2');
+    ).toBe('3'); // a bullet's box is three columns, as a number's is
     const quote = load(
       withLedger('One.\n\n<!--del b2b2 > quoted\\n\\n-->\n\nAfter.', { b2b2: 'bo' }),
     );
