@@ -624,3 +624,29 @@ describe('#440: Return twice at the end of a nested item whose marker is another
     },
   ]);
 });
+
+describe('walk seed 586 of the lists side by side (#602): an agent’s edit while an item opened by Return is open', () => {
+  // The depth run of #586 found a file that took the open item with the agent's edit and wrote the
+  // closer at the start of a quote line, which turned the next item into code. It holds on main
+  // now (seed 586 and its reduction pass at `REDLINES_FUZZ=600`); these rows keep it so, with the
+  // typed text of the seed and without it. A second Return in the open item is #599's shape.
+  const doc = '>   * a a⏎>     + a ship‸⏎>⏎>     + a a';
+  const agent = { agent: 'The agent wrote this.' };
+  scriptRows([
+    { name: 'Return, then the agent’s edit', doc, keys: ['Enter', agent], tc: true, expect: {} },
+    {
+      name: 'text typed, Return, then the agent’s edit',
+      doc,
+      keys: [{ type: 'x' }, { type: 'new words ' }, 'Enter', agent],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'Return, the agent’s edit, then Backspace takes the open item back',
+      doc,
+      keys: ['Enter', agent, 'Backspace'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
