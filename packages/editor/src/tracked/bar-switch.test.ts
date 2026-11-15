@@ -305,6 +305,29 @@ describe('the click on a change bar', () => {
     expect(hot()).toBeNull();
   });
 
+  it('marks the whole editor while the pointer is over any bar, so that every bar is wider and the hand shows (#501)', () => {
+    const editor = load({ view: 'simple' });
+    const { scrollDOM, dom } = editor.view;
+    const marked = () => dom.classList.contains('rl-bars-hot');
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    // Off the target, and out of the editor, the bars are as they were.
+    scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
+    expect(marked()).toBe(false);
+    // A press on the bar takes it away, as the switch does, and the text's changing does too.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    editor.setViewMode('redlines');
+    expect(marked()).toBe(false);
+    // In Clean there is no bar to be over.
+    editor.setViewMode('clean');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(false);
+  });
+
   it('shows no hint, however long the pointer rests on a bar', async () => {
     const editor = load({ view: 'simple' });
     editor.view.scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));

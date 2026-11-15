@@ -234,6 +234,43 @@ export function lookedAt(view: EditorView): { pos: number; row: boolean } {
 
 const setHover = StateEffect.define<number | null>();
 
+const setBarsHot = StateEffect.define<boolean>();
+
+const BARS_HOT: Record<string, string> = { class: 'rl-bars-hot' };
+const BARS_COOL: Record<string, string> = {};
+
+/**
+ * Whether the pointer is over a bar's target, in Simple or Redlines. The editor says so by a class
+ * (`rl-bars-hot`), and the theme draws every bar a little wider and the pointer a hand: the
+ * element under the pointer sets the cursor, not the scroller (which `hover` also gives it), and
+ * what is under the pointer in the margin is the content or a line. CodeMirror keeps the
+ * attributes of its editor and takes away a class set by hand at its next update.
+ */
+export const barsHot = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setBarsHot));
+    if (set) return set.value;
+    // The text moved, or a switch made it wrong.
+    return tr.docChanged || tr.startState.field(viewModeField) !== tr.state.field(viewModeField)
+      ? false
+      : value;
+  },
+  provide: (field) =>
+    EditorView.editorAttributes.from(field, (hot) => (hot ? BARS_HOT : BARS_COOL)),
+});
+
+const barsHotTheme = EditorView.baseTheme({
+  // Every bar is wider (3 px instead of 2) while the pointer is over any one: they can be clicked.
+  '&.rl-bars-hot .rl-bar-seg': { width: '3px' },
+  '&.rl-bars-hot .rl-bar:not(.cm-line)::before': { width: '3px' },
+  '&.rl-bars-hot .rl-trow.rl-bar > .rl-tc:first-child::before': { width: '3px' },
+  // The hand: whatever is under the pointer in the margin.
+  '&.rl-bars-hot .cm-scroller, &.rl-bars-hot .cm-content, &.rl-bars-hot .cm-line': {
+    cursor: 'pointer',
+  },
+});
+
 const hotLine = Decoration.line({ class: 'rl-bar-hot' });
 
 /**
@@ -336,17 +373,19 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         const { view } = this;
         this.hot = target;
         view.scrollDOM.style.cursor = 'pointer';
+        const effects: StateEffect<unknown>[] = [setBarsHot.of(true)];
         if (target.from !== undefined) {
           // The bar of a line of text, which the layer draws wider.
-          view.dispatch({ effects: setHotBar.of({ from: target.from }) });
+          effects.push(setHotBar.of({ from: target.from }));
         } else if (target.element.classList.contains('cm-line')) {
           // A table's row, whose first cell draws its bar: its line is the hot one.
-          view.dispatch({ effects: setHover.of(target.pos) });
+          effects.push(setHover.of(target.pos));
         } else {
           // A struck block or a ghost row, which draw their own.
           this.cell = target.element;
           this.cell.classList.add('rl-bar-hot');
         }
+        view.dispatch({ effects });
       }
 
       /** Lets go of the hover without a transaction: the state has dropped it. */
@@ -362,6 +401,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         this.release();
         const { state } = this.view;
         const effects = [
+          ...(state.field(barsHot, false) ? [setBarsHot.of(false)] : []),
           ...(state.field(hotBar, false) ? [setHotBar.of(null)] : []),
           ...(state.field(hoverField) !== null ? [setHover.of(null)] : []),
         ];
@@ -389,5 +429,5 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
       }
     },
   );
-  return [plugin, hoverField];
+  return [plugin, hoverField, barsHot, barsHotTheme];
 }
