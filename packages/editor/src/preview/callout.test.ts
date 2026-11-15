@@ -267,3 +267,29 @@ describe('an alert in the preview (#311)', () => {
     expect(lines).toContain('rl-codeblock');
   });
 });
+
+describe('two alerts one blank line apart (#389)', () => {
+  const classesAt = (doc: string, needle: string) =>
+    lineClasses(editorAt(doc, doc.length)).get(doc.indexOf(needle)) ?? [];
+
+  it('keep apart: the space is outside the second box, not padding inside a tint', () => {
+    const doc = '> [!NOTE]\n> One.\n\n> [!TIP]\n> Two.\n';
+    expect(classesAt(doc, '> [!TIP]')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '> [!TIP]')).not.toContain('rl-space-block');
+  });
+
+  it('keep apart after an alert of several paragraphs, and for three in a row', () => {
+    const doc = '> [!NOTE]\n> One.\n>\n> Again.\n\n> [!TIP]\n> Two.\n\n> [!WARNING]\n> Three.\n';
+    expect(classesAt(doc, '> [!TIP]')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '> [!WARNING]')).toContain('rl-space-block-apart');
+  });
+
+  it('leave the space under a paragraph above an alert, and over a paragraph below it, as it was', () => {
+    const doc = 'Intro.\n\n> [!NOTE]\n> One.\n\nAfter.\n';
+    expect(classesAt(doc, 'After.')).toContain('rl-space-block');
+    expect(classesAt(doc, 'After.')).not.toContain('rl-space-block-apart');
+    expect([...lineClasses(editorAt(doc, 0)).values()].flat()).not.toContain(
+      'rl-space-block-apart',
+    );
+  });
+});

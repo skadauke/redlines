@@ -4,34 +4,10 @@ import {
   addImages,
   generatedImageName,
   imageExtension,
-  imageFolderFor,
   type ImageAdding,
   savedImageName,
 } from './image-add.ts';
 import type { AddedImages, ImageSource } from './host.ts';
-
-describe('the folder for images', () => {
-  it('is the one the settings name, beside the document', () => {
-    expect(imageFolderFor('folder', 'images', 'plan.md')).toBe('images');
-    expect(imageFolderFor('folder', 'Bilder 2026', 'plan.md')).toBe('Bilder 2026');
-  });
-
-  it('is named for the document, without its extension, when the settings say so', () => {
-    expect(imageFolderFor('assets', 'images', 'plan.md')).toBe('plan.assets');
-    expect(imageFolderFor('assets', 'images', 'my notes.txt')).toBe('my notes.assets');
-    expect(imageFolderFor('assets', 'images', 'archive.tar.md')).toBe('archive.tar.assets');
-    expect(imageFolderFor('assets', 'images', 'Untitled')).toBe('Untitled.assets');
-  });
-
-  it('is never a hidden folder, which the preview wouldn’t load images from', () => {
-    expect(imageFolderFor('assets', 'images', '.notes.md')).toBe('notes.assets');
-    expect(imageFolderFor('assets', 'images', '..draft.md')).toBe('draft.assets');
-  });
-
-  it('is the document’s own folder, written as nothing, when the settings say so', () => {
-    expect(imageFolderFor('same', 'images', 'plan.md')).toBe('');
-  });
-});
 
 describe('the name of a pasted image', () => {
   it('is made of the time, in the person’s own, to the second', () => {
@@ -98,7 +74,6 @@ function setup(
   options: {
     path?: string | null;
     name?: string;
-    place?: 'folder' | 'assets' | 'same';
     folderName?: string;
     saves?: boolean | (() => Promise<boolean>);
     added?: AddedImages | Error;
@@ -115,7 +90,7 @@ function setup(
   const added = options.added ?? { paths: ['images/shot.png'], refused: [] };
   const adding: ImageAdding = {
     document: () => ({ ...document }),
-    place: () => ({ place: options.place ?? 'folder', name: options.folderName ?? 'images' }),
+    folderName: () => options.folderName ?? 'images',
     saveFirst: async () => {
       events.push('asked to save');
       const saved =
@@ -153,30 +128,22 @@ describe('adding images', () => {
     expect(notices).toEqual([]);
   });
 
-  it('saves them where the settings say, for the document’s name', async () => {
-    const assets = setup({ place: 'assets', name: 'my notes.md' });
-    await addImages(assets.adding, assets.spot, files);
-    expect(assets.calls[0]?.folder).toBe('my notes.assets');
-    const same = setup({ place: 'same' });
-    await addImages(same.adding, same.spot, files);
-    expect(same.calls[0]?.folder).toBe('');
+  it('saves them in the folder the settings name, which the host finds in the document’s project', async () => {
     const named = setup({ folderName: 'Bilder' });
     await addImages(named.adding, named.spot, files);
     expect(named.calls[0]?.folder).toBe('Bilder');
+    // Whatever the document is called.
+    const other = setup({ name: 'my notes.md' });
+    await addImages(other.adding, other.spot, files);
+    expect(other.calls[0]?.folder).toBe('images');
   });
 
   it('asks to save a document with no file first, and adds them to the file it is saved as', async () => {
     const { adding, spot, calls, events } = setup({ path: null });
     await addImages(adding, spot, files);
     expect(events).toEqual(['asked to save', 'added', 'wrote images/shot.png']);
-    // Beside the file it was saved as, in the folder named for it.
+    // In the project of the file it was saved as.
     expect(calls).toEqual([{ path: '/docs/Untitled.md', folder: 'images', source: files }]);
-  });
-
-  it('names the folder for the name the document was saved under', async () => {
-    const { adding, spot, calls } = setup({ path: null, place: 'assets' });
-    await addImages(adding, spot, files);
-    expect(calls[0]?.folder).toBe('Untitled.assets');
   });
 
   it('adds nothing, and lets the spot go, when the person doesn’t save', async () => {

@@ -10,6 +10,7 @@
 
 import {
   Compartment,
+  EditorSelection,
   EditorState,
   type Extension,
   Prec,
@@ -21,6 +22,7 @@ import {
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
 import { takeBackAnnotation } from '../blocks/open.ts';
+import { atomsOf } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
 import { agentCaret } from './caret.ts';
@@ -153,10 +155,51 @@ export const undoKeys = (nothing?: (redo: boolean) => void): readonly KeyBinding
 
 export const undoKeymap: readonly KeyBinding[] = undoKeys();
 
+/**
+ * The selection of a redo with each end that is strictly inside hidden text moved out of
+ * it (#461): a caret to the nearer edge, a range's ends outward. A place at an edge of hidden text,
+ * the start of the file included, stays where the step left it.
+ */
+function outOfHiddenText(tr: Transaction): EditorSelection {
+  const { selection } = tr.state;
+  const atoms = atomsOf(tr.state);
+  const end = bodyEnd(tr.state.field(parsedField));
+  const outside = (pos: number, side: -1 | 0 | 1) => {
+    let moved = pos;
+    atoms.between(pos, pos, (from, to) => {
+      if (from < pos && pos < to) {
+        moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+      }
+    });
+    // Never past the body: onto the ledger that is hidden after it, in front of the closers that
+    // end the body's text when the body's end is inside them (as `selectionInBody` stops a
+    // selection).
+    if (end !== null && moved > end) {
+      moved = end;
+      atoms.between(end, end, (from, to) => {
+        if (from < end && end < to) moved = from;
+      });
+    }
+    return moved;
+  };
+  const next = EditorSelection.create(
+    selection.ranges.map((range) =>
+      range.empty
+        ? EditorSelection.cursor(outside(range.head, 0))
+        : EditorSelection.range(
+            outside(range.anchor, range.anchor < range.head ? -1 : 1),
+            outside(range.head, range.head < range.anchor ? -1 : 1),
+          ),
+    ),
+    selection.mainIndex,
+  );
+  return next.eq(selection) ? selection : next;
+}
+
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history({ agentCaret, label: labelOf }),
+    history({ agentCaret, visibleCaret: outOfHiddenText, label: labelOf }),
     restart.of([]),
     droppedField,
     outsideField,

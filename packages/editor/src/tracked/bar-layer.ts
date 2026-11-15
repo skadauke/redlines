@@ -241,6 +241,17 @@ const RIGHT_TO_LEFT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 export const hasRightToLeft = (text: string): boolean => RIGHT_TO_LEFT.test(text);
 
 /**
+ * The space at the top of an alert's box that is no part of it (#389): an alert under an alert
+ * keeps the space between blocks as padding on its first line and clips its tint to leave it out
+ * (`rl-space-*-apart`, preview/theme.ts), so its bar starts below that, as the box does.
+ */
+function spaceApart(el: Element): number {
+  if (!/\brl-space-\w+-apart\b/.test(el.className)) return 0;
+  const clip = /^inset\(([\d.]+)px/.exec(getComputedStyle(el).clipPath);
+  return clip ? Number(clip[1]) : 0;
+}
+
+/**
  * The real page: the screen lines found from the page's own boxes. The rows are where the
  * rectangles of the line's content lie, and each row starts at the position at its left edge.
  * Stepping through positions with `coordsAtPos` and `moveToLineBoundary` can't tell a row's end
@@ -254,6 +265,7 @@ const pageMeasure: BarMeasure = {
     if (!el) return null;
     const box = el.getBoundingClientRect();
     if (!box.height) return null;
+    const apart = spaceApart(el);
     let stops: ScreenLine[] = [];
     if (!hasRightToLeft(view.state.sliceDoc(line.from, line.to))) {
       const range = el.ownerDocument.createRange();
@@ -263,7 +275,11 @@ const pageMeasure: BarMeasure = {
         view.posAtCoords({ x: box.left + 1, y: (row.top + row.bottom) / 2 }, false),
       );
     }
-    return { left: box.left, lines: bandsOf(stops, box, line), drawn: struckPieces(el) };
+    return {
+      left: box.left,
+      lines: bandsOf(stops, { top: box.top + apart, bottom: box.bottom }, line),
+      drawn: struckPieces(el),
+    };
   },
 };
 

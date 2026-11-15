@@ -230,11 +230,11 @@ for (const width of [320, 375, 768, 921, 1120]) {
 // Review Focus 3.
 // 921 and 960 px: the hero turns two-column, and the sheet is at its narrowest.
 for (const width of [320, 375, 768, 921, 960, 1120]) {
-  test(`Review opens the bar inside the sheet at ${width} px`, async ({ page }) => {
+  test(`Review opens the panel inside the sheet at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await open(page);
     await sheet(page).getByRole('button', { name: 'Review' }).click();
-    const bar = sheet(page).locator('.rl-review-bar');
+    const bar = sheet(page).locator('.rl-review-panel');
     await expect(bar).toBeVisible();
     const box = (await bar.boundingBox())!;
     const frame = (await sheet(page).boundingBox())!;
@@ -275,7 +275,7 @@ test('Review reaches Accept by keyboard alone, and accepts a change', async ({ p
   const before = await inserts.count();
   await sheet(page).getByRole('button', { name: 'Review' }).focus();
   await page.keyboard.press('Enter');
-  const accept = sheet(page).locator('.rl-review-bar').getByRole('button', { name: 'Accept' });
+  const accept = sheet(page).locator('.rl-review-panel').getByRole('button', { name: 'Accept' });
   await expect(accept).toBeFocused();
   await expect(accept).toBeEnabled();
   await page.keyboard.press('Enter');

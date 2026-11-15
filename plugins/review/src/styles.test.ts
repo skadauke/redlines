@@ -32,7 +32,7 @@ describe('the review styles at a text size', () => {
     const loose: string[] = [];
     for (const [selector, rule] of Object.entries(reviewThemeSpec)) {
       if (!/rl-(note|card|rail|dot|anchor)/.test(selector)) continue;
-      if (/rl-review-bar|rl-bar-/.test(selector)) continue;
+      if (/rl-review-panel|rl-rp-|rl-bar-/.test(selector)) continue;
       for (const [property, value] of Object.entries(rule as Record<string, unknown>)) {
         if (UNSCALED.has(property) || typeof value !== 'string') continue;
         checked++;
@@ -53,17 +53,16 @@ describe('the review styles at a text size', () => {
     });
   });
 
-  it("keeps the review bar at the interface's own sizes, whatever the text size", () => {
-    expect(reviewThemeSpec['.rl-review-bar']).toMatchObject({
+  it("keeps the review panel at the interface's own sizes, whatever the text size", () => {
+    expect(reviewThemeSpec['.rl-review-panel']).toMatchObject({
       fontSize: 'var(--rl-size-ui)',
-      height: '42px',
     });
     expect(reviewThemeSpec['.rl-bar-error']).toMatchObject({ fontSize: 'var(--rl-size-ui)' });
-    expect(reviewThemeSpec['.rl-review-bar .rl-hint']).toMatchObject({
+    expect(reviewThemeSpec['.rl-review-panel .rl-hint']).toMatchObject({
       fontSize: 'var(--rl-size-ui-small)',
     });
     for (const [selector, rule] of Object.entries(reviewThemeSpec)) {
-      if (/rl-review-bar|rl-bar-/.test(selector)) {
+      if (/rl-review-panel|rl-rp-|rl-bar-/.test(selector)) {
         expect(JSON.stringify(rule), selector).not.toContain('scale');
       }
     }

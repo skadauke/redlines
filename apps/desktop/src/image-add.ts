@@ -6,25 +6,6 @@
 import type { ImageSpot } from '@redlines/editor';
 import { extension } from './file-names.ts';
 import type { AddedImages, ImageSource } from './host.ts';
-import type { ImagePlace } from './settings.ts';
-
-/**
- * The folder for the images of the document called `documentName`, as the settings say, relative
- * to the document: the folder named in the settings, one named for the document (`plan.assets` for
- * `plan.md`), or '' for the document's own folder. Never a hidden one, which the preview wouldn't
- * load images from.
- */
-export function imageFolderFor(
-  place: ImagePlace,
-  folderName: string,
-  documentName: string,
-): string {
-  if (place === 'same') return '';
-  if (place === 'folder') return folderName;
-  const dot = documentName.lastIndexOf('.');
-  const stem = (dot > 0 ? documentName.slice(0, dot) : documentName).replace(/^\.+/, '');
-  return `${stem || 'assets'}.assets`;
-}
 
 const pad = (value: number, length = 2) => String(value).padStart(length, '0');
 
@@ -90,11 +71,11 @@ export function savedImageName(file: File, pasted: boolean, now: Date): string |
 export interface ImageAdding {
   /** The document: the path of its file, null while it has none, and its name. */
   document(): { path: string | null; name: string };
-  /** Where the settings say images go. */
-  place(): { place: ImagePlace; name: string };
+  /** The name of the project's folder for images, as the settings say. */
+  folderName(): string;
   /** Asks whether to save the document first, and saves it as Save As does; whether it is saved. */
   saveFirst(): Promise<boolean>;
-  /** Saves the images of `source` in `folder` beside the document at `path` (the host's). */
+  /** Saves the images of `source` in the folder named `folder` of the project of the document at `path` (the host's). */
   addImages(path: string, folder: string, source: ImageSource): Promise<AddedImages>;
   /** Says something to the person, in a notice. */
   notice(message: string): void;
@@ -119,9 +100,7 @@ export async function addImages(
       document = adding.document();
     }
     if (document.path === null) return spot.release();
-    const { place, name } = adding.place();
-    const folder = imageFolderFor(place, name, document.name);
-    const added = await adding.addImages(document.path, folder, source);
+    const added = await adding.addImages(document.path, adding.folderName(), source);
     if (added.paths.length) spot.insert(added.paths);
     else spot.release();
     const [first, ...more] = added.refused;
