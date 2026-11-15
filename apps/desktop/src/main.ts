@@ -397,10 +397,7 @@ createEmoji(editor, { enabled: () => settings.emojiSuggestions });
  */
 const imageAdding: ImageAdding = {
   document: () => ({ path: controller.state.path, name: controller.state.name }),
-  place: () => {
-    const { imagePlace, imageFolderName } = loadSettings();
-    return { place: imagePlace, name: imageFolderName };
-  },
+  folderName: () => loadSettings().imageFolderName,
   saveFirst: async () => (await host.askToSaveForImage()) && (await controller.saveAs()),
   addImages: (path, folder, source) => host.addImages(path, folder, source),
   notice: (message) => notice.flash(message),

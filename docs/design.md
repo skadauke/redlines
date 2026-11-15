@@ -1053,7 +1053,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
   folder already is linked, not copied. With Track Changes on, the link is the person's own tracked
   insertion, and Undo, named Insert Image, takes it back in one step. Rejecting the insertion or
-  undoing it takes back the link only: the file stays beside the document, where it can be seen and
+  undoing it takes back the link only: the file stays in the project’s folder for images, where it can be seen and
   deleted by hand, because Redlines never deletes a file it might not be the only one to want. A
   document with no file yet asks to be saved first, since there is no folder to save beside. The
   person may go on writing while the images are saved: the links go in where the paste or drop was,
@@ -1061,12 +1061,17 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   all of it is still there; what was typed in it stays, and the links go after it. A document that
   was replaced meanwhile gets none of the links, and the person is told, the files being where they
   were saved.
-- **Where images go** is Preferences › Editor › Images: a folder beside the document, called
-  `images` (the name can be changed), a folder named for the document (`plan.assets` for
-  `plan.md`), or the document's own folder. All three are inside the document's folder, where the
-  preview loads images from, and the setting can't name another place on the disk. A document in
-  the home folder, whose project is too broad to load images from but for its own folder, takes
-  images in that folder alone, and says so for the other two. Only image files go in, by their
+- **Where images go** (#523) is one folder for the project, Preferences › Editor › Images: `images`
+  (the name can be changed) in the project folder the sidebar shows, which is the repository's root,
+  or the document's own folder where it is in no repository. Every document of the project saves
+  its images there and links them by a path from where it is (`../images/shot.png`), so the
+  preview, which loads from the project folder, finds them from a document in any folder below it,
+  a hidden one included. An image dragged in from elsewhere is copied in, never moved, and nothing
+  is ever replaced: a taken name gets `-2`, `-3` and on, and an image that is there already, byte
+  for byte, is linked and not copied again. A document that is in no project keeps an `images`
+  folder beside it. A document in the home folder or at the disk's root, whose project is too broad
+  to load images from but for its own folder, takes images in that folder alone. The setting can't
+  name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
   or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
   pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
