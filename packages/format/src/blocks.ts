@@ -76,7 +76,19 @@ export function prefixLength(line: string): number {
  * column. A checkbox belongs to the text, not to the indentation.
  */
 export function continuationPrefix(prefix: string): string {
-  return prefix.replace(LIST_MARKER, (marker) => ' '.repeat(marker.length)).replace(CHECKBOX, '');
+  // A marker's width is the columns it spans, where a tab goes on to the next tab stop of four
+  // (CommonMark): `-\t` has its content at column 4, not 2.
+  const columns = (text: string, from = 0) => {
+    let column = from;
+    for (const c of text) column = c === '\t' ? column + 4 - (column % 4) : column + 1;
+    return column;
+  };
+  return prefix
+    .replace(LIST_MARKER, (marker, offset: number) => {
+      const start = columns(prefix.slice(0, offset));
+      return ' '.repeat(columns(marker, start) - start);
+    })
+    .replace(CHECKBOX, '');
 }
 
 /**
