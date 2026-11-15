@@ -358,7 +358,7 @@ function onlyText(state: EditorState, item: SyntaxNode): boolean {
     else if (
       !text ||
       child.name !== 'OrderedList' ||
-      textualItems(state, text).length !== child.getChildren('ListItem').length
+      textualItems(state, text, false).length !== child.getChildren('ListItem').length
     ) {
       return false;
     }
@@ -373,9 +373,20 @@ function onlyText(state: EditorState, item: SyntaxNode): boolean {
  * it can't, and the items after it on consecutive lines, as long as none can. An empty item is
  * the open item of the editor's keys (`empty-item.ts`), kept out of the file, so it is none of them.
  */
-function textualItems(state: EditorState, head: SyntaxNode): SyntaxNode[] {
+function textualItems(state: EditorState, head: SyntaxNode, whole = true): SyntaxNode[] {
   const list = past(head.nextSibling);
   if (head.name !== 'Paragraph' || list?.name !== 'OrderedList') return [];
+  // Under an item that the parse reads (a sublist only partly text of it): the same reading here.
+  const above = head.parent;
+  const before = above?.name === 'ListItem' ? past(above.parent?.prevSibling ?? null, true) : null;
+  if (
+    whole &&
+    before &&
+    textualItems(state, before, false).some((it) => it.from === above!.from) &&
+    !onlyText(state, above!)
+  ) {
+    return [];
+  }
   const { doc } = state;
   let line = doc.lineAt(head.to).number;
   const found: SyntaxNode[] = [];
@@ -386,7 +397,7 @@ function textualItems(state: EditorState, head: SyntaxNode): SyntaxNode[] {
       !mark?.nextSibling ||
       doc.lineAt(item.from).number !== line + 1 ||
       /^1[.)]$/.test(state.sliceDoc(mark.from, mark.to)) ||
-      !onlyText(state, item)
+      (whole && !onlyText(state, item))
     ) {
       break;
     }

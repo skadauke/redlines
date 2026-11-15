@@ -185,3 +185,38 @@ for (const [shape, base] of SHAPES) {
   }
 }
 scriptRows(under, 60_000);
+
+/** A sublist that is only partly text of its item (`3. c` is, `1. d` is a list): read as the parse does. */
+const PARTLY = '1. a⏎   2. b⏎      3. c⏎      1. d';
+const partly: Script[] = [];
+for (const [where, doc, steps] of [
+  ['at 3. c', PARTLY.replace('3. c', '3. ‸c'), ['Enter']],
+  ['at the end of 1. d', `${PARTLY}‸`, ['Enter']],
+  ['a paste at the end of 2. b', PARTLY.replace('2. b', '2. b‸'), [{ paste: '- p\n- q' }]],
+  ['a paste at the end of 1. d', `${PARTLY}‸`, [{ paste: '- p\n- q' }]],
+] as [string, string, Script['keys']][]) {
+  for (const tc of [true, false]) {
+    partly.push({
+      name: `partly textual sublist, ${where}, Track Changes ${tc ? 'on' : 'off'}`,
+      doc,
+      keys: steps,
+      tc,
+      expect: {},
+    });
+  }
+}
+scriptRows(partly, 60_000);
+
+/** In a quote, a list's last item with a sublist after it: Return no longer opens an empty paragraph
+ * (it refused with Track Changes on), it makes the next item, as in a list outside a quote. */
+scriptRows(
+  rows([
+    [
+      'Return at the end of a quoted item with a sublist below',
+      '> - a⏎> - b‸⏎>   - c',
+      ['Enter'],
+      '> - a⏎> - b⏎> - ⏎>   - c',
+    ],
+  ]),
+  60_000,
+);
