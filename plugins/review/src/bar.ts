@@ -49,6 +49,28 @@ import {
  * the document: the review leaves nothing selected, and the browser keeps drawing the old selection
  * while the document is out of focus.
  */
+/**
+ * Where the panel may be: the part of the window where the editor can be seen, inside the editor's
+ * own box, and inside every ancestor that clips it (a sheet in a page that clips its editor).
+ */
+function clippedSpace(view: EditorView, win: Window): PanelSpace['visible'] {
+  const seen = visibleSpace(view);
+  const space = { ...seen };
+  const clip = (r: { left: number; top: number; right: number; bottom: number }) => {
+    space.left = Math.max(space.left, r.left);
+    space.top = Math.max(space.top, r.top);
+    space.right = Math.min(space.right, r.right);
+    space.bottom = Math.min(space.bottom, r.bottom);
+  };
+  clip(view.dom.getBoundingClientRect());
+  for (let el = view.dom.parentElement; el && el !== el.ownerDocument.body; el = el.parentElement) {
+    const style = win.getComputedStyle(el);
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+    clip(el.getBoundingClientRect());
+  }
+  return space;
+}
+
 /** Whether a key is part of an input method's composition (Safari ends it before the key). */
 function composing(event: KeyboardEvent): boolean {
   return event.isComposing || event.keyCode === 229;
@@ -639,14 +661,7 @@ class Panel {
         const win = view.dom.ownerDocument.defaultView ?? window;
         // The part of the window where the editor can be seen, and inside the editor's own box: an
         // editor that is a sheet in a page keeps its panel on the sheet.
-        const seen = visibleSpace(view);
-        const box = view.dom.getBoundingClientRect();
-        const visible = {
-          left: Math.max(seen.left, box.left),
-          top: Math.max(seen.top, box.top),
-          right: Math.min(seen.right, box.right),
-          bottom: Math.min(seen.bottom, box.bottom),
-        };
+        const visible = clippedSpace(view, win);
         const content = view.contentDOM.getBoundingClientRect();
         // The text's own edges, inside the padding that holds the margin notes.
         const style = win.getComputedStyle(view.contentDOM);
