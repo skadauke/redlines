@@ -183,7 +183,7 @@ describe('themes', () => {
           const color = declared.get(`--rl-code-${kind}`)!;
           const label = `${name} ${appearance} ${kind}`;
           expect(color, label).toMatch(/^#[0-9a-f]{6}$/);
-          for (const ground of ['--rl-page', '--rl-tint']) {
+          for (const ground of ['--rl-page', '--rl-tint', '--rl-card']) {
             expect(
               contrast(color, declared.get(ground)!),
               `${label} on ${ground}`,
@@ -275,8 +275,10 @@ function ratio(text: Rgb, ground: Rgb): number {
 
 describe('text contrast on the grounds', () => {
   // The tokens text is drawn in: the inks, the brand red, the eight author colors and the code
-  // colors. --rl-ink-3 is the tertiary gray (placeholders, hints at rest, disabled controls and
-  // the grips), which WCAG leaves out when a control is inactive; it is not held here.
+  // colors. --rl-ink-3 is the tertiary gray of disabled controls, grips and rules, which WCAG leaves
+  // out when a control is inactive, so it is not held here; text a person has to read (hints,
+  // placeholders, captions, timestamps, empty states) is --rl-ink-2 or darker, and
+  // apps/desktop/src/text-contrast.node.test.ts fails when --rl-ink-3 colors any other text.
   const TEXT = [
     '--rl-ink',
     '--rl-ink-2',
@@ -285,12 +287,12 @@ describe('text contrast on the grounds', () => {
     ...CODE_KINDS.map((kind) => `--rl-code-${kind}`),
   ];
 
-  it('every text color keeps 4.5:1 on the page and on the tint, in every theme', () => {
+  it('every text color keeps 4.5:1 on the page, the tint and the card, in every theme', () => {
     const failing: string[] = [];
     for (const { name } of THEMES) {
       for (const appearance of APPEARANCES) {
         const declared = block(name, appearance);
-        for (const ground of ['--rl-page', '--rl-tint']) {
+        for (const ground of ['--rl-page', '--rl-tint', '--rl-card']) {
           const under = resolve(declared.get(ground)!);
           for (const token of TEXT) {
             const text = resolve(declared.get(token)!, under);

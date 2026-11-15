@@ -186,7 +186,7 @@ export const baseThemeSpec: ThemeSpec = {
     border: 'none',
     borderRadius: '4px',
     background: 'transparent',
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     opacity: '0',
     cursor: 'pointer',
     font: 'inherit',
@@ -212,7 +212,7 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image img': { maxWidth: '100%', height: 'auto', verticalAlign: 'middle' },
   '.rl-image-own': { display: 'block', textAlign: 'center', padding: `${s(6)} 0`, textIndent: '0' },
   '.rl-image-own img': { display: 'block', margin: '0 auto', verticalAlign: 'top' },
-  '.rl-image-missing': { color: 'var(--rl-ink-3)' },
+  '.rl-image-missing': { color: 'var(--rl-ink-2)' },
 
   // Lists: indentation and markers take the width they have in monospace, so nested items line
   // up under their parent's text and showing a marker's source doesn't move the line. A zero
