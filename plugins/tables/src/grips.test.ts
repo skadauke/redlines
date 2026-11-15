@@ -194,6 +194,29 @@ describe('row grips', () => {
     expect(menuItems(editor)).toEqual([]);
   });
 
+  it('disables Move Row Up at the first row and Move Row Down at the last, with the reason', () => {
+    const editor = mount();
+    const items = () => [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
+    const named = (name: string) => items().find((el) => el.textContent === name);
+    const lastRow = (DOC.match(/^\| /gm) ?? []).length - 2;
+    move(editor, LEFT + 50, rowY(0));
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(0) });
+    expect(named('Move Row Up')?.getAttribute('aria-disabled')).toBe('true');
+    expect(named('Move Row Up')?.title).toBe('The row is at the top.');
+    expect(named('Move Row Down')?.hasAttribute('aria-disabled')).toBe(false);
+    // A click on a disabled item does nothing and leaves the menu open.
+    const before = editor.getDoc();
+    mouse(named('Move Row Up')!, 'mousedown');
+    expect(editor.getDoc()).toBe(before);
+    expect(items().length).toBeGreaterThan(0);
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    move(editor, LEFT + 50, rowY(lastRow));
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(lastRow) });
+    expect(named('Move Row Down')?.getAttribute('aria-disabled')).toBe('true');
+    expect(named('Move Row Down')?.title).toBe('The row is at the bottom.');
+    expect(named('Move Row Up')?.hasAttribute('aria-disabled')).toBe(false);
+  });
+
   it('clears the contents of the row with Clear Contents', () => {
     const editor = mount();
     move(editor, LEFT + 50, rowY(2));

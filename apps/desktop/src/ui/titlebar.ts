@@ -404,7 +404,7 @@ export function createTitleBar(
     entries: () => [
       {
         role: 'menuitemcheckbox',
-        label: 'Track changes',
+        label: 'Track Changes',
         icon: 'tracking',
         iconClass: state.tracking ? 'rl-pen-on' : undefined,
         shortcut: TRACKING_KEY,
@@ -414,9 +414,9 @@ export function createTitleBar(
       'divider',
       {
         role: 'menuitem',
-        label: 'Review changes',
+        label: 'Review Changes',
         icon: 'list',
-        shortcut: '⌥⌘]',
+        // No key, as in the menu bar: ⌥⌘] is Next Change.
         // Nothing to review in a document without redlines.
         disabled: !state.hasRedlines,
         select: () => actions.openReview(),
@@ -424,7 +424,7 @@ export function createTitleBar(
       'divider',
       {
         role: 'menuitemcheckbox',
-        label: 'Show resolved comments',
+        label: 'Show Resolved Comments',
         icon: 'resolved',
         checked: state.showResolved,
         select: () => actions.toggleResolved(),

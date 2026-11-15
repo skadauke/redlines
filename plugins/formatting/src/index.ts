@@ -922,6 +922,11 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.check',
       title: 'Check Item',
       shortcut: 'Mod-Shift-u',
+      // Without a task item there is nothing to check: the item is disabled, not a notice.
+      isEnabled: (state) => {
+        const { from, to } = state.selection.main;
+        return taskItemsIn(state, from, to).length > 0;
+      },
       run: checkItems,
     }),
     command('paragraph', 'insert', {

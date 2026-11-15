@@ -28,6 +28,8 @@ import {
   insertRowsAt,
   moveCols,
   moveColsTo,
+  canMoveCols,
+  canMoveRows,
   moveRows,
   moveRowsTo,
   rectOf,
@@ -95,6 +97,8 @@ export const GRIPS_STYLE = `
 .rl-grip-hint[hidden] { display: none; }
 .rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
 .rl-grip-item:hover { background: var(--rl-rule); }
+.rl-grip-item[aria-disabled="true"] { opacity: 0.45; }
+.rl-grip-item[aria-disabled="true"]:hover { background: none; }
 .rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
 `;
 
@@ -807,15 +811,26 @@ class Grips {
   ): void {
     const { state } = this.view;
     const now = caretAlign(state);
-    const items: [string, () => boolean, boolean?][] =
+    // The last is the reason the item is disabled, when it is.
+    const items: [string, () => boolean, boolean?, string?][] =
       press.axis === 'col'
         ? [
             [colTitles.insertLeft(state), () => insertCols(this.view, true)],
             [colTitles.insertRight(state), () => insertCols(this.view, false)],
             [colTitles.delete(state), () => deleteCols(this.view)],
             ['Delete Table', () => deleteTable(this.view)],
-            [colTitles.moveLeft(state), () => moveCols(this.view, true)],
-            [colTitles.moveRight(state), () => moveCols(this.view, false)],
+            [
+              colTitles.moveLeft(state),
+              () => moveCols(this.view, true),
+              undefined,
+              canMoveCols(state, true) ? undefined : 'The column is at the left.',
+            ],
+            [
+              colTitles.moveRight(state),
+              () => moveCols(this.view, false),
+              undefined,
+              canMoveCols(state, false) ? undefined : 'The column is at the right.',
+            ],
             // The columns' alignment, the caret's column checked.
             ['Align Left', () => alignCols(this.view, 'left'), now === 'left'],
             ['Align Center', () => alignCols(this.view, 'center'), now === 'center'],
@@ -828,22 +843,38 @@ class Grips {
             [rowTitles.insertBelow(state), () => insertRows(this.view, false)],
             [rowTitles.delete(state), () => deleteRows(this.view)],
             ['Delete Table', () => deleteTable(this.view)],
-            [rowTitles.moveUp(state), () => moveRows(this.view, true)],
-            [rowTitles.moveDown(state), () => moveRows(this.view, false)],
+            [
+              rowTitles.moveUp(state),
+              () => moveRows(this.view, true),
+              undefined,
+              canMoveRows(state, true) ? undefined : 'The row is at the top.',
+            ],
+            [
+              rowTitles.moveDown(state),
+              () => moveRows(this.view, false),
+              undefined,
+              canMoveRows(state, false) ? undefined : 'The row is at the bottom.',
+            ],
             ['Clear Contents', () => clearCells(this.view, cellsToClear(state))],
           ];
     const menu = document.createElement('div');
     menu.className = 'rl-grip-menu';
     menu.setAttribute('role', 'menu');
-    for (const [title, run, checked] of items) {
+    for (const [title, run, checked, why] of items) {
       const item = document.createElement('div');
       item.className = 'rl-grip-item';
       // An item that says what the selection has is a check mark: the role says it to assistive technology.
       item.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemradio');
       if (checked !== undefined) item.setAttribute('aria-checked', String(checked));
       item.textContent = title;
+      if (why) {
+        // Disabled: it stays in the menu, says why, and a click leaves the menu open.
+        item.setAttribute('aria-disabled', 'true');
+        item.title = why;
+      }
       item.addEventListener('mousedown', (event) => {
         event.preventDefault();
+        if (why) return;
         this.closeMenu();
         run();
       });

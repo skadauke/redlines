@@ -225,6 +225,7 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      '---',
       'Enter Full Screen',
     ]);
     expect(readsAll(model, 'Review')).toEqual([
@@ -474,12 +475,14 @@ describe('the menu model', () => {
       '---',
       ['Rename…', undefined],
     ]);
-    expect(readsAll(model, 'View').slice(-5)).toEqual([
+    // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
+    expect(readsAll(model, 'View').slice(-6)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
-      'Enter Full Screen',
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],
+      '---',
+      'Enter Full Screen',
     ]);
     const everyRow = model.menus.flatMap((menu) => menu.rows.map(reads));
     expect(everyRow).not.toContainEqual(['Hidden', 'CmdOrCtrl+H']);

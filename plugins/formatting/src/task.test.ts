@@ -406,13 +406,16 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     expect(editor.getDoc()).toBe('- [x] a\n  - [x] b\n    - [x] c\n\nEnd.\n');
   });
 
-  it('says so where there is no task item, and leaves the text alone', () => {
+  it('is disabled where there is no task item, and leaves the text alone', () => {
     const notices: string[] = [];
     const editor = mount(LIST, true, notices);
     select(editor, 'plain');
+    expect(editor.getUiState().enabledCommands).not.toContain('block.check');
     press(editor);
-    expect(notices).toEqual([expect.stringMatching(/^Check Item works on a task list item/)]);
+    expect(notices).toEqual([]);
     expect(editor.getDoc()).toBe(LIST);
+    select(editor, 'one');
+    expect(editor.getUiState().enabledCommands).toContain('block.check');
   });
 
   it('says to write the item first on an item with no text', () => {
