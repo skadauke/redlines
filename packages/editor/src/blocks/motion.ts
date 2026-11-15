@@ -6,8 +6,25 @@
 // do, a `beforeinput` of a paragraph or a line break is Return or Shift-Return, and a user edit
 // from anything else that adds or takes away a line break in a hidden run is dropped.
 
-import { EditorSelection, EditorState, type Extension, Prec, Transaction } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import {
+  cursorLineDown,
+  cursorLineUp,
+  cursorPageDown,
+  cursorPageUp,
+  selectLineDown,
+  selectLineUp,
+  selectPageDown,
+  selectPageUp,
+} from '@codemirror/commands';
+import {
+  EditorSelection,
+  EditorState,
+  type Extension,
+  Prec,
+  type SelectionRange,
+  Transaction,
+} from '@codemirror/state';
+import { type Command, EditorView, keymap } from '@codemirror/view';
 import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { hardBreakAt, type KeyEdit, moveTo, nothing, textEnd, textStart } from './edits.ts';
@@ -28,7 +45,9 @@ export function restingAfter(state: EditorState, block: Block): Block | null {
 
 /** The end of a block's text, or of its last line for one that takes no text. */
 export const endOf = (state: EditorState, block: Block) =>
-  NO_TEXT.has(block.kind) ? state.doc.lineAt(block.lines.to).to : textEnd(state, block);
+  NO_TEXT.has(block.kind)
+    ? restingPlace(state, state.doc.lineAt(block.lines.to).to)
+    : textEnd(state, block);
 
 /**
  * The start of a block's text, on the left of any hidden markers in front of it (as CodeMirror's
@@ -184,7 +203,9 @@ export function lineStartIn(state: EditorState, head: number, boundary: number):
 /** Where ⌘→ (and ⌃E) goes: on a block's last row the end of its text, before hidden markers. */
 export function lineEndIn(state: EditorState, head: number, boundary: number): number {
   const block = blockAt(state, head);
-  if (!block || NO_TEXT.has(block.kind)) return boundary;
+  if (!block) return boundary;
+  // A block that takes no text: the end of its line, in front of any hidden closers on it (#494).
+  if (NO_TEXT.has(block.kind)) return restingPlace(state, boundary);
   const last = state.doc.lineAt(block.lines.to);
   const end = textEnd(state, block);
   return boundary <= last.to && boundary > end ? end : boundary;
@@ -347,48 +368,165 @@ function beforeInput(run: {
 }
 
 /**
- * Where a caret that is put at `pos` rests: `pos` itself, or, where it is the end of a block's line
- * past the hidden closers that end the block's text, in front of them, where typing leaves the
- * caret and End goes (#434). Past the closers is no place for the caret: they and the hidden break
- * after them are one range that the caret steps over, so a click or a key that lands there is moved
- * to the start of the next block, or rests where the DOM can't tell it from there.
+ * Where a caret or a selection's end that is put at `pos` rests, the one rule for every way to put
+ * it there (End, a click, a drag, a shift-click, a double-click, ↓ and ⇟): `pos` itself, or, where
+ * it is the end of a line past the hidden closers that end the line's text, in front of them,
+ * where typing leaves the caret (#434). Past the closers is no place for the caret: they and the
+ * hidden break after them are one range that the caret steps over, so a click or a key that lands
+ * there is moved to the start of the next block, or rests where the DOM can't tell it from there.
+ * A block that takes no text (HTML, code, a table's cell) rests at the end of its line the same
+ * way. The end of a paragraph that ends in a pending deletion rests in front of the struck text,
+ * as ⌘→ always went (#494).
  */
 export function restingPlace(state: EditorState, pos: number): number {
   const block = blockAt(state, pos);
-  if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule' || pos !== block.text.to) {
-    return pos;
+  if (block && !NO_TEXT.has(block.kind) && block.kind !== 'rule') {
+    return pos === block.text.to ? Math.min(pos, textEnd(state, block)) : pos;
   }
-  return Math.min(pos, textEnd(state, block));
+  const line = state.doc.lineAt(pos);
+  if (pos !== line.to) return pos;
+  let at = pos;
+  atomsOf(state).between(pos, pos, (from, to) => {
+    if (from >= line.from && from < pos && pos < to) at = from;
+  });
+  return at;
 }
 
 /**
- * A click past the end of a block's text, past the hidden closers that end it, puts the caret in
- * front of them. CodeMirror puts it at the end of the line, inside the range of the closers and the
- * break after them, and steps it on to the start of the next block, where a command that follows
- * (⌘2) acts on the next block (#434). Any other click, and a drag that starts anywhere else, are
- * CodeMirror's.
+ * The start of the hidden closers that end the row before `pos`, when `pos` is the far edge of the
+ * range that the closers and the break after them make: where a move down that landed at the end
+ * of that row was taken on to, past the break.
  */
-const clicksPastTheEnd = EditorView.mouseSelectionStyle.of((view, event) => {
-  if (event.button !== 0 || event.detail !== 1) return null;
-  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return null;
-  if (view.state.field(viewModeField, false) === 'raw') return null;
-  const at = (e: MouseEvent) => view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
-  const hit = at(event);
-  const anchor = hit === null ? null : restingPlace(view.state, hit);
-  if (hit === null || anchor === null || anchor === hit) return null;
-  return {
-    get(current, _extend, multiple) {
-      const pos = at(current);
-      const head = pos === null ? anchor : restingPlace(view.state, pos);
-      const range = EditorSelection.range(anchor, head);
-      return multiple
-        ? EditorSelection.create(
-            [...view.state.selection.ranges, range],
-            view.state.selection.ranges.length,
-          )
-        : EditorSelection.create([range]);
+function tailBefore(state: EditorState, pos: number): number | null {
+  let from: number | null = null;
+  atomsOf(state).between(pos, pos, (start, end) => {
+    if (end === pos && start < pos) from = start;
+  });
+  if (from === null) return null;
+  const line = state.doc.lineAt(from);
+  if (pos <= line.to || restingPlace(state, line.to) !== from) return null;
+  return state.doc.sliceString(line.from, from).trim() === '' ? null : from;
+}
+
+/**
+ * ↓ and ⇟ that end at the end of a row of text that is followed by hidden closers (the end of a
+ * block that a typed or commented change ends): CodeMirror steps a caret that lands inside the
+ * range of the closers and the break after them to its far edge, the start of the next block
+ * (#491). The move meant the end of the row: in front of the closers. A caret that starts on that
+ * row, or lands at the start of the next block by its column (not past the end of the row above),
+ * is the move's own. Moves up, which CodeMirror takes to the near edge, are as they are.
+ */
+export function settleVertical(
+  view: EditorView,
+  start: SelectionRange,
+  moved: SelectionRange,
+  forward: boolean,
+): SelectionRange {
+  if (!forward || moved.head <= start.head) return moved;
+  const row = tailBefore(view.state, moved.head);
+  if (row === null) return moved;
+  const end = view.coordsAtPos(row, -1);
+  const from = view.coordsAtPos(start.head, start.assoc || (start.empty ? 1 : -1));
+  if (!end || !from || from.bottom > end.top + 1) return moved;
+  // The column the move aims at: CodeMirror's own, kept in the range it returns.
+  const rect = view.contentDOM.getBoundingClientRect();
+  const goal = start.goalColumn ?? from.left - rect.left;
+  if (rect.left + goal < end.left - 1) return moved;
+  return EditorSelection.cursor(row, -1, undefined, goal);
+}
+
+/** A view whose vertical moves are `settleVertical`'s, for CodeMirror's own commands to act on. */
+function settling(view: EditorView): EditorView {
+  return new Proxy(view, {
+    get(target, key) {
+      if (key === 'moveVertically') {
+        return (start: SelectionRange, forward: boolean, distance?: number) =>
+          settleVertical(target, start, target.moveVertically(start, forward, distance), forward);
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
     },
-    update() {},
+  });
+}
+
+const settled =
+  (command: Command): Command =>
+  (view) =>
+    view.state.field(viewModeField, false) !== 'raw' && command(settling(view));
+
+/**
+ * The keys that move down by a row or a page, CodeMirror's commands with the end of a row settled
+ * (#491). The keys that move up are CodeMirror's, which rest in front of the closers.
+ */
+export const verticalKeys = Prec.high(
+  keymap.of([
+    { key: 'ArrowDown', run: settled(cursorLineDown), shift: settled(selectLineDown) },
+    { key: 'PageDown', run: settled(cursorPageDown), shift: settled(selectPageDown) },
+    { mac: 'Ctrl-n', run: settled(cursorLineDown), shift: settled(selectLineDown) },
+    { mac: 'Ctrl-v', run: settled(cursorPageDown) },
+    { mac: 'Ctrl-ArrowDown', run: settled(cursorPageDown), shift: settled(selectPageDown) },
+  ]),
+);
+
+/**
+ * A click, a modified click and a drag that ends past the end of a line, which end in front of the
+ * hidden closers that end it, and a double-click there (#434, #494). CodeMirror puts the end of
+ * the line, inside the range of the closers and the break after them, and steps it on to the start
+ * of the next block, where a command that follows (⌘2) acts on the next block, and typing after a
+ * drag joins two blocks. This is CodeMirror's own selection by the mouse (a click, ⇧ to extend, ⌥
+ * or ⌘ to add a range, a double-click's word, a drag) with `restingPlace` at both ends; a
+ * double-click's drag, and a triple-click, are CodeMirror's and `tripleClicks`'.
+ */
+const pointerSelection = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (event.button !== 0 || event.detail > 2) return null;
+  if (view.state.field(viewModeField, false) === 'raw') return null;
+  const type = event.detail === 2 ? 2 : 1;
+  const at = (e: MouseEvent) => {
+    const { pos, assoc } = view.posAndSideAtCoords({ x: e.clientX, y: e.clientY }, false);
+    return { pos: restingPlace(view.state, pos), assoc, hit: pos };
+  };
+  let start = at(event);
+  // A double-click picks the word, which CodeMirror's own does, but past the end of a line.
+  if (type === 2 && start.pos === start.hit) return null;
+  let startSel = view.state.selection;
+  const rangeFor = (pos: number, assoc: -1 | 1): SelectionRange => {
+    if (type === 1) return EditorSelection.cursor(pos, assoc);
+    const word = view.state.wordAt(pos);
+    return word ? EditorSelection.range(word.from, word.to) : EditorSelection.cursor(pos, assoc);
+  };
+  return {
+    update(update) {
+      if (update.docChanged) {
+        start = { ...start, pos: update.changes.mapPos(start.pos) };
+        startSel = startSel.map(update.changes);
+      }
+    },
+    get(current, extend, multiple) {
+      const cur = at(current);
+      let range = rangeFor(cur.pos, cur.assoc);
+      if (start.pos !== cur.pos && !extend) {
+        const first = rangeFor(start.pos, start.assoc);
+        const from = Math.min(first.from, range.from);
+        const to = Math.max(first.to, range.to);
+        range =
+          from < range.from
+            ? EditorSelection.range(from, to, undefined, undefined, range.assoc)
+            : EditorSelection.range(to, from, undefined, undefined, range.assoc);
+      }
+      if (extend) {
+        return startSel.replaceRange(startSel.main.extend(range.from, range.to, range.assoc));
+      }
+      if (multiple && type === 1 && startSel.ranges.length > 1) {
+        const index = startSel.ranges.findIndex((r) => r.from <= cur.pos && r.to >= cur.pos);
+        if (index >= 0) {
+          const rest = startSel.ranges.filter((_, i) => i !== index);
+          const main =
+            startSel.mainIndex === index ? 0 : startSel.mainIndex - +(startSel.mainIndex > index);
+          return EditorSelection.create(rest, main);
+        }
+      }
+      return multiple ? startSel.addRange(range) : EditorSelection.create([range]);
+    },
   };
 });
 
@@ -397,5 +535,5 @@ export function blockMotion(run: {
   paragraph: (view: EditorView) => boolean;
   line: (view: EditorView) => boolean;
 }): Extension {
-  return [gapClicks, clicksPastTheEnd, tripleClicks, hiddenBreaks, beforeInput(run)];
+  return [gapClicks, pointerSelection, tripleClicks, hiddenBreaks, verticalKeys, beforeInput(run)];
 }

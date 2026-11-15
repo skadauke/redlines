@@ -10,8 +10,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { macBlockCommands } from './keys.ts';
-import { gapSide, lineEndIn, lineStartIn, restingPlace } from './motion.ts';
+import { endOf, gapSide, lineEndIn, lineStartIn, restingPlace } from './motion.ts';
 import { type Script, scriptRows } from './script.ts';
+import { blockAt } from './structure.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const mounted: Editor[] = [];
@@ -233,11 +234,16 @@ describe('a click past the end of a block’s text (#434)', () => {
   function clickAt(
     editor: Editor,
     pos: number,
-    options: { detail?: number; modifier?: boolean; drag?: number } = {},
+    options: { detail?: number; modifier?: boolean; extend?: boolean; drag?: number } = {},
   ): EditorSelection | null {
     const { view } = editor;
-    view.posAtCoords = (coords) =>
+    const where = (coords: { y: number }) =>
       coords.y === 1 && options.drag !== undefined ? options.drag : pos;
+    view.posAtCoords = where;
+    view.posAndSideAtCoords = ((coords: { y: number }) => ({
+      pos: where(coords),
+      assoc: 1,
+    })) as never;
     const event = new MouseEvent('mousedown', {
       button: 0,
       detail: options.detail ?? 1,
@@ -252,7 +258,7 @@ describe('a click past the end of a block’s text (#434)', () => {
         options.drag === undefined
           ? event
           : new MouseEvent('mousemove', { button: 0, clientX: 0, clientY: 1 });
-      return style.get(moved, false, false);
+      return style.get(moved, options.extend ?? false, false);
     }
     return null;
   }
@@ -294,24 +300,51 @@ describe('a click past the end of a block’s text (#434)', () => {
     }
   });
 
-  it('claims a click at the end of the text past the closers, with its drag, and no other', () => {
+  it('puts a click, a drag, a shift-click and a double-click past the closers in front of them', () => {
     const editor = mountFile();
     const doc = editor.view.state.doc.toString();
     const before = doc.indexOf(closer);
     const end = before + closer.length;
-    // The click rests in front of the closers; a drag from there starts there.
+    // The click rests in front of the closers; a drag from there starts there, and a drag from
+    // inside the text to past them ends there (#494).
     const click = clickAt(editor, end);
     expect(click?.main.anchor).toBe(before);
     expect(click?.main.head).toBe(before);
     const drag = clickAt(editor, end, { drag: doc.indexOf('One.') + 2 });
     expect(drag?.main.anchor).toBe(before);
     expect(drag?.main.head).toBe(doc.indexOf('One.') + 2);
-    // Every other click is CodeMirror's: inside the text, a double click, a shift click, Raw.
-    expect(clickAt(editor, doc.indexOf('thr') + 2)).toBeNull();
-    expect(clickAt(editor, end, { detail: 2 })).toBeNull();
-    expect(clickAt(editor, end, { modifier: true })).toBeNull();
+    const into = clickAt(editor, doc.indexOf('Two') + 1, { drag: end });
+    expect(into?.main.head, 'a drag that ends past the closers').toBe(before);
+    // A shift-click past them extends the selection to the text's end, and a double-click there
+    // puts the caret in front of them, never on their hidden text.
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('Two') } });
+    const shift = clickAt(editor, end, { extend: true });
+    expect(shift?.main.anchor).toBe(doc.indexOf('Two'));
+    expect(shift?.main.head).toBe(before);
+    const double = clickAt(editor, end, { detail: 2 });
+    expect(double?.main.head).toBeLessThanOrEqual(before);
+    // A click in the text is where it is; a double click in it and Raw are CodeMirror's, and a
+    // triple click is `tripleClicks`'.
+    expect(clickAt(editor, doc.indexOf('thr') + 2)?.main.head).toBe(doc.indexOf('thr') + 2);
+    expect(clickAt(editor, doc.indexOf('thr') + 2, { detail: 2 })).toBeNull();
+    expect(clickAt(editor, end, { detail: 3 })?.main.empty, 'the triple-click selects').toBe(false);
     editor.setViewMode('raw');
     expect(clickAt(editor, end)).toBeNull();
+  });
+
+  it('rests the end of a line of a block that takes no text in front of the closers on it (#494)', () => {
+    const { state } = mountFile('One.\n\n<div>\n<!--ins k3x9-->\nhello<!--/k3x9-->\n\nNext.').view;
+    const doc = state.doc.toString();
+    const closerAt = doc.indexOf('<!--/k3x9-->');
+    const lineEnd = closerAt + '<!--/k3x9-->'.length;
+    expect(restingPlace(state, lineEnd)).toBe(closerAt);
+    // End (⌘→) goes there, and the block's end for ⌥↓.
+    const block = blockAt(state, closerAt)!;
+    expect(lineEndIn(state, closerAt - 2, lineEnd)).toBe(closerAt);
+    expect(endOf(state, block)).toBe(closerAt);
+    // Where the line ends in text, and in other blocks, it is where it is.
+    expect(restingPlace(state, doc.indexOf('<div>') + 5)).toBe(doc.indexOf('<div>') + 5);
+    expect(restingPlace(state, doc.indexOf('hello') + 2)).toBe(doc.indexOf('hello') + 2);
   });
 });
 
@@ -424,7 +457,12 @@ describe('triple-click', () => {
   /** What the editor's mouse selection styles make of a click at `pos`, `detail` clicks in. */
   function click(editor: Editor, pos: number, detail = 3, drag?: number): EditorSelection | null {
     const { view } = editor;
-    view.posAtCoords = (coords) => (coords.y === 1 && drag !== undefined ? drag : pos);
+    const where = (coords: { y: number }) => (coords.y === 1 && drag !== undefined ? drag : pos);
+    view.posAtCoords = where;
+    view.posAndSideAtCoords = ((coords: { y: number }) => ({
+      pos: where(coords),
+      assoc: 1,
+    })) as never;
     const event = new MouseEvent('mousedown', { button: 0, detail, clientX: 0, clientY: 0 });
     for (const make of view.state.facet(EditorView.mouseSelectionStyle)) {
       const style = make(view, event);
@@ -458,9 +496,11 @@ describe('triple-click', () => {
     expect(selected(editor)).toBe(text);
   });
 
-  it('is CodeMirror’s for one and two clicks, in Raw, and on a thematic break', () => {
+  it('is not the triple-click’s for one and two clicks, in Raw, and on a thematic break', () => {
     const editor = mount('One.⏎⏎Tw‸o.');
-    expect(click(editor, 8, 1)).toBeNull();
+    // A click is a caret where it hit, and a double-click in text is CodeMirror's word.
+    expect(click(editor, 8, 1)?.main.head).toBe(8);
+    expect(click(editor, 8, 1)?.main.empty).toBe(true);
     expect(click(editor, 8, 2)).toBeNull();
     const rule = mount('One.⏎⏎---⏎⏎Tw‸o.');
     expect(click(rule, 7)).toBeNull();
