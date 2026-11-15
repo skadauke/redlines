@@ -173,8 +173,30 @@ describe('the host in a browser tab', () => {
     ]);
     expect(await host.exists('sample.md')).toBe(true);
     expect(await host.exists('missing.md')).toBe(false);
-    // It has no other apps to open a file in.
-    await expect(host.openDefault('logo.png', '')).rejects.toThrow();
+    // The development page has a stand-in for Preview, which records the path.
+    await host.openDefault('logo.png', '');
+    expect(window.__redlinesImages?.opened).toEqual(['logo.png']);
+  });
+
+  it('has no other apps to open a file in, outside the development page', async () => {
+    vi.stubEnv('DEV', false);
+    try {
+      await expect(createHost().openDefault('logo.png', '')).rejects.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('says which image files were saved again by a stamp, in the development page', async () => {
+    const tab = createHost();
+    const png = new Blob(['x'], { type: 'image/png' });
+    window.__redlinesImages?.replace('cat.png', png);
+    // Nothing in the tab's folder but what was added to it.
+    const [first, none] = await tab.imageStamps(['cat.png', 'missing.png']);
+    expect(first).toBeTruthy();
+    expect(none).toBeNull();
+    window.__redlinesImages?.replace('cat.png', png);
+    expect((await tab.imageStamps(['cat.png']))[0]).not.toBe(first);
   });
 
   it('lets the window use the files of its folder in memory, and remembers nothing', async () => {
