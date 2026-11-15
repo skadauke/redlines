@@ -26,6 +26,8 @@ import {
   selectedCells,
   type EditorCommand,
   indentItems,
+  indentReason,
+  inFrontMatter,
   selectionInTable,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -61,6 +63,20 @@ export interface FormattingOptions {
 
 const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Why a format or block command is disabled in Raw while edits are tracked (Raw shows the file's
+ * own text, where nothing can be marked; typing there is asked about, a command is not). */
+const RAW_FORMAT =
+  "Raw shows the file's own text, where Redlines can't mark changes. Switch to Clean or Redlines, or turn off Track Changes.";
+/** What is said where a command is disabled (design §4.1: the hint says what the thing is, then what to do). */
+const FRONT_MATTER_HINT = 'Front matter is YAML, not text to format. Select text in the body.';
+const IN_CODE_HINT = "Formatting doesn't apply inside code. Select text outside it.";
+const IN_CODE_SPAN_HINT = 'Select the whole code span to format it.';
+const DEFINES_HINT = 'This line defines a link. It holds no text to format.';
+const NO_CELL_TEXT_HINT = 'There is no text in the selected cells to format.';
+const NOT_IN_CELL_HINT =
+  'A table cell holds inline text. Put the caret outside the table to change the block.';
+const ALREADY_CODE_HINT = 'This is already a code block.';
+const ITEM_NEEDS_TEXT_HINT = "Write the item first. An item with no text can't change type.";
 /** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
  * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
 const TAGS_NOT_A_PAIR =
@@ -71,7 +87,7 @@ const MARKS_IN_CODE =
 const MARKER_ONLY =
   'The selection is only the marker of a change. Select some of the text to format it.';
 const NOT_IN_ITEM = (what: string) =>
-  `A list item can't become ${what}. Take it out of the list first.`;
+  `A list item can't be made into ${what}. Take it out of the list first (Shift-Tab, or Backspace at the start of the item).`;
 const WRITE_ITEM = 'Write the item first.';
 // What a task box says when it can't change, for a click and for Check Item alike.
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
@@ -190,6 +206,63 @@ function computeActiveBlocks(state: EditorState): Set<string> {
     on.add('block.body');
   }
   return on;
+}
+
+/** Whether edits are tracked in Raw, which shows the file's own text and marks nothing. */
+function rawTracked(state: EditorState): boolean {
+  return state.field(trackingField, false) === true && state.field(viewModeField, false) === 'raw';
+}
+
+/** The selection, or with none the word under the caret: what a format command acts on. */
+function formatTarget(state: EditorState): Range | null {
+  const { from, to, empty, head } = state.selection.main;
+  if (!empty) return { from, to };
+  const word = state.wordAt(head);
+  return word ? { from: word.from, to: word.to } : null;
+}
+
+/** Whether the caret is on an empty line, as Return leaves one: a line of a list item's or a quote's
+ * marker only isn't, since the block would go in front of it. */
+function onEmptyLineAt(state: EditorState): boolean {
+  const line = state.doc.lineAt(state.selection.main.head);
+  return line.text.trim() === '' && !atSelection(state).some((n) => n.parent?.type.isTop);
+}
+
+/** Why the Paragraph menu's block types can't apply where the caret is, or undefined. */
+function blockReason(state: EditorState, to: BlockType, id: string): string | undefined {
+  const { from, empty } = state.selection.main;
+  // On an empty paragraph the menu writes the block's syntax there; Body does nothing.
+  if (empty && onEmptyLineAt(state)) return undefined;
+  const toggledOff = to !== 'p' && activeBlocks(state).has(id);
+  const what = /^h[1-6]$/.test(to) ? 'a heading' : to === 'quote' ? 'a quote' : null;
+  if (what && !toggledOff && atSelection(state).some(({ name }) => name === 'ListItem')) {
+    return NOT_IN_ITEM(what);
+  }
+  if (EMPTY_ITEM.test(state.doc.lineAt(from).text)) return ITEM_NEEDS_TEXT_HINT;
+  return undefined;
+}
+
+/** Why Bold, Italic and the other inline formats can't apply to the selection, or undefined. */
+function inlineReason(state: EditorState): string | undefined {
+  if (rectOf(state)) {
+    const texts = selectedCells(state).filter((cell) => cell.textFrom < cell.textTo);
+    return texts.length === 0 ? NO_CELL_TEXT_HINT : undefined;
+  }
+  const range = formatTarget(state);
+  if (!range) return undefined;
+  const nodes = atSelection(state);
+  // Only a selection wholly in verbatim text is refused: one that reaches out of it is widened to the
+  // text around it by the format library, as it always was.
+  if (inFrontMatter(state, true)) return FRONT_MATTER_HINT;
+  const verbatim = nodes.find(({ name }) => CODE_BLOCK.has(name) || name === 'HTMLBlock');
+  if (verbatim && range.to <= verbatim.to) return IN_CODE_HINT;
+  if (inMarker(state, range)) return MARKER_ONLY;
+  const span = nodes.find(({ name }) => name === 'InlineCode');
+  if (span && range.to <= span.to && !(range.from <= span.from && range.to >= span.to)) {
+    return IN_CODE_SPAN_HINT;
+  }
+  if (nodes.some(({ name }) => name === 'LinkReference')) return DEFINES_HINT;
+  return undefined;
 }
 
 /** Whether `range` lies inside one marker comment of a change. */
@@ -506,11 +579,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * Whether the caret is on an empty line, as Return leaves one. A line of a list item's or a
    * quote's marker only isn't: the block would go in front of it.
    */
-  const onEmptyLine = (): boolean => {
-    const { doc } = view.state;
-    const line = doc.lineAt(view.state.selection.main.head);
-    return line.text.trim() === '' && !atSelection(view.state).some((n) => n.parent?.type.isTop);
-  };
+  const onEmptyLine = (): boolean => onEmptyLineAt(view.state);
 
   /**
    * Writes `text`, a block, on the caret's empty line, keeping a blank line between it and each
@@ -653,11 +722,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   ): EditorCommand => ({
     menu,
     group,
-    // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
-    ...(menu === 'paragraph'
-      ? { isEnabled: (state: EditorState) => !selectionInTable(state) }
-      : {}),
     ...fields,
+    disabledReason: (state: EditorState) => {
+      // Raw shows the file's own text: nothing in it can be marked (typing there is asked about).
+      if (rawTracked(state)) return RAW_FORMAT;
+      // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
+      if (menu === 'paragraph' && selectionInTable(state)) return NOT_IN_CELL_HINT;
+      return fields.disabledReason?.(state);
+    },
   });
 
   const inlineCommand = (
@@ -671,6 +743,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title,
       shortcut,
       run: inline(format_),
+      disabledReason: inlineReason,
       isActive: (state) => atSelection(state).some(({ name }) => name === INLINE_NODE[format_]),
     });
 
@@ -686,6 +759,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title,
       ...(shortcut ? { shortcut } : {}),
       run: block(to, id),
+      disabledReason: (state) => blockReason(state, to, id),
       isActive: (state) => activeBlocks(state).has(id),
     });
 
@@ -895,7 +969,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Link…',
       shortcut: 'Mod-k',
       // Cells selected have no one range to link.
-      isEnabled: (state) => !rectOf(state),
+      disabledReason: (state) =>
+        rectOf(state)
+          ? 'Cells selected have no one range to link. Select text in one cell.'
+          : undefined,
       run: openLink,
       isActive: (state) => linkAt(state) !== null,
     }),
@@ -923,9 +1000,9 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Check Item',
       shortcut: 'Mod-Shift-u',
       // Without a task item there is nothing to check: the item is disabled, not a notice.
-      isEnabled: (state) => {
+      disabledReason: (state) => {
         const { from, to } = state.selection.main;
-        return taskItemsIn(state, from, to).length > 0;
+        return taskItemsIn(state, from, to).length > 0 ? undefined : NO_BOX;
       },
       run: checkItems,
     }),
@@ -934,6 +1011,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Code Block',
       shortcut: 'Mod-Alt-c',
       run: codeBlock,
+      disabledReason: (state) =>
+        atSelection(state).some(({ name }) => CODE_BLOCK.has(name)) ? ALREADY_CODE_HINT : undefined,
       isActive: (state) => activeBlocks(state).has('block.code'),
     }),
     command('paragraph', 'insert', {
@@ -960,6 +1039,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.indent',
       title: 'Indent',
       shortcut: 'Mod-]',
+      disabledReason: (state) => indentReason(state, false),
       run: () => {
         if (!editable()) return false;
         if (indentItems(view, false)) return true;
@@ -971,6 +1051,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.outdent',
       title: 'Outdent',
       shortcut: 'Mod-[',
+      disabledReason: (state) => indentReason(state, true),
       run: () => {
         if (!editable()) return false;
         if (indentItems(view, true)) return true;

@@ -96,6 +96,8 @@ export interface MenuState {
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
   enabledCommands: readonly string[];
+  /** The editor's `EditorUiState.disabledReasons`: why each command that can't run can't. */
+  disabledReasons: Readonly<Record<string, string>>;
   /** The editor's `EditorUiState.commandTitles`: the titles that count the selection. */
   commandTitles: Readonly<Record<string, string>>;
   /** The editor's `EditorUiState.undo`: what Undo would take back, or null for nothing or no name. */
@@ -222,7 +224,7 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
     accelerator: command.shortcut ? acceleratorFor(command.shortcut) : undefined,
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,
-    enabled: command.isEnabled ? (state) => state.enabledCommands.includes(id) : undefined,
+    enabled: command.disabledReason ? (state) => state.enabledCommands.includes(id) : undefined,
     keyInMenuOnly: true,
   };
 }

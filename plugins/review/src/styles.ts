@@ -170,6 +170,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-note-icon svg': { width: notePx(14), height: notePx(14) },
   '.rl-note-icon:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-note-icon:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  // A button grayed with its reason as the hint (`setReason`): dimmed, still under the pointer.
+  '.rl-reason-disabled[aria-disabled="true"], .rl-reason-disabled[aria-disabled="true"] svg': {
+    color: 'var(--rl-ink-3)',
+  },
+  '.rl-reason-disabled[aria-disabled="true"]:hover': { backgroundColor: 'transparent' },
   '.rl-note-button': {
     height: notePx(22),
     padding: `0 ${notePx(6)}`,

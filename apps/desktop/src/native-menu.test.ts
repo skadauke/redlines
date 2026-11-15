@@ -184,6 +184,7 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  disabledReasons: {},
   commandTitles: {},
   undo: null,
   redo: null,
@@ -430,7 +431,7 @@ describe('the menu bar', () => {
           group: 'link',
           shortcut: 'Mod-k',
           run: () => true,
-          isEnabled: () => false,
+          disabledReason: () => 'Not here.',
         },
         { id: 'format.clear', title: 'Clear', menu: 'format', group: 'link', run: () => true },
       ]);

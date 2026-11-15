@@ -77,6 +77,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  disabledReasons: {},
   commandTitles: {},
   undo: null,
   redo: null,
@@ -423,7 +424,7 @@ describe('the menu model', () => {
           title: 'Insert Row Below',
           menu: 'table',
           shortcut: 'Mod-Enter',
-          isEnabled: () => false,
+          disabledReason: () => 'Not here.',
         }),
         command('format.italic', { title: 'Italic', menu: 'format', group: 'inline' }),
         command('format.link', {
@@ -491,7 +492,7 @@ describe('the menu model', () => {
   it('runs a registered command through the registry, and follows the ui state', () => {
     const registry = registryOf([
       command('format.bold', { title: 'Bold', menu: 'format', isActive: () => false }),
-      command('format.link', { title: 'Link…', menu: 'format', isEnabled: () => false }),
+      command('format.link', { title: 'Link…', menu: 'format', disabledReason: () => 'Not here.' }),
       command('format.clear', { title: 'Clear', menu: 'format' }),
     ]);
     const model = appMenuModel(commands(), registry);

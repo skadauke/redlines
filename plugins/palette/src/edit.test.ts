@@ -129,12 +129,12 @@ describe('editCommands', () => {
     const clipboard = { cut: vi.fn(), copy: vi.fn(), paste: vi.fn() };
     const [cut, copy, paste] = editCommands(clipboard, () => {});
     expect([cut?.id, copy?.id, paste?.id]).toEqual(['edit.cut', 'edit.copy', 'edit.paste']);
-    expect(cut?.isEnabled?.(editor.view.state)).toBe(false);
+    expect(cut?.disabledReason?.(editor.view.state)).toBe('Select some text first.');
     // Paste works with no selection: it has no test of one.
-    expect(paste).not.toHaveProperty('isEnabled');
+    expect(paste).not.toHaveProperty('disabledReason');
     editor.view.dispatch({ selection: { anchor: 0, head: 5 } });
-    expect(cut?.isEnabled?.(editor.view.state)).toBe(true);
-    expect(copy?.isEnabled?.(editor.view.state)).toBe(true);
+    expect(cut?.disabledReason?.(editor.view.state)).toBeUndefined();
+    expect(copy?.disabledReason?.(editor.view.state)).toBeUndefined();
   });
 
   it('report a clipboard that fails, whether it throws or rejects', async () => {

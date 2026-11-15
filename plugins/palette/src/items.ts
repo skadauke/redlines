@@ -89,7 +89,7 @@ function shown(spec: ItemSpec, command: EditorCommand, state: EditorState): Show
     name: title.replace(/…$/, ''),
     keys: command.shortcut ? formatShortcut(command.shortcut) : (spec.keys ?? null),
     aria: command.shortcut ? ariaShortcut(command.shortcut) : null,
-    enabled: command.isEnabled?.(state) ?? true,
+    enabled: command.disabledReason?.(state) === undefined,
     toggle: command.isActive !== undefined,
     active: command.isActive?.(state) ?? false,
   };

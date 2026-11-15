@@ -541,7 +541,7 @@ describe('format change cards', () => {
     expect(editor.getDoc()).toContain('We ship the new importer.');
   });
 
-  it('offers only Accept for a format change whose text has lost the format', async () => {
+  it('grays Reject, with the reason, for a format change whose text has lost the format', async () => {
     const lost = file('We ship the <!--fmt m2bd +bold-->new<!--/m2bd--> importer.', [
       ...PEOPLE,
       'marks:',
@@ -549,7 +549,14 @@ describe('format change cards', () => {
     ]);
     const { editor, decided } = mount(lost);
     await clickOn(editor, '.rl-fmt');
-    expect(() => button(card(editor)!, 'Reject')).toThrow('No button');
+    // Reject is grayed, and its hint says why; clicking it decides nothing.
+    const reject = button(card(editor)!, 'Reject');
+    expect(reject.getAttribute('aria-disabled')).toBe('true');
+    expect(reject.title).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    reject.click();
+    expect(decided).toEqual([]);
     button(card(editor)!, 'Accept').click();
     expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
   });

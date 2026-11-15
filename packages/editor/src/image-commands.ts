@@ -30,28 +30,33 @@ export function imageSizeCommands(notice?: (message: string) => void): EditorCom
         undefined,
         notice,
       );
-  const here = (state: Parameters<NonNullable<EditorCommand['isEnabled']>>[0]) =>
-    imageInSelection(state) !== null;
+  /** Why an image command is disabled where no image is selected. */
+  const NO_IMAGE = 'Select an image to change it.';
+  const here = (state: Parameters<NonNullable<EditorCommand['disabledReason']>>[0]) =>
+    imageInSelection(state) === null ? NO_IMAGE : undefined;
   return [
     ...IMAGE_SIZES.map(({ id, title, share }) => ({
       id: `image.size.${id}`,
       title,
-      isEnabled: here,
+      disabledReason: here,
       run: run((column) => ({ width: Math.round(column * share) })),
     })),
     {
       id: 'image.size.original',
       title: 'Original Image Size',
-      isEnabled: (state) => {
+      disabledReason: (state) => {
         const image = imageInSelection(state);
-        return image !== null && (image.width !== null || image.widthText !== null);
+        if (image === null) return NO_IMAGE;
+        return image.width !== null || image.widthText !== null
+          ? undefined
+          : 'This image is at its original size already.';
       },
       run: run({ width: null }),
     },
     ...ALIGNMENTS.map(({ align, title }) => ({
       id: `image.align.${align}`,
       title,
-      isEnabled: here,
+      disabledReason: here,
       isActive: (state: Parameters<typeof here>[0]) => imageInSelection(state)?.align === align,
       run: run({ align }),
     })),

@@ -472,7 +472,7 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     press(editor);
     expect(editor.getDoc()).toBe(doc);
     const command = editor.commands.list().find(({ id }) => id === 'block.check');
-    expect(command?.isEnabled?.(editor.view.state)).toBe(false);
+    expect(command?.disabledReason?.(editor.view.state)).toMatch(/table cell/);
   });
 
   const TWELVE = `${'abcdefghijkl'

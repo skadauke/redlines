@@ -171,7 +171,11 @@ it('gives every row its command, key and state, and runs the command from the ro
       // The key is the editor's: the menu bar's item must not also handle it.
       expect(row.keyInMenuOnly).toBe(true);
       // Chosen from the menu, the command runs through the registry.
-      expect(row.enabled ? row.enabled(state) : true, `${row.text} is enabled`).toBe(true);
+      // A row is grayed exactly when the command says why it can't run here (its hint).
+      const enabled = row.enabled ? row.enabled(state) : true;
+      expect(enabled, `${row.text} follows disabledReasons`).toBe(
+        !(command!.id in ui.disabledReasons),
+      );
       if (command?.isActive) expect(row.checked).toBeDefined();
     }
   }

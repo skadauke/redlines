@@ -726,15 +726,21 @@ describe('the alignment commands', () => {
     expect(delimiter(editor)).toBe('| - | --- | -: |');
   });
 
-  it('do nothing, and say nothing, for the alignment the columns have already', () => {
+  it('are disabled, with a hint, for the alignment the columns have already', () => {
     for (const tracking of [false, true]) {
       const label = `Track Changes ${tracking ? 'on' : 'off'}`;
       const editor = mount(doc, tracking);
       select(editor, at('12'));
-      expect(editor.commands.run('table.alignCenter'), label).toBe(true);
+      // Shown as the current state (checked), and the hint says why it does nothing.
+      expect(editor.getUiState().disabledReasons['table.alignCenter'], label).toBe(
+        'The column is already aligned this way.',
+      );
+      expect(editor.getUiState().activeCommands, label).toContain('table.alignCenter');
+      expect(editor.commands.run('table.alignCenter'), label).toBe(false);
       expect(editor.getDoc(), label).toBe(doc);
       expect(editor.getUiState().canUndo, label).toBe(false);
-      expect(notices, label).toEqual([]);
+      expect(notices, label).toEqual(['The column is already aligned this way.']);
+      notices.length = 0;
     }
     // The same for a column whose alignment is the change's own, which is pending: no second step.
     const editor = mount(doc, true);
@@ -743,7 +749,6 @@ describe('the alignment commands', () => {
     const pending = editor.getDoc();
     editor.commands.run('table.alignRight');
     expect(editor.getDoc()).toBe(pending);
-    expect(notices).toEqual([]);
     editor.undo();
     expect(editor.getDoc()).toBe(doc);
   });

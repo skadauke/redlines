@@ -67,7 +67,11 @@ function inkThreeText(code: string): string[] {
 function disabledOnly(selector: string): boolean {
   return selector
     .split(/,(?![^(]*\))/)
-    .every((part) => /:disabled(?:\s+[\w.#\-\s>]*)?$/.test(part.trim()) && !/:not\(/.test(part));
+    .every(
+      (part) =>
+        /(?::disabled|\[aria-disabled="true"\])(?:\s+[\w.#\-\s>]*)?$/.test(part.trim()) &&
+        !/:not\(/.test(part),
+    );
 }
 
 describe('text contrast (#578)', () => {
@@ -93,6 +97,12 @@ describe('text contrast (#578)', () => {
       wrong,
       `--rl-ink-3 is under 4.5:1; use --rl-ink-2 for text to be read:\n${wrong.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('takes a control grayed with aria-disabled as disabled, and only that attribute set to true', () => {
+    expect(disabledOnly('.g[aria-disabled="true"] svg')).toBe(true);
+    expect(disabledOnly('.g[aria-disabled="true"], .h')).toBe(false);
+    expect(disabledOnly('.g[aria-disabled="false"]')).toBe(false);
   });
 
   it('reads the shapes a rule can take, and is not fooled by a disabled selector beside another', () => {

@@ -4,6 +4,7 @@
 
 import type { EditorState } from '@codemirror/state';
 import {
+  inFrontMatter,
   markupViewFacet,
   parsedField,
   pastHidden,
@@ -27,6 +28,32 @@ const NO_TEXT = 'Select some text to highlight.';
 /** What a highlight in Raw says: its markers are text there, and no highlight is drawn. */
 const REFUSED_IN_RAW =
   "A highlight can't be made or removed in Raw. Switch to Redlines to do either.";
+
+/** Why Highlight is disabled in Raw: its markers are text there. */
+const IN_RAW_HINT = "A highlight can't be made or removed in Raw. Switch to Clean or Redlines.";
+/** Why Highlight is disabled in front matter (format §3.8). */
+const IN_FRONT_MATTER_HINT = "A highlight can't be made in front matter. Select text in the body.";
+
+/**
+ * Why Highlight can't run where the selection is, or undefined: in Raw, in front matter, and with no
+ * text to highlight (a caret away from any word, a selection of line breaks and markers only). A
+ * highlight that is there is removed, which is always possible.
+ */
+export function highlightDisabledReason(state: EditorState): string | undefined {
+  if (state.field(viewModeField, false) === 'raw') return IN_RAW_HINT;
+  if (highlightsAt(state).length > 0) return undefined;
+  if (inFrontMatter(state)) return IN_FRONT_MATTER_HINT;
+  const target = highlightTarget(state);
+  if (!target) return NO_TEXT;
+  const { from, to } = target;
+  if (from === to) return NO_TEXT;
+  return state
+    .sliceDoc(from, to)
+    .replace(/<!--[^]*?-->/g, '')
+    .trim() === ''
+    ? NO_TEXT
+    : undefined;
+}
 
 /** The highlights of each parse, which the menu and the palette ask about at every change. */
 const highlightsOf = new WeakMap<Parsed, readonly MarkRange[]>();

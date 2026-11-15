@@ -230,8 +230,15 @@ describe('formatting selected cells', () => {
         name: '⌘K does nothing with cells selected',
         doc: SEL,
         keys: ['Mod-k'],
-        off: { file: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
-        on: { newest: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
+        // Link is disabled with cells selected, and its key says why.
+        off: {
+          file: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |'),
+          refusal: 'Cells selected have no one range to link. Select text in one cell.',
+        },
+        on: {
+          newest: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |'),
+          refusal: 'Cells selected have no one range to link. Select text in one cell.',
+        },
       },
     ]),
   );
@@ -278,7 +285,9 @@ describe('bold over cells decides on and off from all the selected text', () => 
     const first = doc.indexOf('|  |') + 2;
     editor.view.dispatch({ selection: { anchor: first, head: doc.lastIndexOf('|  |') + 2 } });
     expect(editor.commands.run('format.bold')).toBe(false);
-    expect(notices).toEqual(['There is no text in the selected cells to make bold.']);
+    expect(editor.getUiState().disabledReasons['format.bold']).toBe(
+      'There is no text in the selected cells to format.',
+    );
     expect(editor.getDoc()).toBe(doc);
     editor.destroy();
   });
