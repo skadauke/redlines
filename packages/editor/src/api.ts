@@ -72,6 +72,11 @@ export interface EditorUiState {
   redo: string | null;
   /** Whether there is a step to undo: the Edit menu's Undo is enabled only then. */
   canUndo: boolean;
+  /**
+   * Whether Accept All Changes and Stop Tracking has something to accept: a pending change in the
+   * selection, or with only a caret, in the document.
+   */
+  canAcceptAll: boolean;
   /** Whether there is a step to redo. */
   canRedo: boolean;
 }
@@ -437,6 +442,15 @@ export interface Editor {
    *   decide its kind.
    */
   accept(id: string | readonly string[]): void;
+  /**
+   * Accepts every pending change the selection touches, or with only a caret every change of the
+   * document, and turns Track Changes off, in one step that Undo takes back with the switch.
+   * Comments and highlights stay. Returns false, and does nothing, when there is nothing to
+   * accept (`EditorUiState.canAcceptAll`).
+   *
+   * @throws EditError when the format can't write the decision.
+   */
+  acceptAllAndStopTracking(): boolean;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string | readonly string[]): void;
   /**

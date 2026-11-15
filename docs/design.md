@@ -578,6 +578,13 @@ mode has no counterpart in the desktop app.
   section, all from one agent run, or all. Each asks first, with counts ("Accept 12 changes: Ada 9,
   Claude for Ada 3?"), and one Undo reverses it. Linked changes, such as the two halves of a move,
   are decided together.
+- **Accept All Changes and Stop Tracking** is a row of the app's Review menu (the menu bar, not
+  the toolbar's Review menu), after Track Changes. With a caret it accepts every pending change of
+  the document; with a selection, only the changes the selection touches. Either way it then turns
+  Track Changes off, and comments and highlights stay. It is disabled when there is nothing to
+  accept, in the document or in the selection, and never refuses. It is one step: one Undo brings
+  the changes back and turns Track Changes on again, and Redo does both once more. It writes the
+  file as Accept does for each change, and the switch itself writes nothing (§5.4).
 - **Reviewers who can't accept** (in an app with roles) get the same bar for moving through
   changes and replying.
 - **Saving is independent of review.** A document can be saved, shared or committed with any
