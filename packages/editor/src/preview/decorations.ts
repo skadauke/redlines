@@ -8,8 +8,10 @@
 
 import { syntaxTree } from '@codemirror/language';
 import {
-  type EditorState,
+  EditorSelection,
+  EditorState,
   type Extension,
+  Prec,
   type Line,
   type Range,
   StateField,
@@ -17,7 +19,7 @@ import {
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
-import { parsedField, viewModeField } from '../tracked/field.ts';
+import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { freshlyAdded } from './fresh.ts';
 import { imageOfNode } from '../image-size.ts';
@@ -662,7 +664,48 @@ function hardBreaksOf(decorations: DecorationSet): DecorationSet {
   return found;
 }
 
+/**
+ * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
+ * over, hidden. A space typed in front of them makes the run longer, and the caret mapped through
+ * the typing lands inside it; it goes to the nearer edge (in front of them when typing at their
+ * start), where it can be seen, and a selection's ends go outward.
+ */
+const hardBreakCaret = Prec.highest(
+  EditorState.transactionFilter.of((tr) => {
+    // A change, a selection, or a switch of the view (Raw has no atoms: a caret between the spaces
+    // that Raw allowed goes out when the spaces hide).
+    if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
+      return tr;
+    }
+    if (tr.state.field(viewModeField, false) === 'raw') return tr;
+    const decorations = tr.state.field(previewField);
+    const outside = (pos: number, side: -1 | 0 | 1) => {
+      let moved = pos;
+      decorations.between(pos, pos, (from, to, value) => {
+        if ((value.spec as { hardBreak?: true }).hardBreak === true && from < pos && pos < to) {
+          moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+        }
+      });
+      return moved;
+    };
+    const { newSelection } = tr;
+    let changed = false;
+    const ranges = newSelection.ranges.map((range) => {
+      const anchor = outside(range.anchor, range.empty ? 0 : range.anchor < range.head ? -1 : 1);
+      const head = outside(range.head, range.empty ? 0 : range.head < range.anchor ? -1 : 1);
+      if (anchor === range.anchor && head === range.head) return range;
+      changed = true;
+      return range.empty ? EditorSelection.cursor(head) : EditorSelection.range(anchor, head);
+    });
+    if (!changed) return tr;
+    return [
+      tr,
+      { selection: EditorSelection.create(ranges, newSelection.mainIndex), sequential: true },
+    ];
+  }),
+);
+
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField];
+  return [previewField, hardBreakCaret];
 }
