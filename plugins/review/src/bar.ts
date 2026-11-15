@@ -6,14 +6,19 @@
 
 import {
   EditorSelection,
-  type EditorState,
+  EditorState,
   type Extension,
   Prec,
   StateEffect,
   StateField,
 } from '@codemirror/state';
-import { EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { setViewModeEffect, viewModeField } from '@redlines/editor';
+import { Decoration, EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import {
+  currentChange,
+  setCurrentChange,
+  setViewModeEffect,
+  viewModeField,
+} from '@redlines/editor';
 import type { MarkRange } from '@redlines/format';
 import { icon, type IconName } from './icons.ts';
 import {
@@ -133,25 +138,70 @@ export function closeBar(view: EditorView): void {
 }
 
 /**
- * Moves to a change: selects it, scrolled into view, and opens the bar. A suggestion of several
- * marks is selected whole, from the start of its first mark to the end of its last.
+ * Moves to a change: puts the caret at its start, scrolled into view, marks the change as the
+ * current one (its text and its bars, which the theme draws apart from a selection), and opens the
+ * bar. A suggestion of several marks is marked whole. Nothing stays selected: the person's own
+ * selection, if there was one, goes.
  */
 function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
   const marks = suggestionIn(ctx, change.id);
-  const range = EditorSelection.range(
-    spanOf(marks[0] ?? change).from,
-    spanOf(marks.at(-1) ?? change).to,
-  );
+  const first = marks[0] ?? change;
+  const ranges = marks.flatMap((mark) => mark.segments.map(segmentSpan));
+  const caret = EditorSelection.cursor(spanOf(first).from);
   view.dispatch({
-    selection: range,
+    selection: caret,
     effects: [
       ...opening(view, ctx),
       moveTo.of(change.id),
-      EditorView.scrollIntoView(range, { y: 'center' }),
+      setCurrentChange.of({ ranges }),
+      EditorView.scrollIntoView(caret, { y: 'center' }),
     ],
     userEvent: 'select.review',
   });
   view.focus();
+}
+
+/** The current change's text, drawn as the review's own mark (`rl-review-current`). */
+const currentMark = Decoration.mark({ class: 'rl-review-current' });
+const currentDecorations = EditorView.decorations.compute([currentChange, barOpen], (state) => {
+  const current = state.field(currentChange);
+  if (!current || !isBarOpen(state)) return Decoration.none;
+  return Decoration.set(
+    current.ranges
+      .filter(({ from, to }) => from < to)
+      .map(({ from, to }) => currentMark.range(from, to)),
+    true,
+  );
+});
+
+/** The current change goes when the bar closes, however it closes. */
+const clearOnClose = EditorState.transactionExtender.of((tr) =>
+  isBarOpen(tr.startState) && !isBarOpen(tr.state) && tr.startState.field(currentChange, false)
+    ? { effects: setCurrentChange.of(null) }
+    : null,
+);
+
+/**
+ * What Review Changes starts with: the document's first change, wherever the caret is. With a
+ * selection, the first change the selection touches, and when it touches none, the first change
+ * after it, round to the top. Either way the selection goes, and the change is marked. With no
+ * changes the bar just opens (the command is disabled then).
+ */
+export function start(view: EditorView, ctx: ReviewContext): void {
+  const groups = suggestionsOf(ctx);
+  const { from, to, empty } = view.state.selection.main;
+  const spans = (marks: readonly MarkRange[]) =>
+    marks.flatMap((mark) => mark.segments.map(segmentSpan));
+  let target = groups[0];
+  if (!empty) {
+    target =
+      groups.find((marks) => spans(marks).some((at) => at.from < to && at.to > from)) ??
+      groups.find((marks) => marks.some((mark) => spanOf(mark).from >= to)) ??
+      groups[0];
+  }
+  const change = target?.[0];
+  if (change) select(view, ctx, change);
+  else openBar(view, ctx);
 }
 
 /**
@@ -441,6 +491,9 @@ export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
   return [
     barOpen,
     movedTo,
+    currentChange,
+    currentDecorations,
+    clearOnClose,
     ViewPlugin.define((view) => new Bar(view, ctx, changed)),
     Prec.high(
       keymap.of([

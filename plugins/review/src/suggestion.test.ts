@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Editor } from '@redlines/editor';
+import { currentChange, type Editor } from '@redlines/editor';
 import { accept, applyChanges, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { decideSuggestion } from './shared.ts';
@@ -194,11 +194,13 @@ describe('a suggestion of several marks', () => {
     expect(count(editor)).toBe('2 changes');
     review.next();
     expect(count(editor)).toBe('Change 1 of 2');
-    // The whole suggestion is selected: from its first mark to its last.
-    const { from, to } = editor.view.state.selection.main;
-    const chosen = editor.view.state.sliceDoc(from, to);
-    expect(chosen.startsWith('<!--ins k3x9-->')).toBe(true);
-    expect(chosen.endsWith('now<!--/w2rf-->')).toBe(true);
+    // The whole suggestion is marked as current: from its first mark to its last, with nothing
+    // selected.
+    expect(editor.view.state.selection.main.empty).toBe(true);
+    const ranges = editor.view.state.field(currentChange)?.ranges ?? [];
+    const chosen = ranges.map(({ from, to }) => editor.view.state.sliceDoc(from, to));
+    expect(chosen[0]?.startsWith('<!--ins k3x9-->')).toBe(true);
+    expect(chosen.at(-1)?.endsWith('now<!--/w2rf-->')).toBe(true);
     review.next();
     expect(count(editor)).toBe('Change 2 of 2');
     review.next();

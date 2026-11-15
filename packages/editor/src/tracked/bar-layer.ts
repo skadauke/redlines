@@ -277,6 +277,36 @@ export interface HotBar {
   from: number;
 }
 
+/**
+ * The change a review has moved to (the review bar's current change), by the ranges of its marks
+ * in the text, markers included. Its bars are drawn wider than the others (`rl-bar-current`), and
+ * the review plugin marks its text. It moves with the text, and goes when the selection moves or
+ * the review closes, which the plugin says with a null.
+ */
+export interface CurrentChange {
+  ranges: readonly { from: number; to: number }[];
+}
+
+export const setCurrentChange = StateEffect.define<CurrentChange | null>();
+
+export const currentChange = StateField.define<CurrentChange | null>({
+  create: () => null,
+  update(value, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setCurrentChange));
+    if (set) return set.value;
+    if (!value) return value;
+    // The person moved the selection elsewhere: they are no longer on that change.
+    if (tr.selection) return null;
+    if (!tr.docChanged) return value;
+    return {
+      ranges: value.ranges.map(({ from, to }) => ({
+        from: tr.changes.mapPos(from, 1),
+        to: tr.changes.mapPos(to, -1),
+      })),
+    };
+  },
+});
+
 export const setHotBar = StateEffect.define<HotBar | null>();
 
 export const hotBar = StateField.define<HotBar | null>({
@@ -338,6 +368,7 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
   if (!byLine.size) return [];
   const measure = view.state.facet(barMeasure);
   const hot = view.state.field(hotBar);
+  const current = view.state.field(currentChange)?.ranges ?? [];
   const base = layerBase(view);
   const markers: LayerMarker[] = [];
   for (const [n, spans] of [...byLine].sort((a, b) => a[0] - b[0])) {
@@ -348,9 +379,12 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
       const [only] = segment.colors;
       const author = segment.colors.length === 1 && only ? colorClass(only) : 'rl-bar-mixed';
       const hotClass = hot?.from === segment.from ? ' rl-bar-hot' : '';
+      const isCurrent = current.some(
+        (range) => segment.from <= range.to && segment.to >= range.from,
+      );
       markers.push(
         new RectangleMarker(
-          `rl-bar-seg ${author}${hotClass}`,
+          `rl-bar-seg ${author}${hotClass}${isCurrent ? ' rl-bar-current' : ''}`,
           found.left - BAR_LEFT * view.scaleX - base.left,
           segment.top - base.top,
           null,
@@ -369,6 +403,8 @@ export const barLayerThemeSpec = {
   '.rl-bar-seg.rl-bar-mixed': { backgroundColor: 'var(--rl-mixed)' },
   // Under the pointer, a bar is wider (3 px instead of 2): a click on it switches the looks.
   '.rl-bar-seg.rl-bar-hot': { width: '3px' },
+  // The change a review is on: its bar is wider still (4 px), so that it reads as this one.
+  '.rl-bar-seg.rl-bar-current, .rl-bar-seg.rl-bar-current.rl-bar-hot': { width: '4px' },
 };
 
 const barLayerTheme = EditorView.baseTheme(barLayerThemeSpec);
@@ -377,6 +413,7 @@ const barLayerTheme = EditorView.baseTheme(barLayerThemeSpec);
 export function barLayer(): Extension {
   return [
     hotBar,
+    currentChange,
     barLayerTheme,
     layer({
       above: false,
@@ -385,7 +422,8 @@ export function barLayer(): Extension {
       update: (update) =>
         update.viewportChanged ||
         trackedChangeSpans(update.state) !== trackedChangeSpans(update.startState) ||
-        update.startState.field(hotBar) !== update.state.field(hotBar),
+        update.startState.field(hotBar) !== update.state.field(hotBar) ||
+        update.startState.field(currentChange) !== update.state.field(currentChange),
     }),
   ];
 }
