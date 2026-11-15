@@ -70,6 +70,7 @@ interface Hook {
     getUiState(): Record<string, unknown>;
   };
   controller: { createWith(text: string): Promise<void> };
+  menuRow(text: string): { enabled: boolean; run(): boolean } | null;
 }
 
 declare global {
@@ -304,6 +305,29 @@ export class Journey {
   // ----- Waiting and looking -----
 
   /** Waits for the page to draw what it has: two frames, and the editor's measuring. */
+  /**
+   * Whether a row of the app's menu bar is enabled. The page has no menu bar, so the page's hook
+   * answers as the menu would: from the same row and state.
+   */
+  menuEnabled(text: string): Promise<boolean> {
+    return this.page.evaluate((row) => {
+      const found = window.__redlines!.menuRow(row);
+      if (!found) throw new Error(`There is no menu row ${row}`);
+      return found.enabled;
+    }, text);
+  }
+
+  /** Chooses a row of the menu bar, if it is enabled; false when it is not (nothing happens). */
+  async menu(text: string): Promise<boolean> {
+    const ran = await this.page.evaluate((row) => {
+      const found = window.__redlines!.menuRow(row);
+      if (!found) throw new Error(`There is no menu row ${row}`);
+      return found.run();
+    }, text);
+    await this.settle();
+    return ran;
+  }
+
   async settle(): Promise<void> {
     await this.page.evaluate(
       () =>
