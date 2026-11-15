@@ -779,13 +779,14 @@ const toggleTracking = () => {
 };
 
 /**
- * Saves a change to the settings. Each window keeps its own file sidebar, whatever another saved:
- * what is stored for it is only what a new window starts with.
+ * Saves a change to the settings. Each window keeps its own file sidebar and its own text size,
+ * whatever another saved: what is stored for them is only what a new window starts with.
  */
 const changeSettings = (change: Partial<Settings>) => {
   settings = {
     ...updateSettings(change),
     sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
+    textSize: change.textSize ?? settings.textSize,
   };
 };
 
@@ -1183,9 +1184,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = { ...changed, sidebarOpen: settings.sidebarOpen };
-  // A text size another window saved takes the reading place before it is applied.
-  textZoom.follow(settings.textSize);
+  settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

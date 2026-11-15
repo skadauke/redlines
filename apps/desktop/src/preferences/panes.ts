@@ -60,7 +60,7 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
-  /** Zooms every window of the app to a level of the window zoom's ladder, and keeps it (zoom.ts). */
+  /** Zooms Preferences, and sets the level new windows open at (zoom.ts); other open windows keep theirs. */
   setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
@@ -543,7 +543,7 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  // They walk the ladders of text-size.ts: the zoom of every window, which stops at 200%, and the
+  // They walk the ladders of text-size.ts: the zoom a new window opens at, which stops at 200%, and the
   // text alone, which goes on to 400%.
   const zoom = stepper(current.zoom, (level) => deps.setZoom(level), ZOOM_LADDER);
   const text = stepper(current.textSize, (textSize) => update({ textSize }));
@@ -551,8 +551,8 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   return [
     row('Appearance', lightOrDark),
     row('Theme', theme),
-    row('Zoom', zoom, line('Everything in Redlines’ windows')),
-    row('Text size', text),
+    row('Zoom', zoom, line('This window and windows you open next')),
+    row('Text size', text, line('For windows you open next')),
   ];
 }
 
