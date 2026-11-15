@@ -346,6 +346,7 @@ pub fn run() {
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
         .manage(zoom::Zoom::default())
+        .manage(zoom::WindowZooms::default())
         .manage(project::Projects::default())
         .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())

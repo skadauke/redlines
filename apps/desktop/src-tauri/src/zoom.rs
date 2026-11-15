@@ -1,5 +1,6 @@
-//! The window zoom (design §5.1): one level for every window, kept across launches, from 80% to
-//! 200%. The app is the only writer of WebKit's page zoom, which on the Mac has no getter, so it
+//! The window zoom (design §5.1): a level for each window, from 80% to 200%, and the last one set
+//! anywhere kept across launches, which a window opened later starts at (the app's level). A zoom
+//! changes only the window it is made in. The app is the only writer of WebKit's page zoom, which on the Mac has no getter, so it
 //! keeps the level itself.
 //!
 //! A level is one of the ladder's rungs (`ZOOM_LADDER` in `src/text-size.ts`; the text's own ladder
@@ -9,7 +10,7 @@
 //! initialization script that hands its page the level (`window.__REDLINES_ZOOM__`), and the app
 //! sets the page zoom right after it builds the window, before the page loads. A window asks for a
 //! level with `set_zoom`; the app keeps it and tells each document window and Preferences, with the
-//! `zoom` event and then the page zoom, in that order (`src/zoom.ts` follows the two). The install
+//! `zoom` event and then the page zoom, in that order, to that window alone (`src/zoom.ts` follows the two). The install
 //! window and About are never zoomed. Each page, once loaded, asks `zoom_level` for the app's level, reporting
 //! the one in its settings: the app takes the report only when it has no level yet, and only the
 //! first.
@@ -17,6 +18,7 @@
 //! Preferences can't be resized by hand, so it grows with the zoom: 560 by 440 points times the
 //! zoom, keeping its top edge and its middle, within the visible area of the screen.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -40,6 +42,19 @@ const PREFERENCES_SIZE: (f64, f64) = (560.0, 440.0);
 /// The app's level, once it has one.
 #[derive(Default)]
 pub struct Zoom(Mutex<Option<f64>>);
+
+/// The level each window is at, by label, once it has asked for one or reported. A window not here
+/// is at the app's level.
+#[derive(Default)]
+pub struct WindowZooms(Mutex<HashMap<String, f64>>);
+
+impl WindowZooms {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, f64>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
 
 impl Zoom {
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<f64>> {
@@ -242,62 +257,59 @@ fn resize_preferences(window: &WebviewWindow, level: f64) {
     let _ = window.set_position(LogicalPosition::new(frame.x, frame.y));
 }
 
-/// Tells every document window and Preferences the level, and then sets their page zoom, in that
-/// order: the page takes its reading place on the event, while its layout is still the old one.
-/// The level is the app's now, read here and not taken from the caller, so that two changes in
-/// quick succession leave every window at the one the app ended with.
-fn broadcast(app: &AppHandle) {
-    let Some(level) = *app.state::<Zoom>().lock() else {
-        return;
-    };
-    for (label, window) in app.webview_windows() {
-        if may_zoom(&label).is_err() {
-            continue;
-        }
-        if let Err(error) = app.emit_to(label.as_str(), ZOOM_EVENT, level) {
-            eprintln!("Redlines can't tell {label} of the zoom: {error}");
-        }
-        if let Err(error) = window.set_zoom(level) {
-            eprintln!("Redlines can't zoom {label}: {error}");
-        }
-        if label == PREFERENCES_WINDOW {
-            resize_preferences(&window, level);
-        }
+/// Tells one window the level, and then sets its page zoom, in that order: the page takes its
+/// reading place on the event, while its layout is still the old one. Other windows are left as
+/// they are.
+fn zoom_window(app: &AppHandle, window: &WebviewWindow, level: f64) {
+    let label = window.label();
+    if let Err(error) = app.emit_to(label, ZOOM_EVENT, level) {
+        eprintln!("Redlines can't tell {label} of the zoom: {error}");
+    }
+    if let Err(error) = window.set_zoom(level) {
+        eprintln!("Redlines can't zoom {label}: {error}");
+    }
+    if label == PREFERENCES_WINDOW {
+        resize_preferences(window, level);
     }
 }
 
-/// A window asks for a level. Only a rung is taken, and only from a document window or
-/// Preferences; the level the app has already changes nothing.
+/// A window asks for a level for itself. Only a rung is taken, and only from a document window or
+/// Preferences; the level the window has already changes nothing. The level is also the app's, which
+/// a window opened later starts at.
 #[tauri::command]
 pub fn set_zoom(app: AppHandle, window: WebviewWindow, level: f64) -> Result<(), String> {
     may_zoom(window.label())?;
     if !is_rung(level) {
         return Err(format!("{level} is not a zoom"));
     }
-    {
-        let state = app.state::<Zoom>();
-        let mut kept = state.lock();
-        if *kept == Some(level) {
-            return Ok(());
-        }
-        *kept = Some(level);
-    }
+    let had = app
+        .state::<WindowZooms>()
+        .lock()
+        .insert(window.label().to_owned(), level);
+    *app.state::<Zoom>().lock() = Some(level);
     remember(&app, level);
-    broadcast(&app);
+    if had != Some(level) {
+        zoom_window(&app, &window, level);
+    }
     Ok(())
 }
 
-/// A page's report of the level in its settings, answered with the app's level. The first report
-/// gives the app its level when it has none, which then reaches every window unless it is 100%.
+/// A page's report of the level in its settings, answered with the level of its window: its own
+/// when it has one, else the app's. The first report gives the app its level when it has none.
 #[tauri::command]
 pub fn zoom_level(app: AppHandle, window: WebviewWindow, reported: f64) -> Result<f64, String> {
     may_zoom(window.label())?;
-    let (level, taken) = answer(&mut app.state::<Zoom>().lock(), reported);
+    let (app_level, taken) = answer(&mut app.state::<Zoom>().lock(), reported);
     if taken {
-        remember(&app, level);
-        if level != 1.0 {
-            broadcast(&app);
-        }
+        remember(&app, app_level);
+    }
+    let level = *app
+        .state::<WindowZooms>()
+        .lock()
+        .entry(window.label().to_owned())
+        .or_insert(app_level);
+    if taken && level != 1.0 {
+        zoom_window(&app, &window, level);
     }
     Ok(level)
 }
