@@ -250,7 +250,8 @@ input[type='checkbox']:checked::after {
   transform: rotate(45deg);
 }
 
-/* Tables: a header row and horizontal rules only. */
+/* Tables: a header row, horizontal rules and faint lines between the columns, as the editor draws
+   them (`.rl-tc` in packages/editor/src/preview/theme.ts): the same sizes, the same rule color. */
 .rl-tbl-scroll {
   overflow-x: auto;
 }
@@ -262,6 +263,7 @@ table {
 }
 th,
 td {
+  position: relative;
   padding: 10px 16px 10px 0;
   border-bottom: 1px solid var(--rl-rule);
   text-align: left;
@@ -271,13 +273,24 @@ th:last-child,
 td:last-child {
   padding-right: 0;
 }
+/* Each cell but the first draws a line at its left, halfway across the gap the cell before it keeps.
+   It is drawn, not a border, so that no column's measure changes. */
+th:not(:first-child)::after,
+td:not(:first-child)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  border-left: 1px solid var(--rl-rule);
+  pointer-events: none;
+}
 th {
   padding-top: 0;
   padding-bottom: 8px;
   border-bottom-color: var(--rl-ink-3);
   color: var(--rl-ink-2);
   font-family: var(--rl-th-font);
-  font-size: var(--rl-th-size);
   font-weight: 700;
   letter-spacing: var(--rl-th-track);
   text-transform: var(--rl-th-case);
