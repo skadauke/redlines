@@ -1194,6 +1194,22 @@ it: a marker with text after it (`-x`) is no empty item, and takes the insertion
 that have bare markers (`bareMarkerDocument`, `random-docs.ts`) in the format's and the editor's
 walks.
 
+No mark stands right behind a bare marker in any other edit either: a bare marker followed by a
+comment is a paragraph with a marker's character in it, whatever the newest view has. The
+editor's keys read a bare marker as an empty item, as CommonMark does, and write so. Backspace in
+an empty item right under a bare marker (`- a⏎  - b⏎  -⏎-‸`) takes the break and the bare marker
+with the item, as it does when the marker above has a space after it (`b<!--del k3x9 ⏎  -⏎-
+-->`, tracked, one mark, the item above gone with the break); the deletion never starts behind
+the bare marker (`  -<!--del k3x9 ⏎--->`). Return in a bare marker that starts a list of its own
+under the text of an item of another kind of list (`1. text⏎-‸`, or a number under a bullet, or
+the other delimiter), which the editor's parse takes for a line of that text because it lets no
+empty marker interrupt a paragraph, is Return in an empty item: the list ends, as Word ends it,
+and the split is not written behind the marker (`-<!--split k3x9-->⏎2. ` read as text of the
+item). Where the write for that Return is not known yet (the empty item has a line after it with
+Track Changes on, or goes up a level, in the indentation of a marker), it is refused, as it is
+for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
+`packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
+
 ### 3.3 Marks that start or end a block
 
 A mark that starts at the beginning of a block puts its opener on the line before the block, with

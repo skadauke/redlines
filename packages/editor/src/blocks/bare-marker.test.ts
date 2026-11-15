@@ -174,9 +174,8 @@ scriptRows(
 );
 
 // The walks: documents with bare markers, the caret at the end of one, then typing, Undo, Redo and
-// decisions, with a tab and pastes of inline markup (no bold toggle: with a collapsed caret it fails on main, #584). Return and Backspace are among
-// the keys only once the caret has left the bare marker (after text typed and no Undo or decision
-// since), because at a bare marker they fail on main (#581).
+// decisions, with a tab and pastes of inline markup (no bold toggle: with a collapsed caret it fails on main, #584), and Return and
+// Backspace, at the bare marker too (#581).
 const WALKED: Invariant[] = [
   'hidden-caret',
   'empty-paragraph',
@@ -203,9 +202,9 @@ const KEYS: Step[] = [
   'Mod-Shift-z',
   { decide: 'accept' },
   { decide: 'reject' },
+  'Enter',
+  'Backspace',
 ];
-/** Keys that need the caret away from the bare marker (#581). */
-const AWAY: Step[] = ['Enter', 'Backspace'];
 const WALKS = fuzzCount(40);
 
 it(`holds every invariant over ${WALKS} walks that start at a bare marker`, async () => {
@@ -222,16 +221,7 @@ it(`holds every invariant over ${WALKS} walks that start at a bare marker`, asyn
     const found = bares[below(bares.length)];
     if (!found) continue;
     const at = found.index + found[0].length;
-    // The caret has left the bare marker once letters were typed, until an Undo, Redo or decision.
-    let away = false;
-    const keys = Array.from({ length: 4 }, () => {
-      const pool = away ? [...KEYS, ...AWAY] : KEYS;
-      const key = pool[below(pool.length)]!;
-      if (typeof key === 'string' && /^Mod-(?:Shift-)?z$/.test(key)) away = false;
-      else if (typeof key === 'object' && 'decide' in key) away = false;
-      else if (typeof key === 'object' && 'type' in key && /[a-z]/.test(key.type)) away = true;
-      return key;
-    });
+    const keys = Array.from({ length: 4 }, () => KEYS[below(KEYS.length)]!);
     const tc = random() < 0.7;
     const name = `seed ${seed}, Track Changes ${tc ? 'on' : 'off'}, ${JSON.stringify(keys)}`;
     const script = { name, doc: doc.slice(0, at) + '‸' + doc.slice(at), keys, tc, expect: {} };
