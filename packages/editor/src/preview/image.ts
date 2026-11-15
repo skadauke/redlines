@@ -210,11 +210,19 @@ class ImageWidget extends WidgetType {
     return wrap;
   }
 
+  /** A drag on a handle ends with the widget, whose pointer events then have nowhere to go. */
+  override destroy(dom: HTMLElement): void {
+    drags.get(dom)?.();
+  }
+
   /** Clicking the image puts the caret on it, which shows its source; a handle is pressed instead. */
   override ignoreEvent(event: Event): boolean {
     return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
   }
 }
+
+/** The drags that are going on, by the image they resize, which a widget that goes ends. */
+const drags = new WeakMap<HTMLElement, () => void>();
 
 /** What a drag on a handle is told about the image it resizes. */
 interface Drag {
@@ -273,6 +281,8 @@ function beginResize(view: EditorView, drag: Drag): void {
     show();
   };
   const finish = (commit: boolean) => {
+    drags.delete(wrap);
+    handle.removeEventListener('lostpointercapture', cancel);
     handle.removeEventListener('pointermove', move);
     handle.removeEventListener('pointerup', up);
     handle.removeEventListener('pointercancel', cancel);
@@ -289,7 +299,14 @@ function beginResize(view: EditorView, drag: Drag): void {
     // The image's own size, or the column's if that is less, is no width at all.
     const fit = natural > 0 ? Math.min(natural, column) : 0;
     const asked = fit > 0 && Math.abs(width - fit) <= SNAP ? null : Math.round(width / scale);
-    setImageLook(view, { width: asked }, view.posAtDOM(wrap), view.state.facet(noticeFacet));
+    let at: number;
+    try {
+      at = view.posAtDOM(wrap);
+    } catch {
+      // The widget was replaced while the pointer was down: the image is another now.
+      return;
+    }
+    setImageLook(view, { width: asked }, at, view.state.facet(noticeFacet));
   };
   const up = () => finish(true);
   const cancel = () => finish(false);
@@ -298,6 +315,8 @@ function beginResize(view: EditorView, drag: Drag): void {
     at.stopPropagation();
     finish(false);
   };
+  drags.set(wrap, cancel);
+  handle.addEventListener('lostpointercapture', cancel);
   handle.addEventListener('pointermove', move);
   handle.addEventListener('pointerup', up);
   handle.addEventListener('pointercancel', cancel);

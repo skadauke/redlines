@@ -6,7 +6,13 @@ import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, runScript, scriptRows } from './blocks/script.ts';
 import { undo } from './history/index.ts';
-import { IMAGE_PARTS_PARAGRAPH, imageInSelection, imageText, lookEdit } from './image-size.ts';
+import {
+  IMAGE_IN_HEADING,
+  IMAGE_PARTS_PARAGRAPH,
+  imageInSelection,
+  imageText,
+  lookEdit,
+} from './image-size.ts';
 import { createEditor, type Editor } from './index.ts';
 
 const open: Editor[] = [];
@@ -37,7 +43,7 @@ function written(doc: string, look: Parameters<typeof imageText>[1], at = 0): st
   const { view } = load(doc, at);
   const image = imageInSelection(view.state)!;
   const edit = lookEdit(view.state, image, look);
-  return edit ? edit.insert : null;
+  return edit ? edit.changes[0]!.insert : null;
 }
 
 describe('the text an image is written as', () => {
@@ -199,6 +205,58 @@ describe('the commands of an image', () => {
     expect(editor.view.state.doc.toString()).toMatch(
       /^<img src="cat.png" width="\d+">\n\nmore \*\*text\*\*$/,
     );
+  });
+});
+
+describe('where the tag would be an HTML block', () => {
+  /** The file after the command on the image at the caret, untracked, and what it said. */
+  function after(doc: string, at = 0) {
+    const notices: string[] = [];
+    const editor = load(doc, at, notices);
+    editor.commands.run('image.size.medium');
+    return { text: editor.view.state.doc.toString(), notices };
+  }
+
+  // A marker on the image's line stays where it is, and the tag is not a block of its own there.
+  scriptRows([
+    {
+      name: 'a split after the image stays after it',
+      doc: '‸![a](b.png)<split>⏎more',
+      keys: [{ command: 'image.size.medium' }],
+      tc: false,
+      others: 'bo',
+      expect: { file: '<img src="b.png" alt="a" width="360"><split>⏎more' },
+      skip: { render: 'a lone <img> is an HTML block until the split goes (#628)' },
+    },
+  ]);
+
+  it('does not part a tight list: the next item ends the block', () => {
+    expect(after('- ![a](b.png)\n- other', 2).text).toBe(
+      '- <img src="b.png" alt="a" width="360">\n- other',
+    );
+    expect(after('1. ![a](b.png)\n2. two', 3).text).toBe(
+      '1. <img src="b.png" alt="a" width="360">\n2. two',
+    );
+  });
+
+  it('parts a paragraph before a heading line the block would take, and says so for a setext heading', () => {
+    expect(after('![a](b.png)\n# Heading').text).toBe(
+      '<img src="b.png" alt="a" width="360">\n\n# Heading',
+    );
+    for (const doc of ['![a](b.png)\n---', '![a](b.png)\nmore\n===']) {
+      const { text, notices } = after(doc);
+      expect(text).toBe(doc);
+      expect(notices).toEqual([IMAGE_IN_HEADING]);
+    }
+  });
+
+  it('writes a pipe in a table cell as a character reference, and keeps the tag for it', () => {
+    const table = '| x |\n|---|\n| ![a\\|b](b.png) |';
+    const { text } = after(table, table.indexOf('!['));
+    expect(text).toContain('<img src="b.png" alt="a&#124;b" width="360">');
+    const editor = load(text, text.indexOf('<img'));
+    editor.commands.run('image.size.original');
+    expect(editor.view.state.doc.toString()).toContain('<img src="b.png" alt="a&#124;b">');
   });
 });
 

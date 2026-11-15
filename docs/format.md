@@ -2101,9 +2101,10 @@ pandoc file's `{width=}` is not written yet). The rule:
   that is less, and never larger than its own size. Giving it its own size again takes the `width`
   away, and the tag becomes `![alt](src "title")` again **only** when nothing would be lost: its
   attributes are only `src`, `alt` and `title`, the destination has no space, parenthesis,
-  backslash or angle bracket, and the alt text and the title have nothing that Markdown would read
-  as more than text (no `[`, `]`, `\`, `*`, `_`, backtick, `<`, `&` or `!`; no `"` or `&` in a
-  title). Any other tag stays a tag, without its width.
+  backslash, ampersand, angle bracket or line break, and the alt text and the title have nothing that
+  Markdown would read as more than text (no `[`, `]`, `\`, `*`, `_`, backtick, `<`, `>`, `&`, `!` or
+  line break in the alt text; no `"`, `\`, `<`, `&` or line break in a title; in a table cell, no `|`
+  anywhere, which is written `&#124;` in a tag). Any other tag stays a tag, without its width.
 - **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
   an image alone on its line is otherwise centered, which is the absence of the attribute, so
   centering takes it away. Other readers float the image to that side. An image among words is not
@@ -2116,7 +2117,10 @@ pandoc file's `{width=}` is not written yet). The rule:
   on to the next blank line and reads the lines under it as raw HTML. So an image that stands alone
   on the first line of a paragraph with more lines under it is not turned into a tag as it is: the
   paragraph is parted after the image, with a blank line (the container's, in a quote), and that
-  is the edit. With Track Changes on the part is a typed break that the writer does not take there
+  is the edit; a marker that follows the image on its line stays where it is. It is asked of the
+  parse of the changed text, so a tight list's next item, which ends the block, is not parted. An
+  image that is the whole text of a setext heading can't be a tag on its line (the line would end
+  the heading), and the person is told so. With Track Changes on the part is a typed break that the writer does not take there
   yet (it says so in its words), and the person is told so, in words about the image, and the file
   is left as it is, until the widening of an edit that can't be tracked finely is built.
 - **Known: a lone tag in the file.** Where the tag stands alone in its paragraph (an HTML block)
