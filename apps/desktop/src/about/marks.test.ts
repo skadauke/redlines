@@ -95,60 +95,27 @@ describe('the icon cycler', () => {
     expect(cycler.current()).toBe('delete-mark');
   });
 
-  it('changes the mark as a tracked change: the old struck through, the new underlined', async () => {
+  it('changes the mark: the old fades, the new comes in from below, and no red line is drawn', async () => {
     const { stage, running, marks, shown, cycler, settle } = setup('caret');
     cycler.click();
-    // At once: the app is told, so that the Dock follows; both marks are there, with the red lines.
+    // At once: the app is told, so that the Dock follows; both marks are there.
     expect(shown).toEqual(['change-bar']);
     expect(marks()).toEqual(['caret', 'change-bar']);
-    expect(stage.querySelector('.rl-strike')).not.toBeNull();
-    expect(stage.querySelector('.rl-underline')).not.toBeNull();
+    expect([...stage.children].every((child) => child.tagName === 'IMG')).toBe(true);
     const byElement = (selector: string) =>
       running.filter(({ element }) => element.matches(selector));
-    // The strike is drawn across the old mark, left to right; the old mark fades; the new one comes
-    // in from below; the underline is drawn across under it, and goes.
-    expect(byElement('.rl-strike')[0]?.keyframes).toEqual([
-      { transform: 'scaleX(0)' },
-      { transform: 'scaleX(1)' },
-    ]);
     const old = byElement("img[data-mark='caret']");
     expect(old[0]?.keyframes.at(-1)).toMatchObject({ opacity: 0 });
     const incoming = byElement("img[data-mark='change-bar']");
     expect(incoming[0]?.keyframes[0]).toMatchObject({ opacity: 0 });
     expect(String(incoming[0]?.keyframes[0]?.['transform'])).toMatch(/^translateY\([1-9]/);
     expect(incoming[0]?.keyframes.at(-1)).toMatchObject({ opacity: 1, transform: 'translateY(0)' });
-    const underline = byElement('.rl-underline');
-    expect(underline[0]?.keyframes).toEqual([
-      { transform: 'scaleX(0)', opacity: 1 },
-      { transform: 'scaleX(1)', opacity: 1 },
-    ]);
-    expect(underline.at(-1)?.keyframes.at(-1)).toMatchObject({ opacity: 0 });
+    // Only the two marks are animated.
+    expect(running.every(({ element }) => element.tagName === 'IMG')).toBe(true);
     await settle();
-    // Done: one mark, the new one, and no lines.
     expect(marks()).toEqual(['change-bar']);
-    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+    expect(stage.children).toHaveLength(1);
     expect(cycler.current()).toBe('change-bar');
-  });
-
-  it('takes the strike away with the mark it strikes, so that no red line is left across the new one', () => {
-    const { running, cycler } = setup('caret');
-    cycler.click();
-    const endOf = ({ options }: Running) =>
-      Number(options.delay ?? 0) + Number(options.duration ?? 0);
-    const goes = (selector: string) =>
-      running.filter(
-        ({ element, keyframes }) =>
-          element.matches(selector) && keyframes.at(-1)?.['opacity'] === 0,
-      );
-    const old = goes("img[data-mark='caret']");
-    const strike = goes('.rl-strike');
-    expect(old).toHaveLength(1);
-    expect(strike).toHaveLength(1);
-    // It goes with the mark, not after it: when the old mark is gone, the line is.
-    expect(endOf(strike[0]!)).toBeLessThanOrEqual(endOf(old[0]!));
-    // And it is already going when the new mark has come most of the way in.
-    const incoming = running.find(({ element }) => element.matches("img[data-mark='change-bar']"));
-    expect(Number(strike[0]!.options.delay ?? 0)).toBeLessThan(endOf(incoming!));
   });
 
   it('takes about half a second', () => {
@@ -176,7 +143,7 @@ describe('the icon cycler', () => {
     cycler.click();
     expect(shown).toEqual(['change-bar']);
     expect(marks()).toEqual(['caret', 'change-bar']);
-    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+    expect(stage.querySelector('div')).toBeNull();
     expect(running.length).toBeGreaterThan(0);
     for (const { keyframes, options } of running) {
       // Opacity only: nothing moves or is drawn across.
@@ -188,7 +155,7 @@ describe('the icon cycler', () => {
   });
 
   it('finishes a change that is going when the icon is clicked again, and goes on from there', async () => {
-    const { stage, running, marks, shown, cycler, settle } = setup('caret');
+    const { running, marks, shown, cycler, settle } = setup('caret');
     cycler.click();
     const first = [...running];
     // Not finished yet: another click.
@@ -197,7 +164,6 @@ describe('the icon cycler', () => {
     expect(shown).toEqual(['change-bar', 'margin-bracket']);
     // The first change is settled, and the second is under way from it.
     expect(marks()).toEqual(['change-bar', 'margin-bracket']);
-    expect(stage.querySelectorAll('.rl-strike')).toHaveLength(1);
     await settle();
     expect(marks()).toEqual(['margin-bracket']);
     expect(cycler.current()).toBe('margin-bracket');
@@ -217,15 +183,13 @@ describe('the icon cycler', () => {
   it('reads whether the person wants less motion at each click', async () => {
     const { stage, motion, cycler, settle, marks } = setup('caret');
     cycler.click();
-    expect(stage.querySelector('.rl-strike')).not.toBeNull();
     await settle();
     motion.reduced = true;
     cycler.click();
-    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+    expect(stage.querySelector('div')).toBeNull();
     await settle();
     motion.reduced = false;
     cycler.click();
-    expect(stage.querySelector('.rl-strike')).not.toBeNull();
     await settle();
     expect(marks()).toEqual(['delete-mark']);
   });
@@ -296,7 +260,7 @@ describe('the page’s own animations', () => {
     expect([...stage.querySelectorAll('img')].map((img) => img.dataset['mark'])).toEqual([
       'change-bar',
     ]);
-    expect(stage.querySelector('.rl-strike, .rl-underline')).toBeNull();
+    expect(stage.querySelector('div')).toBeNull();
   });
 
   it('ends the change when its animations run out', async () => {

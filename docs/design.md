@@ -306,8 +306,8 @@ The window, on the desktop:
   › Rotate the Dock Icon keeps the caret. About Redlines is a small window of the app's own, as
   Preferences is, on every system: the icon, the name, the version and build, and the copyright,
   as the system's panel has them. It opens once, and Esc and ⌘W close it. A click on its icon
-  changes it to the next mark of the family, drawn as a tracked change, the old mark struck through
-  with a red line and the new one underlined, in about half a second (a plain crossfade under
+  changes it to the next mark of the family, the old mark fading out and the new one coming in from
+  below, with no line drawn across either, in about half a second (a plain crossfade under
   Reduce Motion); nothing says so, and the Dock icon follows the mark until the next launch.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
