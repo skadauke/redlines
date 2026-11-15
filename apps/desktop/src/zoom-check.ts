@@ -387,6 +387,17 @@ async function positionsMap({
  * Puts the caret in the fifth row of `WRAPPED` in `LONG`, level with the middle of the screen.
  * Fails, saying why, if the paragraph does not wrap to five rows.
  */
+/** Waits until the document's height has not changed for a dozen frames (at most 300). */
+async function layoutStill(view: EditorView): Promise<void> {
+  let height = NaN;
+  let still = 0;
+  for (let frame = 0; frame < 300 && still < 12; frame++) {
+    await frames();
+    still = view.contentHeight === height ? still + 1 : 0;
+    height = view.contentHeight;
+  }
+}
+
 async function caretInFifthRow(
   editor: Editor,
 ): Promise<{ pos: number } | { why: string; rowHeight: number }> {
@@ -490,6 +501,10 @@ async function textKeysKeepTheCaret({
 }: Pick<ZoomCheckContext, 'editor' | 'textZoom'>): Promise<unknown[]> {
   editor.setDoc(LONG);
   editor.setViewMode('clean');
+  // The document is laid out before the line is measured: the parse goes on in the background for
+  // a few frames after `setDoc`, and what it finds (the space between blocks, the hidden blank
+  // lines) moves the text above the caret by some 90 px, in whichever step it lands (#485).
+  await layoutStill(editor.view);
   // The size the page is at, whatever the earlier checks left of it.
   textZoom.follow(1);
   await frames();
@@ -784,10 +799,10 @@ async function surfacesFit({
   await settle();
   fits('view menu', document.querySelector('.rl-menu-anchor:not([hidden]) .rl-menu'));
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  // The review bar.
+  // The review panel.
   surfaces.review.openBar();
   await settle();
-  fits('review bar', document.querySelector('.rl-review-bar'), { margin: 16 });
+  fits('review panel', document.querySelector('.rl-review-panel'), { margin: 12 });
   surfaces.review.closeBar();
   // The sidebar, open and covering the page: the page keeps its whole width under it.
   surfaces.setSidebar(true);

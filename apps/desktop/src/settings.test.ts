@@ -74,7 +74,6 @@ describe('settings', () => {
       consent: {},
       people: [],
       newDocumentFolder: null,
-      imagePlace: 'folder',
       imageFolderName: 'images',
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
@@ -107,7 +106,6 @@ describe('settings', () => {
         { handle: 'claude-bo', color: 3 },
       ],
       newDocumentFolder: '/Users/ada/Notes',
-      imagePlace: 'assets',
       imageFolderName: 'pictures',
     } as const;
     saveSettings(changed);
@@ -347,18 +345,13 @@ describe('settings', () => {
     expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
   });
 
-  it('puts images in a folder named images beside the document, also for settings saved before', () => {
+  it('puts images in a folder named images, also for settings saved before, which may name a place', () => {
     localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
-    expect(loadSettings().imagePlace).toBe('folder');
     expect(loadSettings().imageFolderName).toBe('images');
-    for (const place of ['folder', 'assets', 'same']) {
-      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":"${place}"}`);
-      expect(loadSettings().imagePlace).toBe(place);
-    }
-    for (const stored of ['"elsewhere"', '3', 'null', 'true', '["same"]']) {
-      localStorage.setItem(SETTINGS_KEY, `{"imagePlace":${stored}}`);
-      expect(loadSettings().imagePlace).toBe('folder');
-    }
+    // A place saved before the project's one folder (#523) is let go; its name is kept.
+    localStorage.setItem(SETTINGS_KEY, '{"imagePlace":"assets","imageFolderName":"pics"}');
+    expect(loadSettings().imageFolderName).toBe('pics');
+    expect('imagePlace' in loadSettings()).toBe(false);
   });
 
   it('keeps the name of the folder for images only if a folder can have it', () => {
@@ -400,7 +393,16 @@ describe('settings', () => {
     expect(imageFolderNameProblem('x'.repeat(101))).toBe(
       'A folder’s name can’t be longer than 100 characters.',
     );
-    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a\u0007b', 'a\u0085b', 'a\u007fb']) {
+    for (const typed of [
+      '.images',
+      'a/b',
+      '../x',
+      'a\\b',
+      'a:b',
+      'a\u0007b',
+      'a\u0085b',
+      'a\u007fb',
+    ]) {
       expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
         'A folder’s name has no slash and doesn’t start with a dot.',
       );

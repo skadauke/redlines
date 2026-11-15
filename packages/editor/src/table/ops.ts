@@ -181,8 +181,9 @@ function rowsSelected(
   const last = rows.at(-1);
   if (!read || first === undefined || last === undefined) return EditorSelection.single(fallback);
   if (rectangle) {
-    const end = Math.max(0, (read.rows[last]?.cells.length ?? 1) - 1);
-    const rect = rectSelection(read, { row: first, col: 0 }, { row: last, col: end });
+    // Whole rows: to the table's last column, whatever the last of them has (a row that lacks cells
+    // ends early, as Select Row does), not to the last row's own end.
+    const rect = rectSelection(read, { row: first, col: 0 }, { row: last, col: read.columns - 1 });
     if (rect) return rect;
   }
   const cell = read.rows[first]?.cells[0];

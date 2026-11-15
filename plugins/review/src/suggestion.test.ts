@@ -33,7 +33,7 @@ const two = file(`${BODY} It <!--ins m4np-->is<!--/m4np--> late <!--ins q5rs-->!
 ]);
 
 const notes = (editor: Editor) => [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note')];
-const bar = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-review-bar');
+const bar = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-review-panel');
 const count = (editor: Editor) => bar(editor)?.querySelector('.rl-bar-count')?.textContent;
 
 /** By hand: each mark decided on its own, last first. */

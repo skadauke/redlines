@@ -154,7 +154,7 @@ export interface Host {
   askToOverwrite(name: string): Promise<OverwriteChoice>;
   /**
    * Asks whether to save a document that has no file yet before an image is added to it, which is
-   * saved beside the document. Resolves to true for Save…, false for Cancel.
+   * saved in the project’s folder for images. Resolves to true for Save…, false for Cancel.
    */
   askToSaveForImage(): Promise<boolean>;
   /**
@@ -499,7 +499,7 @@ function createTauriHost(): Host {
     },
     async askToSaveForImage() {
       const answer = await message(
-        'An image is saved beside its document, so the document has to be saved first.',
+        'An image is saved in the project’s folder for images, so the document has to be saved first.',
         {
           title: 'Do you want to save this document before adding the image?',
           kind: 'info',
@@ -696,7 +696,9 @@ function createBrowserHost(): Host {
       Promise.resolve(window.confirm('Discard a comment or reply you haven’t posted?')),
     askToSaveForImage: () =>
       Promise.resolve(
-        window.confirm('Save this document first? An image is saved beside its document.'),
+        window.confirm(
+          'Save this document first? An image is saved in the project’s folder for images.',
+        ),
       ),
     // The browser's own panel, which gives the files themselves.
     chooseImages: () =>

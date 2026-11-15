@@ -29,6 +29,11 @@ impl ProjectRoot {
     pub fn is_too_broad(&self) -> bool {
         self.too_broad
     }
+
+    /// The project's folder, as the document's path gave it (`root_of`).
+    pub fn folder(&self) -> PathBuf {
+        PathBuf::from(&self.folder)
+    }
 }
 
 /// A file or folder in the sidebar. The window reads the fields by name.
