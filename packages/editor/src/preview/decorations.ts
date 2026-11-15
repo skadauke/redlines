@@ -229,12 +229,26 @@ class Builder {
  * (design: block editing, "Typed syntax"). Until then the line is drawn as body text, so that it
  * does not change kind with each character.
  */
-function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
+function loneMark(state: Source, node: SyntaxNode, mark: string): boolean {
   const first = node.getChild(mark);
   if (!first) return false;
   const line = state.doc.lineAt(first.from);
   const rest = state.sliceDoc(first.to, line.to).replace(/<!--[^]*?-->/g, '');
   return rest === '' && node.to <= line.to;
+}
+
+/** The text that a node is read from: a state, or the reading of one. */
+type Source = Pick<EditorState, 'doc' | 'sliceDoc'>;
+
+/** The marker of a list item with nothing after it, which has no block to take the space above. */
+function emptyItemMark(state: Source, node: SyntaxNode): SyntaxNode | null {
+  const mark = node.getChild('ListMark');
+  if (!mark || loneMark(state, node, 'ListMark')) return null;
+  const line = state.doc.lineAt(mark.from);
+  if (node.to > line.to || node.getChild('Task')) return null;
+  return /^[ \t]*$/.test(state.sliceDoc(mark.to, line.to).replace(/<!--[^]*?-->/g, ''))
+    ? mark
+    : null;
 }
 
 function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
@@ -486,7 +500,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
     read.tree.iterate({
       enter: (ref) => {
         if (leafKind(ref.name)) leaves.push(ref.node);
-        else if (ref.name === 'OrderedList')
+        else if (ref.name === 'ListItem') {
+          // An empty item keeps the space above it while an empty paragraph is open too.
+          const mark = emptyItemMark(read.reading, ref.node);
+          if (mark) leaves.push(mark);
+        } else if (ref.name === 'OrderedList')
           countedNumbers(read.reading, ref.node, numbers, read.back);
       },
     });
@@ -496,6 +514,12 @@ export function previewDecorations(state: EditorState): DecorationSet {
       const node = ref.node;
       const name = ref.name;
       if (live && leafKind(name)) leaves.push(node);
+      // An empty item has no block of its own: its marker stands for it, so that the space above
+      // it is the item's from the first, not from the first letter typed in it (#509).
+      else if (live && name === 'ListItem') {
+        const mark = emptyItemMark(state, node);
+        if (mark) leaves.push(mark);
+      }
       const inlineSpec = INLINE[name];
       if (inlineSpec) {
         inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
