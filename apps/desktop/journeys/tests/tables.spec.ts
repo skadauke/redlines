@@ -402,12 +402,10 @@ test.describe('tables @tables', () => {
     row: async (j) => {
       await j.hover('1');
       await j.page.locator('.rl-grip').first().click();
-      await j.page.keyboard.press('Escape');
     },
     column: async (j) => {
       await j.hover('A');
       await j.page.locator('.rl-col-grip').click();
-      await j.page.keyboard.press('Escape');
     },
     table: async (j) => {
       await j.caretAfter('1');
