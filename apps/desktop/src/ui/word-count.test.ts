@@ -107,6 +107,26 @@ describe('createWordCount', () => {
     expect(label()?.textContent).toBe('1,204 words');
   });
 
+  it('counts a moved selection on the next turn, without a second read of the text', () => {
+    const { words, count, counted, label } = setup();
+    counted.selected = 9;
+    words.schedule(false);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(0);
+    expect(label()?.textContent).toBe('9 of 1,204 words');
+  });
+
+  it('lets a waiting count for a change to the text cover a selection moved meanwhile', () => {
+    const { words, count } = setup();
+    words.schedule();
+    vi.advanceTimersByTime(IDLE_MS - 10);
+    words.schedule(false);
+    vi.advanceTimersByTime(0);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10);
+    expect(count).toHaveBeenCalledOnce();
+  });
+
   it('counts a document that has just opened as soon as the page has drawn it, not on idle', () => {
     const { words, count, counted, label } = setup();
     words.schedule();
@@ -270,7 +290,7 @@ describe('the word count of an editor', () => {
     vi.advanceTimersByTime(IDLE_MS);
     expect(label()).toBe('4 words');
     select(5, 13);
-    vi.advanceTimersByTime(IDLE_MS);
+    vi.advanceTimersByTime(0);
     expect(label()).toBe('2 of 4 words');
   });
 

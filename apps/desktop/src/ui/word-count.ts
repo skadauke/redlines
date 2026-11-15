@@ -1,7 +1,7 @@
 // The word count in the window's lower right corner (design §5.1): a small gray label that stays
 // there while the person writes, "1,204 words", and with a selection "120 of 1,204 words". It
 // counts what a reader sees, as the file name's hover facts do (the newest text, never the markers
-// or the ledger), and on idle, a moment after the last change, so that typing never waits for it and
+// or the ledger), and on idle, a moment (150 ms) after the last change to the text, or at once for a moved selection, so that typing never waits for it and
 // a long document stays fast. It sits on a fade of the page's color, as the title bar does at the
 // top, so that text and notes that scroll under it never meet it, and what the editor scrolls to
 // stops short of the fade. Preferences can hide it.
@@ -12,8 +12,8 @@ import type { Editor } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { wordCount } from './titlebar.ts';
 
-/** How long after the last change the words are counted. */
-export const IDLE_MS = 400;
+/** How long after the last change to the text the words are counted. */
+export const IDLE_MS = 150;
 
 /** What the label counts. */
 export interface Words {
@@ -66,8 +66,12 @@ export function wordCountLabel(total: number, selected: number | null): string {
 }
 
 export interface WordCount {
-  /** The document or the selection changed: counts once the changes stop. */
-  schedule(): void;
+  /**
+   * The document changed (the default): counts once the changes stop. Only the selection changed
+   * (`textChanged` false): counts on the next turn, since the text is already read, unless a count
+   * for a change to the text is waiting, which then covers the selection too.
+   */
+  schedule(textChanged?: boolean): void;
   /**
    * A document has just opened: counts as soon as the page has drawn it, so that the label never
    * tells of the document before for as long as an idle wait.
@@ -82,7 +86,7 @@ export interface WordCount {
 /**
  * Adds the label to `parent`, which the page's lower right corner is in, after what is there, so
  * that its fade is over the page. `source.count` is asked only while the label is shown, and after
- * the changes have stopped for `IDLE_MS`. While it is shown the parent is marked `rl-has-footer`,
+ * the changes to the text have stopped for `IDLE_MS` (a moved selection is counted on the next turn). While it is shown the parent is marked `rl-has-footer`,
  * which the style sheet keeps what scrolls into view clear of the fade by.
  */
 export function createWordCount(
@@ -101,24 +105,36 @@ export function createWordCount(
   footer.hidden = !visible;
   parent.classList.toggle('rl-has-footer', visible);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let waiting = false;
 
   const show = () => {
     const { total, selected } = source.count();
     label.textContent = wordCountLabel(total, selected);
   };
+  const later = (ms: number) => {
+    clearTimeout(timer);
+    waiting = true;
+    timer = setTimeout(() => {
+      waiting = false;
+      show();
+    }, ms);
+  };
 
   return {
-    schedule() {
-      clearTimeout(timer);
-      if (visible) timer = setTimeout(show, IDLE_MS);
+    schedule(textChanged = true) {
+      if (!visible) return;
+      if (textChanged) later(IDLE_MS);
+      else if (!waiting) later(0);
     },
     refresh() {
       clearTimeout(timer);
-      if (visible) timer = setTimeout(show, 0);
+      waiting = false;
+      if (visible) later(0);
     },
     setVisible(next) {
       if (next === visible) return;
       visible = next;
+      waiting = false;
       footer.hidden = !next;
       parent.classList.toggle('rl-has-footer', next);
       clearTimeout(timer);
@@ -142,7 +158,8 @@ export function createEditorWordCount(
   const words = createWordCount(parent, { count: editorWords(editor.view) }, options);
   editor.addExtension([
     EditorView.updateListener.of((update) => {
-      if (update.docChanged || update.selectionSet) words.schedule();
+      if (update.docChanged) words.schedule();
+      else if (update.selectionSet) words.schedule(false);
     }),
     // As the title bar's room above, so that a caret scrolled into view from below isn't left in the
     // fade, where the line being typed would be gone.
