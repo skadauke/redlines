@@ -7,6 +7,8 @@ import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
+import { widenedTableEdit } from './table-widen.ts';
+import { Untrackable } from './widen.ts';
 import { addPerson, changesBetween, commitEdit, workingLedger } from './edit-support.ts';
 import type { CommitOptions } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
@@ -900,7 +902,8 @@ function deleteTable(
  *
  * @throws EditError when the operation is refused, or the ledger can't be read.
  */
-export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
+/** The operation at the grain it was made, refused where its rules say so (`tableEdit` widens). */
+export function fineTableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   const parsed = parse(text);
   const table = tableOf(text, parsed, op);
   if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
@@ -1634,3 +1637,28 @@ function relocatedPatch(text: string, table: TableRead, index: number): TextChan
   const marker = rowMarker(text, table.rows[index] as TableRowRead);
   return marker ? [{ ...marker, insert: '' }] : [];
 }
+
+/**
+ * A tracked table operation. Where the rules refuse it because of another person's pending changes
+ * (or any form that would read differently in some order of decisions), it is written as a
+ * replacement of the table (format §3.12, `table-widen.ts`); where no unit holds it, or the
+ * operation has no meaning on the table, the refusal stands.
+ *
+ * @throws EditError when the operation is refused.
+ */
+export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
+  try {
+    return fineTableEdit(text, op, ctx);
+  } catch (error) {
+    if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+    try {
+      return widenedTableEdit(text, op, ctx);
+    } catch (second) {
+      // The operation has no meaning, or no unit holds it: the refusal is the first one's.
+      if (second instanceof EditError || second instanceof Untrackable) throw error;
+      throw second;
+    }
+  }
+}
+
+const WIDENABLE: readonly string[] = ['no-legal-placement', 'would-hide-marks', 'inside-code'];

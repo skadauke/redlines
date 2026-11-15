@@ -9,7 +9,7 @@ import { EditError } from './errors.ts';
 import { expectEveryOrderRead } from './oracle.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { tableEdit } from './table-ops.ts';
+import { fineTableEdit as tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { widenedTableEdit } from './table-widen.ts';
 import { ada, bo, context, file } from './test-helpers.ts';
