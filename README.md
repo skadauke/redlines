@@ -64,7 +64,7 @@ and when, and the comment threads, are in a block at the end of the file.
 - **The window.** The title bar is the page: the text scrolls under it, the document icon next to
   the name drags the file, a double-click on the name renames it, and the eye and the pen switch
   Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
-  corner. A formatting palette opens from a handle at the bottom center and on right-click, and
+  corner. A formatting palette opens on right-click and from the keyboard, and
   ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.
 - **Reviewing.** The View menu lists Clean, Redlines and Raw. A click on a change bar, or View ›
   Simple Look, switches Redlines to its simple look; a note's Accept and Reject there decide in

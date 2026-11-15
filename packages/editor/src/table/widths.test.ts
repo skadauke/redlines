@@ -20,6 +20,7 @@ import {
   type WidthEnvironment,
   shownText,
   widthsOf,
+  WIDTHS_PAUSE,
 } from './widths.ts';
 import { tablesField, tablesOf } from './model.ts';
 import { deleteCols, insertCols } from './ops.ts';
@@ -243,7 +244,7 @@ describe('the widths of a table in an editor', () => {
     expect(widthsOf(editor.view.state).map((w) => w.id)).toEqual(tables.map((t) => t.id));
   });
 
-  it('holds the widths while the caret is in the table, and finds them again when it leaves', async () => {
+  it('holds the widths on each keystroke, and finds them again when the caret leaves', async () => {
     const editor = await load();
     editor.view.dispatch({ selection: { anchor: at('one', 1) } });
     await settle(editor);
@@ -266,6 +267,50 @@ describe('the widths of a table in an editor', () => {
     const found = widthsOf(editor.view.state);
     expect(found).not.toBe(held);
     expect(found[0]!.columns[0]!).toBeGreaterThan(held[0]!.columns[0]!);
+  });
+
+  it('finds them again after a pause in typing, never on each keystroke', async () => {
+    const editor = await load();
+    editor.view.dispatch({ selection: { anchor: at('one', 1) } });
+    await settle(editor);
+    const held = widthsOf(editor.view.state);
+    vi.useFakeTimers();
+    try {
+      const type = (n: number) =>
+        editor.view.dispatch({
+          changes: { from: at('one', 1) + n, insert: 'x' },
+          selection: { anchor: at('one', 1) + n + 1 },
+          userEvent: 'input.type',
+        });
+      // Keystrokes 200 ms apart: the pause never reaches 300 ms, so nothing moves.
+      for (let n = 0; n < 5; n++) {
+        type(n);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(widthsOf(editor.view.state)).toBe(held);
+      }
+      // The typing stops: after the pause the widths follow the text.
+      await vi.advanceTimersByTimeAsync(WIDTHS_PAUSE + 100);
+      const found = widthsOf(editor.view.state);
+      expect(found).not.toBe(held);
+      expect(found[0]!.columns[0]!).toBeGreaterThan(held[0]!.columns[0]!);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finds them again at once when the caret leaves, and drops the pause', async () => {
+    const editor = await load();
+    editor.view.dispatch({ selection: { anchor: at('one', 1) } });
+    await settle(editor);
+    const held = widthsOf(editor.view.state);
+    editor.view.dispatch({
+      changes: { from: at('one', 1), insert: 'xxxxxxxxxxxxxxxxxxxxxxxxx' },
+      selection: { anchor: at('one', 1) + 25 },
+      userEvent: 'input.type',
+    });
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    await settle(editor);
+    expect(widthsOf(editor.view.state)).not.toBe(held);
   });
 
   it('finds them again after a paste, with the caret in the table', async () => {
