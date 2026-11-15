@@ -367,3 +367,101 @@ describe('opening an image', () => {
     expect(opened).toEqual(['img/a cat.png', 'img/a cat.png']);
   });
 });
+
+describe('an image with a size (#526)', () => {
+  it('draws an `<img>` tag as an image with its width, and keeps a tag with no src as source', () => {
+    const editor = editorWith('Words <img src="cat.png" width="200"> more', local, 0);
+    const [image] = drawn(editor);
+    expect(image?.querySelector('img')?.style.width).toContain('200px');
+    expect(drawn(editorWith('Words <img alt="no source"> more', local, 0))).toHaveLength(0);
+    expect(drawn(editorWith('Words <b>bold</b> more', local, 0))).toHaveLength(0);
+  });
+
+  it('draws a tag alone on its line, an HTML block, centered', () => {
+    const editor = editorWith('Before\n\n<img src="cat.png" width="200">\n\nAfter', local, 0);
+    const [image] = drawn(editor);
+    expect(image?.classList.contains('rl-image-own')).toBe(true);
+    expect(image?.querySelector('img')?.style.width).toContain('200px');
+    // A tag with more in its block is HTML, not an image.
+    expect(drawn(editorWith('<img src="cat.png">\nmore text', local, 0))).toHaveLength(0);
+  });
+
+  it('draws a left or right alignment on a line of its own', () => {
+    const [image] = drawn(
+      editorWith('Before\n\n<img src="cat.png" align="left">\n\nAfter', local, 0),
+    );
+    expect(image?.classList.contains('rl-image-left')).toBe(true);
+  });
+
+  it('has a handle on each edge, and none on an image that is only its alt text', () => {
+    const [image] = drawn(editorWith('Before\n\n![A cat](cat.png)', local, 0));
+    expect(image?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+    expect(image?.querySelector('.rl-image-handle-left')?.getAttribute('title')).toBe(
+      'Drag to resize',
+    );
+    const [missing] = drawn(editorWith('Before\n\n![A cat](cat.png)', () => null, 0));
+    expect(missing?.querySelectorAll('.rl-image-handle')).toHaveLength(0);
+  });
+
+  /** A drag of the handle on `side` by `dx` px, of an image `width` px wide in a column of 600. */
+  function drag(editor: Editor, side: 'left' | 'right', dx: number, width = 200, natural = 400) {
+    const [image] = drawn(editor);
+    const img = image!.querySelector('img')!;
+    img.getBoundingClientRect = () => ({ width }) as DOMRect;
+    Object.defineProperty(img, 'naturalWidth', { value: natural });
+    const line = document.createElement('div');
+    Object.defineProperty(line, 'clientWidth', { value: 600 });
+    line.className = 'cm-line';
+    line.append(image!);
+    document.body.append(line);
+    const handle = image!.querySelector<HTMLElement>(`.rl-image-handle-${side}`)!;
+    handle.setPointerCapture = () => {};
+    handle.releasePointerCapture = () => {};
+    const event = (type: string, x: number) => {
+      const found = new MouseEvent(type, {
+        clientX: x,
+        button: 0,
+        bubbles: true,
+        cancelable: true,
+      });
+      return Object.assign(found, { pointerId: 1 });
+    };
+    handle.dispatchEvent(event('pointerdown', 100));
+    handle.dispatchEvent(event('pointermove', 100 + dx));
+    const live = img.style.width;
+    handle.dispatchEvent(event('pointerup', 100 + dx));
+    return { live, after: img.style.width };
+  }
+
+  it('resizes with a drag: the image follows the pointer, and the width is written at its end', () => {
+    // A centered image grows at both edges: the edge is at twice the distance.
+    const editor = editorWith('Before\n\n![A cat](cat.png)\n\nAfter', local, 0);
+    // Its position: the widget replaces the image at 8.
+    editor.view.posAtDOM = () => 8;
+    const { live } = drag(editor, 'right', 50);
+    expect(live).toBe('300px');
+    expect(editor.getDoc()).toBe('Before\n\n<img src="cat.png" alt="A cat" width="300">\n\nAfter');
+  });
+
+  it('takes the left handle the other way, and keeps the least width', () => {
+    const editor = editorWith('Before\n\n![A cat](cat.png)\n\nAfter', local, 0);
+    editor.view.posAtDOM = () => 8;
+    const { live } = drag(editor, 'left', 200);
+    expect(live).toBe('24px');
+    expect(editor.getDoc()).toBe('Before\n\n<img src="cat.png" alt="A cat" width="24">\n\nAfter');
+  });
+
+  it('stops at the column', () => {
+    const editor = editorWith('Before\n\n![A cat](cat.png)\n\nAfter', local, 0);
+    editor.view.posAtDOM = () => 8;
+    expect(drag(editor, 'right', 500, 200, 2000).live).toBe('600px');
+  });
+
+  it('gives the image its own size again when it is dragged to it', () => {
+    const editor = editorWith('Before\n\n<img src="cat.png" width="100">\n\nAfter', local, 0);
+    editor.view.posAtDOM = () => 8;
+    // 100 px wide, its own size 400, the column 600: 100 + 2 × 150 = 400.
+    drag(editor, 'right', 150, 100, 400);
+    expect(editor.getDoc()).toBe('Before\n\n![](cat.png)\n\nAfter');
+  });
+});

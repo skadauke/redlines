@@ -348,8 +348,16 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
-- **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
-  change.
+- **Image size:** while the pointer is over an image, a handle on its left edge and one on its
+  right edge resize it, with its aspect kept; the image follows the pointer as it is dragged, and
+  one Undo takes the size back. A large image fits the text column and a small one keeps its own
+  size (it is never scaled up unless it is dragged larger). The size is stored as `<img width>`
+  (`{width=}` in a pandoc file is not written yet): the first size turns `![alt](src)` into the tag,
+  and the image's own size, which a drag to it also gives, turns it back. Alignment (left, centered,
+  right) is the tag's `align`. A new size is tracked as a substitution of the whole image
+  ([format §3.5.1](format.md#351-image-size-and-alignment)). The menu's Small, Medium, Large,
+  Original size and the alignments are commands of the editor (`image.size.*`, `image.align.*`),
+  which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
@@ -405,7 +413,9 @@ of red there besides the pen).
   **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
   **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
-  deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
+  deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
+  with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
+  text. The click
   and the switch do the same: they switch from the one to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
@@ -873,7 +883,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   every row at its place, struck, counted among the columns when the widths are found, and skipped by
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
-  and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows.
+  and "Moved column". Simple draws the bars and no ghost, tint or underline, and the text of an inserted column in its author's color, as it does for rows.
 - **Widgets at the table's edges.** With the pointer over the table, three small widgets grow it and
   select it without a menu, in the same layer as the handles. **Add column** is a strip as tall as
   the table, 4 px right of it, 20 px wide, with a +, while the pointer is over the rightmost column
@@ -935,7 +945,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   was typed in it since and its comments). The cards say "Inserted row", "Deleted row" and "Moved row" (and
   "Deleted 3 rows" for rows deleted together). Simple draws the bars of the same rows and no ghost,
   tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
-  Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
+  Clean shows, the text of an inserted row in its author's color. Rows that another person's changes are in can be moved (their changes travel with them)
   but not deleted until those are decided; an agent that replaces a table with the table it wants
   changes rows and columns as these commands do (format §3.7, "Agents").
 - **A table deleted whole** (Delete Table, or ⌫ again on a selected table whose cells are empty) is,
@@ -1140,7 +1150,7 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- image resizing, alt text and captions; callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+- alt text and captions of images (resizing is built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
   are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
