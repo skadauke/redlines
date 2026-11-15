@@ -400,6 +400,12 @@ export const baseThemeSpec: ThemeSpec = {
     color: 'HighlightText',
     textDecorationColor: 'currentColor',
   },
+  // The same for a change inside a selected cell (inserted, deleted or formatted text): its author's
+  // color on the selection's blue would be unreadable, so it takes the ink as the cell's text does.
+  '&.rl-cell-selecting .rl-trow > .rl-tc:has(.rl-sel) :is(.rl-ins, .rl-del, .rl-fmt)': {
+    color: 'inherit',
+    textDecorationColor: 'currentColor',
+  },
   '.rl-sel': { color: 'inherit' },
   // The text highlight stays out of the table's rows while cells are selected: the cells are the
   // selection. The page's own highlight of the text between the first and the last cell reached

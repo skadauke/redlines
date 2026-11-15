@@ -680,18 +680,31 @@ test.describe('tables @tables', () => {
     await j.hover(rowsOf().nth(1).locator('.rl-tc').last());
     await j.page.locator('.rl-edge-col').click();
     await j.type('new');
+    // Text inserted in a cell that was there: its change is the author's colour, which must not
+    // stay on the blue when it is selected.
+    await j.caretAfter('Ada');
+    await j.type('xyz');
+    await expect(j.page.locator('.rl-ins-row'), 'the added row is a tinted insertion').toHaveCount(
+      1,
+    );
+    await expect(j.page.locator('.rl-ins-col').first(), 'the added column is tinted').toBeVisible();
     await j.hover(rowsOf().nth(1).locator('.rl-tc').first());
     await j.page.locator('.rl-table-select').click();
     await expect(j.page.locator('.rl-cell-selecting')).toHaveCount(1);
     const paint = await j.page.evaluate(() => {
       const probe = document.createElement('span');
       probe.style.backgroundColor = 'Highlight';
-      document.body.append(probe);
+      probe.style.color = 'HighlightText';
+      (document.querySelector('.cm-editor') ?? document.body).append(probe);
       const selection = getComputedStyle(probe).backgroundColor;
+      const ink = getComputedStyle(probe).color;
       probe.remove();
       const cells = [...document.querySelectorAll<HTMLElement>('.rl-trow:not(.rl-ghost) > .rl-tc')];
       return {
         selection,
+        inks: [...document.querySelectorAll<HTMLElement>('.rl-tc:has(.rl-sel) .rl-ins')].map(
+          (el) => ({ color: getComputedStyle(el).color, ink }),
+        ),
         cells: cells.map((cell) => {
           const style = getComputedStyle(cell);
           return {
@@ -710,6 +723,10 @@ test.describe('tables @tables', () => {
       );
       expect(cell.outline, `cell ${i} has no outline`).toBe('none');
       expect(cell.shadow, `cell ${i} has no shadow`).toBe('none');
+    }
+    expect(paint.inks.length, 'a change inside a selected cell is drawn').toBeGreaterThan(0);
+    for (const one of paint.inks) {
+      expect(one.color, 'changed text inside a selected cell takes the ink').toBe(one.ink);
     }
     await j.shot('cells-table-after-tracked-additions');
   });
