@@ -899,8 +899,13 @@ class Grips {
 
   private selectRows(table: Table, first: number, last: number): void {
     const current = tablesOf(this.view.state).find((t) => t.id === table.id) ?? table;
-    const end = Math.max(0, (current.rows[last]?.cells.length ?? 1) - 1);
-    const selection = rectSelection(current, { row: first, col: 0 }, { row: last, col: end });
+    // Whole rows, to the table's last column: a last row that is shorter than an earlier one must not
+    // narrow the rectangle (#455), and a row that lacks cells ends early (a range can't name a corner in a column the end rows lack).
+    const selection = rectSelection(
+      current,
+      { row: first, col: 0 },
+      { row: last, col: current.columns - 1 },
+    );
     if (selection) this.view.dispatch({ selection, userEvent: 'select' });
   }
 
