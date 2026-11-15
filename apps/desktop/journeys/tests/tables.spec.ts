@@ -665,6 +665,55 @@ test.describe('tables @tables', () => {
     });
   }
 
+  // #522, decided 2026-11-15: a selection of cells, rows, columns or the table is a flat tint in the
+  // editor's own selection blue, with no outline, over every cell it reaches, whether or not a
+  // tracked change has tinted the cell.
+  test('a table selected after tracked additions is one flat tint in the text selection blue, no outline', async ({
+    start,
+  }) => {
+    const doc = '| Name | Role |\n| - | - |\n| Ada | Editor |\n| Grace | Reviewer |\n';
+    const j = await start({ doc: `Intro text here\n\n${doc}`, tracking: true, view: 'redlines' });
+    await j.settle();
+    const rowsOf = () => j.page.locator('.rl-trow:not(.rl-ghost)');
+    await j.hover(rowsOf().last().locator('.rl-tc').first());
+    await j.page.locator('.rl-edge-row').click();
+    await j.hover(rowsOf().nth(1).locator('.rl-tc').last());
+    await j.page.locator('.rl-edge-col').click();
+    await j.type('new');
+    await j.hover(rowsOf().nth(1).locator('.rl-tc').first());
+    await j.page.locator('.rl-table-select').click();
+    await expect(j.page.locator('.rl-cell-selecting')).toHaveCount(1);
+    const paint = await j.page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'Highlight';
+      document.body.append(probe);
+      const selection = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      const cells = [...document.querySelectorAll<HTMLElement>('.rl-trow:not(.rl-ghost) > .rl-tc')];
+      return {
+        selection,
+        cells: cells.map((cell) => {
+          const style = getComputedStyle(cell);
+          return {
+            fill: style.backgroundColor,
+            outline: style.outlineStyle,
+            shadow: style.boxShadow,
+            border: style.borderTopStyle,
+          };
+        }),
+      };
+    });
+    expect(paint.cells.length, 'four rows of three cells').toBe(12);
+    for (const [i, cell] of paint.cells.entries()) {
+      expect(cell.fill, `cell ${i} has the selection blue, not a change's tint`).toBe(
+        paint.selection,
+      );
+      expect(cell.outline, `cell ${i} has no outline`).toBe('none');
+      expect(cell.shadow, `cell ${i} has no shadow`).toBe('none');
+    }
+    await j.shot('cells-table-after-tracked-additions');
+  });
+
   test('a rectangle over an empty cell leaves no page highlight in it', async ({ start }) => {
     const gap = '| A | B |\n| - | - |\n| 1 |  |\n| 3 | 4 |\n';
     const j = await start({ doc: `Intro\n\n${gap}`, tracking: false, view: 'clean' });
