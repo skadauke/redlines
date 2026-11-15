@@ -89,10 +89,60 @@ describe('typing after a bare marker', () => {
     expectSound('two spaces', written);
   });
 
-  it("a tab is written as the marker's space", () => {
+  it("a tab is the marker's separator, kept as typed, with the text lined up at column 4", () => {
     const written = typeIn('- one\n-‸', '\ta');
-    expect(bodyOf(written).startsWith('- one\n- <!--ins k3x9-->\n  a')).toBe(true);
+    expect(bodyOf(written).startsWith('- one\n-\t<!--ins k3x9-->\n    a<!--/k3x9-->')).toBe(true);
     expectSound('a tab', written);
+    const written2 = typeIn('1. one\n2.‸', '\ta');
+    expect(bodyOf(written2).startsWith('1. one\n2.\t<!--ins k3x9-->\n    a<!--/k3x9-->')).toBe(
+      true,
+    );
+    expectSound('a numbered tab', written2);
+  });
+
+  // A judge that the writer can't fool: the text accepted must read in micromark exactly as the text
+  // the author meant to write (the marker, the separator as typed, the text, and what follows),
+  // with a nested list and a continuation paragraph after it, which line up with the content column.
+  it('accepted, the text reads as the author meant it, with a space and with a tab', () => {
+    const cases: [string, string, string][] = [
+      // [the file's body, what is typed at the caret, the text meant]
+      ['- one\n-‸\n  - x', ' a', '- one\n- a\n  - x'],
+      ['- one\n-‸\n  - x', '\ta', '- one\n-\ta\n  - x'],
+      ['- one\n-‸\n\n  para', ' a', '- one\n- a\n\n  para'],
+      ['- one\n-‸\n\n    para', '\ta', '- one\n-\ta\n\n    para'],
+      ['1. one\n2.‸\n\n   b', ' a', '1. one\n2. a\n\n   b'],
+      ['1. one\n2.‸\n\n    b', '\ta', '1. one\n2.\ta\n\n    b'],
+      ['1) one\n2)‸\n   - x', ' a', '1) one\n2) a\n   - x'],
+      ['* one\n*‸\n    - x', '\ta', '* one\n*\ta\n    - x'],
+    ];
+    for (const [doc, typed, meant] of cases) {
+      const written = typeIn(doc, typed);
+      let accepted = written;
+      for (const mark of parse(written).marks) {
+        accepted = applyChanges(accepted, accept(accepted, mark.id));
+      }
+      const label = `${JSON.stringify(doc)} + ${JSON.stringify(typed)}`;
+      expect(readAs(bodyOf(accepted)), label).toBe(readAs(meant));
+      expect(readAs(newestView(written).text), label).toBe(readAs(meant));
+      expect(bodyOf(accepted).replace(/\n+$/, ''), label).toBe(meant);
+    }
+  });
+
+  it('inline markup after the space: bold, code, emphasis, a link, a tag', () => {
+    for (const marker of ['-', '*', '+', '1.', '1)']) {
+      for (const typed of [' **b**', ' `c`', ' *a*', ' [a](b)', ' <b>x</b>']) {
+        const doc = `${marker} one\n${second(marker)}‸`;
+        const written = typeIn(doc, typed);
+        expect(parse(written).marks, `${marker} ${typed}`).toHaveLength(1);
+        expect(bodyOf(written), `${marker} ${typed}`).not.toMatch(
+          /(?:^|\n)(?:[-+*]|\d[.)])<!--ins/,
+        );
+        expect(readAs(bodyOf(written)), `${marker} ${typed}`).toBe(
+          readAs(newestView(written).text),
+        );
+        expectSound(`${marker} ${typed}`, written);
+      }
+    }
   });
 
   it('in a quote, nested in an item, in a numbered item inside a bullet', () => {
@@ -101,6 +151,12 @@ describe('typing after a bare marker', () => {
       '- one\n  - two\n  -‸',
       '- one\n  1. two\n  2.‸',
       '> 1. a\n> 2.‸',
+      // A quote inside an item, an item inside a quote, and the two together.
+      '- > -‸',
+      '> - -‸',
+      '1. > 2.‸',
+      '- one\n\n  > -‸',
+      '> 1. a\n>\n>    - -‸',
     ]) {
       const written = typeIn(doc, ' a');
       expect(readAs(bodyOf(written)), doc).toBe(readAs(newestView(written).text));
@@ -177,7 +233,22 @@ describe('an agent suggests text after a bare marker', () => {
 });
 
 describe("random bare markers with other people's marks around them", () => {
-  const TYPED = [' a', ' ', 'a', '  a b', ' word', '\tx', ' a\nb', ' - a', ' 1. a', ' # a', ' > a'];
+  // No block's start (` - a`, ` 1. a`, ` # a`, ` > a`, ` ---`, a table) typed into a bare item: they
+  // need the widening of a replacement (#583). Inline markup after the space is drawn.
+  const TYPED = [
+    ' a',
+    ' ',
+    'a',
+    '  a b',
+    ' word',
+    '\tx',
+    ' a\nb',
+    ' **b**',
+    ' `c`',
+    ' *a*',
+    ' [a](b)',
+    ' <b>x</b>',
+  ];
   const LINES = [
     '- one',
     '* two',
@@ -188,7 +259,7 @@ describe("random bare markers with other people's marks around them", () => {
     '> quoted',
     '- **bold** item',
   ];
-  const BARE = ['-', '*', '+', '2.', '2)', '  -', '> -', '1.'];
+  const BARE = ['-', '*', '+', '2.', '2)', '  -', '> -', '1.', '- > -', '> - -', '1. > 2.'];
 
   it('every file reads as its newest view in every order of decisions', () => {
     const stats = { written: 0, refused: 0 };

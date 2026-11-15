@@ -1180,8 +1180,11 @@ autocorrect, a paste of plain text, the paste of list items (#510), an agent's i
 library, the `redlines` command or the MCP tools) therefore writes the space first, as untracked
 text, and the insertion opens after it, on the line before the text as §3.3 has it for a mark that
 starts a block: `- <!--ins x-->⏎  a<!--/x-->`. Accepting gives `- a`; rejecting gives `- `, an empty
-item, as the bare marker was. A tab typed there is the marker's separator and is written as that
-one space. A lone space is the space alone, with no mark at all: it reads as the same empty item
+item, as the bare marker was. A tab typed there is the marker's separator and is written as typed,
+untracked (`-\t<!--ins x-->⏎    a<!--/x-->`), with the lines after the opener indented to the content
+column that the tab makes (a tab goes on to the next multiple of four columns, CommonMark), not to a
+space's. The bare marker may stand after quote markers and list markers in any order (`- > -`,
+`> - -`, `1. > 2.`). A lone space is the space alone, with no mark at all: it reads as the same empty item
 in every order of decisions, and there is no change to decide. Text typed with no space first
 (`-a`) is text of a paragraph in both views, and is written as it is, `-<!--ins x-->a<!--/x-->`.
 The rule applies where the marker is the only thing on its line, but for markers of changes after

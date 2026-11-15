@@ -5306,7 +5306,7 @@ function editsOnce(
 /** A list marker at the start of a line, after its quote markers and the markers of the items it
  * is nested in, with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
 const BARE_MARKER =
-  /^(?:[ \t]*>[ \t]?)*(?:[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]+)*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
+  /^(?:[ \t]*(?:>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]+))*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
 
 /**
  * The edits that write text with a space first right after a bare list marker (`-` or `2.` alone
@@ -5316,7 +5316,7 @@ const BARE_MARKER =
  * doesn't know the markers, though the newest view has an item. Written as
  * `- <!--ins x-->a<!--/x-->` it reads as an item in every order of decisions, and rejected leaves
  * `- `, an empty item, as the bare marker was. A lone space is the space alone, with no mark at
- * all. A tab first is the marker's separator and is written as a space. Undefined where no edit is such: a marker with text after it is no bare marker, and text
+ * all. A tab first is the marker's separator, written as typed. Undefined where no edit is such: a marker with text after it is no bare marker, and text
  * that doesn't start with a space needs none.
  */
 function bareMarkerSpaces(
@@ -5333,9 +5333,8 @@ function bareMarkerSpaces(
     if (!BARE_MARKER.test(text.slice(start, at))) return edit;
     // Nothing after it on the line but markers.
     if (!/^(?:<!--[^]*?-->)*\r?$/.test(text.slice(at, lineEnd(text, at)))) return edit;
-    // A tab after a marker is its separator too, and is written as the one space that its item's
-    // text lines up with.
-    writes.push({ at, insert: ' ', leading: true });
+    // A tab is the marker's separator as typed: its content column is the tab's, not a space's.
+    writes.push({ at, insert: edit.insert[0] ?? ' ', leading: true });
     return { ...edit, from: at, to: at, insert: edit.insert.slice(1) };
   });
   return writes.length > 0 ? { edits: rest, writes } : undefined;

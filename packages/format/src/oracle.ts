@@ -13,6 +13,10 @@ import { parse } from './parse.ts';
 import { bodyOf, everyOrder, exactly } from './test-helpers.ts';
 import { newestView } from './views.ts';
 
+/** The block-level tags micromark writes, and the names of CommonMark's HTML blocks (§4.6). */
+const BLOCK_TAGS =
+  'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|pre|script|search|section|style|summary|table|tbody|td|textarea|tfoot|th|thead|title|tr|track|ul';
+
 /** The HTML micromark makes of a text, with GFM's tables and strikethrough, without the HTML
  * comments (the markers), and without the white space that Markdown does not show (before a line
  * break, a closing tag or a hard break, and at the start of a cell). */
@@ -26,8 +30,13 @@ export function readAs(text: string): string {
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]+(?=<\/|\n|<br \/>)/g, '')
-      // The line break after the opener of an item's text (`- <!--ins x-->⏎  a`) shows nowhere.
-      .replace(/(<li>)\n+(?!<)/g, '$1')
+      // The line break after the opener of an item's text (`- <!--ins x-->⏎  a`) shows nowhere, so
+      // it is not a difference between two readings. It is dropped only in front of text or an
+      // inline tag, never in front of a block tag: where a block (`<ul>`, `<p>`, `<pre>`, a heading,
+      // a quote, a table, `<hr>`, or the HTML block names of CommonMark) follows `<li>` the line
+      // break goes with the structure, and the two readings still differ by it. No view is judged
+      // to read alike that has other words, another nesting or another block in it.
+      .replace(new RegExp(`(<li>)\\n+(?!</?(?:${BLOCK_TAGS})[\\s>/])`, 'g'), '$1')
       // A space at the start of a cell (after a marker that starts it) shows nowhere.
       .replace(/(<t[dh](?: [^>]*)?>)[ \t]+/g, '$1')
       .replace(/\n\s*\n/g, '\n')
