@@ -61,6 +61,13 @@ test.describe('the end of the document @blocks', () => {
     expect(await j.cmText()).toBe('Intro\n\n> quoted\n');
   });
 
+  test('↓ at the end of code with no closing fence stays in the code', async ({ start }) => {
+    const j = await start({ doc: 'Intro\n\n```ts\nconst a = 1;', tracking: false, view: 'clean' });
+    await j.caretAfter('const a = 1;');
+    await j.press('ArrowDown');
+    expect(await j.cmText(), 'nothing is added').toBe('Intro\n\n```ts\nconst a = 1;');
+  });
+
   test('↓ in the middle of a quote moves as ever', async ({ start }) => {
     const j = await start({ doc: 'Intro\n\n> one\n> two\n', tracking: false, view: 'clean' });
     await j.caretAfter('one');

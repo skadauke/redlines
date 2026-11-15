@@ -46,7 +46,7 @@ import {
   transposeCrosses,
 } from './motion.ts';
 import { blockAt, neighbours } from './structure.ts';
-import { openIndentedLine, openLineSpaces, planCodeTab } from './code.ts';
+import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -471,6 +471,9 @@ export function planDownAtEnd(view: EditorView): KeyEdit | null {
     block.kind === 'paragraph' &&
     /^!\[[^\]]*\]\([^)]*\)\s*$/.test(state.sliceDoc(block.text.from, block.text.to));
   if (!quoted && !picture && !['code', 'rule', 'html'].includes(block.kind)) return null;
+  // Code with no closing fence runs to the end of the file: a line after it is code (Return writes
+  // a plain line break there).
+  if (block.kind === 'code' && !shapeOf(state, block).closes) return null;
   // A block in an item stays with its list's keys (Return leaves it).
   if (block.containers.some((c) => c.kind === 'item')) return null;
   if (neighbours(state, block).next) return null;
