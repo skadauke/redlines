@@ -133,14 +133,22 @@ interface LineStyle {
   classes: Set<string>;
   /** Monospace columns at which wrapped lines hang. */
   hang?: number;
+  /** The monospace columns the line's leading whitespace is drawn as wide as, if it is indented. */
+  indent?: number;
 }
+
+/**
+ * How far each level of a list is indented, in monospace columns, whatever its markers are in the
+ * source: a bullet, a number and a task at the same level start at the same place, and so does
+ * their text (a bullet's marker is two columns of source and a number's three).
+ */
+export const LEVEL_COLS = 3;
 
 /** Collects decorations; line classes are merged so each line gets one line decoration. */
 class Builder {
   readonly state: EditorState;
   private readonly ranges: Range<Decoration>[] = [];
   private readonly lines = new Map<number, LineStyle>();
-  private readonly indented = new Set<number>();
   /** The first lines of the alerts, whose syntax their title stands for: their quote mark is none. */
   readonly titled = new Set<number>();
 
@@ -199,16 +207,29 @@ class Builder {
    * A line inside a list item: its leading whitespace is set in the monospace font, so nesting
    * shows, and its wrapped lines hang at `hang` monospace columns, where its text starts.
    */
-  indent(line: Line, hang: number): void {
-    this.style(line).hang = hang;
-    if (this.indented.has(line.from)) return;
-    this.indented.add(line.from);
-    this.mark(line.from, spaceAfter(line, line.from), 'rl-indent');
+  indent(line: Line, hang: number, indent: number = hang): void {
+    const style = this.style(line);
+    style.hang = hang;
+    style.indent = indent;
+  }
+
+  /**
+   * The leading whitespace of a list line, in the monospace font, drawn `cols` columns wide: its
+   * source's width is scaled to it (the font size of a space is its width).
+   */
+  private drawIndent(line: Line, cols: number): void {
+    const to = spaceAfter(line, line.from);
+    const source = columns(line, line.from, to);
+    if (to <= line.from) return;
+    const attributes: Record<string, string> =
+      source === cols ? {} : { style: `font-size: ${cols / source}em` };
+    this.push(Decoration.mark({ class: 'rl-indent', attributes }).range(line.from, to));
   }
 
   finish(): DecorationSet {
-    for (const [from, { classes, hang }] of this.lines) {
+    for (const [from, { classes, hang, indent }] of this.lines) {
       if (hang) classes.add('rl-hang');
+      if (indent !== undefined) this.drawIndent(this.state.doc.lineAt(from), indent);
       if (!classes.size) continue;
       const spec = { class: [...classes].join(' ') };
       const attributes: Record<string, string> = hang ? { style: `--rl-hang: ${hang}` } : {};
@@ -358,13 +379,23 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   if (!mark) return;
   const line = state.doc.lineAt(mark.from);
   const content = spaceAfter(line, mark.to);
-  const cols = columns(line, mark.from, content);
   const marker = node.getChild('Task')?.getChild('TaskMarker') ?? null;
   const boxEnd = marker ? spaceAfter(line, marker.to) : content;
+  const text = state.sliceDoc(mark.from, mark.to);
+  const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
+  // A number as Markdown counts it; its source shows with the caret on it (below).
+  const drawn = /^[-+*]$/.test(text) ? bullet : (numbers.get(mark.from) ?? text);
+  // The marker's box is as wide for a bullet as for a number, and the item starts where its
+  // level does, whatever its source says: a task's box is wider, a long number a column more.
+  const cols = marker ? columns(line, mark.from, boxEnd) : Math.max(LEVEL_COLS, drawn.length + 1);
+  const start = (listDepth(node) - 1) * LEVEL_COLS;
+  const hang = start + cols;
+  const textCol = columns(line, line.from, content);
   b.lineClass(line, 'rl-li');
-  if (/^[ \t]*$/.test(line.text.slice(0, mark.from - line.from))) {
+  const plain = /^[ \t]*$/.test(line.text.slice(0, mark.from - line.from));
+  if (plain) {
     // A task's text starts after its box, so its wrapped lines hang there.
-    b.indent(line, columns(line, line.from, boxEnd));
+    b.indent(line, hang, start);
   }
   // A task's source shows while the selection is on its marker, as a list marker's does.
   const shown = touches(state, mark.from, marker ? marker.to : mark.to);
@@ -375,8 +406,18 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   const box = marker && pending !== 'source' ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
-    // The box's source is monospace too, so showing it doesn't move the item's text.
-    b.mark(mark.from, boxEnd, 'rl-list-source');
+    // The box's source is monospace too, so showing it doesn't move the item's text: a marker's
+    // source is as wide as its drawn box, which a bullet's two columns are not.
+    if (marker) b.mark(mark.from, boxEnd, 'rl-list-source');
+    else {
+      const style = `display: inline-block; width: calc(${cols} * 0.6em)`;
+      b.push(
+        Decoration.mark({ class: 'rl-list-source', attributes: { style } }).range(
+          mark.from,
+          content,
+        ),
+      );
+    }
   } else if (box) {
     const checked = /\[[xX]\]/.test(state.sliceDoc(box.from, box.to));
     const widget = new TaskBoxWidget(
@@ -386,16 +427,15 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     );
     b.push(Decoration.replace({ widget }).range(mark.from, boxEnd));
   } else {
-    const text = state.sliceDoc(mark.from, mark.to);
-    const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
-    // A number as Markdown counts it; its source shows with the caret on it (above).
-    const drawn = /^[-+*]$/.test(text) ? bullet : (numbers.get(mark.from) ?? text);
     const widget = new ListMarkWidget(drawn, cols);
     b.push(Decoration.replace({ widget }).range(mark.from, content));
   }
   // Continuation lines hang at their own indentation; nested items set their own below.
   b.eachLine(node.from, node.to, (next, first) => {
-    if (!first) b.indent(next, columns(next, next.from, spaceAfter(next, next.from)));
+    if (first) return;
+    // A continuation line keeps its place relative to the item's text.
+    const at = columns(next, next.from, spaceAfter(next, next.from));
+    b.indent(next, plain ? Math.max(0, hang + at - textCol) : at);
   });
 }
 
