@@ -15,9 +15,6 @@ export const RAIL_GAP = 44;
 export const RAIL_SPACE = RAIL_GAP + RAIL_WIDTH;
 /** The least space between two notes. */
 export const NOTE_GAP = 8;
-/** The wash behind the current change, as a percent of the ink over the page. */
-export const REVIEW_WASH = 4;
-
 /** The column's least margin at 100% (`--rl-margin`); it grows above that. The rail stays inside it. */
 export const MARGIN = 24;
 
@@ -269,12 +266,12 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // The anchor of the selected note: its tint doubled. A resolved thread's text has none at rest,
   // so its selected anchor takes only a light one.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
-  // The change Review Changes is on: a faint gray wash and a ring around its text, in the theme's
-  // inks, so that it reads as "this one" and never as a selection (the system's blue) or a
-  // comment's tint (an author's color). The wash is kept so faint that every author's color keeps
-  // 4.5:1 under it in every theme (styles.test.ts); the ring carries the mark.
+  // The change Review Changes is on: a ring around its text in the theme's inks, so that it reads
+  // as "this one" and never as a selection (the system's blue) or a comment's tint (an author's
+  // color). It has no wash: text sits on the page, or on the tint of code blocks and tables, and
+  // any wash takes some author colors under 4.5:1 there (measured over every theme; Book's red on
+  // its tint is already 4.49 bare), so the ring and the wider bar carry the mark.
   '.rl-review-current': {
-    backgroundColor: `color-mix(in srgb, var(--rl-ink) ${REVIEW_WASH}%, transparent)`,
     boxShadow:
       '0 0 0 1px color-mix(in srgb, var(--rl-page) 80%, transparent), 0 0 0 2.5px color-mix(in srgb, var(--rl-ink-2) 75%, transparent)',
     borderRadius: '2px',

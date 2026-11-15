@@ -555,12 +555,12 @@ mode has no counterpart in the desktop app.
   wherever the caret is. With a selection it goes to the first change the selection touches and the
   selection goes; if the selection touches none, to the first change after it, round to the top.
   The next- and previous-change shortcuts (⌘⌥], ⌘⌥[) still go from the caret. The current change is
-  marked, not selected: its text gets a gray wash and a thin ring, its change bar is drawn wider
+  marked, not selected: its text gets a thin gray ring, its change bar is drawn wider
   (4 px), and its note in the rail is the selected one, all in the theme's inks, so it never looks
   like a selection. The mark moves with Previous and Next and goes when the bar closes or the
   caret moves elsewhere, and when the change is decided or edited away from anywhere (its card, its
-  note, the bar, an agent). The wash is faint enough that every author's color keeps 4.5:1 under it
-  in every theme. **Next and Previous no longer select the change:** they put the caret at its start
+  note, the bar, an agent). It has no wash, so no text changes ground and every author's color keeps
+  the contrast its theme gives it. **Next and Previous no longer select the change:** they put the caret at its start
   and mark it, so copying or typing after them acts at the caret, not on the change; the panel
   planned for it (§5.6 below) holds the keyboard. With no changes the command is disabled.
 - **The review bar** opens when you ask for it, with Review Changes in the Review menu or the

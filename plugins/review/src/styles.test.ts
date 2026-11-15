@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { notePx, REVIEW_WASH, reviewThemeSpec } from './styles.ts';
+import { notePx, reviewThemeSpec } from './styles.ts';
 
 const NOTE = /-?\d+(\.\d+)?px \* var\(--rl-note-scale, 1\)/g;
 const WINDOW = 'calc(100vw - 32px)';
@@ -71,9 +71,9 @@ describe('the review styles at a text size', () => {
 });
 
 describe('the mark of the current change', () => {
-  it('is drawn with the wash that the themes test measures (themes/src/index.test.ts)', () => {
-    expect(reviewThemeSpec['.rl-review-current']).toMatchObject({
-      backgroundColor: `color-mix(in srgb, var(--rl-ink) ${REVIEW_WASH}%, transparent)`,
-    });
+  it('is a ring and no wash, so that no text changes ground under it (contrast stays the theme’s)', () => {
+    const mark = reviewThemeSpec['.rl-review-current'] as Record<string, string>;
+    expect(mark['boxShadow']).toContain('--rl-ink-2');
+    for (const key of ['backgroundColor', 'background']) expect(mark[key], key).toBeUndefined();
   });
 });

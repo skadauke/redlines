@@ -451,6 +451,22 @@ describe('the layer', () => {
     expect(segments(editor)[0]?.className).not.toContain('rl-bar-current');
   });
 
+  it('widens only the bar of the change that is current, not one that merely touches its end', async () => {
+    const editor = load('redlines', { doc: two });
+    await frame();
+    const line = editor.view.state.doc.line(3);
+    const lastThird = line.from + 2 * Math.ceil(line.length / 3);
+    // The current change reaches exactly to where the second bar's screen line starts.
+    editor.view.dispatch({
+      effects: setCurrentChange.of({ ranges: [{ from: line.from, to: lastThird }] }),
+    });
+    await frame();
+    expect(segments(editor).map(({ className }) => className.includes('rl-bar-current'))).toEqual([
+      true,
+      false,
+    ]);
+  });
+
   it('widens one of the two bars of a paragraph, the one whose screen lines start where it says', async () => {
     const editor = load('redlines', { doc: two });
     await frame();
