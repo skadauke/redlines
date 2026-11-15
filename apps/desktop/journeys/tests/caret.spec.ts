@@ -36,7 +36,7 @@ test.describe('the caret by the hidden closers @blocks', () => {
       const { j, end } = await typed(start, view);
       await j.place(30);
       await j.press('ArrowDown');
-      await j.shot(`down-onto-closer-${view}`);
+      await j.shotWithCaret(`down-onto-closer-${view}`);
       expect((await j.caret()).head, 'at the end of "Para one."').toBe(end);
       // Again: the next block, at the end of its line (the column is the goal's).
       await j.press('ArrowDown');
@@ -78,7 +78,7 @@ test.describe('the caret by the hidden closers @blocks', () => {
     const { j, end } = await typed(start, 'clean');
     await j.drag(await j.pointAt(end - PARA.length), await pastEnd(j, end), { steps: 8 });
     expect(await j.caret()).toMatchObject({ anchor: end - PARA.length, head: end });
-    await j.shot('drag-past-the-closer');
+    await j.shotWithCaret('drag-past-the-closer');
     // Typing replaces the text only: the paragraph is not joined to the one below.
     await j.type('X', 'burst');
     expect(await j.cmText()).toContain('\n\nNext.');
