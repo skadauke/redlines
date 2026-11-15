@@ -140,8 +140,13 @@ class ImageWidget extends WidgetType {
   }
 }
 
-/** A pending change's markers (`<!--ins k3x9-->`, `<!--/k3x9-->`, `<!--split k3x9-->`...). */
-const MARKER = /<!--\/?[a-z0-9]*(?: [^>]*?)?-->/g;
+/** A pending change's markers, as docs/format.md §2.1 defines them: `<!--ins k3x9-->`, `<!--/k3x9-->`,
+ * `<!--del k3x9 payload-->` (the payload on one line, any text but `-->`). */
+const ID = '[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}';
+const MARKER = new RegExp(
+  `<!--(?:/${ID}|(?:ins|del|sub|fmt|hl|cmt|split) ${ID}(?: (?:(?!-->).)*)?)-->`,
+  'g',
+);
 
 /**
  * Whether the image stands alone in its paragraph's line: nothing but space and the markers of a

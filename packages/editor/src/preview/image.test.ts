@@ -55,6 +55,12 @@ describe('images', () => {
     expect(alone(tracked)?.classList.contains('rl-image-own')).toBe(true);
     const split = `Before\n\n![A cat](cat.png)<!--split k3x9-->\nAfter${ledger(['k3x9'])}`;
     expect(alone(split)?.classList.contains('rl-image-own')).toBe(true);
+    // A marker whose payload holds a `>` is still a marker.
+    const payload = `Before\n\n![A cat](cat.png)<!--del k3x9 a > b-->\n\nAfter${ledger(['k3x9'])}`;
+    expect(alone(payload)?.classList.contains('rl-image-own')).toBe(true);
+    // An item's or a quote's text flows with its marker: not alone.
+    expect(alone('- ![A cat](cat.png)\n')?.classList.contains('rl-image-own')).toBe(false);
+    expect(alone('> ![A cat](cat.png)\n')?.classList.contains('rl-image-own')).toBe(false);
     // Text beside it keeps it in the line.
     const inline = 'Before ![A cat](cat.png) after';
     expect(alone(inline)?.classList.contains('rl-image-own')).toBe(false);
