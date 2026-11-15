@@ -263,8 +263,8 @@ The window, on the desktop:
 - **A formatting palette, shown only when summoned.** There is no toolbar, and the palette is not
   one: it opens only when asked, on right-click, at the pointer, where it takes the place of the
   system's context menu, and from the keyboard. Nothing is drawn at the bottom of the window to
-  summon it (the handle that was there is gone, decided on 2026-11-15), and it goes away when you
-  type. It is a small card of icons
+  summon it (the handle that was there is gone, decided on 2026-11-15); one opened by right-click goes
+  away when you type. It is a small card of icons
   in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
   with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
   act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
