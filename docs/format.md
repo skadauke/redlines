@@ -1083,7 +1083,13 @@ at the outer edge of a whole inline construct. A marker never goes:
    substitution: that is not the author's to write again (a deletion holds no text, and the change
    may stand behind its marker). Where no way reads alike, the change is refused, in words that name
    the other person's change and ask for it to be decided first;
-6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
+6. between a hard break's trailing spaces or backslash and the line end. It goes before them. The
+   spaces are those of the newest view, whoever types them: two spaces typed at the end of a line
+   that another line follows (or one typed after a space, or next to the spaces of another
+   change) are a hard break, so the insertion's closer is not written after them. The change goes
+   on past the line break, to the end of the first word of the next line, like any change that
+   would end behind the spaces; and a space typed in the author's own insertion that makes two at
+   a line's end does the same, instead of extending the insertion in place;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
    underline only in the container of the line of text above it: under a list item's line and to
