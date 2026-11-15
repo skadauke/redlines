@@ -49,6 +49,8 @@ export default defineConfig<JourneyOptions>({
   // (`--update-snapshots=changed`), on purpose.
   updateSnapshots: 'none',
   expect: {
+    // A journey waits for what it expects only as long as a person would: two seconds.
+    timeout: 2000,
     toHaveScreenshot: {
       // At most 15 pixels differ, each by more than a small colour distance: antialiasing doesn't
       // fail a run, a letter that changed, a moved line or a menu does (one letter is some 40

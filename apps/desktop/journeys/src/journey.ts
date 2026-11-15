@@ -63,7 +63,7 @@ interface Hook {
       dispatch(spec: unknown): void;
     };
     getDoc(): string;
-    setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+    setTracking(on: boolean, options?: { inFile?: boolean }): unknown;
     setViewMode(mode: string): void;
     getUiState(): Record<string, unknown>;
   };
@@ -114,7 +114,7 @@ export class Journey {
    * The text as CodeMirror holds it, with LF line breaks, which is what offsets (`place`,
    * `caret`) count. It differs from `text()` only in a file with CRLF line breaks.
    */
-  private cmText(): Promise<string> {
+  cmText(): Promise<string> {
     return this.page.evaluate(() => window.__redlines!.editor.view.state.doc.toString());
   }
 
@@ -342,7 +342,11 @@ export class Journey {
     await this.shot(name, options);
     // CodeMirror draws its caret as an element, which Playwright's own caret hiding doesn't know.
     await this.page.addStyleTag({ content: '.cm-cursorLayer { visibility: hidden !important; }' });
-    await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, options);
+    // A screenshot that has to settle may take longer than the two seconds a person waits.
+    await expect(this.page).toHaveScreenshot(`${shotName(name, this.options)}.png`, {
+      ...options,
+      timeout: 10_000,
+    });
   }
 }
 
@@ -352,9 +356,9 @@ export class Journey {
  * (`defineConfig<JourneyOptions>` and `use: { scheme: 'dark', textSize: 2 }`) and `start` can
  * override. A script error in the page fails the journey.
  */
-export const test = base.extend<
-  JourneyOptions & { start: (options?: StartOptions) => Promise<Journey> }
->({
+export type Start = (options?: StartOptions) => Promise<Journey>;
+
+export const test = base.extend<JourneyOptions & { start: Start }>({
   scheme: ['light', { option: true }],
   textSize: [1, { option: true }],
   start: async ({ page, scheme, textSize }, use, testInfo) => {
@@ -371,6 +375,45 @@ export const test = base.extend<
     expect(errors, 'no script error in the page').toEqual([]);
   },
 });
+
+/**
+ * A journey that fails today because of an open issue:
+ * `known(510, 'pasting a bullet…', /the pasted bullet is its own item/, body)`.
+ *
+ * The body is run, and its failure is the bug: it must fail with `signature` in its message (give
+ * the assertion that shows the bug a message, `expect(x, 'the pasted bullet is its own item')`), so
+ * a typo, a timeout or a page error is a failure of the journey, not "the bug". The run is green
+ * while the bug stands and goes red when the fix lands ("known bug #510 no longer fails"): then the
+ * lane that fixed it changes `known(510, …)` to `test(…)`, and the journey guards the fix.
+ * `JOURNEYS_EVIDENCE=1` runs the body as an ordinary test, to show the failure itself.
+ */
+export function known(
+  issue: number,
+  title: string,
+  signature: RegExp,
+  body: (fixtures: { start: Start; page: Page }, info: TestInfo) => Promise<void> | void,
+): void {
+  const name = `${title} (#${issue})`;
+  const details = { annotation: { type: 'issue', description: `#${issue}` } };
+  test(name, details, async ({ start, page }, info) => {
+    if (process.env['JOURNEYS_EVIDENCE'] === '1') return body({ start, page }, info);
+    let failure: unknown;
+    try {
+      await body({ start, page }, info);
+    } catch (error) {
+      failure = error;
+    }
+    if (failure === undefined) {
+      throw new Error(`known bug #${issue} no longer fails: change known(${issue}, …) to test(…)`);
+    }
+    const message = failure instanceof Error ? failure.message : JSON.stringify(failure);
+    if (!signature.test(message)) {
+      throw new Error(
+        `#${issue} failed, but not as the bug does (expected ${String(signature)}):\n${message}`,
+      );
+    }
+  });
+}
 
 /** Opens the page in the state asked for, and waits until it is drawn and still. */
 async function openPage(page: Page, look: JourneyOptions, options: StartOptions): Promise<void> {
@@ -411,11 +454,13 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
     await page.evaluate((text) => window.__redlines!.controller.createWith(text), options.doc);
   }
   if (options.tracking !== undefined) {
-    const switched = await page.evaluate(
+    await page.evaluate(
       (on) => window.__redlines!.editor.setTracking(on, { inFile: false }),
       options.tracking,
     );
-    expect(switched, `Track Changes switched ${options.tracking ? 'on' : 'off'}`).toBe(true);
+    // The editor's own state says whether it took (an older editor answered with a boolean).
+    const on = await page.evaluate(() => window.__redlines!.editor.getUiState()['tracking']);
+    expect(on, `Track Changes switched ${options.tracking ? 'on' : 'off'}`).toBe(options.tracking);
   }
   if (options.view !== undefined) {
     await page.evaluate((view) => window.__redlines!.editor.setViewMode(view), options.view);
