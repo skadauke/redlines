@@ -162,7 +162,7 @@ body {
 
 .rl-pref-note {
   margin-top: 4px;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-small);
   line-height: 16px;
   user-select: text;
@@ -175,7 +175,7 @@ body {
 
 .rl-pref-empty {
   margin: 56px 0 0;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   text-align: center;
 }
 
@@ -259,13 +259,13 @@ select:focus-visible {
 .rl-pref-path {
   min-width: 0;
   overflow: hidden;
-  color: var(--rl-ink-2);
+  color: var(--rl-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .rl-pref-path.rl-pref-unset {
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
 }
 
 .rl-pref-inline > .rl-pref-button {

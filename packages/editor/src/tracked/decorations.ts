@@ -1704,7 +1704,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   '.rl-tc.rl-ghost-col.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
-  '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
+  '.rl-comment': { color: 'var(--rl-ink-2)', fontSize: '0.85em' },
 
   // Raw: the source in the code font, a little wider and more open than the document's column,
   // markers and the ledger in the second ink.
@@ -1718,7 +1718,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '&.rl-view-raw .rl-tok-heading, &.rl-view-raw .rl-tok-strong': { fontWeight: '700' },
   '&.rl-view-raw .rl-tok-emphasis': { fontStyle: 'italic' },
   '&.rl-view-raw .rl-tok-strike': { textDecoration: 'line-through' },
-  '&.rl-view-raw .rl-tok-mark': { color: 'var(--rl-ink-3)' },
+  '&.rl-view-raw .rl-tok-mark': { color: 'var(--rl-ink-2)' },
   '&.rl-view-raw .rl-tok-link': { color: 'var(--rl-ink-2)' },
   '&.rl-view-raw .rl-tok-comment': { color: 'var(--rl-ink-2)' },
 };

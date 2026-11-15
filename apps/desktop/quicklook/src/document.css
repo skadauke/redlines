@@ -127,7 +127,7 @@ a {
 
 /* An image the preview doesn't load: its alt text, quietly. */
 .rl-image {
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
 }
 
 /* An image that the extension loaded from beside the document. */
@@ -166,7 +166,7 @@ code[data-chunk]::before {
   content: attr(data-chunk);
   display: block;
   margin-bottom: 0.6em;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
 }
 
 /* Front matter is about the document rather than part of it: dimmed, in code's face. */
