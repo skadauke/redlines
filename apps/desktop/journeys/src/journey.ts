@@ -63,7 +63,7 @@ interface Hook {
       dispatch(spec: unknown): void;
     };
     getDoc(): string;
-    setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+    setTracking(on: boolean, options?: { inFile?: boolean }): unknown;
     setViewMode(mode: string): void;
     getUiState(): Record<string, unknown>;
   };
@@ -453,11 +453,13 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
     await page.evaluate((text) => window.__redlines!.controller.createWith(text), options.doc);
   }
   if (options.tracking !== undefined) {
-    const switched = await page.evaluate(
+    await page.evaluate(
       (on) => window.__redlines!.editor.setTracking(on, { inFile: false }),
       options.tracking,
     );
-    expect(switched, `Track Changes switched ${options.tracking ? 'on' : 'off'}`).toBe(true);
+    // The editor's own state says whether it took (an older editor answered with a boolean).
+    const on = await page.evaluate(() => window.__redlines!.editor.getUiState()['tracking']);
+    expect(on, `Track Changes switched ${options.tracking ? 'on' : 'off'}`).toBe(options.tracking);
   }
   if (options.view !== undefined) {
     await page.evaluate((view) => window.__redlines!.editor.setViewMode(view), options.view);
