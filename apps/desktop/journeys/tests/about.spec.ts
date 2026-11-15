@@ -21,7 +21,11 @@ test.describe('about @views', () => {
     // A moment in, where the old animation had its red lines across the marks.
     await page.waitForTimeout(150);
     await shot('about-mid-change');
+    // The change is under way (the old mark and the new one are both there), and nothing is drawn
+    // across them: no element but the marks, anywhere in the page.
+    await expect(icon.locator('img'), 'the change is under way').toHaveCount(2);
     await expect(icon.locator(':scope > :not(img)'), 'no red line is drawn').toHaveCount(0);
+    await expect(page.locator('.rl-strike, .rl-underline')).toHaveCount(0);
     await expect(icon.locator('img')).toHaveCount(1, { timeout: 2000 });
     await shot('about-after');
     await expect(page.locator('#name')).toHaveText('Redlines');
