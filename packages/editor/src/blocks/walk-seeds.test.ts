@@ -643,5 +643,35 @@ describe('walk seed 331 of the lists side by side (#598): Return at the start of
       tc: false,
       expect: {},
     },
+    // The adversarial review's finding: where the break replaces the line break and the indent of
+    // the line (the caret at its start, or a key before it took text), the tracked layer writes the
+    // split at the end of the line before, which is sound, and no refusal applies.
+    ...(
+      [
+        [
+          'a typed change at the end of the item, → and Return',
+          '- one‸⏎  more',
+          [{ type: 'x' }, 'ArrowRight', 'Enter'],
+        ],
+        [
+          'the same in a numbered list',
+          '1. one‸⏎   more⏎2. two',
+          [{ type: 'x' }, 'ArrowRight', 'Enter'],
+        ],
+        [
+          'Backspace at the end of the item, → and Return',
+          '- one‸⏎  more',
+          ['Backspace', 'ArrowRight', 'Enter'],
+        ],
+        ['Delete after the indent, then Return', '- one⏎  ‸more', ['Delete', 'Enter']],
+        ['Delete at a quoted item, then Return', '> - one⏎> ‸- two', ['Delete', 'Enter']],
+      ] as const
+    ).map(([name, doc, keys]) => ({
+      name: `${name}, Track Changes on`,
+      doc,
+      keys: [...keys] as Step[],
+      tc: true,
+      expect: {},
+    })),
   ]);
 });
