@@ -491,8 +491,8 @@ const review = createReview(editor, {
   },
 });
 
-// The formatting palette: hidden while writing, it opens from a handle at the bottom center and on
-// right-click, in place of WebKit's own menu. Its items are commands of the registry, so it
+// The formatting palette: shown only when summoned: on right-click, in place of WebKit's own menu,
+// and from the keyboard. Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const palette = createPalette(editor, {
@@ -1295,7 +1295,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
 }
 
-// Debug only (palette-check.ts): the formatting palette's right-click, handle and hints, and Ask's
+// Debug only (palette-check.ts): the formatting palette's right-click and hints, and Ask's
 // bubble with the page's scripted agent, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
   void import('./palette-check.ts').then(({ runPaletteCheck }) =>

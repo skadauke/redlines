@@ -1,6 +1,6 @@
 // Debug only: checks the formatting palette and Ask in WebKit, where happy-dom can't: the right-click
 // through real layout (the palette at the pointer, inside the window, WebKit's own menu held back),
-// the hover hint, the handle at the bottom center, and, with the page's scripted agent
+// the hover hint, no handle at the bottom center, and, with the page's scripted agent
 // (`dev-agents.ts`), Ask's bubble: where it hangs, the first-run question, the answer with its
 // citation, Make Comment and Esc. Serve the page with `VITE_PALETTE_CHECK=1 pnpm dev` and open it
 // in WebKit: it reads nothing in a release build. Each check reports one console line,
@@ -151,34 +151,8 @@ async function checks(
   await sleep(50);
   report('esc-closes-the-palette', query<HTMLElement>('.rl-palette')?.hidden === true);
 
-  // The handle: at the bottom center, hover brings the palette up above it, leaving puts it away.
-  const handle = query<HTMLElement>('.rl-palette-handle');
-  const hr = handle?.getBoundingClientRect();
-  report(
-    'handle-is-at-the-bottom-center',
-    !!hr &&
-      Math.abs(hr.left + hr.width / 2 - innerWidth / 2) < 2 &&
-      Math.abs(hr.bottom - innerHeight) < 2,
-    plain(hr),
-  );
-  handle?.dispatchEvent(
-    new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse', buttons: 0 }),
-  );
-  await sleep(300);
-  const up = query<HTMLElement>('.rl-palette');
-  const ur = atRest(up);
-  report(
-    'hover-brings-the-palette-up-above-the-handle',
-    up?.hidden === false &&
-      !!ur &&
-      !!hr &&
-      ur.bottom <= hr.top &&
-      Math.abs(ur.left + ur.width / 2 - innerWidth / 2) < 3,
-    { palette: plain(ur), handle: plain(hr) },
-  );
-  handle?.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true, pointerType: 'mouse' }));
-  await sleep(400);
-  report('leaving-puts-it-away', query<HTMLElement>('.rl-palette')?.hidden === true);
+  // No handle: nothing is drawn at the bottom center, and the palette stays hidden until summoned.
+  report('no-handle-at-the-bottom', query<HTMLElement>('.rl-palette-handle') === null);
 
   if (!options.ask) {
     console.log('PALETTE-CHECK ask skipped: no scripted agent on this page');
