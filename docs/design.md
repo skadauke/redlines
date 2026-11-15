@@ -752,7 +752,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **A table stays its source, and is drawn as a table.** A block wrapper is the table, each line a
   row, each cell a mark; pipes, padding and the delimiter row are hidden, and the caret steps over
   them, stopping only in cells. Raw shows the source. A table inside a quote or a list item stays
-  source. Column widths are computed from every row and held while the caret is in the table; a
+  source. Column widths are computed from every row and found again about 300 ms after typing
+  pauses in the table (never on each key), and at once when the caret leaves it; a
   table never reaches past the text column, and scrolls sideways in its own box.
 - **Typing in a cell.** Return and ⇧Return write a line break in the cell (`<br>`, drawn as a line
   break and deleted by one ⌫); ⌫ at a cell's start and ⌦ at its end do nothing, so cells never

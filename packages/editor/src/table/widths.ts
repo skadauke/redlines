@@ -7,9 +7,11 @@
 // widths as an effect; the field keeps them, and the plugin writes them as `--w0`, `--w1`… in a style
 // rule for each table's `data-table` id.
 //
-// Widths hold while the caret is in the table, and are found again when it leaves, after a row or a
-// column changes, a paste, a change of the text size or the window's size, and when fonts load: a
-// column that widened with each keystroke would move every other column under the person's eyes.
+// While the caret is in the table, a change of text finds the widths again after a short pause in
+// typing (`WIDTHS_PAUSE`), never on each keystroke: a column that widened with each letter would
+// move every other column under the person's eyes. They are found again at once when the caret
+// leaves, after a row or a column changes, a paste, a change of the text size or the window's size,
+// and when fonts load.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -388,7 +390,11 @@ function rulesFor(widths: readonly TableWidths[]): string {
     .join('\n');
 }
 
+/** How long typing in a table pauses before its widths are found again, in milliseconds. */
+export const WIDTHS_PAUSE = 300;
+
 class WidthPlugin {
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private measured = false;
   private destroyed = false;
   private signature = '';
@@ -434,6 +440,19 @@ class WidthPlugin {
     const pasted = update.transactions.some(isPaste);
     if (!this.measured || structure || ghosts || leaves || mode || pasted) this.measure();
     else if (update.geometryChanged) this.checkEnvironment();
+    // Typing in a table: after a pause, not on each keystroke.
+    if (update.docChanged && tableOfCaret(update.state) >= 0 && !this.destroyed) {
+      this.cancelPause();
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.measure();
+      }, WIDTHS_PAUSE);
+    }
+  }
+
+  private cancelPause(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
   }
 
   /** A change of the text size or of the room, which geometry changes show. */
@@ -451,6 +470,7 @@ class WidthPlugin {
   /** Measures every table, after this update, and keeps what it finds. */
   measure(): void {
     if (this.destroyed) return;
+    this.cancelPause();
     this.view.requestMeasure({
       key: this,
       read: (view) => {
@@ -486,13 +506,14 @@ class WidthPlugin {
 
   destroy(): void {
     this.destroyed = true;
+    this.cancelPause();
     window.removeEventListener('resize', this.onResize);
     document.fonts?.removeEventListener?.('loadingdone', this.onFonts);
     this.style.remove();
   }
 }
 
-/** Column widths, computed from every row and held while the caret is in the table. */
+/** Column widths, computed from every row, found again after a pause in typing. */
 export function tableWidths() {
   return [widthsField, ViewPlugin.define((view) => new WidthPlugin(view))];
 }
