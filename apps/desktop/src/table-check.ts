@@ -1293,7 +1293,9 @@ const CHECKS: Check[] = [
         await frames();
         const lines = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-trow')];
         const bars = lines.filter((line) => line.classList.contains('rl-bar')).length;
-        const tinted = lines.filter((line) => line.classList.contains('rl-ins-row'));
+        const tinted = lines.filter((line) =>
+          line.classList.contains(view === 'simple' ? 'rl-ins-row-plain' : 'rl-ins-row'),
+        );
         const painted_ = tinted.some((line) => painted(line.querySelector('.rl-tc') ?? line));
         if (bars < 2) problems[`${view}-bars`] = bars;
         if (view === 'redlines' && (!tinted.length || !painted_))
