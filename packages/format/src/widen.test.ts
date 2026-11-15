@@ -46,7 +46,11 @@ function check(label: string, text: string, find: string, insert: string, kind: 
   expect(
     parse(accepted).marks.map((mark) => mark.id),
     label,
-  ).toEqual(parse(text).marks.map((mark) => mark.id).filter((mark) => !done.held.includes(mark)));
+  ).toEqual(
+    parse(text)
+      .marks.map((mark) => mark.id)
+      .filter((mark) => !done.held.includes(mark)),
+  );
   expect(newestView(accepted).text.replace(/\n+$/, ''), label).toBe(wanted.replace(/\n+$/, ''));
   return done;
 }
@@ -56,7 +60,13 @@ describe('widening an edit to the unit that holds it', () => {
     const body =
       'Intro.\n\n<!--ins k3x9-->\n\nFast <!--/k3x9-->importer ships <!--del w2rf very -->April.\n\nOutro.';
     const text = file(body, { k3x9: 'bo', w2rf: 'bo' });
-    const done = check('heading', text, 'Fast importer ships April.', '## Fast importer ships April.', 'block');
+    const done = check(
+      'heading',
+      text,
+      'Fast importer ships April.',
+      '## Fast importer ships April.',
+      'block',
+    );
     expect(done.held).toEqual(['k3x9', 'w2rf']);
   });
 
@@ -68,14 +78,21 @@ describe('widening an edit to the unit that holds it', () => {
 
 describe('every kind of unit', () => {
   it('a table that another person changed, rewritten', () => {
-    const table = ['| Fruit | Count |', '| ----- | ----- |', '| Apples | <!--ins k3x9-->3<!--/k3x9--> |', '| Pears | 5 |'];
+    const table = [
+      '| Fruit | Count |',
+      '| ----- | ----- |',
+      '| Apples | <!--ins k3x9-->3<!--/k3x9--> |',
+      '| Pears | 5 |',
+    ];
     const text = file(`Intro.\n\n${table.join('\n')}\n\nOutro.`, { k3x9: 'bo' });
     const done = check('table', text, 'Pears | 5', 'Pears | 6', 'table');
     expect(done.held).toEqual(['k3x9']);
   });
 
   it('a quote paragraph', () => {
-    const text = file('Intro.\n\n> Quoted <!--ins k3x9-->text<!--/k3x9--> here.\n\nOutro.', { k3x9: 'bo' });
+    const text = file('Intro.\n\n> Quoted <!--ins k3x9-->text<!--/k3x9--> here.\n\nOutro.', {
+      k3x9: 'bo',
+    });
     check('quote', text, 'Quoted text here', '# Quoted text here', 'block');
   });
 
@@ -85,18 +102,26 @@ describe('every kind of unit', () => {
   });
 
   it('an item of a tight list, with its bullet outside', () => {
-    const text = file('Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.', { k3x9: 'bo' });
+    const text = file('Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.', {
+      k3x9: 'bo',
+    });
     check('tight item', text, 'one two', '## one two', 'block');
   });
 
   it('code that starts an item of a tight list goes up to the list (format 12.3)', () => {
-    const text = file('Intro.\n\n- ```js\n  let a = 1;\n  ```\n- two <!--ins k3x9-->more<!--/k3x9-->\n\nOutro.', { k3x9: 'bo' });
+    const text = file(
+      'Intro.\n\n- ```js\n  let a = 1;\n  ```\n- two <!--ins k3x9-->more<!--/k3x9-->\n\nOutro.',
+      { k3x9: 'bo' },
+    );
     const done = check('tight code', text, 'let a = 1;', 'let a = 2;', 'list');
     expect(done.unit.rung).toBeGreaterThan(0);
   });
 
   it('a fenced block of code', () => {
-    const text = file('Intro.\n\n```js\nlet a = 1;\n```\n\nOutro. <!--ins k3x9-->More.<!--/k3x9-->', { k3x9: 'bo' });
+    const text = file(
+      'Intro.\n\n```js\nlet a = 1;\n```\n\nOutro. <!--ins k3x9-->More.<!--/k3x9-->',
+      { k3x9: 'bo' },
+    );
     check('code', text, 'let a = 1;', 'let a = 2;', 'code');
   });
 });
@@ -105,12 +130,32 @@ describe('CRLF files', () => {
   const crlf = (text: string) => text.replaceAll('\n', '\r\n');
 
   it('a paragraph, a table and a list item come back byte for byte, in the file’s line breaks', () => {
-    const table = ['| Fruit | Count |', '| ----- | ----- |', '| Apples | <!--ins k3x9-->3<!--/k3x9--> |', '| Pears | 5 |'];
+    const table = [
+      '| Fruit | Count |',
+      '| ----- | ----- |',
+      '| Apples | <!--ins k3x9-->3<!--/k3x9--> |',
+      '| Pears | 5 |',
+    ];
     const cases: [string, string, string, string][] = [
-      ['Intro.\n\n<!--ins k3x9-->\n\nFast <!--/k3x9-->importer ships.\n\nOutro.', 'Fast importer', '## Fast importer', 'block'],
+      [
+        'Intro.\n\n<!--ins k3x9-->\n\nFast <!--/k3x9-->importer ships.\n\nOutro.',
+        'Fast importer',
+        '## Fast importer',
+        'block',
+      ],
       [`Intro.\n\n${table.join('\n')}\n\nOutro.`, 'Pears | 5', 'Pears | 6', 'table'],
-      ['Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.', 'one two', '## one two', 'block'],
-      ['Intro.\n\n```js\nlet a = 1;\n```\n\nOutro <!--ins k3x9-->more<!--/k3x9-->.', 'let a = 1;', 'let a = 2;\nlet b;', 'code'],
+      [
+        'Intro.\n\n- one <!--ins k3x9-->two<!--/k3x9-->\n- three\n\nOutro.',
+        'one two',
+        '## one two',
+        'block',
+      ],
+      [
+        'Intro.\n\n```js\nlet a = 1;\n```\n\nOutro <!--ins k3x9-->more<!--/k3x9-->.',
+        'let a = 1;',
+        'let a = 2;\nlet b;',
+        'code',
+      ],
     ];
     for (const [body, find, insert, kind] of cases) {
       const text = crlf(file(body, { k3x9: 'bo' }));
@@ -125,7 +170,11 @@ describe('CRLF files', () => {
 describe('stacked replacements (format §3.12, Editing it)', () => {
   it('another person’s edit in the new text is written inside the first replacement', () => {
     const text = file('Intro.\n\nThe importer ships in April.\n\nOutro.');
-    const first = widen(text, replacing(text, 'ships in April', 'ships in May'), context(ada, ['r2zd']));
+    const first = widen(
+      text,
+      replacing(text, 'ships in April', 'ships in May'),
+      context(ada, ['r2zd']),
+    );
     const second = widen(
       first.text,
       replacing(first.text, 'May', 'June, after the review'),
@@ -139,7 +188,9 @@ describe('stacked replacements (format §3.12, Editing it)', () => {
     expectSound('stacked', second.text);
     // Rejecting the second gives the first back, byte for byte; rejecting the first takes both.
     expect(applyChanges(second.text, reject(second.text, 's3vb'))).toBe(first.text);
-    expect(applyChanges(second.text, reject(second.text, 'r2zd')).trimEnd()).toBe(bodyOf(text).trimEnd());
+    expect(applyChanges(second.text, reject(second.text, 'r2zd')).trimEnd()).toBe(
+      bodyOf(text).trimEnd(),
+    );
     // Accepting the first leaves the second pending, with the first's new text as its old text.
     const left = applyChanges(second.text, accept(second.text, 'r2zd'));
     expect(parse(left).marks.map((mark) => [mark.id, mark.payload])).toEqual([

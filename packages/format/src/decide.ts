@@ -436,9 +436,7 @@ function decideNow(
   const travelling = new Set<string>();
   const raw = marks
     .filter((mark) => !isRowMark(mark) && !isColMark(mark))
-    .flatMap((mark) =>
-      decisionChanges(text, limit, deletions, mark, action, eol, reader, parsed),
-    );
+    .flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol, reader, parsed));
   if (rowMarks.length > 0) {
     // The rows of a table are decided together, a move's two halves with each other.
     const wanted = new Set(rowMarks.map((mark) => mark.id));
@@ -551,7 +549,8 @@ function decideInPayload(
   const { mark, chain } = found;
   const leaf = chain.at(-1);
   const top = chain[0];
-  if (!leaf || !top) throw new EditError(`There is no change with the id ${mark.id}.`, 'unknown-id');
+  if (!leaf || !top)
+    throw new EditError(`There is no change with the id ${mark.id}.`, 'unknown-id');
   const ledger = ledgerTextOf(text, parsed);
   const proxy = payloadFile(leaf.text, ledger);
   const read = parse(proxy);

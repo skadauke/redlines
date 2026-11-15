@@ -105,12 +105,11 @@ describe('Ada rewrites a table that two people changed', () => {
       expect(done.unit.kind, label).toBe('table');
       const after = done.text;
       expect(parse(after).warnings, label).toEqual([]);
-      expect(newestView(after).text.replace(/\n+$/, ''), label).toBe(
-        `Intro.\n\n${NEW}\n\nOutro.`,
-      );
+      expect(newestView(after).text.replace(/\n+$/, ''), label).toBe(`Intro.\n\n${NEW}\n\nOutro.`);
       expect(originalView(after).text, label).toBe(originalView(text).text);
       // Ada's own changes fold into the replacement: rejecting it gives the table without them.
-      const base = done.folded.length === 0 ? text : applyChanges(text, rejectMarks(text, done.folded));
+      const base =
+        done.folded.length === 0 ? text : applyChanges(text, rejectMarks(text, done.folded));
       expect(applyChanges(after, reject(after, done.id)), label).toBe(base);
       const accepted = applyChanges(after, accept(after, done.id));
       expect(bodyOf(accepted).replace(/\n+$/, ''), label).toBe(`Intro.\n\n${NEW}\n\nOutro.`);

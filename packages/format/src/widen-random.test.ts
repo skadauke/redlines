@@ -22,23 +22,28 @@ import { readAs } from './oracle.ts';
 import { parse } from './parse.ts';
 import { payloadMarksOf } from './payload-marks.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
-import {
-  ada,
-  bo,
-  bodyOf,
-  context,
-  randomEdit,
-  viewBlocks,
-} from './test-helpers.ts';
+import { ada, bo, bodyOf, context, randomEdit, viewBlocks } from './test-helpers.ts';
 import { addComment } from './comments.ts';
 import { addHighlight } from './highlights.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
-import { Untrackable, widen } from './widen.ts';
+import { Untrackable, traceWidening, widen } from './widen.ts';
 import type { Widened } from './widen.ts';
 
-const INSERTS = ['x', 'new words', ' and more', '\n\n', '## ', '- ', '> ', '1. ', 'a\nb', '', '| a | b |'];
+const INSERTS = [
+  'x',
+  'new words',
+  ' and more',
+  '\n\n',
+  '## ',
+  '- ',
+  '> ',
+  '1. ',
+  'a\nb',
+  '',
+  '| a | b |',
+];
 
 function randomIds(below: (n: number) => number) {
   return (n: number) => Uint8Array.from({ length: n }, () => below(256));
@@ -115,6 +120,11 @@ describe('random widened replacements', () => {
     const reasons: Record<string, number> = {};
     const failures: string[] = [];
     const samples: string[] = [];
+    const why: Record<string, number> = {};
+    traceWidening((reason) => {
+      const key = reason.replace(/:.*/, '');
+      why[key] = (why[key] ?? 0) + 1;
+    });
     for (let seed = 1; seed <= total; seed++) {
       if (process.env['WIDEN_SEED'] && Number(process.env['WIDEN_SEED']) !== seed) continue;
       const random = seeded(seed * 31 + 7);
@@ -145,7 +155,9 @@ describe('random widened replacements', () => {
           }
           continue;
         }
-        failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(edit)}\n${text}`);
+        failures.push(
+          `${label}: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(edit)}\n${text}`,
+        );
         continue;
       }
       seen.written++;
@@ -155,7 +167,10 @@ describe('random widened replacements', () => {
         // 3. exact
         expect(applyChanges(text, done.changes), label).toBe(after);
         const intended = applyChanges(view, [edit]);
-        expect(parse(after).warnings.map((w) => w.code), `${label}: warnings`).toEqual([]);
+        expect(
+          parse(after).warnings.map((w) => w.code),
+          `${label}: warnings`,
+        ).toEqual([]);
         if (readAs(bodyOf(after)) !== readAs(newestView(after).text)) {
           throw new Error(
             `${label}: reads as its newest view\nBODY ${JSON.stringify(readAs(bodyOf(after)))}\nVIEW ${JSON.stringify(readAs(newestView(after).text))}`,
@@ -165,13 +180,15 @@ describe('random widened replacements', () => {
         expect(originalView(after).text, `${label}: original`).toBe(originalView(text).text);
         const rejected = applyChanges(after, reject(after, done.id));
         // The author's own changes in the unit are folded: rejected in the old text.
-        const base = done.folded.length === 0 ? text : applyChanges(text, rejectMarks(text, done.folded));
+        const base =
+          done.folded.length === 0 ? text : applyChanges(text, rejectMarks(text, done.folded));
         expect(rejected, `${label}: reject gives the file back`).toBe(base);
         const accepted = applyChanges(after, accept(after, done.id));
         expect(readAs(newestView(accepted).text), `${label}: accept`).toBe(readAs(intended));
         // 4. ledger
         // A comment's entry is its thread, which stays whatever is decided.
-        const threads = (ledger: ReturnType<typeof parse>['ledger']) => ledger.comments.map((t) => t.id);
+        const threads = (ledger: ReturnType<typeof parse>['ledger']) =>
+          ledger.comments.map((t) => t.id);
         const keptAfterAccept = Object.keys(parse(accepted).ledger.marks);
         const keptAfterReject = Object.keys(parse(rejected).ledger.marks);
         const was = parse(text);
@@ -188,7 +205,10 @@ describe('random widened replacements', () => {
         for (const id of done.held) {
           const was = parse(text).marks.find((m) => m.id === id);
           if (was?.kind === 'cmt') {
-            expect(parse(accepted).marks.map((m) => m.id), `${label}: point comment ${id}`).toContain(id);
+            expect(
+              parse(accepted).marks.map((m) => m.id),
+              `${label}: point comment ${id}`,
+            ).toContain(id);
           }
         }
         // 2. commutes
@@ -226,11 +246,14 @@ describe('random widened replacements', () => {
         const ids = new Set([done.id, ...done.held, ...nested.map((found) => found.mark.id)]);
         randomOrders(label, after, below, 6, ids);
       } catch (error) {
-        failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}\nedit ${JSON.stringify(edit)} by ${author.handle}\n${text}\n----after----\n${after}`);
+        failures.push(
+          `${label}: ${error instanceof Error ? error.message : String(error)}\nedit ${JSON.stringify(edit)} by ${author.handle}\n${text}\n----after----\n${after}`,
+        );
         if (failures.length > 9) break;
       }
     }
-    console.log(JSON.stringify({ total, ...seen, reasons }));
+    traceWidening(undefined);
+    console.log(JSON.stringify({ total, ...seen, reasons, why }));
     if (process.env.WIDEN_DEBUG) console.log(samples.join('\n=====\n'));
     expect(failures.join('\n=======\n')).toBe('');
     // Few edits are untrackable, and they say why.

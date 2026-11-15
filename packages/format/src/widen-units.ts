@@ -60,7 +60,7 @@ const glueClose = (line: Line) => !blank(line) && CLOSER_ONLY.test(line.text.tri
 export function unitsOf(text: string, parsed: Parsed, region?: Range): Unit[] {
   const stop = region?.to ?? parsed.ledgerRange?.from ?? text.length;
   const lines: Line[] = [];
-  for (let at = region?.from ?? bodyStart(text); at <= stop; ) {
+  for (let at = region?.from ?? bodyStart(text); at <= stop;) {
     const newline = text.indexOf('\n', at);
     let to = newline === -1 || newline >= stop ? Math.min(stop, text.length) : newline;
     if (text[to - 1] === '\r' && to > at) to--;
@@ -149,7 +149,9 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
       const quote = QUOTE.exec(head.text);
       const bullet = BULLET.exec(head.text);
       const fence = FENCE.exec(head.text);
-      const rawEnd = verbatim.find((v) => v.from === head.lineFrom && text.slice(v.from, v.from + 1) !== '`');
+      const rawEnd = verbatim.find(
+        (v) => v.from === head.lineFrom && text.slice(v.from, v.from + 1) !== '`',
+      );
       if (fence) {
         const end = closeFence(lines, at, fence[1] ?? '```');
         units.push(make('code', lines[end] ?? head, true));
@@ -166,9 +168,18 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
           const line = lines[k]!;
           const q = QUOTE.exec(line.text);
           if (q) {
-            inner.push({ ...line, contentFrom: line.contentFrom + q[0].length, text: line.text.slice(q[0].length) });
+            inner.push({
+              ...line,
+              contentFrom: line.contentFrom + q[0].length,
+              text: line.text.slice(q[0].length),
+            });
             end = k;
-          } else if (!blank(line) && !startsBlock(line.text) && k === end + 1 && !blank(lines[k - 1]!)) {
+          } else if (
+            !blank(line) &&
+            !startsBlock(line.text) &&
+            k === end + 1 &&
+            !blank(lines[k - 1]!)
+          ) {
             // A lazy line: it goes on the paragraph above.
             inner.push(line);
             end = k;
@@ -184,7 +195,11 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
         i = next;
       } else if (/^( {4}|\t)/.test(head.text) && !paragraphAbove(units, start)) {
         let end = at;
-        while (lines[end + 1] && (/^( {4}|\t)/.test(lines[end + 1]!.text) || blank(lines[end + 1]!))) end++;
+        while (
+          lines[end + 1] &&
+          (/^( {4}|\t)/.test(lines[end + 1]!.text) || blank(lines[end + 1]!))
+        )
+          end++;
         while (blank(lines[end]!) && end > at) end--;
         units.push(make('code', lines[end]!, true));
         i = end + 1;
@@ -192,7 +207,8 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
         // A paragraph, a heading, a rule, an HTML block: lines up to a blank line.
         let end = at;
         if (!ATX.test(head.text) && !RULE.test(head.text.trim())) {
-          while (lines[end + 1] && !blank(lines[end + 1]!) && !startsBlock(lines[end + 1]!.text)) end++;
+          while (lines[end + 1] && !blank(lines[end + 1]!) && !startsBlock(lines[end + 1]!.text))
+            end++;
         }
         while (lines[end + 1] && glueClose(lines[end + 1]!)) end++;
         units.push(make('block', lines[end]!));
@@ -262,13 +278,24 @@ function readList(
   const first = BULLET.exec(head.text)!;
   const ordered = /\d/.test(first[2] ?? '');
   const delimiter = ordered ? (first[2] ?? '').slice(-1) : (first[2] ?? '');
-  const list = unit('list', lines[start]!, head, parent, false, head.contentFrom + (first[1]?.length ?? 0));
+  const list = unit(
+    'list',
+    lines[start]!,
+    head,
+    parent,
+    false,
+    head.contentFrom + (first[1]?.length ?? 0),
+  );
   const items: { first: number; last: number; width: number; marker: string }[] = [];
   let k = at;
   while (k < lines.length) {
     const line = lines[k]!;
     const m = BULLET.exec(line.text);
-    const sameKind = m && (ordered ? /\d/.test(m[2] ?? '') && (m[2] ?? '').slice(-1) === delimiter : m[2] === delimiter);
+    const sameKind =
+      m &&
+      (ordered
+        ? /\d/.test(m[2] ?? '') && (m[2] ?? '').slice(-1) === delimiter
+        : m[2] === delimiter);
     if (!sameKind || !m) break;
     const marker = (m[1] ?? '') + (m[2] ?? '');
     const spaces = (m[3] ?? '').length;
@@ -323,9 +350,19 @@ function readList(
   for (const item of items) {
     const itemFirst = lines[item.first]!;
     const m = BULLET.exec(itemFirst.text)!;
-    const content = (m[1]?.length ?? 0) + (m[2]?.length ?? 0) + ((m[3] ?? '').length > 4 ? 1 : (m[3] ?? '').length);
+    const content =
+      (m[1]?.length ?? 0) +
+      (m[2]?.length ?? 0) +
+      ((m[3] ?? '').length > 4 ? 1 : (m[3] ?? '').length);
     const lastLine = lines[item.last]!;
-    const element = unit('item', itemFirst, lastLine, list, list.tight, itemFirst.contentFrom + content);
+    const element = unit(
+      'item',
+      itemFirst,
+      lastLine,
+      list,
+      list.tight,
+      itemFirst.contentFrom + content,
+    );
     const inner: Line[] = [];
     for (let j = item.first; j <= item.last; j++) {
       const line = lines[j]!;

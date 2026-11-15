@@ -156,10 +156,10 @@ describe('deciding a replacement whose old text holds marks', () => {
   it('accepting a mark in the old text decides it there, and leaves the new text alone', () => {
     const done = run(text, accept, 'k3x9');
     expect(done).toBe(
-      file(
-        replaced('Fast importer ships <!--del w2rf very -->April.', NEW),
-        { r2zd: 'ada', w2rf: 'bo' },
-      ),
+      file(replaced('Fast importer ships <!--del w2rf very -->April.', NEW), {
+        r2zd: 'ada',
+        w2rf: 'bo',
+      }),
     );
     // Rejecting the replacement now gives the file as if it had been accepted before the edit.
     expect(run(done, reject, 'r2zd')).toBe(
@@ -186,7 +186,10 @@ describe('deciding a replacement whose old text holds marks', () => {
     const nested = file(replaced(second, 'new'), { r2zd: 'ada', s2nd: 'bo', t3rd: 'ada' });
     const done = run(nested, accept, 't3rd');
     expect(done).toBe(
-      file(replaced('two <!--sub s2nd three-->and<!--/s2nd-->', 'new'), { r2zd: 'ada', s2nd: 'bo' }),
+      file(replaced('two <!--sub s2nd three-->and<!--/s2nd-->', 'new'), {
+        r2zd: 'ada',
+        s2nd: 'bo',
+      }),
     );
     expect(run(nested, reject, 'r2zd')).toBe(file(before(second), { s2nd: 'bo', t3rd: 'ada' }));
   });
@@ -200,9 +203,7 @@ describe('comments and highlights in the old text of a replacement', () => {
 
   it('accepting the replacement leaves a point comment where the new text starts, and drops a highlight', () => {
     const done = run(text, accept, 'r2zd');
-    expect(done).toBe(
-      file('Intro.\n\n<!--cmt c7bk-->\n\nSee it.\n\nOutro.', {}, threads),
-    );
+    expect(done).toBe(file('Intro.\n\n<!--cmt c7bk-->\n\nSee it.\n\nOutro.', {}, threads));
     const read = parse(done);
     expect(read.warnings).toEqual([]);
     expect(read.marks.map((mark) => [mark.id, mark.kind])).toEqual([['c7bk', 'cmt']]);
@@ -210,13 +211,19 @@ describe('comments and highlights in the old text of a replacement', () => {
   });
 
   it('rejecting the replacement gives the comment and the highlight back where they were', () => {
-    expect(run(text, reject, 'r2zd')).toBe(file(`Intro.\n\n${old}\n\nOutro.`, { h4jm: 'bo' }, threads));
+    expect(run(text, reject, 'r2zd')).toBe(
+      file(`Intro.\n\n${old}\n\nOutro.`, { h4jm: 'bo' }, threads),
+    );
   });
 
   it('dismissing the highlight in the old text decides it there', () => {
     const done = run(text, accept, 'h4jm');
     expect(done).toBe(
-      file(replaced('See <!--cmt c7bk-->this<!--/c7bk--> and that.', 'See it.'), { r2zd: 'ada' }, threads),
+      file(
+        replaced('See <!--cmt c7bk-->this<!--/c7bk--> and that.', 'See it.'),
+        { r2zd: 'ada' },
+        threads,
+      ),
     );
   });
 
@@ -229,6 +236,8 @@ describe('comments and highlights in the old text of a replacement', () => {
     const held = file(replaced(OLD, NEW), marks2);
     expect(applyChanges(held, acceptAll(held))).toBe(`Intro.\n\n${NEW}\n\nOutro.\n`);
     // Reject all leaves nothing pending: the replacement is rejected, and their changes with it.
-    expect(applyChanges(held, rejectAll(held))).toBe(`Intro.\n\nimporter ships very April.\n\nOutro.\n`);
+    expect(applyChanges(held, rejectAll(held))).toBe(
+      `Intro.\n\nimporter ships very April.\n\nOutro.\n`,
+    );
   });
 });

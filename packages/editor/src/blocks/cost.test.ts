@@ -1054,34 +1054,45 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of ⌘B over a column o
 // in place. It is held to a few times what a fine keystroke costs in the same process, at both
 // sizes with 200 pending changes, and to a ceiling that the machine's calibration scales. (Measured
 // at 12 ms and 16 ms against 3.5 ms and 6.7 ms for the fine keystroke, on a development Mac.)
-describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first keystroke that widens', () => {
-  it.each([
-    ['16 KB', 16_000],
-    ['150 KB', 150_000],
-  ] as const)('costs at most five times a fine keystroke, on %s with 200 marks', (size, bytes) => {
-    const doc = documentOf(bytes, 200);
-    const view = parse(doc);
-    expect(view.marks.length).toBe(200);
-    const text = doc.slice(0, view.ledgerRange!.from).replace(/<!--\/?[a-z]+ ?[a-z0-9]{0,4}-->/g, '');
-    const at = text.indexOf('brown fox', text.length >> 1) + 'brown '.length;
-    const ctx = () => ({ author: ada, time: '2026-10-31T09:00Z' });
-    const run = (make: () => unknown) => {
-      make();
-      const runs: number[] = [];
-      for (let i = 0; i < 7; i++) {
-        const start = performance.now();
-        make();
-        runs.push(performance.now() - start);
-      }
-      return median(runs);
-    };
-    const edit = { from: at, to: at, insert: 'x' };
-    const scale = record ? 1 : calibrate() / CALIBRATION;
-    const fine = run(() => trackedEdit(doc, edit, ctx()));
-    const wide = run(() => widen(doc, [edit], ctx()));
-    console.log(`cost: widening, ${size}: fine ${fine.toFixed(2)} ms, widening ${wide.toFixed(2)} ms`);
-    if (record) return;
-    expect(wide, `${size}: against a fine keystroke`).toBeLessThan(5 * fine + 5 * scale);
-    expect(wide, `${size}: ceiling`).toBeLessThan(100 * scale);
-  }, 120_000);
-});
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of the first keystroke that widens',
+  () => {
+    it.each([
+      ['16 KB', 16_000],
+      ['150 KB', 150_000],
+    ] as const)(
+      'costs at most five times a fine keystroke, on %s with 200 marks',
+      (size, bytes) => {
+        const doc = documentOf(bytes, 200);
+        const view = parse(doc);
+        expect(view.marks.length).toBe(200);
+        const text = doc
+          .slice(0, view.ledgerRange!.from)
+          .replace(/<!--\/?[a-z]+ ?[a-z0-9]{0,4}-->/g, '');
+        const at = text.indexOf('brown fox', text.length >> 1) + 'brown '.length;
+        const ctx = () => ({ author: ada, time: '2026-10-31T09:00Z' });
+        const run = (make: () => unknown) => {
+          make();
+          const runs: number[] = [];
+          for (let i = 0; i < 7; i++) {
+            const start = performance.now();
+            make();
+            runs.push(performance.now() - start);
+          }
+          return median(runs);
+        };
+        const edit = { from: at, to: at, insert: 'x' };
+        const scale = record ? 1 : calibrate() / CALIBRATION;
+        const fine = run(() => trackedEdit(doc, edit, ctx()));
+        const wide = run(() => widen(doc, [edit], ctx()));
+        console.log(
+          `cost: widening, ${size}: fine ${fine.toFixed(2)} ms, widening ${wide.toFixed(2)} ms`,
+        );
+        if (record) return;
+        expect(wide, `${size}: against a fine keystroke`).toBeLessThan(5 * fine + 5 * scale);
+        expect(wide, `${size}: ceiling`).toBeLessThan(100 * scale);
+      },
+      120_000,
+    );
+  },
+);

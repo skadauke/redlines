@@ -203,7 +203,8 @@ function readPayloads(
   const build = (site: Site) => {
     for (const marker of site.scanned.markers) {
       note(marker.id, site);
-      if (marker.type !== 'open' || site.depth >= MOST_PAYLOAD_DEPTH || !holdsMarks(marker)) continue;
+      if (marker.type !== 'open' || site.depth >= MOST_PAYLOAD_DEPTH || !holdsMarks(marker))
+        continue;
       const text = marker.payload ?? '';
       const child: Site = {
         ownerId: marker.id,
@@ -291,7 +292,8 @@ function readPayloads(
     for (const mark of here) {
       mark.segments.forEach((segment, index) => {
         const child = site.children.find(
-          (candidate) => candidate.ownerId === mark.id && candidate.opener.from === segment.open.from,
+          (candidate) =>
+            candidate.ownerId === mark.id && candidate.opener.from === segment.open.from,
         );
         if (child) deeper.push({ ...read(child), segment: index });
       });

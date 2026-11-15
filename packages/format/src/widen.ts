@@ -90,11 +90,7 @@ export interface Widened {
  *
  * @throws Untrackable when no unit holds the edit; EditError when the ledger can't be read.
  */
-export function widen(
-  text: string,
-  edits: readonly TextChange[],
-  ctx: EditContext,
-): Widened {
+export function widen(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
   const parsed = parse(text);
   const view = newestView(text);
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -105,7 +101,10 @@ export function widen(
   const spanTo = Math.max(...sorted.map((edit) => edit.to));
   const sourceFrom = view.map.toSource(spanFrom, 1);
   const sourceTo = Math.max(sourceFrom, view.map.toSource(spanTo, -1));
-  if (sourceFrom < bodyStart(text) || (parsed.ledgerRange && sourceFrom > parsed.ledgerRange.from)) {
+  if (
+    sourceFrom < bodyStart(text) ||
+    (parsed.ledgerRange && sourceFrom > parsed.ledgerRange.from)
+  ) {
     throw new Untrackable('front-matter', "Front matter can't be marked as a change.");
   }
   const intended = applyChanges(view.text, sorted);
@@ -114,10 +113,9 @@ export function widen(
   const others = (range: Range) => othersIn(parsed, range, ctx);
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
-  let blocks = 0;
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
-    blocks = topLevelBlocks(units, closed);
+    const blocks = topLevelBlocks(units, closed);
     if (blocks > WIDEN_MOST_BLOCKS) {
       throw new Untrackable(
         'too-large',
@@ -126,12 +124,29 @@ export function widen(
         others({ from: closed.lineFrom, to: closed.to }),
       );
     }
-    const done = tryRung(text, parsed, view, intended, sorted, closed, ctx, id, index, blocks, region);
+    const done = tryRung(
+      text,
+      parsed,
+      view,
+      intended,
+      sorted,
+      closed,
+      ctx,
+      id,
+      index,
+      blocks,
+      region,
+    );
     if (done) return done;
     rung = widerThan(closed);
   }
-  if (process.env['WIDEN_WHY']) console.log('WHY ladder-end');
-  throw new Untrackable('no-unit', 'No unit can hold this change.', undefined, others({ from: sourceFrom, to: sourceTo }));
+  trace?.('ladder-end');
+  throw new Untrackable(
+    'no-unit',
+    'No unit can hold this change.',
+    undefined,
+    others({ from: sourceFrom, to: sourceTo }),
+  );
 }
 
 /** The people, other than the author, who have pending changes in `range`. */
@@ -258,7 +273,9 @@ function touches(mark: MarkRange, range: Range): boolean {
 function extentOf(mark: MarkRange): Range {
   return {
     from: Math.min(...mark.segments.map((segment) => segment.open.from)),
-    to: Math.max(...mark.segments.map((segment) => (segment.close ?? segment.carrier ?? segment.open).to)),
+    to: Math.max(
+      ...mark.segments.map((segment) => (segment.close ?? segment.carrier ?? segment.open).to),
+    ),
   };
 }
 
@@ -351,7 +368,10 @@ function tryRung(
       const proxy = payloadFile(text.slice(rung.lineFrom, to), ledgerText);
       const made = applyChanges(
         proxy,
-        rejectMarks(proxy, own.map((mark) => mark.id)),
+        rejectMarks(
+          proxy,
+          own.map((mark) => mark.id),
+        ),
       );
       const folded = payloadOfFile(made, parse(made));
       if (!folded.startsWith(rung.prefix)) return giveUp('fold prefix');
@@ -382,7 +402,11 @@ function tryRung(
     endsInFence(now) ||
     endsInBare(now) ||
     endsInDelimiter(now);
-  const blankAfter = atomic && rung.prefix === '' && /^\r?\n\r?\n[ \t]*\S/.test(next) && !/^\r?\n\r?\n<!-- redlines/.test(next);
+  const blankAfter =
+    atomic &&
+    rung.prefix === '' &&
+    /^\r?\n\r?\n[ \t]*\S/.test(next) &&
+    !/^\r?\n\r?\n<!-- redlines/.test(next);
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
@@ -431,8 +455,16 @@ function endsInDelimiter(text: string): boolean {
   return /[*_~\\]$/.test(text);
 }
 
+/** Hears why a rung was given up, for a test that asks (see `traceWidening`). */
+let trace: ((why: string) => void) | undefined;
+
+/** Asks to be told why each rung of the ladder is given up. Pass undefined to stop. */
+export function traceWidening(hear: ((why: string) => void) | undefined): void {
+  trace = hear;
+}
+
 function giveUp(why: string): undefined {
-  if (process.env['WIDEN_WHY']) console.log('WHY', why);
+  trace?.(why);
   return undefined;
 }
 
@@ -459,7 +491,7 @@ function passes(
   id: string,
 ): boolean {
   const why = failure(text, before, after, intended, id);
-  if (why && process.env['WIDEN_WHY']) console.log('WHY', why);
+  if (why) trace?.(why);
   return why === undefined;
 }
 
