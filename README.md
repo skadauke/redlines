@@ -56,7 +56,7 @@ and when, and the comment threads, are in a block at the end of the file.
   the folders and documents of the document's project, its repository or else its folder. Plain
   text files (`.txt`) open and save as Markdown files do, and code blocks have syntax colors. Local
   images inside the project show in the document, and an image dropped on the editor, pasted or
-  chosen with Format › Image… is saved beside the document and linked, as a tracked insertion when
+  chosen with Format › Image… is saved in the project’s `images` folder and linked, as a tracked insertion when
   Track Changes is on. ⌘-click on a link opens it in the browser. GitHub alerts show as boxes with a
   type menu, `<sub>` and `<sup>` as subscript and superscript (⌥⌘, and ⌥⌘.), and emoji shortcodes
   as emoji, with a list after a colon. With two or more headings, a column of lines in the left

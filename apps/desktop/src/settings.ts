@@ -21,13 +21,6 @@ export type AgentScope = 'document' | 'folder' | 'everything';
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;
 
-/**
- * Where the images added to a document are saved (#308): in a folder beside it, named by
- * `imageFolderName`; in a folder named for the document, `<name>.assets`; or in the document's own
- * folder. All of them are inside the folder of the document, where the preview loads images from.
- */
-export type ImagePlace = 'folder' | 'assets' | 'same';
-
 /** The most characters the name of the folder for images may have. */
 const MAX_FOLDER_NAME = 100;
 
@@ -46,7 +39,9 @@ export function imageFolderNameProblem(typed: string): string | null {
   }
   const control = (char: string) => char < ' ' || (char >= '\u007f' && char <= '\u009f');
   if ([...name].some(control)) return 'A folder’s name can’t have control characters in it.';
-  const plain = !name.startsWith('.') && ![...name].some((char) => char === '/' || char === '\\');
+  const plain =
+    !name.startsWith('.') &&
+    ![...name].some((char) => char === '/' || char === '\\' || char === ':');
   return plain ? null : 'A folder’s name has no slash and doesn’t start with a dot.';
 }
 
@@ -124,9 +119,11 @@ export interface Settings {
    * a saved document starts in that document's own folder, whatever this says.
    */
   newDocumentFolder: string | null;
-  /** Where the images dropped or pasted into a document are saved (#308). */
-  imagePlace: ImagePlace;
-  /** The name of the folder beside the document, for `imagePlace: 'folder'`. */
+  /**
+   * The name of the project's one folder for images (#308, #523): in the project folder the sidebar
+   * shows (the repository's root, else the document's own folder), where every image dropped or
+   * pasted into one of its documents is saved.
+   */
   imageFolderName: string;
 }
 
@@ -157,7 +154,6 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   consent: {},
   people: [],
   newDocumentFolder: null,
-  imagePlace: 'folder',
   imageFolderName: 'images',
 };
 
@@ -220,9 +216,6 @@ export function loadSettings(): Settings {
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
         ? value['newDocumentFolder']
         : null,
-    imagePlace: isImagePlace(value['imagePlace'])
-      ? value['imagePlace']
-      : DEFAULT_SETTINGS.imagePlace,
     imageFolderName:
       (typeof value['imageFolderName'] === 'string' &&
         imageFolderNameOf(value['imageFolderName'])) ||
@@ -393,10 +386,6 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
-}
-
-function isImagePlace(value: unknown): value is ImagePlace {
-  return value === 'folder' || value === 'assets' || value === 'same';
 }
 
 function isAgentScope(value: unknown): value is AgentScope {

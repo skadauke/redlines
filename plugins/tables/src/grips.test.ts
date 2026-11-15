@@ -1,6 +1,15 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor, rectOf, touchedCols, touchedRows } from '@redlines/editor';
+import { runScopeHandlers } from '@codemirror/view';
+import {
+  createEditor,
+  type Editor,
+  moveRows,
+  rectOf,
+  touchedCols,
+  touchedRows,
+  wholeRect,
+} from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTables } from './index.ts';
 
@@ -633,4 +642,68 @@ describe('edge widgets, the corner and crowding', () => {
     move(editor, LEFT + 100, TOP + 160 - 10);
     expect(q(editor, '.rl-edge-row')).toBeNull();
   });
+});
+
+describe('whole rows through the grip when the last selected row is shorter (#455)', () => {
+  const SHORT = `Intro.\n\n| a | b | c |\n| - | - | - |\n| 11 | 12 | 13 |\n| 21 |\n| 31 | 32 | 33 |\n\nAfter.\n`;
+  it('keeps moved rows selected whole when the last of them is shorter (rowsSelected)', () => {
+    const editor = mount(SHORT);
+    move(editor, LEFT + 50, rowY(1));
+    mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(1), button: 0 });
+    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(1) });
+    move(editor, LEFT + 50, rowY(2));
+    mouse(grip(editor)!, 'mousedown', {
+      clientX: 60,
+      clientY: rowY(2),
+      button: 0,
+      shiftKey: true,
+    });
+    mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+    // Rows 1 and 2 move down one place, after the row 31: they stay selected as whole rows.
+    expect(moveRows(editor.view, false)).toBe(true);
+    const rect = rectOf(editor.view.state);
+    expect(rect?.rows).toEqual([2, 3]);
+    expect(rect?.cols, 'all three columns').toEqual([0, 2]);
+    expect(rect && wholeRect(rect)).toBe('row');
+  });
+
+  for (const tracking of [false, true]) {
+    it(`selects the rows whole, and ⌫⌫ deletes them, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = mount(SHORT, tracking);
+      // The grip over row 1, then ⇧ over row 2 (the short one): a click and its release each.
+      move(editor, LEFT + 50, rowY(1));
+      mouse(grip(editor)!, 'mousedown', { clientX: 60, clientY: rowY(1), button: 0 });
+      mouse(window, 'mouseup', { clientX: 60, clientY: rowY(1) });
+      move(editor, LEFT + 50, rowY(2));
+      mouse(grip(editor)!, 'mousedown', {
+        clientX: 60,
+        clientY: rowY(2),
+        button: 0,
+        shiftKey: true,
+      });
+      mouse(window, 'mouseup', { clientX: 60, clientY: rowY(2) });
+      const rect = rectOf(editor.view.state);
+      expect(rect?.rows, 'rows 1 and 2').toEqual([1, 2]);
+      expect(rect?.cols, 'all three columns').toEqual([0, 2]);
+      expect(rect && wholeRect(rect), 'whole rows').toBe('row');
+      // ⌫ clears the cells, ⌫ again deletes the rows.
+      const back = () =>
+        runScopeHandlers(
+          editor.view,
+          new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }),
+          'editor',
+        );
+      expect(back()).toBe(true);
+      expect(back()).toBe(true);
+      const doc = editor.getDoc();
+      if (tracking) {
+        // The rows are tracked deletions, not gone: their text stays in the file for the decision.
+        expect(editor.getParsed().marks.some((mark) => mark.kind === 'del')).toBe(true);
+      } else {
+        expect(doc).not.toContain('| 11 |');
+        expect(doc).not.toContain('| 21 |');
+      }
+      expect(doc).toContain('| 31 | 32 | 33 |');
+    });
+  }
 });

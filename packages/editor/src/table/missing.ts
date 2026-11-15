@@ -21,13 +21,13 @@ import { viewModeField } from '../tracked/field.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
 
 /** The caret is in the cell of column `col` that the row ending at `at` lacks. */
-export interface MissingAt {
+interface MissingAt {
   at: number;
   col: number;
 }
 
 /** Puts the caret, which is at the end of a row, in the cell of that row that is column `col`. */
-export const setMissing = StateEffect.define<MissingAt>();
+const setMissing = StateEffect.define<MissingAt>();
 
 /** The column of the cell the caret is in, when it is not the first the row lacks. It holds until the
  * selection or the text changes, which no longer mean the cell it was put in. */

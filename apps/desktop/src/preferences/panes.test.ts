@@ -728,91 +728,59 @@ describe('the panes', () => {
   });
 
   describe('the Images row', () => {
-    /** The row's parts: the place's menu, the folder's name, and the line that says where images go. */
+    /** The row's parts: the folder's name, and the line that says where images go. */
     const imagesRow = (container: HTMLElement) => {
       const row = container.querySelector<HTMLElement>('[data-row="Images"]');
-      const place = row?.querySelector<HTMLSelectElement>('select');
       const status = row?.querySelector<HTMLElement>('[role="status"]');
-      if (!row || !place || !status) throw new Error('no Images row');
+      const name = row?.querySelector<HTMLInputElement>('input[type="text"]');
+      if (!row || !status || !name) throw new Error('no Images row');
       return {
-        place,
-        /** The field for the folder's name, which is there only for a folder beside the document. */
-        name: () => row.querySelector<HTMLInputElement>('input[type="text"]'),
+        name,
         said: () => status.textContent,
         failed: () => status.classList.contains('rl-pref-failure'),
-        choose: (value: string) => {
-          place.value = value;
-          place.dispatchEvent(new Event('change'));
-        },
         type: (field: HTMLInputElement, text: string) => {
           field.value = text;
           field.dispatchEvent(new Event('input'));
         },
       };
     };
+    const WHERE = (name: string) =>
+      `Every image goes in “${name}” in the project’s folder, the one the sidebar shows; a document that is in no project keeps one beside it. An image dragged in is copied, never moved, and nothing is ever replaced.`;
 
-    it('offers a folder beside the document, one named for it, and the document’s own, in a folder named images', () => {
-      const row = imagesRow(draw('editor').container);
-      expect([...row.place.options].map((option) => [option.value, option.textContent])).toEqual([
-        ['folder', 'In a folder beside the document'],
-        ['assets', 'In a folder named for the document'],
-        ['same', 'In the document’s folder'],
-      ]);
-      expect(row.place.value).toBe('folder');
-      expect(row.name()?.value).toBe('images');
-      expect(row.said()).toBe('Saved in “images” next to the document.');
+    it('is one folder’s name, images, for the whole project, and has no choice of place', () => {
+      const container = draw('editor').container;
+      const row = imagesRow(container);
+      expect(container.querySelector('[data-row="Images"] select')).toBeNull();
+      expect(row.name.value).toBe('images');
+      expect(row.said()).toBe(WHERE('images'));
       expect(row.failed()).toBe(false);
     });
 
-    it('starts at the stored settings, with the folder’s name only where it is used', () => {
+    it('starts at the stored name', () => {
       const { container } = setup();
-      const settings = {
-        ...DEFAULT_SETTINGS,
-        imagePlace: 'assets' as const,
-        imageFolderName: 'pictures',
-      };
+      const settings = { ...DEFAULT_SETTINGS, imageFolderName: 'pictures' };
       renderPane('editor', container, { ...setup().deps, settings: () => settings });
       const row = imagesRow(container);
-      expect(row.place.value).toBe('assets');
-      expect(row.name()).toBeNull();
-      expect(row.said()).toBe('Saved in a folder like “plan.assets” next to the document.');
-    });
-
-    it('saves a place at once, and shows the folder’s name only for a folder beside the document', () => {
-      const { container, update, now } = draw('editor');
-      const row = imagesRow(container);
-      row.choose('same');
-      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'same' });
-      expect(now().imagePlace).toBe('same');
-      expect(row.name()).toBeNull();
-      expect(row.said()).toBe('Saved next to the document.');
-      row.choose('assets');
-      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'assets' });
-      expect(row.name()).toBeNull();
-      row.choose('folder');
-      expect(update).toHaveBeenLastCalledWith({ imagePlace: 'folder' });
-      expect(row.name()?.value).toBe('images');
-      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.name.value).toBe('pictures');
+      expect(row.said()).toBe(WHERE('pictures'));
     });
 
     it('saves the folder’s name as it is typed, without the spaces around it', () => {
       const { container, update, now } = draw('editor');
       const row = imagesRow(container);
-      const field = row.name()!;
-      row.type(field, ' Bilder 2026 ');
+      row.type(row.name, ' Bilder 2026 ');
       expect(update).toHaveBeenLastCalledWith({ imageFolderName: 'Bilder 2026' });
       expect(now().imageFolderName).toBe('Bilder 2026');
-      expect(row.said()).toBe('Saved in “Bilder 2026” next to the document.');
+      expect(row.said()).toBe(WHERE('Bilder 2026'));
       expect(row.failed()).toBe(false);
     });
 
-    it('saves no name that a folder beside the document can’t have, and says why', () => {
+    it('saves no name that a folder in the project can’t have, and says why', () => {
       const { container, update, now } = draw('editor');
       const row = imagesRow(container);
-      const field = row.name()!;
       for (const typed of ['.images', 'a/b', '../images', 'a\\b']) {
         update.mockClear();
-        row.type(field, typed);
+        row.type(row.name, typed);
         expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
         expect(row.said()).toBe('A folder’s name has no slash and doesn’t start with a dot.');
         expect(row.failed()).toBe(true);
@@ -824,7 +792,7 @@ describe('the panes', () => {
         ['x'.repeat(101), 'A folder’s name can’t be longer than 100 characters.'],
       ] as const) {
         update.mockClear();
-        row.type(field, typed);
+        row.type(row.name, typed);
         expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
         expect(row.said()).toBe(said);
         expect(row.failed()).toBe(true);
@@ -835,30 +803,25 @@ describe('the panes', () => {
     it('goes back to the saved name when the field is left with one that isn’t a name', () => {
       const { container } = draw('editor');
       const row = imagesRow(container);
-      const field = row.name()!;
-      row.type(field, 'a/b');
+      row.type(row.name, 'a/b');
       // While it is being typed it is left as it is.
-      expect(field.value).toBe('a/b');
-      field.dispatchEvent(new Event('blur'));
-      expect(field.value).toBe('images');
-      expect(row.said()).toBe('Saved in “images” next to the document.');
+      expect(row.name.value).toBe('a/b');
+      row.name.dispatchEvent(new Event('blur'));
+      expect(row.name.value).toBe('images');
+      expect(row.said()).toBe(WHERE('images'));
       expect(row.failed()).toBe(false);
       // A name that was fine is shown as it was saved, trimmed.
-      row.type(field, ' pics ');
-      field.dispatchEvent(new Event('blur'));
-      expect(field.value).toBe('pics');
+      row.type(row.name, ' pics ');
+      row.name.dispatchEvent(new Event('blur'));
+      expect(row.name.value).toBe('pics');
     });
 
-    it('is a group named for the row, whose menu and field have names of their own', () => {
+    it('is a group named for the row, whose field has a name of its own', () => {
       const { container } = draw('editor');
       const row = container.querySelector<HTMLElement>('[data-row="Images"]');
       const group = row?.querySelector<HTMLElement>('[role="group"]');
       const label = row?.querySelector<HTMLElement>('.rl-pref-label');
       expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
-      // The group's name is not read for what is inside it by every screen reader.
-      expect(group?.querySelector('select')?.getAttribute('aria-label')).toBe(
-        'Where images are saved',
-      );
       expect(group?.querySelector('input')?.getAttribute('aria-label')).toBe('Folder name');
     });
   });
