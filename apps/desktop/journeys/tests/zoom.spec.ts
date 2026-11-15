@@ -10,23 +10,28 @@ test.describe('zoom is per window @views', () => {
   test('larger text in one window leaves the other alone, and a new window takes the last', async ({
     start,
   }) => {
+    // The run's look sets the first window's size (1 at 100%, 2 at 200%), and a window opened
+    // after it takes the last size set anywhere: that one, whatever the look (#612).
     const j = await start({ doc: 'Hello\n', tracking: false, view: 'clean' });
+    const first = await scale(j.page);
     const other = await j.page.context().newPage();
     await other.goto('/');
     await other.waitForFunction(() => window.__redlines !== undefined);
-    expect(await scale(other)).toBe('1');
+    expect(await scale(other)).toBe(first);
 
     await j.press('Control+Meta+=');
-    await expect.poll(() => scale(j.page)).toBe('1.1');
+    await expect.poll(() => scale(j.page)).not.toBe(first);
+    const larger = await scale(j.page);
+    expect(Number(larger)).toBeGreaterThan(Number(first));
     // The other window heard nothing of it.
     await other.waitForTimeout(300);
-    expect(await scale(other)).toBe('1');
+    expect(await scale(other)).toBe(first);
     await j.shot('text-size-first-window');
 
     // A window opened now starts at the last size set anywhere.
     const third = await j.page.context().newPage();
     await third.goto('/');
     await third.waitForFunction(() => window.__redlines !== undefined);
-    expect(await scale(third)).toBe('1.1');
+    expect(await scale(third)).toBe(larger);
   });
 });

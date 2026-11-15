@@ -35,9 +35,9 @@ import {
   ghostColumnsOf,
   GhostColsWidget,
   type InsertedColumn,
+  insertedColumnClass,
   insertedColumnsOf,
 } from './colghosts.ts';
-import { colorClass } from '../tracked/colors.ts';
 import { type Dirty, dirtyOf, type Span } from './dirty.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
 import { type MissingCaret, missingCaret } from './missing.ts';
@@ -106,7 +106,8 @@ class MissingCellWidget extends WidgetType {
       other.active === this.active &&
       other.added?.id === this.added?.id &&
       other.added?.color === this.added?.color &&
-      other.added?.moved === this.added?.moved
+      other.added?.moved === this.added?.moved &&
+      other.added?.plain === this.added?.plain
     );
   }
 
@@ -114,7 +115,7 @@ class MissingCellWidget extends WidgetType {
     const cell = document.createElement('span');
     const { added } = this;
     cell.className = `rl-tc rl-tc-missing${this.active ? ' rl-tc-active' : ''}${
-      added ? ` rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}` : ''
+      added ? ` ${insertedColumnClass(added)}` : ''
     }`;
     cell.setAttribute('role', 'cell');
     cell.setAttribute('aria-colindex', String(this.vcol + 1));
@@ -284,7 +285,7 @@ function rowDecorations(
       cells.push(
         Decoration.mark({
           class: shown
-            ? `rl-tc${added ? ` rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}` : ''}`
+            ? `rl-tc${added ? ` ${insertedColumnClass(added)}` : ''}`
             : 'rl-tc rl-tc-hidden',
           inclusive: true,
           // (a ghost before or after the cell is not in it)
