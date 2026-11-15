@@ -19,7 +19,7 @@ import {
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
-import { parsedField, viewModeField } from '../tracked/field.ts';
+import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { freshlyAdded } from './fresh.ts';
 import { imageOfNode } from '../image-size.ts';
@@ -671,30 +671,36 @@ function hardBreaksOf(decorations: DecorationSet): DecorationSet {
  */
 const hardBreakCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
-    if (!tr.docChanged && !tr.selection) return tr;
+    // A change, a selection, or a switch of the view (Raw has no atoms: a caret between the spaces
+    // that Raw allowed goes out when the spaces hide).
+    if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
+      return tr;
+    }
     if (tr.state.field(viewModeField, false) === 'raw') return tr;
-    const breaks = hardBreaksOf(tr.state.field(previewField));
-    if (!breaks.size) return tr;
+    const decorations = tr.state.field(previewField);
     const outside = (pos: number, side: -1 | 0 | 1) => {
       let moved = pos;
-      breaks.between(pos, pos, (from, to) => {
-        if (from < pos && pos < to) {
+      decorations.between(pos, pos, (from, to, value) => {
+        if ((value.spec as { hardBreak?: true }).hardBreak === true && from < pos && pos < to) {
           moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
         }
       });
       return moved;
     };
-    const { selection } = tr;
-    const ranges = (selection ?? tr.newSelection).ranges.map((range) =>
-      range.empty
-        ? EditorSelection.cursor(outside(range.head, 0))
-        : EditorSelection.range(
-            outside(range.anchor, range.anchor < range.head ? -1 : 1),
-            outside(range.head, range.head < range.anchor ? -1 : 1),
-          ),
-    );
-    const next = EditorSelection.create(ranges, tr.newSelection.mainIndex);
-    return next.eq(tr.newSelection) ? tr : [tr, { selection: next, sequential: true }];
+    const { newSelection } = tr;
+    let changed = false;
+    const ranges = newSelection.ranges.map((range) => {
+      const anchor = outside(range.anchor, range.empty ? 0 : range.anchor < range.head ? -1 : 1);
+      const head = outside(range.head, range.empty ? 0 : range.head < range.anchor ? -1 : 1);
+      if (anchor === range.anchor && head === range.head) return range;
+      changed = true;
+      return range.empty ? EditorSelection.cursor(head) : EditorSelection.range(anchor, head);
+    });
+    if (!changed) return tr;
+    return [
+      tr,
+      { selection: EditorSelection.create(ranges, newSelection.mainIndex), sequential: true },
+    ];
   }),
 );
 
