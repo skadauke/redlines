@@ -49,6 +49,8 @@ export default defineConfig<JourneyOptions>({
   // (`--update-snapshots=changed`), on purpose.
   updateSnapshots: 'none',
   expect: {
+    // A journey waits for what it expects only as long as a person would: two seconds.
+    timeout: 2000,
     toHaveScreenshot: {
       // At most 15 pixels differ, each by more than a small colour distance: antialiasing doesn't
       // fail a run, a letter that changed, a moved line or a menu does (one letter is some 40
@@ -65,7 +67,12 @@ export default defineConfig<JourneyOptions>({
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 1 : 0,
   workers: process.env['CI'] ? 2 : undefined,
-  reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
+  // The JSON report is what `pnpm journeys:look` reads: which journey took which pictures.
+  reporter: [
+    ['list'],
+    ['json', { outputFile: 'test-results/results.json' }],
+    ...(process.env['CI'] ? ([['html', { open: 'never' }]] as const) : []),
+  ],
   outputDir: 'test-results',
   use: {
     baseURL,

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
 import { createEditor, type Editor, type MarkupView, undo } from '@redlines/editor';
-import { accept, applyChanges, newestView, reject } from '@redlines/format';
+import { accept, applyChanges, newestView, originalView, reject } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFormatting, plugin } from './index.ts';
 
@@ -215,8 +215,10 @@ describe('blocks', () => {
   it('inserts a table and a rule as tracked insertions with tracking on', () => {
     const { editor } = mount('One.\n\nTwo.\n', { tracking: true });
     select(editor, 2);
-    expect(editor.commands.run('block.table')).toBe(true);
     expect(editor.commands.run('block.rule')).toBe(true);
+    // A rule can't go in a table, now that the pending table is one: the table goes after "Two."
+    select(editor, editor.getDoc().indexOf('Two.') + 4);
+    expect(editor.commands.run('block.table')).toBe(true);
     const kinds = editor.getParsed().marks.map((mark) => mark.kind);
     expect(kinds.length).toBeGreaterThan(0);
     // The line breaks that part the block from its neighbors are insertions too.
@@ -225,6 +227,54 @@ describe('blocks', () => {
     expect(visible(editor)).toContain('| --- |');
     expect(visible(editor)).toContain('\n---');
     expect(visible(editor).indexOf('Two.')).toBeGreaterThan(visible(editor).indexOf('---'));
+  });
+
+  // Every kind of block that a command inserts is drawn as that block with Track Changes on, as it
+  // is with it off, not shown as Markdown (P0-a): the table was shown raw, its lines ending with the
+  // markers of the line breaks it inserts.
+  it.each([
+    ['block.table', '.rl-trow', 2],
+    ['block.rule', '.rl-hr', 1],
+    ['block.code', '.rl-codeblock', 3],
+    ['block.quote', '.rl-quote', 1],
+    ['block.alert', '.rl-callout', 2],
+  ])('draws %s as a block with tracking on and off', (command, selector, lines) => {
+    for (const tracking of [false, true]) {
+      for (const view of ['redlines', 'clean'] as const) {
+        const { editor } = mount('One.\n\nTwo.\n', { tracking });
+        editor.setViewMode(view);
+        select(editor, 2);
+        expect(editor.commands.run(command)).toBe(true);
+        forceParsing(editor.view, editor.view.state.doc.length, 5000);
+        const drawn = editor.view.contentDOM.querySelectorAll(selector);
+        expect(drawn.length, `${command}, tracking ${tracking}, ${view}`).toBeGreaterThanOrEqual(
+          lines,
+        );
+      }
+    }
+  });
+
+  it('draws a table inserted with tracking on, types in it, and decides it', () => {
+    const { editor } = mount('One.\n\nTwo.\n', { tracking: true });
+    select(editor, 2);
+    editor.commands.run('block.table');
+    const rows = () => editor.view.contentDOM.querySelectorAll('.cm-line.rl-trow');
+    expect(rows()).toHaveLength(2);
+    expect([...rows()].some((row) => row.textContent?.includes('<!--'))).toBe(false);
+    // The first cell's word is selected: typing replaces it, in the pending insertion.
+    editor.view.dispatch(editor.view.state.replaceSelection('Name'), { userEvent: 'input.type' });
+    expect(rows()).toHaveLength(2);
+    expect(visible(editor)).toContain('| Name | Column |');
+    // Accepting everything leaves the table plain, rejecting everything takes it away.
+    const doc = editor.getDoc();
+    expect(newestView(doc).text).toMatch(
+      /^One\.\n\n\| Name \| Column \|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\nTwo\./,
+    );
+    expect(originalView(doc).text.trim()).toBe('One.\n\nTwo.');
+    // Undo takes the typing and the table back.
+    for (let i = 0; i < 6; i++) undo(editor.view);
+    expect(editor.getDoc()).toBe('One.\n\nTwo.\n');
+    expect(rows()).toHaveLength(0);
   });
 
   it('inserts a table plainly with tracking off', () => {

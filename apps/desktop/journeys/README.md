@@ -46,6 +46,30 @@ run leaves the picture it got, the approved one and a diff in `test-results/<jou
   wrong once); a journey's other moments are `j.shot(name)`, for the look review, and are compared
   with nothing.
 
+## The look review
+
+`pnpm journeys:look` collects a run's screenshots into `apps/desktop/journeys/look-review/` with an
+`INDEX.md`, for an agent or a person to check against the checklist. How a lane uses it:
+[look-review.md](look-review.md).
+
+## Journeys for bugs that are still open
+
+A journey that fails today because of an open issue is written as
+`known(510, 'title', /the pasted bullet is an item of its own/, body)` (from `src/journey.ts`). The
+body runs, and it must fail with the signature in its message (give the assertion that shows the bug
+a message: `expect(x, 'the pasted bullet is an item of its own')`), so a typo, a timeout or a page
+error fails the journey instead of passing as "the bug". The run stays green while the bug stands and
+goes red ("known bug #510 no longer fails") when the fix lands: the lane that fixed it changes
+`known(510, …)` to `test(…)`, and the journey guards the fix. The failure is the evidence:
+`JOURNEYS_EVIDENCE=1 pnpm journeys tests/lists.spec.ts` runs `known` journeys as ordinary tests and
+shows what fails and where (and the shots show what it looks like).
+
+## Tags and areas
+
+`@smoke` runs on every pull request (the page opens, Track Changes marks typing, a list, a table,
+the eye's menu). The area tags, `@lists`, `@blocks`, `@tables`, `@links`, `@views`, say which part of
+the app a journey is about, so that a PR runs the ones for the paths it touches.
+
 ## Writing one
 
 ```ts
