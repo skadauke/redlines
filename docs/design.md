@@ -348,8 +348,16 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
-- **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
-  change.
+- **Image size:** while the pointer is over an image, a handle on its left edge and one on its
+  right edge resize it, with its aspect kept; the image follows the pointer as it is dragged, and
+  one Undo takes the size back. A large image fits the text column and a small one keeps its own
+  size (it is never scaled up unless it is dragged larger). The size is stored as `<img width>`
+  (`{width=}` in a pandoc file is not written yet): the first size turns `![alt](src)` into the tag,
+  and the image's own size, which a drag to it also gives, turns it back. Alignment (left, centered,
+  right) is the tag's `align`. A new size is tracked as a substitution of the whole image
+  ([format §3.5.1](format.md#351-image-size-and-alignment)). The menu's Small, Medium, Large,
+  Original size and the alignments are commands of the editor (`image.size.*`, `image.align.*`),
+  which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
@@ -860,6 +868,15 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
   and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows.
+- **Widgets at the table's edges.** With the pointer over the table, three small widgets grow it and
+  select it without a menu, in the same layer as the handles. **Add column** is a strip as tall as
+  the table, 4 px right of it, 20 px wide, with a +, while the pointer is over the rightmost column
+  or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
+  over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
+  as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
+  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
+  has a hint after the title bar's delay.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection
@@ -1117,7 +1134,7 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- image resizing, alt text and captions; callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+- alt text and captions of images (resizing is built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
   are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;

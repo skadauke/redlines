@@ -403,6 +403,74 @@ test.describe('tables @tables', () => {
     await j.shot('column-handle-menu');
   });
 
+  // #622, decided 2026-11-15: Add column (right of the table, over the rightmost column), Add row
+  // (below it, over the bottom row) and a corner widget that selects the table.
+  for (const tracking of [false, true]) {
+    const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
+    const view = tracking ? 'redlines' : 'clean';
+    test(`Add column, Add row and Select table widgets at the table's edges, ${mode}`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: `Intro\n\n${MOVE}`, tracking, view });
+      await j.settle();
+      const box = async (sel: string) => (await j.page.locator(sel).first().boundingBox())!;
+      // A cell of a row by its place (the markers of tracked edits hold digits of their own).
+      const cell = (row: number) =>
+        j.page.locator('.rl-trow:not(.rl-ghost)').nth(row).locator('.rl-tc').first();
+      const addCol = j.page.locator('.rl-edge-col');
+      const addRow = j.page.locator('.rl-edge-row');
+      const corner = j.page.locator('.rl-table-select');
+      const tbl = await box('.rl-tbl');
+      // Over the first column: none of Add column; the corner widget shows with the table's handles.
+      await j.hover('1');
+      await expect(addCol, 'Add column is not shown over the first column').toBeHidden();
+      await expect(corner, 'the corner widget shows over the table').toBeVisible();
+      const c = await box('.rl-table-select');
+      expect(c.x + c.width, 'the corner widget is left of the table').toBeLessThanOrEqual(tbl.x);
+      expect(c.y + c.height, 'and above it').toBeLessThanOrEqual(tbl.y);
+      expect(tbl.x - (c.x + c.width), 'close to the corner').toBeLessThanOrEqual(4);
+      // Over the rightmost column: Add column, just right of the table.
+      await j.hover('2');
+      await expect(addCol, 'Add column is shown over the last column').toBeVisible();
+      const a = await box('.rl-edge-col');
+      expect(a.x, 'just right of the table').toBeGreaterThanOrEqual(tbl.x + tbl.width);
+      expect(a.x - (tbl.x + tbl.width), 'close to the table').toBeLessThanOrEqual(6);
+      expect(a.height, 'as tall as the table').toBeGreaterThan(tbl.height - 4);
+      await j.shot('add-column-widget');
+      // Reached from the table, it keeps showing, and a click adds a column at the end.
+      await addCol.hover();
+      await expect(addCol).toBeVisible();
+      await expect(j.page.locator('.rl-grip-hint')).toHaveText(/Add a column/);
+      await addCol.click();
+      expect(await j.cmText(), 'a column is added at the end').toMatch(/\| A \| B \|[^|\n]*\|/);
+      await expect(j.page.locator('.rl-th .rl-tc[data-col]')).toHaveCount(3);
+      // Over the bottom row: Add row, just below the table.
+      await j.hover(cell(-1));
+      await expect(addRow, 'Add row is shown over the bottom row').toBeVisible();
+      const tbl2 = await box('.rl-tbl');
+      const r = await box('.rl-edge-row');
+      expect(r.y - (tbl2.y + tbl2.height), 'just below the table').toBeLessThanOrEqual(6);
+      expect(r.y).toBeGreaterThanOrEqual(tbl2.y + tbl2.height);
+      await j.shot('add-row-widget');
+      await j.hover(cell(2));
+      await expect(addRow, 'Add row is not shown over a middle row').toBeHidden();
+      await j.hover(cell(-1));
+      const rows = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      await addRow.click();
+      const after = (await j.cmText()).split('\n').filter((l) => l.startsWith('|')).length;
+      expect(after, 'a row is added at the end').toBe(rows + 1);
+      // The corner widget selects the table.
+      await j.hover(cell(1));
+      await corner.click();
+      expect(await selected(j.page), 'the whole table is selected').toBeGreaterThanOrEqual(10);
+      await j.shot('table-selected-by-widget');
+      // With Track Changes on the added row and column are the tracked insertions the Table menu makes.
+      const file = await j.text();
+      if (tracking) expect(file, 'the additions are tracked insertions').toContain('<!--ins ');
+      else expect(file).not.toContain('<!--ins ');
+    });
+  }
+
   test('the + and the column grip have hover hints too', async ({ start }) => {
     const j = await start({ doc: `Intro\n\n${MOVE}`, tracking: false, view: 'clean' });
     await j.settle();
@@ -596,6 +664,72 @@ test.describe('tables @tables', () => {
       if (name === 'row' || name === 'table') await j.baseline(`cells-${name}`);
     });
   }
+
+  // #522, decided 2026-11-15: a selection of cells, rows, columns or the table is a flat tint in the
+  // editor's own selection blue, with no outline, over every cell it reaches, whether or not a
+  // tracked change has tinted the cell.
+  test('a table selected after tracked additions is one flat tint in the text selection blue, no outline', async ({
+    start,
+  }) => {
+    const doc = '| Name | Role |\n| - | - |\n| Ada | Editor |\n| Grace | Reviewer |\n';
+    const j = await start({ doc: `Intro text here\n\n${doc}`, tracking: true, view: 'redlines' });
+    await j.settle();
+    const rowsOf = () => j.page.locator('.rl-trow:not(.rl-ghost)');
+    await j.hover(rowsOf().last().locator('.rl-tc').first());
+    await j.page.locator('.rl-edge-row').click();
+    await j.hover(rowsOf().nth(1).locator('.rl-tc').last());
+    await j.page.locator('.rl-edge-col').click();
+    await j.type('new');
+    // Text inserted in a cell that was there: its change is the author's colour, which must not
+    // stay on the blue when it is selected.
+    await j.caretAfter('Ada');
+    await j.type('xyz');
+    await expect(j.page.locator('.rl-ins-row'), 'the added row is a tinted insertion').toHaveCount(
+      1,
+    );
+    await expect(j.page.locator('.rl-ins-col').first(), 'the added column is tinted').toBeVisible();
+    await j.hover(rowsOf().nth(1).locator('.rl-tc').first());
+    await j.page.locator('.rl-table-select').click();
+    await expect(j.page.locator('.rl-cell-selecting')).toHaveCount(1);
+    const paint = await j.page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'Highlight';
+      probe.style.color = 'HighlightText';
+      (document.querySelector('.cm-editor') ?? document.body).append(probe);
+      const selection = getComputedStyle(probe).backgroundColor;
+      const ink = getComputedStyle(probe).color;
+      probe.remove();
+      const cells = [...document.querySelectorAll<HTMLElement>('.rl-trow:not(.rl-ghost) > .rl-tc')];
+      return {
+        selection,
+        inks: [...document.querySelectorAll<HTMLElement>('.rl-tc:has(.rl-sel) .rl-ins')].map(
+          (el) => ({ color: getComputedStyle(el).color, ink }),
+        ),
+        cells: cells.map((cell) => {
+          const style = getComputedStyle(cell);
+          return {
+            fill: style.backgroundColor,
+            outline: style.outlineStyle,
+            shadow: style.boxShadow,
+            border: style.borderTopStyle,
+          };
+        }),
+      };
+    });
+    expect(paint.cells.length, 'four rows of three cells').toBe(12);
+    for (const [i, cell] of paint.cells.entries()) {
+      expect(cell.fill, `cell ${i} has the selection blue, not a change's tint`).toBe(
+        paint.selection,
+      );
+      expect(cell.outline, `cell ${i} has no outline`).toBe('none');
+      expect(cell.shadow, `cell ${i} has no shadow`).toBe('none');
+    }
+    expect(paint.inks.length, 'a change inside a selected cell is drawn').toBeGreaterThan(0);
+    for (const one of paint.inks) {
+      expect(one.color, 'changed text inside a selected cell takes the ink').toBe(one.ink);
+    }
+    await j.shot('cells-table-after-tracked-additions');
+  });
 
   test('a rectangle over an empty cell leaves no page highlight in it', async ({ start }) => {
     const gap = '| A | B |\n| - | - |\n| 1 |  |\n| 3 | 4 |\n';
