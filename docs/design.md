@@ -388,15 +388,21 @@ another document doesn't open yet.
 
 The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
 the eye switches between Clean and Redlines, and from Raw goes back to whichever of the two was shown
-last; Raw is for the menu.
+last; Raw is for the menu, below a separator. The click shows that it did something, for Clean and
+Redlines look alike in a document without redlines: the eye's pupil is red for a moment (the one use
+of red there besides the pen).
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
-  always there, with its shortcut, whatever the document holds and whether Track Changes is on or
-  off, so the View menu always offers the same three views. A document without redlines looks
-  nearly the same as in Clean. Redlines has two looks, and a click on a change bar in the margin or
-  the View menu's **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
+  always there in the menu bar's View menu, with its shortcut, whatever the document holds and
+  whether Track Changes is on or off, since a disabled item would take its key away. The eye's menu
+  is for what there is to see: Redlines is disabled in it for a document with no changes and no
+  ledger (no pending change, highlight or comment), where it would look nearly the same as Clean
+  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the eye still
+  show it. The eye's menu has no Simple Look row. Redlines has two
+  looks, and a click on a change bar in the margin or the menu bar's View ›
+  **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
   **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden, and inserted and reformatted text is plain (Word's Simple Markup). The click
@@ -405,8 +411,9 @@ last; Raw is for the menu.
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
   checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
-  have no look), and in the title bar's menu as well. A change bar is a pointer's way, and the
-  switch is the way for the keyboard and VoiceOver (#330): nobody needs a pointer to choose a look.
+  have no look); the eye's menu has no row for it. A change bar is a pointer's way, and the
+  menu bar's switch (⌥⌘4) is the way for the keyboard and VoiceOver (#330): nobody needs a pointer
+  to choose a look.
 - **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 

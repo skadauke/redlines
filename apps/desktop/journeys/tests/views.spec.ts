@@ -1,6 +1,6 @@
 // The eye's menu: the views, and what it says about a file with no changes.
 
-import { expect, known, test, type Journey } from '../src/journey.ts';
+import { expect, test, type Journey } from '../src/journey.ts';
 import { isOpaque } from '../src/contrast.ts';
 
 /**
@@ -26,23 +26,63 @@ test.describe('the eye @views', () => {
     expect(await isOpaque(j.page.locator('.rl-menu').filter({ visible: true }))).toBe(true);
   });
 
-  known(
-    499,
-    'in a file with no changes, Redlines is disabled in the eye',
-    /Redlines is disabled/,
-    async ({ start }) => {
-      const j = await start({ doc: 'Hello\n', tracking: false });
-      const eye = await openEye(j);
-      await expect(eye.item('Redlines'), 'the Redlines row is there').toHaveCount(1);
-      // Today Redlines can be chosen in a file with nothing to show.
-      await expect(eye.item('Redlines'), 'Redlines is disabled').toBeDisabled();
-    },
-  );
+  test('in a file with no changes, Redlines is disabled in the eye, and Clean and Raw are not', async ({
+    start,
+  }) => {
+    const j = await start({ doc: 'Hello\n', tracking: false });
+    const eye = await openEye(j);
+    await expect(eye.item('Redlines'), 'the Redlines row is there').toHaveCount(1);
+    await expect(eye.item('Redlines'), 'Redlines is disabled').toBeDisabled();
+    await expect(eye.item('Clean')).toBeEnabled();
+    await expect(eye.item('Raw')).toBeEnabled();
+    await j.shot('eye-menu-no-changes');
+  });
 
-  known(499, 'the eye has no Simple Look row', /no Simple Look row/, async ({ start }) => {
+  test('in a file with changes, Redlines can be chosen in the eye', async ({ start }) => {
+    const j = await start({ doc: 'Hello\n', tracking: true, view: 'clean' });
+    await j.caretAtEnd();
+    await j.press('ArrowUp');
+    await j.type('x');
+    const eye = await openEye(j);
+    await expect(eye.item('Redlines')).toBeEnabled();
+    await j.shot('eye-menu-with-changes');
+  });
+
+  test('the eye has no Simple Look row, and Raw is below a separator', async ({ start }) => {
     const j = await start({ doc: 'Hello\n', tracking: false });
     const eye = await openEye(j);
     await expect(eye.item('Clean'), 'the menu is open').toHaveCount(1);
     await expect(eye.item('Simple Look'), 'no Simple Look row').toHaveCount(0);
+    // Clean, Redlines, a separator, Raw.
+    const order = await j.page.evaluate(() =>
+      [...document.querySelectorAll('.rl-menu')]
+        .filter((menu) => (menu as HTMLElement).offsetParent !== null)
+        .flatMap((menu) =>
+          [...menu.children]
+            .filter((el) => el.matches('[role^="menuitem"], [role="separator"]'))
+            .map((el) =>
+              el.matches('[role="separator"]')
+                ? '—'
+                : (el.querySelector('.rl-menu-label')?.textContent ?? ''),
+            ),
+        ),
+    );
+    expect(order.slice(0, 4)).toEqual(['Clean', 'Redlines', '—', 'Raw']);
+    expect(order.includes('Simple Look')).toBe(false);
+  });
+
+  test('a click on the eye shows that it did something: the pupil is red for a moment', async ({
+    start,
+  }) => {
+    const j = await start({ doc: 'Hello\n', tracking: false });
+    const eye = j.page.getByRole('button', { name: 'View', exact: true });
+    const pupil = () =>
+      eye.evaluate((button) => getComputedStyle(button.querySelector('circle')!).fill);
+    const rest = await pupil();
+    await eye.click();
+    expect(await pupil(), 'the pupil is red after the click').not.toBe(rest);
+    await j.shot('eye-clicked');
+    await expect(eye).not.toHaveClass(/rl-eye-flash/);
+    expect(await pupil(), 'and as it was after a moment').toBe(rest);
   });
 });
