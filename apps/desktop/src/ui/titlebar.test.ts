@@ -581,9 +581,15 @@ describe('title bar', () => {
     expect(shown(redlines()) && !redlines().disabled).toBe(true);
     redlines().click();
     expect(actions.setView).toHaveBeenCalledWith('redlines');
-    // The view that is shown stays checked when its last change goes.
+    // The view that is shown stays checked, and enabled, when its last change goes: the menu opens
+    // on the checked row, and a disabled row can't be focused.
     bar.update({ ...BASE, hasRedlines: false, view: 'redlines' });
     expect(redlines().getAttribute('aria-checked')).toBe('true');
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'simple' });
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'raw' });
+    expect(redlines().disabled).toBe(true);
   });
 
   it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {

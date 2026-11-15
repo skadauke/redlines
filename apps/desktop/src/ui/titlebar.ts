@@ -376,7 +376,14 @@ export function createTitleBar(
     // The keys are the menu bar's, as in menu-model.ts.
     entries: () => [
       viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
-      viewItem('redlines', VIEW_NAMES.redlines, VIEW_KEYS.redlines, !state.hasRedlines),
+      // Not disabled while it is the view shown: the menu opens on the row that is checked, and
+      // a disabled row can't be focused (the keys and VoiceOver would not find the current view).
+      viewItem(
+        'redlines',
+        VIEW_NAMES.redlines,
+        VIEW_KEYS.redlines,
+        !state.hasRedlines && menuViewOf(state.view) !== 'redlines',
+      ),
       'divider',
       viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
     ],
@@ -473,6 +480,7 @@ export function createTitleBar(
     height: () => bar.getBoundingClientRect().height,
     room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
+      clearTimeout(flashTimer);
       for (const tip of tips) tip.destroy();
       forgetPress?.();
       for (const menu of menus) menu.destroy();
