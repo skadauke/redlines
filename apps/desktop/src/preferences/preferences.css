@@ -38,13 +38,15 @@ body {
   -webkit-user-select: none;
 }
 
-/* The top: beside the window buttons, the icons, centered. */
+/* The top: beside the window buttons, the panes' tabs, each an icon with its name under it. */
 .rl-pref-bar {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  height: calc(56 * var(--rl-pt));
+  min-height: calc(68 * var(--rl-pt));
+  padding: calc(7 * var(--rl-pt)) 0;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--rl-rule);
 }
 
@@ -54,18 +56,21 @@ body {
 }
 
 .rl-pref-tab {
-  position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: calc(44 * var(--rl-frame));
-  height: calc(34 * var(--rl-frame));
-  padding: 0;
+  gap: calc(3 * var(--rl-frame));
+  min-width: calc(72 * var(--rl-frame));
+  height: calc(54 * var(--rl-frame));
+  padding: 0 calc(8 * var(--rl-frame));
   border: 0;
   border-radius: calc(7 * var(--rl-frame));
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
+  font-size: var(--rl-size-ui-small-frame);
+  line-height: 1;
 }
 
 .rl-pref-tab svg {
@@ -87,33 +92,55 @@ body {
   box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
 
-/* The hint: after a short wait on hover, as the title bar's. */
-.rl-pref-hint {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  z-index: 1;
-  padding: 3px 8px;
-  border-radius: 5px;
-  background: var(--rl-tip, var(--rl-ink));
-  color: var(--rl-page, Canvas);
-  font-size: var(--rl-size-ui-small);
-  line-height: 16px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-50%);
-}
-
-.rl-pref-tab:hover .rl-pref-hint {
-  opacity: 1;
-  transition: opacity 80ms linear 400ms;
-}
-
 .rl-pref-pane {
   flex: 1;
   overflow-y: auto;
-  padding: 26px 28px;
+  padding: 24px 28px 26px;
+}
+
+/* The filter: not there until a key is typed; then it heads the rows that match. */
+.rl-pref-filter {
+  display: block;
+  box-sizing: border-box;
+  flex: none;
+  width: calc(100% - 56px);
+  margin: 14px 28px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: var(--rl-page, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rl-pref-filter[hidden] {
+  display: none;
+}
+
+.rl-pref-filter::placeholder {
+  color: var(--rl-ink-2);
+}
+
+.rl-pref-filter:focus {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+/* A group of rows under a small heading, with room between groups. */
+.rl-pref-group + .rl-pref-group {
+  margin-top: 26px;
+}
+
+.rl-pref-section {
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rl-rule);
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  font-weight: 700;
+  line-height: 16px;
 }
 
 /* A row: the label right-aligned in its column, the control beside it. */
