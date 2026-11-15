@@ -14,7 +14,7 @@ export interface RefusalSite {
   /** The line it is on, from 1. */
   line: number;
   /** How it is written. */
-  how: 'error' | 'plan' | 'notice';
+  how: 'error' | 'plan' | 'notice' | 'effect' | 'constant';
   /** The first words of its message, or the name of the constant that holds it. */
   key: string;
   /** The error code, where it is given as a literal. */
@@ -103,7 +103,24 @@ export function refusalSites(root: string): RefusalSite[] {
       [/new EditError\(/g, 'error'],
       [/\brefusal:\s*/g, 'plan'],
       [/\bnotice\(/g, 'notice'],
+      [/\brefusedEditEffect\.of\(/g, 'effect'],
     ];
+    // A message that a constant holds, which is shown where the constant is used: `const NAME =
+    // "A comment can't be added in Raw."`. The words that make it a refusal are the ones every
+    // refusal of the interface says.
+    for (const match of source.matchAll(
+      /^(?:export )?const ([A-Z][A-Z_]+)\s*=\s*(?:\n\s*)?(['"`])((?:\\.|(?!\2)[^\\])*)\2/gm,
+    )) {
+      const words = match[3] ?? '';
+      if (!/can't|can’t|can not|first\.|Decide it|isn't a|aren't/i.test(words)) continue;
+      sites.push({
+        file,
+        line: lineOf(match.index),
+        how: 'constant',
+        key: match[1] ?? '',
+        code: undefined,
+      });
+    }
     for (const [pattern, how] of patterns) {
       for (const match of source.matchAll(pattern)) {
         // A mention in a comment is no refusal.
