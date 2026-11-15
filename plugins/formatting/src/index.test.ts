@@ -202,14 +202,21 @@ describe('blocks', () => {
     expect(editor.commands.run('block.indent')).toBe(true);
     expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
     select(editor, 4);
+    // The first item has nothing to go under: Indent is disabled, and says why.
+    expect(editor.getUiState().disabledReasons['block.indent']).toBe(
+      "The first item of a list can't be indented: there is no item to put it under.",
+    );
     editor.commands.run('block.indent');
     expect(refused).toEqual([
       "The first item of a list can't be indented: there is no item to put it under.",
     ]);
     refused.length = 0;
+    // A top-level item is under no item to come out of.
     editor.commands.run('block.outdent');
     expect(editor.getDoc()).toBe('1. One\n2. Two\n   1. Three\n');
-    expect(refused).toEqual([]);
+    expect(refused).toEqual([
+      "This item isn't under another item. Backspace at its start takes the bullet away.",
+    ]);
   });
 
   it('inserts a table and a rule as tracked insertions with tracking on', () => {
@@ -749,7 +756,13 @@ describe('commands in a table', () => {
     expect(inside).toContain('format.bold');
     select(editor, 3);
     const outside = editor.getUiState().enabledCommands;
-    for (const id of BLOCKS) expect(outside, id).toContain(id);
+    // Indent and Outdent are for a list item: outside one, in a paragraph, they are disabled too.
+    for (const id of BLOCKS.filter((id) => !/indent|outdent/.test(id))) {
+      expect(outside, id).toContain(id);
+    }
+    expect(editor.getUiState().disabledReasons['block.indent']).toBe(
+      'Only a list item can be indented or outdented.',
+    );
   });
 
   it('does nothing when a block command is run in a cell', () => {

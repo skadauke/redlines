@@ -433,7 +433,7 @@ describe('margin notes', () => {
     expect(editor.getDoc()).toContain('A big plan.');
   });
 
-  it('a note offers only Accept for a format change whose text has lost the format', () => {
+  it('a note grays Reject, with the reason, for a format change whose text has lost the format', () => {
     const doc = file('A <!--fmt m2bd +bold-->big<!--/m2bd--> plan.', [
       ...PEOPLE,
       'marks:',
@@ -441,7 +441,13 @@ describe('margin notes', () => {
     ]);
     const { editor, decided } = mount(doc);
     const [note] = notes(editor);
-    expect(() => button(note!, 'Reject')).toThrow('No button');
+    const reject = button(note!, 'Reject');
+    expect(reject.getAttribute('aria-disabled')).toBe('true');
+    expect(reject.title).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    reject.click();
+    expect(decided).toEqual([]);
     button(note!, 'Accept').click();
     expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
   });

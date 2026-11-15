@@ -157,7 +157,7 @@ describe('a suggestion of several marks', () => {
     expect(notes(editor)).toHaveLength(1);
   });
 
-  it('decides nothing when one mark of the suggestion cannot be decided', () => {
+  it('grays Reject, and decides nothing, when one mark of the suggestion cannot be rejected', () => {
     // Bold that the text has lost can only be accepted, so a rejection stops at it.
     const doc = file(
       'A <!--ins k3x9-->new<!--/k3x9--> <!--fmt m2bd +bold-->big<!--/m2bd--> plan.',
@@ -170,13 +170,19 @@ describe('a suggestion of several marks', () => {
     );
     const { editor, review } = mount(doc, { real: true });
     const before = editor.getDoc();
-    // The card offers no Reject, as for a lone format change of this kind; accepting is fine.
-    expect(() => button(notes(editor)[0]!, 'Reject')).toThrow('No button');
-    // The bar offers it, and the refusal writes nothing.
+    // The card and the bar gray Reject with the reason, as for a lone format change of this kind
+    // (accepting is fine), and a click writes nothing.
+    expect(button(notes(editor)[0]!, 'Reject').title).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
     review.next();
-    button(bar(editor)!, 'Reject').click();
+    const reject = button(bar(editor)!, 'Reject');
+    expect(reject.getAttribute('aria-disabled')).toBe('true');
+    expect(reject.title).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    reject.click();
     expect(editor.getDoc()).toBe(before);
-    expect(bar(editor)!.querySelector('.rl-bar-error')?.textContent).not.toBe('');
   });
 
   it('writes nothing when the editor refuses', () => {

@@ -23,6 +23,7 @@ import type { FormatReader } from './format-reader.ts';
 import {
   decidesFormat,
   formatDecision,
+  rejectionError,
   rejectionWorks,
   underscoreRewrites,
 } from './format-undo.ts';
@@ -74,16 +75,52 @@ const isColMark = (mark: MarkRange) =>
  * accepted, or go with the insertion that holds it. Other refusals say what to decide first.
  */
 export function canReject(parsed: Parsed, mark: MarkRange): boolean {
-  if (mark.kind === 'split') return !beforeFence(parsed.text, mark);
-  if (mark.kind !== 'fmt') return true;
+  return rejectReason(parsed, mark) === undefined;
+}
+
+/** What Reject's hint says where a change can only be accepted (design §4.1). */
+const ONLY_ACCEPT = 'This change can only be accepted: ';
+
+/**
+ * Why a person can't be offered to reject the mark, in a sentence that says what to do: "This change
+ * can only be accepted: its block no longer has that syntax." (a hint for the grayed Reject), or
+ * undefined where it can be. `canReject` is whether this says nothing.
+ */
+export function rejectReason(parsed: Parsed, mark: MarkRange): string | undefined {
+  if (mark.kind === 'split') {
+    return beforeFence(parsed.text, mark)
+      ? `${ONLY_ACCEPT}rejecting it would join the line after it to the text in front, which opens a code fence.`
+      : undefined;
+  }
+  if (mark.kind !== 'fmt') return undefined;
   const { text } = parsed;
   if (mark.segments.some((s) => s.close && text.slice(s.open.to, s.close.from).includes('<!--'))) {
-    return true;
+    return undefined;
   }
   // Nothing is left for the change to have formatted: `****`, two backticks, `[](url)`.
   const ranges = mark.segments.filter((segment) => segment.close);
-  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) return false;
-  return rejectionWorks(formatReader(text, parsed), mark);
+  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) {
+    return `${ONLY_ACCEPT}its text no longer has that formatting.`;
+  }
+  const error = rejectionError(formatReader(text, parsed), mark);
+  if (error === null) return undefined;
+  return `${ONLY_ACCEPT}${whyLost(error.message)}`;
+}
+
+/** What is lost, in the words of the hint, from what the format said when it could not restore. */
+function whyLost(message: string): string {
+  if (/alert no longer has a type/.test(message)) {
+    return 'its alert no longer has a type on its first line.';
+  }
+  if (/table no longer has the columns/.test(message)) {
+    return 'the table no longer has the columns it had.';
+  }
+  if (/block no longer has that syntax/.test(message))
+    return 'its block no longer has that syntax.';
+  if (/text no longer has that formatting/.test(message)) {
+    return 'its text no longer has that formatting.';
+  }
+  return "its old text can't be restored.";
 }
 
 /** Whether the break of a split is followed by a line that opens a fenced code block. */

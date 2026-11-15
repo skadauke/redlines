@@ -15,11 +15,12 @@ import {
 import { Decoration, EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   currentChange,
+  parsedField,
   setCurrentChange,
   setViewModeEffect,
   viewModeField,
 } from '@redlines/editor';
-import type { MarkRange } from '@redlines/format';
+import { type MarkRange, rejectReason } from '@redlines/format';
 import { icon, type IconName } from './icons.ts';
 import {
   attempt,
@@ -34,6 +35,7 @@ import {
   suggestionIn,
   suggestionsOf,
   visibleSpace,
+  setReason,
 } from './shared.ts';
 
 /** How far the bar floats above the bottom of the window. */
@@ -394,6 +396,15 @@ class Bar {
         : `${n} ${n === 1 ? 'change' : 'changes'}`;
     previous.disabled = next.disabled = !n;
     accept.disabled = reject.disabled = current < 0;
+    // A change that can only be accepted: Reject is grayed, and its hint says why.
+    const marks = groups[current] ?? [];
+    const parsed = state.field(parsedField);
+    setReason(
+      reject,
+      current < 0
+        ? undefined
+        : marks.map((mark) => rejectReason(parsed, mark)).find((reason) => reason !== undefined),
+    );
   }
 
   /**

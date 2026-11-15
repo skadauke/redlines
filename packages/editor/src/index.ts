@@ -54,6 +54,7 @@ import {
   agentStep,
   joinsNewestStep,
   redoDepth,
+  redoDisabledReason,
   redoHasSomething,
   redoName,
   redoSayingWhy,
@@ -61,6 +62,7 @@ import {
   startOver,
   undoDepth,
   undoHistory,
+  undoDisabledReason,
   undoHasSomething,
   undoKeys,
   undoName,
@@ -129,6 +131,7 @@ export {
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
+export { indentReason } from './blocks/tab.ts';
 export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -191,6 +194,9 @@ export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/t
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
+
+/** A hint of one id, or none. */
+const reasonFor = (id: string, reason: string | undefined) => (reason ? { [id]: reason } : {});
 
 const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) => {
   const keys = Object.keys(a);
@@ -396,7 +402,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
       enabledCommands: enabledCommands(commands.list(), state),
-      disabledReasons: disabledReasons(commands.list(), state),
+      disabledReasons: {
+        ...disabledReasons(commands.list(), state),
+        // Undo and Redo are the host's Edit items, not registered commands; their hints are here.
+        ...reasonFor('edit.undo', undoDisabledReason(state)),
+        ...reasonFor('edit.redo', redoDisabledReason(state)),
+      },
       commandTitles: commandTitles(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),

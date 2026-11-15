@@ -26,6 +26,7 @@ import {
   selectedCells,
   type EditorCommand,
   indentItems,
+  indentReason,
   inFrontMatter,
   selectionInTable,
   setViewModeEffect,
@@ -1033,6 +1034,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.indent',
       title: 'Indent',
       shortcut: 'Mod-]',
+      disabledReason: (state) => indentReason(state, false),
       run: () => {
         if (!editable()) return false;
         if (indentItems(view, false)) return true;
@@ -1044,6 +1046,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.outdent',
       title: 'Outdent',
       shortcut: 'Mod-[',
+      disabledReason: (state) => indentReason(state, true),
       run: () => {
         if (!editable()) return false;
         if (indentItems(view, true)) return true;

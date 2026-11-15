@@ -37,7 +37,7 @@ import {
 } from '@redlines/editor';
 import {
   addComment,
-  canReject,
+  rejectReason,
   type Handle,
   type MarkRange,
   type Parsed,
@@ -75,6 +75,7 @@ import {
   tableDeleted,
   visibleSpace,
   visibleStart,
+  setReason,
 } from './shared.ts';
 import { MARGIN, NOTE_GAP, RAIL_SPACE, RAIL_WIDTH } from './styles.ts';
 
@@ -1640,7 +1641,7 @@ class NoteView {
   private box: CommentBox | null = null;
   private footer: HTMLElement | null = null;
   /** A change's Reject, which a change that can only be accepted goes without. */
-  private reject: HTMLElement | null = null;
+  private reject: HTMLButtonElement | null = null;
   /** A thread's Resolve and Reopen: a resolved thread has the second in place of the first. */
   private resolveAction: HTMLElement | null = null;
   private reopenAction: HTMLElement | null = null;
@@ -1776,8 +1777,11 @@ class NoteView {
     const resolvedBy = resolver ? byline(parsed, resolver.by, me).name : '';
     if (this.reject && note.change) {
       const marks = note.changes ?? [note.change];
-      if (!marks.every((mark) => canReject(parsed, mark))) this.reject.remove();
-      else if (this.reject.parentNode !== this.actions) this.actions.append(this.reject);
+      setReason(
+        this.reject,
+        marks.map((mark) => rejectReason(parsed, mark)).find((reason) => reason !== undefined),
+      );
+      if (this.reject.parentNode !== this.actions) this.actions.append(this.reject);
     }
     const entries: Entry[] = note.thread
       ? [note.thread, ...note.thread.replies]

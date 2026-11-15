@@ -66,7 +66,9 @@ export interface EditorUiState {
    * what the thing is, then what to do ("The first item of a list can't be indented: there is no
    * item to put it under."). A menu or toolbar draws the command grayed and shows this as its hover
    * hint; a key with no menu item shows it as a notice. A command that can run is not in it, and
-   * every command that can't is: `enabledCommands` is every registered command that is not here.
+   * every command that can't is: `enabledCommands` is every registered command that is not here. The
+   * Edit menu's Undo and Redo are not commands: their hints are under `edit.undo` and `edit.redo`,
+   * when there is more to say than "nothing to undo" (the file changed on disk).
    */
   disabledReasons: Readonly<Record<string, string>>;
   /**

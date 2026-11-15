@@ -99,13 +99,22 @@ function whyNot(state: EditorState, afterReload: string): string | null {
   return !state.readOnly && state.field(droppedField, false) ? afterReload : null;
 }
 
-/** Whether Undo has a step to take back, or something to say. */
-export const undoHasSomething = (state: EditorState) =>
-  undoDepth(state) > 0 || whyNot(state, UNDO_AFTER_RELOAD) !== null;
+/** Whether Undo has a step to take back. */
+export const undoHasSomething = (state: EditorState) => undoDepth(state) > 0;
 
-/** Whether Redo has a step to bring back, or something to say. */
-export const redoHasSomething = (state: EditorState) =>
-  redoDepth(state) > 0 || whyNot(state, REDO_AFTER_RELOAD) !== null;
+/** Whether Redo has a step to bring back. */
+export const redoHasSomething = (state: EditorState) => redoDepth(state) > 0;
+
+/**
+ * Why Undo is grayed, when there is something to say beyond "nothing to undo": a reload took its
+ * steps away, or Raw is read-only (a hint for the Edit menu and the toolbar, as a command's is).
+ */
+export const undoDisabledReason = (state: EditorState): string | undefined =>
+  undoDepth(state) > 0 ? undefined : (whyNot(state, UNDO_AFTER_RELOAD) ?? undefined);
+
+/** Why Redo is grayed, likewise. */
+export const redoDisabledReason = (state: EditorState): string | undefined =>
+  redoDepth(state) > 0 ? undefined : (whyNot(state, REDO_AFTER_RELOAD) ?? undefined);
 
 /**
  * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is

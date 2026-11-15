@@ -1330,7 +1330,7 @@ export function lastCharOfLine(state: EditorState, block: Block, head: number): 
   };
 }
 
-const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
+const HEADING_ONE_LINE = 'A heading is one line. Press Return to start a new paragraph.';
 const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
 /**

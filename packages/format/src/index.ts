@@ -34,6 +34,7 @@ export {
   changesIn,
   acceptMarks,
   canReject,
+  rejectReason,
   isDecidable,
   reject,
   rejectAll,
