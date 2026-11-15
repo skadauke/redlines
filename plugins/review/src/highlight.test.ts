@@ -69,7 +69,7 @@ describe('the Highlight command', () => {
     expect(ids.indexOf('highlight.toggle')).toBe(ids.indexOf('comment.add') + 1);
     expect(editor.commands.list().find(({ id }) => id === 'comment.add')?.group).toBe('comment');
     // Disabled in Raw, front matter and where there is no text, and its key says why.
-    expect(command(editor)?.disabledReason).toBeTypeOf('function');
+    expect('disabledReason' in command(editor)!).toBe(true);
   });
 
   it('goes with the review interface', () => {

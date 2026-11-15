@@ -1144,6 +1144,7 @@ describe('ui state', () => {
       changes: [],
       activeCommands: [],
       enabledCommands: [],
+      disabledReasons: {},
       commandTitles: {},
       undo: null,
       redo: null,
