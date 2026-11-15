@@ -146,4 +146,59 @@ test.describe('tables @tables', () => {
       },
     );
   }
+
+  // #520: adding a column gives the widths a reload of the resulting text gives (no jump after a
+  // reload), whichever way the column is added; and so does deleting one.
+  const SHAPES: Record<string, { table: string; caret: string }> = {
+    two: { table: '| Name | Notes |\n| - | - |\n| Ada | x |\n', caret: 'Ada' },
+    five: {
+      table:
+        '| Name | Role | City | Note | Id |\n| - | - | - | - | - |\n| Ada | Mathematician and the first programmer | London | x | 1 |\n| Bo | y | Paris | A long note with many words that will want a lot of room on the page | 22 |\n',
+      caret: 'Ada',
+    },
+    wide: {
+      table: `| Alpha | Beta | Gamma |\n| - | - | - |\n| ${'word '.repeat(30)}| ${'text '.repeat(30)}| ${'more '.repeat(30)}|\n`,
+      caret: 'Alpha',
+    },
+  };
+  const widthsOf = (page: import('@playwright/test').Page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.rl-th .rl-tc')].map(
+        (cell) => cell.getBoundingClientRect().width,
+      ),
+    );
+  for (const [name, shape] of Object.entries(SHAPES)) {
+    for (const edit of ['add', 'delete'] as const) {
+      test(`${edit === 'add' ? 'a new column' : 'a deleted column'} has the widths a reload gives, ${name} @tables`, async ({
+        start,
+      }) => {
+        const doc = `Intro\n\n${shape.table}`;
+        const j = await start({ doc, tracking: false, view: 'clean' });
+        await j.settle();
+        const before = await widthsOf(j.page);
+        await j.shot(`columns-${name}-${edit}-before`);
+        await j.caretAfter(shape.caret);
+        await j.press(edit === 'add' ? 'Alt+Meta+ArrowRight' : 'Control+Meta+Backspace');
+        await j.settle();
+        const text = await j.text();
+        expect(text, 'the table changed').not.toBe(doc);
+        const changed = await widthsOf(j.page);
+        expect(changed.length, 'a column more or less').toBe(
+          before.length + (edit === 'add' ? 1 : -1),
+        );
+        await j.shot(`columns-${name}-${edit}-after`);
+        const again = await start({ doc: text, tracking: false, view: 'clean' });
+        await again.settle();
+        const reloaded = await widthsOf(again.page);
+        await again.shot(`columns-${name}-${edit}-reloaded`);
+        expect(reloaded.length).toBe(changed.length);
+        reloaded.forEach((width, i) => {
+          expect(
+            Math.abs(width - (changed[i] ?? 0)),
+            `column ${i}: ${changed[i]} after the change, ${width} after a reload`,
+          ).toBeLessThanOrEqual(1);
+        });
+      });
+    }
+  }
 });
