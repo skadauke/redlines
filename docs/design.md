@@ -862,6 +862,15 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
   and "Moved column". Simple draws the bars and no ghost, tint or underline, and the text of an inserted column in its author's color, as it does for rows.
+- **Widgets at the table's edges.** With the pointer over the table, three small widgets grow it and
+  select it without a menu, in the same layer as the handles. **Add column** is a strip as tall as
+  the table, 4 px right of it, 20 px wide, with a +, while the pointer is over the rightmost column
+  or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
+  over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
+  as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
+  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
+  has a hint after the title bar's delay.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection
