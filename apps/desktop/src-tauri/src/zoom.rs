@@ -123,6 +123,12 @@ fn answer(level: &mut Option<f64>, reported: f64) -> (f64, bool) {
     (1.0, false)
 }
 
+/// The level of the window `label`: its own, or else the app's, which it then keeps as its own so
+/// that a later change of the app's level (another window's zoom) leaves it where it is.
+fn level_of(levels: &mut HashMap<String, f64>, label: &str, app_level: f64) -> f64 {
+    *levels.entry(label.to_owned()).or_insert(app_level)
+}
+
 /// Only a document window or Preferences may zoom; the install window and About keep the system's
 /// size.
 fn may_zoom(label: &str) -> Result<(), String> {
@@ -303,11 +309,11 @@ pub fn zoom_level(app: AppHandle, window: WebviewWindow, reported: f64) -> Resul
     if taken {
         remember(&app, app_level);
     }
-    let level = *app
-        .state::<WindowZooms>()
-        .lock()
-        .entry(window.label().to_owned())
-        .or_insert(app_level);
+    let level = level_of(
+        &mut app.state::<WindowZooms>().lock(),
+        window.label(),
+        app_level,
+    );
     if taken && level != 1.0 {
         zoom_window(&app, &window, level);
     }
@@ -367,6 +373,19 @@ mod tests {
         let mut none = None;
         assert_eq!(answer(&mut none, 1.3), (1.0, false));
         assert_eq!(none, None);
+    }
+
+    #[test]
+    fn a_window_keeps_its_own_level_when_another_window_zooms() {
+        let mut levels = HashMap::new();
+        // A window opens at the app's level, which is the last zoom anywhere.
+        assert_eq!(level_of(&mut levels, "main", 1.25), 1.25);
+        // Another window zooms, and the app's level is now 2.0: the first stays at its own.
+        levels.insert("doc-2".to_owned(), 2.0);
+        assert_eq!(level_of(&mut levels, "main", 2.0), 1.25);
+        assert_eq!(level_of(&mut levels, "doc-2", 1.0), 2.0);
+        // A window that has not been seen takes the app's.
+        assert_eq!(level_of(&mut levels, "doc-3", 2.0), 2.0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // The page's side of the window zoom (design §5.1). The app (src-tauri/src/zoom.rs) is the only
 // writer of WebKit's page zoom: it keeps the level, hands each new page its level in an
-// initialization script, and on a change tells every window with the `zoom` event and then sets
-// the window's page zoom. A page asks for a level with the app's `set_zoom` command, takes its
+// initialization script, and on a change tells the window that made it, and no other, with the
+// `zoom` event and then sets the window's page zoom. A page asks for a level with the app's `set_zoom` command, takes its
 // reading place on the event (the layout is still the old one), and sets `--rl-zoom`, which the
 // frame's units are worked out from (zoom.css), on the `resize` that the new zoom brings.
 
