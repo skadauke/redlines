@@ -830,6 +830,8 @@ says the same), the placement rules of §3.1 to §3.5 that write the fine forms,
 
 ## 8. Risks and open questions for Stephan
 
+**Decided by Stephan on 2026-11-15: all sixteen as recommended.** The work starts with R1, per §7.
+
 Each with a recommendation. They are in the order of how much each changes what gets built.
 
 1. **12.3 asked for the list item; the probe says the item's form fails in a tight list.** Widen to
