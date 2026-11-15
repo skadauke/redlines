@@ -47,6 +47,7 @@ import {
   planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
+import { staleInput } from './stale-input.ts';
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
@@ -139,7 +140,18 @@ const keyCaret = Prec.highest(
       pos = from + found + caret.afterText.text.length;
     }
     // Never inside text the caret steps over (the closer of a mark and the deletion after it).
-    const shown = visibleSelection(tr.state, EditorSelection.single(pos)).main.head;
+    let shown = visibleSelection(tr.state, EditorSelection.single(pos)).main.head;
+    // A caret at the end of a line's text, with the tracked layer's closer written at it, was
+    // taken to the near end of the hidden range that the closer and the line breaks after it make:
+    // the start of the next block (#508). It stays in front of the closer, on its own line.
+    if ('at' in caret) {
+      const before = tr.changes.mapPos(caret.at, -1);
+      const line = tr.newDoc.lineAt(pos).number;
+      if (before !== pos && tr.newDoc.lineAt(shown).number !== line) {
+        const back = visibleSelection(tr.state, EditorSelection.single(before)).main.head;
+        if (tr.newDoc.lineAt(back).number === line) shown = back;
+      }
+    }
     return [tr, { selection: EditorSelection.cursor(shown), sequential: true }];
   }),
 );
@@ -711,6 +723,7 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
+    Prec.highest(staleInput()),
     Prec.lowest(openLineSpaces),
   ];
 }
