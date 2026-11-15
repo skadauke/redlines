@@ -28,10 +28,10 @@ function lowContrast(page: Page): Promise<Low[]> {
       return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
     };
     const lum = (c: number[]) => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
-    const behind = (element: Element, pseudo?: string): number[] => {
+    const behind = (element: Element): number[] => {
       const layers: number[][] = [];
       for (let e: Element | null = element; e; e = e.parentElement) {
-        layers.push(parse(getComputedStyle(e, e === element ? pseudo : undefined).backgroundColor));
+        layers.push(parse(getComputedStyle(e).backgroundColor));
       }
       return layers.reduceRight<number[]>(
         (under, top) => {
@@ -56,7 +56,7 @@ function lowContrast(page: Page): Promise<Low[]> {
       if (rect.width === 0 || rect.height === 0 || style.visibility === 'hidden') return;
       if (opacityOf(element) === 0) return;
       if (element.closest(':disabled, [aria-disabled="true"], .cm-content')) return;
-      const ground = behind(element, pseudo);
+      const ground = behind(element);
       const own = parse(style.color);
       const o = own[3] * opacityOf(element);
       const shown = [0, 1, 2].map((i) => own[i]! * o + ground[i]! * (1 - o));

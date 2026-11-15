@@ -49,13 +49,25 @@ function selectorAt(code: string, at: number): string {
     .trim();
 }
 
-/** Every rule that sets the text color (not a border's, an outline's or a background) to ink-3. */
+/**
+ * Every rule that sets a text color (`color`, `fill`, `-webkit-text-fill-color`, quoted or not, in
+ * a style sheet or a style object) to something that holds --rl-ink-3, not a border's, an
+ * outline's or a background's: the selector of each.
+ */
 function inkThreeText(code: string): string[] {
   const found: string[] = [];
-  for (const match of code.matchAll(/(?<![\w-])color\s*:\s*['"`]?var\(--rl-ink-3\)/g)) {
-    found.push(selectorAt(code, match.index));
+  const text = /(?<![\w-])['"`]?(?:color|fill|-webkit-text-fill-color)['"`]?\s*:\s*([^;}\n]*)/g;
+  for (const match of code.matchAll(text)) {
+    if (/--rl-ink-3\b/.test(match[1] ?? '')) found.push(selectorAt(code, match.index));
   }
   return found;
+}
+
+/** Whether every selector of a list is a disabled control, as `.x:disabled` is (not `:not(:disabled)`). */
+function disabledOnly(selector: string): boolean {
+  return selector
+    .split(/,(?![^(]*\))/)
+    .every((part) => /:disabled(?:\s+[\w.#\-\s>]*)?$/.test(part.trim()) && !/:not\(/.test(part));
 }
 
 describe('text contrast (#578)', () => {
@@ -74,12 +86,24 @@ describe('text contrast (#578)', () => {
   it('colors text with --rl-ink-3 only in a disabled control or a decorative glyph', () => {
     const wrong = all.flatMap(({ file, uses }) =>
       uses
-        .filter((selector) => !/:disabled/.test(selector) && !DECORATIVE.has(selector))
+        .filter((selector) => !disabledOnly(selector) && !DECORATIVE.has(selector))
         .map((selector) => `${file}: ${selector}`),
     );
     expect(
       wrong,
       `--rl-ink-3 is under 4.5:1; use --rl-ink-2 for text to be read:\n${wrong.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('reads the shapes a rule can take, and is not fooled by a disabled selector beside another', () => {
+    const css =
+      '.a { color: var(--rl-ink-3); }\n.b, .c:disabled { color: var(--rl-ink-3); }\n.d:not(:disabled) { fill: color-mix(in srgb, var(--rl-ink-3) 50%, red); }\n.e:disabled svg { color: var(--rl-ink-3, gray); }\n.f { border-color: var(--rl-ink-3); background-color: var(--rl-ink-3); }';
+    const uses = inkThreeText(css);
+    expect(uses).toEqual(['.a', '.b, .c:disabled', '.d:not(:disabled)', '.e:disabled svg']);
+    expect(uses.filter((selector) => !disabledOnly(selector))).toEqual([
+      '.a',
+      '.b, .c:disabled',
+      '.d:not(:disabled)',
+    ]);
   });
 });

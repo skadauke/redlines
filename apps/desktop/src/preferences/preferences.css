@@ -234,7 +234,7 @@ select:focus-visible {
 .rl-pref-path {
   min-width: 0;
   overflow: hidden;
-  color: var(--rl-ink-2);
+  color: var(--rl-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
