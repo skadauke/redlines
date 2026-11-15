@@ -127,6 +127,7 @@ export {
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
+export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {

@@ -840,7 +840,7 @@ const toggleSidebar = () => {
 };
 
 // The review bar (@redlines/review). These menu items are enabled only for documents with redlines.
-const openReview = () => review.openBar();
+const openReview = () => review.startReview();
 // Resolved comments in the rail: a choice kept with the settings, like the text size, so that the
 // windows and the next launch follow it.
 const toggleResolved = () => {
