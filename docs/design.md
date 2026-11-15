@@ -348,8 +348,16 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Quarto callouts in `.qmd` and `.Rmd` are not drawn yet.
-- **Image size:** resize handles, stored as `<img width>` or `{width=}`, and tracked as a format
-  change.
+- **Image size:** while the pointer is over an image, a handle on its left edge and one on its
+  right edge resize it, with its aspect kept; the image follows the pointer as it is dragged, and
+  one Undo takes the size back. A large image fits the text column and a small one keeps its own
+  size (it is never scaled up unless it is dragged larger). The size is stored as `<img width>`
+  (`{width=}` in a pandoc file is not written yet): the first size turns `![alt](src)` into the tag,
+  and the image's own size, which a drag to it also gives, turns it back. Alignment (left, centered,
+  right) is the tag's `align`. A new size is tracked as a substitution of the whole image
+  ([format §3.5.1](format.md#351-image-size-and-alignment)). The menu's Small, Medium, Large,
+  Original size and the alignments are commands of the editor (`image.size.*`, `image.align.*`),
+  which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
@@ -1126,7 +1134,7 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- image resizing, alt text and captions; callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+- alt text and captions of images (resizing is built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
   are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;

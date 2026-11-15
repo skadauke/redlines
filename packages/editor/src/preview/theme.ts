@@ -209,10 +209,61 @@ export const baseThemeSpec: ThemeSpec = {
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
   // inline, it sits in the text. A missing one is its alt text, quietly.
+  '.rl-image': { position: 'relative' },
   '.rl-image img': { maxWidth: '100%', height: 'auto', verticalAlign: 'middle' },
   '.rl-image-own': { display: 'block', textAlign: 'center', padding: `${s(6)} 0`, textIndent: '0' },
-  '.rl-image-own img': { display: 'block', margin: '0 auto', verticalAlign: 'top' },
+  '.rl-image-own.rl-image-left': { textAlign: 'left' },
+  '.rl-image-own.rl-image-right': { textAlign: 'right' },
+  '.rl-image-frame': {
+    display: 'inline-block',
+    position: 'relative',
+    maxWidth: '100%',
+    verticalAlign: 'top',
+  },
+  '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
+  // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
+  // Each is a strip along its edge, wide enough to grab, with a light pill that shows on any picture.
+  '.rl-image-handle': {
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    width: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'ew-resize',
+    opacity: '0',
+    touchAction: 'none',
+    userSelect: 'none',
+  },
+  '.rl-image-handle-left': { left: '0' },
+  '.rl-image-handle-right': { right: '0' },
+  '.rl-image-handle::before': {
+    content: '""',
+    width: '6px',
+    height: '40px',
+    maxHeight: '60%',
+    borderRadius: '3px',
+    backgroundColor: '#fff',
+    boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35)',
+  },
+  '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
+    { opacity: '1' },
+  '.rl-image-badge': {
+    position: 'absolute',
+    top: '6px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '2px 8px',
+    borderRadius: '10px',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    color: '#fff',
+    fontSize: 'var(--rl-size-ui-small)',
+    lineHeight: '1.4',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+  },
 
   // Lists: indentation and markers take the width they have in monospace, so nested items line
   // up under their parent's text and showing a marker's source doesn't move the line. A zero
@@ -391,6 +442,20 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc:has(.rl-sel)': {
     backgroundColor: 'Highlight',
     color: 'HighlightText',
+  },
+  // One tint for every selection: over a row or a column a change has made (the author's tint, which
+  // an inserted row's cells and an inserted column's have), the selection's blue wins and the text
+  // keeps the readable ink (#522).
+  '&.rl-cell-selecting .rl-trow > .rl-tc:has(.rl-sel)': {
+    backgroundColor: 'Highlight',
+    color: 'HighlightText',
+    textDecorationColor: 'currentColor',
+  },
+  // The same for a change inside a selected cell (inserted, deleted or formatted text): its author's
+  // color on the selection's blue would be unreadable, so it takes the ink as the cell's text does.
+  '&.rl-cell-selecting .rl-trow > .rl-tc:has(.rl-sel) :is(.rl-ins, .rl-del, .rl-fmt)': {
+    color: 'inherit',
+    textDecorationColor: 'currentColor',
   },
   '.rl-sel': { color: 'inherit' },
   // The text highlight stays out of the table's rows while cells are selected: the cells are the
