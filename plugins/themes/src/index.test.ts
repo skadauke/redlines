@@ -247,3 +247,61 @@ describe('themes', () => {
     }
   });
 });
+
+type Rgb = [number, number, number];
+
+/** A `#rrggbb` or `rgb(r g b / a)` color, composited over `ground` when it has an alpha. */
+function resolve(value: string, ground?: Rgb): Rgb {
+  const hex = /^#([0-9a-f]{6})$/.exec(value);
+  if (hex) return [0, 2, 4].map((at) => parseInt(hex[1]!.slice(at, at + 2), 16)) as Rgb;
+  const fn = /^rgb\((\d+) (\d+) (\d+)(?: \/ (\d*\.?\d+))?\)$/.exec(value);
+  if (!fn) throw new Error(`not a color the contrast test reads: ${value}`);
+  const [r, g, b] = [Number(fn[1]), Number(fn[2]), Number(fn[3])];
+  const alpha = fn[4] === undefined ? 1 : Number(fn[4]);
+  if (alpha === 1) return [r, g, b];
+  if (!ground) throw new Error(`a color with an alpha needs a ground: ${value}`);
+  return [r, g, b].map((c, i) => c * alpha + ground[i]! * (1 - alpha)) as Rgb;
+}
+
+function ratio(text: Rgb, ground: Rgb): number {
+  const lum = ([r, g, b]: Rgb) => {
+    const f = (c: number) =>
+      c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const [hi, lo] = [lum(text), lum(ground)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+describe('text contrast on the grounds', () => {
+  // The tokens text is drawn in: the inks, the brand red, the eight author colors and the code
+  // colors. --rl-ink-3 is the tertiary gray (placeholders, hints at rest, disabled controls and
+  // the grips), which WCAG leaves out when a control is inactive; it is not held here.
+  const TEXT = [
+    '--rl-ink',
+    '--rl-ink-2',
+    '--rl-red',
+    ...Array.from({ length: 8 }, (_, i) => `--rl-author-${i + 1}`),
+    ...CODE_KINDS.map((kind) => `--rl-code-${kind}`),
+  ];
+
+  it('every text color keeps 4.5:1 on the page and on the tint, in every theme', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (const ground of ['--rl-page', '--rl-tint']) {
+          const under = resolve(declared.get(ground)!);
+          for (const token of TEXT) {
+            const text = resolve(declared.get(token)!, under);
+            const value = ratio(text, under);
+            if (value < 4.5) {
+              failing.push(`${name} ${appearance} ${token} on ${ground}: ${value.toFixed(2)}:1`);
+            }
+          }
+        }
+      }
+    }
+    expect(failing, `below 4.5:1:\n${failing.join('\n')}`).toEqual([]);
+  });
+});
