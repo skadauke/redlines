@@ -245,7 +245,7 @@ export const hasRightToLeft = (text: string): boolean => RIGHT_TO_LEFT.test(text
  * keeps the space between blocks as padding on its first line and clips its tint to leave it out
  * (`rl-space-*-apart`, preview/theme.ts), so its bar starts below that, as the box does.
  */
-function spaceApart(el: HTMLElement): number {
+function spaceApart(el: Element): number {
   if (!/\brl-space-\w+-apart\b/.test(el.className)) return 0;
   const clip = /^inset\(([\d.]+)px/.exec(getComputedStyle(el).clipPath);
   return clip ? Number(clip[1]) : 0;
