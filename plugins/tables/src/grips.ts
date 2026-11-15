@@ -59,22 +59,66 @@ function cellsToClear(state: EditorState): readonly TableCell[] {
   return cell ? [cell] : [];
 }
 
-/** How far above a table its column grips stand: the strip above it. */
+/** How far above a table its column handles are looked for: the strip above it. */
 const COL_STRIP = 28;
+/** A handle's reach, across and along its edge, in px; its pill is smaller and grows within it. */
+const GRIP_REACH = 14;
+const GRIP_SPAN = 26;
+/** The room between a handle's reach and the table's edge. */
+const GRIP_GAP = 2;
+/** The widgets at the table's edges: Add column and Add row are strips this thick, 4 px from the table,
+ * and the table's corner widget is a square; the pointer is looked for within `EDGE_REACH` of them. */
+const EDGE_SIZE = 20;
+const EDGE_GAP = 4;
+const EDGE_REACH = EDGE_GAP + EDGE_SIZE + 4;
+const CORNER_SIZE = 16;
 
 export const GRIPS_STYLE = `
 .rl-grips { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
 .rl-grips > * { pointer-events: auto; }
-.rl-grip, .rl-plus, .rl-col-grip, .rl-col-plus {
+.rl-plus, .rl-col-plus {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 22px; border-radius: 4px; cursor: grab; user-select: none;
-  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1; letter-spacing: -2px;
+  width: 18px; height: 22px; border-radius: 4px; user-select: none;
+  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1;
 }
-.rl-grip:hover, .rl-plus:hover, .rl-col-grip:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
-.rl-plus, .rl-col-plus { cursor: pointer; letter-spacing: 0; border: 1px solid var(--rl-rule); background: var(--rl-page); }
+.rl-edge-add, .rl-table-select {
+  position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer; user-select: none; background: var(--rl-rule); color: var(--rl-ink);
+  border: 1px solid transparent; font-size: var(--rl-size-ui); line-height: 1;
+}
+.rl-edge-add:hover, .rl-table-select:hover { border-color: var(--rl-ink-3); }
+.rl-edge-col { width: ${EDGE_SIZE}px; }
+.rl-edge-row { height: ${EDGE_SIZE}px; }
+.rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
+.rl-table-select::before {
+  content: ''; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 2px;
+  background: linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat;
+}
+.rl-plus:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
+.rl-plus, .rl-col-plus { cursor: pointer; border: 1px solid var(--rl-rule); background: var(--rl-page); }
+/* A handle is a small pill at the table's edge: the element is its reach (wider than the pill, so it
+   is easy to hit), the pill is its ::before, which grows when the pointer is over it to say it can be
+   dragged. A row's and a column's are the same pill, turned. */
+.rl-grip, .rl-col-grip {
+  position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  cursor: grab; user-select: none;
+}
+.rl-grip { width: ${GRIP_REACH}px; height: ${GRIP_SPAN}px; }
+.rl-col-grip { width: ${GRIP_SPAN}px; height: ${GRIP_REACH}px; }
+.rl-grip::before, .rl-col-grip::before {
+  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-2);
+  background: var(--rl-rule); transition: width 0.1s, height 0.1s, background-color 0.1s;
+}
+.rl-grip::before { width: 5px; height: 16px; }
+.rl-col-grip::before { width: 16px; height: 5px; }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-2); }
+.rl-grip:hover::before { width: 8px; height: 22px; }
+.rl-col-grip:hover::before { width: 22px; height: 8px; }
+.rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) { .rl-grip::before, .rl-col-grip::before { transition: none; } }
 .rl-plus-line, .rl-col-plus-line { position: absolute; height: 1px; background: var(--rl-ink-3); pointer-events: none; }
 .rl-col-plus-line { width: 1px; }
-.rl-col-grip { width: 22px; height: 18px; cursor: grab; letter-spacing: 0; }
 .rl-drop-line { position: absolute; height: 3px; border-radius: 2px; background: var(--rl-ink-2); pointer-events: none; }
 .rl-drop-line[hidden] { display: none; }
 .rl-drag-copy {
@@ -115,16 +159,29 @@ function installStyle(): void {
 }
 
 /**
- * Where the row grip and the + stand, as a `left` in the editor's box: left of the change bars (24 px
- * left of the column) with 4 px between. When the margin is too narrow for that (a narrow window, a
- * large text size), the grip moves up to the table's edge, 6 px from it, over the bars' strip, and
- * never off the window (4 px in), so it stays within reach of the table.
+ * Where the row handle stands, as a `left` in the editor's box: its reach ends 2 px before the table's
+ * edge, so its pill is close to the table, over the strip of the change bars (a bar is a mark on a
+ * changed row, and a handle is drawn over it). It never goes off the window (4 px in).
  */
 export function gripLeft(tableLeft: number, editorLeft: number): number {
-  const usual = tableLeft - 24 - 4 - 18;
-  const left = usual >= 4 ? usual : Math.max(4, tableLeft - 18 - 6);
-  return left - editorLeft;
+  return Math.max(4, tableLeft - GRIP_GAP - GRIP_REACH) - editorLeft;
 }
+
+/** Where the + between rows stands: where the row handle's reach ends, 18 px wide and, as the handle
+ * does, 2 px from the table, so that the + comes up under the pointer where the handle was. */
+export function plusLeft(tableLeft: number, editorLeft: number): number {
+  return Math.max(4, tableLeft - GRIP_GAP - 18) - editorLeft;
+}
+
+/** Whether the pointer is over the table's corner square, which a + at the first boundary would cover. */
+function inCorner(drawn: { left: number; top: number }, x: number, y: number): boolean {
+  const left = drawn.left - GRIP_GAP - CORNER_SIZE;
+  const top = drawn.top - GRIP_GAP - CORNER_SIZE;
+  return x >= left && x <= left + CORNER_SIZE && y >= top && y <= top + CORNER_SIZE;
+}
+
+/** How far above the table a column handle's reach begins. */
+export const colGripTop = (tableTop: number): number => tableTop - GRIP_GAP - GRIP_REACH;
 
 /** A table drawn: its id, its box and the line of each of its real rows. */
 interface Drawn {
@@ -178,9 +235,9 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
     const here =
       !near ||
       (near.x >= box.left - reach &&
-        near.x <= box.right &&
+        near.x <= box.right + EDGE_REACH &&
         near.y >= box.top - Math.max(PLUS_REACH, COL_STRIP) &&
-        near.y <= box.bottom + PLUS_REACH);
+        near.y <= box.bottom + Math.max(PLUS_REACH, EDGE_REACH));
     if (!here) continue;
     const known = measured.get(wrapper);
     if (
@@ -248,6 +305,11 @@ class Grips {
     first: number;
     last: number;
   } | null = null;
+  private addCol: HTMLElement | null = null;
+  private addRow: HTMLElement | null = null;
+  private selectAll: HTMLElement | null = null;
+  /** The table the edge widgets act on. */
+  private edgeOf: Drawn | null = null;
   private colGrip: HTMLElement | null = null;
   private colPlus: HTMLElement | null = null;
   private colPlusLine: HTMLElement | null = null;
@@ -342,6 +404,7 @@ class Grips {
     this.at = null;
     this.boundary = null;
     this.hideCols();
+    this.hideEdges();
     if (!keepMenu) this.closeMenu();
   }
 
@@ -368,13 +431,20 @@ class Grips {
     }
     if (this.menu) return;
     const tables = drawnTables(this.view, { x: event.clientX, y: event.clientY });
+    this.movedOverGrips(tables, event.clientX, event.clientY);
+    this.movedOverEdges(tables, event.clientX, event.clientY);
+  }
+
+  /** The row handle and the + between rows and columns, for the pointer at `x`, `y`. */
+  private movedOverGrips(tables: readonly Drawn[], x: number, y: number): void {
     const viewLeft = this.view.dom.getBoundingClientRect().left;
-    const { clientX: x, clientY: y } = event;
     this.movedOverColumns(tables, x, y);
     // A boundary near the pointer, in the strip: a + there.
     for (const drawn of tables) {
       if (x > drawn.left + 12 || x < viewLeft) continue;
-      const index = plusBoundary(y, boundariesOf(drawn.rects));
+      let index = plusBoundary(y, boundariesOf(drawn.rects));
+      // Over the corner square the + at the first boundary stands aside: a click is its.
+      if (index === 0 && inCorner(drawn, x, y)) index = null;
       if (index !== null) {
         this.showPlus(drawn, index);
         this.showGrip(null);
@@ -402,7 +472,8 @@ class Grips {
       const over = y >= drawn.top - COL_STRIP && y <= drawn.bottom;
       if (!over || x < drawn.left || x > drawn.right) continue;
       const edges = colBoundariesOf(drawn.cols);
-      const boundary = inStrip ? plusBoundary(x, edges) : null;
+      let boundary = inStrip ? plusBoundary(x, edges) : null;
+      if (boundary === 0 && inCorner(drawn, x, y)) boundary = null;
       if (boundary !== null) {
         this.showColPlus(drawn, boundary);
         this.colGrip?.remove();
@@ -418,6 +489,108 @@ class Grips {
       }
     }
     this.hideCols();
+  }
+
+  /**
+   * The widgets at the table's edges: Add column, just right of the table, while the pointer is over
+   * its rightmost column (or the widget); Add row, just below, while it is over the bottom row; and
+   * the corner square that selects the table, while it is over the table or the strips beside it
+   * (not while a + stands where the square would).
+   */
+  private movedOverEdges(tables: readonly Drawn[], x: number, y: number): void {
+    for (const drawn of tables) {
+      const lastCol = drawn.cols[drawn.cols.length - 1];
+      const lastRow = drawn.rects[drawn.rects.length - 1];
+      const inColumns = x >= drawn.left && x <= drawn.right;
+      const inRows = y >= drawn.top && y <= drawn.bottom;
+      const col = !!lastCol && inRows && x >= lastCol.left && x <= drawn.right + EDGE_REACH;
+      // Not where the next table's own strip above it is: Add row would cover its handles.
+      const crowded = [...this.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')].some(
+        (el) => {
+          const top = el.getBoundingClientRect().top;
+          return top > drawn.bottom && top - COL_STRIP < drawn.bottom + EDGE_REACH;
+        },
+      );
+      const row =
+        !crowded && !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
+      const corner =
+        x >= drawn.left - 24 && x <= drawn.right && y >= drawn.top - COL_STRIP && y <= drawn.bottom;
+      if (!col && !row && !corner) continue;
+      this.edgeOf = drawn;
+      this.showEdge('addCol', col);
+      this.showEdge('addRow', row);
+      // The + at a table's first boundary stands where the square is; the others don't.
+      const covered = this.boundary?.index === 0 || this.colBoundary?.index === 0;
+      this.showEdge('selectAll', corner && !covered);
+      return;
+    }
+    this.hideEdges();
+  }
+
+  private hideEdges(): void {
+    this.addCol?.remove();
+    this.addRow?.remove();
+    this.selectAll?.remove();
+    this.addCol = this.addRow = this.selectAll = null;
+    this.edgeOf = null;
+  }
+
+  /** Shows (or takes away) one of the edge widgets, at the edge of the table `edgeOf`. */
+  private showEdge(which: 'addCol' | 'addRow' | 'selectAll', on: boolean): void {
+    const drawn = this.edgeOf;
+    if (!on || !drawn) {
+      this[which]?.remove();
+      this[which] = null;
+      return;
+    }
+    let el = this[which];
+    if (!el) {
+      el = document.createElement('div');
+      if (which === 'selectAll') {
+        el.className = 'rl-table-select';
+        this.hint(el, 'Select the table');
+      } else {
+        el.className = `rl-edge-add ${which === 'addCol' ? 'rl-edge-col' : 'rl-edge-row'}`;
+        el.textContent = '+';
+        this.hint(el, which === 'addCol' ? 'Add a column' : 'Add a row');
+      }
+      el.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        // A Control-click is a right-click on a Mac: no insertion.
+        if (event.button !== 0 || event.ctrlKey) return;
+        const at = this.edgeOf;
+        if (!at) return;
+        const table = tablesOf(this.view.state).find((t) => t.id === at.table.id) ?? at.table;
+        if (which === 'addCol') insertColsAt(this.view, table, table.columns);
+        else if (which === 'addRow') insertRowsAt(this.view, table, table.rows.length);
+        else {
+          const selection = rectSelection(
+            table,
+            { row: 0, col: 0 },
+            { row: table.rows.length - 1, col: table.columns - 1 },
+          );
+          if (selection) this.view.dispatch({ selection, userEvent: 'select' });
+        }
+        this.hide();
+      });
+      this.layer.append(el);
+      this[which] = el;
+    }
+    const base = this.view.dom.getBoundingClientRect();
+    if (which === 'addCol') {
+      // Just right of the table, as tall as it, and never off the window.
+      const left = Math.min(drawn.right + EDGE_GAP, base.right - EDGE_SIZE - 4);
+      el.style.left = `${left - base.left}px`;
+      el.style.top = `${drawn.top - base.top}px`;
+      el.style.height = `${Math.max(0, drawn.bottom - drawn.top)}px`;
+    } else if (which === 'addRow') {
+      el.style.left = `${drawn.left - base.left}px`;
+      el.style.top = `${drawn.bottom + EDGE_GAP - base.top}px`;
+      el.style.width = `${Math.max(0, drawn.right - drawn.left)}px`;
+    } else {
+      el.style.left = `${Math.max(4, drawn.left - GRIP_GAP - CORNER_SIZE) - base.left}px`;
+      el.style.top = `${Math.max(4, drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
+    }
   }
 
   private hideColPlus(): void {
@@ -463,7 +636,6 @@ class Grips {
     const grip = this.colGrip ?? document.createElement('div');
     if (!this.colGrip) {
       grip.className = 'rl-col-grip';
-      grip.textContent = '⋯';
       grip.addEventListener('mousedown', (event) => this.pressedCol(event));
       grip.addEventListener('contextmenu', (event) => this.menuOf(event, 'col'));
       this.hint(grip, 'Drag to move the column, right-click for its menu');
@@ -471,10 +643,12 @@ class Grips {
       this.colGrip = grip;
     }
     const base = this.view.dom.getBoundingClientRect();
-    // Above the column, in the strip above the table, and never above the window's top.
-    const centered = rect.left + (rect.right - rect.left - 22) / 2 - base.left;
-    grip.style.left = `${Math.max(4, Math.min(centered, base.width - 22 - 4))}px`;
-    grip.style.top = `${Math.max(4 - base.top, at.drawn.top - COL_STRIP + 2 - base.top)}px`;
+    // Above the column, just over the table's edge, and never above the window's top.
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.right - rect.left));
+    const centered = rect.left + (rect.right - rect.left - span) / 2 - base.left;
+    grip.style.width = `${span}px`;
+    grip.style.left = `${Math.max(4, Math.min(centered, base.width - span - 4))}px`;
+    grip.style.top = `${Math.max(4 - base.top, colGripTop(at.drawn.top) - base.top)}px`;
     grip.dataset['col'] = String(at.col);
   }
 
@@ -654,7 +828,6 @@ class Grips {
     const grip = this.grip ?? document.createElement('div');
     if (!this.grip) {
       grip.className = 'rl-grip';
-      grip.textContent = '⋮⋮';
       grip.addEventListener('mousedown', (event) => this.pressed(event));
       grip.addEventListener('contextmenu', (event) => this.menuOf(event, 'row'));
       this.hint(grip, 'Drag to move the row, right-click for its menu');
@@ -663,8 +836,11 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     const left = gripLeft(at.drawn.left, base.left);
+    // As tall as its row when the row is shorter than the usual reach, so it never stands over the next.
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.bottom - rect.top));
     grip.style.left = `${left}px`;
-    grip.style.top = `${rect.top + (rect.bottom - rect.top - 22) / 2 - base.top}px`;
+    grip.style.height = `${span}px`;
+    grip.style.top = `${rect.top + (rect.bottom - rect.top - span) / 2 - base.top}px`;
     grip.dataset['row'] = String(at.row);
   }
 
@@ -691,8 +867,7 @@ class Grips {
       this.plus = plus;
       this.plusLine = line;
     }
-    const left = gripLeft(drawn.left, base.left);
-    this.plus.style.left = `${left}px`;
+    this.plus.style.left = `${plusLeft(drawn.left, base.left)}px`;
     this.plus.style.top = `${y - 11 - base.top}px`;
     if (this.plusLine) {
       this.plusLine.style.left = `${drawn.left - base.left}px`;

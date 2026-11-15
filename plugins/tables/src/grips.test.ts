@@ -10,6 +10,8 @@ const DOC = `Intro.\n\n| a | b |\n| - | - |\n| 11 | 12 |\n| 21 | 22 |\n| 31 | 32
 const LEFT = 100;
 const TOP = 100;
 let tableLeft = LEFT;
+/** Where a second table in the document is drawn (its top), when a test has one. */
+let secondTop: number | null = null;
 
 const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
   left,
@@ -28,7 +30,10 @@ beforeEach(() => {
     this: HTMLElement,
   ) {
     if (this.classList.contains('cm-editor')) return rect(0, 0, 800, 600);
-    if (this.classList.contains('rl-tbl')) return rect(tableLeft, TOP, 400, 160);
+    if (this.classList.contains('rl-tbl')) {
+      const second = secondTop !== null && this !== document.querySelector('.rl-tbl');
+      return rect(tableLeft, second ? (secondTop ?? TOP) : TOP, 400, 160);
+    }
     const line = this.closest('.rl-trow');
     // The cells are 200 px wide, side by side: the columns' boxes.
     if (this.classList.contains('rl-tc') && line && !this.classList.contains('rl-ghost-col')) {
@@ -64,6 +69,7 @@ afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   tableLeft = LEFT;
+  secondTop = null;
 });
 
 const layer = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-grips');
@@ -80,14 +86,16 @@ const menuItems = (editor: Editor) =>
   [...editor.view.dom.querySelectorAll('.rl-grip-item')].map((el) => el.textContent);
 
 describe('row grips', () => {
-  it('draws the grip beside the hovered row, left of the change bars, in a layer hidden from assistive technology', () => {
+  it('draws the handle beside the hovered row, close to the table edge, in a layer hidden from assistive technology', () => {
     const editor = mount();
     expect(layer(editor)?.getAttribute('aria-hidden')).toBe('true');
     expect(grip(editor)).toBeNull();
     move(editor, LEFT + 50, rowY(2));
     expect(grip(editor)?.dataset['row']).toBe('2');
     const left = parseFloat(grip(editor)?.style.left ?? '');
-    expect(left).toBeLessThan(LEFT - 24);
+    // 14 px of reach, ending a hair before the table: its pill is close to the table, not floating off.
+    expect(left + 14).toBeLessThanOrEqual(LEFT);
+    expect(LEFT - (left + 14)).toBeLessThanOrEqual(4);
     // Over the strip beside the table too.
     move(editor, LEFT - 30, rowY(3));
     expect(grip(editor)?.dataset['row']).toBe('3');
@@ -126,16 +134,16 @@ describe('row grips', () => {
 
   it('moves up to the table when the margin is narrow, and stays 4 px inside the window', () => {
     for (const [table, near] of [
-      [48, 8],
-      [30, 12],
+      [48, 4],
+      [30, 4],
     ] as const) {
       tableLeft = table;
       const editor = mount();
       move(editor, table + 50, rowY(1));
       const left = parseFloat(grip(editor)?.style.left ?? '');
-      // 18 px wide: its right edge is close to the table's, never over it.
-      expect(left + 18).toBeLessThanOrEqual(table);
-      expect(table - (left + 18)).toBeLessThanOrEqual(near);
+      // 14 px of reach: its right edge is close to the table's, never over it.
+      expect(left + 14).toBeLessThanOrEqual(table);
+      expect(table - (left + 14)).toBeLessThanOrEqual(near);
       expect(left).toBeGreaterThanOrEqual(4);
     }
   });
@@ -269,7 +277,9 @@ describe('column grips', () => {
     const top = parseFloat(colGrip(editor)?.style.top ?? '');
     // In the strip above the table, which is 28 px, and in the window.
     expect(top).toBeGreaterThanOrEqual(TOP - 28);
-    expect(top + 18).toBeLessThanOrEqual(TOP);
+    // Close to the table's top edge: its pill is not floating above it.
+    expect(top + 14).toBeLessThanOrEqual(TOP);
+    expect(TOP - (top + 14)).toBeLessThanOrEqual(4);
     // Over the table too, and not away from it.
     move(editor, colX(0), rowY(2));
     expect(colGrip(editor)?.dataset['col']).toBe('0');
@@ -505,5 +515,122 @@ describe('column grips', () => {
     move(editor, LEFT + 400 - 4, TOP - 10);
     mouse(colPlus(editor)!, 'mousedown');
     expect(editor.getDoc().match(/<!--ins \w+ col-->/g)).toHaveLength(1);
+  });
+});
+
+describe('edge widgets', () => {
+  const q = (editor: Editor, selector: string) =>
+    editor.view.dom.querySelector<HTMLElement>(selector);
+  /** The table: 400 px wide from LEFT, 160 tall from TOP (four rows). */
+  const RIGHT = LEFT + 400;
+  const BOTTOM = TOP + 160;
+
+  it('shows Add column right of the table over its rightmost column, and not over the first', () => {
+    const editor = mount();
+    move(editor, LEFT + 100, TOP + 60);
+    expect(q(editor, '.rl-edge-col')).toBeNull();
+    move(editor, LEFT + 300, TOP + 60);
+    const widget = q(editor, '.rl-edge-col');
+    expect(widget).not.toBeNull();
+    // 4 px right of the table, as tall as it.
+    expect(parseFloat(widget?.style.left ?? '')).toBe(RIGHT + 4);
+    expect(parseFloat(widget?.style.height ?? '')).toBe(160);
+    // Reached from the table: it stays while the pointer is over it.
+    move(editor, RIGHT + 12, TOP + 60);
+    expect(q(editor, '.rl-edge-col')).not.toBeNull();
+    move(editor, RIGHT + 60, TOP + 60);
+    expect(q(editor, '.rl-edge-col')).toBeNull();
+  });
+
+  it('shows Add row below the table over its bottom row, and not over the first row', () => {
+    const editor = mount();
+    move(editor, LEFT + 100, TOP + 60);
+    expect(q(editor, '.rl-edge-row')).toBeNull();
+    move(editor, LEFT + 100, BOTTOM - 10);
+    const widget = q(editor, '.rl-edge-row');
+    expect(widget).not.toBeNull();
+    expect(parseFloat(widget?.style.top ?? '')).toBe(BOTTOM + 4);
+    expect(parseFloat(widget?.style.width ?? '')).toBe(400);
+  });
+
+  it('adds a column at the end, and a row at the end, on a click', () => {
+    const editor = mount();
+    move(editor, LEFT + 300, TOP + 60);
+    mouse(q(editor, '.rl-edge-col')!, 'mousedown');
+    expect((editor.getDoc().split('\n')[2] ?? '').split('|').length).toBe(5);
+    move(editor, LEFT + 100, BOTTOM - 10);
+    mouse(q(editor, '.rl-edge-row')!, 'mousedown');
+    expect(
+      editor
+        .getDoc()
+        .split('\n')
+        .filter((l) => l.startsWith('|')).length,
+    ).toBe(6);
+  });
+
+  it('writes tracked insertions with Track Changes on', () => {
+    const editor = mount(DOC, true);
+    move(editor, LEFT + 300, TOP + 60);
+    mouse(q(editor, '.rl-edge-col')!, 'mousedown');
+    expect(editor.getDoc().match(/<!--ins \w+ col-->/g)).toHaveLength(1);
+    move(editor, LEFT + 100, BOTTOM - 10);
+    mouse(q(editor, '.rl-edge-row')!, 'mousedown');
+    expect(editor.getDoc()).toMatch(/<!--ins \w+ row-->/);
+  });
+
+  it('selects the whole table from the corner widget', () => {
+    const editor = mount();
+    move(editor, LEFT + 100, TOP + 60);
+    const corner = q(editor, '.rl-table-select');
+    expect(corner).not.toBeNull();
+    // Close to the table's corner, not over it.
+    expect(parseFloat(corner?.style.left ?? '') + 16).toBeLessThanOrEqual(LEFT);
+    expect(parseFloat(corner?.style.top ?? '') + 16).toBeLessThanOrEqual(TOP);
+    mouse(corner!, 'mousedown');
+    const rect = rectOf(editor.view.state);
+    expect(rect?.table.rows.length).toBe(4);
+    expect(touchedRows(editor.view.state)?.first).toBe(0);
+    expect(touchedRows(editor.view.state)?.last).toBe(3);
+    expect(touchedCols(editor.view.state)?.last).toBe(1);
+  });
+
+  it('go at the next keystroke', () => {
+    const editor = mount();
+    move(editor, LEFT + 300, BOTTOM - 10);
+    expect(q(editor, '.rl-edge-col')).not.toBeNull();
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(q(editor, '.rl-edge-col')).toBeNull();
+    expect(q(editor, '.rl-edge-row')).toBeNull();
+    expect(q(editor, '.rl-table-select')).toBeNull();
+  });
+});
+
+describe('edge widgets, the corner and crowding', () => {
+  const q = (editor: Editor, selector: string) =>
+    editor.view.dom.querySelector<HTMLElement>(selector);
+
+  it('keeps the corner square while the pointer moves along the strips, and over it no + takes it', () => {
+    const editor = mount();
+    // Over the corner's lower half, where the + at the first row boundary would be: the square stays.
+    move(editor, LEFT - 8, TOP - 6);
+    expect(q(editor, '.rl-table-select')).not.toBeNull();
+    expect(q(editor, '.rl-plus')).toBeNull();
+    // Along the left strip at the boundary between two rows: the + shows and the square stays.
+    move(editor, LEFT - 8, TOP + 40);
+    expect(q(editor, '.rl-plus')).not.toBeNull();
+    expect(q(editor, '.rl-table-select')).not.toBeNull();
+  });
+
+  it('shows no Add row where another table is within the reach of its own strip', () => {
+    const editor = mount(`${DOC}\n| x | y |\n| - | - |\n| 1 | 2 |\n\nEnd.\n`);
+    // Alone, the bottom row has its Add row.
+    secondTop = TOP + 1000;
+    move(editor, LEFT + 100, TOP + 160 - 10);
+    expect(q(editor, '.rl-edge-row')).not.toBeNull();
+    move(editor, 700, 700);
+    // The second table is 20 px below the first: its strip above it is where Add row would be.
+    secondTop = TOP + 160 + 20;
+    move(editor, LEFT + 100, TOP + 160 - 10);
+    expect(q(editor, '.rl-edge-row')).toBeNull();
   });
 });
