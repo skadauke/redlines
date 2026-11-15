@@ -360,7 +360,10 @@ test.describe('tables @tables', () => {
     await j.shot('handles-at-rest');
     // They grow a little under the pointer.
     await row.hover();
-    await j.page.waitForTimeout(200);
+    await expect
+      .poll(async () => (await pill('.rl-grip'))!.width, { message: 'the row handle grows' })
+      .toBeGreaterThan(rowAt.width);
+    await expect.poll(async () => (await pill('.rl-grip'))!.width).toBe(rowAt.width + 3);
     const rowGrown = (await pill('.rl-grip'))!;
     expect(rowGrown.width, 'the row handle grows').toBeGreaterThan(rowAt.width);
     expect(rowGrown.height).toBeGreaterThan(rowAt.height);
@@ -368,7 +371,7 @@ test.describe('tables @tables', () => {
     await j.shot('row-handle-grown');
     await j.hover('3');
     await col.hover();
-    await j.page.waitForTimeout(200);
+    await expect.poll(async () => (await pill('.rl-col-grip'))!.width).toBeGreaterThan(colAt.width);
     const colGrown = (await pill('.rl-col-grip'))!;
     expect(colGrown.width, 'the column handle grows').toBeGreaterThan(colAt.width);
     expect(colGrown.height).toBeGreaterThan(colAt.height);

@@ -833,7 +833,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   deletion takes the rows the selection touches and puts the caret in the row that is then there;
   moving takes them one place, and they stay selected. A handle shows in the left margin beside
   the row under the pointer, while the pointer is over the table: a small pill (5 × 16 px) at the
-  table's left edge, 2 to 6 px from it, over the change bars' strip and inside the window, which grows
+  table's left edge (its reach, 14 px wide, ends 2 px from it), over the change bars' strip and inside the window, which grows
   a little (8 × 22 px) when the pointer is over it, to say it can be dragged, in a
   layer over the editor that assistive technology does not see (the menu bar has every command); a
   click selects the row (⇧ extends) when it is released, and a right-click selects it and opens its

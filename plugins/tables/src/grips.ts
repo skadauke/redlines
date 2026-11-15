@@ -87,12 +87,12 @@ export const GRIPS_STYLE = `
 .rl-grip { width: ${GRIP_REACH}px; height: ${GRIP_SPAN}px; }
 .rl-col-grip { width: ${GRIP_SPAN}px; height: ${GRIP_REACH}px; }
 .rl-grip::before, .rl-col-grip::before {
-  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-3);
+  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-2);
   background: var(--rl-rule); transition: width 0.1s, height 0.1s, background-color 0.1s;
 }
 .rl-grip::before { width: 5px; height: 16px; }
 .rl-col-grip::before { width: 16px; height: 5px; }
-.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-3); }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-2); }
 .rl-grip:hover::before { width: 8px; height: 22px; }
 .rl-col-grip:hover::before { width: 22px; height: 8px; }
 .rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
@@ -147,9 +147,10 @@ export function gripLeft(tableLeft: number, editorLeft: number): number {
   return Math.max(4, tableLeft - GRIP_GAP - GRIP_REACH) - editorLeft;
 }
 
-/** Where the + between rows stands: just beyond the row handle's reach, never off the window. */
+/** Where the + between rows stands: where the row handle's reach ends, 18 px wide and, as the handle
+ * does, 2 px from the table, so that the + comes up under the pointer where the handle was. */
 export function plusLeft(tableLeft: number, editorLeft: number): number {
-  return Math.max(4, tableLeft - GRIP_GAP - GRIP_REACH - 18 - 2) - editorLeft;
+  return Math.max(4, tableLeft - GRIP_GAP - 18) - editorLeft;
 }
 
 /** How far above the table a column handle's reach begins. */
@@ -500,8 +501,10 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     // Above the column, just over the table's edge, and never above the window's top.
-    const centered = rect.left + (rect.right - rect.left - GRIP_SPAN) / 2 - base.left;
-    grip.style.left = `${Math.max(4, Math.min(centered, base.width - GRIP_SPAN - 4))}px`;
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.right - rect.left));
+    const centered = rect.left + (rect.right - rect.left - span) / 2 - base.left;
+    grip.style.width = `${span}px`;
+    grip.style.left = `${Math.max(4, Math.min(centered, base.width - span - 4))}px`;
     grip.style.top = `${Math.max(4 - base.top, colGripTop(at.drawn.top) - base.top)}px`;
     grip.dataset['col'] = String(at.col);
   }
@@ -690,8 +693,11 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     const left = gripLeft(at.drawn.left, base.left);
+    // As tall as its row when the row is shorter than the usual reach, so it never stands over the next.
+    const span = Math.max(8, Math.min(GRIP_SPAN, rect.bottom - rect.top));
     grip.style.left = `${left}px`;
-    grip.style.top = `${rect.top + (rect.bottom - rect.top - GRIP_SPAN) / 2 - base.top}px`;
+    grip.style.height = `${span}px`;
+    grip.style.top = `${rect.top + (rect.bottom - rect.top - span) / 2 - base.top}px`;
     grip.dataset['row'] = String(at.row);
   }
 
