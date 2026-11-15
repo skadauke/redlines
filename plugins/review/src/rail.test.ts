@@ -2169,8 +2169,8 @@ describe('the Add Comment command', () => {
     const { editor } = mount(plain);
     const command = editor.commands.list().find(({ id }) => id === 'comment.add');
     expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'format' });
-    // A disabled item would take its key with it, and in Raw the key says why it does nothing.
-    expect('isEnabled' in command!).toBe(false);
+    // Disabled in Raw and in front matter: the item is grayed, and its key says why.
+    expect(command?.disabledReason).toBeTypeOf('function');
   });
 
   it('opens the box from the key and from a menu, and says why in Raw', () => {

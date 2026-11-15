@@ -268,6 +268,27 @@ export function canMoveCols(state: EditorState, left: boolean): boolean {
   return left ? touched.first > 0 : touched.last < touched.table.columns - 1;
 }
 
+/** Why a command of the Table menu can't run with the caret outside a table (disabled, with this hint). */
+export const NOT_IN_TABLE = 'This command works in a table. Put the caret in one.';
+
+/** Why the rows the selection touches can't move up or down, or undefined when they can. */
+export function moveRowsReason(state: EditorState, up: boolean): string | undefined {
+  const touched = touchedRows(state);
+  if (!touched) return NOT_IN_TABLE;
+  const many = touched.last > touched.first;
+  if (canMoveRows(state, up)) return undefined;
+  const where = up ? 'top' : 'bottom';
+  return `${many ? 'These rows are' : 'This row is'} at the ${where} of the table already.`;
+}
+
+/** Why the rows the selection touches can't be deleted, or undefined when they can. */
+export function deleteRowsReason(state: EditorState): string | undefined {
+  const touched = touchedRows(state);
+  if (!touched) return NOT_IN_TABLE;
+  const everyRow = touched.first === 0 && touched.last === touched.table.rows.length - 1;
+  return everyRow ? 'A table keeps at least one row. Delete the table instead.' : undefined;
+}
+
 /** Moves the rows the selection touches one place up or down; they stay selected. At the top or the
  * bottom there is no place: it says so. */
 export function moveRows(view: EditorView, up: boolean): boolean {
@@ -455,6 +476,36 @@ export function insertColsAt(view: EditorView, table: Table, at: number, count =
     'table.insert.col',
     (after, done) => colsSelected(after.state, table, done.cols ?? [], 1, false, done.caret),
   );
+}
+
+/** Why the columns the selection touches can't move left or right, or undefined when they can. */
+export function moveColsReason(state: EditorState, left: boolean): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  if (canMoveCols(state, left)) return undefined;
+  const many = touched.last > touched.first;
+  const edge = left ? 'left' : 'right';
+  return `${many ? 'These columns are' : 'This column is'} at the ${edge} edge of the table already.`;
+}
+
+/** Why the columns the selection touches can't be deleted, or undefined when they can. */
+export function deleteColsReason(state: EditorState): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  const everyColumn = touched.first === 0 && touched.last === touched.table.columns - 1;
+  return everyColumn ? 'A table keeps at least one column. Delete the table instead.' : undefined;
+}
+
+/** Why the columns the selection touches can't be aligned `align`, or undefined when they can. */
+export function alignReason(state: EditorState, align: Align): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  for (let col = touched.first; col <= touched.last; col++) {
+    if (touched.table.aligns[col] !== align) return undefined;
+  }
+  return touched.last > touched.first
+    ? 'The columns are already aligned this way.'
+    : 'The column is already aligned this way.';
 }
 
 /** Moves the columns the selection touches one place left or right; they stay selected. At the edge

@@ -37,10 +37,12 @@ import {
   activeCommands,
   commandTitles,
   createCommandRegistry,
+  disabledReasons,
   enabledCommands,
 } from './commands.ts';
 import { followText } from './anchor.ts';
-import { frontMatter } from './blocks/front-matter.ts';
+import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
@@ -147,6 +149,12 @@ export {
   moveColsTo,
   canMoveCols,
   canMoveRows,
+  alignReason,
+  deleteColsReason,
+  deleteRowsReason,
+  moveColsReason,
+  moveRowsReason,
+  NOT_IN_TABLE,
   moveRows,
   moveRowsTo,
   rowCount,
@@ -200,6 +208,7 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   sameIds(a.activeCommands, b.activeCommands) &&
   sameIds(a.enabledCommands, b.enabledCommands) &&
   sameTitles(a.commandTitles, b.commandTitles) &&
+  sameTitles(a.disabledReasons, b.disabledReasons) &&
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
@@ -372,7 +381,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
   told = fileText(initial);
-  const commands = createCommandRegistry(() => editor, report);
+  const commands = createCommandRegistry(
+    () => editor,
+    report,
+    (message) => options.onNotice?.(message),
+  );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     return {
@@ -383,6 +396,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
       enabledCommands: enabledCommands(commands.list(), state),
+      disabledReasons: disabledReasons(commands.list(), state),
       commandTitles: commandTitles(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
@@ -660,7 +674,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       {
         id: 'image.edit',
         title: 'Edit Image in Preview',
-        isEnabled: (state) => localImageAt(state) !== null,
+        disabledReason: (state) =>
+          localImageAt(state) === null
+            ? 'Select an image in the document to edit it in Preview.'
+            : undefined,
         run: ({ view: { state } }) => {
           const src = localImageAt(state);
           if (src === null) return false;

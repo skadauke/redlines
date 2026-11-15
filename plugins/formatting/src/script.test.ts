@@ -132,11 +132,12 @@ describe('Subscript and Superscript', () => {
   });
 
   it('are refused with a one-line notice inside code, and write nothing', () => {
-    const { editor, notices } = mount('```\nsome code\n```\n', { tracking: true });
+    const { editor } = mount('```\nsome code\n```\n', { tracking: true });
     select(editor, 8);
     expect(editor.commands.run('format.sup')).toBe(false);
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).not.toContain('\n');
+    const reason = editor.getUiState().disabledReasons['format.sup'];
+    expect(reason).toBeTypeOf('string');
+    expect(reason).not.toContain('\n');
     expect(editor.getDoc()).toBe('```\nsome code\n```\n');
   });
 

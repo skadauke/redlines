@@ -68,8 +68,8 @@ describe('the Highlight command', () => {
     const ids = editor.commands.list().map(({ id }) => id);
     expect(ids.indexOf('highlight.toggle')).toBe(ids.indexOf('comment.add') + 1);
     expect(editor.commands.list().find(({ id }) => id === 'comment.add')?.group).toBe('comment');
-    // Not disabled in Raw, or its key would not say why it does nothing there.
-    expect('isEnabled' in command(editor)!).toBe(false);
+    // Disabled in Raw, front matter and where there is no text, and its key says why.
+    expect(command(editor)?.disabledReason).toBeTypeOf('function');
   });
 
   it('goes with the review interface', () => {
@@ -257,7 +257,7 @@ describe('the Highlight command', () => {
       shortcut(editor, 'H', { shiftKey: true, keyCode: 72 });
       expect(notices).toHaveLength(2);
       expect(notices[0]).toBe(
-        "A highlight can't be made or removed in Raw. Switch to Redlines to do either.",
+        "A highlight can't be made or removed in Raw. Switch to Clean or Redlines.",
       );
       expect(doc(editor)).toBe(text);
       expect(editor.getUiState().view).toBe('raw');

@@ -59,7 +59,8 @@ export function createFind(editor: Editor): () => void {
       title: 'Use Selection for Find',
       shortcut: 'Mod-e',
       // With nothing selected there is no text to search for.
-      isEnabled: (state) => !state.selection.main.empty,
+      disabledReason: (state) =>
+        state.selection.main.empty ? 'Select some text to use it for Find.' : undefined,
       run: () => {
         const query = selectedText(view.state);
         if (!query) return false;

@@ -130,11 +130,11 @@ describe('inline formats', () => {
   });
 
   it('is refused with a one-line notice inside code', () => {
-    const { editor, notices } = mount('```\nsome code\n```\n', { tracking: true });
+    const { editor, refused } = mount('```\nsome code\n```\n', { tracking: true });
     select(editor, 8);
     expect(editor.commands.run('format.bold')).toBe(false);
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).not.toContain('\n');
+    expect(refused).toEqual(["Formatting doesn't apply inside code. Select text outside it."]);
+    expect(editor.getUiState().disabledReasons['format.bold']).toBe(refused[0]);
     expect(editor.getDoc()).toBe('```\nsome code\n```\n');
   });
 
@@ -349,7 +349,7 @@ describe('blocks', () => {
     const code = mount('```\nlet x;\n```\n');
     select(code.editor, 6);
     expect(code.editor.commands.run('block.code')).toBe(false);
-    expect(code.notices).toHaveLength(1);
+    expect(code.refused).toEqual(['This is already a code block.']);
 
     const quoted = mount('> quoted text\n');
     select(quoted.editor, 4);
@@ -453,7 +453,9 @@ describe('blocks on an empty line (#167)', () => {
     const { editor, notices, refused } = mount('- Write\n- \n', { tracking: true });
     select(editor, 10);
     expect(editor.commands.run('block.ol')).toBe(false);
-    expect(notices.concat(refused)).toEqual(['Write the item first.']);
+    expect(notices.concat(refused)).toEqual([
+      "Write the item first. An item with no text can't change type.",
+    ]);
   });
 });
 
@@ -645,22 +647,26 @@ describe('link popover, keeping the address', () => {
 describe('what formatting says when it does nothing', () => {
   it('says so for a selection of only a marker', () => {
     const doc = 'One <!--ins k3x9-->two<!--/k3x9--> three.\n';
-    const { editor, notices } = mount(doc, { tracking: true });
+    const { editor, refused } = mount(doc, { tracking: true });
     select(editor, 6, 14);
     expect(editor.commands.run('format.bold')).toBe(false);
-    expect(notices).toHaveLength(1);
+    expect(refused).toHaveLength(1);
     expect(editor.getDoc()).toBe(doc);
   });
 
   it('says a list item cannot become a heading or a quote', () => {
-    const { editor, notices } = mount('- One\n- Two\n');
+    const { editor, refused } = mount('- One\n- Two\n');
     select(editor, 3);
     expect(editor.commands.run('block.h2')).toBe(false);
     expect(editor.commands.run('block.quote')).toBe(false);
-    expect(notices).toEqual([
-      "A list item can't become a heading. Take it out of the list first.",
-      "A list item can't become a quote. Take it out of the list first.",
+    expect(refused).toEqual([
+      "A list item can't be made into a heading. Take it out of the list first (Shift-Tab, or Backspace at the start of the item).",
+      "A list item can't be made into a quote. Take it out of the list first (Shift-Tab, or Backspace at the start of the item).",
     ]);
+    // The reasons are the hints of the grayed commands.
+    expect(Object.keys(editor.getUiState().disabledReasons)).toEqual(
+      expect.arrayContaining(['block.h2', 'block.quote']),
+    );
   });
 });
 
