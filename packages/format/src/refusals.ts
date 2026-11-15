@@ -132,6 +132,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'info',
     'shows an error or a refusal that has its own tier',
   ],
+  [
+    'packages/editor/src/commands.ts',
+    'reason',
+    'disable',
+    'a disabled command run by its key, or by a click past a grayed item, says why (R6a)',
+  ],
   ['packages/editor/src/images.ts', 'IMAGE_IN_CODE', 'disable', 'inventory #137'],
   [
     'packages/editor/src/index.ts',
@@ -193,6 +199,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'A part of this edit falls inside a change that a',
     'widen',
     'inventory #71',
+  ],
+  [
+    'plugins/formatting/src/index.ts',
+    'RAW_FORMAT',
+    'disable',
+    'format and block commands are grayed in Raw while edits are tracked (R6a)',
   ],
   ['packages/editor/src/tracked/typing.ts', 'RAW_READ_ONLY', 'alert', 'inventory #73'],
   [
@@ -888,6 +900,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['plugins/formatting/src/index.ts', 'ALREADY_CODE', 'disable', 'already a code block'],
   [
     'plugins/formatting/src/index.ts',
+    'ITEM_NEEDS_TEXT_HINT',
+    'disable',
+    'an item with no text cannot change type (R6a)',
+  ],
+  [
+    'plugins/formatting/src/index.ts',
     "Accept or reject ${name}'s change to this box fi",
     'widen',
     'widen the item (Appendix B)',
@@ -984,6 +1002,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     "what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`",
     'disable',
     'an image paste holds no text',
+  ],
+  [
+    'plugins/review/src/highlight.ts',
+    'IN_FRONT_MATTER_HINT',
+    'disable',
+    'Highlight is grayed in front matter, format §3.8 (R6a)',
+  ],
+  [
+    'plugins/review/src/highlight.ts',
+    'IN_RAW_HINT',
+    'disable',
+    'Highlight is grayed in Raw, where its markers are text (R6a)',
   ],
   [
     'plugins/review/src/highlight.ts',

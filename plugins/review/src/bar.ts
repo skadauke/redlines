@@ -22,7 +22,7 @@ import {
   setViewModeEffect,
   viewModeField,
 } from '@redlines/editor';
-import { addComment, EditError, type MarkRange } from '@redlines/format';
+import { addComment, EditError, type MarkRange, type Parsed, rejectReason } from '@redlines/format';
 import { authorLine, byline, colorClass } from './people.ts';
 import { icon, type IconName } from './icons.ts';
 import {
@@ -42,6 +42,7 @@ import {
   suggestionIn,
   suggestionsOf,
   visibleSpace,
+  setReason,
 } from './shared.ts';
 
 /**
@@ -621,6 +622,11 @@ class Panel {
     actions.hidden = nav.hidden = !n;
     const marks = groups[current];
     const first = marks?.[0];
+    // A change that can only be accepted: Reject is grayed, and its hint says why.
+    setReason(
+      reject,
+      current < 0 || !marks ? undefined : firstReason(state.field(parsedField), marks),
+    );
     const key = !n
       ? 'none'
       : first
@@ -860,4 +866,13 @@ export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
       ]),
     ),
   ];
+}
+
+/** The first reason that one of `marks` can't be rejected, stopping there (each is a dry run). */
+function firstReason(parsed: Parsed, marks: readonly MarkRange[]): string | undefined {
+  for (const mark of marks) {
+    const reason = rejectReason(parsed, mark);
+    if (reason !== undefined) return reason;
+  }
+  return undefined;
 }

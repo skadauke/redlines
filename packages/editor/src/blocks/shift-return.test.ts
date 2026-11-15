@@ -286,15 +286,27 @@ describe('Shift-Return', () => {
         name: 'inside a heading: refused',
         doc: '## Head‸ing',
         keys: ['Shift-Enter'],
-        off: { caret: '## Head‸ing', refusal: 'A heading is one line in Markdown.' },
-        on: { caret: '## Head‸ing', refusal: 'A heading is one line in Markdown.' },
+        off: {
+          caret: '## Head‸ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
+        on: {
+          caret: '## Head‸ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
       },
       {
         name: 'over a selection inside a heading: refused before anything is deleted',
         doc: '## He[ad]ing',
         keys: ['Shift-Enter'],
-        off: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
-        on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
+        off: {
+          caret: '## He[ad]ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
+        on: {
+          caret: '## He[ad]ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
       },
       {
         name: 'in code: a line break, as Return (a substitution of the block with Track Changes on)',

@@ -3,6 +3,8 @@
 // it. Without this, the parser reads it as a rule and a setext heading, or, closed by `...`, as a
 // rule and a paragraph that a list key goes on with.
 
+import { syntaxTree } from '@codemirror/language';
+import type { EditorState } from '@codemirror/state';
 import { tags } from '@lezer/highlight';
 import type { BlockContext, Line, MarkdownConfig } from '@lezer/markdown';
 
@@ -79,3 +81,14 @@ export const frontMatter: MarkdownConfig = {
   ],
   parseBlock: [{ name: 'FrontMatter', before: 'HorizontalRule', parse: parseFrontMatter }],
 };
+
+/**
+ * Whether the selection starts in the YAML front matter, where a change can't be marked and a
+ * comment or highlight has no anchor (format §3.8). With `whole`, only when the selection ends there
+ * too: a selection that reaches the body is widened by a format change. Reads the parse, so it is cheap.
+ */
+export function inFrontMatter(state: EditorState, whole = false): boolean {
+  const first = syntaxTree(state).topNode.firstChild;
+  const { from, to } = state.selection.main;
+  return first?.name === 'FrontMatter' && (whole ? to : from) <= first.to;
+}

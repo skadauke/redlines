@@ -1101,6 +1101,7 @@ function render(): void {
     recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
+    disabledReasons: ui.disabledReasons,
     commandTitles: ui.commandTitles,
     undo: ui.undo,
     redo: ui.redo,

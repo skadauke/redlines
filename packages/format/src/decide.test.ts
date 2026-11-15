@@ -6,6 +6,7 @@ import {
   acceptAll,
   acceptMarks,
   canReject,
+  rejectReason,
   isDecidable,
   reject,
   rejectAll,
@@ -1259,6 +1260,11 @@ describe('a point alignment change (format §3.7, #281)', () => {
     const gone = parse(narrow).marks[0];
     expect(gone && isDecidable(gone)).toBe(true);
     expect(gone && canReject(parse(narrow), gone)).toBe(false);
+    // The hint of the grayed Reject says why, in the words of the interface (design §4.1).
+    expect(gone && rejectReason(parse(narrow), gone)).toBe(
+      'This change can only be accepted: the table no longer has the columns it had.',
+    );
+    expect(mark && rejectReason(parsed, mark)).toBeUndefined();
   });
 
   it('is rejected, with another change, as one decision that gives what rejecting each does', () => {
@@ -1291,5 +1297,27 @@ describe('a point alignment change (format §3.7, #281)', () => {
     expect(trim(applyChanges(narrow, rejectMarks(narrow, ['w8nn'])))).toBe(
       '| a<!--fmt k3x9 align=\\|\\x20-\\x20\\|\\x20-\\x20\\|--> |\n| :-: |\n|  |',
     );
+  });
+});
+
+describe('why a change can only be accepted (the hint of the grayed Reject)', () => {
+  const hint = (text: string) => {
+    const parsed = parse(text);
+    const mark = parsed.marks[0];
+    return mark && rejectReason(parsed, mark);
+  };
+
+  it('says the formatting is gone, or nothing is left of the text', () => {
+    // The format was taken off in the text, so rejecting has no syntax to take away.
+    expect(hint(file('A <!--fmt m2bd +bold-->big<!--/m2bd--> plan.', { m2bd: 'bo' }))).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    expect(hint(file('A <!--fmt m2bd +bold-->**big**<!--/m2bd--> plan.', { m2bd: 'bo' }))).toBe(
+      undefined,
+    );
+  });
+
+  it('says nothing for a change that can be rejected', () => {
+    expect(hint(file('A <!--ins k3x9-->new<!--/k3x9--> plan.', { k3x9: 'bo' }))).toBeUndefined();
   });
 });

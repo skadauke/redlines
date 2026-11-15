@@ -99,7 +99,7 @@ describe('the palette items', () => {
     const [group] = shownGroups(
       [
         command('format.bold', { isActive: () => true }),
-        command('format.italic', { isEnabled: () => false }),
+        command('format.italic', { disabledReason: () => 'Not here.' }),
         command('format.clear'),
       ],
       state,

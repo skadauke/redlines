@@ -57,10 +57,20 @@ export interface EditorUiState {
   /** The ids of the registered commands that say they are active here, in registered order. */
   activeCommands: readonly string[];
   /**
-   * The ids of the registered commands that can run here, in registered order: those that say so,
-   * and those with no `isEnabled`.
+   * The ids of the registered commands that can run here, in registered order: those with no
+   * `disabledReason` and those whose `disabledReason` says nothing here.
    */
   enabledCommands: readonly string[];
+  /**
+   * Why each registered command that can't run here can't, by id, in the words of the interface:
+   * what the thing is, then what to do ("The first item of a list can't be indented: there is no
+   * item to put it under."). A menu or toolbar draws the command grayed and shows this as its hover
+   * hint; a key with no menu item shows it as a notice. A command that can run is not in it, and
+   * every command that can't is: `enabledCommands` is every registered command that is not here. The
+   * Edit menu's Undo and Redo are not commands: their hints are under `edit.undo` and `edit.redo`,
+   * when there is more to say than "nothing to undo" (the file changed on disk).
+   */
+  disabledReasons: Readonly<Record<string, string>>;
   /**
    * The current title of each registered command whose title reads the state, by id: `Delete 2
    * Rows`. A command with a plain title is not in it.
@@ -116,7 +126,14 @@ export interface EditorCommand {
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
   isActive?(state: EditorState): boolean;
-  isEnabled?(state: EditorState): boolean;
+  /**
+   * Why the command can't run in `state`, as one sentence for people (what the thing is, then what
+   * to do), or undefined when it can. A disabled command is never run: its menu item and toolbar
+   * button are grayed with this as the hint, and its key says it as a notice. There is no
+   * `isEnabled`: a command that can't run always has a reason, so that a grayed command is never
+   * silent (hardening.md: a key that does nothing and says nothing is a bug).
+   */
+  disabledReason?(state: EditorState): string | undefined;
 }
 
 export interface CommandRegistry {

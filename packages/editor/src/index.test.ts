@@ -330,7 +330,7 @@ describe('Undo and Redo that have nothing to take back', () => {
     expect(nothing).toBe(3);
   });
 
-  it('are enabled for the menu when they would say why, and the menu says it too', () => {
+  it('are grayed for the menu with the reason as their hint, and the key says it too', () => {
     const parent = document.createElement('div');
     document.body.append(parent);
     const notices: string[] = [];
@@ -341,7 +341,14 @@ describe('Undo and Redo that have nothing to take back', () => {
     });
     editor.view.dispatch({ changes: { from: 3, insert: '!' }, userEvent: 'input.type' });
     editor.reloadDoc('Two.\n');
-    expect(editor.getUiState()).toMatchObject({ canUndo: true, canRedo: true });
+    const ui = editor.getUiState();
+    expect(ui).toMatchObject({ canUndo: false, canRedo: false });
+    expect(ui.disabledReasons['edit.undo']).toBe(
+      'Undo isn’t available after the file changed on disk.',
+    );
+    expect(ui.disabledReasons['edit.redo']).toBe(
+      'Redo isn’t available after the file changed on disk.',
+    );
     expect(editor.undo()).toBe(true);
     expect(notices).toHaveLength(1);
   });
