@@ -7,12 +7,13 @@
 // original view leaves out the break a `split` stands for (format §3.4).
 
 import { openerRange, splitEnd } from './blocks.ts';
-import { applyChanges, eolOf, inEol } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
 import { alignChange, alignHide, alignLabel } from './table-align.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
+import { ledgerTextOf, newestOfPayload, originalText, payloadAt } from './payload-marks.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { insertedCols, insertedRows, readRowCells, tablesOfText } from './table.ts';
@@ -248,9 +249,10 @@ export function originalChanges(
 ): OriginalChange[] {
   const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
-  // Restored text has the file's line breaks, as rejecting writes it.
   const eol = eolOf(text, parsed.ledgerRange);
-  const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
+  // Restored text has the file's line breaks, as rejecting writes it, and the marks that the old
+  // text of a replacement holds are rejected too (format §3.12).
+  const restored = (mark: MarkRange, segment: Segment) => originalText(text, parsed, mark, segment);
   // The rows of a table: inserted rows go, deleted rows and the old place of a moved row come back.
   const handled = new Set<string>();
   const isRow = (mark: MarkRange) =>
@@ -288,12 +290,12 @@ export function originalChanges(
         changes.push(wholeSegment(segment, ''));
       } else if (mark.kind === 'sub') {
         changes.push({
-          ...wholeSegment(segment, restored(segment)),
+          ...wholeSegment(segment, restored(mark, segment)),
           opener: openerRange(segment),
         });
       } else if (mark.kind === 'del') {
         const opener = openerRange(segment);
-        changes.push({ ...opener, insert: restored(segment), opener });
+        changes.push({ ...opener, insert: restored(mark, segment), opener });
       } else if (mark.kind === 'split') {
         // The break after it, and the prefix of the block that follows, were inserted with it. So
         // was the deletion of the break that someone recorded after it.
@@ -511,6 +513,19 @@ export function reviewView(text: string): string {
       let { open, close } = notation(mark, segment, reviewEntries(parsed, mark.id), parsed);
       if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
         open = close = '';
+      }
+      // The old text of a replacement holds other people's marks: it shows as their changes would
+      // leave it, and a note names them, so that they can be decided by id (format §8).
+      const site = mark.kind === 'sub' ? payloadAt(parsed, mark, segment) : undefined;
+      if (site) {
+        const marks = site.marks.filter((held) => held.kind !== 'hl');
+        open = `{~~${newestOfPayload(site.text, ledgerTextOf(text, parsed))}~>`;
+        const names = marks.map((held) => `[${held.id} ${held.entry.by}]`);
+        const last = names.pop();
+        const note = names.length > 0 ? `${names.join(', ')} and ${last}` : last;
+        if (note !== undefined && mark.segments.at(-1) === segment) {
+          close += `{>>[${mark.id} ${mark.entry.by}] Its old text holds ${note}<<}`;
+        }
       }
       const inside = held.get(segment);
       if (inside)

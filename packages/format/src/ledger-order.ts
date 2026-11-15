@@ -2,8 +2,12 @@
 // writes marks and threads in the order the `Ledger` holds them and does not prune, so every edit
 // that writes the ledger runs it through `normalizeLedger` first.
 
-import { scan } from './scan.ts';
+import { holdsMarks, scan, scanPayload } from './scan.ts';
+import type { Marker } from './scan.ts';
 import type { Ledger, MarkEntry, MarkKind } from './types.ts';
+
+/** The deepest payload that holds marks that are read (format §3.12). */
+export const MOST_PAYLOAD_DEPTH = 3;
 
 /**
  * The ledger as it should be written for a body: `marks` in the document order of each mark's first
@@ -21,11 +25,18 @@ import type { Ledger, MarkEntry, MarkKind } from './types.ts';
 export function normalizeLedger(textAfter: string, ledger: Ledger): Ledger {
   // Map keeps the order of insertion, and the scan finds markers in the order they appear.
   const firstOpener = new Map<string, MarkKind>();
-  for (const marker of scan(textAfter).markers) {
-    if (marker.type === 'open' && !firstOpener.has(marker.id)) {
-      firstOpener.set(marker.id, marker.kind);
+  // The marks in the old text of a replacement stay in the ledger as long as the replacement
+  // does: they are in the order of the replacement's place in the body (format §3.12).
+  const walk = (markers: readonly Marker[], depth: number) => {
+    for (const marker of markers) {
+      if (marker.type !== 'open') continue;
+      if (!firstOpener.has(marker.id)) firstOpener.set(marker.id, marker.kind);
+      if (depth < MOST_PAYLOAD_DEPTH && holdsMarks(marker)) {
+        walk(scanPayload(marker.payload ?? '').markers, depth + 1);
+      }
     }
-  }
+  };
+  walk(scan(textAfter).markers, 0);
 
   const marks: Record<string, MarkEntry> = {};
   const anchorOrder = new Map<string, number>();

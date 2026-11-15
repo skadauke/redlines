@@ -5,14 +5,19 @@ import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
 import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
-import { scan } from './scan.ts';
-import type { Marker } from './scan.ts';
+import { MOST_PAYLOAD_DEPTH } from './ledger-order.ts';
+import { holdsMarks, scan, scanPayload } from './scan.ts';
+import type { Marker, Scan } from './scan.ts';
 import type {
+  Ledger,
   MarkEntry,
+  MarkKind,
   MarkRange,
   Parsed,
+  PayloadMarks,
   Range,
   Segment,
+  Thread,
   Warning,
   WarningCode,
 } from './types.ts';
@@ -88,6 +93,221 @@ function startsLineWithText(text: string, range: Range): boolean {
   return after.replace(/<!--.*?-->/g, '').trim() !== '';
 }
 
+/** What the markers of one id make: its kind, its comment thread and its stretches. Undefined when
+ * they make none (a closer with no opener, a comment with no thread). `warn` hears what is wrong. */
+function segmentsOf(
+  body: string,
+  id: string,
+  markers: readonly Marker[],
+  threads: ReadonlyMap<string, Thread>,
+  warn: (code: WarningCode, message: string, range: Range, id?: string) => void,
+): { kind: MarkKind; thread: Thread | undefined; segments: Segment[] } | undefined {
+  const first = markers.find((marker) => marker.type === 'open');
+  if (!first) {
+    for (const marker of markers)
+      warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
+    return undefined;
+  }
+  const kind = first.kind;
+  const thread = threads.get(id);
+  // A comment anchor whose thread isn't in the ledger is ordinary content (format §2.1).
+  if (kind === 'cmt' && !thread) return undefined;
+
+  const segments: Segment[] = [];
+  let pending: Extract<Marker, { type: 'open' }> | null = null;
+  const alone = markers.length === 1;
+  for (const marker of markers) {
+    if (marker.type === 'close') {
+      if (pending) {
+        segments.push(segmentOf(body, pending, marker));
+        pending = null;
+      } else warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
+      continue;
+    }
+    if (marker.kind !== kind) {
+      warn(
+        'kind-mismatch',
+        `${id} is a ${kind} mark, but this opener says ${marker.kind}`,
+        rangeOf(marker),
+        id,
+      );
+      continue;
+    }
+    if (pending) {
+      if (kind !== 'cmt') {
+        warn('duplicate-id', `${id} is opened again before it is closed`, rangeOf(marker), id);
+        continue;
+      }
+      // A comment opener with no closer before the next one is a point comment.
+      segments.push(segmentOf(body, pending));
+    }
+    if (isPoint(marker, alone)) {
+      segments.push(segmentOf(body, marker));
+      pending = null;
+    } else pending = marker;
+  }
+  if (pending) {
+    if (kind === 'cmt') segments.push(segmentOf(body, pending));
+    else warn('unclosed-mark', `The ${kind} mark ${id} is never closed`, rangeOf(pending), id);
+  }
+  return { kind, thread, segments };
+}
+
+/** The ids of the marks in payloads, all depths. */
+export function payloadIds(payloads: readonly PayloadMarks[]): string[] {
+  return payloads.flatMap((site) => [
+    ...site.marks.map((mark) => mark.id),
+    ...payloadIds(site.payloads),
+  ]);
+}
+
+/** A payload that holds markers, as the scan found it, before it is known which are marks. */
+interface Site {
+  /** The mark that owns the payload, and where its opener is in the text that holds it. */
+  ownerId: string;
+  opener: Range;
+  /** The index of the owner's segment: known for the payloads of the body's marks. */
+  segment: number;
+  depth: number;
+  text: string;
+  scanned: Scan;
+  /** Where the outermost owner's opener is in the file, which a warning points at. */
+  at: Range;
+  children: Site[];
+}
+
+/**
+ * Reads the marks that the payloads of `marks` hold (format §3.12): the old text of a replacement
+ * keeps other people's marks, written in the payload's encoding. A marker in a payload is a mark
+ * when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, all
+ * its markers are in the one payload and make a mark by the rules of the body, and the payload is
+ * no deeper than `MOST_PAYLOAD_DEPTH`. Otherwise it is text, and the file says so.
+ */
+function readPayloads(
+  marks: readonly MarkRange[],
+  scanned: Scan,
+  ledger: Ledger,
+  threads: ReadonlyMap<string, Thread>,
+  warn: (code: WarningCode, message: string, range: Range, id: string) => void,
+): PayloadMarks[] {
+  const holders = marks.filter((mark) => mark.kind === 'sub' || mark.kind === 'del');
+  if (!holders.some((mark) => mark.segments.some((s) => s.payload?.includes('<!--')))) return [];
+  // Where each id stands, to see which stand in one place only.
+  const where = new Map<string, Set<Site | null>>();
+  const note = (id: string, site: Site | null) => {
+    const set = where.get(id);
+    if (set) set.add(site);
+    else where.set(id, new Set([site]));
+  };
+  for (const marker of scanned.markers) note(marker.id, null);
+  const build = (site: Site) => {
+    for (const marker of site.scanned.markers) {
+      note(marker.id, site);
+      if (marker.type !== 'open' || site.depth >= MOST_PAYLOAD_DEPTH || !holdsMarks(marker)) continue;
+      const text = marker.payload ?? '';
+      const child: Site = {
+        ownerId: marker.id,
+        opener: rangeOf(marker),
+        segment: -1,
+        depth: site.depth + 1,
+        text,
+        scanned: scanPayload(text),
+        at: site.at,
+        children: [],
+      };
+      site.children.push(child);
+      build(child);
+    }
+  };
+  const roots: Site[] = [];
+  for (const owner of holders) {
+    owner.segments.forEach((segment, index) => {
+      const payload = segment.payload;
+      if (payload === undefined || !payload.includes('<!--') || /^(?:row|col)=/.test(payload)) {
+        return;
+      }
+      const site: Site = {
+        ownerId: owner.id,
+        opener: segment.open,
+        segment: index,
+        depth: 1,
+        text: payload,
+        scanned: scanPayload(payload),
+        at: segment.open,
+        children: [],
+      };
+      roots.push(site);
+      build(site);
+    });
+  }
+
+  const read = (site: Site): PayloadMarks => {
+    const byId = new Map<string, Marker[]>();
+    for (const marker of site.scanned.markers) {
+      const group = byId.get(marker.id);
+      if (group) group.push(marker);
+      else byId.set(marker.id, [marker]);
+    }
+    const here: MarkRange[] = [];
+    const text = (id: string, why: string) =>
+      warn(
+        'payload-mark',
+        `The mark ${id} in the old text of ${site.ownerId} is read as text: ${why}`,
+        site.at,
+        id,
+      );
+    for (const [id, markers] of byId) {
+      const first = markers.find((marker) => marker.type === 'open');
+      if (first?.kind === 'cmt' ? !threads.has(id) : !Object.hasOwn(ledger.marks, id)) {
+        text(id, 'it has no ledger entry');
+        continue;
+      }
+      if ((where.get(id)?.size ?? 0) > 1) {
+        text(id, 'its id stands in more than one place');
+        continue;
+      }
+      let problem = '';
+      const grouped = segmentsOf(site.text, id, markers, threads, (_code, message) => {
+        problem ||= message;
+      });
+      if (!grouped || problem) {
+        text(id, problem || 'it makes no mark');
+        continue;
+      }
+      const entry: MarkEntry =
+        grouped.kind === 'cmt' && grouped.thread
+          ? { by: grouped.thread.by, at: grouped.thread.at }
+          : ledger.marks[id]!;
+      const payloads = grouped.segments.flatMap((segment) => segment.payload ?? []);
+      const mark: MarkRange = { id, kind: grouped.kind, segments: grouped.segments, entry };
+      const [firstPayload] = payloads;
+      if (firstPayload !== undefined) {
+        mark.payload = grouped.kind === 'fmt' ? firstPayload : payloads.join('');
+      }
+      here.push(mark);
+    }
+    here.sort((a, b) => (a.segments[0]?.open.from ?? 0) - (b.segments[0]?.open.from ?? 0));
+    const deeper: PayloadMarks[] = [];
+    for (const mark of here) {
+      mark.segments.forEach((segment, index) => {
+        const child = site.children.find(
+          (candidate) => candidate.ownerId === mark.id && candidate.opener.from === segment.open.from,
+        );
+        if (child) deeper.push({ ...read(child), segment: index });
+      });
+    }
+    return {
+      owner: site.ownerId,
+      segment: site.segment,
+      depth: site.depth,
+      text: site.text,
+      marks: here,
+      payloads: deeper,
+    };
+  };
+  return roots.map(read);
+}
+
 /** Each parse's ledger, as read, by the parse; for later parses of the same file. */
 const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
 
@@ -123,54 +343,9 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
   const marks: MarkRange[] = [];
   for (const [id, markers] of byId) {
-    const first = markers.find((marker) => marker.type === 'open');
-    if (!first) {
-      for (const marker of markers)
-        warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
-      continue;
-    }
-    const kind = first.kind;
-    const thread = threads.get(id);
-    // A comment anchor whose thread isn't in the ledger is ordinary content (format §2.1).
-    if (kind === 'cmt' && !thread) continue;
-
-    const segments: Segment[] = [];
-    let pending: Extract<Marker, { type: 'open' }> | null = null;
-    const alone = markers.length === 1;
-    for (const marker of markers) {
-      if (marker.type === 'close') {
-        if (pending) {
-          segments.push(segmentOf(body, pending, marker));
-          pending = null;
-        } else warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
-        continue;
-      }
-      if (marker.kind !== kind) {
-        warn(
-          'kind-mismatch',
-          `${id} is a ${kind} mark, but this opener says ${marker.kind}`,
-          rangeOf(marker),
-          id,
-        );
-        continue;
-      }
-      if (pending) {
-        if (kind !== 'cmt') {
-          warn('duplicate-id', `${id} is opened again before it is closed`, rangeOf(marker), id);
-          continue;
-        }
-        // A comment opener with no closer before the next one is a point comment.
-        segments.push(segmentOf(body, pending));
-      }
-      if (isPoint(marker, alone)) {
-        segments.push(segmentOf(body, marker));
-        pending = null;
-      } else pending = marker;
-    }
-    if (pending) {
-      if (kind === 'cmt') segments.push(segmentOf(body, pending));
-      else warn('unclosed-mark', `The ${kind} mark ${id} is never closed`, rangeOf(pending), id);
-    }
+    const grouped = segmentsOf(body, id, markers, threads, warn);
+    if (!grouped) continue;
+    const { kind, thread, segments } = grouped;
     const [firstSegment] = segments;
     if (!firstSegment) continue;
 
@@ -206,7 +381,12 @@ export function parse(text: string, previous?: Parsed): Parsed {
   }
   marks.sort((a, b) => (a.segments[0]?.open.from ?? 0) - (b.segments[0]?.open.from ?? 0));
 
+  // The marks in the old text of replacements: read here, and not orphans.
+  const payloads = readPayloads(marks, scanned, ledger, threads, (code, message, range, id) =>
+    warn(code, message, range, id),
+  );
   const markIds = new Set(marks.map((mark) => mark.id));
+  for (const id of payloadIds(payloads)) markIds.add(id);
   for (const id of Object.keys(ledger.marks)) {
     if (!markIds.has(id)) {
       warnings.push({ code: 'orphan-entry', message: `The ledger entry ${id} has no mark`, id });
@@ -223,7 +403,14 @@ export function parse(text: string, previous?: Parsed): Parsed {
   }
   warnings.sort((a, b) => (a.range?.from ?? -1) - (b.range?.from ?? -1));
 
-  const parsed: Parsed = { text, marks, ledger, ledgerRange: span?.range ?? null, warnings };
+  const parsed: Parsed = {
+    text,
+    marks,
+    ledger,
+    ledgerRange: span?.range ?? null,
+    warnings,
+    payloads,
+  };
   // A ledger with CR line breaks is not read, whatever its YAML, so it gives nothing to keep.
   if (span && read && !span.crLines) ledgerReads.set(parsed, { source: span.source, read });
   return parsed;
