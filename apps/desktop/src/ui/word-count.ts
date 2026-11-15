@@ -1,7 +1,7 @@
 // The word count in the window's lower right corner (design §5.1): a small gray label that stays
 // there while the person writes, "1,204 words", and with a selection "120 of 1,204 words". It
 // counts what a reader sees, as the file name's hover facts do (the newest text, never the markers
-// or the ledger), and on idle, a moment (150 ms) after the last change to the text, or at once for a moved selection, so that typing never waits for it and
+// or the ledger), and on idle, a moment after the last change to the text, or a few frames after a moved selection, so that typing never waits for it and
 // a long document stays fast. It sits on a fade of the page's color, as the title bar does at the
 // top, so that text and notes that scroll under it never meet it, and what the editor scrolls to
 // stops short of the fade. Preferences can hide it.
@@ -14,6 +14,9 @@ import { wordCount } from './titlebar.ts';
 
 /** How long after the last change to the text the words are counted. */
 export const IDLE_MS = 150;
+
+/** How long after a moved selection its words are counted: a drag is counted in steps of this. */
+export const SELECTION_MS = 40;
 
 /** What the label counts. */
 export interface Words {
@@ -68,8 +71,8 @@ export function wordCountLabel(total: number, selected: number | null): string {
 export interface WordCount {
   /**
    * The document changed (the default): counts once the changes stop. Only the selection changed
-   * (`textChanged` false): counts on the next turn, since the text is already read, unless a count
-   * for a change to the text is waiting, which then covers the selection too.
+   * (`textChanged` false): counts after `SELECTION_MS`, since the text is already read, unless a
+   * count is waiting, which then covers the selection too.
    */
   schedule(textChanged?: boolean): void;
   /**
@@ -86,7 +89,7 @@ export interface WordCount {
 /**
  * Adds the label to `parent`, which the page's lower right corner is in, after what is there, so
  * that its fade is over the page. `source.count` is asked only while the label is shown, and after
- * the changes to the text have stopped for `IDLE_MS` (a moved selection is counted on the next turn). While it is shown the parent is marked `rl-has-footer`,
+ * the changes to the text have stopped for `IDLE_MS` (a moved selection, after `SELECTION_MS`). While it is shown the parent is marked `rl-has-footer`,
  * which the style sheet keeps what scrolls into view clear of the fade by.
  */
 export function createWordCount(
@@ -124,7 +127,7 @@ export function createWordCount(
     schedule(textChanged = true) {
       if (!visible) return;
       if (textChanged) later(IDLE_MS);
-      else if (!waiting) later(0);
+      else if (!waiting) later(SELECTION_MS);
     },
     refresh() {
       clearTimeout(timer);
@@ -147,7 +150,7 @@ export function createWordCount(
 
 /**
  * The word count of `editor`: the label in `parent`, counting what the editor holds, on idle after
- * its text or its selection changes (a document that opens is `refresh`ed by the host), and what the
+ * its text changes, and a moment after its selection does (a document that opens is `refresh`ed by the host), and what the
  * editor scrolls to kept clear of the label's fade while it is shown.
  */
 export function createEditorWordCount(

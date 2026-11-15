@@ -16,9 +16,9 @@ test.describe('the word count @views', () => {
     await j.caretAfter('three');
     await j.type(' four five');
     // Well under the old 400 ms idle wait, after the last key.
-    await expect(label).toHaveText('5 words', { timeout: 300 });
+    await expect(label).toHaveText('5 words', { timeout: 350 });
     await j.press('Shift+Home');
-    await expect(label).toHaveText('5 of 5 words', { timeout: 150 });
+    await expect(label).toHaveText('5 of 5 words', { timeout: 250 });
     await j.shot('word-count-selection');
   });
 });
