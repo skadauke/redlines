@@ -48,8 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # A pull request's changed paths come from its merge base with the target branch.
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          # A pull request's changed paths come from its merge base with the target branch. (The strings:
+          # in an expression 0 is false, and `cond && 0 || 1` would be 1.)
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
 
       # The pnpm version comes from packageManager in package.json.
