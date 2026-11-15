@@ -75,6 +75,37 @@ test.describe('lists @lists', () => {
     });
   }
 
+  // Other shapes of the same flow, which Stephan may have had: a checked item above, a document
+  // that goes on after the checklist, and the Clean view. Each ends the checklist as a bullet does.
+  const SHAPES: [string, string, string, 'clean' | 'redlines'][] = [
+    ['a checked item above', '- [x] done\n', 'done', 'redlines'],
+    ['text after the checklist', '- [ ] one\n\nAfter\n', 'one', 'redlines'],
+    ['no newline at the end of the file', '- [ ] one', 'one', 'clean'],
+    ['a numbered checklist', '1. [ ] one\n2. [x] two\n', 'two', 'clean'],
+  ];
+  for (const tracking of [false, true]) {
+    for (const [name, doc, after, view] of SHAPES) {
+      test(`Return on an empty last checkbox ends the checklist: ${name}, Track Changes ${tracking ? 'on' : 'off'}`, async ({
+        start,
+      }) => {
+        const j = await start({ doc, tracking, view });
+        await j.caretAfter(after);
+        await j.press('Enter');
+        expect((await j.caret()).lineText, 'a new empty checkbox').toMatch(/^(- |\d+\. )\[ \] $/);
+        await j.press('Enter');
+        const lines = (await j.cmText()).split('<!-- redlines')[0]!.split('\n');
+        expect(
+          lines.filter((line) => /^(- |\d+\. )\[[ x]\]\s*$/.test(line)),
+          'no empty checkbox is left',
+        ).toEqual([]);
+        expect((await j.caret()).lineText, 'the caret is outside the list').toBe('');
+        await j.shot(
+          `checklist-ended-${name.replace(/\W+/g, '-')}-${tracking ? 'tracked' : 'plain'}`,
+        );
+      });
+    }
+  }
+
   test('Return on an empty last bullet ends the list (the control for the checkbox)', async ({
     start,
   }) => {

@@ -96,6 +96,27 @@ describe('row grips', () => {
     expect(grip(editor)).toBeNull();
   });
 
+  it('shows a hint on the grip after the title bar delay, and not before', () => {
+    vi.useFakeTimers();
+    try {
+      const editor = mount();
+      move(editor, LEFT + 50, rowY(2));
+      const el = grip(editor);
+      expect(el?.getAttribute('aria-label')).toMatch(/move the row/);
+      const tip = () => editor.view.dom.querySelector<HTMLElement>('.rl-grip-hint');
+      el?.dispatchEvent(new MouseEvent('mouseenter'));
+      vi.advanceTimersByTime(399);
+      expect(tip()?.hidden).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(tip()?.hidden).toBe(false);
+      expect(tip()?.textContent).toMatch(/move the row/);
+      el?.dispatchEvent(new MouseEvent('mouseleave'));
+      expect(tip()?.hidden).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('never leaves the window', () => {
     tableLeft = 20;
     const editor = mount();

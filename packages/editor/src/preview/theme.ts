@@ -323,6 +323,7 @@ export const baseThemeSpec: ThemeSpec = {
   '.cm-line.rl-trow': { display: 'table-row', padding: '0' },
   '.rl-tc': {
     display: 'table-cell',
+    position: 'relative',
     // The widths (`table/widths.ts`) are of the whole cell, its padding in them.
     boxSizing: 'border-box',
     padding: `${s(10)} ${s(16)} ${s(10)} 0`,
@@ -331,6 +332,19 @@ export const baseThemeSpec: ThemeSpec = {
     borderBottom: '1px solid var(--rl-rule)',
   },
   '.rl-tc:last-child': { paddingRight: '0' },
+  // Faint lines divide the columns: each cell but the first draws one at its left, halfway across the
+  // gap the cell before it keeps (its right padding). It is drawn, not a border or a padding, so that
+  // it changes no cell's measure (`table/widths.ts` reads one cell's padding for every column).
+  '.rl-tc:not(:first-child)::after': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: s(-8),
+    borderLeft: '1px solid var(--rl-rule)',
+    pointerEvents: 'none',
+  },
+  '.rl-tc-hidden + .rl-tc::after, .rl-tc-hidden::after': { display: 'none' },
   '.rl-tc-hidden': { display: 'none' },
   '.rl-tc[data-align="left"]': { textAlign: 'left' },
   '.rl-tc[data-align="center"]': { textAlign: 'center' },
@@ -390,7 +404,6 @@ export const baseThemeSpec: ThemeSpec = {
     paddingBottom: s(8),
     color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-th-font)',
-    fontSize: 'var(--rl-th-size)',
     fontWeight: '700',
     textTransform: 'var(--rl-th-case)',
     letterSpacing: 'var(--rl-th-track)',
