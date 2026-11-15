@@ -476,9 +476,10 @@ function analyze(state: EditorState, kept: number | null): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
-  // Simple is Redlines with every change's look off (design: The views and the looks): the same parts and
-  // layers, so that the bars land on the same lines, with no text and no class, and no marks of
-  // line breaks. Comments, highlights and pins are drawn as in Redlines.
+  // Simple is Redlines with the changes' looks mostly off (design: The views and the looks): the same
+  // parts and layers, so that the bars land on the same lines, with no deleted text, no underline
+  // (an insertion is only in its author's color), no tint and no marks of line breaks.
+  // Comments, highlights and pins are drawn as in Redlines.
   const markup = mode === 'redlines' || mode === 'simple';
   const redlines = mode === 'redlines';
   const marks = redlines && state.facet(lineBreakMarksFacet);
@@ -534,9 +535,12 @@ function analyze(state: EditorState, kept: number | null): Model {
       // tint and underline.
       if (markup && mark.kind === 'ins' && mark.payload === 'row') {
         parts.push({ text: '', className: '', color, change: true });
+        // Simple draws the text of the row in the author's color, with no tint and no underline.
         if (redlines) {
           const moved = mark.entry.move === undefined ? '' : ' rl-moved-row';
           model.rows.push({ at: segment.open.from, className: `rl-ins-row${moved} ${author}` });
+        } else {
+          model.rows.push({ at: segment.open.from, className: `rl-ins-row-plain ${author}` });
         }
       }
       // A deleted table column: a change bar on each row of its table, in Simple too; the ghost cells
@@ -609,7 +613,8 @@ function analyze(state: EditorState, kept: number | null): Model {
         model.layers.push({ from: start, to, className, color, change: true });
       } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
-          const className = redlines ? `rl-ins ${author}` : '';
+          // Simple: the author's color, without the underline.
+          const className = redlines ? `rl-ins ${author}` : `rl-ins-plain ${author}`;
           // A substitution's text starts after the carrier of an opener alone on its line, which
           // its old text is drawn after: struck text is no inserted text.
           const start =
@@ -1576,6 +1581,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     textUnderlineOffset: '3px',
     textDecorationSkipInk: 'none',
   },
+  // Inserted text in Simple: the author's color alone, with no underline.
+  '.rl-ins-plain': { color: 'var(--rl-color)' },
   // Deleted text: struck through, in its author's color.
   '.rl-del': {
     color: 'var(--rl-color)',
@@ -1665,6 +1672,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     textUnderlineOffset: '3px',
     textDecorationSkipInk: 'none',
   },
+  // An inserted table row in Simple: the text in the author's color, with no tint and no underline.
+  '.rl-trow.rl-ins-row-plain > .rl-tc': { color: 'var(--rl-color)' },
   // The new place of a moved row: a double underline.
   '.rl-trow.rl-moved-row > .rl-tc': { textDecorationStyle: 'double' },
   // An inserted table column: the author's tint behind its cells, the text underlined and in the
@@ -1678,6 +1687,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     textUnderlineOffset: '3px',
     textDecorationSkipInk: 'none',
   },
+  // An inserted table column in Simple: the text in the author's color alone.
+  '.rl-tc.rl-ins-col-plain': { color: 'var(--rl-color)' },
   // The new place of a moved column: a double underline.
   '.rl-tc.rl-ins-col.rl-moved-col': { textDecorationStyle: 'double' },
   // A deleted row, a ghost at its place (`table/ghosts.ts`): struck text in the author's color on
