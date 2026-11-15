@@ -10,6 +10,7 @@ import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
+import { payloadMarksOf } from './payload-marks.ts';
 import { bodyOf, everyOrder, exactly } from './test-helpers.ts';
 import { newestView } from './views.ts';
 
@@ -73,7 +74,8 @@ export function expectEveryOrderRead(label: string, text: string, path = ''): st
     readAs(newestView(text).text),
   );
   const refused: string[] = [];
-  for (const { id, kind } of parse(text).marks) {
+  const read = parse(text);
+  for (const { id, kind } of [...read.marks, ...payloadMarksOf(read).map((found) => found.mark)]) {
     if (kind === 'cmt') continue;
     for (const [step, decide] of [
       [`${path} a${id}`, accept],

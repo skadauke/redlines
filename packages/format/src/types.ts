@@ -190,6 +190,10 @@ export type WarningCode =
   | 'orphan-thread'
   | 'unclosed-mark'
   | 'unopened-close'
+  /** A marker in the old text of a replacement that is read as text, because it is not a mark there
+   * (format §3.12): no ledger entry, an id that stands elsewhere, a piece without its other end, or
+   * nested too deep. */
+  | 'payload-mark'
   | 'bad-ledger';
 
 /** Something wrong in a file that the parser worked around (format §12). */
@@ -198,6 +202,25 @@ export interface Warning {
   message: string;
   id?: string;
   range?: Range;
+}
+
+/**
+ * The marks in the old text of a replacement (format §3.12): other people's pending changes that the
+ * payload of a substitution holds, as the marks they are, in the payload's encoding. `text` is the
+ * decoded payload, and every range of `marks` is an offset in it, not in the file.
+ */
+export interface PayloadMarks {
+  /** The mark whose payload this is, and the index of the segment in it. */
+  owner: string;
+  segment: number;
+  /** 1 for the payload of a mark in the body; 2 for a payload in a payload, up to 3. */
+  depth: number;
+  /** The decoded payload. */
+  text: string;
+  /** The marks read in it, in the order of their first segment. Their entries are the ledger's. */
+  marks: MarkRange[];
+  /** The payloads of those marks' own payloads. */
+  payloads: PayloadMarks[];
 }
 
 /** A parsed file. */
@@ -210,6 +233,8 @@ export interface Parsed {
   /** The ledger comment plus the blank line before it; null when the file has none. */
   ledgerRange: Range | null;
   warnings: Warning[];
+  /** The payloads of marks in `marks` that hold marks of their own (format §3.12). */
+  payloads: PayloadMarks[];
 }
 
 /** Maps offsets between a view and the source it was derived from. */
