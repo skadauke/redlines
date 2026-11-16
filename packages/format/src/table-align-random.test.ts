@@ -31,7 +31,9 @@ import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { expectEveryOrderRead, readAs } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { tableEdit, untrackedTableEdit } from './table-ops.ts';
+// (the fine rules: this suite is about a point mark beside other changes, and a replacement of the
+// table, which a plain edit can break apart, is written and held to account in the suites of lane R2)
+import { fineTableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
@@ -397,7 +399,7 @@ describe('a point alignment change with changes beside it, random', () => {
         steps.push(`${aligner.handle} align ${JSON.stringify(cols)} ${to}`);
         try {
           const op: TableOp = { kind: 'align', table: table.from, cols, align: to };
-          text = applyChanges(text, tableEdit(text, op, context(aligner, ids())).changes);
+          text = applyChanges(text, fineTableEdit(text, op, context(aligner, ids())).changes);
           return true;
         } catch (error) {
           if (error instanceof EditError) return false;
@@ -492,7 +494,7 @@ describe('a point alignment change with changes beside it, random', () => {
             changes =
               who === 'plain'
                 ? untrackedTableEdit(text, op).changes
-                : tableEdit(text, op, context(person, ids())).changes;
+                : fineTableEdit(text, op, context(person, ids())).changes;
           } else if (over) {
             const ctx = context(person, ids());
             const bold = { kind: 'inline', format: 'bold', on: true } as const;

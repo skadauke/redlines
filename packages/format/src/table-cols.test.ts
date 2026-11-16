@@ -6,6 +6,7 @@ import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { encodeValue } from './format-ops.ts';
 import { trackedFormat } from './formatting.ts';
+import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { alignMarkOf } from './table-align.ts';
@@ -36,7 +37,7 @@ import { newestView, originalView, reviewView } from './views.ts';
 
 const FRUIT =
   '| Fruit  | Count | Price |\n| ------ | ----- | ----- |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |';
-const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
+const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs', 'r2zd', 's4ab', 't5cd', 'u6ef'];
 const trim = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
 
 type Shape =
@@ -60,6 +61,9 @@ const said = (run: () => unknown) => {
   }
   return 'no error';
 };
+/** An edit that the fine rules refuse and `widen` writes: read alike in every order, rejected back. */
+const widened = (text: string, run: () => { changes: TextChange[] }, own?: string) =>
+  expectWidened('widened', text, run().changes, own);
 const columnsOf = (text: string): number[] =>
   (blockLeaves(text).find((leaf) => leaf.kind === 'table')?.rows ?? []).map((row) => row.length);
 
@@ -193,18 +197,14 @@ describe('inserting columns, tracked (format §3.7)', () => {
     }
   }, 60_000);
 
-  it('refuses while a row is deleted or moved or an alignment change is pending, in words', () => {
+  it('widens while a row is deleted or moved or an alignment change is pending', () => {
     const deleted = edit(start, { kind: 'deleteRows', rows: [1] }).after;
-    expect(said(() => edit(deleted, { kind: 'insertCols', after: 1 }))).toBe(
-      'Accept or reject the row changes in this table first.',
-    );
+    widened(deleted, () => edit(deleted, { kind: 'insertCols', after: 1 }), 'ada');
     expect(said(() => edit(deleted, { kind: 'insertCols', after: 1 }, null))).toBe(
       'Accept or reject the row changes in this table first.',
     );
     const above = edit(start, { kind: 'insertRows', after: -1 }).after;
-    expect(said(() => edit(above, { kind: 'insertCols', after: 1 }, bo))).toBe(
-      'Accept or reject the row changes in this table first.',
-    );
+    widened(above, () => edit(above, { kind: 'insertCols', after: 1 }, bo), 'bo');
     expect(said(() => edit(start, { kind: 'insertCols', after: 9 }))).toBe(
       'There is no such place in this table.',
     );
@@ -212,9 +212,10 @@ describe('inserting columns, tracked (format §3.7)', () => {
 
   it('keeps a pending column’s header when a row would take its place', () => {
     const done = edit(start, { kind: 'insertCols', after: 1 }).after;
-    const columns = 'Accept or reject the column changes in this table first.';
-    expect(said(() => edit(done, { kind: 'insertRows', after: -1 }, bo))).toBe(columns);
-    expect(said(() => edit(done, { kind: 'insertRows', after: -1 }, null))).toBe(columns);
+    widened(done, () => edit(done, { kind: 'insertRows', after: -1 }, bo), 'bo');
+    expect(said(() => edit(done, { kind: 'insertRows', after: -1 }, null))).toBe(
+      'Accept or reject the column changes in this table first.',
+    );
     // A row below is allowed, tracked or not.
     expect(said(() => edit(done, { kind: 'insertRows', after: 0 }, bo))).toBe('no error');
     expect(said(() => edit(done, { kind: 'insertRows', after: 0 }, null))).toBe('no error');
@@ -354,7 +355,7 @@ describe('deleting columns, tracked', () => {
     expect(trim(originalView(done).text)).toBe(FRUIT);
   });
 
-  it('rule 3: refuses another person’s pending change or insertion in the column', () => {
+  it('rule 3: widens another person’s pending change or insertion in the column', () => {
     const typed = applyChanges(
       start,
       trackedEdit(
@@ -363,19 +364,13 @@ describe('deleting columns, tracked', () => {
         context(bo, ['b7cd']),
       ),
     );
-    expect(said(() => edit(typed, { kind: 'deleteCols', cols: [1] }))).toBe(
-      "Bo Chen's pending change is in this column. Decide it first.",
-    );
+    widened(typed, () => edit(typed, { kind: 'deleteCols', cols: [1] }), 'ada');
     // A column that is not theirs can be deleted.
     expect(said(() => edit(typed, { kind: 'deleteCols', cols: [0] }))).toBe('no error');
     const made = edit(start, { kind: 'insertCols', after: 1 }, bo, ['c2dd']).after;
-    expect(said(() => edit(made, { kind: 'deleteCols', cols: [1] }))).toBe(
-      "Bo Chen's inserted column is pending. Decide it first.",
-    );
+    widened(made, () => edit(made, { kind: 'deleteCols', cols: [1] }), 'ada');
     const moved = edit(start, { kind: 'moveCols', cols: [0], to: 3 }, bo, ['c2dd', 'f3gg']).after;
-    expect(said(() => edit(moved, { kind: 'deleteCols', cols: [2] }))).toBe(
-      "Bo Chen's moved column is pending. Decide it first.",
-    );
+    widened(moved, () => edit(moved, { kind: 'deleteCols', cols: [2] }), 'ada');
   });
 
   it('rule 4: a comment in a deleted column becomes a point comment in the cell after, or before for the last', () => {
@@ -396,12 +391,11 @@ describe('deleting columns, tracked', () => {
     expectInOrder('comment', ['c9qf'], end);
   });
 
-  it('rule 2: refuses with a row deleted or moved, or inserted, and not with columns pending', () => {
-    const rows = 'Accept or reject the row changes in this table first.';
+  it('rule 2: widens with a row deleted or moved, or inserted, and not with columns pending', () => {
     const deleted = edit(start, { kind: 'deleteRows', rows: [1] }).after;
-    expect(said(() => edit(deleted, { kind: 'deleteCols', cols: [1] }))).toBe(rows);
+    widened(deleted, () => edit(deleted, { kind: 'deleteCols', cols: [1] }), 'ada');
     const made = edit(start, { kind: 'insertRows', after: 1 }).after;
-    expect(said(() => edit(made, { kind: 'deleteCols', cols: [1] }, bo, ['c2dd']))).toBe(rows);
+    widened(made, () => edit(made, { kind: 'deleteCols', cols: [1] }, bo, ['c2dd']), 'bo');
     // With Track Changes off a pending row insertion is no obstacle.
     expect(said(() => edit(made, { kind: 'deleteCols', cols: [1] }, null))).toBe('no error');
     const col = edit(start, { kind: 'insertCols', after: 1 }).after;
@@ -538,7 +532,7 @@ describe('moving columns (format §3.7)', () => {
     expectInOrder('comment in a moved column', ['c9qf'], back);
   });
 
-  it('refuses a move that changes nothing, another person’s inserted column, and a short row', () => {
+  it('refuses a move that changes nothing and a short row, and widens another person’s inserted column', () => {
     expect(said(() => edit(start, { kind: 'moveCols', cols: [1], to: 1 }))).toBe(
       'The columns are already there.',
     );
@@ -546,9 +540,7 @@ describe('moving columns (format §3.7)', () => {
       'The columns are already there.',
     );
     const made = edit(start, { kind: 'insertCols', after: 1 }, bo, ['c2dd']).after;
-    expect(said(() => edit(made, { kind: 'moveCols', cols: [1], to: 0 }))).toBe(
-      "Bo Chen's inserted column is pending. Decide it first.",
-    );
+    widened(made, () => edit(made, { kind: 'moveCols', cols: [1], to: 0 }), 'ada');
     const ragged = file('| A | B |\n| - | - |\n| a |');
     expect(said(() => edit(ragged, { kind: 'moveCols', cols: [0], to: 2 }))).toBe(
       'A row of this table has fewer cells than its header. Fill it in first.',
@@ -662,13 +654,11 @@ describe('a comment that starts above a table without pipes at its edges', () =>
     ]);
   };
 
-  it('is refused for a column move or deletion it ends in, naming its author', () => {
+  it('is widened for a column move or deletion it ends in', () => {
     const text = commented();
     expect(parse(text).marks.some((m) => m.id === 'c9qf')).toBe(true);
-    const words =
-      "Ada Lovelace's comment starts above this table and ends in this column. Delete it first, or turn off Track Changes.";
-    expect(said(() => edit(text, { kind: 'moveCols', cols: [0], to: 3 }))).toBe(words);
-    expect(said(() => edit(text, { kind: 'deleteCols', cols: [0] }))).toBe(words);
+    widened(text, () => edit(text, { kind: 'moveCols', cols: [0], to: 3 }), 'ada');
+    widened(text, () => edit(text, { kind: 'deleteCols', cols: [0] }), 'ada');
   });
 
   it('allows the operation on any other column, and with Track Changes off', () => {
