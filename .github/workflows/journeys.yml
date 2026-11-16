@@ -2,7 +2,8 @@
 # screenshots (apps/desktop/journeys). It runs on a Mac, since WebKit there is the app's engine
 # and the approved screenshots (baselines) are drawn by it. It is the testing tiers:
 #
-# - a pull request runs the short tier, as a job of its own beside `check` in ci.yml: the smoke
+# - a pull request runs the short tier, only when it changes apps/desktop/journeys or carries the
+#   `journeys` label, as a job of its own beside `check` in ci.yml: the smoke
 #   journeys, and the journeys tagged for the areas of the paths it changes (src/areas.ts), in the
 #   light look at 100%;
 # - a push to main runs the middle tier: every journey in the light look, and the smoke journeys in
@@ -15,6 +16,8 @@ name: Journeys
 
 on:
   pull_request:
+    # `labeled`: adding the `journeys` label runs them on a pull request that doesn't touch them.
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '**'
       - '!docs/**'
@@ -35,14 +38,50 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request replaces its run; a run on main, and the sweep, are each left to
-# finish, since their pictures are those of a commit that nothing else will look at.
+# A newer push to a pull request replaces its run, and a newer commit on main replaces the run of
+# the one before, so that only the newest main commit holds a macOS runner. The sweep is left to
+# finish.
 concurrency:
   group: journeys-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  # A pull request runs the journeys only when it changes them (apps/desktop/journeys) or carries
+  # the `journeys` label; lanes run their journeys on their own machines and attach the pictures.
+  # Main and the sweep always run.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          persist-credentials: false
+
+      - name: Decide
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'journeys') }}
+        shell: bash
+        run: |
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            run=false
+            [ "$LABELED" = true ] && run=true
+            if git diff --name-only --no-renames "$BASE" HEAD | grep -q '^apps/desktop/journeys/'; then
+              run=true
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "The journeys run: $run"
+
   journeys:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
