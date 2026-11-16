@@ -185,13 +185,12 @@ class ImageWidget extends WidgetType {
     });
     img.addEventListener('error', showAlt);
     img.src = this.url;
-    // An image on a line of its own sits in a frame as wide as it is, so that its handles are at
-    // its edges and not at the text column's.
-    const frame = this.own ? document.createElement('span') : wrap;
-    if (this.own) {
-      frame.className = 'rl-image-frame';
-      wrap.append(frame);
-    }
+    // The image sits in a frame as big as it is, so that its handles are at its edges and as tall as
+    // it: an image on a line of its own would else have them at the text column's, and one in a line of
+    // text at the height of the line.
+    const frame = document.createElement('span');
+    frame.className = 'rl-image-frame';
+    wrap.append(frame);
     frame.append(img);
     for (const side of ['left', 'right'] as const) {
       const handle = document.createElement('span');
