@@ -757,6 +757,11 @@ const previewField = StateField.define<Preview>({
   ],
 });
 
+/** The hard breaks' hidden spaces and the images in `state`, which the caret steps over (none without a preview). */
+export function hardBreakAtoms(state: EditorState): DecorationSet {
+  return state.field(previewField, false)?.breaks ?? Decoration.none;
+}
+
 /**
  * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
  * over, hidden. A space typed in front of them makes the run longer, and the caret mapped through

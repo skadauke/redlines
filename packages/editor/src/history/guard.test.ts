@@ -191,3 +191,15 @@ describe('undo after the file changed on disk', () => {
     expect(parse(editor.getDoc()).warnings).toEqual([]);
   });
 });
+
+describe('redo and the spaces of a hard break (#649)', () => {
+  it('puts the caret in front of the spaces, not between them', () => {
+    const editor = load('abc  \ndef');
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    type(editor, 3, ' ');
+    expect(undo(editor.view)).toBe(true);
+    expect(redo(editor.view)).toBe(true);
+    expect(editor.getDoc()).toBe('abc   \ndef');
+    expect([3, 6]).toContain(editor.view.state.selection.main.head);
+  });
+});
