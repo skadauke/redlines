@@ -2038,6 +2038,7 @@ describe('a run, with the live editor and the file', () => {
       author: me,
       document: {
         path: () => doc.state.path,
+        plainOnly: () => false,
         generation: () => doc.generation,
         read: () => editor.getDoc(),
         parsed: () => editor.getParsed(),
