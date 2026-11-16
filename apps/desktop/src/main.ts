@@ -1030,6 +1030,23 @@ const commands: MenuCommands = {
 activatePlugins(editor, {}, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
+  toast: ({ text, action }) =>
+    notifications.show({
+      text,
+      key: 'plugin toast',
+      timeout: 8000,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                action.run();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
   documentData: (manifest) => documentData.forPlugin(manifest),
 });
 
