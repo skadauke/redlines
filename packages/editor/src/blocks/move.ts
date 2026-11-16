@@ -57,11 +57,8 @@ export function moveBlocks(view: EditorView, up: boolean): boolean {
   if (!run) return false;
   const gap = neighbourGap(run, up);
   if (!gap) {
-    view.dispatch({
-      effects: refusedEditEffect.of(
-        up ? 'The block is at the top.' : 'The block is at the bottom.',
-      ),
-    });
+    const edge = up ? 'The block is at the top.' : 'The block is at the bottom.';
+    view.dispatch({ effects: refusedEditEffect.of(edge) });
     return true;
   }
   return moveRunTo(view, run, gap);
@@ -87,13 +84,11 @@ export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boole
     }
   } catch (error) {
     if (error instanceof EditError || error instanceof Untrackable) {
-      view.dispatch({
-        effects: refusedEditEffect.of(
-          error instanceof EditError
-            ? error.message
-            : 'This move reaches too many blocks to be tracked. Turn off Track Changes to move it.',
-        ),
-      });
+      const message =
+        error instanceof EditError
+          ? error.message
+          : 'This move reaches too many blocks to be tracked. Turn off Track Changes to move it.';
+      view.dispatch({ effects: refusedEditEffect.of(message) });
       return true;
     }
     throw error;

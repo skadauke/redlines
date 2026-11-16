@@ -194,6 +194,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'shows an error or a refusal that has its own tier',
   ],
   [
+    'packages/editor/src/blocks/move.ts',
+    'edge',
+    'info',
+    'tells that there is no place to move to; the command grays in the menu when its hint says so',
+  ],
+  [
+    'packages/editor/src/blocks/move.ts',
+    'message',
+    'alert',
+    'a move that reaches more blocks than a widened edit can hold is to be made untracked after the person is asked (§3.13); until the sheet takes it, a notice says to turn Track Changes off',
+  ],
+  [
     'packages/editor/src/table/paste.ts',
     'message',
     'info',
