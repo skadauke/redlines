@@ -6,6 +6,7 @@ import {
   chunkHeader,
   localImagePath,
   localImageSources,
+  markdownImages,
   markdownToHtml,
   withoutComments,
 } from './markdown.ts';
@@ -201,6 +202,65 @@ describe('markdownToHtml', () => {
       const html = markdownToHtml('A <img src="https://example.com/x.png" alt="Remote"> b.\n');
       expect(html).toContain('<span class="rl-image">Remote</span>');
       expect(html).not.toContain('<img');
+    });
+  });
+
+  describe('an <img> tag with a local file', () => {
+    const loaded = new Map([
+      ['pics/a b.png', 'img-0'],
+      ['100%.png', 'img-1'],
+    ]);
+
+    it('is the picture, at its width and height', () => {
+      const html = markdownToHtml(
+        'A <img src="pics/a b.png" alt="Sized" width="120" height="80"> and <img src="pics/a b.png" width=50%>.\n',
+        loaded,
+      );
+      expect(html).toContain(
+        '<img class="rl-image" src="cid:img-0" alt="Sized" width="120" height="80">',
+      );
+      expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="" width="50%">');
+    });
+
+    it('is drawn inside GitHub’s centered paragraph', () => {
+      const html = markdownToHtml(
+        '<p align="center">\n<img src="pics/a b.png" height="40">\n</p>\n',
+        loaded,
+      );
+      expect(html).toContain('<p align="center">');
+      expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="" height="40">');
+    });
+
+    it('keeps a size that is a number, and no other', () => {
+      const html = markdownToHtml(
+        '<img src="pics/a b.png" width="9px" height="1e3"> <img src="pics/a b.png" width="12" height="calc(1px)">\n',
+        loaded,
+      );
+      expect(html).toContain('src="cid:img-0" alt="">');
+      expect(html).toContain('alt="" width="12">');
+      expect(html).not.toMatch(/calc|9px|1e3/);
+    });
+
+    it('has a name with a % that starts no escape', () => {
+      expect(markdownToHtml('<img src="100%.png" alt="p">\n', loaded)).toContain('src="cid:img-1"');
+    });
+
+    it('is its alt text when the host did not load the file, or for an address that is not a path', () => {
+      const html = markdownToHtml(
+        '<img src="other.png" alt="a" width="10"> <img src="https://example.com/x.png" alt="b"> <img src="javascript:x" alt="c">\n',
+        loaded,
+      );
+      expect(html).not.toContain('<img');
+      for (const alt of ['a', 'b', 'c'])
+        expect(html).toContain(`<span class="rl-image">${alt}</span>`);
+    });
+
+    it('is asked of the host like any local image', () => {
+      expect(
+        markdownImages(
+          '<img src="pics/a b.png"> <img src="https://example.com/x.png"> ![m](m.png)\n',
+        ),
+      ).toEqual(['pics/a b.png', 'm.png']);
     });
   });
 

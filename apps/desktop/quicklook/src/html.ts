@@ -108,7 +108,8 @@ function drawn(element: string, found: Map<string, string>): string {
   return out;
 }
 
-/** An image: `markdown.ts` draws it as the picture, if the host loaded the file, else as its alt. */
+/** An image: `markdown.ts` draws it as the picture, if the host loaded the file, else as its alt.
+ * Its `width` and `height` are kept when they are numbers, as GitHub keeps them (#629). */
 function image(found: Map<string, string>): string {
   const alt = escapeHtml((found.get('alt') ?? '').slice(0, MAX_TEXT));
   const src = found.get('src') ?? '';
@@ -117,7 +118,12 @@ function image(found: Map<string, string>): string {
   }
   // A % that starts no escape is a part of the name, as micromark writes it.
   const address = src.replace(/%(?![0-9A-Fa-f]{2})/g, '%25');
-  return `<img src="${escapeHtml(address)}" alt="${alt}" />`;
+  const size = ['width', 'height']
+    .map((name) => [name, found.get(name) ?? ''] as const)
+    .filter(([, value]) => NUMBER.test(value))
+    .map(([name, value]) => ` ${name}="${value}"`)
+    .join('');
+  return `<img src="${escapeHtml(address)}" alt="${alt}"${size} />`;
 }
 
 /** A piece of the HTML to write: `tag` is markup, which micromark leaves out of an image's alt text

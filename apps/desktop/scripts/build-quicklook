@@ -508,7 +508,8 @@ def image_checks(checks: Checks) -> None:
             f"![absolute outside]({base / 'outside.png'}) ![hidden folder](../.hidden/h.png) "
             "![hidden file](../images/.h.png) ![fake](../images/fake.png) ![evil](../images/evil.svg) "
             "![big](../images/big.png) ![missing](../images/missing.png) ![folder](../images) "
-            "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n",
+            "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n\n"
+            '<img src="local.png" alt="tag" width="64" height="48"> <img src="https://example.com/t.png" alt="remote tag">\n',
             encoding="utf-8",
         )
 
@@ -547,6 +548,8 @@ def image_checks(checks: Checks) -> None:
             checks.ok(f'src="cid:{row["name"]}"' in page, f"the page draws {row['source']!r} as cid:{row['name']}")
         for alt in ["link out", "outside", "absolute outside", "hidden folder", "hidden file", "fake", "evil", "big", "missing", "folder", "remote", "data"]:
             checks.ok(f'<span class="rl-image">{alt}</span>' in page, f"the page shows {alt!r} as its alt text")
+        checks.ok(re.search(r'<img [^>]*alt="tag" width="64" height="48">', page) is not None, "an <img> tag is the picture, at its width and height")
+        checks.ok('<span class="rl-image">remote tag</span>' in page, "an <img> tag of a server is its alt text")
         checks.ok(re.search(r'<img[^>]*src="(?!cid:)', page) is None, "the page draws no image from anywhere but its attachments")
         checks.ok("img-src cid:" in page, "the page's policy allows images from its attachments")
         without = subprocess.run([HARNESS, script, document], capture_output=True, text=True).stdout
