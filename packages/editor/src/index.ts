@@ -45,6 +45,7 @@ import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
+export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -128,7 +129,15 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
-export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
+export {
+  agentOf,
+  followsText,
+  joinsNewestStep,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+} from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export {
@@ -300,7 +309,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
-    images(options.onImageFiles, options.onNotice),
+    images(options.onImageFiles, options.onNotice, options.projectImageLink),
     noticeFacet.of(options.onNotice),
     options.onError
       ? EditorView.exceptionSink.of((error) => {

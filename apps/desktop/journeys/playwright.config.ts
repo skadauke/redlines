@@ -64,6 +64,9 @@ export default defineConfig<JourneyOptions>({
   },
   // Journeys share one dev server and each starts its own page: they don't touch each other.
   fullyParallel: true,
+  // The long documents (`@long`, tests/long-documents.spec.ts) take minutes: main runs them
+  // (JOURNEYS_LONG=1), a pull request and a plain `pnpm journeys` don't.
+  grepInvert: process.env['JOURNEYS_LONG'] === '1' ? undefined : /@long/,
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 1 : 0,
   workers: process.env['CI'] ? 2 : undefined,
