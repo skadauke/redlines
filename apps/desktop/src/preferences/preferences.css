@@ -6,7 +6,7 @@
 
 :root {
   color-scheme: light dark;
-  accent-color: var(--rl-ink-2);
+  accent-color: var(--rl-on, var(--rl-ink-2));
 }
 
 :root[data-rl-appearance='light'] {
@@ -110,9 +110,10 @@ body {
   flex: none;
   width: calc(100% - 56px);
   margin: 14px 28px 0;
-  padding: 5px 10px;
+  height: var(--rl-ctl-h, 26px);
+  padding: 0 10px;
   border: 1px solid var(--rl-rule);
-  border-radius: 7px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: var(--rl-page, Canvas);
   color: var(--rl-ink, CanvasText);
   font: inherit;
@@ -216,12 +217,13 @@ select,
 .rl-pref-text,
 .rl-pref-button {
   box-sizing: border-box;
-  height: 24px;
+  height: var(--rl-ctl-h, 26px);
   border: 1px solid var(--rl-rule);
-  border-radius: 6px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: transparent;
   color: var(--rl-ink);
   font: inherit;
+  font-size: var(--rl-size-ctl);
 }
 
 select {
@@ -231,6 +233,7 @@ select {
 
 .rl-pref-text {
   padding: 0 7px;
+  font-size: var(--rl-size-field);
   user-select: text;
   -webkit-user-select: text;
 }
