@@ -234,8 +234,11 @@ function canvasMeasure(view: EditorView): (text: string, row: number) => Measure
     const shown = font.upper ? text.toUpperCase() : text;
     return context.measureText(shown).width + shown.length * font.spacing;
   };
-  return cachedMeasure((text, row) => {
+  return cachedMeasure((written, row) => {
     const font = row === 0 ? header : body;
+    // An empty header cell draws its placeholder (the theme's `.rl-th .rl-tc-fill::before`): the
+    // column is as wide as it.
+    const text = row === 0 && !written.trim() ? 'Header' : written;
     let longestWord = 0;
     let longestLine = 0;
     let bold = false;

@@ -14,6 +14,7 @@ import {
   createLiveLines,
   createMacAgents,
   createRuns,
+  defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
@@ -68,6 +69,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -360,6 +362,8 @@ const agents =
         {
           // What the person named each agent in Preferences, read at every look.
           handles: () => loadSettings().agentHandles,
+          // The model the person chose for each agent, read at every run.
+          models: () => loadSettings().agentModels,
           ...(isTauri
             ? {
                 more: async () =>
@@ -407,12 +411,12 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     getParsed: () => editor.getParsed(),
     getMet: () => settings.people,
     me: author.handle,
-    agents: () => knownAgents,
+    // The default agent comes first in the list (#528).
+    agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
   });
 };
 
-// The formatting commands are the Format and Paragraph menus. They register before the review
-// interface, so that its Add Comment comes last in Format.
+// The formatting commands are the Insert, Format and Paragraph menus.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
@@ -449,12 +453,11 @@ async function insertChosenImages(spot: ImageSpot): Promise<void> {
   }
 }
 
-// Registered before the review plugin's Add Comment, which comes last in Format.
 editor.commands.register([
   {
     id: 'image.insert',
     title: 'Image…',
-    menu: 'format',
+    menu: 'insert',
     group: 'insert',
     run: () => {
       const spot = editor.imageSpot();
@@ -465,8 +468,8 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
-// a plugin with commands in that menu registers before this one.
+// A menu lists its commands in the order they are registered: Add Comment and Ask… come last in the Review menu, after its own rows: its
+// commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
@@ -802,6 +805,8 @@ const ask = createAsk(editor, {
   },
   projectRoot: projectOf,
   settings: agentSettings,
+  // An Ask that names no agent goes to the one the person chose in Preferences (#528).
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
@@ -885,12 +890,7 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
@@ -927,6 +927,12 @@ const textZoom = followTextZoom(window, {
   holdRail: (held) => review.holdRail(held),
   say: (text) => notice.flash(text),
 });
+
+const toggleWordCount = () => {
+  changeSettings({ showWordCount: !settings.showWordCount });
+  wordCount.setVisible(settings.showWordCount);
+  render();
+};
 
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
@@ -1071,6 +1077,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
   openReview,
@@ -1202,6 +1209,7 @@ function render(): void {
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
@@ -1365,12 +1373,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = {
-    ...changed,
-    sidebarOpen: settings.sidebarOpen,
-    sidebarWidth: settings.sidebarWidth,
-    textSize: settings.textSize,
-  };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

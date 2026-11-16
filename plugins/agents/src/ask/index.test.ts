@@ -184,13 +184,13 @@ function key(name: string, init: KeyboardEventInit = {}): KeyboardEvent {
 }
 
 describe('the command', () => {
-  it('is Ask… in the Format menu beside Add Comment, with its key', () => {
+  it('is Ask… in the Review menu beside Add Comment, with its key', () => {
     const { editor } = mount();
     const command = editor.commands.list().find(({ id }) => id === 'ask.start');
     expect(command).toMatchObject({
       title: 'Ask…',
       shortcut: 'Mod-Alt-a',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
     });
   });

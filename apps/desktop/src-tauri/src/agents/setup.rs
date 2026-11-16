@@ -47,7 +47,7 @@ pub enum Install {
 
 impl Agent {
     /// The agent's package on npm.
-    fn npm_package(self) -> &'static str {
+    pub(super) fn npm_package(self) -> &'static str {
         match self {
             Agent::Claude => "@anthropic-ai/claude-code",
             Agent::Codex => "@openai/codex",
