@@ -448,15 +448,35 @@ export const baseThemeSpec: ThemeSpec = {
   // cell; the text highlight stays for what lies outside the table.
   // The cell is painted, not the mark: a block mark inside a cell, between the widget buffers
   // around it, stacks into lines and makes the row taller (found in a measure of a selected row).
+  // The tint runs from one column line to the next, not over the cell's box: the lines are drawn half a
+  // gap (8px) left of the cell, so the box is that far to the right of them. The cell's own background
+  // covers the box but for the gap, and a block before the cell (a cell but the first has one: the line
+  // is its ::after) covers the gap before it, short of the cell's bottom rule. The last cell has no
+  // gap after it.
   '.rl-tc:has(.rl-sel)': {
-    backgroundColor: 'Highlight',
+    backgroundColor: 'transparent',
+    backgroundImage: 'linear-gradient(Highlight, Highlight)',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: '0 0',
+    backgroundSize: `calc(100% - ${s(8)}) 100%`,
     color: 'HighlightText',
+  },
+  '.rl-tc:last-child:has(.rl-sel)': { backgroundSize: '100% 100%' },
+  '.rl-tc:not(:first-child):has(.rl-sel)::before': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: s(-8),
+    width: s(8),
+    backgroundColor: 'Highlight',
+    pointerEvents: 'none',
   },
   // One tint for every selection: over a row or a column a change has made (the author's tint, which
   // an inserted row's cells and an inserted column's have), the selection's blue wins and the text
   // keeps the readable ink (#522).
   '&.rl-cell-selecting .rl-trow > .rl-tc:has(.rl-sel)': {
-    backgroundColor: 'Highlight',
+    backgroundColor: 'transparent',
     color: 'HighlightText',
     textDecorationColor: 'currentColor',
   },
