@@ -433,9 +433,23 @@ README-style snippets) holds the editor to it.
 - **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
   hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
   on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
-  the conversion is exact. `<details>` is closed unless the file says `open`; a closed section
-  with pending changes shows a bar and a count. These come after the inline tags, in the order of
-  #686.
+  the conversion is exact. These come after the inline tags, in the order of #686.
+- **`<details>` and `<div align>` as containers** (#688). A container is an opening tag line (with
+  the `<summary>` line under it, for a `details`) and a closing tag line, each a block of its own
+  with blank lines around it, at the top of the document, as GitHub needs to read the Markdown
+  between them; a tag with other text in its block is an HTML block with no Markdown inside (a later
+  phase). The tag lines are hidden, the Markdown inside is ordinary blocks (tracked edits and all),
+  and while the caret is in an open container a faint bracket stands in the margin. The summary is
+  one line, drawn bold with a triangle; a `details` with none shows "Details". A `<div>` hides its
+  tags and aligns what is inside (`align`); a `details` with no closing tag folds to the end of the
+  text, as on GitHub. Folding is view state and never written: closed unless the file says `open`,
+  nothing remembered, the triangle or ⌥⌘↓ and ⌥⌘↑ on the summary line toggle it, and Down on a
+  closed summary steps over the content. A section is open for as long as the caret, or a Find or
+  Review match, is in it, and closes again when that moves out. A closed section with pending
+  changes shows a bar and their count on its summary line, so changes never hide. Backspace and
+  Delete never join a paragraph into a tag line, nor the summary's line break away. Insert ›
+  Collapsible Section writes the structure (open, with the summary's text selected), and wraps a
+  selection of blocks with two insertions.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`

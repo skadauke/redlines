@@ -29,6 +29,7 @@ import {
   indentReason,
   inFrontMatter,
   selectionInTable,
+  setFold,
   setViewModeEffect,
   trackedEditAnnotation,
   trackingField,
@@ -628,6 +629,52 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     return done;
   };
 
+  /**
+   * Collapsible Section (#688): `<details>` with a `<summary>` and the blocks inside. Over a
+   * selection of blocks it goes around them (two insertions: the blocks are not rewritten); at the
+   * caret it is a new section after the block, as Table is. It opens, with the summary's text
+   * selected, because a section just made is one to write in (nothing is remembered).
+   */
+  const SUMMARY = 'Summary';
+  const collapsibleSection = (): boolean => {
+    const { doc } = view.state;
+    const { from, to, empty } = view.state.selection.main;
+    const head = `<details>\n<summary>${SUMMARY}</summary>\n\n`;
+    const open = (at: number) => {
+      const anchor = view.state.doc.toString().indexOf(`<summary>${SUMMARY}`, at);
+      if (anchor < 0) return;
+      const opener = view.state.doc.line(view.state.doc.lineAt(anchor).number - 1).from;
+      const start = anchor + '<summary>'.length;
+      view.dispatch({
+        selection: { anchor: start, head: start + SUMMARY.length },
+        effects: setFold.of({ from: opener, open: true }),
+      });
+    };
+    if (empty) {
+      const done = insertBlock(`${head}Text\n\n</details>`, '<details>', 0);
+      if (done) open(Math.max(0, from - 1));
+      return done;
+    }
+    // The blocks the selection touches, whole: from the start of the first to the end of the last.
+    const first = doc.lineAt(from);
+    let last = doc.lineAt(to);
+    if (to === last.from && last.number > first.number) last = doc.line(last.number - 1);
+    let start = first.from;
+    let end = last.to;
+    const tree = syntaxTree(view.state);
+    for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
+      if (node.to < start || node.from > end) continue;
+      start = Math.min(start, node.from);
+      end = Math.max(end, node.to);
+    }
+    const done = insert([
+      { from: start, to: start, insert: head },
+      { from: end, to: end, insert: '\n\n</details>' },
+    ]);
+    if (done) open(Math.max(0, start - 1));
+    return done;
+  };
+
   const codeBlock = (): boolean => {
     const nodes = atSelection(view.state);
     if (nodes.some(({ name }) => CODE_BLOCK.has(name))) {
@@ -1021,6 +1068,11 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       shortcut: 'Mod-Alt-t',
       // The first header cell's text is selected, so that typing names the column.
       run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
+    }),
+    command('paragraph', 'insert', {
+      id: 'block.details',
+      title: 'Collapsible Section',
+      run: collapsibleSection,
     }),
     command('paragraph', 'insert', {
       id: 'block.alert',

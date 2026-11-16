@@ -37,7 +37,16 @@ import {
   type Parsed,
   type Segment,
 } from '@redlines/format';
+import {
+  containersOf,
+  foldField,
+  headLine,
+  hiddenContainerLines,
+  isOpen,
+} from '../blocks/containers.ts';
 import { blankLines, commentSpans, keptLine } from '../blocks/hidden.ts';
+import { containerKeys } from '../blocks/container-keys.ts';
+import { containerBracket, drawContainers } from './container-draw.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS, LEVEL_COLS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
@@ -648,6 +657,8 @@ function analyze(state: EditorState, kept: number | null): Model {
   // Blank lines between blocks are structure, never lines (design: block editing).
   // The empty paragraph Return opened is drawn, wherever the caret is, while it is open.
   model.blocks.push(...blankLines(state, kept, openBlock(state)?.empty ?? null));
+  // The tag lines of containers, and what a closed section folds away (blocks/containers.ts).
+  model.blocks.push(...hiddenContainerLines(state));
   // The empty paragraph that is open is no blank line that a marker's line takes along.
   const open = openBlock(state)?.empty ?? null;
   const drawn = (line: Line) => open !== null && line.from <= open.to && line.to >= open.from;
@@ -1143,7 +1154,7 @@ interface Display {
   atomic: RangeSet<Atom>;
 }
 
-function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
+function atomicRanges(doc: Text, model: Model, extra: readonly Span[] = []): RangeSet<Atom> {
   // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
     ...model.hidden.map(({ from, to, parts }) => ({
@@ -1151,6 +1162,7 @@ function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
       to,
       visible: parts.some((part) => part.text),
     })),
+    ...extra.map(({ from, to }) => ({ from, to, visible: false })),
     ...model.blocks.map(({ from, to }) => ({
       from: Math.max(0, from - 1),
       to: Math.min(doc.length, to + 1),
@@ -1243,6 +1255,8 @@ function display(state: EditorState): Display {
     ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
   }
   const spans = changeSpans(model);
+  const drawing = state.field(viewModeField) === 'raw' ? null : containerDrawing(state, spans);
+  if (drawing) ranges.push(...drawing.ranges);
   for (const [n, className] of bars(doc, spans)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
@@ -1254,7 +1268,7 @@ function display(state: EditorState): Display {
     spans,
     kept,
     decorations: Decoration.set(ranges, true),
-    atomic: atomicRanges(doc, model),
+    atomic: atomicRanges(doc, model, drawing?.atoms),
   };
 }
 
@@ -1271,6 +1285,36 @@ export function trackedDecorations(state: EditorState): DecorationSet {
   return display(state).decorations;
 }
 
+/**
+ * The containers' drawing, with the changes that a closed section holds put on its summary line:
+ * a bar there (a span for each change, added to `spans`), and a count after the summary.
+ */
+function containerDrawing(state: EditorState, spans: ChangeSpan[]) {
+  const parsed = state.field(parsedField);
+  const colors = colorsOf(state);
+  const drawing = drawContainers(state, (from, to) => {
+    let count = 0;
+    for (const mark of parsed.marks) {
+      if (!isDrawnChange(mark)) continue;
+      const at = mark.segments[0]?.open.from ?? -1;
+      if (at >= from && at <= to) count++;
+    }
+    return count;
+  });
+  for (const container of containersOf(state)) {
+    if (isOpen(state, container)) continue;
+    const row = headLine(state, container).from;
+    for (const mark of parsed.marks) {
+      if (!isDrawnChange(mark)) continue;
+      const at = mark.segments[0]?.open.from ?? -1;
+      if (at >= container.bodyFrom && at <= container.end) {
+        spans.push({ from: row, to: row, color: colors.get(mark.entry.by) ?? 0 });
+      }
+    }
+  }
+  return drawing;
+}
+
 const trackedField = StateField.define<Display>({
   create: display,
   update(value, tr) {
@@ -1281,6 +1325,7 @@ const trackedField = StateField.define<Display>({
       tr.startState.facet(authorFacet) !== tr.state.facet(authorFacet) ||
       tr.startState.facet(lineBreakMarksFacet) !== tr.state.facet(lineBreakMarksFacet) ||
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
+      tr.startState.field(foldField, false) !== tr.state.field(foldField, false) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       // The caret onto a blank line, or off it, which is hidden again.
       (tr.selection !== undefined && keptLine(tr.state) !== value.kept) ||
@@ -1730,5 +1775,8 @@ export function trackedChanges(): Extension {
     rawHighlighting,
     colorTheme,
     theme,
+    foldField,
+    containerBracket,
+    containerKeys,
   ];
 }
