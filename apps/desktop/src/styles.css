@@ -327,9 +327,8 @@ body {
   color: var(--rl-red, #d42a1e);
 }
 
-/* A click on the eye: the pupil is red for a moment (titlebar.ts). */
-.rl-eye-flash svg circle {
-  fill: var(--rl-red, #d42a1e);
+/* The View button shows Redlines by a red bar in the page's margin, the app's change bar (#661). */
+.rl-icon-button svg .rl-view-bar {
   stroke: var(--rl-red, #d42a1e);
 }
 

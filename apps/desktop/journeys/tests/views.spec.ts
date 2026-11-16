@@ -2,6 +2,7 @@
 
 import { expect, test, type Journey } from '../src/journey.ts';
 import { isOpaque } from '../src/contrast.ts';
+import { OTHERS_CHANGES } from '../src/others-changes.ts';
 
 /**
  * Opens the eye's menu, which opens on hover after a short pause, and returns its items by their
@@ -72,18 +73,31 @@ test.describe('the eye @views', () => {
     expect(order.includes('Simple Look')).toBe(false);
   });
 
-  test('a click on the eye shows that it did something: the pupil is red for a moment', async ({
+  test('the View button is a page that shows the view: lines, a red bar, a #', async ({
     start,
   }) => {
-    const j = await start({ doc: 'Hello\n', tracking: false });
+    const j = await start({ doc: OTHERS_CHANGES, tracking: false, view: 'clean' });
     const eye = j.page.getByRole('button', { name: 'View', exact: true });
-    const pupil = () =>
-      eye.evaluate((button) => getComputedStyle(button.querySelector('circle')!).fill);
-    const rest = await pupil();
+    const bar = eye.locator('.rl-view-bar');
+    await expect(bar, 'Clean has no bar').toHaveCount(0);
+    await j.shot('view-button-clean');
     await eye.click();
-    expect(await pupil(), 'the pupil is red after the click').not.toBe(rest);
-    await j.shot('eye-clicked');
-    await expect(eye).not.toHaveClass(/rl-eye-flash/);
-    expect(await pupil(), 'and as it was after a moment').toBe(rest);
+    await expect(bar, 'Redlines has the bar').toHaveCount(1);
+    // It is the app's red: the color a probe takes from the same token.
+    const red = await j.page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--rl-red, #d42a1e)';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    expect(await bar.evaluate((path) => getComputedStyle(path).stroke), 'and it is red').toBe(red);
+    await j.page.mouse.move(400, 400);
+    await j.shot('view-button-redlines');
+    await j.page.mouse.move(400, 400);
+    await (await openEye(j)).item('Plain').click();
+    await expect(bar, 'Plain has no bar').toHaveCount(0);
+    await j.shot('view-button-plain');
   });
 });
