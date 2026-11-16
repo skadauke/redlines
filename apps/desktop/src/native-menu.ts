@@ -13,6 +13,7 @@ import {
   type SubmenuOptions,
 } from '@tauri-apps/api/menu';
 import type { ActionRow, MenuModel, MenuRow, MenuState, SubmenuRow } from './menu-model.ts';
+import type { ShortcutBook } from './shortcut-book.ts';
 
 type DrawnRow = NonNullable<SubmenuOptions['items']>[number];
 
@@ -26,9 +27,18 @@ export interface NativeMenu {
   activate(): Promise<void>;
 }
 
-/** Builds this window's menu bar. */
-export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
+/** A row's key as it is now: the person's own, when `book` has them, else the row's. */
+const keyOfRow = (row: ActionRow, book?: ShortcutBook) =>
+  book ? book.acceleratorOf(row) : row.accelerator;
+
+/**
+ * Builds this window's menu bar. With `book`, its rows have the person's own keys, and follow them
+ * when they change.
+ */
+export async function createNativeMenu(model: MenuModel, book?: ShortcutBook): Promise<NativeMenu> {
   let state: MenuState | null = null;
+  /** The items that have a key of their own to follow. */
+  const keyed: { row: ActionRow; item: MenuItem | CheckMenuItem }[] = [];
   /** One for each thing on the menu that follows the state. */
   const followers: ((next: MenuState) => void)[] = [];
 
@@ -47,8 +57,10 @@ export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
   // Tauri takes the actions out of the options it is given, so a row is never handed over itself:
   // the table goes on to serve the key handling.
   const drawAction = async (row: ActionRow): Promise<DrawnRow> => {
-    const { text, accelerator, action, checked, enabled, textFor } = row;
-    if (!checked && !enabled && !textFor) return { text, accelerator, action };
+    const { text, action, checked, enabled, textFor } = row;
+    const accelerator = keyOfRow(row, book);
+    // Without the shortcuts, a row with nothing to follow is handed over as it is.
+    if (!checked && !enabled && !textFor && !book) return { text, accelerator, action };
     const drawCheck = async (isChecked: (state: MenuState) => boolean) => {
       const check: CheckMenuItem = await CheckMenuItem.new({
         text,
@@ -61,6 +73,7 @@ export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
         },
       });
       follow(isChecked, (value) => void check.setChecked(value));
+      keyed.push({ row, item: check });
       return check;
     };
     const item = checked
@@ -68,6 +81,7 @@ export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
       : await MenuItem.new({ text, accelerator, action });
     follow(enabled, (value) => void item.setEnabled(value));
     follow(textFor, (value) => void item.setText(value));
+    if (!checked) keyed.push({ row, item });
     return item;
   };
 
@@ -124,6 +138,14 @@ export async function createNativeMenu(model: MenuModel): Promise<NativeMenu> {
   const windowsMenu = submenus[model.menus.findIndex((entry) => entry.windowsMenu)];
   const helpMenu = submenus[model.menus.findIndex((entry) => entry.helpMenu)];
   const menu = await Menu.new({ items: submenus });
+  // A key the person changes shows in the menu bar at once.
+  book?.subscribe(() => {
+    for (const { row, item } of keyed) {
+      item.setAccelerator(keyOfRow(row, book) ?? null).catch((error: unknown) => {
+        console.error(`Could not change the key of ${row.text}`, error);
+      });
+    }
+  });
 
   return {
     update: (next) => {
@@ -182,10 +204,14 @@ function matcher(accelerator: string): (event: KeyboardEvent) => boolean {
 }
 
 /** The rows that a key press stands in for, also those in submenus. */
-function rowsWithKeys(rows: readonly MenuRow[]): ActionRow[] {
+function rowsWithKeys(rows: readonly MenuRow[], book?: ShortcutBook): ActionRow[] {
   return rows.flatMap((row) => {
-    if ('rows' in row) return rowsWithKeys(row.rows);
-    return 'action' in row && row.accelerator && !row.keyInMenuOnly ? [row] : [];
+    if ('rows' in row) return rowsWithKeys(row.rows, book);
+    if (!('action' in row) || !keyOfRow(row, book)) return [];
+    // A key in the menu bar alone is the browser's or the editor's keymap's, unless the person
+    // gave the row a key of their own, and a registered command's is always the editor's.
+    const own = !!row.id && !row.id.startsWith('command:') && !!book && row.id in book.overrides();
+    return !row.keyInMenuOnly || own ? [row] : [];
   });
 }
 
@@ -193,14 +219,13 @@ function rowsWithKeys(rows: readonly MenuRow[]): ActionRow[] {
  * Handles the menu bar's shortcuts as key presses, for the browser, where there is no menu bar.
  * Returns a function that stops it.
  */
-export function installShortcuts(model: MenuModel): () => void {
-  const keys = model.menus
-    .flatMap(({ rows }) => rowsWithKeys(rows))
-    .map(({ accelerator, action }) => ({ matches: matcher(accelerator ?? ''), action }));
+export function installShortcuts(model: MenuModel, book?: ShortcutBook): () => void {
   const onKey = (event: KeyboardEvent) => {
     // Something nearer the key has it already, such as the editor's keymap.
     if (event.defaultPrevented) return;
-    const key = keys.find(({ matches }) => matches(event));
+    const key = model.menus
+      .flatMap(({ rows }) => rowsWithKeys(rows, book))
+      .find((row) => matcher(keyOfRow(row, book) ?? '')(event));
     if (!key) return;
     event.preventDefault();
     key.action();
@@ -210,10 +235,10 @@ export function installShortcuts(model: MenuModel): () => void {
 }
 
 /** The rows with a key of any kind, also those that leave it to the menu bar. */
-function keyedRows(rows: readonly MenuRow[]): ActionRow[] {
+function keyedRows(rows: readonly MenuRow[], book?: ShortcutBook): ActionRow[] {
   return rows.flatMap((row) => {
-    if ('rows' in row) return keyedRows(row.rows);
-    return 'action' in row && row.accelerator ? [row] : [];
+    if ('rows' in row) return keyedRows(row.rows, book);
+    return 'action' in row && keyOfRow(row, book) ? [row] : [];
   });
 }
 
@@ -227,13 +252,17 @@ function keyedRows(rows: readonly MenuRow[]): ActionRow[] {
  * nothing runs twice. The page sees the key before the menu bar does, in a comment box or the
  * find bar too. Returns a function that stops it.
  */
-export function installPlusKeys(model: MenuModel, state: () => MenuState | null): () => void {
-  const rows = model.menus
-    .flatMap(({ rows: menuRows }) => keyedRows(menuRows))
-    .filter(({ accelerator }) => accelerator?.endsWith('+='));
-  const withCtrl = (row: ActionRow) => (row.accelerator ?? '').split('+').includes('Ctrl');
+export function installPlusKeys(
+  model: MenuModel,
+  state: () => MenuState | null,
+  book?: ShortcutBook,
+): () => void {
+  const withCtrl = (row: ActionRow) => (keyOfRow(row, book) ?? '').split('+').includes('Ctrl');
   const onKey = (event: KeyboardEvent) => {
     if (event.defaultPrevented || event.key !== '+' || !event.metaKey || event.altKey) return;
+    const rows = model.menus
+      .flatMap(({ rows: menuRows }) => keyedRows(menuRows, book))
+      .filter((row) => keyOfRow(row, book)?.endsWith('+='));
     const row = rows.find((candidate) => withCtrl(candidate) === event.ctrlKey);
     if (!row) return;
     const current = state();

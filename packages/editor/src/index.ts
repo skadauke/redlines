@@ -393,6 +393,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     () => editor,
     report,
     (message) => options.onNotice?.(message),
+    options.commandKeys,
   );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);

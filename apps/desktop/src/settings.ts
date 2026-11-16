@@ -123,6 +123,11 @@ export interface Settings {
    * pasted into one of its documents is saved.
    */
   imageFolderName: string;
+  /**
+   * The person's own shortcuts (Preferences › Shortcuts, shortcuts.ts): a command's id to its key
+   * in CodeMirror's notation, or to "" for none. A command that isn't here has its own key.
+   */
+  shortcuts: Readonly<Record<string, string>>;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -152,6 +157,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
+  shortcuts: {},
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -214,7 +220,18 @@ export function loadSettings(): Settings {
       (typeof value['imageFolderName'] === 'string' &&
         imageFolderNameOf(value['imageFolderName'])) ||
       DEFAULT_SETTINGS.imageFolderName,
+    shortcuts: shortcutsOf(value['shortcuts']),
   };
+}
+
+/** The shortcuts as stored: ids to a key or "" for none; anything else is dropped. */
+function shortcutsOf(value: unknown): Settings['shortcuts'] {
+  const shortcuts: Record<string, string> = {};
+  if (typeof value !== 'object' || value === null) return shortcuts;
+  for (const [id, key] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof key === 'string' && key.length < 40) shortcuts[id] = key;
+  }
+  return shortcuts;
 }
 
 /**

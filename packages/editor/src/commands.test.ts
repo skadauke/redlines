@@ -115,6 +115,65 @@ describe('shortcuts', () => {
   });
 });
 
+describe('the person’s own keys', () => {
+  /** Keys that start from `own` and can be changed, as the app's shortcut book does. */
+  function keysOf(own: Record<string, string | undefined>) {
+    const listeners = new Set<() => void>();
+    return {
+      keys: {
+        keyOf: (id: string, fallback: string | undefined) => (id in own ? own[id] : fallback),
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => void listeners.delete(listener);
+        },
+      },
+      change(next: Record<string, string | undefined>) {
+        for (const id of Object.keys(own)) delete own[id];
+        Object.assign(own, next);
+        for (const listener of listeners) listener();
+      },
+    };
+  }
+
+  it('runs a command by the key it was given, not the one it came with, at once', () => {
+    const own = keysOf({});
+    const editor = mount({ commandKeys: own.keys });
+    const run = vi.fn(() => true);
+    editor.commands.register([command({ shortcut: 'Mod-b', run })]);
+
+    own.change({ 'format.bold': 'Mod-j' });
+    expect(press(editor, 'Mod-b').defaultPrevented).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+    expect(press(editor, 'Mod-j').defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('gives a command with no key one, and takes a cleared key away', () => {
+    const own = keysOf({});
+    const editor = mount({ commandKeys: own.keys });
+    const run = vi.fn(() => true);
+    editor.commands.register([command({ run }), command({ id: 'other', shortcut: 'Mod-k' })]);
+
+    own.change({ 'format.bold': 'Mod-j', other: undefined });
+    press(editor, 'Mod-j');
+    expect(run).toHaveBeenCalledOnce();
+    expect(press(editor, 'Mod-k').defaultPrevented).toBe(false);
+  });
+
+  it('lists a command with the key it has now, and the one it came with', () => {
+    const own = keysOf({ 'format.bold': 'Mod-j' });
+    const editor = mount({ commandKeys: own.keys });
+    editor.commands.register([command({ shortcut: 'Mod-b' })]);
+    expect(editor.commands.list()[0]).toMatchObject({
+      shortcut: 'Mod-j',
+      defaultShortcut: 'Mod-b',
+    });
+    own.change({});
+    expect(editor.commands.list()[0]?.shortcut).toBe('Mod-b');
+    expect(editor.commands.list()[0]?.defaultShortcut).toBeUndefined();
+  });
+});
+
 describe('keys the core binds too', () => {
   // CodeMirror's default keymap has these, and the formatting commands need them.
   const doc = '  One two.\n\nThree.\n';

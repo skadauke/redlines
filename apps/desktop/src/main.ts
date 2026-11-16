@@ -61,6 +61,8 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
+import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
+import { publishShortcutEntries } from './shortcuts-published.ts';
 import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
@@ -252,8 +254,15 @@ function dragFile(): void {
   });
 }
 
+// Every command's key, with the person's own over its own (shortcuts.ts): the editor's keys, the
+// menu bar and the browser's key handling all ask it. A change is kept in the settings.
+const shortcutBook = createShortcutBook(settings.shortcuts, (shortcuts) => {
+  settings = { ...settings, shortcuts: updateSettings({ shortcuts }).shortcuts };
+});
+
 const editor = createEditor(element('#editor'), {
   doc: '',
+  commandKeys: shortcutBook.commandKeys,
   author,
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
@@ -1035,6 +1044,9 @@ activatePlugins(editor, {}, DESKTOP_PLUGINS, {
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands, { browser: !isTauri });
+shortcutBook.setEntries(shortcutEntries(menuModel));
+// The Shortcuts pane of Preferences lists them, and has no menu bar of its own to read them from.
+publishShortcutEntries(shortcutBook.entries());
 const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
@@ -1182,7 +1194,8 @@ if (isTauri) {
   // The zoom rows were disabled until now.
   render();
   // ⌘+ typed as "+" reaches Zoom In through the page: the menu bar's keys have no plus key.
-  if (/Macintosh/.test(navigator.userAgent)) installPlusKeys(menuModel, () => menuState);
+  if (/Macintosh/.test(navigator.userAgent))
+    installPlusKeys(menuModel, () => menuState, shortcutBook);
   // A file the app gives this window, from its command line, the system (`open -a Redlines
   // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
   // been used by the time it opens, it takes a window of its own. The app gives documents alone.
@@ -1215,10 +1228,10 @@ if (isTauri) {
   // A new document always starts with Track Changes off (#660): the switch is the document's own,
   // written at save, so no setting and no earlier document decides it.
   windows?.ready();
-  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel, shortcutBook).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
-    installShortcuts(menuModel);
+    installShortcuts(menuModel, shortcutBook);
     return null;
   });
   if (nativeMenu) {
@@ -1230,7 +1243,7 @@ if (isTauri) {
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
 } else {
-  installShortcuts(menuModel);
+  installShortcuts(menuModel, shortcutBook);
   await controller.open('sample.md');
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
@@ -1259,6 +1272,7 @@ if (isTauri) {
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
+  shortcutBook.load(settings.shortcuts);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

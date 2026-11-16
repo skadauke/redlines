@@ -74,6 +74,7 @@ describe('settings', () => {
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
+      shortcuts: {},
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -105,6 +106,7 @@ describe('settings', () => {
       ],
       newDocumentFolder: '/Users/ada/Notes',
       imageFolderName: 'pictures',
+      shortcuts: { 'File/Save': 'Alt-Mod-s', 'command:format.bold': '' },
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
