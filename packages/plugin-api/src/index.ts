@@ -250,6 +250,12 @@ export interface AgentRequest {
    * with an id the provider doesn't list, the agent's own default runs (#530).
    */
   model?: string;
+  /**
+   * Whether the agent may use the web, for this run (#529): the host sets it from Preferences'
+   * switch, or from an Allow Once. Off, a provider that can lets the agent reach for the web and
+   * says so with `web` (`allowed: false`) instead of letting it through.
+   */
+  web?: boolean;
 }
 
 /** A model an agent can run, as Preferences and Ask's picker list it. */
@@ -290,7 +296,12 @@ export type AgentEvent =
    */
   | { type: 'status'; text: string; blocked?: BlockedRead }
   /** `finalText` is the last message, for an agent that never called reply. */
-  | { type: 'done'; finalText?: string }
+  | { type: 'done'; finalText?: string; web?: true }
+  /**
+   * The agent used the web (`allowed: true`), or reached for it with the switch off (`allowed:
+   * false`), which the host answers by asking the person (#529). `text` is the status line.
+   */
+  | { type: 'web'; allowed: boolean; text: string }
   /**
    * `setup` is true when Preferences › Agents can put it right: the agent is signed out, or too
    * old to run here.

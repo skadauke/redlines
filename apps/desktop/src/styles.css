@@ -754,6 +754,10 @@ body {
   animation: rl-rise 140ms ease-out;
 }
 
+.rl-notification-wide {
+  width: 360px;
+}
+
 .rl-notification-compact {
   flex-direction: row;
   align-items: flex-start;
@@ -782,6 +786,7 @@ body {
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
+  white-space: nowrap;
   cursor: default;
 }
 

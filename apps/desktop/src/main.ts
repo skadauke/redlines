@@ -351,11 +351,35 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
 // doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
+let webAsks = 0;
+const webAccess = {
+  web: () => loadSettings().webAccess,
+  allowWeb: () => void updateSettings({ webAccess: true }),
+  askWeb: (_agent: string, name: string, signal: AbortSignal) =>
+    new Promise<'once' | 'always' | 'no'>((resolve) => {
+      const done = (answer: 'once' | 'always' | 'no') => (card: { close(): void }) => {
+        signal.removeEventListener('abort', stopped);
+        card.close();
+        resolve(answer);
+      };
+      // Its own key: another run's card doesn't take this one's place.
+      const card = notifications.show({
+        key: `web-access ${++webAsks}`,
+        text: `${name} wants to use the web, to look something up or check a source.`,
+        dismissLabel: 'Don’t Allow',
+        onDismiss: () => done('no')(card),
+        secondaryAction: { label: 'Allow Once', run: done('once') },
+        action: { label: 'Allow Always', run: done('always') },
+      });
+      const stopped = () => done('no')(card);
+      signal.addEventListener('abort', stopped, { once: true });
+    }),
+};
 const agents =
   !isTauri && import.meta.env.DEV
     ? // A plain page has no agent programs: in development a scripted one stands in, which answers
       // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
-      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents(webAccess))
     : createMacAgents(
         isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
         createRelay(),
@@ -364,6 +388,9 @@ const agents =
           handles: () => loadSettings().agentHandles,
           // The model the person chose for each agent, read at every run.
           models: () => loadSettings().agentModels,
+          // The web (#529): one switch for every agent. An agent that reaches for it with the
+          // switch off asks here: Allow Once, or Allow Always, which turns the switch on.
+          ...webAccess,
           ...(isTauri
             ? {
                 more: async () =>
