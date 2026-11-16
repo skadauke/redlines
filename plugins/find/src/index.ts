@@ -2,7 +2,7 @@
 // that a reader never sees, so find searches the newest view of it and maps matches back to the
 // document. Replacing is an edit like typing, so Track Changes records it as substitutions.
 
-import type { Editor, EditorCommand } from '@redlines/editor';
+import { holdOpenAt, type Editor, type EditorCommand } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 import { findBar, type FindHost } from './bar.ts';
 import {
@@ -145,6 +145,9 @@ export const plugin: Plugin = {
   },
   activate: (context) =>
     createFind(context.editor as Editor, {
+      // A closed section opens while its match is the current one (#688).
+      onCurrentMatch: (match) =>
+        (context.editor as Editor).view.dispatch({ effects: holdOpenAt.of(match.from) }),
       toast: (toast) => context.toast?.(toast),
     }),
 };

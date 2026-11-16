@@ -30,7 +30,14 @@ import {
   placeHolds,
 } from './table-align.ts';
 import type { ColItem } from './table-cols.ts';
-import { ALIGN_FIRST, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+import {
+  ALIGN_FIRST,
+  fineTableEdit,
+  pendingOf,
+  ruleTwo,
+  tableEdit,
+  untrackedTableEdit,
+} from './table-ops.ts';
 import { outerPipeWrites } from './table-rules.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
@@ -56,12 +63,12 @@ import {
 } from './test-helpers.ts';
 import type { Leaf } from './test-helpers.ts';
 import type { Person, Range, TextChange } from './types.ts';
-import { expectEveryOrderRead, expectSound, readAs } from './oracle.ts';
+import { expectEveryOrderRead, expectSound, expectWidened, readAs } from './oracle.ts';
 import { newestView, originalView, originalViewOfText, reviewView } from './views.ts';
 
 const FRUIT =
   '| Fruit  | Count | Price |\n| :----- | ----- | ----: |\n| Apples | 3     | 1.20  |\n| Pears  | 5     | 0.90  |';
-const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
+const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs', 'r2zd', 's4ab', 't5cd', 'u6ef'];
 const trim = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
 const BOLD: FormatOp = { kind: 'inline', format: 'bold', on: true };
 /** The same body, byte for byte: a file with no pending change has no ledger. */
@@ -115,6 +122,9 @@ const said = (run: () => unknown) => {
   }
   return 'no error';
 };
+/** An edit that the fine rules refuse and `widen` writes: read alike in every order, rejected back. */
+const widened = (label: string, text: string, run: () => { changes: TextChange[] }, own?: string) =>
+  expectWidened(label, text, run().changes, own);
 const aligns = (text: string) => readTables(text, parse(text))[0]?.aligns;
 /** The first line of a file's table text: the header row. */
 const headerLine = (text: string) => trim(text).split('\n')[0];
@@ -283,13 +293,10 @@ describe('aligning a column, tracked (format §3.7)', () => {
       expectEveryOrderAlike('a pipe in a code span', done, exactly);
     });
 
-    it('is refused where the end of the last cell would make Markdown read it otherwise', () => {
+    it('is widened where the end of the last cell would make Markdown read it otherwise', () => {
       for (const end of ['b\\', '_b_', 'b_']) {
         const text = file(`| a | ${end} |\n| - | - |\n| c | d |`);
-        expect(
-          said(() => align(text, [0], 'right')),
-          end,
-        ).toBe(PLACE);
+        widened(end, text, () => align(text, [0], 'right'));
         // With Track Changes off no mark is written, and the delimiter row changes as asked.
         expect(
           said(() => edit(text, { kind: 'align', cols: [0], align: 'right' }, null)),
@@ -298,10 +305,10 @@ describe('aligning a column, tracked (format §3.7)', () => {
       }
       // The same in a header with no trailing pipe, where the mark is the line's end.
       const bare = file('a | _b_\n--|--\nc | d');
-      expect(said(() => align(bare, [0], 'right'))).toBe(PLACE);
+      widened('bare', bare, () => align(bare, [0], 'right'));
     });
 
-    it('is refused where the scan would not read the mark: an unclosed comment, a backtick paired below', () => {
+    it('is widened where the scan would not read the mark: an unclosed comment, a backtick paired below', () => {
       // The mark would be inside a comment that never closes, or inside a code span that the scan pairs
       // across the cells of the table: it would be no change, and its entry would be lost without a word.
       for (const body of [
@@ -311,10 +318,14 @@ describe('aligning a column, tracked (format §3.7)', () => {
         'a | `b\n--|--\nc | d`',
       ]) {
         const text = file(body);
-        expect(
-          said(() => align(text, [0], 'right')),
-          body,
-        ).toBe(PLACE);
+        // An unclosed comment is no text that a replacement can hold either: the refusal stays, as
+        // it is today (filed). A backtick that a later cell closes is widened.
+        if (body.includes('<!--'))
+          expect(
+            said(() => align(text, [0], 'right')),
+            body,
+          ).toBe(PLACE);
+        else widened(body, text, () => align(text, [0], 'right'));
         expect(
           said(() => edit(text, { kind: 'align', cols: [0], align: 'right' }, null)),
           body,
@@ -361,23 +372,23 @@ describe('aligning a column, tracked (format §3.7)', () => {
       }
     });
 
-    it('is refused after a delimiter run that the mark would change, and written after one that it would not', () => {
+    it('is widened after a delimiter run that the mark would change, and written after one that it would not', () => {
       // The mark's `<` makes a `*` that closes an emphasis one that can open as well, when what stands before
       // it is punctuation (a full stop, or the end of a marker): the rule of three then keeps `**a .*` from
       // closing. A run after a letter, and one with nothing before it that it could close, read as they did.
       for (const end of ['**a .*', '*a .**', '_a .__', '**a ~*', '**a )*', '**a _*']) {
         const text = file(`| a | ${end} |\n| - | - |\n| c | d |`);
-        expect(
-          said(() => align(text, [0], 'right')),
-          end,
-        ).toBe(PLACE);
+        widened(end, text, () => align(text, [0], 'right'));
       }
       // A marker closes the run before it, as the end of an insertion does: the file reads as its newest view
       // with the mark after it only where the run is not changed by it.
       const typed = file(`| a | **b<!--sub k3x9 *b-->**b<!--/k3x9-->* |\n| - | - |\n| c | d |`, {
         k3x9: 'bo',
       });
-      expect(said(() => align(typed, [0], 'right', ada, ['c2dd']))).toBe(PLACE);
+      // (the file before already reads differently once Bo's change is decided, so only the file
+      // as it stands is held to read as its newest view)
+      const after = align(typed, [0], 'right', ada, ['c2dd', ...IDS]).after;
+      expect(readAs(bodyOf(after)), 'typed').toBe(readAs(newestView(after).text));
       for (const end of ['b*', '*b*', '**b**', 'Price *', '**a b*', 'a *', '**', '*']) {
         const text = file(`| a | ${end} |\n| - | - |\n| c | d |`);
         const done = align(text, [0], 'right', ada, ['c2dd']).after;
@@ -385,7 +396,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       }
     });
 
-    it('is written only where Markdown reads the cell as it did, for every short ending', () => {
+    it('is written where Markdown reads the cell as it did, and widened elsewhere, for every short ending', () => {
       // Every ending of up to three characters over the characters that read as syntax, after each of five
       // beginnings: the mark is refused in words, or the file reads, as micromark reads it, as its newest view.
       const alphabet = ['b', ' ', '.', '*', '_', '~', ')', '\\'];
@@ -403,12 +414,16 @@ describe('aligning a column, tracked (format §3.7)', () => {
           if (readTables(text, parse(text))[0]?.rows[0]?.cells.length !== 2) continue;
           let done: string;
           try {
-            done = align(text, [0], 'right', ada, ['k3x9']).after;
+            const table = readTables(text, parse(text))[0]?.from ?? 0;
+            const op: TableOp = { kind: 'align', cols: [0], align: 'right', table };
+            done = applyChanges(text, fineTableEdit(text, op, context(ada, ['k3x9'])).changes);
           } catch (error) {
             expect(
               error instanceof EditError ? error.message : String(error),
               `${lead}${end}`,
             ).toBe(PLACE);
+            // The mark has no place: the change is widened into a replacement of the table.
+            widened(JSON.stringify(`${lead}${end}`), text, () => align(text, [0], 'right'));
             refused++;
             continue;
           }
@@ -422,7 +437,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       expect(refused).toBeGreaterThan(100);
     }, 60_000);
 
-    it('is refused where another change at the end of the cell would put the end of its text in front of the mark', () => {
+    it('is widened where another change at the end of the cell would put the end of its text in front of the mark', () => {
       // Bo's pending deletion of the backslash, or of the underscore: the cell reads fine now, and
       // rejecting the deletion would bring the backslash back in front of the mark, which it would
       // escape, or the underscore, whose flanking the mark would change.
@@ -440,10 +455,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       ] as const) {
         const text = byBo(file(`| a | ${end} |\n| - | - |\n| c | d |`), take);
         expect(newestView(text).text).not.toMatch(/[\\_]\s*\|/);
-        expect(
-          said(() => align(text, [0], 'right')),
-          end,
-        ).toBe(PLACE);
+        widened(end, text, () => align(text, [0], 'right'));
         // With Track Changes off no mark is written.
         expect(
           said(() => edit(text, { kind: 'align', cols: [0], align: 'right' }, null)),
@@ -504,27 +516,22 @@ describe('aligning a column, tracked (format §3.7)', () => {
     expect(parse(undone).ledger.marks).toEqual({});
   });
 
-  it('refuses another person’s pending alignment change, naming them', () => {
+  it('widens another person’s pending alignment change into a replacement of the table', () => {
     const one = align(start, [1], 'center').after;
-    expect(said(() => align(one, [0], 'right', bo, ['c2dd']))).toBe(
-      "Ada Lovelace's alignment change is pending. Decide it first.",
-    );
+    widened('Bo beside Ada’s', one, () => align(one, [0], 'right', bo, ['c2dd', ...IDS]));
     expect(said(() => align(start, [0], 'left', ada))).toBe(
       'The columns are already aligned that way.',
     );
   });
 
-  it('is refused while a column is pending, in words, and plain is allowed', () => {
+  it('is widened while a column is pending, and plain is allowed', () => {
     const pending = {
       inserted: edit(start, { kind: 'insertCols', after: 1 }, bo, ['c2dd']).after,
       moved: edit(start, { kind: 'moveCols', cols: [0], to: 3 }, bo, ['c2dd', 'f3gg']).after,
       deleted: edit(start, { kind: 'deleteCols', cols: [1] }, bo, ['c2dd']).after,
     };
     for (const [name, text] of Object.entries(pending)) {
-      expect(
-        said(() => align(text, [0], 'center')),
-        name,
-      ).toBe(COLUMNS_FIRST);
+      widened(name, text, () => align(text, [0], 'center'));
       const table = readTables(text, parse(text))[0];
       expect(table && ruleTwo('align', pendingOf(table, parse(text)), true), name).toBe(
         COLUMNS_FIRST,
@@ -555,7 +562,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
     }
   }, 60_000);
 
-  it('is refused while the header is a pending row change, in words; plain is allowed', () => {
+  it('is widened while the header is a pending row change; plain is allowed', () => {
     const states: [string, string][] = [
       [
         'a row inserted above it',
@@ -579,10 +586,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
       expect(pending?.align, name).toBe(false);
       expect(pending && ruleTwo('align', pending, true), name).toBe(ROWS_FIRST);
       expect(pending && ruleTwo('align', pending, false), name).toBeNull();
-      expect(
-        said(() => align(text, [1], 'center', ada, ['k3x9'])),
-        name,
-      ).toBe(ROWS_FIRST);
+      widened(name, text, () => align(text, [1], 'center', ada, IDS), 'ada');
       // Plain alignment writes no mark, and is allowed.
       const plain = edit(text, { kind: 'align', cols: [1], align: 'center' }, null);
       expect(
@@ -599,7 +603,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
     );
   });
 
-  it('refuses a row operation on the header while it is pending, tracked and plain, and allows the others', () => {
+  it('widens a tracked row operation on the header while it is pending, refuses it plain, and allows the others', () => {
     // A header and three rows.
     const four = file(`${FRUIT}\n| Plums  | 7     | 2.00  |`);
     const pending = align(four, [1], 'center').after;
@@ -626,10 +630,20 @@ describe('aligning a column, tracked (format §3.7)', () => {
       [null, 'plain'],
     ] as const) {
       for (const shape of refused) {
-        expect(
-          said(() => edit(pending, shape, who, ['c2dd', 'f3gg'])),
-          `${label} ${JSON.stringify(shape)}`,
-        ).toBe(ALIGN_FIRST);
+        const name = `${label} ${JSON.stringify(shape)}`;
+        // Plain stays refused (nothing tracked to widen); a tracked edit is a replacement of the table.
+        if (who === null)
+          expect(
+            said(() => edit(pending, shape, who, IDS)),
+            name,
+          ).toBe(ALIGN_FIRST);
+        else
+          widened(
+            name,
+            pending,
+            () => edit(pending, shape, who, IDS),
+            who === ada ? 'ada' : undefined,
+          );
       }
       for (const shape of allowed) {
         const name = `${label} ${JSON.stringify(shape)}`;
@@ -641,7 +655,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
     }
   });
 
-  it('refuses an agent’s edit of the table that adds a row above the header or takes it out', () => {
+  it('widens an agent’s edit of the table that adds a row above the header or takes it out', () => {
     const text = file(`Intro.\n\n${FRUIT}\n\nAfter.`);
     const one = align(text, [1], 'center').after;
     const rows = CENTERED.split('\n');
@@ -649,10 +663,10 @@ describe('aligning a column, tracked (format §3.7)', () => {
       suggestReplace(one, CENTERED, table.join('\n'), context(claudeAda, ['c2dd', 'f3gg', 'h4jj']));
     const plums = '| Plums  | 7     | 2.00  |';
     // A row above the header, and the header taken out.
-    expect(
-      said(() => agent([plums, rows[1] ?? '', rows[0] ?? '', rows[2] ?? '', rows[3] ?? ''])),
-    ).toBe(ALIGN_FIRST);
-    expect(said(() => agent([rows[2] ?? '', rows[1] ?? '', rows[3] ?? '']))).toBe(ALIGN_FIRST);
+    widened('row above', one, () =>
+      agent([plums, rows[1] ?? '', rows[0] ?? '', rows[2] ?? '', rows[3] ?? '']),
+    );
+    widened('header out', one, () => agent([rows[2] ?? '', rows[1] ?? '', rows[3] ?? '']));
     // A row below the header is written, and decided in every order.
     const below = applyChanges(
       one,
@@ -664,7 +678,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
     expectNoDecisionRefused('an agent’s row', below);
   });
 
-  it('refuses an agent’s replacement that renames every cell of the header, and writes one that keeps a cell', () => {
+  it('widens an agent’s replacement that renames every cell of the header, and writes one that keeps a cell', () => {
     // No cell of the header is left to match its old row, so the table is compared as the header deleted and
     // another row put in: refused, as the row above the header and the header taken out are. A header that
     // keeps a cell is the same header with some cells changed, which are written as substitutions in front of
@@ -679,7 +693,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
         [header, rows[1] ?? '', rows[2] ?? '', rows[3] ?? ''].join('\n'),
         context(claudeAda, ['c2dd', 'f3gg', 'h4jj']),
       );
-    expect(said(() => agent('| Food   | Number | Cost |'))).toBe(ALIGN_FIRST);
+    widened('renamed', one, () => agent('| Food   | Number | Cost |'));
     // The header's line: the table has paragraphs around it.
     const headerOf = (t: string) =>
       trim(t)
@@ -699,7 +713,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
 
   // A tracked column operation would leave the old row a cell short or long in some order of decisions
   // (rule 5, and Call 6). With Track Changes off the old row is kept in step: see the plain operations below.
-  it('still refuses every tracked column operation while it is pending, by Bo and by Ada', () => {
+  it('widens every tracked column operation while it is pending, by Bo and by Ada', () => {
     const done = align(start, [1], 'center').after;
     for (const who of [bo, ada]) {
       for (const shape of [
@@ -707,10 +721,7 @@ describe('aligning a column, tracked (format §3.7)', () => {
         { kind: 'deleteCols', cols: [1] },
         { kind: 'moveCols', cols: [0], to: 2 },
       ] satisfies Shape[]) {
-        expect(
-          said(() => edit(done, shape, who, ['c2dd', 'f3gg'])),
-          `${who.handle} ${shape.kind}`,
-        ).toBe(ALIGN_FIRST);
+        widened(`${who.handle} ${shape.kind}`, done, () => edit(done, shape, who, IDS), who.handle);
       }
     }
   });
@@ -927,9 +938,7 @@ describe('the span form, written by another tool', () => {
     expect(trim(two).startsWith(MARK)).toBe(true);
     same(applyChanges(two, reject(two, 'k3x9')), file(FRUIT));
     // Another person's is refused, naming them; plain Align changes the old row as well.
-    expect(said(() => align(SPAN, [0], 'right', bo, ['c2dd']))).toBe(
-      "Ada Lovelace's alignment change is pending. Decide it first.",
-    );
+    widened('Bo beside a span', SPAN, () => align(SPAN, [0], 'right', bo, ['c2dd', ...IDS]));
     const plain = edit(SPAN, { kind: 'align', cols: [0], align: 'right' }, null).after;
     expect(aligns(plain)).toEqual(['right', 'center', 'right']);
     expect(aligns(applyChanges(plain, reject(plain, 'k3x9')))).toEqual(['right', '', 'right']);
@@ -965,7 +974,7 @@ describe('the span form, written by another tool', () => {
     expectEveryOrderAlike('a deletion under a span', second, exactly);
   }, 60_000);
 
-  it('refuses a column operation and a row operation on the header while it is pending', () => {
+  it('widens a tracked column or row operation on the header while it is pending, and refuses it plain', () => {
     for (const who of [bo, null]) {
       for (const shape of [
         { kind: 'insertCols', after: 1 },
@@ -975,10 +984,14 @@ describe('the span form, written by another tool', () => {
         { kind: 'deleteRows', rows: [0] },
         { kind: 'moveRows', rows: [0], to: 3 },
       ] satisfies Shape[]) {
-        expect(
-          said(() => edit(SPAN, shape, who, ['c2dd', 'f3gg'])),
-          `${who?.handle} ${shape.kind}`,
-        ).toBe(ALIGN_FIRST);
+        const name = `${who?.handle} ${shape.kind}`;
+        // Plain stays refused; a tracked edit is a replacement of the table.
+        if (who === null)
+          expect(
+            said(() => edit(SPAN, shape, who, IDS)),
+            name,
+          ).toBe(ALIGN_FIRST);
+        else widened(name, SPAN, () => edit(SPAN, shape, who, IDS));
       }
     }
   });
@@ -1816,14 +1829,16 @@ describe('a plain column operation beside a pending alignment change (format §3
       { kind: 'moveCols', cols: [0], to: 2 },
     ] satisfies Shape[];
 
-    it('tracked, by Ada or by Bo, with the words that say what to do', () => {
+    it('tracked, by Ada or by Bo, is widened', () => {
       for (const text of [POINT, align(file(FRUIT), [1], 'center').after]) {
         for (const who of [ada, bo]) {
           for (const shape of SHAPES) {
-            expect(
-              said(() => edit(text, shape, who, ['c2dd', 'f3gg'])),
+            widened(
               `${who.handle} ${shape.kind}`,
-            ).toBe(ALIGN_FIRST);
+              text,
+              () => edit(text, shape, who, IDS),
+              who.handle,
+            );
           }
         }
       }
@@ -2339,7 +2354,7 @@ describe('a plain column operation beside a pending alignment change (format §3
         const cols = Array.from({ length: width }, (_, c) => c).filter(() => random() < 0.5);
         const target = pick(['left', 'center', 'right', ''] as const);
         const aligned = cols.length > 0 ? cols : [0];
-        text = align(text, aligned, target, ada, ['k3x9']).after;
+        text = align(text, aligned, target, ada, IDS).after;
         steps.push(`align ${aligned.join(',')} ${target}`);
         const last = table()?.rows[0]?.cells.at(-1);
         if (!odd && last && random() < 0.3) {
@@ -3495,18 +3510,19 @@ describe('a point alignment change beside other marks and edits', () => {
     // order, neither all accepted nor all rejected, can leave a backslash or a delimiter run right in front of
     // the mark, which Markdown then reads otherwise: the writer tries the orders of the changes in that cell.
     const aligned = (body: string, marks: Record<string, string>, who = ada) =>
-      align(file(body, marks), [0], 'right', who, ['k3x9']).after;
+      align(file(body, marks), [0], 'right', who, IDS).after;
+    const wide = (label: string, body: string, marks: Record<string, string>) => {
+      const text = file(body, marks);
+      return widened(label, text, () => align(text, [0], 'right', ada, IDS), 'ada');
+    };
 
-    it('is refused where deciding some of the changes would leave a delimiter run in front of it', () => {
+    it('is widened where deciding some of the changes would leave a delimiter run in front of it', () => {
       // Bo deletes the `x` after `**a .*` and Ada types `b` after it: with the typing rejected and the
       // deletion accepted the run ends the cell, and the mark after it makes the rule of three keep it from
       // closing. All accepted ends in `b`, all rejected in `x`.
       const body =
         '| h | **a .*<!--del c2dd x--><!--ins f3gg-->b<!--/f3gg--> |\n| - | - |\n| c | d |';
-      expect(
-        said(() => aligned(body, { c2dd: 'bo', f3gg: 'ada' })),
-        'exposed',
-      ).toBe(PLACE);
+      wide('exposed', body, { c2dd: 'bo', f3gg: 'ada' });
       // Nothing that exposes a run: the same cell with a plain `x` in front of the changes is written.
       const plain = body.replace('<!--del c2dd x-->', 'x<!--del c2dd y-->');
       const done = aligned(plain, { c2dd: 'bo', f3gg: 'ada' });
@@ -3515,14 +3531,14 @@ describe('a point alignment change beside other marks and edits', () => {
       expectNoDecisionRefused('plain x', done);
     });
 
-    it('is refused where a backslash would be brought back in front of it by a decision of two changes', () => {
+    it('is widened where a backslash would be brought back in front of it by a decision of two changes', () => {
       // `a\` with a pending deletion of `b` after it and a typing: the deletion accepted and the typing
       // rejected leaves the backslash right in front of the mark.
       const body = '| h | a\\<!--del c2dd b--><!--ins f3gg-->c<!--/f3gg--> |\n| - | - |\n| c | d |';
-      expect(said(() => aligned(body, { c2dd: 'bo', f3gg: 'ada' }))).toBe(PLACE);
+      wide('backslash', body, { c2dd: 'bo', f3gg: 'ada' });
     });
 
-    it('is refused where deciding the changes in the cell would leave no table to decide it in', () => {
+    it('is refused, as it is today, where deciding the changes in the cell would leave no table to decide it in', () => {
       // A header with no leading pipe, in which Bo commented over a character of `b~~` and replaced another:
       // accepting his deletions and rejecting his insertion empties the cell, and the header, which then
       // starts with the closer of the comment, is no table. Rejecting the alignment change would then be
@@ -3558,7 +3574,7 @@ describe('a point alignment change beside other marks and edits', () => {
       expect(expectNoDecisionRefused('bold, then the alignment', done)).toBeGreaterThan(2);
     }, 60_000);
 
-    it('is written after up to two changes in the cell, and refused after more in words that say what to do', () => {
+    it('is written after up to two changes in the cell, and widened after more', () => {
       const ids = ['c2dd', 'f3gg', 'h4jj'];
       const typing = (n: number) =>
         ['b', 'c', 'd']
@@ -3571,7 +3587,7 @@ describe('a point alignment change beside other marks and edits', () => {
       expect(expectNoDecisionRefused('two changes', two)).toBeGreaterThan(6);
       // Three are too many to look at in every order. Deciding one of them leaves two, and then it is written.
       const three = file(`| h | a${typing(3)} |\n| - | - |\n| c | d |`, marks);
-      expect(said(() => align(three, [0], 'right', ada, ['k3x9']))).toBe(TOO_MANY);
+      widened('three', three, () => align(three, [0], 'right', ada, IDS));
       const decided = applyChanges(three, accept(three, 'c2dd'));
       const done = align(decided, [0], 'right', ada, ['k3x9']).after;
       expectEveryOrderAlike('after one is decided', done, exactly);
@@ -3811,7 +3827,7 @@ describe('a point alignment change beside other marks and edits', () => {
       expect(words.filter(({ key }) => key !== '\\')).toEqual([]);
       expect(words.length).toBeGreaterThan(0);
       expect(total).toBeGreaterThan(800);
-    });
+    }, 60_000);
 
     it('refuses a comment that would put its closer in front of a run that the mark follows', () => {
       // `*b**` is written, the run `**` after a letter. A comment over `*b` ends between the `b` and the
@@ -5035,10 +5051,10 @@ describe('a point alignment change beside a column change, as a merge leaves the
       const steps: string[] = [];
       const ids = () => [...(rich ? MORE : POOL)].sort(() => random() - 0.5);
       const tableOf = () => readTables(text, parse(text))[0];
-      /** An operation of Bo's, tracked, or nothing where it is refused. */
+      /** An operation of Bo's, tracked finely, or nothing where the fine rules refuse it. */
       const operate = (op: TableOp) => {
         try {
-          text = applyChanges(text, tableEdit(text, op, context(bo, ids())).changes);
+          text = applyChanges(text, fineTableEdit(text, op, context(bo, ids())).changes);
           steps.push(JSON.stringify(op));
         } catch (error) {
           if (!(error instanceof EditError)) throw error;

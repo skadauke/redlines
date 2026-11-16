@@ -758,6 +758,10 @@ body {
   animation: rl-rise 140ms ease-out;
 }
 
+.rl-notification-wide {
+  width: 360px;
+}
+
 .rl-notification-compact {
   flex-direction: row;
   align-items: flex-start;
@@ -786,6 +790,7 @@ body {
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
+  white-space: nowrap;
   cursor: default;
 }
 
@@ -862,6 +867,13 @@ body {
   .rl-sidebar,
   .rl-sidebar-folder svg {
     transition: none;
+  }
+}
+
+/* A table's empty header cells show a placeholder on screen; the page doesn't print it. */
+@media print {
+  .rl-tc-fill::before {
+    content: none !important;
   }
 }
 

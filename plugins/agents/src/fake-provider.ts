@@ -90,6 +90,8 @@ export function fakeProvider(options: {
   readLimit?: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox, as an OpenClaw agent. */
   toolbox?: false;
+  /** The models it lists, as a provider's `models`. */
+  models?: AgentProvider['models'];
   state?: AgentState;
   /** How it is detected, for a test that holds detection; by default as `state` says, at once. */
   detect?: () => Promise<AgentState>;
@@ -99,6 +101,7 @@ export function fakeProvider(options: {
     name: options.name ?? 'Claude',
     readLimit: options.readLimit ?? 'folder',
     ...(options.toolbox === false ? { toolbox: false as const } : {}),
+    ...(options.models ? { models: options.models } : {}),
     requests: [],
     script: options.script,
     detect:

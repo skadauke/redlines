@@ -297,7 +297,7 @@ The window, on the desktop:
   Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
   Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  available; an item whose command isn't registered is left out. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View has Show/Hide Word Count (#536). Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
   closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
@@ -408,6 +408,57 @@ Redlines covers everything in the Markdown Guide's
   `.Rmd` file are kept byte for byte and shown as written.
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
+
+**HTML as GitHub draws it** (#686). What Redlines shows in Clean is as close as possible to what
+GitHub renders: GFM, GFM's escaped tags, and GitHub's list of allowed HTML. The aim is a standard,
+not perfection. The list (elements, attributes and protocols, from html-pipeline's
+`SanitizationFilter`) is one module, `github-html.ts` in `@redlines/format`, which Quick Look can
+share, and a check in development (micromark and GFM, then a sanitizer with the same list, over
+README-style snippets) holds the editor to it.
+
+- **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
+  no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
+  as folding and opening a block's source, are view state and never written.
+- **Quick Look** (#691) draws the same list from tokens, since its JavaScriptCore has no DOM: the
+  source is never passed through, an attribute is kept only if GitHub keeps it and a static page
+  can use it (never `id`, `name`, `style`, `class`, `srcset` or a handler), and a remote image is
+  its alt text. `<details>` is WebKit's own, closed unless the file says `open` (ruling: a static
+  preview shows what GitHub shows at rest, and WebKit opens it on a click without script).
+- **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
+  `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
+  `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
+  `<sup>` are, and edited in place. `ins`, `del` and `s` use the text's ink, never an author's
+  color; `mark` uses GitHub's yellow; `title` shows as an app hint. Removing a pair is a format
+  change (`-html=TAG`, format §2.6). `<br>` is a line break everywhere and `<wbr>` is invisible,
+  each one caret step. Shift-Return stays Markdown's hard break; `<br>` is written only in table
+  cells.
+- **The nine tags GFM escapes** (script, style, iframe, title, textarea, xmp, noembed, noframes,
+  plaintext) show as text. `<u>`, `font`, `center` and other unknown tags drop their tags and keep
+  their text. Underline has no command.
+- **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
+  hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
+  on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
+  the conversion is exact. These come after the inline tags, in the order of #686.
+- **`<details>` and `<div align>` as containers** (#688). A container is an opening tag line (with
+  the `<summary>` line under it, for a `details`) and a closing tag line, each a block of its own
+  with blank lines around it, at the top of the document, as GitHub needs to read the Markdown
+  between them; a tag with other text in its block is an HTML block with no Markdown inside (a later
+  phase). The tag lines are hidden, the Markdown inside is ordinary blocks (tracked edits and all),
+  and while the caret is in an open container a faint bracket stands in the margin. The summary is
+  one line, drawn bold with a triangle; a `details` with none shows "Details". A `<div>` hides its
+  tags and aligns what is inside (`align`); a `details` with no closing tag folds to the end of the
+  text, as on GitHub. Folding is view state and never written: closed unless the file says `open`,
+  nothing remembered, the triangle or ⌥⌘↓ and ⌥⌘↑ on the summary line toggle it, and Down on a
+  closed summary steps over the content. A section is open for as long as the caret, or a Find or
+  Review match, is in it, and closes again when that moves out. A closed section with pending
+  changes shows a bar and their count on its summary line, so changes never hide. Backspace and
+  Delete never join a paragraph into a tag line, nor the summary's line break away. Insert ›
+  Collapsible Section writes the structure (open, with the summary's text selected), and wraps a
+  selection of blocks with two insertions.
+- **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
+  WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
+  `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
+  anchors.
 
 **Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
 address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
@@ -1059,6 +1110,7 @@ menus, shortcuts, the palette, plugins and agents.
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
 | In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
+| Move a paragraph, list item or block up, down | ⌥↑ and ⌥↓ (the blocks a selection covers move together; tracked, it is one change that is accepted or rejected whole, format §3.14) | Alt+Up and Down |
 | In a table: insert column left, right; delete column | ⌥⌘← and ⌥⌘→; ⌃⌘⌫                                                                 | Ctrl+Alt+Left and Right; Ctrl+Win+Backspace |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | In a table: clear cells; delete emptied rows, columns, the table | ⌫ or ⌦; again once whole rows, columns or the table are selected and empty                  | Backspace or Delete; again       |
@@ -1219,7 +1271,7 @@ a new email under the same name becomes an alias in the ledger
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes and cross-references; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 
@@ -1877,6 +1929,19 @@ so a file's authors (`claude-<person>`) stay what they were; a mention of the ol
 nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
 every look at the agents, so a change reaches the open documents' pickers at once.
 
+**Default agent** (#528). Once more than one agent is set up (a program found on this Mac, or an
+OpenClaw agent), the first row of the pane is a choice of them, by the names they are shown as. An Ask
+that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
+first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
+
+**Models** (#530). A provider lists the models its program can be told to run (`AgentProvider.models`:
+Claude Code's aliases Opus, Sonnet and Haiku, and a short list for Codex, which has no command that
+lists them); an OpenClaw agent lists none, because its Gateway chooses, so its card has no Model field.
+A card's Model field is Default, which says nothing and leaves the program's own default, or one of the
+list; the choice is kept in the app's settings (`agentModels`, by agent id) and reaches every run of the
+agent, a comment's and an Ask's. A request can carry its own model (`AgentRequest.model`), which Ask's
+picker uses; the program is told only a model its provider lists.
+
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
 button, and Check Again always:
@@ -1887,6 +1952,12 @@ button, and Check Again always:
   installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
   <package>@latest` for a global npm install, and the agent's own `update` for any other
   (`claude update`, `codex update`). Redlines looks again when it ends.
+- **A newer version** (#527): a program that is fine but older than the newest shows Update too, and
+  says "Version 2.2.0 is available." Update shows only then, or when the program is too old. The newest
+  is the version npm's registry lists for the agent's package (the one its own updater installs), which
+  the app asks for with the system's `curl` at a fixed address, sending nothing of the person's, and
+  keeps for six hours; Check Again asks afresh. A look that fails (offline) shows no Update and says
+  nothing.
 - **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
   opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
   the same command and looks again when the person comes back.
@@ -2021,6 +2092,13 @@ while the setting allows it), and the answer is remembered for that agent and fo
 settings, never in the document: an answer narrower than the setting stands, and one wider than
 it is held to it and kept, and stands again if the setting is widened. A document in the home
 folder itself, or in the disk's root, has no folder to read, and is read as This document.
+**Web access** is one switch for every agent, Web access in Preferences › Agents, off by default.
+Off, Claude Code's web tools and Codex's search are not allowed to the run, and an agent that reaches
+for the web (a call to a web tool; for Codex, a `curl` or `wget` command, which its profile holds back)
+stops the run, and a card in the corner asks: Don't Allow, Allow Once (this run, which starts again
+with the web), or Allow Always, which turns the switch on. On, they are allowed to every run. An
+answer that used the web says so under it in Ask's bubble. An agent the person added, which is held
+to read-only by the host's rule, is not given the web.
 Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
 update, signed out, signed in), the remembered answers with a Forget button for each, and Show
 Agent Logs.

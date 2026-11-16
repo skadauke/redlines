@@ -48,6 +48,11 @@ export const ASK_STYLE = `
   white-space: pre-wrap;
 }
 .rl-qa-turn + .rl-qa-turn { margin-top: ${px(8)}; padding-top: ${px(6)}; border-top: 1px solid var(--rl-rule); }
+.rl-qa-web {
+  margin-top: ${px(4)};
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small-scaled);
+}
 .rl-qa-answer p { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
 .rl-qa-answer ul, .rl-qa-answer ol { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
 .rl-qa-answer ul { padding-left: ${px(16)}; }

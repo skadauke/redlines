@@ -1,0 +1,185 @@
+// Moving blocks (format §3.14): ⌥↑ and ⌥↓ move the paragraph, item or block the caret is in, or the
+// blocks a selection covers, one place among their siblings; a drag moves them to a drop line
+// (`drag.ts`). Both are one edit, written by the format: tracked with Track Changes on (a deletion
+// at the old place and an insertion at the new, one group, or a widened replacement where those can't
+// be written), plain with it off, and one step to undo.
+
+import { isolateHistory } from '@codemirror/commands';
+import { ChangeSet, EditorSelection, type EditorState, Transaction } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+import {
+  type BlockGap,
+  type BlockRun,
+  blockRunAt,
+  EditError,
+  moveBlockEdits,
+  neighbourGap,
+  newestView,
+  trackedBlockMove,
+  Untrackable,
+} from '@redlines/format';
+import type { Range } from '@redlines/format';
+import {
+  markupViewFacet,
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from '../tracked/field.ts';
+import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
+import {
+  authoredChanges,
+  contextFor,
+  refusedEditEffect,
+  trackingField,
+  untrackedChanges,
+} from '../tracked/typing.ts';
+
+/** The run the selection names, with Raw and several selections excluded. */
+export function runOfSelection(state: EditorState): BlockRun | undefined {
+  if (state.field(viewModeField, false) === 'raw') return undefined;
+  if (state.selection.ranges.length > 1) return undefined;
+  const { from, to } = state.selection.main;
+  return blockRunAt(state.doc.toString(), { from, to });
+}
+
+/** Why the blocks at the selection can't move up or down, or undefined when they can. */
+export function moveBlocksReason(state: EditorState, up: boolean): string | undefined {
+  const run = runOfSelection(state);
+  if (!run) return 'Put the caret in a paragraph, a list item or a block.';
+  if (neighbourGap(run, up)) return undefined;
+  const many = run.count > 1;
+  return `${many ? 'These blocks are' : 'This block is'} at the ${up ? 'top' : 'bottom'} already.`;
+}
+
+/** ⌥↑ and ⌥↓: moves the blocks one place. False in Raw and with several selections; at the edge it does nothing. */
+export function moveBlocks(view: EditorView, up: boolean): boolean {
+  const run = runOfSelection(view.state);
+  if (!run) return false;
+  const gap = neighbourGap(run, up);
+  // Nothing above the first or below the last: the command is disabled (`moveBlocksReason` says why),
+  // and the key does nothing, with no notice.
+  if (!gap) return true;
+  return moveRunTo(view, run, gap);
+}
+
+/** Moves `run` to `gap` and keeps it selected, as it was (a caret stays at its place in the text). */
+export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boolean {
+  const { state } = view;
+  const text = state.doc.toString();
+  const tracking = state.field(trackingField);
+  let changes: ChangeSet;
+  let moved: Range;
+  let untracked = !tracking;
+  try {
+    if (tracking) {
+      try {
+        const done = trackedBlockMove(text, run, gap, contextFor(state));
+        if (!done) return false;
+        changes = ChangeSet.of(done.changes, state.doc.length);
+        moved = done.moved;
+      } catch (error) {
+        if (!(error instanceof Untrackable)) throw error;
+        // Not even the widened write holds it: the person is asked, and the move is made untracked
+        // (design: widen, alert or disable, §3.1), never refused.
+        untracked = true;
+        const plain = plainMove(state, text, run, gap, true);
+        if (!plain) return false;
+        ({ changes, moved } = plain);
+      }
+    } else {
+      const plain = plainMove(state, text, run, gap);
+      if (!plain) return false;
+      ({ changes, moved } = plain);
+    }
+  } catch (error) {
+    if (error instanceof EditError) {
+      const message = error.message;
+      view.dispatch({ effects: refusedEditEffect.of(message) });
+      return true;
+    }
+    throw error;
+  }
+  const after = changes.apply(state.doc).toString();
+  const selection = selectionAfter(state, after, run, moved);
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full')];
+  if (tracking && untracked) {
+    const asker = state.facet(untrackedAskFacet);
+    if (asker) {
+      // Held for the sheet: Make Edit makes the same move without tracking, Cancel drops it.
+      view.dispatch({
+        effects: heldEditEffect.of({
+          reason: 'accept-pending',
+          words: { title: TOO_MANY_BLOCKS },
+          doc: state.doc,
+          changes,
+          selection,
+          annotations: [Transaction.userEvent.of('move.block'), ...annotations],
+          scrollIntoView: true,
+        }),
+      });
+      return true;
+    }
+    annotations.push(untrackedAnswerAnnotation.of(true));
+  }
+  view.dispatch({
+    changes,
+    selection,
+    userEvent: 'move.block',
+    annotations,
+    effects:
+      tracking && !untracked && state.field(viewModeField) === 'clean'
+        ? [setViewModeEffect.of(state.facet(markupViewFacet))]
+        : [],
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+/** The sheet's question for a move that no tracked write holds. */
+const TOO_MANY_BLOCKS =
+  'This move reaches too many blocks to be tracked. Make it without tracking?';
+
+/** The move as plain edits, in offsets of the text (none when the run is no longer there). */
+function plainMove(
+  state: EditorState,
+  text: string,
+  run: BlockRun,
+  gap: BlockGap,
+  forced = false,
+): { changes: ChangeSet; moved: Range } | undefined {
+  const plan = moveBlockEdits(text, run, gap);
+  if (!plan) return undefined;
+  return {
+    changes: (forced ? untrackedChanges : authoredChanges)(
+      state,
+      text,
+      state.field(parsedField),
+      plan.edits,
+    ),
+    moved: plan.moved,
+  };
+}
+
+/** The selection once the move is made: the moved blocks, selected as the person had them (a caret
+ * where it stood in their text), in offsets of the text `after`. */
+function selectionAfter(
+  state: EditorState,
+  after: string,
+  run: BlockRun,
+  moved: Range,
+): EditorSelection {
+  const before = newestView(state.doc.toString());
+  const next = newestView(after);
+  const { anchor, head } = state.selection.main;
+  // At the end of the moved text, in front of the closers that end it, never inside them.
+  const place = (offset: number) => {
+    const view = Math.min(
+      moved.to,
+      moved.from + Math.max(0, before.map.fromSource(offset) - run.viewFrom),
+    );
+    return next.map.toSource(view, view === moved.to ? -1 : 1);
+  };
+  if (anchor === head) return EditorSelection.single(place(head));
+  return EditorSelection.single(place(anchor), place(head));
+}

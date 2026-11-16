@@ -17,7 +17,8 @@ import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { isAlignPoint } from './table-align.ts';
 import { expectCommentsTravel } from './table-move-oracle.ts';
-import { ALIGN_FIRST, tableEdit, untrackedTableEdit } from './table-ops.ts';
+import { expectEveryOrderRead } from './oracle.ts';
+import { fineTableEdit, ALIGN_FIRST, tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
@@ -137,7 +138,8 @@ function notedMove(
     const tableAt = (text: string) => readTables(text, parse(text))[0]?.from ?? 0;
     let commented: string | null = before ? note(initial, row) : initial;
     if (commented === null) return false;
-    const done = tableEdit(commented, op(tableAt(commented)), context(mover, ids()));
+    // (the fine move: a replacement of the table has no comment that travels)
+    const done = fineTableEdit(commented, op(tableAt(commented)), context(mover, ids()));
     let text = applyChanges(commented, done.changes);
     if (!before) {
       commented = note(text, done.rows?.[0] ?? 0);
@@ -217,6 +219,20 @@ function expectWholeTableDeleted(
       // that no longer reads as the table, which the decision's own rules do for a comment in a
       // moved row of a table without a pipe at its start).
       const named = parsed.ledger.people.find((p) => p.handle === other?.entry.by)?.name;
+      // No replacement of a table that is the whole text can be written where its marker would
+      // stand alone on its line: that refusal stays (filed in the PR).
+      if (shape === 'alone' && /a marker would be left alone on its line/.test(error.message)) {
+        continue;
+      }
+      // Track Changes off, beside another person's pending replacement of the table (lane R2's
+      // write): the plain edit can't be made without touching the changes around it.
+      if (
+        !who &&
+        parsed.marks.some((mark) => mark.kind === 'sub') &&
+        /with Track Changes off without changing other text/.test(error.message)
+      ) {
+        continue;
+      }
       const pending = /'s pending change is in this table\. Decide it first\.$/.test(error.message);
       if (who && other)
         expect(error.message, tag).toBe(
@@ -235,10 +251,13 @@ function expectWholeTableDeleted(
       }
       continue;
     }
-    expect(
-      who !== undefined && other !== undefined,
-      `${tag}: allowed, with ${other?.id} pending`,
-    ).toBe(false);
+    if (who !== undefined && other !== undefined) {
+      // Another person's change is pending in the table: the deletion is a replacement of the
+      // table, and the file reads alike in every order (lane R2).
+      expect(tablesOf(newestView(after).text), tag).toHaveLength(0);
+      expectEveryOrderRead(tag, after);
+      continue;
+    }
     const remaining = shape === 'alone' ? '' : `Intro.${eol}${eol}After.`;
     // (a file with no mark keeps the ledger it had, which no edit writes)
     if (parse(after).marks.length > 0) {
@@ -250,6 +269,13 @@ function expectWholeTableDeleted(
     }
     expect(tablesOf(newestView(after).text), tag).toHaveLength(0);
     expect(tidy(newestView(after).text), tag).toBe(remaining);
+    if (!who && parse(body).marks.some((mark) => mark.kind === 'sub')) {
+      // Taken out with Track Changes off from inside another person's pending replacement of the
+      // table (the replacement is a lane R2 write): its old text still holds the table, and the
+      // file reads alike in every order.
+      expectEveryOrderRead(tag, after);
+      continue;
+    }
     if (!who) {
       expect(tablesOf(originalView(after).text), tag).toHaveLength(0);
       expect(tidy(originalView(after).text), tag).toBe(remaining);
@@ -391,11 +417,13 @@ describe('rows, random', () => {
                 ? untrackedTableEdit(text, op)
                 : tableEdit(text, op, context(person ?? ada, ids()))
             ).changes;
-            if (onHeader && markPending) {
+            if (onHeader && markPending && who === 'plain') {
               throw new Error(
                 `${op.kind} on the header was written beside a pending alignment change: ${steps.join(' / ')}\n${text}`,
               );
             }
+            // Tracked, the operation on the header is a replacement of the table (lane R2).
+            if (onHeader && markPending) headerRefused++;
             if (op.kind === 'align') aligned++;
             else if (markPending && !onHeader) beside++;
           } else if (over) {
@@ -423,7 +451,7 @@ describe('rows, random', () => {
               error.message === ALIGN_FIRST,
               `${error.message}: ${steps.join(' / ')}\n${text}`,
             ).toBe(onHeader && markPending);
-            if (onHeader && markPending) {
+            if (onHeader && markPending && who === 'plain') {
               headerRefused++;
               if (!(lead && trail)) headerRefusedBare++;
             }

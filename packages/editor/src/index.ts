@@ -44,6 +44,13 @@ import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -92,6 +99,7 @@ import {
   refreshImagesEffect,
 } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
+import { htmlInline } from './preview/html-inline.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
@@ -303,7 +311,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+      extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
@@ -837,3 +845,5 @@ function pasteIntoField(view: EditorView, text: string): boolean {
   }
   return false;
 }
+
+export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';

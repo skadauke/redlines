@@ -31,6 +31,7 @@ function commands() {
     acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
+    toggleWordCount: vi.fn(),
     pastePlain: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -74,6 +75,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   canAcceptAll: false,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   zoom: 1,
   textSize: 1,
   hasFile: true,
@@ -229,6 +231,7 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Word Count', undefined],
       '---',
       'Enter Full Screen',
     ]);
@@ -369,6 +372,10 @@ describe('the menu model', () => {
     const files = actionRow(model, 'View', 'Show Files');
     expect(files.textFor?.(state({ sidebarOpen: false }))).toBe('Show Files');
     expect(files.textFor?.(state({ sidebarOpen: true }))).toBe('Hide Files');
+
+    const words = actionRow(model, 'View', 'Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: false }))).toBe('Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: true }))).toBe('Hide Word Count');
   });
 
   it('enables the size rows between the ends', () => {
@@ -489,8 +496,9 @@ describe('the menu model', () => {
       ['Rename…', undefined],
     ]);
     // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
-    expect(readsAll(model, 'View').slice(-6)).toEqual([
+    expect(readsAll(model, 'View').slice(-7)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Word Count', undefined],
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],

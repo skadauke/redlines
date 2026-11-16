@@ -9,10 +9,12 @@ import type {
   AgentEvent,
   AgentInfo,
   AgentProvider,
+  AgentRequest,
   AgentState,
   HostAgents,
   HostRelay,
   McpEndpoint,
+  ToolLines,
 } from '@redlines/plugin-api';
 import { DEFAULT_HANDLES, displayName, handleOf } from './handles.ts';
 
@@ -25,6 +27,9 @@ const KEEP_MS = 60_000;
 
 /** What an agent with no toolbox is handed in its place: nothing to connect to. */
 const NO_TOOLS: McpEndpoint = { command: '', args: [] };
+
+/** The toolbox's tools that write to the document or its thread. */
+const WRITES = new Set(['str_replace', 'comment', 'reply']);
 
 export interface MacAgents extends HostAgents {
   forget(): void;
@@ -41,6 +46,24 @@ export interface MacAgentsOptions {
    * keeps the name it has, as an agent the person named themselves does.
    */
   handles?: () => Readonly<Record<string, string>>;
+  /**
+   * The model the person chose for each agent, by id (Preferences, #530), asked at every run. A
+   * request that names no model of its own (Ask's picker does) runs the one chosen here.
+   */
+  models?: () => Readonly<Record<string, string>>;
+  /**
+   * Whether Preferences' switch lets agents use the web (#529), asked at every run: one switch for
+   * every agent, off by default.
+   */
+  web?: () => boolean;
+  /**
+   * What the person says when an agent that may not use the web reaches for it: Allow Once (this
+   * run only), Allow Always (which turns the switch on, through `allowWeb`) or neither. Without
+   * it, the answer is no.
+   */
+  askWeb?: (agent: string, name: string, signal: AbortSignal) => Promise<'once' | 'always' | 'no'>;
+  /** Turns the switch on, for Allow Always. */
+  allowWeb?: () => void;
 }
 
 export function createMacAgents(
@@ -73,6 +96,7 @@ export function createMacAgents(
           name: provider.name,
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          ...(provider.models ? { models: provider.models } : {}),
           state,
         };
       }),
@@ -107,7 +131,69 @@ export function createMacAgents(
       kept = null;
     },
 
-    async *run(agent, request, tools, signal): AsyncGenerator<AgentEvent> {
+    async *run(agent, asked, tools, signal): AsyncGenerator<AgentEvent> {
+      // The web (#529): the run is held to the switch. An agent that reaches for it with the switch
+      // off stops there, the person is asked, and the run starts again with the answer; asked
+      // once, a run that is turned down goes on without, and is not asked again.
+      let web = options.web?.() === true;
+      let turnedDown = false;
+      // A run that has written (a reply, a comment, an edit) isn't started again: its writes would
+      // be made twice. It goes on, and its web call is refused.
+      let wrote = false;
+      const watching: ToolLines = (line) => {
+        try {
+          const call = JSON.parse(line) as { method?: unknown; params?: { name?: unknown } };
+          if (call.method === 'tools/call' && WRITES.has(String(call.params?.name))) wrote = true;
+        } catch {
+          // Not JSON: the toolbox says so.
+        }
+        return tools(line);
+      };
+      for (;;) {
+        const stop = new AbortController();
+        const forward = () => stop.abort();
+        if (signal.aborted) stop.abort();
+        signal.addEventListener('abort', forward, { once: true });
+        let wanted: string | undefined;
+        let used = false;
+        try {
+          for await (const event of runOnce(agent, { ...asked, web }, watching, stop.signal)) {
+            if (event.type === 'web') {
+              if (event.allowed) used = true;
+              else if (!web && !turnedDown && !wrote) {
+                wanted = event.text;
+                stop.abort();
+                break;
+              }
+              yield { type: 'status', text: event.text };
+              continue;
+            }
+            yield event.type === 'done' && used ? { ...event, web: true } : event;
+            if (event.type === 'done' || event.type === 'error') return;
+          }
+        } finally {
+          signal.removeEventListener('abort', forward);
+        }
+        if (wanted === undefined || signal.aborted) return;
+        yield { type: 'status', text: 'Waiting for your answer' };
+        const name = current.find(({ id }) => id === agent)?.name ?? agent;
+        const answer = await (options.askWeb?.(agent, name, signal) ??
+          Promise.resolve('no' as const));
+        if (signal.aborted) return;
+        if (answer === 'always') options.allowWeb?.();
+        if (answer === 'no') turnedDown = true;
+        else web = true;
+      }
+    },
+  };
+  /** One start of an agent, held to what `asked.web` says. */
+  async function* runOnce(
+    agent: string,
+    asked: AgentRequest,
+    tools: ToolLines,
+    signal: AbortSignal,
+  ): AsyncGenerator<AgentEvent> {
+    {
       // An agent added since the last look is looked for once more.
       const find = (list: readonly AgentProvider[]) => list.find(({ id }) => id === agent);
       const provider = find(current) ?? (options.more ? find(await look()) : undefined);
@@ -115,6 +201,11 @@ export function createMacAgents(
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
         return;
       }
+      // The model chosen in Preferences, unless the request names one the agent lists.
+      const listed = (model: string | undefined) =>
+        model !== undefined && provider.models?.some(({ id }) => id === model) === true;
+      const chosen = options.models?.()[agent];
+      const request = !listed(asked.model) && listed(chosen) ? { ...asked, model: chosen } : asked;
       // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
       // an error that its tools never started.
       if (provider.toolbox === false) {
@@ -154,7 +245,7 @@ export function createMacAgents(
       } finally {
         line.close();
       }
-    },
-  };
+    }
+  }
   return agents;
 }
