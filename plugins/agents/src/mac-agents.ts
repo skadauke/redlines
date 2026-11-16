@@ -121,10 +121,11 @@ export function createMacAgents(
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
         return;
       }
-      // The model chosen in Preferences, unless the request names one.
+      // The model chosen in Preferences, unless the request names one the agent lists.
+      const listed = (model: string | undefined) =>
+        model !== undefined && provider.models?.some(({ id }) => id === model) === true;
       const chosen = options.models?.()[agent];
-      const request =
-        asked.model === undefined && chosen !== undefined ? { ...asked, model: chosen } : asked;
+      const request = !listed(asked.model) && listed(chosen) ? { ...asked, model: chosen } : asked;
       // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
       // an error that its tools never started.
       if (provider.toolbox === false) {
