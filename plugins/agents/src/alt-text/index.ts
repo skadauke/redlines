@@ -204,6 +204,7 @@ export function createAltText(editor: Editor, options: AltTextOptions): AltText 
 
     function commit(): void {
       if (mine.abort) return;
+      if (options.generation && options.generation() !== mine.generation) return close();
       const now = imageInSelectionAt(mine.from);
       if (now) setImageAlt(view, field.value, now.from);
       close(true);
@@ -233,6 +234,7 @@ export function createAltText(editor: Editor, options: AltTextOptions): AltText 
           mine.abort = null;
           waiting(false);
           say(error instanceof Error ? error.message : String(error));
+          field.focus({ preventScroll: true });
         },
       );
     }
@@ -283,6 +285,8 @@ export function createAltText(editor: Editor, options: AltTextOptions): AltText 
           if (who.unavailable !== undefined) {
             describe.setAttribute('aria-disabled', 'true');
             describe.title = who.unavailable;
+            // Said in words, not only as a hint: a grayed button says why where it can be read.
+            say(who.unavailable);
           }
           size();
         },

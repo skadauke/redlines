@@ -64,6 +64,15 @@ describe('Alt text with Track Changes off', () => {
     expect(text(editor)).toBe('![Fig. \\[1\\] \\& \\*more\\*](cat.png)');
   });
 
+  it('reads back what was typed, character references and escapes included', () => {
+    const editor = load('![](cat.png)', 1);
+    for (const typed of ['&amp;', '&#38;', '\\&', 'a &lt; b', '\\*x\\*', 'R&D']) {
+      setImageAlt(editor.view, typed);
+      expect(imageInSelection(editor.view.state)?.alt).toBe(typed);
+      setImageAlt(editor.view, '');
+    }
+  });
+
   it('escapes a pipe in a table cell, where it would end the cell', () => {
     const table = '| x |\n|---|\n| ![](cat.png) |';
     const editor = load(table, table.indexOf('![') + 1);
@@ -79,9 +88,13 @@ describe('Alt text with Track Changes off', () => {
       '<img src="a.png" alt="A &quot;new&quot; one &amp; more" width="200">',
     );
     setImageAlt(editor.view, '');
-    expect(text(editor)).toBe('<img src="a.png" width="200">');
+    // An empty alt stays, which says the picture needs none; no alt at all says it was not described.
+    expect(text(editor)).toBe('<img src="a.png" alt="" width="200">');
     setImageAlt(editor.view, 'Back');
     expect(text(editor)).toBe('<img src="a.png" alt="Back" width="200">');
+    const bare = load('<img src="b.png">', 2);
+    expect(setImageAlt(bare.view, '')).toBe(false);
+    expect(text(bare)).toBe('<img src="b.png">');
   });
 
   it('is one change that one Undo takes back', () => {
@@ -103,6 +116,13 @@ describe('Alt text with Track Changes on', () => {
       /Words <!--sub \w{4} !\[A cat\]\(cat\.png\)-->!\[A grey cat\]\(cat\.png\)<!--\/\w{4}--> more/,
     );
     expect(newestView(file).text).toBe('Words ![A grey cat](cat.png) more');
+  });
+
+  it('writes nothing for the alt text the image has, however it is written', () => {
+    const editor = load('![a*b](cat.png)', 1);
+    editor.setTracking(true, { inFile: false });
+    expect(setImageAlt(editor.view, 'a*b')).toBe(false);
+    expect(text(editor)).toBe('![a*b](cat.png)');
   });
 
   it('is tracked inside a pending change too, keeping its old text', () => {

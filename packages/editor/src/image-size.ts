@@ -85,9 +85,18 @@ function inTableOf(node: SyntaxNode): boolean {
 /** The ASCII punctuation that a backslash in front of makes literal in Markdown. */
 const ESCAPABLE = /\\([!-/:-@[-`{-~])/g;
 
-/** An image's destination, alt text or title as the document writes it, read as text. */
+/**
+ * An image's destination, alt text or title as the document writes it, read as text: in one pass,
+ * so that what a backslash made literal (`\&amp;`) is not read as a character reference.
+ */
 function readMarkdown(written: string): string {
-  return readReferences(written.replace(ESCAPABLE, '$1'));
+  let text = '';
+  let last = 0;
+  for (const escape of written.matchAll(ESCAPABLE)) {
+    text += readReferences(written.slice(last, escape.index)) + escape[1];
+    last = escape.index + escape[0].length;
+  }
+  return text + readReferences(written.slice(last));
 }
 
 const TAG = /^<img((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>$/i;
@@ -422,13 +431,17 @@ export function escapeAlt(text: string, inTable: boolean): string {
 /** The change that gives `image` the alt text, or null where it has that text already. */
 export function altEdit(state: EditorState, image: ImageElement, alt: string): TextEdit | null {
   const wanted = alt.replace(/\s+/g, ' ').trim();
+  // The alt it has is what is asked for: nothing to write, however the image happens to be written.
+  if (image.alt === wanted) return null;
   let insert: string;
   if (image.form === 'tag') {
     const attributes = attributesWith(image, {});
     const kept = attributes.filter((attribute) => attribute.name !== 'alt');
     const at = attributes.findIndex((attribute) => attribute.name === 'alt');
+    // An alt taken away from a tag stays as `alt=""`: no alt at all is a picture that has not been
+    // described, and an empty one says it needs no description, as `![](src)` does.
     const written: Attribute[] =
-      wanted === ''
+      wanted === '' && at === -1
         ? []
         : [
             {

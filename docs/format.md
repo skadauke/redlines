@@ -2112,7 +2112,7 @@ pandoc file's `{width=}` is not written yet). The rule:
   was. The text is one line (whitespace runs are one space); in the brackets a backslash, `[`, `]`,
   `&`, a backtick, `*`, `_` and `<` and `>` are written with a backslash in front, and in a table cell
   `|` too, so that reading the image back gives the text as it was given; in a tag the attribute rules
-  above apply. An empty text takes the alt away (a tag loses the attribute). Under Track Changes it is
+  above apply. An empty text takes the alt away: `![](src)`, and a tag's `alt=""` (a tag that never had one is left as it is). Under Track Changes it is
   a substitution of the whole image, like any change to an image; it is never refused.
 - **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
   an image alone on its line is otherwise centered, which is the absence of the attribute, so
