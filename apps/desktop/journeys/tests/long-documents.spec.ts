@@ -42,7 +42,28 @@ async function journey(
     phases.push(phase);
     console.log(formatPhases(label, [phase]));
   };
-  await record('to the middle', () => dragScrollbarTo(j.page, 0.5));
+  // How long after a drag the text on the screen is styled (a far jump draws from a likely parse,
+  // #699), not only drawn: the parse covers the middle of the viewport.
+  const styledAfter = (): Promise<number> =>
+    j.page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const started = performance.now();
+          const look = () => {
+            const styled = window.__redlines!.parsedAtViewport();
+            if (styled || performance.now() - started > 20_000)
+              resolve(performance.now() - started);
+            else requestAnimationFrame(look);
+          };
+          look();
+        }),
+    );
+  let styledMiddle = 0;
+  await record('to the middle', async () => {
+    await dragScrollbarTo(j.page, 0.5);
+    styledMiddle = await styledAfter();
+  });
+  console.log(`${label} | middle styled ${Math.round(styledMiddle)} ms after the drag`);
   // How long after the drag the end is on the screen (a page that stays blank is the worst stall).
   let blankMs = 0;
   await record('to the end', async () => {
@@ -62,6 +83,7 @@ async function journey(
       END_OF_DOCUMENT,
     );
   });
+  console.log(`${label} | end styled ${Math.round(await styledAfter())} ms after the drag`);
   console.log(`${label} | end drawn ${Math.round(blankMs)} ms after the drag`);
   const atEnd = await j.drawn();
   await j.shot(`${label}-end`);

@@ -83,6 +83,7 @@ import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
+import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
   imageResolver,
@@ -130,6 +131,9 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+/** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
+export const parsedAt = (state: EditorState, pos: number): boolean =>
+  syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
 export {
   agentOf,
   followsText,
@@ -294,11 +298,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const asked = new Set<string>();
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
+  const markdownSupport = markdown({
+    extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+    codeLanguages: options.codeLanguages,
+  });
   const extensions = [
-    markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
-      codeLanguages: options.codeLanguages,
-    }),
+    markdownSupport,
+    likelyParsing(markdownSupport.language.parser),
     trackedChanges(),
     barLayer(),
     barSwitch(),
