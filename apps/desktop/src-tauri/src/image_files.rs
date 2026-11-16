@@ -135,6 +135,24 @@ fn too_large(name: &str) -> String {
     )
 }
 
+/// Whether `error` is the system refusing to open a link (`images::open` doesn't follow one): the
+/// loop of links it names (`ELOOP`).
+fn is_link_refusal(error: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+fn is_a_link(name: &str) -> String {
+    format!("“{name}” is a link, which Redlines doesn’t follow. Add the image itself.")
+}
+
 fn cannot_add(name: &str, error: &io::Error) -> String {
     format!("Couldn’t add “{name}”: {error}.")
 }
@@ -371,8 +389,15 @@ fn copy_image(folder: &Path, source: &Path, max: u64) -> Result<String, String> 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let cannot = |error: io::Error| cannot_add(&name, &error);
-    // Never through a link put in the file's place since it was given (`images::open`).
-    let mut file = crate::images::open(source).map_err(cannot)?;
+    // Never through a link put in the file's place since it was given (`images::open`), or one that
+    // was given: the system's words for it (a loop of links) say nothing to the person.
+    let mut file = crate::images::open(source).map_err(|error| {
+        if is_link_refusal(&error) {
+            is_a_link(&name)
+        } else {
+            cannot(error)
+        }
+    })?;
     let metadata = file.metadata().map_err(cannot)?;
     if !metadata.is_file() {
         return Err(not_an_image(&name));
@@ -1252,7 +1277,11 @@ mod tests {
         let from = folder("source-link-from");
         std::fs::write(from.join("real.png"), PNG).unwrap();
         std::os::unix::fs::symlink(from.join("real.png"), from.join("link.png")).unwrap();
-        assert!(copy_image(&own, &from.join("link.png"), 1000).is_err());
+        // Said in our words, not the system's ("Too many levels of symbolic links").
+        assert_eq!(
+            copy_image(&own, &from.join("link.png"), 1000),
+            Err(is_a_link("link.png"))
+        );
         assert_eq!(std::fs::read_dir(&own).unwrap().count(), 1);
     }
 

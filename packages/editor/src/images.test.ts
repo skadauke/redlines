@@ -5,7 +5,13 @@ import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type ImageSpot } from './index.ts';
 import { previewDecorations } from './preview/decorations.ts';
-import { DOCUMENT_CHANGED, IMAGE_IN_CODE, imageFiles, imageLink } from './images.ts';
+import {
+  DOCUMENT_CHANGED,
+  IMAGE_IN_CODE,
+  IMAGE_NOT_DRAWN,
+  imageFiles,
+  imageLink,
+} from './images.ts';
 import { RAW_READ_ONLY } from './tracked/typing.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -609,6 +615,72 @@ describe('where the editor takes no image', () => {
     expect(given).toEqual([]);
     expect(notices).toEqual([IMAGE_IN_CODE, IMAGE_IN_CODE]);
     expect(editor.getDoc()).toBe('Text `code` here\n\n```\nfenced\n```\n');
+  });
+
+  /** What a paste of an image at the caret, after `before` of the document, does: the notices. */
+  function pasteAfter(doc: string, before: string): string[] {
+    const { editor, given, notices } = load(doc);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf(before) + before.length } });
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
+    pasteFiles(editor, [png()]);
+    expect(given.length, `${before}: one is given where no notice is`).toBe(notices.length ? 0 : 1);
+    return notices;
+  }
+
+  it('refuses where an image is never drawn, and says so (#375)', () => {
+    const cases: [string, string][] = [
+      ['---\ntitle: Plan\n---\n\nText\n', 'title: P'],
+      ['<div>\nsome html\n</div>\n\nText\n', 'some '],
+      ['Text <!-- a comment --> more\n', '<!-- a '],
+      [
+        'See https://example.com/page now\n\n[a link](https://exa.com/x) here\n',
+        '[a link](https://e',
+      ],
+      ['![an image](cat.png) after\n', '![an ima'],
+      ['![an image](cat.png) after\n', '![an image](ca'],
+      ['Before\n\n$$\nx = 1\n$$\n\nAfter\n', 'x ='],
+      ['A <span class="x">tag</span> here\n', '<span cla'],
+    ];
+    for (const [doc, before] of cases) {
+      expect(pasteAfter(doc, before), `${JSON.stringify(doc)} after ${before}`).toEqual([
+        IMAGE_NOT_DRAWN,
+      ]);
+    }
+  });
+
+  it('takes one where nothing is undrawn though a rule might say so (review of #375)', () => {
+    const cases: [string, string][] = [
+      // A line that starts with a pending change's marker is an HTML block as far as the parse goes.
+      ['<!--ins k3x9-->hello<!--/k3x9--> world and more\n', 'world and'],
+      // The gap between two nodes of a kind is inside neither.
+      ['![a](x.png)![b](y.png)\n', '![a](x.png)'],
+      ['A <img src="a"><img src="b"> B\n', '<img src="a">'],
+      ['Hi <!--del k3x9-->old<!--/k3x9--><!--ins k3x8-->new<!--/k3x8--> end\n', 'old<!--/k3x9-->'],
+      // Math that closes on a line of text, math in fenced code or in a span: not open any more.
+      ['$$\nx $$\n\nNext\n', 'Nex'],
+      ['```\n$$\n```\n\nNext\n', 'Nex'],
+      ['Use `$$` here\n', 'Use `$$` '],
+    ];
+    for (const [doc, before] of cases) {
+      expect(pasteAfter(doc, before), `${JSON.stringify(doc)} after ${before}`).toEqual([]);
+    }
+    // But inside a marker, an image still doesn't go.
+    expect(pasteAfter('<!--ins k3x9-->hello<!--/k3x9--> more\n', '<!--ins k3')).toEqual([
+      IMAGE_NOT_DRAWN,
+    ]);
+  });
+
+  it('still takes one at the edges of those, and in the text of a link', () => {
+    const cases: [string, string][] = [
+      ['---\ntitle: Plan\n---\n\nText\n', '---\n\n'],
+      ['![an image](cat.png) after\n', '![an image](cat.png)'],
+      ['See [a link](https://example.com/x) here\n', '[a li'],
+      ['A <span>tag</span> here\n', 'A '],
+      ['Before\n\n$$\nx = 1\n$$\n\nAfter\n', 'x = 1\n$$\n\n'],
+    ];
+    for (const [doc, before] of cases) {
+      expect(pasteAfter(doc, before), `${JSON.stringify(doc)} after ${before}`).toEqual([]);
+    }
   });
 
   it('takes an image right after inline code, and right before it, where the caret is outside it', () => {

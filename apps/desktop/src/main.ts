@@ -833,7 +833,8 @@ const acceptAllAndStopTracking = () => {
 
 /**
  * Saves a change to the settings. Each window keeps its own file sidebar and its own text size,
- * whatever another saved: what is stored for them is only what a new window starts with.
+ * whatever another saved: what is stored for the sidebar is what a new window starts with, and the
+ * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
   settings = {
@@ -870,7 +871,10 @@ const textZoom = followTextZoom(window, {
   scroller,
   root: document.documentElement,
   size: () => settings.textSize,
-  save: (textSize) => changeSettings({ textSize }),
+  // This window's own: a zoom never changes the default that new windows open at.
+  save: (textSize) => {
+    settings = { ...settings, textSize };
+  },
   holdRail: (held) => review.holdRail(held),
   say: (text) => notice.flash(text),
 });
@@ -1322,7 +1326,9 @@ if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
       textZoom,
       textSize: {
         get: () => settings.textSize,
-        save: (size) => changeSettings({ textSize: size }),
+        save: (size) => {
+          settings = { ...settings, textSize: size };
+        },
       },
       surfaces: {
         review,

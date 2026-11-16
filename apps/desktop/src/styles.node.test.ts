@@ -306,7 +306,9 @@ describe('styles.css', () => {
     const preferences = rules(
       readFileSync(new URL('./preferences/preferences.css', import.meta.url), 'utf8'),
     );
-    expect(declared('.rl-pref-bar', preferences)).toContain('height: calc(56 * var(--rl-pt))');
-    expect(declared('.rl-pref-tab', preferences)).toContain('width: calc(44 * var(--rl-frame))');
+    expect(declared('.rl-pref-bar', preferences)).toContain('height: calc(68 * var(--rl-pt))');
+    expect(declared('.rl-pref-tab', preferences)).toContain(
+      'min-width: calc(72 * var(--rl-frame))',
+    );
   });
 });
