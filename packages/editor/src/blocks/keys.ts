@@ -23,6 +23,7 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
+import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import {
   type KeyEdit,
@@ -222,7 +223,7 @@ export function applyKeyEdit(
     scrollIntoView: true,
   });
   // Refused, where the key has another form: that one.
-  if (edit.fallback && tr.effects.some((effect) => effect.is(refusedEditEffect))) {
+  if (edit.fallback && (wasHeld(tr) || tr.effects.some((effect) => effect.is(refusedEditEffect)))) {
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
@@ -243,7 +244,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   const refused = (at: EditorState, edit: KeyEdit) =>
     at
       .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
-      .effects.some((effect) => effect.is(refusedEditEffect));
+      .effects.some((effect) => effect.is(refusedEditEffect) || effect.is(heldEditEffect));
   if (main.empty) {
     const bare = bareMarkerAt(state);
     if (bare !== null) {

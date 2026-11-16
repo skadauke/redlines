@@ -6,6 +6,7 @@
 import { fakeProvider, fakeRelay, type FakeScript } from '@redlines/agents/fake-provider';
 import { createMacAgents, type MacAgents } from '@redlines/agents';
 import { newestView } from '@redlines/format';
+import { loadSettings } from './settings.ts';
 
 /** The first sentence of the document as a reader sees it, which the canned answer cites. */
 function firstSentence(text: string): string {
@@ -32,5 +33,8 @@ export function createDevAgents(): MacAgents {
     await tools.call('reply', { text: 'Scripted reply, for development.' });
     yield { type: 'done' };
   };
-  return createMacAgents([fakeProvider({ relay, script })], relay);
+  // The handle Preferences gave it, read at every look, as the app's agents are.
+  return createMacAgents([fakeProvider({ relay, script })], relay, {
+    handles: () => loadSettings().agentHandles,
+  });
 }

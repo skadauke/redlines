@@ -32,6 +32,22 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
 }
 
 describe('createMacAgents', () => {
+  it('names an agent by its handle, capitalized, as the handles are now', async () => {
+    const relay = fakeRelay();
+    let handles: Record<string, string> = {};
+    const agents = createMacAgents([fakeProvider({ relay, script: replies('Hi.') })], relay, {
+      handles: () => handles,
+    });
+    expect((await agents.list())[0]).toMatchObject({
+      id: 'claude',
+      name: 'Claude',
+      handle: 'claude',
+    });
+    // A change of handle needs no new detection.
+    handles = { claude: 'ada' };
+    expect((await agents.list())[0]).toMatchObject({ id: 'claude', name: 'Ada', handle: 'ada' });
+  });
+
   it('lists each provider with what it detected', async () => {
     const relay = fakeRelay();
     const agents = createMacAgents(

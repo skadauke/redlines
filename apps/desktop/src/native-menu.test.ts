@@ -150,6 +150,8 @@ function commands() {
     openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
+    reportProblem: vi.fn(),
+    revealCrashLog: vi.fn(),
   } satisfies MenuCommands;
 }
 
