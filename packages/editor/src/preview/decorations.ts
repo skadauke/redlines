@@ -15,6 +15,7 @@ import {
   type Line,
   type Range,
   StateField,
+  type Transaction,
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
@@ -24,6 +25,14 @@ import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './c
 import { imageOfNode } from '../image-size.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
+import {
+  inWindow,
+  replaceIn,
+  selectionMoved,
+  selectionPlaces,
+  windowsOf,
+  type Window,
+} from '../restyle.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
 import { entityDecoration, pendingBox, roomDecoration, TaskBoxWidget } from './task.ts';
 
@@ -546,7 +555,7 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
  * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
  * shows the source as written, without them.
  */
-export function previewDecorations(state: EditorState): DecorationSet {
+export function previewDecorations(state: EditorState, window?: Window): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const b = new Builder(state);
   /** The leaf blocks, in document order, for the space between them. */
@@ -556,6 +565,8 @@ export function previewDecorations(state: EditorState): DecorationSet {
   // paragraph open, as if it held a character.
   const read = readTree(state);
   const live = read.tree === syntaxTree(state);
+  // A window is read only from a live tree (the field draws all of it again while a block is open).
+  const bounds = window && live ? { from: window.context, to: window.reach } : {};
   if (!live) {
     read.tree.iterate({
       enter: (ref) => {
@@ -570,6 +581,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
     });
   }
   syntaxTree(state).iterate({
+    ...bounds,
     enter: (ref) => {
       const node = ref.node;
       const name = ref.name;
@@ -649,42 +661,90 @@ export function previewDecorations(state: EditorState): DecorationSet {
   return b.finish();
 }
 
-const previewField = StateField.define<DecorationSet>({
-  create: previewDecorations,
-  update(decorations, tr) {
-    const changed =
-      tr.docChanged ||
-      tr.selection ||
-      tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
-      syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
-      openBlock(tr.state) !== openBlock(tr.startState) ||
-      tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
-      // The names of emoji that a host gave, or took away, after the text was drawn.
-      tr.state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
-    return changed ? previewDecorations(tr.state) : decorations;
-  },
+/** What the preview field holds: the decorations, and the hard breaks and images among them. */
+interface Preview {
+  decorations: DecorationSet;
+  /** The hard breaks' syntax and the images, as what the caret steps over. */
+  breaks: DecorationSet;
+}
+
+const isBreak = (value: Decoration) => {
+  const spec = value.spec as { hardBreak?: true; imageAtom?: true };
+  return spec.hardBreak === true || spec.imageAtom === true;
+};
+
+function previewOf(decorations: DecorationSet, breaks?: DecorationSet): Preview {
+  return {
+    decorations,
+    breaks: breaks ?? decorations.update({ filter: (_from, _to, value) => isBreak(value) }),
+  };
+}
+
+/**
+ * The preview's decorations after a transaction. A change of the text, the selection or the parse
+ * redraws only the blocks it can touch (`windowsOf`), and keeps and maps the rest; what no window
+ * can hold (a switch of view, an open block, the images drawn again) redraws all of it.
+ */
+function updatePreview(value: Preview, tr: Transaction): Preview {
+  const state = tr.state;
+  const everything =
+    tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
+    openBlock(state) !== null ||
+    openBlock(tr.startState) !== null ||
+    state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
+    // The names of emoji that a host gave, or took away, after the text was drawn.
+    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
+  const tree = syntaxTree(state);
+  // A selection set, even to where it was, ends what a paste has just added (`freshlyAdded`).
+  const moved = selectionMoved(tr) || tr.selection !== undefined;
+  if (!everything && !tr.docChanged && !moved && tree === syntaxTree(tr.startState)) return value;
+  // Another tree of the same length (a language set again) has no window to name.
+  const replaced =
+    !tr.docChanged &&
+    tree !== syntaxTree(tr.startState) &&
+    tree.length === syntaxTree(tr.startState).length;
+  const extra = moved ? selectionPlaces(tr) : [];
+  // The ledger is never drawn: where it is, and where it was, may change what is.
+  const ledger = state.field(parsedField).ledgerRange;
+  const was = tr.startState.field(parsedField).ledgerRange;
+  const sameLedger = ledger
+    ? !!was &&
+      tr.changes.mapPos(was.from, 1) === ledger.from &&
+      tr.changes.mapPos(was.to, -1) === ledger.to
+    : !was;
+  if (!sameLedger) {
+    for (const range of [ledger, was]) if (range) extra.push([range.from, range.to]);
+  }
+  const windows = everything || replaced ? null : windowsOf(tr, extra);
+  if (!windows) return previewOf(previewDecorations(state));
+  let decorations = tr.docChanged ? value.decorations.map(tr.changes) : value.decorations;
+  let breaks = tr.docChanged ? value.breaks.map(tr.changes) : value.breaks;
+  for (const window of windows) {
+    const fresh = previewDecorations(state, window);
+    decorations = replaceIn(decorations, window, inWindow(fresh, window));
+    breaks = replaceIn(
+      breaks,
+      window,
+      inWindow(fresh, window).filter((range) => isBreak(range.value)),
+    );
+  }
+  return { decorations, breaks };
+}
+
+/** The decorations the preview field holds, for tests: the editor keeps them as edits go. */
+export function keptPreviewDecorations(state: EditorState): DecorationSet {
+  return state.field(previewField).decorations;
+}
+
+const previewField = StateField.define<Preview>({
+  create: (state) => previewOf(previewDecorations(state)),
+  update: updatePreview,
   // From a state field rather than a view plugin, because it draws block decorations.
   provide: (field) => [
-    EditorView.decorations.from(field),
-    EditorView.atomicRanges.of((view) => hardBreaksOf(view.state.field(field))),
+    EditorView.decorations.from(field, (value) => value.decorations),
+    EditorView.atomicRanges.of((view) => view.state.field(field).breaks),
   ],
 });
-
-/** The hard breaks' syntax and the images among a set of decorations, as what the caret steps over. */
-const stepped = new WeakMap<DecorationSet, DecorationSet>();
-function hardBreaksOf(decorations: DecorationSet): DecorationSet {
-  let found = stepped.get(decorations);
-  if (!found) {
-    found = decorations.update({
-      filter: (_from, _to, value) => {
-        const spec = value.spec as { hardBreak?: true; imageAtom?: true };
-        return spec.hardBreak === true || spec.imageAtom === true;
-      },
-    });
-    stepped.set(decorations, found);
-  }
-  return found;
-}
 
 /**
  * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
@@ -700,7 +760,7 @@ const hardBreakCaret = Prec.highest(
       return tr;
     }
     if (tr.state.field(viewModeField, false) === 'raw') return tr;
-    const decorations = tr.state.field(previewField);
+    const decorations = tr.state.field(previewField).decorations;
     const outside = (pos: number, side: -1 | 0 | 1) => {
       let moved = pos;
       decorations.between(pos, pos, (from, to, value) => {
