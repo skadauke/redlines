@@ -11,7 +11,7 @@ const author: Author = { handle: 'ada', name: 'Ada Lovelace' };
 
 afterEach(() => document.body.replaceChildren());
 
-it('has Add Comment and Highlight last in the Format menu, with their keys, and they work', () => {
+it('has Highlight last in the Format menu and Add Comment in the Review menu, with their keys, and they work', () => {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc: 'Some text.', author });
@@ -22,20 +22,23 @@ it('has Add Comment and Highlight last in the Format menu, with their keys, and 
 
   const model = appMenuModel({} as MenuCommands, editor.commands);
   const rows = model.menus.find(({ title }) => title === 'Format')?.rows ?? [];
-  // The two are one group, with no separator between them.
   expect(rows.map((row) => ('text' in row ? row.text : 'item' in row ? row.item : ''))).toEqual([
     'Bold',
     'Separator',
-    'Add Comment',
     'Highlight',
   ]);
-  const [comment, highlight] = rows.slice(-2) as ActionRow[];
+  const highlight = rows.at(-1) as ActionRow;
+  // Add Comment moved to Review with Ask… (menu audit, finding 5).
+  const reviewRows = model.menus.find(({ title }) => title === 'Review')?.rows ?? [];
+  const comment = reviewRows.find((row) => 'text' in row && row.text === 'Add Comment') as
+    ActionRow | undefined;
+  expect(comment).toBeDefined();
   expect(comment!.accelerator).toBe('CmdOrCtrl+Alt+M');
-  expect(highlight!.accelerator).toBe('CmdOrCtrl+Shift+H');
+  expect(highlight.accelerator).toBe('CmdOrCtrl+Shift+H');
   // Highlight makes a highlight on the word at the caret, and its title then says it can be taken
   // away.
   expect(editor.getParsed().marks).toEqual([]);
-  highlight!.action();
+  highlight.action();
   expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['hl']);
   expect(editor.getUiState().commandTitles['highlight.toggle']).toBe('Remove Highlight');
   comment!.action();

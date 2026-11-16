@@ -409,7 +409,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       id: 'ask.start',
       title: 'Ask…',
       shortcut: 'Mod-Alt-a',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
       // The question's own box is a field: choosing Ask again, from the menu, asks about the new
       // selection, whoever has the keyboard.
