@@ -77,6 +77,8 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
@@ -252,9 +254,18 @@ function dragFile(): void {
   });
 }
 
+const untrackedAnswers = createUntrackedAnswers();
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,

@@ -9,6 +9,7 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
+import { askAgainInAllDocuments } from '../untracked-answers.ts';
 import {
   agentSetup,
   agentSkills,
@@ -129,6 +130,7 @@ const deps: PaneDeps = {
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
   },
   gitIdentity: git,
+  askAgain: askAgainInAllDocuments,
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
   installCommandLineAtHome: () =>
     installCommandLine<CommandLineLink>('install_command_line_at_home'),

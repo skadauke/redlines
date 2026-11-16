@@ -56,6 +56,17 @@ import {
   untrackedFormat,
 } from '@redlines/format';
 import { lineChanges } from '../diff.ts';
+import {
+  annotationsOfTransaction,
+  answeredAlready,
+  heldEditEffect,
+  holdEdit,
+  runOf,
+  untrackedAnswerAnnotation,
+  untrackedAskFacet,
+  untrackedAsking,
+  untrackedRunField,
+} from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
@@ -107,6 +118,12 @@ export const RAW_READ_ONLY =
 /** Raw shows markers as text, which typing could forge or break while edits are tracked. */
 export function rawIsReadOnly(state: EditorState): boolean {
   return state.field(trackingField) && state.field(viewModeField) === 'raw';
+}
+
+/** Raw while edits are tracked, where the host asks first and the person can make the edit
+ * without tracking (`ask.ts`); without a host that asks, Raw is read-only there. */
+function rawAsks(state: EditorState): boolean {
+  return rawIsReadOnly(state) && state.facet(untrackedAskFacet) !== null;
 }
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
@@ -598,7 +615,11 @@ export function authoredChanges(
 }
 
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
-function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): TransactionSpec {
+function trackedSpec(
+  tr: Transaction,
+  edits: Edit[],
+  backward: boolean,
+): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
   const start = tr.startState;
   let tracked: Tracked;
   try {
@@ -611,7 +632,18 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
       tr.annotation(editGroupAnnotation) === true,
     );
   } catch (error) {
-    if (error instanceof EditError) return refused(tr, error);
+    if (error instanceof EditError) {
+      // Front matter takes no mark: the person is asked first (design §3.1), where there is a host
+      // to ask. A correction the Mac made on its own is left out unsaid.
+      if (
+        error.code === 'front-matter' &&
+        start.facet(untrackedAskFacet) &&
+        !tr.isUserEvent(AUTOCORRECTION)
+      ) {
+        return askedAbout(tr, edits, backward);
+      }
+      return refused(tr, error);
+    }
     throw error;
   }
   if (tracked.changes.empty) return {};
@@ -620,6 +652,24 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
       ? [setViewModeEffect.of(start.facet(markupViewFacet))]
       : [];
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
+}
+
+/** An edit in front matter: made at once without tracking when the person answered already, and
+ * held for the sheet when not. */
+function askedAbout(
+  tr: Transaction,
+  edits: Edit[],
+  backward: boolean,
+): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
+  const now = Date.now();
+  if (!answeredAlready(tr.startState, 'front-matter', now)) {
+    return holdEdit(tr, 'front-matter', annotationsOfTransaction(tr));
+  }
+  const made = untrackedSpec(tr, edits, backward);
+  const ran = { effects: runOf('front-matter', now), sequential: true };
+  return Array.isArray(made)
+    ? [...(made as readonly (Transaction | TransactionSpec)[]), ran]
+    : [made as TransactionSpec, ran];
 }
 
 /**
@@ -693,16 +743,25 @@ function isDeferred(tr: Transaction): boolean {
   return (
     tr.isUserEvent('input.type.compose') &&
     !tr.annotation(trackedEditAnnotation) &&
-    tr.startState.field(viewModeField) !== 'raw'
+    tr.annotation(untrackedAnswerAnnotation) !== true &&
+    (tr.startState.field(viewModeField) !== 'raw' || rawAsks(tr.startState))
   );
 }
 
 const typingFilter = EditorState.transactionFilter.of((tr) => {
   const start = tr.startState;
+  const answered = tr.annotation(untrackedAnswerAnnotation) === true;
   if (start.field(viewModeField) === 'raw') {
     // Markdown's own Enter and Backspace edit without looking at the read-only setting.
-    const refused = tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start);
-    return refused ? { effects: refusedEditEffect.of(RAW_READ_ONLY) } : tr;
+    if (!(tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start)) || answered) return tr;
+    if (!start.facet(untrackedAskFacet)) return { effects: refusedEditEffect.of(RAW_READ_ONLY) };
+    // An input method's composition goes in as it is, and is asked about when it ends.
+    if (isDeferred(tr)) return tr;
+    const now = Date.now();
+    if (answeredAlready(start, 'raw', now)) {
+      return [tr, { effects: runOf('raw', now), sequential: true }];
+    }
+    return holdEdit(tr, 'raw', annotationsOfTransaction(tr));
   }
   if (tr.annotation(trackedEditAnnotation) || tr.annotation(Transaction.remote)) return tr;
   if (!tr.docChanged) return tr.selection ? selectionInBody(tr) : tr;
@@ -714,7 +773,9 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
   }
-  if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
+  if (start.field(trackingField) && !answered) {
+    return trackedSpec(tr, keepingSpaces(tr, edits), backward);
+  }
   return untrackedSpec(tr, edits, backward);
 });
 
@@ -799,20 +860,68 @@ function finishComposition(view: EditorView): void {
   const effects: StateEffect<unknown>[] = [composedEffect.of(null)];
   let changes = back;
   let selection: SelectionRange | undefined;
+  const inRaw = state.field(viewModeField) === 'raw';
+  const asker = state.facet(untrackedAskFacet);
+  /** The composition taken back, and held for the sheet (design §3.1). */
+  const hold = (reason: 'raw' | 'front-matter') => {
+    const base = back.apply(state.doc);
+    const last = edits.at(-1);
+    view.dispatch({
+      changes: back,
+      effects: [
+        composedEffect.of(null),
+        heldEditEffect.of({
+          reason,
+          doc: base,
+          changes: ChangeSet.of(
+            edits.map(({ from, to, insert }) => ({ from, to, insert })),
+            base.length,
+          ),
+          selection: last && EditorSelection.single(last.from + last.insert.length),
+          annotations: [Transaction.userEvent.of('input.type')],
+          scrollIntoView: true,
+        }),
+      ],
+      annotations: [
+        trackedEditAnnotation.of(true),
+        untrackedAnswerAnnotation.of(true),
+        Transaction.userEvent.of('input.type.compose'),
+      ],
+    });
+  };
+  if (inRaw && asker) {
+    // Raw while edits are tracked: the text stays as composed when it was answered for already.
+    if (answeredAlready(state, 'raw', Date.now())) {
+      view.dispatch({ effects: [composedEffect.of(null), runOf('raw', Date.now())] });
+    } else hold('raw');
+    return;
+  }
   try {
     const base = back.apply(state.doc);
     const text = base.toString();
     const parsed = parse(text, state.field(parsedField));
     const tracking = state.field(trackingField);
-    const made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
+    let made: Tracked;
+    let kept = !tracking;
+    try {
+      made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
+    } catch (error) {
+      if (!(error instanceof EditError && error.code === 'front-matter' && asker && tracking)) {
+        throw error;
+      }
+      if (!answeredAlready(state, 'front-matter', Date.now())) return hold('front-matter');
+      made = untrackEdits(state, text, parsed, edits, false);
+      kept = true;
+      effects.push(runOf('front-matter', Date.now()));
+    }
     // Text composed with Track Changes off that goes in as it was composed needs no step.
-    if (!tracking && made.changes.apply(base).eq(state.doc)) {
-      view.dispatch({ effects: composedEffect.of(null) });
+    if (kept && made.changes.apply(base).eq(state.doc)) {
+      view.dispatch({ effects });
       return;
     }
     changes = back.compose(made.changes);
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
-    if (tracking && suggests(state, base, edits, made.changes)) {
+    if (tracking && !kept && suggests(state, base, edits, made.changes)) {
       effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
   } catch (error) {
@@ -863,13 +972,14 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
 
 /** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
-  [trackingField, viewModeField],
-  rawIsReadOnly,
+  [trackingField, viewModeField, untrackedAskFacet],
+  (state) => rawIsReadOnly(state) && !rawAsks(state),
 );
 
 /** In Raw while it is read-only, says why what the page would edit doesn't go in. */
 function sayReadOnly(view: EditorView): void {
-  if (rawIsReadOnly(view.state)) view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
+  if (rawIsReadOnly(view.state) && !rawAsks(view.state))
+    view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
 }
 
 /**
@@ -894,6 +1004,8 @@ export function trackedTyping(): Extension {
     compositionEnd,
     rawWhileTracking,
     rawEditsRefused,
+    untrackedRunField,
+    untrackedAsking,
     systemCorrections(),
   ];
 }
