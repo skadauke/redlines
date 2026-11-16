@@ -619,7 +619,7 @@ describe('settings', () => {
     };
     const reopen = (lastDocument: string) =>
       reopenLastDocument({ ...DEFAULT_SETTINGS, onLaunch: 'reopen', lastDocument }, open);
-    for (const stale of ['/notes/logo.svg', '/notes/Makefile', '/notes/main.ts']) {
+    for (const stale of ['/notes/logo.docx', '/notes/Makefile', '/notes/main.zig']) {
       expect(await reopen(stale), stale).toBe(false);
     }
     // Not even read: nothing would be said.

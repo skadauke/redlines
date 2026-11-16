@@ -34,10 +34,10 @@ const REPO: ProjectRoot = { folder: '/repo', isRepo: true, tooBroad: false };
 
 function repoTree(): Record<string, string[]> {
   return {
-    '/repo': ['package.json', 'src/', 'docs/', 'README.md'],
+    '/repo': ['package.lock', 'src/', 'docs/', 'README.md'],
     '/repo/docs': ['images/', 'format.md', 'design.md'],
     '/repo/docs/images': ['logo.png', 'diagram.pdf', 'scans.zip'],
-    '/repo/src': ['main.ts', 'TODO.md'],
+    '/repo/src': ['main.zig', 'TODO.md'],
   };
 }
 
@@ -100,9 +100,9 @@ describe('sidebar', () => {
       dir('Archive'),
       file('slides.qmd'),
       file('notes.txt'),
-      file('main.ts'),
+      file('main.zig'),
       file('paper.pdf'),
-      file('package.json'),
+      file('package.lock'),
     ];
     expect(sortEntries(entries).map((entry) => entry.name)).toEqual([
       'Analysis.Rmd',
