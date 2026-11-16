@@ -29,6 +29,20 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
   combine: (values) => values[0] ?? null,
 });
 
+/** An image's size in px, as its file says: what a page may reserve the room for before it loads. */
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+/** The host's answer for the size of a local image, as written in the document; null for unknown. */
+export type ImageSizer = (src: string) => ImageSize | null | Promise<ImageSize | null>;
+
+/** The host's sizer (`EditorOptions.imageSize`). */
+export const imageSizer = Facet.define<ImageSizer, ImageSizer | null>({
+  combine: (values) => values[0] ?? null,
+});
+
 /** The host's resolver would answer differently now: images are drawn again. */
 export const refreshImagesEffect = StateEffect.define<null>();
 
@@ -137,6 +151,8 @@ class ImageWidget extends WidgetType {
   /** The width the document gives it, in px at the theme's own text size, or null. */
   readonly width: number | null;
   readonly align: ImageAlign;
+  /** The local path the host may know the size of, or null. */
+  readonly path: string | null;
 
   constructor(
     alt: string,
@@ -144,8 +160,10 @@ class ImageWidget extends WidgetType {
     own: boolean,
     width: number | null = null,
     align: ImageAlign = 'center',
+    path: string | null = null,
   ) {
     super();
+    this.path = path;
     this.alt = alt;
     this.url = url;
     this.own = own;
@@ -159,7 +177,8 @@ class ImageWidget extends WidgetType {
       other.url === this.url &&
       other.own === this.own &&
       other.width === this.width &&
-      other.align === this.align
+      other.align === this.align &&
+      other.path === this.path
     );
   }
 
@@ -179,6 +198,11 @@ class ImageWidget extends WidgetType {
     const img = document.createElement('img');
     img.alt = this.alt;
     img.draggable = false;
+    // The file is read when it is near, and its size is known before: the room is held, and the
+    // page doesn't move when it arrives.
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    this.reserve(view, img);
     // A remote image learns nothing of the document it is in.
     img.referrerPolicy = 'no-referrer';
     // The width that is written, times the text size, which a CSS max-width keeps within the column.
@@ -215,6 +239,33 @@ class ImageWidget extends WidgetType {
       frame.append(handle);
     }
     return wrap;
+  }
+
+  /**
+   * Gives `img` the width and height of its file before it loads, from the host (`imageSize`): the
+   * width attribute and the height attribute make the browser hold the aspect ratio, and, unless the
+   * document says a width, the natural width times the text size is held too. Does nothing once the
+   * image has loaded, which knows its own size.
+   */
+  private reserve(view: EditorView, img: HTMLImageElement): void {
+    const sizer = this.path === null ? null : view.state.facet(imageSizer);
+    if (!sizer || this.path === null) return;
+    const apply = (size: ImageSize | null) => {
+      if (!size || !(size.width > 0) || !(size.height > 0) || img.naturalWidth > 0) return;
+      img.setAttribute('width', String(size.width));
+      img.setAttribute('height', String(size.height));
+      if (this.width === null && !img.style.getPropertyValue('width')) {
+        img.style.setProperty('width', textPx(size.width));
+      }
+    };
+    let answer: ReturnType<ImageSizer>;
+    try {
+      answer = sizer(this.path);
+    } catch {
+      return;
+    }
+    if (answer instanceof Promise) answer.then(apply, () => {});
+    else apply(answer);
   }
 
   /** A drag on a handle ends with the widget, whose pointer events then have nowhere to go. */
@@ -356,16 +407,18 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   if (!image) return null;
   const source = sourceOf(image.src);
   let url: string | null = null;
+  let path: string | null = null;
   if (source.kind === 'remote') {
     url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
   } else if (source.kind === 'data') {
     url = source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
+    if (url !== null) path = source.path;
   }
   const own = aloneInItsLine(state, node);
   return Decoration.replace({
-    widget: new ImageWidget(image.alt, url, own, image.width, image.align),
+    widget: new ImageWidget(image.alt, url, own, image.width, image.align, path),
   });
 }
 

@@ -43,6 +43,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
+import { createImageSizes } from './image-sizes.ts';
 import { localImagePath, localImageUrl } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
@@ -200,6 +201,8 @@ let imageFolder: string | null = null;
 let imageDocument: string | null = null;
 
 /** The images the preview has drawn, which are looked at again when the window regains the focus. */
+/** The size of each local image file, read from its header once and kept until it is saved again. */
+const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
 const imageWatch = createImageWatch((paths) => host.imageStamps(paths));
 
 /**
@@ -298,6 +301,11 @@ const editor = createEditor(element('#editor'), {
       const url = host.imageUrl(file);
       return url === null ? null : imageWatch.url(file, url);
     });
+  },
+  imageSize: (src) => {
+    const path = imageDocument;
+    const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
+    return file === null ? null : imageSizes.of(file);
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).

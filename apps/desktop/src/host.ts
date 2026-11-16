@@ -139,6 +139,12 @@ export interface Host {
    */
   imageStamps(paths: string[]): Promise<(string | null)[]>;
   /**
+   * The width and height in px of each image file, in order, read from its header: null for a file
+   * the page may not load, that isn't there, or whose format isn't read. The preview holds the
+   * room of an image before it loads from it.
+   */
+  imageSizes(paths: string[]): Promise<({ width: number; height: number } | null)[]>;
+  /**
    * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
    * doesn't let the windows use them again.
    */
@@ -466,6 +472,10 @@ function createTauriHost(): Host {
     allowImages: (path) => invoke<boolean>('show_images', { path }),
     imageUrl: (path) => convertFileSrc(path),
     imageStamps: (paths) => invoke<(string | null)[]>('image_stamps', { paths }),
+    imageSizes: async (paths) =>
+      (await invoke<([number, number] | null)[]>('image_sizes', { paths })).map((size) =>
+        size ? { width: size[0], height: size[1] } : null,
+      ),
     forgetDocuments: async () => {
       await invoke('forget_documents');
     },
@@ -685,6 +695,7 @@ function createBrowserHost(): Host {
       Promise.resolve(
         paths.map((path) => (images.has(path) ? String(stamps.get(path) ?? 0) : null)),
       ),
+    imageSizes: (paths) => Promise.resolve(paths.map(() => null)),
     forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.

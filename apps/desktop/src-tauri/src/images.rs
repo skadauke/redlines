@@ -218,6 +218,99 @@ pub fn image_stamps(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
     }
 }
 
+/// The width and height in px of an image whose first bytes are `head`, read from its header: PNG,
+/// GIF, WebP and JPEG, the formats a document's images mostly are. None for another format, a
+/// header that is cut short (`HEAD_FOR_SIZE` bytes are read), or one that says zero.
+pub(crate) fn size_of_header(head: &[u8]) -> Option<(u32, u32)> {
+    let be32 = |at: usize| {
+        head.get(at..at + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let le16 = |at: usize| {
+        head.get(at..at + 2)
+            .map(|b| u32::from(u16::from_le_bytes([b[0], b[1]])))
+    };
+    let le24 = |at: usize| {
+        head.get(at..at + 3)
+            .map(|b| u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+    };
+    let size = if head.starts_with(b"\x89PNG\r\n\x1a\n") && head.get(12..16) == Some(b"IHDR") {
+        (be32(16)?, be32(20)?)
+    } else if head.starts_with(b"GIF8") {
+        (le16(6)?, le16(8)?)
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        match head.get(12..16)? {
+            b"VP8X" => (le24(24)? + 1, le24(27)? + 1),
+            b"VP8L" => {
+                let b = head.get(21..25)?;
+                let bits = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1)
+            }
+            b"VP8 " => (le16(26)? & 0x3fff, le16(28)? & 0x3fff),
+            _ => return None,
+        }
+    } else if head.starts_with(&[0xff, 0xd8]) {
+        let mut at = 2;
+        loop {
+            while *head.get(at)? != 0xff {
+                at += 1;
+            }
+            let marker = *head.get(at + 1)?;
+            if marker == 0xff {
+                at += 1;
+                continue;
+            }
+            let length = u16::from_be_bytes([*head.get(at + 2)?, *head.get(at + 3)?]);
+            // The frame headers (not the tables that share their numbers).
+            if (0xc0..=0xcf).contains(&marker) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
+                let height = u16::from_be_bytes([*head.get(at + 5)?, *head.get(at + 6)?]);
+                let width = u16::from_be_bytes([*head.get(at + 7)?, *head.get(at + 8)?]);
+                break (u32::from(width), u32::from(height));
+            }
+            at += 2 + usize::from(length);
+        }
+    } else {
+        return None;
+    };
+    (size.0 > 0 && size.1 > 0).then_some(size)
+}
+
+/// How much of a file is read to find its size: a JPEG's frame header may follow a thumbnail.
+const HEAD_FOR_SIZE: u64 = 128 * 1024;
+
+/// The size of each image the page asks about, in order: of the file as it really is, and only if
+/// the page may load it, as `stamps` does, so that it learns nothing of a file it can't see. Read
+/// from the header alone. None for a file outside, hidden, missing, or in a format not read.
+fn sizes(images: &Images, paths: &[String]) -> Vec<Option<(u32, u32)>> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = Path::new(path);
+            let real = path
+                .is_absolute()
+                .then(|| images.may_load(path).ok())
+                .flatten()?;
+            let file = open(&real).ok()?;
+            if !file.metadata().ok()?.is_file() {
+                return None;
+            }
+            let mut head = Vec::new();
+            file.take(HEAD_FOR_SIZE).read_to_end(&mut head).ok()?;
+            size_of_header(&head)
+        })
+        .collect()
+}
+
+/// The width and height of the local images the preview is about to draw (`sizes`), so that it
+/// holds their room before they load and the page doesn't move when they arrive.
+#[tauri::command(async)]
+pub fn image_sizes(app: AppHandle, paths: Vec<String>) -> Vec<Option<(u32, u32)>> {
+    match app.try_state::<Images>() {
+        Some(images) => sizes(&images, &paths),
+        None => vec![None; paths.len()],
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
@@ -402,6 +495,21 @@ fn requested(uri: &Uri) -> Option<PathBuf> {
 
 #[cfg(all(test, unix))]
 mod tests {
+
+    #[test]
+    fn it_reads_an_images_size_from_its_header() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&[0, 0, 1, 0x2c, 0, 0, 0, 0x64]);
+        assert_eq!(size_of_header(&png), Some((300, 100)));
+        assert_eq!(size_of_header(b"GIF89a\x0a\0\x14\0"), Some((10, 20)));
+        let jpeg = [
+            0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0, 0x40, 0, 0x80, 3,
+        ];
+        assert_eq!(size_of_header(&jpeg), Some((128, 64)));
+        assert_eq!(size_of_header(&jpeg[..12]), None);
+        assert_eq!(size_of_header(b"not an image"), None);
+        assert_eq!(size_of_header(b""), None);
+    }
     use super::*;
     use std::fs;
     use std::os::unix::fs::symlink;

@@ -82,7 +82,13 @@ import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
-import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
+import {
+  imageOpening,
+  imageResolver,
+  imageSizer,
+  localImageAt,
+  refreshImagesEffect,
+} from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -311,6 +317,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     undoHistory(),
     trackingBack,

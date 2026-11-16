@@ -422,6 +422,7 @@ pub fn run() {
             links::open_link,
             project::show_images,
             images::image_stamps,
+            images::image_sizes,
             project::allow_document,
             image_files::pick_images,
             image_files::add_images,

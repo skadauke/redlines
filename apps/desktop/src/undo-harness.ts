@@ -165,6 +165,7 @@ export async function openWindow(doc: string): Promise<Window> {
     allowImages: () => Promise.resolve(false),
     imageUrl: () => null,
     imageStamps: () => Promise.resolve([]),
+    imageSizes: () => Promise.resolve([]),
     forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => {
