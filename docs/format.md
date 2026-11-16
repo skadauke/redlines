@@ -3323,6 +3323,41 @@ blocks of the document's own flow, §3.7.)
   person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
 - **Track Changes off.** The same two edits are made plain.
 
+### 3.15 HTML with a Markdown twin
+
+A block of HTML of one of these shapes has an exact Markdown form, its **twin**, and a command that
+changes the block's structure (a heading's level, Tab in a list, a row or a column) converts it first.
+The text of the HTML is edited as it is written, with no conversion.
+
+| HTML (a top-level block, on its own lines)                                    | Twin                 |
+| ----------------------------------------------------------------------------- | -------------------- |
+| `<h1>` to `<h6>`, no attributes, one line of inline content                   | `#` to `######`      |
+| `<hr>`, `<hr/>`, `<hr />`                                                     | `---` (`***` under a line of text) |
+| `<pre><code>` with plain text, the five entities of code only                 | a fence, longer than any run of backticks in the code |
+| `<blockquote>` of lines of inline content, or of `<p>`s of it                 | `>` lines (`>` alone between paragraphs) |
+| `<ul>`, `<ol>` (`start` only), `<li>` of inline content, with nested lists    | `-` and `1.` items, nested by their marker's width |
+| `<table>` with a header row of `<th>`, rows of `<td>`, and `align` kept per column | a pipe table with its delimiter row |
+
+**Exact** means the twin renders as the HTML did in GitHub's renderer (micromark 4.0.2 with GFM): the
+same elements, text and attributes, apart from what HTML itself ignores (white space between tags,
+the `thead` and `tbody` that rows sit in, the paragraph Markdown puts in a quote). To be sure of it,
+text is carried over only when no character in it means anything to Markdown: letters, numbers,
+spaces and `. , ; : ' " ? ! % ( ) + - / = ^ { } #` and entities, plain inline tags (`b`, `i`, `code`,
+`a`, `br` and the like, with plain attributes) in pairs, and no address that Markdown would link
+(`www.`, `http:`), no `*`, `_`, `` ` ``, `[`, `]`, `\`, `|`, `~`, `$`, `@` or `<` that starts anything
+else, no line that starts like another block (`#`, `-`, `+`, `>`, `1.`), and no `#` at the end. A list
+that isn't numbered from 1, a table and a numbered sublist need a blank line above, or a line of text
+would swallow them. Anything more than the twin has (an attribute, a span, a caption, a `<p>` in an
+item, a pending change or a comment in the block, a block in a quote or an item) is **no twin**.
+
+With Track Changes **on** the conversion is a substitution (§3.4) of the block's lines by the twin,
+one change whose ledger entry has a `note` that names it ("Converted the `<h2>` heading to
+Markdown"): accepting it gives the Markdown, rejecting it gives back the HTML. A block change can't
+start at a pending change, so a command that can say what it makes of the twin (a heading's level)
+is written into the same substitution; any other command runs after the conversion, and says why when
+it is refused. With Track Changes **off** the block is replaced. Where there is no twin the command is
+disabled, and its hint says why.
+
 ## 4. Comments
 
 A comment thread is anchored in the body and stored in the ledger under the same id.

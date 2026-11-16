@@ -94,3 +94,5 @@ export {
   isEscapedTag,
 } from './github-html.ts';
 export type { HtmlHandling } from './github-html.ts';
+export { htmlTwin, NO_TWIN } from './html-twin.ts';
+export type { Twin, TwinKind, TwinPlace, TwinRead } from './html-twin.ts';
