@@ -135,8 +135,8 @@ export const GRIPS_STYLE = `
 }
 .rl-grip-hint {
   position: absolute; z-index: 6; padding: 6px 10px; border-radius: 8px; pointer-events: none;
-  background: var(--rl-tip, #1d1d1f); color: #fff; font-size: var(--rl-size-ui-small);
-  line-height: 1.3; white-space: nowrap; box-shadow: 0 4px 16px rgb(0 0 0 / 0.22);
+  border: 1px solid var(--rl-rule); background: var(--rl-card); color: var(--rl-ink);
+  font-size: var(--rl-size-ui-small); line-height: 1.3; white-space: nowrap; box-shadow: var(--rl-shadow);
 }
 .rl-grip-hint[hidden] { display: none; }
 .rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
