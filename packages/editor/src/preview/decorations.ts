@@ -673,8 +673,14 @@ function updatePreview(value: Preview, tr: Transaction): Preview {
     // The names of emoji that a host gave, or took away, after the text was drawn.
     state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
   const tree = syntaxTree(state);
-  const moved = selectionMoved(tr);
+  // A selection set, even to where it was, ends what a paste has just added (`freshlyAdded`).
+  const moved = selectionMoved(tr) || tr.selection !== undefined;
   if (!everything && !tr.docChanged && !moved && tree === syntaxTree(tr.startState)) return value;
+  // Another tree of the same length (a language set again) has no window to name.
+  const replaced =
+    !tr.docChanged &&
+    tree !== syntaxTree(tr.startState) &&
+    tree.length === syntaxTree(tr.startState).length;
   const extra = moved ? selectionPlaces(tr) : [];
   // The ledger is never drawn: where it is, and where it was, may change what is.
   const ledger = state.field(parsedField).ledgerRange;
@@ -687,7 +693,7 @@ function updatePreview(value: Preview, tr: Transaction): Preview {
   if (!sameLedger) {
     for (const range of [ledger, was]) if (range) extra.push([range.from, range.to]);
   }
-  const windows = everything ? null : windowsOf(tr, extra);
+  const windows = everything || replaced ? null : windowsOf(tr, extra);
   if (!windows) return previewOf(previewDecorations(state));
   let decorations = tr.docChanged ? value.decorations.map(tr.changes) : value.decorations;
   let breaks = tr.docChanged ? value.breaks.map(tr.changes) : value.breaks;

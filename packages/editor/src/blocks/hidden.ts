@@ -56,7 +56,7 @@ function scanOf(state: EditorState): Scan {
   const tree = syntaxTree(state);
   const { doc } = state;
   let scan = scans.get(doc);
-  if (!scan) scans.set(doc, (scan = { reach: 0, holders: [], comments: [], runs: [] }));
+  if (!scan) scans.set(doc, (scan = { reach: -1, holders: [], comments: [], runs: [] }));
   if (tree.length <= scan.reach) return scan;
   const from = blockBefore(tree, scan.reach);
   scan.holders = scan.holders.filter((span) => span.from < from);

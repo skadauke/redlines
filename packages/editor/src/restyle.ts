@@ -76,10 +76,8 @@ export function windowsOf(tr: Transaction, extra: readonly [number, number][]): 
   tr.changes.iterChangedRanges((_a, _b, from, to) => regions.push([from, to]));
   // Edits can make the parse differ below them, as an opened fence does: the drawing follows the
   // tree until it is the old one again.
-  if (tr.docChanged && regions.length) {
-    const last = regions[regions.length - 1]!;
-    last[1] = resync(tr.changes, before, tree, last[1]);
-  }
+  if (tr.docChanged)
+    for (const region of regions) region[1] = resync(tr.changes, before, tree, region[1]);
   const reach = tr.changes.mapPos(before.length, -1);
   if (tree.length !== reach)
     regions.push([Math.min(tree.length, reach), Math.max(tree.length, reach)]);
