@@ -1651,6 +1651,9 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
     return fineTableEdit(text, op, ctx);
   } catch (error) {
     if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+    // A request with no meaning (the last column, rows already there, columns already aligned that
+    // way) is no refusal of the rules: it is answered in its own words, not written as a replacement.
+    if (NO_MEANING.test(error.message)) throw error;
     try {
       return widenedTableEdit(text, op, ctx);
     } catch (second) {
@@ -1660,5 +1663,8 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
     }
   }
 }
+
+const NO_MEANING =
+  /^(Delete the table instead\.|The (rows|columns) are already there\.|The columns are already aligned that way\.|A table keeps at least one column\.|There is no such )/;
 
 const WIDENABLE: readonly string[] = ['no-legal-placement', 'would-hide-marks', 'inside-code'];

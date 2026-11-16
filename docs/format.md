@@ -2304,9 +2304,13 @@ operation with Track Changes on is refused for another person's pending change, 
 that is pending, or a mark that has no place ("Decide it first", "Accept or reject the … changes in
 this table first", a marker that can't follow), the operation is made as Track Changes off makes it
 on the table as the newest view reads it, and written as the replacement of the table (§3.12), with
-other people's pending changes in its old text. The words stay for what no unit holds, for the
-operations with Track Changes off, and for the requests that have no meaning (an index outside the
-table, the last row or column, a request that changes nothing).
+other people's pending changes in its old text. The words stay for what no unit holds (a table that is the
+whole text, where the closer would stand alone on its line; a marker inside an unclosed comment; a
+row with no leading pipe; a header alignment while the header's row change is pending), for the
+operations with Track Changes off (also those inside another person's pending replacement of the
+table, which can't be made without changing the text around it), for a paste that needs more of a
+table beside another person's change, and for the requests that have no meaning (an index outside
+the table, the last row or column, a request that changes nothing).
 
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:

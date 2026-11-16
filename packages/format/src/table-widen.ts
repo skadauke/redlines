@@ -32,7 +32,7 @@ export function widenedTableEdit(text: string, op: TableOp, ctx: EditContext): T
   const edits = changesBetween(view.text, applyChanges(view.text, plain.changes));
   const done = widen(text, edits, ctx);
   const after = newestView(done.text);
-  return { ...plain, changes: done.changes, caret: after.map.toSource(plain.caret) };
+  return { ...plain, changes: done.changes, caret: after.map.toSource(plain.caret, 1) };
 }
 
 /** The codes of the refusals that a replacement of the table sets right. */
