@@ -73,6 +73,7 @@ interface Hook {
   };
   controller: { createWith(text: string): Promise<void> };
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
+  parsedAtViewport(): boolean;
 }
 
 declare global {

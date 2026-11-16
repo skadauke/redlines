@@ -42,6 +42,7 @@
     "allow-folder-exists",
     "allow-forget-documents",
     "allow-identity",
+    "allow-image-sizes",
     "allow-image-stamps",
     "allow-keep-running",
     "allow-list-folder",

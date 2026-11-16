@@ -105,7 +105,7 @@ export function windowsOf(tr: Transaction, extra: readonly [number, number][]): 
  * place where two blocks in a row are what they were (the same kind, the same size) before the
  * edit. Never past the end of the old tree: the tree's progress is a region of its own.
  */
-function resync(changes: ChangeSet, before: Tree, tree: Tree, from: number): number {
+export function resync(changes: ChangeSet, before: Tree, tree: Tree, from: number): number {
   const back = changes.invertedDesc;
   let node = blockAt(tree, from, 1);
   let same = 0;

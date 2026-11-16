@@ -38,7 +38,7 @@ import {
   insertedColumnClass,
   insertedColumnsOf,
 } from './colghosts.ts';
-import { type Dirty, dirtyOf, type Span } from './dirty.ts';
+import { type Dirty, dirtyOf, dirtyOfParse, type Span } from './dirty.ts';
 import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
 import { type MissingCaret, missingCaret } from './missing.ts';
 import { BR } from './stops.ts';
@@ -393,13 +393,6 @@ export function layoutOf(state: EditorState): Layout {
   };
 }
 
-/** What a set keeps when the ranges that start in `from`..`to` and end by it are taken out. */
-const without = (from: number, to: number) => ({
-  filter: (a: number, b: number) => !(a >= from && b <= to),
-  filterFrom: from,
-  filterTo: to,
-});
-
 /**
  * The layout after a change that is in the tables' text: the sets mapped through it, the tables it
  * doesn't touch as they were, the rows it touches built again, and a table whose shape it changes
@@ -417,34 +410,54 @@ function patchLayout(value: Layout, tr: Transaction, dirty: Dirty): Layout {
   );
 }
 
+/**
+ * What a set keeps when the ranges that start in any of `spans` and end by it are taken out, in one
+ * pass over the set (a pass costs its chunks, so one for each table would cost the number of tables,
+ * and the parse going on builds many).
+ */
+function withoutAny(spans: readonly Span[]) {
+  const from = Math.min(...spans.map((span) => span.from));
+  const to = Math.max(...spans.map((span) => span.to));
+  return {
+    filter: (a: number, b: number) => !spans.some((span) => a >= span.from && b <= span.to),
+    filterFrom: from,
+    filterTo: to,
+  };
+}
+
 /** `layout`, a layout of the text `state` has, with what `dirty` names built again in it. */
 function rebuild(layout: Layout, state: EditorState, dirty: Dirty): Layout {
   let { wrappers, decorations, cells } = layout;
-  const dropRows = (span: Span) => {
-    decorations = decorations.update(without(span.from, span.to));
-    cells = cells.update(without(span.from, span.to));
-  };
-  for (const span of dirty.gone) {
-    wrappers = wrappers.update(without(span.from, span.to));
-    dropRows(span);
-  }
   // Everything that is to be built again is taken out first: what a change touches can lie where
   // another table's drawing starts, and nothing built may be taken out after.
+  const wrapperSpans: Span[] = [];
+  const rowSpans: Span[] = [];
+  for (const span of dirty.gone) {
+    wrapperSpans.push(span);
+    rowSpans.push(span);
+  }
   for (const { rows, clear } of dirty.tables) {
-    wrappers = wrappers.update(without(clear.from, clear.to));
-    if (rows === null) dropRows(clear);
-    else for (const { clear: span } of rows) dropRows(span);
+    wrapperSpans.push(clear);
+    if (rows === null) rowSpans.push(clear);
+    else for (const { clear: span } of rows) rowSpans.push(span);
+  }
+  if (wrapperSpans.length) wrappers = wrappers.update(withoutAny(wrapperSpans));
+  if (rowSpans.length) {
+    decorations = decorations.update(withoutAny(rowSpans));
+    cells = cells.update(withoutAny(rowSpans));
   }
   const caretOf = caretOnce(state);
+  const added: Range<BlockWrapper>[] = [];
+  const out: Range<Decoration>[] = [];
+  const inCells: Range<Decoration>[] = [];
   for (const { table, rows } of dirty.tables) {
     const built = rows ? rows.map((r) => r.row) : table.rows;
-    const out: Range<Decoration>[] = [];
-    const inCells: Range<Decoration>[] = [];
     for (const row of built) rowDecorations(state, table, row, out, inCells, caretOf);
-    wrappers = wrappers.update({ add: wrappersOf(table), sort: true });
-    decorations = decorations.update({ add: out, sort: true });
-    cells = cells.update({ add: inCells, sort: true });
+    added.push(...wrappersOf(table));
   }
+  if (added.length) wrappers = wrappers.update({ add: added, sort: true });
+  if (out.length) decorations = decorations.update({ add: out, sort: true });
+  if (inCells.length) cells = cells.update({ add: inCells, sort: true });
   return { wrappers, decorations, cells };
 }
 
@@ -496,10 +509,11 @@ function updateLayout(value: Layout, tr: Transaction): Layout {
     tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
   if (!changed) return value;
   const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
-  // A change of view, or tables read again from a parse that went on, builds them all.
-  if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
-    return layoutOf(tr.state);
-  }
+  // A change of view builds them all. So does a change to or from Raw.
+  if (mode || tr.state.field(viewModeField, false) === 'raw') return layoutOf(tr.state);
+  // A parse that went on, with no change to the text, read more tables, and read those of the stretch
+  // it added again (#744): the new are built, and the gone dropped; the others are the same ones.
+  if (!tr.docChanged) return patchLayout(value, tr, dirtyOfParse(tr));
   if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
   const dirty = dirtyOf(tr);
   return dirty ? patchLayout(value, tr, dirty) : layoutOf(tr.state);

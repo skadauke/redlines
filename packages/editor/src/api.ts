@@ -275,6 +275,18 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * The size in px of a local image's file, given the path as `resolveImage` is: read from the
+   * file's header, so that the page holds the image's room before it loads and doesn't move when
+   * it arrives. May answer later (a promise); null for a size not known. Default: none.
+   */
+  imageSize?: (src: string) =>
+    | { width: number; height: number }
+    | null
+    | Promise<{
+        width: number;
+        height: number;
+      } | null>;
+  /**
    * Opens the file of a local image in another app, for a double-click on the image, and for the
    * `image.edit` command (Edit Image in Preview): given the image's path as the document writes it,
    * decoded and relative to the document (`img/a b.png`). The host knows where the document is and
