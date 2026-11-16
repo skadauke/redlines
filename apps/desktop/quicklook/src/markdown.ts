@@ -12,6 +12,8 @@
 // - An image is its alt text, unless it is a file beside the document that the host (the extension)
 //   has loaded and says so, by the path the document wrote and a name to show it by: then it is
 //   `<img src="cid:name">`, which Quick Look answers from the attachments of its reply.
+//   An `<img>` tag of the document (html.ts) is the same image, at its `width` and `height` if it
+//   wrote them (#629).
 // - A chunk of R Markdown or Quarto, a fence whose info string is written in braces
 //   (```` ```{r setup, include=FALSE} ````), keeps what is in the braces as a plain line over its code,
 //   where micromark would take the first word for the language and drop the rest.
@@ -145,7 +147,8 @@ function extension(html: Html): HtmlExtension {
 
 /** An image as micromark writes it: `<img src="…" alt="…"( title="…")? />`, with every quote and
  * bracket inside escaped, and nothing else makes the tag: raw HTML is text. */
-const IMAGE = /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")? \/>/g;
+const IMAGE =
+  /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")?(?: width="(\d{1,5}%?)")?(?: height="(\d{1,5}%?)")? \/>/g;
 
 /** The most local images that a document is asked about: a preview shows no more. */
 export const MAX_IMAGES = 40;
@@ -220,11 +223,11 @@ export function markdownImages(source: string): string[] {
  * except those in `images`, which the host loaded: those are the pictures. */
 export function markdownToHtml(source: string, images: LoadedImages = new Map()): string {
   return classOfItems(rawHtml(source))
-    .replace(IMAGE, (_, src: string, alt: string) => {
+    .replace(IMAGE, (_, src: string, alt: string, width?: string, height?: string) => {
       const path = localImagePath(src);
       const name = path === null ? undefined : images.get(path);
       return name !== undefined && NAME.test(name)
-        ? `<img class="rl-image" src="cid:${name}" alt="${alt}">`
+        ? `<img class="rl-image" src="cid:${name}" alt="${alt}"${width ? ` width="${width}"` : ''}${height ? ` height="${height}"` : ''}>`
         : `<span class="rl-image">${alt}</span>`;
     })
     .replace(/<table(?=[\s>])/g, '<div class="rl-tbl-scroll"><table')

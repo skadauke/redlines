@@ -133,8 +133,16 @@ a {
 /* An image that the extension loaded from beside the document. */
 img.rl-image {
   max-width: 100%;
-  height: auto;
   vertical-align: middle;
+}
+/* A size the document wrote (#629): with both, the height follows the width, in the same shape; with
+   only a height, the height stands. */
+img.rl-image:not([height]),
+img.rl-image[width] {
+  height: auto;
+}
+img.rl-image[height]:not([width]) {
+  width: auto;
 }
 
 code {
