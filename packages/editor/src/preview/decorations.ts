@@ -21,12 +21,11 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { freshlyAdded } from './fresh.ts';
 import { imageOfNode } from '../image-size.ts';
-import { imageDecoration, refreshImagesEffect } from './image.ts';
+import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
-import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
+import { entityDecoration, pendingBox, roomDecoration, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -296,6 +295,20 @@ function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
   }
 }
 
+/** Whether an entity is the whole text of its paragraph and is `&nbsp;`: a line of room. */
+function isRoom(state: EditorState, node: SyntaxNode): boolean {
+  const paragraph = node.parent;
+  return (
+    state.sliceDoc(node.from, node.to) === '&nbsp;' &&
+    paragraph?.name === 'Paragraph' &&
+    paragraph.parent?.name === 'Document' &&
+    state
+      .sliceDoc(paragraph.from, paragraph.to)
+      .replace(/<!--[^]*?-->/g, '')
+      .trim() === '&nbsp;'
+  );
+}
+
 /** A hard line break: its syntax is hidden (the line break itself is drawn as the break). */
 function hardBreak(b: Builder, node: SyntaxNode): void {
   // The node ends with the line break; the syntax is what comes before it.
@@ -497,8 +510,9 @@ function autolink(b: Builder, node: SyntaxNode): void {
 function image(b: Builder, node: SyntaxNode): void {
   // A tag that is no image, or a block that holds more than one, stays source.
   if (!imageOfNode(b.state, node)) return;
-  // A link a paste or a drop has just added is drawn with the caret at its end (`freshlyAdded`).
-  if (touches(b.state, node.from, node.to) && !freshlyAdded(b.state, node.to)) {
+  // The image stays drawn while it is selected or the caret is beside it (a click selects it, #675);
+  // only a selection with an end inside its syntax shows the source.
+  if (selectionInside(b.state, node.from, node.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);
@@ -603,6 +617,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
       // Entities in table cells are drawn by the table widget, not here (out of scope for now).
       else if (name === 'Entity') {
+        // A paragraph of `&nbsp;` alone is a line of room: an empty line, with the caret in it too.
+        if (isRoom(state, node)) {
+          b.push(roomDecoration().range(node.from, node.to));
+          return true;
+        }
         const decoration = touches(state, node.from, node.to)
           ? null
           : entityDecoration(state, node.from, node.to);
@@ -623,8 +642,8 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
-  for (const { line, spacing, below, apart } of spacings(read.reading, leaves)) {
-    const kind = below ? '-below' : apart ? '-apart' : '';
+  for (const { line, spacing, below, apart, clip } of spacings(read.reading, leaves)) {
+    const kind = below ? '-below' : apart ? '-apart' : clip ? '-clip' : '';
     b.lineClass(state.doc.line(line), `rl-space-${spacing}${kind}`);
   }
   return b.finish();
@@ -651,13 +670,16 @@ const previewField = StateField.define<DecorationSet>({
   ],
 });
 
-/** The hard breaks' syntax among a set of decorations, as what the caret steps over. */
+/** The hard breaks' syntax and the images among a set of decorations, as what the caret steps over. */
 const stepped = new WeakMap<DecorationSet, DecorationSet>();
 function hardBreaksOf(decorations: DecorationSet): DecorationSet {
   let found = stepped.get(decorations);
   if (!found) {
     found = decorations.update({
-      filter: (_from, _to, value) => (value.spec as { hardBreak?: true }).hardBreak === true,
+      filter: (_from, _to, value) => {
+        const spec = value.spec as { hardBreak?: true; imageAtom?: true };
+        return spec.hardBreak === true || spec.imageAtom === true;
+      },
     });
     stepped.set(decorations, found);
   }
