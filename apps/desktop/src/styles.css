@@ -160,6 +160,8 @@ body {
   white-space: nowrap;
   -webkit-user-select: none;
   user-select: none;
+  /* The fade lets the pointer through to the text; the label takes it, for its hint (#682). */
+  pointer-events: auto;
 }
 
 /*

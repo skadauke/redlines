@@ -23,6 +23,25 @@ export interface Words {
   total: number;
   /** The words a selection covers, or null when nothing with a word in it is selected. */
   selected: number | null;
+  /** The lines and characters, for the label's hover hint (#682). */
+  parts: TextParts;
+}
+
+/** The lines and characters of what a reader sees, and of the selection, which is null when empty. */
+export interface TextParts {
+  lines: number;
+  characters: number;
+  selectedLines: number | null;
+  selectedCharacters: number | null;
+}
+
+/** The lines of `text` (none for no text), and its characters, which a line break is not one of. */
+function linesAndCharacters(text: string): { lines: number; characters: number } {
+  if (text === '') return { lines: 0, characters: 0 };
+  const lines = text.split('\n');
+  let characters = 0;
+  for (const line of lines) characters += Array.from(line).length;
+  return { lines: lines.length, characters };
 }
 
 /** What a reader sees of a document: its newest view. */
@@ -31,11 +50,22 @@ type Newest = ReturnType<typeof newestView>;
 /** The words of a document as a reader sees it, and of the selection `from` to `to` in its source. */
 function wordsOf(view: Newest, selection: { from: number; to: number }): Words {
   const total = wordCount(view.text);
-  if (selection.from === selection.to) return { total, selected: null };
+  const parts: TextParts = {
+    ...linesAndCharacters(view.text),
+    selectedLines: null,
+    selectedCharacters: null,
+  };
+  if (selection.from === selection.to) return { total, selected: null, parts };
   const from = view.map.fromSource(selection.from);
   const to = view.map.fromSource(selection.to);
-  const selected = wordCount(view.text.slice(from, to));
-  return { total, selected: selected > 0 ? selected : null };
+  const chosen = view.text.slice(from, to);
+  const inside = linesAndCharacters(chosen);
+  if (inside.characters > 0) {
+    parts.selectedLines = inside.lines;
+    parts.selectedCharacters = inside.characters;
+  }
+  const selected = wordCount(chosen);
+  return { total, selected: selected > 0 ? selected : null, parts };
 }
 
 /**
@@ -66,6 +96,21 @@ function editorWords(view: EditorView): () => Words {
 export function wordCountLabel(total: number, selected: number | null): string {
   const all = `${total.toLocaleString()} ${total === 1 ? 'word' : 'words'}`;
   return selected === null ? all : `${selected.toLocaleString()} of ${all}`;
+}
+
+/**
+ * What hovering the label says: "12 lines · 640 characters", and with a selection "3 of 12 lines ·
+ * 120 of 640 characters".
+ */
+export function textPartsLabel(parts: TextParts): string {
+  const n = (count: number, one: string) =>
+    `${count.toLocaleString()} ${count === 1 ? one : `${one}s`}`;
+  const of = (selected: number | null, total: number, one: string) =>
+    selected === null ? n(total, one) : `${selected.toLocaleString()} of ${n(total, one)}`;
+  return [
+    of(parts.selectedLines, parts.lines, 'line'),
+    of(parts.selectedCharacters, parts.characters, 'character'),
+  ].join(' \u00b7 ');
 }
 
 export interface WordCount {
@@ -111,8 +156,10 @@ export function createWordCount(
   let waiting = false;
 
   const show = () => {
-    const { total, selected } = source.count();
+    const { total, selected, parts } = source.count();
     label.textContent = wordCountLabel(total, selected);
+    // The app's hint draws a title (title-hints.ts), so it reads as the others do (#684).
+    label.title = textPartsLabel(parts);
   };
   const later = (ms: number) => {
     clearTimeout(timer);
