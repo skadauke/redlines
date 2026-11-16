@@ -43,7 +43,7 @@ const RULES: readonly (readonly [RegExp, Effect])[] = [
     /^(packages\/editor\/src\/preview\/|plugins\/(code|emoji)\/)/,
     ['lists', 'blocks', 'links', 'tables'],
   ],
-  [/^(plugins\/(review|palette)\/|apps\/desktop\/src\/ui\/)/, ['views', 'links']],
+  [/^(plugins\/(review|toolbar)\/|apps\/desktop\/src\/ui\/)/, ['views', 'links']],
 ];
 
 /**

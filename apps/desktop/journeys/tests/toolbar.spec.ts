@@ -9,7 +9,7 @@ const DOC = 'The quick brown fox jumps over the lazy dog.\n\nA second paragraph 
 const toolbar = (j: Journey) => j.page.locator('.rl-toolbar');
 const wrench = (j: Journey) => j.page.locator('.rl-wrench-button');
 
-test.describe('the toolbar @toolbar', () => {
+test.describe('the toolbar @views', () => {
   test('is away until it is summoned, and the wrench is left of the eye', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
     await expect(toolbar(j)).toBeHidden();
