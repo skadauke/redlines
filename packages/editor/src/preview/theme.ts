@@ -41,9 +41,35 @@ function spaceRules(): ThemeSpec {
     // tint would paint, so the tint is clipped to the box (a transparent border would square the
     // box's top corners, which the radius rounds from the border box). The alert's own padding is
     // the same as `.rl-callout-first`'s.
+    // Code, a table or an alert under a tinted block (#639) do the same: the space is padding on the
+    // line that starts the box (an alert's has its own padding, code's none), clipped out of the
+    // tint, and for a table under a box, padding on the box's last line, clipped the same way. The
+    // clip's insets and corners are variables, so a single line that is both ends takes both.
+    const clipped =
+      'inset(var(--rl-clip-top, 0px) 0 var(--rl-clip-bottom, 0px) 0 round var(--rl-clip-rt, 0px) var(--rl-clip-rt, 0px) var(--rl-clip-rb, 0px) var(--rl-clip-rb, 0px))';
     rules[`.cm-line.rl-callout-first.rl-space-${kind}-apart`] = {
       paddingTop: `calc(${space(kind)} + ${textPx(10)})`,
-      clipPath: `inset(${space(kind)} 0 0 0 round 8px 8px 0 0)`,
+      '--rl-clip-top': space(kind),
+      '--rl-clip-rt': '8px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-codeblock-first.rl-space-${kind}-apart`] = {
+      paddingTop: space(kind),
+      '--rl-clip-top': space(kind),
+      '--rl-clip-rt': '6px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-callout-last.rl-space-${kind}-clip`] = {
+      paddingBottom: `calc(${space(kind)} + ${textPx(10)})`,
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '8px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-codeblock-last.rl-space-${kind}-clip`] = {
+      paddingBottom: space(kind),
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '6px',
+      clipPath: clipped,
     };
   }
   return rules;
