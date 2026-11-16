@@ -559,12 +559,35 @@ export function openBlock(state: EditorState): OpenBlock | null {
 }
 
 /** The Returns that opened the open block, from the record, last first; null if it has none. */
-function openers(state: EditorState): readonly Taken[] | null {
+function openers(state: EditorState, leaving = false): readonly Taken[] | null {
   const open = openBlock(state);
   const record = state.field(recordField, false) ?? [];
   if (!open || !record.length) return null;
-  const first = record.findLastIndex((taken) => taken.opened);
-  return first < 0 ? null : record.slice(first).reverse();
+  let first = record.findLastIndex((taken) => taken.opened);
+  if (first < 0) return null;
+  // The caret leaving after a Return in an empty item that ended its list: taken back, the Returns
+  // would bring the empty item back. That item is the one the Return before it made, which goes
+  // with it (#669). An item that was in the file before is the file's, and comes back as it was.
+  // The file, while the block is open, is as it was before the Return.
+  let back = first;
+  if (leaving) {
+    while (back >= 0 && bringsItemBack(state, open, record.slice(back).reverse())) back--;
+    if (back >= 0) first = back;
+  }
+  return record.slice(first).reverse();
+}
+
+/** A line of an item's marker alone (and its box). */
+const EMPTY_ITEM_LINE = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]*)?$/;
+
+/** Whether taking back these Returns leaves an empty item where the open block was. */
+function bringsItemBack(state: EditorState, open: OpenBlock, takes: readonly Taken[]): boolean {
+  let changes = takes[0]!.changes;
+  for (const taken of takes.slice(1)) changes = changes.compose(taken.changes);
+  const gone = changes.apply(state.doc);
+  return [-1, 1].some((assoc) =>
+    EMPTY_ITEM_LINE.test(gone.lineAt(changes.mapPos(open.empty.from, assoc)).text),
+  );
 }
 
 /**
@@ -738,12 +761,13 @@ function tightListAround(state: EditorState, line: Line): { from: number; to: nu
 /**
  * The changes that take the open block back: the Returns that opened it, from the record, when
  * nothing else was done since; otherwise its line and a blank line beside it. Null when nothing is
- * open, or it can't be taken back.
+ * open, or it can't be taken back. `leaving` is the caret leaving the block (an empty item the
+ * Return ended its list from doesn't come back, #669), not the file's text while it is open.
  */
-export function takeBackChanges(state: EditorState): ChangeSet | null {
+export function takeBackChanges(state: EditorState, leaving = false): ChangeSet | null {
   const open = openBlock(state);
   if (!open) return null;
-  const takes = openers(state);
+  const takes = openers(state, leaving);
   if (takes) {
     let changes = takes[0]!.changes;
     for (const taken of takes.slice(1)) changes = changes.compose(taken.changes);
@@ -752,9 +776,12 @@ export function takeBackChanges(state: EditorState): ChangeSet | null {
   return removal(state, open);
 }
 
-/** The document's text as the file has it: with the open block taken back. */
-export function textWithoutOpen(state: EditorState): string {
-  const changes = takeBackChanges(state);
+/**
+ * The document's text as the file has it: with the open block taken back. With `leaving`, as it
+ * is once the caret leaves the block.
+ */
+export function textWithoutOpen(state: EditorState, leaving = false): string {
+  const changes = takeBackChanges(state, leaving);
   return changes ? changes.apply(state.doc).toString() : state.doc.toString();
 }
 
@@ -776,8 +803,8 @@ function takeBackSpec(
 ): { spec: TransactionSpec; outside: boolean } | null {
   const open = openBlock(state);
   if (!open) return null;
-  const takes = openers(state);
-  const changes = takeBackChanges(state);
+  const takes = openers(state, true);
+  const changes = takeBackChanges(state, true);
   if (!changes)
     return { spec: { effects: [setOpenEffect.of(null), endRecordEffect.of(null)] }, outside: true };
   const effects: StateEffect<unknown>[] = [setOpenEffect.of(null), endRecordEffect.of(null)];
