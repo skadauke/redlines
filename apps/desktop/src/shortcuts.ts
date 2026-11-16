@@ -78,6 +78,18 @@ export function menuKey(key: string): string {
   ].join('+');
 }
 
+/** A key as assistive technology names it (`aria-keyshortcuts`): `Alt-Mod-1` is `Alt+Meta+1`. */
+export function ariaKey(key: string): string {
+  const pieces = normalizeKey(key).split(/-(?!$)/);
+  const name = pieces.pop() ?? '';
+  const aria: Record<string, string> = { Ctrl: 'Control', Mod: 'Meta' };
+  const named: Record<string, string> = { Space: ' ' };
+  return [
+    ...pieces.map((piece) => aria[piece] ?? piece),
+    named[name] ?? (name.length === 1 ? name.toUpperCase() : name),
+  ].join('+');
+}
+
 /** Whether a key has ⌘, ⌃ or ⌥: a key with only ⇧, or none, would be typing. */
 export function hasCommandModifier(key: string): boolean {
   return /^(?:(?:Ctrl|Alt|Shift|Mod)-)*(?:Ctrl|Alt|Mod)-/.test(key);

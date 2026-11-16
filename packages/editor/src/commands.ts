@@ -7,7 +7,7 @@
 // bar, whose item would run the command again (a Mac's webview sees a key before the menu bar does),
 // or to WebKit, which would make the text bold itself.
 
-import { EditorState, Prec } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandKeys, CommandRegistry, Editor, EditorCommand } from './api.ts';
 
@@ -109,6 +109,12 @@ export function createCommandRegistry(
   changed: () => void,
   notice: (message: string) => void = () => {},
   keys?: CommandKeys,
+  /**
+   * Puts the commands' keymap in the editor ahead of every other (`Editor.addExtension` adds after
+   * the others, and a keymap of the same precedence that came first wins); replaces its last one,
+   * and takes it away when given none.
+   */
+  install?: (keymap: Extension | null) => void,
 ): CommandRegistry {
   let commands: readonly EditorCommand[] = [];
   /** The commands as listed: each with the key it has now, and the one it came with. */
@@ -152,11 +158,21 @@ export function createCommandRegistry(
       return key ? [binding(command, key)] : [];
     });
   let removeKeys = () => {};
-  /** Binds every command's key again, in one keymap that comes before the core's. */
+  const bind = (extension: Extension) => {
+    if (install) {
+      install(extension);
+      return () => install(null);
+    }
+    return editor().addExtension(extension);
+  };
+  /**
+   * Binds every command's key again, in one keymap that comes before every other, so that a key the
+   * person chose beats a binding of the editor's or a plugin's own, added earlier or later (#551).
+   */
   const bindAll = () => {
     removeKeys();
     relist();
-    removeKeys = editor().addExtension(Prec.high(keymap.of(bindings())));
+    removeKeys = bind(Prec.highest(keymap.of(bindings())));
   };
   keys?.subscribe(() => {
     if (commands.length) bindAll();

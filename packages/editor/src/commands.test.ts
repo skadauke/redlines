@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing, syntaxTree } from '@codemirror/language';
+import { Prec } from '@codemirror/state';
 import { keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -445,6 +446,39 @@ describe('running by id', () => {
     checkbox.blur();
     expect(editor.commands.run('format.bold')).toBe(true);
     expect(run).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('the commands’ keymap', () => {
+  it('comes before a keymap that a plugin added earlier, at the highest precedence too', () => {
+    const editor = mount();
+    const seen: string[] = [];
+    editor.addExtension(
+      Prec.highest(
+        keymap.of([
+          {
+            key: 'Mod-j',
+            run: () => {
+              seen.push('plugin');
+              return true;
+            },
+          },
+        ]),
+      ),
+    );
+    editor.commands.register([
+      {
+        id: 'x.mine',
+        title: 'Mine',
+        shortcut: 'Mod-j',
+        run: () => {
+          seen.push('command');
+          return true;
+        },
+      },
+    ]);
+    press(editor, 'Mod-j');
+    expect(seen).toEqual(['command']);
   });
 });
 

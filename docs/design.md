@@ -239,8 +239,8 @@ The window, on the desktop:
   lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
   and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
   are dots that open on hover wherever the window is too narrow for them beside the column. Both are each window's own: a zoom changes only the window it is made in, and a window opened later starts at the last window zoom set anywhere, kept across launches, and its text at the Default text size of Preferences › Appearance, which no window's own text size changes and which changes no window that is open; neither reaches the file, a print, the clipboard or an export.
-- **Preferences** (⌘,) is its own window with labeled tabs: General, Editor, Appearance and Agents
-  (Shortcuts, a fifth, is still to come). The rows of each pane are in groups under small headings:
+- **Preferences** (⌘,) is its own window with labeled tabs: General, Editor, Appearance, Agents
+  and Shortcuts (§5.9). The rows of each pane are in groups under small headings:
   General has You (name and handle), Opening (what opens at launch, the default folder for new
   documents) and The app (automatic updates, the default app for Markdown, the Quick Look preview of
   Markdown files, installing the `redlines` command line, the Dock icon's rotation); Editor has
@@ -986,6 +986,18 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 **The command palette** opens with ⌘⇧P (Ctrl+Shift+P on Windows and Linux): fuzzy search over
 every command, with its shortcut, and recent commands first. One command registry serves the
 menus, shortcuts, the palette, plugins and agents.
+
+**Your own shortcuts** (#535, #551). Every command's key is in one book: the command's own, and
+over it what the person changed (`settings.shortcuts`, a command's id to a key, or "" for none),
+which every window shares. The editor's keys, the menu bar and the title bar's hints and menus all
+read it, so a change works at once and survives a restart. Preferences › Shortcuts lists every
+command under its menu with its key. A click on the key records a new one: it needs ⌘, ⌃ or ⌥, Esc
+cancels and ⌫ clears. A key that is another command's asks "⌘I is Italic's" with Replace (which
+leaves the other with no key) or Cancel; a key macOS keeps (⌘Q, ⌘H, ⌘M, ⌘W, ⌘Space, ⌥⌘H, ⌃⌘F, ⌘Tab,
+⌃↑, ⌃↓) and Cut, Copy, Paste and Select All are refused, with the reason in the row. Quit, Undo and
+Redo keep their keys. The pane has its own Filter (typing in it goes there, not to the window's
+filter) and Reset All. The commands' keymap comes before every other keymap of the editor, so a
+key the person chose beats a binding of the editor's or a plugin's own.
 
 | Action                         | macOS                                                                                         | Windows and Linux         |
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |

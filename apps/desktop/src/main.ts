@@ -913,6 +913,7 @@ function renameDocument(): void {
 }
 
 const titleBar = createTitleBar(element('#titlebar'), {
+  keyOf: (id) => shortcutBook.keyOf(id),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -938,6 +939,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// A key changed here or in Preferences: the title bar's hints and menus show it (#551).
+shortcutBook.subscribe(() => titleBar.keysChanged());
 
 // The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
 // editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a

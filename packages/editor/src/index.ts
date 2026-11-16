@@ -365,6 +365,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   ];
   /** Extensions added after the editor was made (`addExtension`), each once, in order. */
   const addedCompartment = new Compartment();
+  /** The commands' keys: ahead of every other extension, so that the person's own keys win. */
+  const commandKeysCompartment = new Compartment();
+  let commandKeymap: Extension = [];
   let added: { extension: Extension }[] = [];
   const addedExtensions = () => added.map((entry) => entry.extension);
   /** A state for a loaded file, shown and tracked as given, or by default as its document asks. */
@@ -372,6 +375,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const state = EditorState.create({
       doc: loaded.doc,
       extensions: [
+        commandKeysCompartment.of(commandKeymap),
         loaded.extension,
         markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
@@ -394,6 +398,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     report,
     (message) => options.onNotice?.(message),
     options.commandKeys,
+    (keymap) => {
+      commandKeymap = keymap ?? [];
+      view.dispatch({ effects: commandKeysCompartment.reconfigure(commandKeymap) });
+    },
   );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);

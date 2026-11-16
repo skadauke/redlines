@@ -1,4 +1,4 @@
-// The four panes of the Preferences window (design, Preferences): a few rows each, a label and a
+// The five panes of the Preferences window (design, Preferences): a few rows each, a label and a
 // control, which apply at once. A pane holds only what the table in the design lists, and what the
 // installed plugins contribute to it (`SettingContribution`); the Agents pane is filled by the
 // agents' own code (`deps.agentsPane`).
@@ -13,9 +13,11 @@ import {
   type AppearanceChoice,
   type Settings,
 } from '../settings.ts';
+import type { ShortcutEntry } from '../shortcuts.ts';
 import { stepSize } from '../text-size.ts';
+import { renderShortcutsPane } from './shortcuts-pane.ts';
 
-export type PaneId = 'general' | 'editor' | 'appearance' | 'agents';
+export type PaneId = 'general' | 'editor' | 'appearance' | 'agents' | 'shortcuts';
 
 /** The panes, left to right along the top, each with its label under its icon. */
 export const PANES: readonly { id: PaneId; label: string }[] = [
@@ -23,6 +25,7 @@ export const PANES: readonly { id: PaneId; label: string }[] = [
   { id: 'editor', label: 'Editor' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'agents', label: 'Agents' },
+  { id: 'shortcuts', label: 'Shortcuts' },
 ];
 
 /** A group of rows under a small heading: what the filter names beside each result. */
@@ -100,6 +103,11 @@ export interface PaneDeps {
   setPluginValue?: (id: string, value: boolean | number | string) => void;
   /** Fills the Agents pane; supplied with the agents. Returns a function that tidies it up. */
   agentsPane?: (container: HTMLElement) => void | (() => void);
+  /**
+   * The commands that can have keys, as the app's windows published them (shortcuts-published.ts):
+   * the Shortcuts pane lists them. None until a document window has run.
+   */
+  shortcutEntries?: () => readonly ShortcutEntry[];
 }
 
 type Control = HTMLElement;
@@ -724,7 +732,7 @@ function contributed(pane: PaneId, deps: PaneDeps): HTMLElement[] {
 
 /** The sections of a pane that is made of rows: what the rows are drawn from, and what the filter reads. */
 function sectionsOf(pane: PaneId, deps: PaneDeps): Section[] {
-  if (pane === 'agents') return [];
+  if (pane === 'agents' || pane === 'shortcuts') return [];
   const sections = { general, appearance, editor: editing }[pane](deps);
   const more = contributed(pane, deps);
   return more.length ? [...sections, { title: 'More', rows: more }] : sections;
@@ -750,6 +758,7 @@ export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps)
   for (const { title, rows } of sectionsOf(pane, deps)) {
     container.append(group(title, rows));
   }
+  if (pane === 'shortcuts') return renderShortcutsPane(container, deps);
   if (pane !== 'agents') return () => {};
   if (deps.agentsPane) {
     const tidy = deps.agentsPane(container);

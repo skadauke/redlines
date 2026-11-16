@@ -80,8 +80,14 @@ const loseFocus = () => {
 };
 
 describe('the panes', () => {
-  it('has four panes, General first (Shortcuts is a pane of its own, later)', () => {
-    expect(PANES.map((pane) => pane.label)).toEqual(['General', 'Editor', 'Appearance', 'Agents']);
+  it('has five panes, General first and Shortcuts last', () => {
+    expect(PANES.map((pane) => pane.label)).toEqual([
+      'General',
+      'Editor',
+      'Appearance',
+      'Agents',
+      'Shortcuts',
+    ]);
   });
 
   it('holds exactly the rows of the design, each pane', () => {

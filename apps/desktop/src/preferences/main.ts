@@ -1,4 +1,4 @@
-// The Preferences window: four panes, reached by icons along the top. Every change is saved at once
+// The Preferences window: five panes, reached by icons along the top. Every change is saved at once
 // to the settings every window of the app shares (settings.ts), and the app's windows follow it
 // through the `storage` event, so there is nothing to save and nothing to close for it to apply.
 
@@ -23,11 +23,13 @@ import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { ignorePinch } from '../text-size.ts';
 import { icon } from '../ui/icons.ts';
+import { publishedShortcutEntries } from '../shortcuts-published.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
+import { forgetShortcutsFilter } from './shortcuts-pane.ts';
 import {
   PANES,
   buildFilterSections,
@@ -203,6 +205,7 @@ const deps: PaneDeps = {
         await invoke('agent_logs_open');
       },
     }),
+  shortcutEntries: publishedShortcutEntries,
   // No plugin contributes a setting yet; when one does, its values are kept here.
   contributions: [],
   pluginValue: (id) => plugins.read()[id],
@@ -225,7 +228,10 @@ watchSettings((next) => {
   // someone types their name would take the caret away, so what is being edited is left alone, and
   // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  // The Shortcuts pane's own Filter is drawn again with the text it has (shortcuts-pane.ts).
+  const editing =
+    (active instanceof HTMLInputElement && !active.classList.contains('rl-pref-kfilter')) ||
+    active instanceof HTMLSelectElement;
   if (!editing && !pane?.querySelector('[data-waiting]')) {
     if (filter.hidden) show(current);
     else showFilter(true);
@@ -258,6 +264,7 @@ const ICONS = {
   appearance: 'appearance',
   editor: 'editor',
   agents: 'agents',
+  shortcuts: 'shortcuts',
 } as const;
 for (const { id, label } of PANES) {
   const button = document.createElement('button');
@@ -314,6 +321,7 @@ function showFilter(rebuild = false): void {
 }
 function clearFilter(): void {
   built = null;
+  forgetShortcutsFilter();
   if (filter.hidden) return;
   filter.value = '';
   filter.hidden = true;
@@ -352,6 +360,16 @@ window.addEventListener('keydown', (event) => {
       target.closest('input, textarea, select, button, a, [contenteditable], [role="button"]'))
   )
     return;
+  // In the Shortcuts pane the key goes to that pane's own Filter, which narrows its commands.
+  const own =
+    current === 'shortcuts' ? pane.querySelector<HTMLInputElement>('.rl-pref-kfilter') : null;
+  if (own) {
+    event.preventDefault();
+    own.focus();
+    own.value += event.key;
+    own.dispatchEvent(new Event('input'));
+    return;
+  }
   event.preventDefault();
   filter.hidden = false;
   filter.value = event.key;
