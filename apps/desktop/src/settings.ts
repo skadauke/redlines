@@ -118,6 +118,11 @@ export interface Settings {
    */
   defaultAgent: string | null;
   /**
+   * The model the person chose for each agent (#530), by agent id and model id; an agent with none
+   * runs its own default.
+   */
+  agentModels: Record<string, string>;
+  /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
    */
@@ -162,6 +167,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   consent: {},
   agentHandles: {},
   defaultAgent: null,
+  agentModels: {},
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -223,6 +229,7 @@ export function loadSettings(): Settings {
       typeof value['defaultAgent'] === 'string' && value['defaultAgent']
         ? value['defaultAgent']
         : null,
+    agentModels: agentModelsOf(value['agentModels']),
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
@@ -276,6 +283,16 @@ function agentHandlesOf(value: unknown): Record<string, string> {
     handles[id] = handle;
   }
   return handles;
+}
+
+/** The models chosen, by agent: only text, and nothing empty. */
+function agentModelsOf(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '',
+    ),
+  );
 }
 
 function recentOf(value: unknown): readonly string[] {

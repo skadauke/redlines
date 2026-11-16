@@ -1834,6 +1834,14 @@ OpenClaw agent), the first row of the pane is a choice of them, by the names the
 that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
 first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
 
+**Models** (#530). A provider lists the models its program can be told to run (`AgentProvider.models`:
+Claude Code's aliases Opus, Sonnet and Haiku, and a short list for Codex, which has no command that
+lists them); an OpenClaw agent lists none, because its Gateway chooses, so its card has no Model field.
+A card's Model field is Default, which says nothing and leaves the program's own default, or one of the
+list; the choice is kept in the app's settings (`agentModels`, by agent id) and reaches every run of the
+agent, a comment's and an Ask's. A request can carry its own model (`AgentRequest.model`), which Ask's
+picker uses; the program is told only a model its provider lists.
+
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
 button, and Check Again always:

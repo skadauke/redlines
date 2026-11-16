@@ -148,6 +148,7 @@ const deps: PaneDeps = {
         id: provider.id,
         // The card is the program's: what is shown of the agent in a document is its handle.
         name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        ...(provider.models ? { models: provider.models } : {}),
         detect: (fresh?: boolean) => {
           if (fresh) detections.delete(provider.id);
           const kept =
