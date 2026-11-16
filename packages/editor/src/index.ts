@@ -40,6 +40,7 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
@@ -68,6 +69,7 @@ import {
   undoSayingWhy,
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -80,7 +82,13 @@ import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
-import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
+import {
+  imageOpening,
+  imageResolver,
+  imageSelection,
+  localImageAt,
+  refreshImagesEffect,
+} from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -192,6 +200,13 @@ export {
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  UNTRACKED_DETAILS,
+  UNTRACKED_TITLE,
+  type UntrackedAnswer,
+  type UntrackedAsker,
+  type UntrackedReason,
+} from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -287,9 +302,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice),
     noticeFacet.of(options.onNotice),
+    options.onError
+      ? EditorView.exceptionSink.of((error) => {
+          console.error(error);
+          options.onError?.(error);
+        })
+      : [],
+    options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,
     markdownPreview(),
+    longLines(),
     options.openLink ? linkOpening({ open: options.openLink }) : [],
     tableLayout(),
     tableGhosts(),
@@ -301,6 +324,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    imageSelection(),
     undoHistory(),
     trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),

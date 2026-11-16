@@ -46,6 +46,8 @@ function commands() {
     openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
+    reportProblem: vi.fn(),
+    revealCrashLog: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -255,7 +257,12 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Window')).toEqual(['Minimize', 'Zoom', '---', 'BringAllToFront']);
     expect(model.menus.find((menu) => menu.title === 'Window')?.windowsMenu).toBe(true);
-    expect(readsAll(model, 'Help')).toEqual([['Show Agent Logs', undefined]]);
+    expect(readsAll(model, 'Help')).toEqual([
+      ['Report a Problem…', undefined],
+      ['Reveal Log', undefined],
+      '---',
+      ['Show Agent Logs', undefined],
+    ]);
     expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
@@ -318,6 +325,10 @@ describe('the menu model', () => {
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
     expect(c.openPreferences).toHaveBeenCalledOnce();
+    click('Help', 'Report a Problem…');
+    expect(c.reportProblem).toHaveBeenCalledOnce();
+    click('Help', 'Reveal Log');
+    expect(c.revealCrashLog).toHaveBeenCalledOnce();
     click('Help', 'Show Agent Logs');
     expect(c.showAgentLogs).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');

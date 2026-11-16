@@ -1215,6 +1215,30 @@ Track Changes on, or goes up a level, in the indentation of a marker), it is ref
 for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
 `packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
 
+**A number and a period at the start of an item's text.** `- 1.` is, to CommonMark (micromark
+4.0.2: `<ul><li><ol><li></li></ol></li></ul>`), a bullet item that holds an empty numbered list, and
+so is `- 1)`, and `1. 2.` a numbered item that holds one (`- [ ] 1.` is text: a box is no list). The editor decides by the keystroke which one the person
+means. The digits of an item's first line of text (one to nine) followed by a period or a
+parenthesis typed with nothing after the caret are text: the editor writes the delimiter escaped,
+`- 1\.` or `- 1\)`, which every reader shows as `1.` (the backslash also reads the same in every
+order of decisions: with Track Changes on it is one more letter of the author's insertion). A
+period typed before more text (`- 1.5`, written `- 1\.5` if it was typed in that order) is text
+the same way. The digits and the delimiter followed by a space, typed in that order, are the
+numbered sublist of an item (#512): the space takes the backslash away (with Track Changes on it is
+a letter of the author's own insertion, which the deletion only takes back) and the item holds the
+numbered list, `- 1. ` (micromark 4.0.2 reads `<ul><li><ol><li></li></ol></li></ul>`; the digits are kept, so
+`- 3. ` is a list that starts at 3). The reverse needs no rule: `- ` typed at the start of a
+numbered item's text is a bullet list in the item, `1. - `, as it reads. Tab on an item that is the
+first of its list is still refused; a numbered item after a bullet list is the first of its own
+list, so a numbered sublist under a bullet is made by typing `1. ` in the bullet item, or by Tab
+(a nested bullet) and then the convert command (#506). The space after a backslash that the person typed by hand, `1\.`, takes the backslash away the same way. A file that holds `- 1.` as it is, the empty
+numbered list, is read as that, and the keys
+treat it as an empty item (Return in it goes up a level, as in any empty item). Only the delimiter
+typed at the end of the item's first line is escaped: the digits typed in front of an existing
+period, Backspace that leaves `1.`, a paste, and a line that goes on under the digits are written
+as they are, and read as the empty numbered list. Tested:
+`typed-number.test.ts` of `packages/editor/src/blocks`.
+
 A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
 line of that text, as CommonMark reads it: only a list that starts at 1 interrupts a paragraph, and
 micromark 4.0.2 reads `<li>a⏎2. b</li>`. The editor's parse reads a sublist there, because it lets
@@ -2893,7 +2917,8 @@ Changes on is made after the alert of §3.13, and leaves no mark. The commands f
 highlight are disabled in front matter, with the reason in their hint.
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
-the body's, and are written plain; anything else typed there is refused as an edit of front matter.
+the body's, and are written plain; anything else typed there with Track Changes on is asked about
+first (§3.13), and made without tracking if the person says so.
 
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends
@@ -3221,6 +3246,15 @@ Track Changes is on, is made without tracking after the person is asked, and lea
 ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
 Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
 agent.
+
+The question is a sheet with the title "This edit can't be tracked. Make it without tracking?", a line
+that says why, "Don't ask again in this document", Cancel and Make Edit. Return and Escape are
+Cancel; Make Edit is a click or ⌘↩. The edit waits for the answer, whether it is a key, a paste, a drop
+or an input method's composition (which is asked about when it ends), and is made if the document is
+still the one it was made against, and dropped if not. One answer holds for the edits that follow in
+the same run (the same reason, no pause of five seconds). "Don't ask again" is the app's, kept for
+the file by its path and never in the file, so that somebody else who opens it is asked. Where the
+host has no sheet, such an edit is refused as before.
 
 ## 4. Comments
 
