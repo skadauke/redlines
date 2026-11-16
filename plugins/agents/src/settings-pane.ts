@@ -12,6 +12,7 @@ import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
 import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
 import { modelField } from './model-field.ts';
+import { isNewer } from './versions.ts';
 import { handleField } from './handle-field.ts';
 import { displayName, handleOf } from './handles.ts';
 import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
@@ -67,6 +68,13 @@ export interface PaneAgent {
   skill?: PaneSkill;
   /** `fresh` asks the program again, where the host keeps what it found. */
   detect(fresh?: boolean): Promise<AgentState>;
+  /**
+   * The newest version of the agent's program, as `x.y.z`, which is what its updater installs, or
+   * a rejection when it can't be found (offline). Update shows when it is newer than the one
+   * installed (#527). `fresh` skips what the host kept. Without it, Update shows only for a program
+   * that is too old.
+   */
+  latest?(fresh?: boolean): Promise<string>;
   /** Runs the agent's own updater, for the way it was installed, which the host knows. */
   update?(): Promise<SetupResult>;
   /** Runs the agent's own login, which opens the browser; Redlines never sees the credentials. */
@@ -490,6 +498,8 @@ function agentRow(
   /** An update or a sign-in is under way: nothing else is started meanwhile. */
   let activity: 'update' | 'sign-in' | null = null;
   let last: AgentState | null = null;
+  /** A version newer than the one installed, when the host found one (#527). */
+  let newer: string | undefined;
 
   /** A button of the row, which waits while the row says something is happening (`busy`). */
   const make = (text: string, label: string, run: () => void, busy: boolean) => {
@@ -507,10 +517,14 @@ function agentRow(
       : '';
     const tooOld = state?.found === true && !state.signedIn && state.reason === 'too-old';
     const signedOut = state?.found === true && !state.signedIn && state.reason === 'signed-out';
-    const canUpdate = tooOld && agent.update !== undefined;
+    const canUpdate = (tooOld || newer !== undefined) && agent.update !== undefined;
     const canSignIn = signedOut && agent.signIn !== undefined;
     // The button says what to do, so help that told the person what to type is left out.
     help.textContent = canSignIn ? '' : (state?.help ?? '');
+    // Update is offered for a program that is behind, and says which version is out.
+    if (newer !== undefined && !tooOld && shown === undefined) {
+      help.textContent = `Version ${newer} is available.`;
+    }
     if (activity === 'sign-in') help.textContent = 'Finish in your browser.';
     const command = state !== null && !state.found ? state.install : undefined;
     // While the row says something is happening, its buttons wait.
@@ -543,6 +557,7 @@ function agentRow(
     // An update or a sign-in is what the row is about; it looks again by itself when it ends.
     if (activity !== null) return;
     const mine = ++asked;
+    newer = undefined;
     draw(null, 'Checking…');
     void Promise.resolve()
       .then(() => (fresh ? agent.detect(true) : agent.detect()))
@@ -553,6 +568,7 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
+        lookForNewer(state, mine, fresh);
         looked(state?.found === true && state.signedIn);
         skillUi.look(state?.found === true);
         const ready = state?.found === true && state.signedIn;
@@ -571,6 +587,29 @@ function agentRow(
           said.textContent = `The update ran, but ${was} is still too old.${words ? ` It said: ${words}` : ''}`;
         }
       });
+  };
+
+  /**
+   * Asks for the newest version, once the program is found and says its version: Update shows only
+   * when it is newer. A look that fails (offline) leaves things as they are, with no word of it.
+   */
+  const lookForNewer = (state: AgentState | null, mine: number, fresh: boolean) => {
+    if (!agent.latest || state?.found !== true || state.version === undefined) return;
+    const installed = state.version;
+    let asking: Promise<string>;
+    try {
+      asking = agent.latest(fresh);
+    } catch {
+      return;
+    }
+    asking.then(
+      (version) => {
+        if (!alive() || mine !== asked || activity !== null || !isNewer(version, installed)) return;
+        newer = version;
+        draw(last);
+      },
+      () => {},
+    );
   };
 
   const copy = (text: string) => {

@@ -25,6 +25,7 @@ const COMMANDS: &[&str] = &[
     "agent_exec",
     "agent_home_access",
     "agent_home_reach",
+    "agent_latest_version",
     "agent_logs_open",
     "agent_setup_stop",
     "agent_sign_in",

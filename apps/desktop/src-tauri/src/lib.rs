@@ -461,6 +461,8 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_update,
             #[cfg(unix)]
+            agents::agent_latest_version,
+            #[cfg(unix)]
             agents::agent_sign_in,
             #[cfg(unix)]
             agents::agent_setup_stop,
