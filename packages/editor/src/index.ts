@@ -43,6 +43,13 @@ import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
