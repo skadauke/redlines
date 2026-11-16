@@ -392,3 +392,123 @@ select:focus-visible {
 .rl-pref-item .rl-pref-button {
   flex: none;
 }
+
+/* The Shortcuts pane: its own Filter, then every command under its menu with its key. */
+.rl-pref-kfilter {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 18px;
+  padding: 5px 10px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: var(--rl-page, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rl-pref-kfilter::placeholder {
+  color: var(--rl-ink-2);
+}
+
+.rl-pref-kfilter:focus {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+.rl-pref-krow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 2px 6px;
+  border-radius: 7px;
+}
+
+.rl-pref-krow:hover {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+}
+
+.rl-pref-kname {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The key: a button that records a new one, quiet until it is pointed at. */
+.rl-pref-key {
+  flex: none;
+  min-width: 64px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  font: inherit;
+  letter-spacing: 0.04em;
+  text-align: right;
+  line-height: 24px;
+}
+
+button.rl-pref-key:hover {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
+}
+
+button.rl-pref-key:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
+}
+
+/* A command with no key says so only when it is pointed at or focused. */
+.rl-pref-key-empty {
+  opacity: 0;
+  letter-spacing: 0;
+}
+
+.rl-pref-krow:hover .rl-pref-key-empty,
+.rl-pref-key-empty:focus-visible {
+  opacity: 1;
+}
+
+.rl-pref-key-fixed {
+  cursor: default;
+}
+
+/* The row while a key is recorded: what to do, or what is wrong with the key, in place. */
+.rl-pref-krec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  max-width: 70%;
+  color: var(--rl-ink);
+  text-align: right;
+}
+
+.rl-pref-krec:focus {
+  outline: none;
+}
+
+.rl-pref-khint {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-pref-kfoot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.rl-pref-kfoot .rl-pref-note {
+  margin-top: 0;
+}
+
+.rl-pref-button:disabled {
+  opacity: 0.5;
+}

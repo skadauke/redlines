@@ -63,6 +63,9 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
+import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
+import { publishShortcutEntries } from './shortcuts-published.ts';
+import { displayKey } from './shortcuts.ts';
 import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
@@ -268,6 +271,12 @@ function dragFile(): void {
   });
 }
 
+// Every command's key, with the person's own over its own (shortcuts.ts): the editor's keys, the
+// menu bar and the browser's key handling all ask it. A change is kept in the settings.
+const shortcutBook = createShortcutBook(settings.shortcuts, (shortcuts) => {
+  settings = { ...settings, shortcuts: updateSettings({ shortcuts }).shortcuts };
+});
+
 // Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
 // is a document to take the shape of.
 let crashes: CrashWatch | null = null;
@@ -277,6 +286,7 @@ const untrackedAnswers = createUntrackedAnswers();
 
 const editor = createEditor(element('#editor'), {
   doc: '',
+  commandKeys: shortcutBook.commandKeys,
   onError: (error) => crashes?.caught(error),
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
@@ -951,11 +961,16 @@ const changeSettings = (change: Partial<Settings>) => {
  */
 function toolbarCommands(): AppCommand[] {
   const ui = () => editor.getUiState();
+  // The key the person's book gives a row now (none: null), as the palette draws it.
+  const keyFor = (row: string, fixed: string) => {
+    const key = shortcutBook.keyOf(row);
+    return key ? displayKey(key) : shortcutBook.entries().length ? undefined : fixed;
+  };
   return [
     {
       id: 'app.tracking',
       title: 'Track Changes',
-      keys: '⇧⌘E',
+      keys: keyFor('Review/Track Changes', '⇧⌘E'),
       synonyms: ['suggest', 'suggesting', 'redline'],
       control: {
         kind: 'switch',
@@ -999,35 +1014,35 @@ function toolbarCommands(): AppCommand[] {
     {
       id: 'app.clean',
       title: 'Show Clean View',
-      keys: '⌥⌘1',
+      keys: keyFor('View/Clean', '⌥⌘1'),
       synonyms: ['preview', 'read'],
       run: () => editor.showView('clean'),
     },
     {
       id: 'app.redlines',
       title: 'Show Redlines View',
-      keys: '⌥⌘2',
+      keys: keyFor('View/Redlines', '⌥⌘2'),
       synonyms: ['changes', 'markup'],
       run: () => editor.showView('redlines'),
     },
     {
       id: 'app.raw',
       title: 'Show Raw View',
-      keys: '⌥⌘3',
+      keys: keyFor('View/Plain', '⌥⌘3'),
       synonyms: ['markdown', 'source'],
       run: () => editor.showView('raw'),
     },
     {
       id: 'app.simple',
       title: 'Simple Look',
-      keys: '⌥⌘4',
+      keys: keyFor('View/Simple Look', '⌥⌘4'),
       synonyms: ['plain', 'quiet'],
       run: () => editor.switchLook(),
     },
     {
       id: 'app.preferences',
       title: 'Open Preferences',
-      keys: '⌘,',
+      keys: keyFor('Redlines/Preferences…', '⌘,'),
       synonyms: ['settings', 'options'],
       run: () => commands.openPreferences(),
     },
@@ -1108,6 +1123,7 @@ function renameDocument(): void {
 installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
+  keyOf: (id) => shortcutBook.keyOf(id),
   toggleToolbar: () => toolbar.toggle(),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
@@ -1134,6 +1150,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// A key changed here or in Preferences: the title bar's hints and menus show it (#551).
+shortcutBook.subscribe(() => titleBar.keysChanged());
 
 // The toolbar is at the bottom of the window from the start when the person wants it there.
 toolbar.setAtBottom(settings.toolbarAtBottom);
@@ -1295,6 +1314,9 @@ activatePlugins(editor, {}, DESKTOP_PLUGINS, {
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands, { browser: !isTauri });
+shortcutBook.setEntries(shortcutEntries(menuModel));
+// The Shortcuts pane of Preferences lists them, and has no menu bar of its own to read them from.
+publishShortcutEntries(shortcutBook.entries());
 const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
@@ -1447,7 +1469,8 @@ if (isTauri) {
   // The zoom rows were disabled until now.
   render();
   // ⌘+ typed as "+" reaches Zoom In through the page: the menu bar's keys have no plus key.
-  if (/Macintosh/.test(navigator.userAgent)) installPlusKeys(menuModel, () => menuState);
+  if (/Macintosh/.test(navigator.userAgent))
+    installPlusKeys(menuModel, () => menuState, shortcutBook);
   // A file the app gives this window, from its command line, the system (`open -a Redlines
   // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
   // been used by the time it opens, it takes a window of its own. The app gives documents alone.
@@ -1482,10 +1505,10 @@ if (isTauri) {
   // After a crash: the edits the window had, put back, with a card that says so (#693).
   void restoreAfterCrash();
   windows?.ready();
-  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel, shortcutBook).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
-    installShortcuts(menuModel);
+    installShortcuts(menuModel, shortcutBook);
     return null;
   });
   if (nativeMenu) {
@@ -1497,7 +1520,7 @@ if (isTauri) {
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
 } else {
-  installShortcuts(menuModel);
+  installShortcuts(menuModel, shortcutBook);
   await controller.open('sample.md');
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
@@ -1526,6 +1549,7 @@ if (isTauri) {
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
   settings = keepWindowOwn(settings, changed);
+  shortcutBook.load(settings.shortcuts);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   toolbar.setAtBottom(settings.toolbarAtBottom);

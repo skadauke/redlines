@@ -30,7 +30,7 @@ const BASE: TitleBarState = {
 /** The bars the test made, which are taken down after it: an open menu listens on the document. */
 const made: { destroy(): void }[] = [];
 
-function setup(state: Partial<TitleBarState> = {}) {
+function setup(state: Partial<TitleBarState> = {}, keyOf?: (id: string) => string | null) {
   const root = document.createElement('div');
   document.body.append(root);
   const actions = {
@@ -46,6 +46,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     dragFile: vi.fn(),
     scrollPage: vi.fn(),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
+    ...(keyOf ? { keyOf } : {}),
   };
   const bar = createTitleBar(root, actions);
   made.push(bar);
@@ -1069,6 +1070,26 @@ describe('what a click on the icons will do, said before it is made', () => {
     bar.update({ ...BASE, view: 'clean' });
     bar.update({ ...BASE, view: 'raw' });
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
+  });
+
+  it('shows the keys the person gave, and none when they took the key away (#551)', () => {
+    const keys: Record<string, string | null> = {
+      'View/Clean': 'Alt-Mod-9',
+      'Review/Track Changes': null,
+      'View/Show Files': 'Mod-k',
+    };
+    const { root, bar, button } = setup({ view: 'redlines' }, (id) => keys[id] ?? null);
+    const { view, review } = tips(root);
+    expect(view?.textContent).toBe('Show Clean⌥⌘9');
+    expect(button('View').getAttribute('aria-keyshortcuts')).toBe('Alt+Meta+9');
+    expect(review?.textContent).toBe('Turn on Track Changes');
+    expect(root.querySelector('#rl-files-tip')?.textContent).toBe('Show files⌘K');
+    // A change made in Preferences reaches a bar that is already drawn.
+    keys['View/Clean'] = 'Ctrl-Mod-9';
+    keys['Review/Track Changes'] = 'Shift-Mod-t';
+    bar.keysChanged();
+    expect(view?.textContent).toBe('Show Clean⌃⌘9');
+    expect(review?.textContent).toBe('Turn on Track Changes⇧⌘T');
   });
 
   it('says on the pen whether a click turns Track Changes on or off, with the key', () => {

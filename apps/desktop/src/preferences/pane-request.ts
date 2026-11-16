@@ -5,7 +5,7 @@
 // takes it away, and a request that waited too long was for a window that never opened.
 
 /** The panes of the Preferences window (`PANES` in panes.ts, which a test holds this to). */
-export type RequestedPane = 'general' | 'appearance' | 'editor' | 'agents';
+export type RequestedPane = 'general' | 'appearance' | 'editor' | 'agents' | 'shortcuts';
 
 export const PANE_REQUEST_KEY = 'redlines.preferences-pane';
 
@@ -22,7 +22,7 @@ export function requestPane(pane: RequestedPane, now: number = Date.now()): void
   }
 }
 
-const PANES: readonly string[] = ['general', 'appearance', 'editor', 'agents'];
+const PANES: readonly string[] = ['general', 'appearance', 'editor', 'agents', 'shortcuts'];
 
 /** The pane a stored request asks for, if it is one and is not too old. */
 function paneOf(stored: string | null, now: number): RequestedPane | null {

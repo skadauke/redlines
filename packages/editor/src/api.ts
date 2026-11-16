@@ -105,8 +105,13 @@ export interface EditorCommand {
    * draws items from the registry follows it.
    */
   title: string | ((state: EditorState) => string);
-  /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
+  /**
+   * CodeMirror notation, such as 'Mod-b'. The core binds it. In the registry's list it is the key
+   * the command has now, which the person may have changed (`CommandKeys`).
+   */
   shortcut?: string;
+  /** Only in the registry's list, and only on a command whose key was changed: the key it came with, or "" for none. */
+  defaultShortcut?: string;
   /** Where a host with menus shows it. */
   menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
@@ -150,6 +155,14 @@ export interface EditorCommand {
    * silent (hardening.md: a key that does nothing and says nothing is a bug).
    */
   disabledReason?(state: EditorState): string | undefined;
+}
+
+/** The person's own keys for the registry's commands. */
+export interface CommandKeys {
+  /** The key the command has now in CodeMirror's notation, or undefined for none; `fallback` is its own. */
+  keyOf(id: string, fallback: string | undefined): string | undefined;
+  /** Calls `listener` when a key changes. Returns a function that stops it. */
+  subscribe(listener: () => void): () => void;
 }
 
 export interface CommandRegistry {
@@ -340,6 +353,8 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** The person's own keys for the commands (`CommandKeys`); the commands' own until given. */
+  commandKeys?: CommandKeys;
   /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
   onError?: (error: unknown) => void;
   /**
