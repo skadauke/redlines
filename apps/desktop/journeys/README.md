@@ -148,8 +148,8 @@ baselines are drawn by it), as a job of its own in parallel with `check`:
 | When | What | Looks |
 |---|---|---|
 | a pull request | the `@smoke` journeys, and those of the areas its paths touch (`src/areas.ts`) | light |
-| a push to main | every journey (the `@long` ones too), and the smoke journeys again | light; dark, 200% and dark 200% for the smoke ones |
-| manual dispatch (the sweep) | every journey | all four |
+| a push to main | every journey, and the smoke journeys again; then the `@long` ones, alone | light; dark, 200% and dark 200% for the smoke ones |
+| manual dispatch (the sweep) | every journey, then the `@long` ones | all four |
 
 A change to a path every journey draws through (the format, the editor's core, the themes, the
 page's own code, the journeys, the workflow) runs every journey. The run uploads `journeys-test-results`

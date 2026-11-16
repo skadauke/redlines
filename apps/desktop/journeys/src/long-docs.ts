@@ -37,6 +37,10 @@ function pngBase64(next: () => number, chars: number): string {
   return bytes.toString('base64');
 }
 
+/** A 1x1 PNG, so that the images of the document load from the document itself. */
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 export const END_OF_DOCUMENT = 'The very last paragraph, which must read exactly right.';
 
 function ledger(marks: string[], comments: string[]): string {
@@ -101,7 +105,7 @@ export function ordinaryDocument(bytes: number, marks = 600): string {
       const kind = ['ins', 'del', 'cmt', 'hl'][ids.length % 4]!;
       if (kind === 'cmt') comments.push(id);
       if (kind === 'del') text += `<!--del ${id}  An old sentence that was removed.-->`;
-      else text = text.replace('quick brown', `<!--${kind} ${id}-->quick brown<!--/${id}-->`);
+      else text = text.replace(/^(\S+ \S+)/, `<!--${kind} ${id}-->$1<!--/${id}-->`);
     }
     if (n % 25 === 0) blocks.push(`## Section ${n / 25}`, '');
     blocks.push(text, '');
@@ -117,7 +121,7 @@ export function ordinaryDocument(bytes: number, marks = 600): string {
       size += 200;
     }
     if (n % 40 === 7) {
-      blocks.push(`![figure ${n}](images/figure-${n}.png)`, '');
+      blocks.push(`![figure ${n}](${TINY_PNG})`, '');
       size += 40;
     }
     n++;

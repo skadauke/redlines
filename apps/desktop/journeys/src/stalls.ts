@@ -56,11 +56,11 @@ export function webkitMemoryMB(): number | null {
     const out = execFileSync('ps', ['-axo', 'pid=,ppid=,rss=,command='], { encoding: 'utf8' });
     let kb = 0;
     for (const line of out.split('\n')) {
-      const [pid, ppid, rss, ...command] = line.trim().split(/\s+/);
+      const [, ppid, rss, ...command] = line.trim().split(/\s+/);
       const text = command.join(' ');
       if (!/ms-playwright\/webkit/.test(text)) continue;
       // Another run's browser: the launcher script of a browser that is not ours.
-      if (/pw_run\.sh/.test(text) && Number(ppid) !== process.pid && Number(pid) !== process.pid) {
+      if (/pw_run\.sh/.test(text) && Number(ppid) !== process.pid) {
         return null;
       }
       kb += Number(rss) || 0;

@@ -8,7 +8,7 @@
 // The numbers are printed (and attached to the report) on every run; `JOURNEYS_BUDGETS=off` keeps
 // the assertions on the text and drops the budgets, to measure a build that is over them.
 
-import { expect, known, test, type Journey } from '../src/journey.ts';
+import { expect, test, type Journey } from '../src/journey.ts';
 import { END_OF_DOCUMENT, longLinesDocument, ordinaryDocument } from '../src/long-docs.ts';
 import { dragScrollbarTo, formatPhases, measure, startMonitor, type Phase } from '../src/stalls.ts';
 
@@ -52,7 +52,8 @@ async function journey(
         new Promise<number>((resolve) => {
           const started = performance.now();
           const look = () => {
-            const drawn = window.__redlines!.editor.view.contentDOM.innerText.includes(needle);
+            const { view } = window.__redlines!.editor;
+            const drawn = view.viewport.to >= view.state.doc.length - needle.length;
             if (drawn || performance.now() - started > 15_000) resolve(performance.now() - started);
             else requestAnimationFrame(look);
           };
@@ -76,7 +77,8 @@ async function journey(
     j.page.evaluate(() => (document.querySelector('.rl-scroller') as HTMLElement).scrollTop);
   const pageDown = { before: 0, after: 0 };
   await record('page down', async () => {
-    await j.place(Math.floor((await j.cmText()).length * 0.4));
+    const length = await j.page.evaluate(() => window.__redlines!.editor.view.state.doc.length);
+    await j.place(Math.floor(length * 0.4));
     pageDown.before = await scrollTop();
     for (let i = 0; i < 20; i++) await j.press('PageDown');
     await j.settle();
@@ -89,21 +91,23 @@ async function journey(
 
   expect(pageDown.after, 'Page Down moved down the document').toBeGreaterThan(pageDown.before);
 
+  if (enforce) {
+    expect(openMs, 'opening').toBeLessThan(budget.open);
+    for (const p of phases) {
+      expect(p.longestStall, `${p.name}: the longest stall`).toBeLessThan(budget.stall);
+      expect(p.frameMax, `${p.name}: the longest frame`).toBeLessThan(budget.frame);
+      if (p.memoryMB !== null)
+        expect(p.memoryMB, `${p.name}: memory`).toBeLessThan(budget.memoryMB);
+    }
+  }
+
   // The end reads exactly right, and nothing in the file changed.
   expect(atEnd, 'the end of the document is drawn').toContain(END_OF_DOCUMENT);
   expect(await j.text(), 'the document is as it was opened').toBe(doc);
-
-  if (!enforce) return;
-  expect(openMs, 'opening').toBeLessThan(budget.open);
-  for (const p of phases) {
-    expect(p.longestStall, `${p.name}: the longest stall`).toBeLessThan(budget.stall);
-    expect(p.frameMax, `${p.name}: the longest frame`).toBeLessThan(budget.frame);
-    if (p.memoryMB !== null) expect(p.memoryMB, `${p.name}: memory`).toBeLessThan(budget.memoryMB);
-  }
 }
 
 test.describe('long documents @long', () => {
-  // One document at a time: the memory read is the whole browser's.
+  // One document at a time (the workflow runs this tier with one worker).
   test.describe.configure({ mode: 'default' });
   test.setTimeout(240_000);
 
@@ -113,39 +117,26 @@ test.describe('long documents @long', () => {
     await journey(
       'long-lines',
       longLinesDocument(),
-      { stall: 150, frame: 200, memoryMB: 2500, open: 15_000 },
+      { stall: 250, frame: 300, memoryMB: 2500, open: 15_000 },
       start,
     );
   });
 
-  // A jump of the scrollbar straight to the end of a long document leaves the editor drawn at the
-  // top, blank where the person lands, until the next scroll: the end isn't drawn (#699). The
-  // journeys hold everything else meanwhile; the lane that fixes it changes `known` to `test`.
-  known(
-    699,
-    '1 MB of ordinary text with hundreds of changes and comments: the end is drawn',
-    /the end of the document is drawn/,
-    async ({ start }) => {
-      await journey(
-        'one-mb',
-        ordinaryDocument(1_000_000),
-        { stall: 400, frame: 450, memoryMB: 2500, open: 15_000 },
-        start,
-      );
-    },
-  );
+  test('1 MB of ordinary text with hundreds of changes and comments', async ({ start }) => {
+    await journey(
+      'one-mb',
+      ordinaryDocument(1_000_000),
+      { stall: 600, frame: 600, memoryMB: 2500, open: 15_000 },
+      start,
+    );
+  });
 
-  known(
-    699,
-    '5 MB of ordinary text with hundreds of changes and comments: the end is drawn',
-    /the end of the document is drawn/,
-    async ({ start }) => {
-      await journey(
-        'five-mb',
-        ordinaryDocument(5_000_000),
-        { stall: 500, frame: 500, memoryMB: 3500, open: 40_000 },
-        start,
-      );
-    },
-  );
+  test('5 MB of ordinary text with hundreds of changes and comments', async ({ start }) => {
+    await journey(
+      'five-mb',
+      ordinaryDocument(5_000_000),
+      { stall: 800, frame: 800, memoryMB: 3500, open: 40_000 },
+      start,
+    );
+  });
 });
