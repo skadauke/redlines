@@ -112,6 +112,16 @@ export const TOOLBAR_STYLE = `
   line-height: 1.2;
 }
 .rl-toolbar-line { display: flex; gap: 2px; }
+/* The Table menu: two sides under their names, and a caption over a line of its own. */
+.rl-toolbar-menu-sides { min-width: 340px; }
+.rl-toolbar-sides { display: flex; gap: 2px; }
+.rl-toolbar-side, .rl-toolbar-caption {
+  padding: 6px 10px 3px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1.2;
+}
+.rl-toolbar-side { flex: 1; }
 .rl-toolbar-item {
   display: flex;
   flex: 1;

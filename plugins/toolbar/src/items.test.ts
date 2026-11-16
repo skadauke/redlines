@@ -46,6 +46,8 @@ describe('the toolbar menus', () => {
       'insert',
       'review',
       'list',
+      'table',
+      'image',
       'format',
       'edit',
     ]);

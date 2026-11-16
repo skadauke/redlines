@@ -57,7 +57,8 @@ function update(button: HTMLButtonElement, item: ShownItem, paired: boolean): vo
   if (item.toggle) button.setAttribute('aria-checked', String(item.active));
   else button.removeAttribute('aria-checked');
   // What is said is what is drawn (WCAG 2.5.3): the menu's word, not the command's title.
-  button.setAttribute('aria-label', item.label.replace(/…$/, ''));
+  const said = item.label.replace(/…$/, '');
+  button.setAttribute('aria-label', item.side ? `${said}, ${item.side}` : said);
   if (item.aria) button.setAttribute('aria-keyshortcuts', item.aria);
   else button.removeAttribute('aria-keyshortcuts');
   // The hint: the reason a grayed item can't be used, and for the icons of a shared line, the name
@@ -185,6 +186,8 @@ export function drawPanel(
 ): DrawnPanel {
   panel.replaceChildren();
   const items = new Map<string, { button: HTMLButtonElement; paired: boolean }>();
+  /** The headers of the menus, which say what the selection is where the menu is about one. */
+  const heads = new Map<MenuId, HTMLElement>();
   if (spelling) panel.append(spellingBlock(spelling, handlers), rule(true));
   const row = element('div', 'rl-toolbar-bar');
   panel.append(row);
@@ -269,8 +272,22 @@ export function drawPanel(
     list.setAttribute('aria-label', menu.label);
     list.hidden = true;
     const head = element('div', 'rl-toolbar-menu-head');
-    head.textContent = menu.label;
+    head.textContent = menu.heading;
+    head.setAttribute('role', 'presentation');
+    heads.set(menu.id, head);
     list.append(head);
+    if (menu.sides) {
+      list.classList.add('rl-toolbar-menu-sides');
+      const sides = element('div', 'rl-toolbar-sides');
+      sides.setAttribute('role', 'presentation');
+      for (const name of menu.sides) {
+        const side = element('span', 'rl-toolbar-side');
+        side.textContent = name;
+        side.setAttribute('role', 'presentation');
+        sides.append(side);
+      }
+      list.append(sides);
+    }
     const rowButtons: HTMLButtonElement[][] = [];
     for (const shownRow of menu.rows) {
       const line = element(
@@ -278,6 +295,13 @@ export function drawPanel(
         shownRow.length > 1 ? 'rl-toolbar-line rl-toolbar-pair' : 'rl-toolbar-line',
       );
       const paired = shownRow.length > 1;
+      const caption = shownRow[0]?.caption;
+      if (caption) {
+        const words = element('div', 'rl-toolbar-caption');
+        words.textContent = caption;
+        words.setAttribute('role', 'presentation');
+        list.append(words);
+      }
       const buttons = shownRow.map((item) => {
         const button = itemButton(item, paired, handlers);
         items.set(item.id, { button, paired });
@@ -330,6 +354,8 @@ export function drawPanel(
         }
       }
       for (const menu of next.menus) {
+        const head = heads.get(menu.id);
+        if (head && head.textContent !== menu.heading) head.textContent = menu.heading;
         for (const shownRow of menu.rows) {
           for (const item of shownRow) {
             const entry = items.get(item.id);

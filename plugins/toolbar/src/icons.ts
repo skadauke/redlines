@@ -64,6 +64,34 @@ const ICONS = {
   'no-list': '<path d="M3 4.5h10M3 8h10M3 11.5h6"/><path d="M11 10.5l3 3M14 10.5l-3 3"/>',
   /** Collapsible Section: a triangle beside a line. */
   collapsible: '<path d="M3.5 4.5l3 3-3 3z"/><path d="M8.5 6h4.5M8.5 10h4.5"/>',
+  /** Table menu: a row or column added beside a table's edge. */
+  'row-above': '<rect x="2.5" y="8" width="11" height="5.5" rx="1.2"/><path d="M8 2v4M6 4h4"/>',
+  'row-below': '<rect x="2.5" y="2.5" width="11" height="5.5" rx="1.2"/><path d="M8 10v4M6 12h4"/>',
+  'col-left': '<rect x="8" y="2.5" width="5.5" height="11" rx="1.2"/><path d="M2 8h4M4 6v4"/>',
+  'col-right': '<rect x="2.5" y="2.5" width="5.5" height="11" rx="1.2"/><path d="M10 8h4M12 6v4"/>',
+  /** Arrows, for the moves. */
+  'move-up': '<path d="M8 13V3.5M4.5 7L8 3.5 11.5 7"/>',
+  'move-down': '<path d="M8 3v9.5M4.5 9L8 12.5 11.5 9"/>',
+  'move-left': '<path d="M13 8H3.5M7 4.5L3.5 8 7 11.5"/>',
+  'move-right': '<path d="M3 8h9.5M9 4.5L12.5 8 9 11.5"/>',
+  /** Select: a dashed frame. */
+  select: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.6" stroke-dasharray="2.2 2"/>',
+  /** Delete: a bin. */
+  delete: '<path d="M3 4.5h10M6.4 4.5V3h3.2v1.5M4.4 4.5l.6 8.5h6l.6-8.5M7 7v3.6M9 7v3.6"/>',
+  /** Alignment: lines flush to one side or centered. */
+  'align-left': '<path d="M3 4h10M3 7.3h6M3 10.6h10M3 13.9h6" transform="translate(0 -1)"/>',
+  'align-center': '<path d="M3 4h10M5 7.3h6M3 10.6h10M5 13.9h6" transform="translate(0 -1)"/>',
+  'align-right': '<path d="M3 4h10M7 7.3h6M3 10.6h10M7 13.9h6" transform="translate(0 -1)"/>',
+  /** Image sizes: the frame grows from small to large; original size is the frame's own corners. */
+  'size-small': '<rect x="5" y="5.5" width="6" height="5" rx="1"/>',
+  'size-medium': '<rect x="3.5" y="4.5" width="9" height="7" rx="1.2"/>',
+  'size-large': '<rect x="2" y="3" width="12" height="10" rx="1.4"/>',
+  'original-size': '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
+  /** Edit in Preview: a frame with an arrow leaving it. */
+  preview:
+    '<path d="M7 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 2.5h4v4M13.5 2.5L8 8"/>',
+  /** Alt Text: a frame with a line of words under it. */
+  'alt-text': '<rect x="2" y="2.5" width="12" height="7" rx="1.4"/><path d="M3 12.5h10M3 14.5h6"/>',
   /** The mark of a menu in the bar. */
   chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */
