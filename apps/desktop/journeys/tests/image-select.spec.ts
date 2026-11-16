@@ -100,6 +100,20 @@ test.describe('selecting an image @blocks', () => {
     expect(await shown(j)).not.toContain('red.png');
   });
 
+  test('a drag that starts on the image selects across text, as before', async ({ start }) => {
+    const j = await open(start, MARKDOWN);
+    const box = (await j.page.locator('.rl-image img').boundingBox())!;
+    const end = await j.pointOf('The end');
+    await j.drag(
+      { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+      { x: end.x + 20, y: end.y },
+    );
+    const head = (await j.caret()).head;
+    expect(head, 'the selection runs on into the text').toBeGreaterThan(
+      (await j.text()).indexOf('The end'),
+    );
+  });
+
   test('Backspace on a selected image takes it out, and Undo brings it back', async ({ start }) => {
     const j = await open(start, MARKDOWN);
     await j.page.locator('.rl-image img').click();

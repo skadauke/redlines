@@ -16,7 +16,7 @@ import {
   noticeFacet,
   setImageLook,
 } from '../image-size.ts';
-import { parsedField } from '../tracked/field.ts';
+import { parsedField, viewModeField } from '../tracked/field.ts';
 import { textPx } from './theme.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -468,14 +468,17 @@ const selectedImageLook = EditorView.editorAttributes.compute(
   ['selection', 'doc'],
   (state): Record<string, string> => {
     const { from, to, empty } = state.selection.main;
+    // Raw draws no image: its selection is the page's own.
     if (empty || state.selection.ranges.length !== 1) return {};
+    if (state.field(viewModeField, false) === 'raw') return {};
     const node = imageNodeAt(state, from);
     return node && node.from === from && node.to === to ? { class: 'rl-image-is-selected' } : {};
   },
 );
 
+// A click, not the press: a press that starts a drag across text is the editor's own.
 const clickSelects = EditorView.domEventHandlers({
-  mousedown(event, view) {
+  click(event, view) {
     if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey) return false;
     const target = event.target;
     if (!(target instanceof Element) || target.closest('.rl-image-handle')) return false;
@@ -488,7 +491,6 @@ const clickSelects = EditorView.domEventHandlers({
       return false;
     }
     if (!node) return false;
-    event.preventDefault();
     view.focus();
     view.dispatch({
       selection: { anchor: node.from, head: node.to },
