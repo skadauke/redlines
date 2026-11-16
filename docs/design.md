@@ -419,6 +419,11 @@ README-style snippets) holds the editor to it.
 - **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
   no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
   as folding and opening a block's source, are view state and never written.
+- **Quick Look** (#691) draws the same list from tokens, since its JavaScriptCore has no DOM: the
+  source is never passed through, an attribute is kept only if GitHub keeps it and a static page
+  can use it (never `id`, `name`, `style`, `class`, `srcset` or a handler), and a remote image is
+  its alt text. `<details>` is WebKit's own, closed unless the file says `open` (ruling: a static
+  preview shows what GitHub shows at rest, and WebKit opens it on a click without script).
 - **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
   `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
   `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
