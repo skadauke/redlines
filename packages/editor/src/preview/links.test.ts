@@ -346,7 +346,7 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()).toBeNull();
   });
 
-  it('has a rule for the theme’s hint (--rl-tip, white text) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
+  it('has a rule for the hint (the notifications’ grays) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
     const editor = load(DOC, { openLink: vi.fn() });
     mouse(linkNamed(editor, 'web link'), 'mousemove', { clientX: 5, clientY: 5 });
     vi.advanceTimersByTime(400);
@@ -356,8 +356,8 @@ describe('the hint on a link (design §5.2)', () => {
       .map((style) => style.textContent)
       .join('');
     const rule = /\.cm-tooltip\.rl-link-hint\s*\{([^}]*)\}/.exec(rules)?.[1] ?? '';
-    expect(rule).toMatch(/background-color:\s*var\(--rl-tip\)/);
-    expect(rule).toMatch(/color:\s*#ffffff/);
+    expect(rule).toMatch(/background-color:\s*var\(--rl-card\)/);
+    expect(rule).toMatch(/color:\s*var\(--rl-ink\)/);
     // A link on the first lines of the page still shows its hint (the title bar's room above).
     const tooltips = editor.view.state.facet(showTooltip).filter((tip) => tip !== null);
     expect(tooltips).toHaveLength(1);

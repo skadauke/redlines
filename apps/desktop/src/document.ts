@@ -521,6 +521,36 @@ export class DocumentController {
     while (this.#agentPending > 0) await this.#agentWrites;
   }
 
+  /**
+   * Puts back the edits a crash cut short (#693): the document is the one that was open, as it is
+   * now, and `text` is what it held when its recovery copy was last kept. The file stays what it
+   * is, so the edits are unsaved, and the text goes in as a reload does: not as an edit, which
+   * Track Changes would mark. Resolves to whether it did, which it doesn't when the person has
+   * typed already, or the text is what the document holds.
+   */
+  restore(path: string | null, text: string): boolean {
+    if (path !== this.#state.path || this.#state.dirty || this.#editor.getDoc() === text) {
+      return false;
+    }
+    this.#editor.reloadDoc(text);
+    this.markEdited(text);
+    return true;
+  }
+
+  /**
+   * Shows the file as it was saved, in place of the edits that were recovered (#693). They are
+   * given up: the document has no unsaved edits afterwards.
+   */
+  async showSavedVersion(): Promise<void> {
+    const path = this.#state.path;
+    const saved = path === null ? '' : await this.#read(path);
+    if (typeof saved !== 'string' || path !== this.#state.path) return;
+    this.#base = saved;
+    this.#disk = saved;
+    this.#editor.reloadDoc(saved);
+    this.#update({ dirty: false, notice: null });
+  }
+
   /** Dismisses the notice, or only the one that says `only`, so that another one stays. */
   dismissNotice(only?: string): void {
     const { notice } = this.#state;

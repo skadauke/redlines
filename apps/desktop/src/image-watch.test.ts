@@ -29,19 +29,20 @@ describe('image watch', () => {
   it('refreshes the image that was saved again and no other', async () => {
     const d = disk({ '/r/a.png': '1', '/r/b.png': '1' });
     const watch = createImageWatch(d.stamps);
+    watch.forget();
     const both = ['/r/a.png', '/r/b.png'];
     // Nothing has changed since they were drawn.
     expect(await focus(watch, both)).toEqual([]);
     d.files['/r/a.png'] = '2';
     expect(await focus(watch, both)).toEqual(['/r/a.png']);
     // The changed one loads from another URL, the other from the same.
-    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=1`);
-    expect(watch.url('/r/b.png', asset('/r/b.png'))).toBe(asset('/r/b.png'));
+    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=1.1`);
+    expect(watch.url('/r/b.png', asset('/r/b.png'))).toBe(`${asset('/r/b.png')}?v=1.0`);
     // Once told of, it is not told of again until saved again.
     expect(await focus(watch, both)).toEqual([]);
     d.files['/r/a.png'] = '3';
     expect(await focus(watch, both)).toEqual(['/r/a.png']);
-    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=2`);
+    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=1.2`);
   });
 
   it('takes the stamp of a new image when the drawing settles, so a quick save is seen', async () => {
@@ -61,12 +62,13 @@ describe('image watch', () => {
   it('adds a version to the app’s URLs only', async () => {
     const d = disk({ '/r/a.png': '1' });
     const watch = createImageWatch(d.stamps);
+    watch.forget();
     await focus(watch, ['/r/a.png']);
     d.files['/r/a.png'] = '2';
     await focus(watch, ['/r/a.png']);
     expect(watch.url('/r/a.png', 'blob:http://localhost/x')).toBe('blob:http://localhost/x');
     expect(watch.url('/r/a.png', 'http://asset.localhost/r/a.png')).toBe(
-      'http://asset.localhost/r/a.png?v=1',
+      'http://asset.localhost/r/a.png?v=1.1',
     );
   });
 
@@ -81,22 +83,27 @@ describe('image watch', () => {
     expect(await focus(watch, both)).toEqual(['/r/late.png']);
   });
 
-  it('loads a document that comes back from the version it last showed', async () => {
+  it('loads the images of a document opened again from URLs the webview has not loaded (#677)', async () => {
     const d = disk({ '/r/a.png': '1' });
     const watch = createImageWatch(d.stamps);
-    await focus(watch, ['/r/a.png']);
-    d.files['/r/a.png'] = '2';
-    await focus(watch, ['/r/a.png']);
-    // Another document is drawn, and this one comes back: not from the plain URL the webview may
-    // still have a copy of.
     watch.forget();
+    const first = watch.url('/r/a.png', asset('/r/a.png'));
+    // The page keeps what it loaded for as long as it lives: the document opened again, with the
+    // file changed meanwhile by any other app, must not ask for the same URL.
     watch.forget();
-    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=1`);
+    const again = watch.url('/r/a.png', asset('/r/a.png'));
+    expect(again).not.toBe(first);
+    // A redraw within one opening keeps the URL, so that nothing loads twice.
+    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(again);
     // And it is watched afresh: nothing is told of until it is saved again.
     expect(await focus(watch, ['/r/a.png'])).toEqual([]);
     d.files['/r/a.png'] = '3';
     expect(await focus(watch, ['/r/a.png'])).toEqual(['/r/a.png']);
-    expect(watch.url('/r/a.png', asset('/r/a.png'))).toBe(`${asset('/r/a.png')}?v=2`);
+    const saved = watch.url('/r/a.png', asset('/r/a.png'));
+    expect(saved).not.toBe(again);
+    // Opened once more, it is another URL still, and no earlier one comes back.
+    watch.forget();
+    expect([first, again, saved]).not.toContain(watch.url('/r/a.png', asset('/r/a.png')));
   });
 
   it('asks only about the images the text shows now', async () => {

@@ -34,13 +34,7 @@ import {
  * skip that no longer fails is reported, so that it is taken away. These are found by the longer
  * runs (`REDLINES_FUZZ=300`), not the default one.
  */
-const KNOWN: ReadonlyMap<number, string> = new Map([
-  // Shift-Return at the start of an item's second paragraph, Track Changes off, makes a new item
-  // of the paragraph's text and leaves an empty paragraph (the `empty-paragraph` invariant):
-  // `- a⏎⏎  ‸b` gives `- a⏎⏎  ⏎- b`. The word is typed in order; it is the block key that is wrong.
-  [80, '#508: Shift-Return at the start of an item’s second paragraph'],
-  [216, '#508: Shift-Return at the start of an item’s second paragraph'],
-]);
+const KNOWN: ReadonlyMap<number, string> = new Map<number, string>([]);
 
 const SEEDS = fuzzCount(45);
 /** The invariants cost ten times the typing check: by default every third seed has them. */
