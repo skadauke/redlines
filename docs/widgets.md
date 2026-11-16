@@ -29,7 +29,7 @@ the keyboard's focus, a `title`'s only for the pointer); it never takes the poin
 
 - The title bar's icons, the review bar's icons, the table grips, the formatting palette and a
   link's address each have a hint of their own (`.rl-tip`, `.rl-hint`, `.rl-grip-hint`,
-  `.rl-palette-tip`, `.rl-link-hint`), and the image's size readout (`.rl-image-badge`) is drawn the
+  `.rl-toolbar-tip`, `.rl-link-hint`), and the image's size readout (`.rl-image-badge`) is drawn the
   same.
 - **A `title` attribute needs no code of its own.** The system draws it as a black bubble, so each
   window runs `installTitleHints` (`apps/desktop/src/ui/title-hints.ts`): while the pointer rests

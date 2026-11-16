@@ -1,13 +1,13 @@
-// Cut, Copy and Paste, as the palette's Edit group has them. The Edit menu's items are the system's
-// own, which the menu bar sends to the page; the palette is in the page, so its items are commands of
+// Cut, Copy and Paste, as the toolbar's Edit group has them. The Edit menu's items are the system's
+// own, which the menu bar sends to the page; the toolbar is in the page, so its items are commands of
 // the registry like the others, and a host says how they reach the clipboard. They have no keys of
-// their own: ⌘X, ⌘C and ⌘V are the system's, and the palette only shows them.
+// their own: ⌘X, ⌘C and ⌘V are the system's, and the toolbar only shows them.
 
 import type { EditorState } from '@codemirror/state';
 import type { Editor, EditorCommand } from '@redlines/editor';
 
 /** How the Edit items reach the clipboard. A host gives what its page can do. */
-export interface PaletteClipboard {
+export interface ToolbarClipboard {
   /** Cuts the selection, as ⌘X does. */
   cut(): void | Promise<void>;
   /** Copies the selection, as ⌘C does. */
@@ -21,7 +21,7 @@ export interface PaletteClipboard {
 
 /**
  * A clipboard for a page: Cut and Copy are the editing commands the editor's `cut` and `copy`
- * handlers answer, which the page runs for a press of the palette (a gesture it allows).
+ * handlers answer, which the page runs for a press of the toolbar (a gesture it allows).
  *
  * Paste is the host's own where it has one (`paste`: the Mac's own `paste:` to the page, which WebKit
  * answers with a paste event that carries the clipboard's HTML), so that the editor converts what a
@@ -35,7 +35,7 @@ export function pageClipboard(
   editor: Editor,
   readText: () => Promise<string>,
   paste?: () => Promise<boolean>,
-): PaletteClipboard {
+): ToolbarClipboard {
   const doc = editor.view.dom.ownerDocument;
   const copying = (what: 'cut' | 'copy') => () => {
     editor.focus();
@@ -69,7 +69,7 @@ const noSelection = (state: EditorState): string | undefined =>
 
 /** The commands of the Edit group, which a registry may not hold already: they have no menu. */
 export function editCommands(
-  clipboard: PaletteClipboard,
+  clipboard: ToolbarClipboard,
   failed: (what: 'cut' | 'copy' | 'paste', error: unknown) => void,
 ): EditorCommand[] {
   const run = (what: 'cut' | 'copy' | 'paste') => () => {

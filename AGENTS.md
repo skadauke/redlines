@@ -38,7 +38,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands, the grips and the +  |
 | `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
-| `plugins/palette`       | `@redlines/palette`: the formatting palette, on right-click and from the keyboard |
+| `plugins/toolbar`       | `@redlines/toolbar`: the toolbar, from the title bar's wrench, on right-click and from the keyboard |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
 | `.claude-plugin/`       | This repository as a Claude Code marketplace (`marketplace.json`)         |
@@ -107,7 +107,7 @@ repo root.
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
   over them, their bars and cards, in Redlines and its simple look) and `VITE_PALETTE_CHECK=1 pnpm
-  dev` (the formatting palette's right-click and hints, and Ask's bubble, answered by the
+  dev` (the toolbar's right-click and hints, and Ask's bubble, answered by the
   page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
   results to the console and ends with a `... done <n> passed, <n> failed` line
   (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).

@@ -1020,19 +1020,31 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
+    'plugins/review/src/index.ts',
+    'NO_CHANGE',
+    'disable',
+    'Accept and Reject are grayed with the caret outside a tracked change, and say why',
+  ],
+  [
+    'plugins/formatting/src/index.ts',
+    'NOT_WRAPPED',
+    'info',
+    'tells where an inserted block went when the selection could not be wrapped; nothing is refused',
+  ],
+  [
     'plugins/outline/src/index.ts',
     'message',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     'message',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     "what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`",
     'disable',
     'an image paste holds no text',

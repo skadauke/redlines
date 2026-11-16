@@ -7,7 +7,7 @@
 
 import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { ChangeSet, type EditorState } from '@codemirror/state';
+import { ChangeSet, type EditorState, Transaction } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
@@ -31,6 +31,7 @@ import {
   selectionInTable,
   setFold,
   setViewModeEffect,
+  tablesOf,
   trackedEditAnnotation,
   trackingField,
   viewModeField,
@@ -103,6 +104,24 @@ const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quot
  * (a tracked insertion can't end with an empty quote line, which would take the block after it). */
 const ALERT = '> [!NOTE]\n> Text';
 const ALERT_BODY = 'Text';
+/** The commands that wrap a selection, or insert below one that holds a table (#555). */
+const WRAPS = new Set(['block.code', 'block.alert']);
+/** Whether a selection of text reaches out of the one table it is in (or starts outside any). */
+const reachesOut = (state: EditorState): boolean => {
+  const { from, to, empty } = state.selection.main;
+  return !empty && !tablesOf(state).some((table) => from >= table.from && to <= table.to);
+};
+/** Said where a selection can't be wrapped and the block goes below it instead (not a refusal). */
+const NOT_WRAPPED =
+  'The selection holds a table, an image or changes that are pending, so the block was put below it.';
+/** What Quote writes where it inserts one: a body whose text is selected, as Alert's is. */
+const QUOTE = '> Text';
+const QUOTE_BODY = 'Text';
+/**
+ * The text before a caret that is at the very start of a block's first line: nothing, or only the
+ * markers of a heading, a quote, a list item and its box, which the caret is in front of the text of.
+ */
+const AT_BLOCK_START = /^[ \t]*(?:(?:#{1,6}|[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*|\[[ xX]\][ \t]+)*$/;
 const NO_TRACKED_HEADING_CODE =
   "A heading can't become a code block while Track Changes is on. Make it body text first.";
 
@@ -618,35 +637,149 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       const start = view.state.doc.toString().indexOf(find, line.from);
       if (start >= 0) {
         const anchor = afterVisible(start, caret);
-        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
+        view.dispatch({
+          selection: { anchor, head: afterVisible(anchor, selected) },
+          annotations: Transaction.addToHistory.of(false),
+        });
       }
     }
     return done;
   };
 
-  /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
+  /** The block of the document's top level that holds `pos`, or null. */
+  const topBlockAt = (pos: number, side: -1 | 0 | 1 = 0): SyntaxNode | null =>
+    around(view.state, pos, side).find((node) => node.parent?.type.isTop) ?? null;
+
+  /**
+   * Where a block inserted for the caret goes (#555): in an empty paragraph, in its place; with the
+   * caret at the very start of a block, above it; anywhere else below the block the caret is in, so
+   * that no sentence is split. `at` is the place to go by (the caret by default; a selection that
+   * can't be wrapped goes by its end). With `placed` the caret is put `caret` characters into the
+   * block, `selected` of them selected; the default is where the block has text to select.
+   */
   const insertBlock = (
     text: string,
     find: string,
     caret: number,
     selected = 0,
-    place = selected > 0,
+    placed = selected > 0,
+    at = view.state.selection.main.head,
   ): boolean => {
-    if (onEmptyLine()) return putOnEmptyLine(text, find, caret, selected);
     const { doc } = view.state;
-    const { head } = view.state.selection.main;
-    const line = doc.lineAt(head);
-    const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
-    const at = top ? Math.max(top.to, line.to) : line.to;
-    const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
-    if (done && place) {
-      const start = view.state.doc.toString().indexOf(find, at);
+    if (view.state.selection.main.empty && onEmptyLine()) {
+      return putOnEmptyLine(text, find, caret, selected);
+    }
+    const line = doc.lineAt(at);
+    const { empty: caretOnly, to: selectionEnd } = view.state.selection.main;
+    const top = topBlockAt(at, 0) ?? topBlockAt(at, !caretOnly && at === selectionEnd ? -1 : 1);
+    let above =
+      top !== null &&
+      doc.lineAt(top.from).number === line.number &&
+      AT_BLOCK_START.test(doc.sliceString(line.from, at));
+    // Above a block that is no paragraph, a tracked insertion can't end with its line breaks (they
+    // would take the start of the block that follows): it goes at the end of the block before
+    // instead, which reads the same, and below this one where there is none.
+    let before: SyntaxNode | null = null;
+    if (above && top && view.state.field(trackingField) && top.name !== 'Paragraph') {
+      before = top.prevSibling;
+      if (!before) above = false;
+    }
+    const place = before
+      ? before.to
+      : above && top
+        ? top.from
+        : top
+          ? Math.max(top.to, line.to)
+          : line.to;
+    const done = insert([
+      { from: place, to: place, insert: above && !before ? `${text}\n\n` : `\n\n${text}` },
+    ]);
+    if (done && placed) {
+      const start = view.state.doc.toString().indexOf(find, place);
       if (start >= 0) {
         const anchor = afterVisible(start, caret);
-        view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
+        // Not a step of its own: one Undo takes the whole block away.
+        view.dispatch({
+          selection: { anchor, head: afterVisible(anchor, selected) },
+          annotations: Transaction.addToHistory.of(false),
+        });
       }
     }
     return done;
+  };
+
+  /**
+   * The top-level blocks a selection touches, as one range from the start of the first to the end of
+   * the last, for Quote, Callout and Code Block to wrap. Null for a caret, and for a selection that
+   * holds a table or an image, or the markers of changes: those insert the block below instead,
+   * which is no refusal (#555).
+   */
+  const wrapRange = (): Range | null => {
+    const { from, to, empty } = view.state.selection.main;
+    if (empty) return null;
+    const blocks: SyntaxNode[] = [];
+    syntaxTree(view.state).iterate({
+      from,
+      to,
+      enter(node) {
+        if (node.node.parent?.type.isTop) {
+          if (node.to > from && node.from < to) blocks.push(node.node);
+          return false;
+        }
+        return undefined;
+      },
+    });
+    const first = blocks[0];
+    const last = blocks.at(-1);
+    if (!first || !last) return null;
+    const text = view.state.doc.sliceString(first.from, last.to);
+    if (blocks.some(({ name }) => name === 'Table' || name === 'FrontMatter')) return null;
+    if (/!\[|<img\b/i.test(text) || text.includes('<!--')) return null;
+    return { from: first.from, to: last.to };
+  };
+
+  /** Quote or Callout: wraps the selected blocks, or inserts an empty one by the placement rule. */
+  const wrapped = (head: string): boolean => {
+    const range = wrapRange();
+    if (!range) return false;
+    const text = view.state.doc.sliceString(range.from, range.to);
+    const lines = text.split('\n').map((line) => (line.trim() === '' ? '>' : `> ${line}`));
+    return insert([
+      { from: range.from, to: range.to, insert: [...(head ? [head] : []), ...lines].join('\n') },
+    ]);
+  };
+
+  const quoteBlock = (): boolean => {
+    if (!editable()) return false;
+    if (view.state.selection.main.empty || wrapRange() === null) {
+      return insertBlock(QUOTE, '> ', 2, QUOTE_BODY.length, true, insertAt(true));
+    }
+    return wrapped('');
+  };
+
+  const calloutBlock = (): boolean => {
+    if (!editable()) return false;
+    if (view.state.selection.main.empty || wrapRange() === null) {
+      return insertBlock(
+        ALERT,
+        '> [!NOTE]',
+        ALERT.length - ALERT_BODY.length,
+        ALERT_BODY.length,
+        true,
+        insertAt(true),
+      );
+    }
+    return wrapped('> [!NOTE]');
+  };
+
+  /** Where a block that can't wrap the selection goes by: the caret, or the selection's end. */
+  const insertAt = (unwrapped = false): number => {
+    const { head, from, to, empty } = view.state.selection.main;
+    if (empty) return head;
+    // The selection is of text that can't be wrapped: say where the block went instead.
+    if (unwrapped) notice(NOT_WRAPPED);
+    // A selection that ends at the start of a line ends in the block before it.
+    return to > from && to === view.state.doc.lineAt(to).from ? to - 1 : to;
   };
 
   /**
@@ -701,12 +834,24 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       notice(ALREADY_CODE);
       return false;
     }
-    if (nodes.some(({ name }) => name === 'ListItem' || name === 'Blockquote')) {
+    const { doc } = view.state;
+    const { from, to, empty } = view.state.selection.main;
+    // A caret in text inserts an empty code block by the placement rule (#555), and so does a
+    // selection that holds a table or an image, which can't be wrapped; a selection of text is
+    // wrapped. An empty line, and a line of a marker only, are the empty paragraph's and item's: the
+    // fence takes their place, below. A caret in a list item or a quote has its block's end to go
+    // below, so the refusal is for wrapping only.
+    const marker = EMPTY_MARKER.exec(doc.lineAt(from).text);
+    const markerOnly = marker !== null && /[>*+\-\d]/.test(marker[1] ?? '');
+    const inserting = empty ? !onEmptyLine() && !markerOnly : wrapRange() === null;
+    if (!inserting && nodes.some(({ name }) => name === 'ListItem' || name === 'Blockquote')) {
       notice(NO_CODE_IN_CONTAINER);
       return false;
     }
-    const { doc } = view.state;
-    const { from, to, empty } = view.state.selection.main;
+    if (inserting) {
+      if (!editable()) return false;
+      return insertBlock('```\n\n```', '```\n', 4, 0, true, insertAt(!empty));
+    }
     let first = doc.lineAt(from);
     let last = doc.lineAt(to);
     // A selection that ends at the start of a line doesn't take that line.
@@ -797,7 +942,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       // Plain shows the file's own text: nothing in it can be marked (typing there is asked about).
       if (rawTracked(state)) return RAW_FORMAT;
       // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
-      if (menu !== 'format' && selectionInTable(state)) return NOT_IN_CELL_HINT;
+      if (
+        menu !== 'format' &&
+        selectionInTable(state) &&
+        !(WRAPS.has(fields.id) && reachesOut(state))
+      ) {
+        return NOT_IN_CELL_HINT;
+      }
       return fields.disabledReason?.(state);
     },
   });
@@ -1102,11 +1253,24 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     command('insert', 'insert', {
       id: 'block.alert',
       title: 'Alert',
-      // A new alert after the block the caret is in, or on the empty paragraph it is in, with its
-      // body's text selected: the type is changed from the menu in its title.
-      run: () =>
-        insertBlock(ALERT, '> [!NOTE]', ALERT.length - ALERT_BODY.length, ALERT_BODY.length),
+      // A new alert by the placement rule (#555), with its body's text selected, where the type is
+      // changed from the menu in its title; selected blocks are wrapped in one instead.
+      run: calloutBlock,
     }),
+    // Quote as Insert has it (#555): an empty quote by the placement rule, or the selected blocks
+    // in one. The Paragraph menu's Quote (⌥⌘Q) is another command, which changes the block.
+    {
+      id: 'insert.quote',
+      title: (state) => (state.selection.main.empty ? 'Insert Quote' : 'Make Selection a Quote'),
+      disabledReason: (state) =>
+        rawTracked(state)
+          ? RAW_FORMAT
+          : selectionInTable(state) && !reachesOut(state)
+            ? NOT_IN_CELL_HINT
+            : undefined,
+      isActive: (state) => activeBlocks(state).has('block.quote'),
+      run: quoteBlock,
+    },
     command('insert', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
@@ -1185,6 +1349,7 @@ export const plugin: Plugin = {
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
         { id: 'block.details', title: 'Collapsible Section' },
         { id: 'block.alert', title: 'Alert' },
+        { id: 'insert.quote', title: 'Insert Quote' },
         { id: 'block.rule', title: 'Horizontal Rule' },
         { id: 'block.indent', title: 'Indent', shortcut: 'Mod-]' },
         { id: 'block.outdent', title: 'Outdent', shortcut: 'Mod-[' },
