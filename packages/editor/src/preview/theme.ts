@@ -272,6 +272,15 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
     { opacity: '1' },
+  // The line a dragged image file shows between blocks (#681), in the theme's gray, never red.
+  '.rl-drop-line': {
+    position: 'absolute',
+    height: '2px',
+    borderRadius: '1px',
+    backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+    pointerEvents: 'none',
+    zIndex: '5',
+  },
   '.rl-image-badge': {
     position: 'absolute',
     top: '6px',
