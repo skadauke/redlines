@@ -186,7 +186,7 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-html-chip': {
     display: 'inline-block',
     fontSize: 'var(--rl-size-ui-small)',
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     backgroundColor: 'var(--rl-tint)',
     borderRadius: '5px',
     padding: '0 0.4em',
