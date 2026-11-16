@@ -7,7 +7,7 @@ import type {
 } from '@redlines/plugin-api';
 import { describe, expect, it, vi } from 'vitest';
 import { events as only, fakeProvider, fakeRelay, replies } from './fake-provider.ts';
-import { createMacAgents } from './mac-agents.ts';
+import { createMacAgents, type MacAgentsOptions } from './mac-agents.ts';
 
 const request: AgentRequest = {
   prompt: '@Claude hi',
@@ -30,6 +30,105 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   for await (const event of events) all.push(event);
   return all;
 }
+
+/** An agent that reaches for the web, and answers once it may use it (#529). */
+function webby(relay = fakeRelay()) {
+  return fakeProvider({
+    relay,
+    script: async function* ({ request, tools }) {
+      await tools.initialize();
+      yield { type: 'web', allowed: request.web === true, text: 'Searching the web' };
+      yield { type: 'done', finalText: request.web === true ? 'Looked it up.' : 'Could not.' };
+    },
+  });
+}
+
+describe('web access (#529)', () => {
+  const run = (agents: ReturnType<typeof createMacAgents>) =>
+    collect(agents.run('claude', request, tools, new AbortController().signal));
+
+  it('runs with the switch as it is now, and says the answer used the web', async () => {
+    const relay = fakeRelay();
+    const claude = webby(relay);
+    const agents = createMacAgents([claude], relay, { web: () => true });
+    const all = await run(agents);
+    expect(claude.requests.map(({ web }) => web)).toEqual([true]);
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Looked it up.', web: true });
+  });
+
+  it('asks when an agent reaches for the web with the switch off, and runs again for Allow Once', async () => {
+    const relay = fakeRelay();
+    const claude = webby(relay);
+    const allowWeb = vi.fn();
+    const askWeb = vi.fn<NonNullable<MacAgentsOptions['askWeb']>>(() =>
+      Promise.resolve('once' as const),
+    );
+    const agents = createMacAgents([claude], relay, { web: () => false, askWeb, allowWeb });
+    const all = await run(agents);
+    expect(askWeb).toHaveBeenCalledWith('claude', 'Claude', expect.any(AbortSignal));
+    expect(allowWeb).not.toHaveBeenCalled();
+    expect(claude.requests.map(({ web }) => web)).toEqual([false, true]);
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Looked it up.', web: true });
+    // Once is once: the next run starts with the switch off again.
+    await run(agents);
+    expect(claude.requests.map(({ web }) => web)).toEqual([false, true, false, true]);
+  });
+
+  it('turns the switch on for Allow Always', async () => {
+    const relay = fakeRelay();
+    const claude = webby(relay);
+    let on = false;
+    const agents = createMacAgents([claude], relay, {
+      web: () => on,
+      askWeb: () => Promise.resolve('always'),
+      allowWeb: () => {
+        on = true;
+      },
+    });
+    await run(agents);
+    expect(on).toBe(true);
+    await run(agents);
+    expect(claude.requests.map(({ web }) => web)).toEqual([false, true, true]);
+  });
+
+  it('goes on without the web when the person says no, and does not ask again', async () => {
+    const relay = fakeRelay();
+    const claude = webby(relay);
+    const askWeb = vi.fn<NonNullable<MacAgentsOptions['askWeb']>>(() =>
+      Promise.resolve('no' as const),
+    );
+    const agents = createMacAgents([claude], relay, { askWeb });
+    const all = await run(agents);
+    expect(askWeb).toHaveBeenCalledTimes(1);
+    expect(claude.requests.map(({ web }) => web)).toEqual([false, false]);
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Could not.' });
+  });
+
+  it('does not start a run again that has written, which would write twice', async () => {
+    const relay = fakeRelay();
+    const claude = fakeProvider({
+      relay,
+      script: async function* ({ tools }) {
+        await tools.initialize();
+        await tools.call('reply', { text: 'Working on it.' });
+        yield { type: 'web', allowed: false, text: 'Searching the web' };
+        yield { type: 'done', finalText: 'Done.' };
+      },
+    });
+    const askWeb = vi.fn<NonNullable<MacAgentsOptions['askWeb']>>(() => Promise.resolve('once'));
+    const all = await run(createMacAgents([claude], relay, { askWeb }));
+    expect(askWeb).not.toHaveBeenCalled();
+    expect(claude.requests).toHaveLength(1);
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
+  });
+
+  it('answers no without anyone to ask', async () => {
+    const relay = fakeRelay();
+    const claude = webby(relay);
+    const all = await run(createMacAgents([claude], relay));
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Could not.' });
+  });
+});
 
 describe('createMacAgents', () => {
   it('lists the models of an agent, and runs the one chosen unless the request names its own (#530)', async () => {

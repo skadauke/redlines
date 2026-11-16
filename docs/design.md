@@ -273,8 +273,8 @@ The window, on the desktop:
   window's own zoom (⌘+ and ⌘−, and the palette's Text Size, change one window), for Track Changes
   on new documents, or for the views. Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
-  hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
-  view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
+  hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (a page that shows the view,
+  §5.3) sets the view, and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
 - **Icons without labels, explained on hover.** Hovering over Files shows its name and shortcut.
   Hovering over View or Review opens its menu after a short pause, with each item's shortcut, and
   the arrow keys open it from the keyboard. A click on either does what is done most often: View
@@ -282,7 +282,7 @@ The window, on the desktop:
   Review turns Track Changes on and off, as ⇧⌘E does. A click while the menu is open closes it and
   acts. Each icon's hint says what a click will do, with its key ("Show Redlines ⌥⌘2", "Turn off
   Track Changes ⇧⌘E"): the menu has the pointer's rest, so the hint shows when the keyboard brings
-  the focus to the icon, and after a click on the eye, when the pointer stays (a click on the pen
+  the focus to the icon, and after a click on View, when the pointer stays (a click on the pen
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
@@ -453,21 +453,23 @@ another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Plain
 
-The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
-the eye switches between Clean and Redlines, and from Plain goes back to whichever of the two was shown
-last; Plain is for the menu, below a separator. The click shows that it did something, for Clean and
-Redlines look alike in a document without redlines: the eye's pupil is red for a moment (the one use
-of red there besides the pen).
+The View menu, under the View button at the top right (§5.1), sets how the document is shown. The
+button is a small page that shows the view it is in: a page with lines of text for Clean, the same
+page with a red bar in its left margin, like the change bars, for Redlines (in either look), and the
+page with a monospace # for Plain. Red shows there only as that state (besides the pen). A click on
+it switches between Clean and Redlines, and from Plain goes back to whichever of the two was shown
+last; Plain is for the menu, below a separator. The icon changing is the sign that the click did
+something, though Clean and Redlines look alike in a document without redlines.
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there in the menu bar's View menu, with its shortcut, whatever the document holds and
-  whether Track Changes is on or off, since a disabled item would take its key away. The eye's menu
+  whether Track Changes is on or off, since a disabled item would take its key away. The View menu
   is for what there is to see: Redlines is disabled in it for a document with no changes and no
   ledger (no pending change, highlight or comment), where it would look nearly the same as Clean
-  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the eye still
-  show it. The eye's menu has no Simple Look row. Redlines has two
+  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the View button still
+  show it. The View menu has no Simple Look row. Redlines has two
   looks, and a click on a change bar in the margin or the menu bar's View ›
   **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
   **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
@@ -481,7 +483,7 @@ of red there besides the pen).
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
   checked while the simple look shows, there to choose only while Redlines shows (Clean and Plain
-  have no look); the eye's menu has no row for it. A change bar is a pointer's way, and the
+  have no look); the View menu has no row for it. A change bar is a pointer's way, and the
   menu bar's switch (⌥⌘4) is the way for the keyboard and VoiceOver (#330): nobody needs a pointer
   to choose a look.
 - **Plain** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
@@ -2059,6 +2061,13 @@ while the setting allows it), and the answer is remembered for that agent and fo
 settings, never in the document: an answer narrower than the setting stands, and one wider than
 it is held to it and kept, and stands again if the setting is widened. A document in the home
 folder itself, or in the disk's root, has no folder to read, and is read as This document.
+**Web access** is one switch for every agent, Web access in Preferences › Agents, off by default.
+Off, Claude Code's web tools and Codex's search are not allowed to the run, and an agent that reaches
+for the web (a call to a web tool; for Codex, a `curl` or `wget` command, which its profile holds back)
+stops the run, and a card in the corner asks: Don't Allow, Allow Once (this run, which starts again
+with the web), or Allow Always, which turns the switch on. On, they are allowed to every run. An
+answer that used the web says so under it in Ask's bubble. An agent the person added, which is held
+to read-only by the host's rule, is not given the web.
 Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
 update, signed out, signed in), the remembered answers with a Forget button for each, and Show
 Agent Logs.

@@ -18,7 +18,7 @@ import { deriveHandle } from './handle.ts';
 import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
-import { extension, isDocument } from './file-names.ts';
+import { DOCUMENT_EXTENSIONS, extension, isDocument } from './file-names.ts';
 import { savedImageName } from './image-add.ts';
 import sample from './sample.md?raw';
 
@@ -322,7 +322,7 @@ export function createHost(): Host {
 }
 
 /** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
-const PANEL_EXTENSIONS = ['md', 'markdown', 'qmd', 'Rmd', 'txt'];
+const PANEL_EXTENSIONS = DOCUMENT_EXTENSIONS;
 
 /**
  * The panels' filter, with the extension of the document `name` first when there is one: the save
@@ -332,7 +332,7 @@ function panelFilters(name = '') {
   const own = isDocument(name) ? extension(name) : '';
   const first = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() === own);
   const rest = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() !== own);
-  return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
+  return [{ name: 'Markdown, text and code', extensions: [...first, ...rest] }];
 }
 
 /** How long Save waits to hear whether the default folder is there, before it goes without. */

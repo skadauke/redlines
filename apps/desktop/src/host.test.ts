@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createHost,
   DISCARD_DRAFT_BUTTONS,
+  DOCUMENT_EXTENSIONS,
   dirname,
   isDocument,
   joinPath,
@@ -98,9 +99,9 @@ describe('isDocument', () => {
 
   it('is false for any other file, and for a name that is only an extension', () => {
     const others = [
-      'main.ts',
-      'package.json',
-      'notes.text',
+      'main.zig',
+      'package.lock',
+      'notes.docx',
       'notes.txt.bak',
       'logo.png',
       'paper.pdf',
@@ -419,7 +420,7 @@ describe('the host in the app', () => {
           filter.extensions.map((extension) => extension.toLowerCase()),
         ),
       );
-    const DOCUMENTS = new Set(['md', 'markdown', 'qmd', 'rmd', 'txt']);
+    const DOCUMENTS = new Set(DOCUMENT_EXTENSIONS);
 
     afterEach(() => {
       dialog.open.mockReset();
@@ -526,7 +527,7 @@ describe('the host in the app', () => {
     it('reads no file the Open panel picked that isn’t a document', async () => {
       // On the Mac the panel enables every file whose type conforms to plain text's, `.txt`'s:
       // scripts, source files, logs, a Terminal `.command`.
-      for (const picked of ['/repo/run.command', '/repo/build.py', '/repo/Makefile']) {
+      for (const picked of ['/repo/run.command', '/repo/build.zig', '/repo/Makefile']) {
         dialog.open.mockResolvedValueOnce(picked);
         const opening = createHost().open();
         await expect(opening).rejects.toBeInstanceOf(NotADocumentError);
@@ -548,7 +549,7 @@ describe('the host in the app', () => {
       };
       expect(await first('/docs/notes.txt')).toBe('txt');
       expect(await first('/docs/NOTES.TXT')).toBe('txt');
-      expect(await first('/docs/analysis.Rmd')).toBe('Rmd');
+      expect(await first('/docs/analysis.Rmd')).toBe('rmd');
       expect(await first('/docs/talk.qmd')).toBe('qmd');
       expect(await first('Untitled.md')).toBe('md');
       // Cancelled: nothing is written.
@@ -558,7 +559,7 @@ describe('the host in the app', () => {
     it('writes nothing where Save As was given a name that isn’t a document’s', async () => {
       // The panel takes a name whose type conforms to one it offers, such as a script's for plain
       // text, and, off the Mac, a name with no extension at all.
-      for (const chosen of ['/docs/notes.py', '/docs/notes']) {
+      for (const chosen of ['/docs/notes.zig', '/docs/notes']) {
         dialog.save.mockResolvedValueOnce(chosen);
         const saving = createHost().saveAs('One\n', '/docs/notes.txt');
         await expect(saving).rejects.toBeInstanceOf(NotADocumentError);

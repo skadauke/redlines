@@ -736,6 +736,22 @@ describe('the Agents pane', () => {
     expect(now().agentScope).toBe('everything');
   });
 
+  it('has one switch for the web, off by default, for every agent (#529)', () => {
+    const { deps, container, update, now } = setup({});
+    renderAgentsPane(container, deps);
+    const web = row(container, 'Web access').querySelector('input')!;
+    expect(web.type).toBe('checkbox');
+    expect(web.checked).toBe(false);
+    expect(row(container, 'Web access').textContent).toContain('Allow Once, or Allow Always');
+    web.checked = true;
+    web.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenCalledWith({ webAccess: true });
+    expect(now().webAccess).toBe(true);
+    web.checked = false;
+    web.dispatchEvent(new Event('change'));
+    expect(now().webAccess).toBe(false);
+  });
+
   describe('the note under What agents may read', () => {
     const noteOf = (container: HTMLElement) =>
       row(container, 'What agents may read').querySelector('.rl-pref-note')?.textContent ?? '';
@@ -1011,6 +1027,7 @@ describe('the Agents pane', () => {
       'Claude',
       'Codex',
       'What agents may read',
+      'Web access',
       'Remembered answers',
       'Agent logs',
     ]);
@@ -1077,6 +1094,7 @@ describe('the Agents pane', () => {
         'Codex',
         'Other agents',
         'What agents may read',
+        'Web access',
         'Agent logs',
       ]);
       const text = row(container, 'Other agents').textContent;

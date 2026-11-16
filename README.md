@@ -62,7 +62,7 @@ and when, and the comment threads, are in a block at the end of the file.
   as emoji, with a list after a colon. With two or more headings, a column of lines in the left
   margin is the outline: hover to open it, click a heading to go there, ⌃⌘O for the keyboard.
 - **The window.** The title bar is the page: the text scrolls under it, the document icon next to
-  the name drags the file, a double-click on the name renames it, and the eye and the pen switch
+  the name drags the file, a double-click on the name renames it, and the view button (a page that shows the view) and the pen switch
   Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
   corner. A formatting palette opens on right-click and from the keyboard, and
   ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.

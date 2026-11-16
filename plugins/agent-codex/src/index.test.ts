@@ -265,6 +265,9 @@ describe('codexArgs', () => {
       'hooks',
     ]);
     expect(settings).toContain('web_search="disabled"');
+    expect(codexArgs({ ...folderRequest, web: true }, endpoint, homebrew)).toContain(
+      'web_search="live"',
+    );
     // The person's skills, and Redlines' own installed from Preferences, are for a Codex run by
     // hand: a run here acts through the toolbox, and can't read a skill's file.
     expect(settings).toContain('skills.include_instructions=false');
@@ -394,6 +397,43 @@ describe('parseCodexLine', () => {
   ])('maps the failure %j to one line', (message, line) => {
     const failed = JSON.stringify({ type: 'turn.failed', error: { message } });
     expect(parseCodexLine(failed, newCodexState())).toEqual({ type: 'error', message: line });
+  });
+
+  // #529: Codex's search is off unless the person allowed the web; a command is the only way a run
+  // without it can reach for the web, so one that does is how the host knows to ask.
+  it('says a command that reaches for the web wants it, unless the run may', () => {
+    const wants = item('command_execution', { command: "/bin/zsh -lc 'curl -s https://x.org'" });
+    expect(parseCodexLine(wants, newCodexState())).toEqual({
+      type: 'web',
+      allowed: false,
+      text: 'Reaching for the web',
+    });
+    expect(parseCodexLine(wants, newCodexState(undefined, true))).toEqual(
+      expect.objectContaining({ type: 'status' }),
+    );
+    for (const command of ['ls curly', 'rg curl src', 'ls /usr/bin/curl', 'cat curl.md']) {
+      expect(parseCodexLine(item('command_execution', { command }), newCodexState())).toEqual(
+        expect.objectContaining({ type: 'status' }),
+      );
+    }
+    expect(
+      parseCodexLine(item('command_execution', { command: '/usr/bin/curl -s x' }), newCodexState()),
+    ).toEqual(expect.objectContaining({ type: 'web' }));
+  });
+
+  it('says the web was used, and marks the answer', () => {
+    const state = newCodexState(undefined, true);
+    expect(parseCodexLine(item('web_search', { query: 'q' }), state)).toEqual({
+      type: 'web',
+      allowed: true,
+      text: 'Searching the web',
+    });
+    state.lastMessage = 'Done.';
+    expect(parseCodexLine(JSON.stringify({ type: 'turn.completed' }), state)).toEqual({
+      type: 'done',
+      finalText: 'Done.',
+      web: true,
+    });
   });
 
   it('does not throw on helpers, commands, unknown events or lines that are not JSON', () => {

@@ -298,11 +298,20 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
         });
         let skills = wide.map(|_| Part::Exact("--disable-slash-commands".to_owned()));
         // At the home folder scope the file tools are always there: it isn't This document.
+        // The web tools are always on the list, so that an agent can reach for one, and allowed
+        // only when the person allowed the web (`--allowedTools` below); `dontAsk` refuses them
+        // otherwise (#529).
         let tools = if wide.is_some() {
-            vec!["Read,Grep,Glob".to_owned()]
+            vec!["Read,Grep,Glob,WebSearch,WebFetch".to_owned()]
         } else {
-            vec!["Read,Grep,Glob".to_owned(), String::new()]
+            vec![
+                "Read,Grep,Glob,WebSearch,WebFetch".to_owned(),
+                "WebSearch,WebFetch".to_owned(),
+            ]
         };
+        let toolbox = "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
+                       mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status";
+        let allowed = vec![toolbox.to_owned(), format!("{toolbox},WebSearch,WebFetch")];
         let settings = wide.map_or_else(
             || r#"{"disableAllHooks":true}"#.to_owned(),
             claude_wide_settings,
@@ -314,12 +323,9 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             .chain(skills)
             .chain(exact(&["--permission-mode", "dontAsk", "--tools"]))
             .chain([Part::OneOf(tools)])
-            .chain(exact(&[
-                "--allowedTools",
-                "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
-                 mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status",
-                "--mcp-config",
-            ]))
+            .chain(exact(&["--allowedTools"]))
+            .chain([Part::OneOf(allowed)])
+            .chain(exact(&["--mcp-config"]))
             .chain([Part::OneOf(configs)])
             .chain(exact(&[
                 "--strict-mcp-config",
@@ -434,11 +440,13 @@ fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
                 "--disable",
                 "hooks",
                 "-c",
-                r#"web_search="disabled""#,
-                "-c",
-                r#"skills.include_instructions=false"#,
-                "--",
             ]))
+            // Codex's own search, off unless the person allowed the web (#529).
+            .chain([Part::OneOf(vec![
+                r#"web_search="disabled""#.to_owned(),
+                r#"web_search="live""#.to_owned(),
+            ])])
+            .chain(exact(&["-c", r#"skills.include_instructions=false"#, "--"]))
             .chain([Part::Prompt])
             .collect()
     };
@@ -605,7 +613,7 @@ pub mod tests {
     #[test]
     fn every_provider_line_is_allowed() {
         with_known(|lines, known| {
-            assert_eq!(lines.lines.len(), 6);
+            assert_eq!(lines.lines.len(), 8);
             for (name, line) in &lines.lines {
                 assert_eq!(
                     check_run_line(agent_of(name), line, known),
@@ -906,17 +914,15 @@ pub mod tests {
     #[test]
     fn protective_flags_cant_be_left_out() {
         // These ran a folder's own `SessionStart` hook, and brought back the person's config.
-        assert!(
-            claude(&[
-                "-p",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--",
-                "hi"
-            ])
-            .is_err()
-        );
+        assert!(claude(&[
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--",
+            "hi"
+        ])
+        .is_err());
         assert!(codex(&["exec", "--skip-git-repo-check", "--", "hi"]).is_err());
         assert!(claude(&["-p"]).is_err());
         assert!(claude(&[]).is_err());
