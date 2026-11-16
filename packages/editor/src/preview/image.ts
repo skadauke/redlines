@@ -197,13 +197,19 @@ class ImageWidget extends WidgetType {
     frame.append(img);
     // A handle stands outside the picture, unless that is outside the text column (a column-wide
     // image): there it would lie in the margin, under a note, so it stands inside that edge instead.
-    frame.addEventListener('pointerenter', () => {
+    const placeHandles = () => {
+      // Not while a drag holds a handle: it stays where the pointer took it.
+      if (frame.closest('.rl-image-resizing')) return;
       const line = wrap.closest('.cm-line')?.getBoundingClientRect();
       const box = frame.getBoundingClientRect();
       if (!line || box.width === 0) return;
       frame.classList.toggle('rl-handle-in-left', box.left - HANDLE_WIDTH < line.left);
       frame.classList.toggle('rl-handle-in-right', box.right + HANDLE_WIDTH > line.right);
-    });
+    };
+    // On entering, and as the pointer moves over the image, so that a width or window that changed
+    // since is seen (a toggle that changes nothing costs nothing).
+    frame.addEventListener('pointerenter', placeHandles);
+    frame.addEventListener('pointermove', placeHandles);
     for (const side of ['left', 'right'] as const) {
       const handle = document.createElement('span');
       handle.className = `rl-image-handle rl-image-handle-${side}`;

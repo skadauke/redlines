@@ -419,7 +419,7 @@ describe('an image with a size (#526)', () => {
     expect(frame.classList.contains('rl-handle-in-right')).toBe(true);
     // Narrower: they stand outside, as before.
     frame.getBoundingClientRect = () => rect(200, 600);
-    frame.dispatchEvent(new Event('pointerenter'));
+    frame.dispatchEvent(new Event('pointermove'));
     expect(frame.classList.contains('rl-handle-in-left')).toBe(false);
     expect(frame.classList.contains('rl-handle-in-right')).toBe(false);
   });
