@@ -22,6 +22,7 @@ const ids = (commands: readonly EditorCommand[], at: EditorState = state) =>
 const everything = [{ command: 'ask.start' }, ...MENUS.flatMap((menu) => menu.rows.flat())].map(
   ({ command: id }) => command(id, { isActive: () => true }),
 );
+const PARAGRAPH = { paragraph: true, item: false };
 
 describe('the toolbar menus', () => {
   it('leaves out an item whose command is not registered, and a menu with none left', () => {
@@ -40,7 +41,7 @@ describe('the toolbar menus', () => {
   });
 
   it('orders the bar Ask | Insert · Review · List · Format · Edit', () => {
-    const bar = shownBar(everything, state);
+    const bar = shownBar(everything, state, PARAGRAPH);
     expect(bar.ask?.id).toBe('ask.start');
     expect(bar.menus.map((menu) => menu.id)).toEqual([
       'insert',
@@ -145,52 +146,61 @@ describe('the toolbar menus', () => {
 });
 
 describe('the List menu', () => {
-  const paragraph = [
-    command('block.body', { isActive: () => true }),
-    command('block.ul', { isActive: () => false }),
-    command('block.ol', { isActive: () => false }),
-    command('block.task', { isActive: () => false }),
+  const lists = [
+    command('block.body'),
+    command('block.ul'),
+    command('block.ol'),
+    command('block.task'),
   ];
-  const listMenu = (commands: readonly EditorCommand[]) =>
-    shownBar(commands, state).menus.find((menu) => menu.id === 'list');
+  const listMenu = (
+    commands: readonly EditorCommand[],
+    holds: { paragraph: boolean; item: boolean },
+  ) => shownBar(commands, state, holds).menus.find((menu) => menu.id === 'list');
+  const PARAGRAPH = { paragraph: true, item: false };
+  const ITEM = { paragraph: false, item: true };
+  const NEITHER = { paragraph: false, item: false };
 
   it('shows for a paragraph, which a list can be made of', () => {
     expect(
-      listMenu(paragraph)
+      listMenu(lists, PARAGRAPH)
         ?.rows.flat()
         .map((item) => item.label),
     ).toEqual(['Bullets', 'Numbers', 'Checkboxes', 'No List']);
   });
 
   it('shows for a list item, and is not in the bar for anything else', () => {
-    const inList = paragraph.map((each) =>
-      each.id === 'block.ol'
-        ? { ...each, isActive: () => true }
-        : { ...each, isActive: () => false },
-    );
-    expect(listMenu(inList)).toBeDefined();
-    // A heading, a code block, a table: none of the four is on.
-    expect(listMenu(paragraph.map((each) => ({ ...each, isActive: () => false })))).toBeUndefined();
+    expect(listMenu(lists, ITEM)).toBeDefined();
+    expect(listMenu(lists, { paragraph: true, item: true })).toBeDefined();
+    // A heading, a code block, a table: no paragraph and no item.
+    expect(listMenu(lists, NEITHER)).toBeUndefined();
   });
 
-  it('grays No List on a paragraph, with the reason, and leaves it on in a list', () => {
-    const noList = (commands: readonly EditorCommand[]) =>
-      listMenu(commands)
+  it('sits after Review and before Format in the bar', () => {
+    const bar = shownBar(
+      [...lists, command('comment.add'), command('format.bold')],
+      state,
+      PARAGRAPH,
+    );
+    expect(bar.menus.map((menu) => menu.id)).toEqual(['review', 'list', 'format']);
+  });
+
+  it('grays No List where there is no list item, with the reason, and leaves it on with one', () => {
+    const noList = (holds: { paragraph: boolean; item: boolean }) =>
+      listMenu(lists, holds)
         ?.rows.flat()
         .find((item) => item.id === 'block.body');
-    expect(noList(paragraph)?.enabled).toBe(false);
-    expect(noList(paragraph)?.reason).toMatch(/not a list/);
-    const inBullets = paragraph.map((each) =>
-      each.id === 'block.ul' ? { ...each, isActive: () => true } : each,
-    );
-    expect(noList(inBullets)?.enabled).toBe(true);
+    expect(noList(PARAGRAPH)?.enabled).toBe(false);
+    expect(noList(PARAGRAPH)?.reason).toMatch(/not a list/);
+    expect(noList(ITEM)?.enabled).toBe(true);
+    // A selection that reaches into a list takes the list out of it.
+    expect(noList({ paragraph: true, item: true })?.enabled).toBe(true);
   });
 
   it('grays a conversion the command says makes no sense, with the command’s own reason', () => {
-    const grayed = paragraph.map((each) =>
+    const grayed = lists.map((each) =>
       each.id === 'block.task' ? { ...each, disabledReason: () => 'Not in a cell.' } : each,
     );
-    const item = listMenu(grayed)
+    const item = listMenu(grayed, PARAGRAPH)
       ?.rows.flat()
       .find((each) => each.id === 'block.task');
     expect(item).toMatchObject({ enabled: false, reason: 'Not in a cell.' });
