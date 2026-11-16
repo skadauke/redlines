@@ -335,6 +335,10 @@ importers:
       '@redlines/review':
         specifier: workspace:*
         version: link:../review
+    devDependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
 
   plugins/code:
     dependencies:

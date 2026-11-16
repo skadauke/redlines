@@ -66,6 +66,7 @@ export function createMacAgents(
           name: provider.name,
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          ...(provider.seesImages === true ? { seesImages: true as const } : {}),
           state,
         };
       }),

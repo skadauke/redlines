@@ -10,6 +10,7 @@ import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
   blockedMessage,
+  createAltDescriber,
   createAltText,
   createAsk,
   createLiveLines,
@@ -797,7 +798,48 @@ const ask = createAsk(editor, {
 createAltText(editor, {
   notice: (message) => notice.flash(message),
   generation: () => controller.generation,
+  // "Describe with <agent>": the agent is shown the one picture and nothing else (agent.ts).
+  describer: createAltDescriber({
+    agents,
+    author,
+    document: { path: () => controller.state.path, generation: () => controller.generation },
+    readImage: readImageForAgent,
+  }),
 });
+
+/** The most bytes of a picture an agent is shown, as the app's own command holds it to. */
+const AGENT_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The picture `src` of the document, as the bytes an agent is shown (Alt Text, #553): only a local
+ * image inside the document's project folder (`localImagePath`), read by the app, which holds it to
+ * the folders its sidebars show, to PNG, JPEG, GIF and WebP, and to 5 MB (`image_for_agent`). A plain
+ * page in development reads it from its own memory, with the same limits.
+ */
+async function readImageForAgent(src: string): Promise<{ mimeType: string; data: string }> {
+  const document = imageDocument;
+  const root = imageFolder;
+  const path = document && root !== null ? localImagePath(src, document, root) : null;
+  if (path === null) throw new Error('Only an image in this document’s folder can be described.');
+  if (isTauri) {
+    try {
+      return await invoke<{ mimeType: string; data: string }>('image_for_agent', { path });
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error));
+    }
+  }
+  const url = host.imageUrl(path);
+  if (url === null) throw new Error('The image file isn’t there.');
+  const blob = await (await fetch(url)).blob();
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(blob.type)) {
+    throw new Error('Only PNG, JPEG, GIF and WebP pictures can be described.');
+  }
+  if (blob.size > AGENT_IMAGE_BYTES) throw new Error('That image is too big to describe.');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return { mimeType: blob.type, data: btoa(binary) };
+}
 
 /**
  * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed

@@ -253,12 +253,12 @@ describe('claudeArgs', () => {
     });
   });
 
-  it('allows the six toolbox tools and nothing else', () => {
+  it('allows the six toolbox tools and the picture of an Alt Text request, and nothing else', () => {
     const allowed = (valueOf(claudeArgs(folderRequest, endpoint), '--allowedTools') ?? '').split(
       ',',
     );
     expect(allowed).toEqual(
-      ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'].map(
+      ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'].map(
         (tool) => `mcp__redlines__${tool}`,
       ),
     );

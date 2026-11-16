@@ -316,7 +316,8 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             .chain(exact(&[
                 "--allowedTools",
                 "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
-                 mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status",
+                 mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status,\
+                 mcp__redlines__view_image",
                 "--mcp-config",
             ]))
             .chain([Part::OneOf(configs)])

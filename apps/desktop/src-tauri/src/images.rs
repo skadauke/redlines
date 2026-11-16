@@ -218,6 +218,62 @@ pub fn image_stamps(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
     }
 }
 
+/// The most bytes of a picture that an agent is shown: what a model takes in one image.
+const AGENT_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+
+/// The types of picture an agent that can look at pictures takes.
+const AGENT_IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// A picture handed to an agent to describe (`image_for_agent`).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentImage {
+    mime_type: &'static str,
+    /// The file's bytes, in base64.
+    data: String,
+}
+
+/// The picture at `path` for an agent, or what is said to the person when it can't be handed over.
+fn agent_image(images: &Images, path: &str) -> Result<AgentImage, String> {
+    use base64::Engine;
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("Couldn’t read the image.".into());
+    }
+    let (kind, bytes) = read_image(images, path).map_err(|status| {
+        if status == StatusCode::NOT_FOUND {
+            "The image file isn’t there.".to_string()
+        } else {
+            "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
+        }
+    })?;
+    if !AGENT_IMAGE_TYPES.contains(&kind) {
+        return Err("Only PNG, JPEG, GIF and WebP pictures can be described.".into());
+    }
+    if bytes.len() > AGENT_IMAGE_BYTES {
+        return Err(format!(
+            "That image is larger than {} MB, which is too big to describe.",
+            AGENT_IMAGE_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(AgentImage {
+        mime_type: kind,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+/// The one picture an agent is shown to write its alt text (Alt Text, #553): the file at `path`, an
+/// absolute path, only where the page may load it (`Images::may_load`: inside a folder a sidebar
+/// shows, never a hidden file, every link followed), read whole as the preview reads it and no
+/// larger than `AGENT_IMAGE_BYTES`. It gives the agent no other file and no path to read.
+#[tauri::command(async)]
+pub fn image_for_agent(app: AppHandle, path: String) -> Result<AgentImage, String> {
+    match app.try_state::<Images>() {
+        Some(images) => agent_image(&images, &path),
+        None => Err("Couldn’t read the image.".into()),
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
@@ -235,7 +291,12 @@ fn image(
     request: &Request<Vec<u8>>,
 ) -> Result<(&'static str, Vec<u8>), StatusCode> {
     let path = requested(request.uri()).ok_or(StatusCode::FORBIDDEN)?;
-    let real = images.may_load(&path)?;
+    read_image(images, &path)
+}
+
+/// The image at `path`, if the page may load it, read whole as `image` reads it.
+fn read_image(images: &Images, path: &Path) -> Result<(&'static str, Vec<u8>), StatusCode> {
+    let real = images.may_load(path)?;
     let refused = |_| StatusCode::FORBIDDEN;
     let mut file = open(&real).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
@@ -426,6 +487,43 @@ mod tests {
                 fs::write(&path, "").unwrap();
             }
         }
+    }
+
+    #[test]
+    fn hands_an_agent_one_picture_of_the_project_and_nothing_else() {
+        use base64::Engine;
+        let folder = folder("agent-image");
+        make(
+            &folder,
+            &["repo/.gi\u{74}/", "repo/docs/plan.md", "other/owl.png"],
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        fs::write(folder.join("repo/cat.png"), png).unwrap();
+        fs::write(folder.join("repo/cat.bmp"), b"BM\0\0\0\0\0\0\0\0\0\0\0\0").unwrap();
+        fs::write(folder.join("other/owl.png"), png).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let at = |name: &str| agent_image(&images, &folder.join(name).to_string_lossy());
+        let seen = at("repo/cat.png").unwrap();
+        assert_eq!(seen.mime_type, "image/png");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(seen.data)
+                .unwrap(),
+            png
+        );
+        // A picture of a type no model takes, a file outside the project, a missing one, a path
+        // that isn't absolute.
+        assert!(
+            at("repo/cat.bmp")
+                .unwrap_err()
+                .contains("PNG, JPEG, GIF and WebP")
+        );
+        assert!(at("other/owl.png").is_err());
+        assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
+        assert!(agent_image(&images, "repo/cat.png").is_err());
     }
 
     #[test]

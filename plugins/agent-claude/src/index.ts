@@ -31,7 +31,9 @@ export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 /** What Claude Code's own site says to run to install it. Redlines shows it and never runs it. */
 export const INSTALL_COMMAND = 'curl -fsSL https://claude.ai/install.sh | bash';
 
-const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
+// `view_image` is offered only to a request to describe an image, which has the one picture it is
+// about; it is allowed here for every run, and a run that is not offered it never sees it.
+const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'];
 
 /**
  * The whole command line, in one place, so that a correction is a one-line change, here and in the
@@ -325,6 +327,8 @@ export function createClaudeProvider(
     id: 'claude',
     name: 'Claude',
     readLimit: 'folder',
+    // Claude Code passes an MCP tool's image to the model (`view_image`).
+    seesImages: true,
 
     async detect() {
       const state = await detectAgent(processes, {

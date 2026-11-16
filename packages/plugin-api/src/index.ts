@@ -300,6 +300,11 @@ export interface AgentProvider {
    * changes nothing in the document. Without it, the agent has the toolbox.
    */
   toolbox?: false;
+  /**
+   * `true` for an agent that can look at a picture the toolbox shows it (`view_image`, an MCP image
+   * content block): the one that writes an image's alt text. Without it, Alt Text does not ask it.
+   */
+  seesImages?: true;
   detect(): Promise<AgentState>;
   run(request: AgentRequest, tools: McpEndpoint, signal: AbortSignal): AsyncIterable<AgentEvent>;
 }
@@ -311,6 +316,8 @@ export interface AgentInfo {
   readLimit: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
   toolbox?: false;
+  /** `true` when the agent can look at a picture (`AgentProvider.seesImages`). */
+  seesImages?: true;
   state: AgentState;
 }
 
