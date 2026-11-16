@@ -307,7 +307,10 @@ export interface AgentProvider {
 /** An agent as the host lists it. */
 export interface AgentInfo {
   id: string;
+  /** What the agent is shown as: its handle, capitalized (`Ada`). */
   name: string;
+  /** What is written after an @ to name it (`ada`). Default: the id. */
+  handle?: string;
   readLimit: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
   toolbox?: false;

@@ -361,19 +361,18 @@ describe('after the links are written', () => {
     expect(drawn(editor)).toBe(0);
     editor.view.dispatch({ selection: { anchor: end + 2 } });
     expect(drawn(editor)).toBe(1);
-    // And back to its end: the exception was for the link as it was added, and is over.
+    // And back to its end: a caret beside an image doesn't show its source (#675).
     editor.view.dispatch({ selection: { anchor: end } });
-    expect(drawn(editor)).toBe(0);
+    expect(drawn(editor)).toBe(1);
   });
 
-  it('ends the exception when anything is written, even where the caret and the link stay', () => {
+  it('keeps it drawn when text is written after it, with the caret still at its end', () => {
     const { editor, spot } = spotAt('One two\n', 3);
     spot.insert(['shot.png']);
     expect(drawn(editor)).toBe(1);
-    // Text written after the link, with no selection set: the caret is still at its end.
     editor.view.dispatch({ changes: { from: editor.view.state.doc.length, insert: '!' } });
     expect(editor.view.state.selection.main.head).toBe('One![](shot.png)'.length);
-    expect(drawn(editor)).toBe(0);
+    expect(drawn(editor)).toBe(1);
   });
 
   it('draws it still when text is typed after it, which leaves the caret off the link', () => {
