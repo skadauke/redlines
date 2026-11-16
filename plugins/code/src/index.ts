@@ -5,7 +5,15 @@ import type { Editor } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 import { codeHighlight } from './highlight.ts';
 
-export { codeHighlight, codeLanguages, codeSpans, codeStyle } from './highlight.ts';
+export {
+  CODE_FILE_COLOR_LIMIT,
+  codeFileHighlight,
+  codeFileLanguage,
+  codeHighlight,
+  codeLanguages,
+  codeSpans,
+  codeStyle,
+} from './highlight.ts';
 
 /**
  * Colors the code in the editor. The editor has to be made with `codeLanguages` as well, since

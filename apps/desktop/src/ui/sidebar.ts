@@ -5,6 +5,7 @@
 // or in a new one with ⌘-click or while a run is live. Hidden by default.
 
 import { PROJECT_IMAGE_TYPE } from '@redlines/editor';
+import { documentKind } from '../file-names.ts';
 import {
   basename,
   dirname,
@@ -34,6 +35,11 @@ export interface SidebarOptions {
    * never land in another document.
    */
   isRunLive?: () => boolean;
+  /**
+   * Whether text and code files (Plain-only documents) are listed. Off, only the one that is open
+   * is. Default: listed.
+   */
+  showPlainOnly?: () => boolean;
   /** Tells the person what went wrong, in one line. */
   notice(message: string): void;
   /** The edge was dragged: keep the width (#680). */
@@ -202,7 +208,14 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     if (entries === undefined) return [];
     if (entries === null) return [message('This folder can’t be read.', depth)];
     if (entries.length === 0 && depth === 0) return [message('No files here.')];
-    return entries.flatMap((entry) => [
+    const hidden = (entry: FileEntry) =>
+      !entry.isDir &&
+      options.showPlainOnly?.() === false &&
+      documentKind(entry.name) === 'plain-only' &&
+      entry.path !== current;
+    const listed = entries.filter((entry) => !hidden(entry));
+    if (listed.length === 0 && depth === 0) return [message('No files here.')];
+    return listed.flatMap((entry) => [
       row(entry, depth),
       ...(entry.isDir && expanded.has(entry.path) ? rowsOf(entry.path, depth + 1) : []),
     ]);
@@ -223,6 +236,10 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.className = 'rl-sidebar-name';
     name.textContent = entry.name;
     button.append(name);
+    // A text or code file is in the secondary ink: its suffix says what it is, and it has no review.
+    if (!entry.isDir && documentKind(entry.name) === 'plain-only') {
+      button.classList.add('rl-sidebar-plain');
+    }
     if (entry.path === current) button.setAttribute('aria-current', 'page');
     if (!entry.isDir && !isDocument(entry.name)) {
       // An image is not opened: it is dragged into the document, which links it by its path (#681).

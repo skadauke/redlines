@@ -106,6 +106,11 @@ export interface Settings {
   showLineBreakMarks: boolean;
   /** Whether the word count shows in the window's lower right corner (design §5.1). */
   showWordCount: boolean;
+  /**
+   * Whether the sidebar lists text and code files (Plain-only documents) beside the Markdown ones;
+   * off, it lists only the one that is open.
+   */
+  showPlainOnlyFiles: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -158,6 +163,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   emojiSuggestions: true,
   showLineBreakMarks: false,
   showWordCount: true,
+  showPlainOnlyFiles: true,
   agentScope: 'folder',
   consent: {},
   agentHandles: {},
@@ -184,7 +190,8 @@ export function loadSettings(): Settings {
       | 'rotateIcon'
       | 'checkForUpdates'
       | 'showLineBreakMarks'
-      | 'showWordCount',
+      | 'showWordCount'
+      | 'showPlainOnlyFiles',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -214,6 +221,7 @@ export function loadSettings(): Settings {
     emojiSuggestions: typing('emojiSuggestions'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
+    showPlainOnlyFiles: flag('showPlainOnlyFiles'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,

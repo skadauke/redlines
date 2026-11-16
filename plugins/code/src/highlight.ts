@@ -12,6 +12,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
+import { type ChangedRange, type Parser, type Tree, TreeFragment } from '@lezer/common';
 import { highlightTree, tags as t } from '@lezer/highlight';
 
 const color = (kind: string) => ({ color: `var(--rl-code-${kind})` });
@@ -110,4 +111,108 @@ export function codeLanguages(info: string): LanguageDescription | null {
 /** Loads a language by its info string, as the editor does when it meets the block. */
 export async function loadCodeLanguage(info: string): Promise<void> {
   await codeLanguages(info)?.load();
+}
+
+/** Above this many characters a file is not colored: the colors are off, and the file is still Plain. */
+export const CODE_FILE_COLOR_LIMIT = 2_000_000;
+
+/**
+ * The grammar for a file's name (`app.ts`, `Makefile`), or null for a name with none, such as
+ * `.txt`, `.log` and `.csv`, which stay uncolored.
+ */
+export function codeFileLanguage(filename: string): LanguageDescription | null {
+  const name = filename.slice(Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\')) + 1);
+  // The extensions are lowercase in the grammars; `Makefile` and its kind are matched as written.
+  return (
+    LanguageDescription.matchFilename(languages, name) ??
+    LanguageDescription.matchFilename(languages, name.toLowerCase())
+  );
+}
+
+/** The ranges an update changed, as `TreeFragment.applyChanges` takes them. */
+function changedRanges(update: ViewUpdate): ChangedRange[] {
+  const ranges: ChangedRange[] = [];
+  update.changes.iterChangedRanges((fromA, toA, fromB, toB) =>
+    ranges.push({ fromA, toA, fromB, toB }),
+  );
+  return ranges;
+}
+
+/**
+ * Colors a whole file as the language its name says, for a Plain-only file (text or code). It uses
+ * the same style and the theme's `--rl-code-*` tokens as the blocks of a Markdown file, and the
+ * grammar loads on demand: until it arrives the text is uncolored. The grammar parses the file on
+ * its own, beside the editor's own parse. A name with no grammar, or a file over
+ * `CODE_FILE_COLOR_LIMIT` characters, gets no colors.
+ */
+export function codeFileHighlight(filename: string, size = 0): Extension {
+  const found = size > CODE_FILE_COLOR_LIMIT ? null : codeFileLanguage(filename);
+  if (!found) return [];
+  const description = found;
+  return [
+    EditorView.styleModule.of(codeStyle.module!),
+    ViewPlugin.fromClass(
+      class {
+        decorations: DecorationSet = Decoration.none;
+        parser: Parser | null = null;
+        tree: Tree | null = null;
+        fragments: readonly TreeFragment[] = [];
+        gone = false;
+        constructor(view: EditorView) {
+          description.load().then(
+            (support) => {
+              if (this.gone || view.state.doc.length > CODE_FILE_COLOR_LIMIT) return;
+              this.parser = support.language.parser;
+              this.decorations = this.build(view);
+              // Draws the colors that the grammar's arrival made possible.
+              view.dispatch({});
+            },
+            // A grammar that can't be loaded leaves the file uncolored, and still Plain.
+            () => {},
+          );
+        }
+        update(update: ViewUpdate) {
+          if (!this.parser) return;
+          // A file that grew past the limit by paste or reload is no longer colored.
+          if (update.state.doc.length > CODE_FILE_COLOR_LIMIT) {
+            this.parser = null;
+            this.tree = null;
+            this.fragments = [];
+            this.decorations = Decoration.none;
+            return;
+          }
+          if (update.docChanged || update.viewportChanged) {
+            this.decorations = this.build(update.view, update);
+          }
+        }
+        destroy() {
+          this.gone = true;
+        }
+        build(view: EditorView, update?: ViewUpdate): DecorationSet {
+          const { parser } = this;
+          if (!parser) return Decoration.none;
+          if (update?.docChanged || !this.tree) {
+            if (update?.docChanged) {
+              this.fragments = TreeFragment.applyChanges(this.fragments, changedRanges(update));
+            }
+            this.tree = parser.parse(view.state.doc.toString(), this.fragments);
+            this.fragments = TreeFragment.addTree(this.tree, this.fragments);
+          }
+          const marks: Range<Decoration>[] = [];
+          for (const { from, to } of view.visibleRanges) {
+            highlightTree(
+              this.tree,
+              codeStyle,
+              (start, end, classes) =>
+                marks.push(Decoration.mark({ class: classes }).range(start, end)),
+              from,
+              to,
+            );
+          }
+          return Decoration.set(marks, true);
+        }
+      },
+      { decorations: (plugin) => plugin.decorations },
+    ),
+  ];
 }

@@ -311,7 +311,20 @@ function general(deps: PaneDeps): Section[] {
       title: 'You',
       rows: [row('Name and handle', identity, line('As they appear on your changes.'))],
     },
-    { title: 'Opening', rows: [row('On launch', onLaunch), newDocumentFolderRow(deps)] },
+    {
+      title: 'Opening',
+      rows: [
+        row('On launch', onLaunch),
+        newDocumentFolderRow(deps),
+        row(
+          'Show code and text files in the sidebar',
+          toggle(current.showPlainOnlyFiles, (value) => update({ showPlainOnlyFiles: value })),
+          line(
+            'Text and code files open in Plain, with no review. The file that is open always shows.',
+          ),
+        ),
+      ],
+    },
     {
       title: 'The app',
       rows: [
