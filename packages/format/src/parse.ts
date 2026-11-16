@@ -6,8 +6,8 @@ import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { MOST_PAYLOAD_DEPTH } from './ledger-order.ts';
-import { holdsMarks, scan, scanPayload } from './scan.ts';
-import type { Marker, Scan } from './scan.ts';
+import { holdsMarks, scan, scanChanged, scanPayload } from './scan.ts';
+import type { Change, Marker, Scan } from './scan.ts';
 import type {
   Ledger,
   MarkEntry,
@@ -328,10 +328,11 @@ const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
  * Parses a file. Never throws. Given the parse of an earlier version of the same file, a ledger
  * whose text hasn't changed is taken from it rather than read again (an editor parses on every
  * keystroke, and reading the ledger's YAML is most of the work); the two parses then share the
- * ledger object, so treat it as read-only.
+ * ledger object, so treat it as read-only. With `change`, where the text differs from that
+ * earlier text, the markers are read again only near the edit (#700): the same parse, found faster.
  */
-export function parse(text: string, previous?: Parsed): Parsed {
-  const scanned = scan(text);
+export function parse(text: string, previous?: Parsed, change?: Change): Parsed {
+  const scanned = (previous && change && scanChanged(previous.text, text, change)) || scan(text);
   const span = findLedger(text, scanned);
   const known = span && previous ? ledgerReads.get(previous) : undefined;
   let read: LedgerRead | null = null;
