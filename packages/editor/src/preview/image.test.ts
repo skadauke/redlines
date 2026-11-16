@@ -445,6 +445,27 @@ describe('an image with a size (#526)', () => {
     expect(missing?.querySelectorAll('.rl-image-handle')).toHaveLength(0);
   });
 
+  it('puts a handle inside the edge where outside is outside the text column (#676)', () => {
+    const [image] = drawn(editorWith('Before\n\n![A cat](cat.png)', local, 0));
+    const frame = image!.querySelector<HTMLElement>('.rl-image-frame')!;
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    image!.replaceWith(line);
+    line.append(image!);
+    const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect;
+    line.getBoundingClientRect = () => rect(100, 700);
+    // As wide as the column: both handles would lie in the margin.
+    frame.getBoundingClientRect = () => rect(100, 700);
+    frame.dispatchEvent(new Event('pointerenter'));
+    expect(frame.classList.contains('rl-handle-in-left')).toBe(true);
+    expect(frame.classList.contains('rl-handle-in-right')).toBe(true);
+    // Narrower: they stand outside, as before.
+    frame.getBoundingClientRect = () => rect(200, 600);
+    frame.dispatchEvent(new Event('pointermove'));
+    expect(frame.classList.contains('rl-handle-in-left')).toBe(false);
+    expect(frame.classList.contains('rl-handle-in-right')).toBe(false);
+  });
+
   /** A drag of the handle on `side` by `dx` px, of an image `width` px wide in a column of 600. */
   function drag(editor: Editor, side: 'left' | 'right', dx: number, width = 200, natural = 400) {
     const [image] = drawn(editor);

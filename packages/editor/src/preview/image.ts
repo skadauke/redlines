@@ -107,6 +107,9 @@ const LEAST_WIDTH = 24;
 /** How near the image's own size a drag ends to give the image its own size again, in px. */
 const SNAP = 4;
 
+/** The width of a resize handle's strip (the theme's `.rl-image-handle`). */
+const HANDLE_WIDTH = 14;
+
 /** The text column's width at `line`, in px as it is on screen: what an image may fill. */
 function columnPx(view: EditorView, line: Element | null): number {
   const el = line ?? view.contentDOM;
@@ -205,6 +208,21 @@ class ImageWidget extends WidgetType {
     frame.className = 'rl-image-frame';
     wrap.append(frame);
     frame.append(img);
+    // A handle stands outside the picture, unless that is outside the text column (a column-wide
+    // image): there it would lie in the margin, under a note, so it stands inside that edge instead.
+    const placeHandles = () => {
+      // Not while a drag holds a handle: it stays where the pointer took it.
+      if (frame.closest('.rl-image-resizing')) return;
+      const line = wrap.closest('.cm-line')?.getBoundingClientRect();
+      const box = frame.getBoundingClientRect();
+      if (!line || box.width === 0) return;
+      frame.classList.toggle('rl-handle-in-left', box.left - HANDLE_WIDTH < line.left);
+      frame.classList.toggle('rl-handle-in-right', box.right + HANDLE_WIDTH > line.right);
+    };
+    // On entering, and as the pointer moves over the image, so that a width or window that changed
+    // since is seen (a toggle that changes nothing costs nothing).
+    frame.addEventListener('pointerenter', placeHandles);
+    frame.addEventListener('pointermove', placeHandles);
     for (const side of ['left', 'right'] as const) {
       const handle = document.createElement('span');
       handle.className = `rl-image-handle rl-image-handle-${side}`;

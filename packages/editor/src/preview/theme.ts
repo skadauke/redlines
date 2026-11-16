@@ -258,6 +258,9 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-handle-left': { right: '100%' },
   '.rl-image-handle-right': { left: '100%' },
+  // Where that is outside the text column (a column-wide image): inside the edge, off the margin's notes.
+  '.rl-handle-in-left .rl-image-handle-left': { right: 'auto', left: '0' },
+  '.rl-handle-in-right .rl-image-handle-right': { left: 'auto', right: '0' },
   '.rl-image-handle::before': {
     content: '""',
     width: '6px',
