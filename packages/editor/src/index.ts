@@ -215,6 +215,7 @@ export {
   type UntrackedAnswer,
   type UntrackedAsker,
   type UntrackedReason,
+  type UntrackedWords,
 } from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
