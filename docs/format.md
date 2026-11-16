@@ -3295,6 +3295,34 @@ the person. It is asked every time, since no answer to it stands for the next ed
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.
 
+### 3.14 Moving blocks
+
+A move of whole blocks to another place among their siblings (⌥↑ and ⌥↓, a drag to a drop line) is
+written with no mark of its own: it is the deletion of the blocks where they stood and the insertion
+of the same text where they land, which every edit can already be written as, with one `group` on
+the marks (§2.2), so that they are accepted or rejected together, and every order of deciding them
+reads alike, like any deletion and insertion. Accepting both gives the blocks at the new place,
+rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
+blocks of the document's own flow, §3.7.)
+
+- **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
+  paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
+  a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with
+  what is nested in it; in an item's own nested list or quote, the unit there; a selection that
+  covers a whole list, quote or item moves it, and one across several siblings moves them all. A
+  block moves among its own siblings only: an item stays in its list, and a block in its quote.
+  Nothing moves above the first sibling or below the last, and the command says so.
+- **The text.** The moved text is the newest view of the blocks, with the break that the siblings
+  have between them. Another person's pending changes in the blocks are not carried: they stay in
+  the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
+  text they would give if accepted. Ordered lists keep their written numbers.
+- **When a fine write isn't sound.** The same text can be written by the siblings that the run passes
+  moving the other way (the same file when accepted), and if neither is sound the move is widened to
+  the blocks from the old place to the new, one substitution that keeps others' changes in its
+  old text (§3.12). A move that reaches more blocks than a widened edit may is not refused: the
+  person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
+- **Track Changes off.** The same two edits are made plain.
+
 ## 4. Comments
 
 A comment thread is anchored in the body and stored in the ledger under the same id.

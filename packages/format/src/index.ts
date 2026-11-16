@@ -63,6 +63,8 @@ export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
 export { findInPayload, payloadMarksOf } from './payload-marks.ts';
 export type { PayloadFound } from './payload-marks.ts';
+export { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './block-move.ts';
+export type { BlockGap, BlockRun } from './block-move.ts';
 export { Untrackable, WIDEN_MOST_BLOCKS, widen } from './widen.ts';
 export type { UntrackableReason, Widened, WidenedUnit } from './widen.ts';
 export { unitsOf } from './widen-units.ts';
