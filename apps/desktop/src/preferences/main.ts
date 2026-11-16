@@ -145,7 +145,8 @@ const deps: PaneDeps = {
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
         id: provider.id,
-        name: provider.name,
+        // The card is the program's: what is shown of the agent in a document is its handle.
+        name: provider.id === 'claude' ? 'Claude Code' : provider.name,
         detect: (fresh?: boolean) => {
           if (fresh) detections.delete(provider.id);
           const kept = detections.get(provider.id) ?? provider.detect();

@@ -44,7 +44,9 @@ export function mentionedAgents(text: string, agents: readonly AgentInfo[]): str
   const found: { id: string; at: number }[] = [];
   for (const agent of agents) {
     if (!agent.state.found) continue;
-    const names = [agent.name, agent.id].map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const names = [agent.name, agent.handle ?? agent.id].map((name) =>
+      name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    );
     const mention = new RegExp(`@(?:${names.join('|')})`, 'giu');
     for (const match of plain.matchAll(mention)) {
       if (WORD_BEFORE.test(plain.slice(0, match.index))) continue;

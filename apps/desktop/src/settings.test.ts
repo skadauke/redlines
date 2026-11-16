@@ -71,6 +71,7 @@ describe('settings', () => {
       showWordCount: true,
       agentScope: 'folder',
       consent: {},
+      agentHandles: {},
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -99,6 +100,7 @@ describe('settings', () => {
       showWordCount: false,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      agentHandles: { claude: 'ada' },
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -667,5 +669,17 @@ describe('settings', () => {
     });
     const second = meetPeopleInSettings(['di'], first);
     expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
+  });
+
+  it('keeps the handles of agents that are handles, and none that another agent has', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        agentHandles: { claude: 'ada', codex: 'ada', x: 'Bo!', y: 'two-words', z: 3 },
+      }),
+    );
+    expect(loadSettings().agentHandles).toEqual({ claude: 'ada', y: 'two-words' });
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
+    expect(loadSettings().agentHandles).toEqual({});
   });
 });

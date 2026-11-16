@@ -4,6 +4,7 @@
 // helps, whether line breaks show their marks, what agents may read), and the file sidebar. A
 // window that changes a setting tells the others through the `storage` event (`watchSettings`).
 
+import { isHandle } from '@redlines/agents';
 import { meetPeople, type Author, type MarkupView, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
@@ -107,6 +108,12 @@ export interface Settings {
   /** What the person allowed each agent, keyed `agent|folder`. */
   consent: Record<string, AgentScope | 'no'>;
   /**
+   * The handle the person gave an agent, by its id (Preferences › Agents, #558): what is written
+   * after an @, and, capitalized, the name it is shown by. Only the handles that differ from the
+   * defaults (claude, codex) are kept.
+   */
+  agentHandles: Record<string, string>;
+  /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
    */
@@ -149,6 +156,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   showWordCount: true,
   agentScope: 'folder',
   consent: {},
+  agentHandles: {},
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -205,6 +213,7 @@ export function loadSettings(): Settings {
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
+    agentHandles: agentHandlesOf(value['agentHandles']),
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
@@ -237,6 +246,19 @@ function identityOf(value: unknown): Settings['identity'] {
   return name.trim() && handle && toHandle(handle) === handle
     ? { name: name.trim(), handle }
     : null;
+}
+
+/** The handles of the agents: each a handle (lowercase letters, digits, hyphens), none shared. */
+function agentHandlesOf(value: unknown): Record<string, string> {
+  const handles: Record<string, string> = {};
+  if (typeof value !== 'object' || value === null) return handles;
+  const taken = new Set<string>();
+  for (const [id, handle] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof handle !== 'string' || !isHandle(handle) || taken.has(handle)) continue;
+    taken.add(handle);
+    handles[id] = handle;
+  }
+  return handles;
 }
 
 function recentOf(value: unknown): readonly string[] {
