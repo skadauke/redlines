@@ -1,11 +1,11 @@
-// The palette's parts as page elements: a row of icon buttons for each group, and above them, for a
+// The toolbar's parts as page elements: a row of icon buttons for each group, and above them, for a
 // right-click on a misspelled word, the system's suggestions. The elements are drawn from what the
 // registry holds now (`shownGroups`) and kept up to date as the selection changes. Every button
-// keeps the keyboard where it is, in the document, so that using the palette with the mouse never
+// keeps the keyboard where it is, in the document, so that using the toolbar with the mouse never
 // moves the caret or loses the selection.
 
 import type { ShownGroup, ShownItem } from './items.ts';
-import { paletteIcon } from './icons.ts';
+import { toolbarIcon } from './icons.ts';
 
 /** What the person may do with a misspelled word. */
 export interface SpellingRows {
@@ -33,9 +33,9 @@ const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className: strin
   return el;
 };
 
-/** A hairline between the parts of the palette. */
-function rule(): HTMLElement {
-  const line = element('div', 'rl-palette-rule');
+/** A hairline between the parts of the toolbar. */
+function rule(under = false): HTMLElement {
+  const line = element('div', under ? 'rl-toolbar-rule rl-toolbar-rule-under' : 'rl-toolbar-rule');
   line.setAttribute('role', 'separator');
   return line;
 }
@@ -62,9 +62,9 @@ function update(button: HTMLButtonElement, item: ShownItem): void {
 }
 
 function itemButton(item: ShownItem, handlers: PanelHandlers): HTMLButtonElement {
-  const button = keepsFocus(element('button', 'rl-palette-item'));
+  const button = keepsFocus(element('button', 'rl-toolbar-item'));
   button.dataset['command'] = item.id;
-  button.append(paletteIcon(item.icon));
+  button.append(toolbarIcon(item.icon));
   update(button, item);
   button.addEventListener('click', () => {
     if (!button.disabled) handlers.run(item.id);
@@ -85,11 +85,11 @@ function itemButton(item: ShownItem, handlers: PanelHandlers): HTMLButtonElement
 
 /** Text rows for the suggestions, Learn Spelling and, for a word with no guess, a line saying so. */
 function spellingBlock(rows: SpellingRows, handlers: PanelHandlers): HTMLElement {
-  const block = element('div', 'rl-palette-spelling');
+  const block = element('div', 'rl-toolbar-spelling');
   block.setAttribute('role', 'group');
   block.setAttribute('aria-label', 'Spelling');
   const row = (className: string, text: string, run: (() => void) | null) => {
-    const button = keepsFocus(element('button', `rl-palette-word ${className}`));
+    const button = keepsFocus(element('button', `rl-toolbar-word ${className}`));
     button.textContent = text;
     button.dataset['spelling'] = className.split(' ')[0] ?? '';
     if (run) button.addEventListener('click', run);
@@ -97,13 +97,13 @@ function spellingBlock(rows: SpellingRows, handlers: PanelHandlers): HTMLElement
     return button;
   };
   if (rows.suggestions.length === 0) {
-    block.append(row('rl-palette-none', 'No Guesses Found', null));
+    block.append(row('rl-toolbar-none', 'No Guesses Found', null));
   }
   for (const suggestion of rows.suggestions) {
-    block.append(row('rl-palette-suggestion', suggestion, () => handlers.pick(suggestion)));
+    block.append(row('rl-toolbar-suggestion', suggestion, () => handlers.pick(suggestion)));
   }
   if (rows.canLearn)
-    block.append(row('rl-palette-learn', 'Learn Spelling', () => handlers.learn()));
+    block.append(row('rl-toolbar-learn', 'Learn Spelling', () => handlers.learn()));
   return block;
 }
 
@@ -130,10 +130,13 @@ export function drawPanel(
 ): DrawnPanel {
   panel.replaceChildren();
   const buttons = new Map<string, HTMLButtonElement>();
-  if (spelling) panel.append(spellingBlock(spelling, handlers), rule());
+  if (spelling) panel.append(spellingBlock(spelling, handlers), rule(true));
+  // The groups side by side, in one row of the card, with a vertical hairline between them.
+  const bar = element('div', 'rl-toolbar-bar');
+  panel.append(bar);
   groups.forEach((group, i) => {
-    if (i > 0) panel.append(rule());
-    const row = element('div', 'rl-palette-row');
+    if (i > 0) bar.append(rule());
+    const row = element('div', 'rl-toolbar-row');
     row.setAttribute('role', 'group');
     row.setAttribute('aria-label', group.label);
     for (const item of group.items) {
@@ -141,7 +144,7 @@ export function drawPanel(
       buttons.set(item.id, button);
       row.append(button);
     }
-    panel.append(row);
+    bar.append(row);
   });
   let drawn = signature(groups);
   return {
@@ -159,12 +162,11 @@ export function drawPanel(
     rows() {
       const enabled = (buttons: Iterable<HTMLButtonElement>) =>
         [...buttons].filter((button) => !button.disabled);
-      const words = enabled(panel.querySelectorAll<HTMLButtonElement>('.rl-palette-word'));
-      const items = [...panel.querySelectorAll<HTMLElement>('.rl-palette-row')].map((row) =>
-        enabled(row.querySelectorAll<HTMLButtonElement>('.rl-palette-item')),
-      );
-      // Each word is a row of its own, in front of the item rows.
-      return [...words.map((word) => [word]), ...items.filter((row) => row.length > 0)];
+      const words = enabled(panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word'));
+      // The items are one row, across the groups.
+      const items = enabled(panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-item'));
+      // Each word is a row of its own, in front of the items.
+      return [...words.map((word) => [word]), ...(items.length > 0 ? [items] : [])];
     },
   };
 }

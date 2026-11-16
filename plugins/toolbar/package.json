@@ -1,8 +1,8 @@
 {
-  "name": "@redlines/palette",
+  "name": "@redlines/toolbar",
   "version": "0.0.0",
   "private": true,
-  "description": "The formatting palette: shown only when summoned: on right-click and from the keyboard.",
+  "description": "The toolbar: shown when summoned (the title bar's wrench, right-click, the keyboard), or at the bottom of the window by preference.",
   "license": "MIT",
   "type": "module",
   "exports": {

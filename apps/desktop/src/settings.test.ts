@@ -70,6 +70,7 @@ describe('settings', () => {
       trackNewDocuments: false,
       showLineBreakMarks: false,
       showWordCount: true,
+      toolbarAtBottom: false,
       agentScope: 'folder',
       consent: {},
       people: [],
@@ -99,6 +100,7 @@ describe('settings', () => {
       trackNewDocuments: true,
       showLineBreakMarks: true,
       showWordCount: false,
+      toolbarAtBottom: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [

@@ -104,6 +104,8 @@ export interface Settings {
   showLineBreakMarks: boolean;
   /** Whether the word count shows in the window's lower right corner (design §5.1). */
   showWordCount: boolean;
+  /** Whether the toolbar is shown at the bottom of the window, not only when it is summoned (#504). */
+  toolbarAtBottom: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -150,6 +152,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   trackNewDocuments: false,
   showLineBreakMarks: false,
   showWordCount: true,
+  toolbarAtBottom: false,
   agentScope: 'folder',
   consent: {},
   people: [],
@@ -175,7 +178,8 @@ export function loadSettings(): Settings {
       | 'rotateIcon'
       | 'checkForUpdates'
       | 'showLineBreakMarks'
-      | 'showWordCount',
+      | 'showWordCount'
+      | 'toolbarAtBottom',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (
     key:
@@ -207,6 +211,7 @@ export function loadSettings(): Settings {
     trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
+    toolbarAtBottom: flag('toolbarAtBottom'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,

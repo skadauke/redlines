@@ -1,6 +1,6 @@
-// The title bar (design §5.1): part of the page, with the file name centered and three icons and
-// no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover, and a click on either does what it does most often: the eye switches
+// The title bar (design §5.1): part of the page, with the file name centered and four icons and
+// no labels. Files, next to the window buttons, explains itself on hover; the wrench shows and
+// hides the toolbar (#685); View and Review open their menus on hover, and a click on either does what it does most often: the eye switches
 // between Clean and Redlines, the pen turns Track Changes on and off. Each says what a click will
 // do, with its key, in a hint. The file name says how many words the document has, and when it was
 // last saved, on hover, and a double-click on it renames the document. A small document icon beside
@@ -25,9 +25,13 @@ export interface TitleBarState {
   hasRedlines: boolean;
   sidebarOpen: boolean;
   showResolved: boolean;
+  /** Whether the toolbar shows, by any means: the wrench is pressed while it does. */
+  toolbarShown: boolean;
 }
 
 export interface TitleBarActions {
+  /** Shows the toolbar at the bottom of the window, or puts it away (the wrench). */
+  toggleToolbar(): void;
   /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
   setView(view: MenuView): void;
   /** Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`). */
@@ -92,6 +96,8 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
+export const TOOLBAR_KEY = '⇧⌘P';
+export const TOOLBAR_ARIA_KEY = 'Shift+Meta+P';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 
@@ -145,6 +151,7 @@ export function createTitleBar(
     hasRedlines: false,
     sidebarOpen: false,
     showResolved: false,
+    toolbarShown: false,
   };
 
   const bar = element('header', 'rl-titlebar');
@@ -275,6 +282,24 @@ export function createTitleBar(
     input.setSelectionRange(0, dot > 0 ? dot : state.name.length);
   };
 
+  // The toolbar's wrench: a click shows it or puts it away, and the button is pressed while it shows.
+  const toolbarControl = element('div', 'rl-control');
+  const toolbarButton = iconButton('Show Toolbar', icon('wrench', 18));
+  toolbarButton.classList.add('rl-wrench-button');
+  toolbarButton.setAttribute('aria-keyshortcuts', TOOLBAR_ARIA_KEY);
+  toolbarControl.append(toolbarButton);
+  const toolbarTip = createTip(toolbarControl, toolbarButton, 'rl-wrench-tip', {
+    end: true,
+    beforeShow: () => hideTips(),
+  });
+  // The press leaves the document's caret and selection where they were: the toolbar acts on them.
+  toolbarButton.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbarButton.addEventListener('click', (event) => {
+    actions.toggleToolbar();
+    // The pointer is still there: what the next click will do is said once it has rested.
+    if (event.detail > 0) toolbarTip.arm();
+  });
+
   // View and Review.
   const end = element('div', 'rl-titlebar-end');
   const viewControl = element('div', 'rl-control');
@@ -297,8 +322,8 @@ export function createTitleBar(
     beforeShow: () => hideTips(),
   });
   reviewButton.setAttribute('aria-keyshortcuts', TRACKING_ARIA_KEY);
-  end.append(viewControl, reviewControl);
-  const tips = [filesTip, viewTip, reviewTip];
+  end.append(toolbarControl, viewControl, reviewControl);
+  const tips = [filesTip, toolbarTip, viewTip, reviewTip];
   const hideTips = () => {
     for (const tip of tips) tip.hide();
   };
@@ -459,6 +484,9 @@ export function createTitleBar(
     const toView = viewAfterClick(next.view);
     viewTip.set(`Show ${VIEW_NAMES[toView]}`, VIEW_KEYS[toView]);
     viewButton.setAttribute('aria-keyshortcuts', VIEW_ARIA_KEYS[toView]);
+    toolbarButton.setAttribute('aria-pressed', String(next.toolbarShown));
+    toolbarButton.setAttribute('aria-label', next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar');
+    toolbarTip.set(next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar', TOOLBAR_KEY);
     reviewTip.set(next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes', TRACKING_KEY);
     reviewButton.setAttribute('aria-pressed', String(next.tracking));
 

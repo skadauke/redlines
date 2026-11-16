@@ -266,24 +266,31 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A formatting palette, shown only when summoned.** There is no toolbar, and the palette is not
-  one: it opens only when asked, on right-click, at the pointer, where it takes the place of the
-  system's context menu, and from the keyboard. Nothing is drawn at the bottom of the window to
-  summon it (the handle that was there is gone, decided on 2026-11-15); one opened by right-click goes
-  away when you type. It is a small card of icons
-  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
-  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
+- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
+  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
+  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
+  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
+  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+  while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
+  it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
+  elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
+  Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
+  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
+  small card of icons in one row, groups divided by hairlines, with no labels, explained on hover
+  like the title bar's icons, after the same delay,
+  with each item's name and shortcut. The groups are Comment (Add Comment, Highlight and Ask, which
   act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
   Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
   Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
-  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  available; an item whose command isn't registered is left out. The arrow keys move along its
+  items; Esc closes one at the caret or the pointer. Its menus, the command palette, Convert and
+  the other parts of #504 come in later batches. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
   and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
   nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
-  when there is none. The palette replaces the selection toolbar of §5.12.
+  when there is none. The toolbar replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left
@@ -1008,7 +1015,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1156,7 +1163,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
-  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  (§5.1), which opens from the title bar's wrench and on right-click rather than floating over a selection by
   itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
@@ -1398,7 +1405,7 @@ written.
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `palette`    | The formatting palette: on right-click and ⌥⌘P (§5.1) | —                 |
+| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 

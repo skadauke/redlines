@@ -1,4 +1,4 @@
-// The palette's line icons: drawn on a 16 × 16 grid with round 1.3 strokes in the current text
+// The toolbar's line icons: drawn on a 16 × 16 grid with round 1.3 strokes in the current text
 // color, as the interface's others are (apps/desktop/src/ui/icons.ts), so a control's color is its
 // icon's color. They have no labels: a hint names each on hover.
 
@@ -48,10 +48,10 @@ const ICONS = {
     '<rect x="3" y="3.6" width="10" height="9.9" rx="1.6"/><path d="M6 3.6v-.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.5"/><path d="M5.8 7.8h4.4M5.8 10.3h2.8"/>',
 } as const;
 
-export type PaletteIcon = keyof typeof ICONS;
+export type ToolbarIcon = keyof typeof ICONS;
 
 /** An icon as an inline SVG, `size` pixels square, hidden from assistive technology. */
-export function paletteIcon(name: PaletteIcon, size = 16): SVGSVGElement {
+export function toolbarIcon(name: ToolbarIcon, size = 16): SVGSVGElement {
   const template = document.createElement('template');
   template.innerHTML =
     `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" ` +
@@ -63,4 +63,4 @@ export function paletteIcon(name: PaletteIcon, size = 16): SVGSVGElement {
 }
 
 /** The names of the icons, for a test that checks every item has one. */
-export const ICON_NAMES = Object.keys(ICONS) as PaletteIcon[];
+export const ICON_NAMES = Object.keys(ICONS) as ToolbarIcon[];

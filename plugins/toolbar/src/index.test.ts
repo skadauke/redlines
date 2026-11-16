@@ -6,18 +6,18 @@ import {
   type EditorOptions,
 } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPalette, type Palette, type PaletteOptions, plugin } from './index.ts';
+import { createToolbar, type Toolbar, type ToolbarOptions, plugin } from './index.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
-const mounted: { editor: Editor; palette: Palette }[] = [];
+const mounted: { editor: Editor; toolbar: Toolbar }[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers();
 });
 
 afterEach(() => {
-  for (const { editor, palette } of mounted.splice(0)) {
-    palette.destroy();
+  for (const { editor, toolbar } of mounted.splice(0)) {
+    toolbar.destroy();
     editor.destroy();
   }
   document.body.replaceChildren();
@@ -44,13 +44,13 @@ const COMMANDS = [
 
 interface Mount {
   editor: Editor;
-  palette: Palette;
+  toolbar: Toolbar;
   notices: string[];
 }
 
 function mount(
   doc = 'Hello wrold there',
-  options: Partial<PaletteOptions> = {},
+  options: Partial<ToolbarOptions> = {},
   commands: readonly EditorCommand[] = COMMANDS,
   editorOptions: Partial<EditorOptions> = {},
 ): Mount {
@@ -59,21 +59,21 @@ function mount(
   const editor = createEditor(parent, { doc, author: ada, ...editorOptions });
   editor.commands.register(commands);
   const notices: string[] = [];
-  const palette = createPalette(editor, {
+  const toolbar = createToolbar(editor, {
     notice: (message) => notices.push(message),
     tooltipMs: 400,
     ...options,
   });
-  mounted.push({ editor, palette });
-  return { editor, palette, notices };
+  mounted.push({ editor, toolbar });
+  return { editor, toolbar, notices };
 }
 
-const panelOf = () => document.querySelector<HTMLElement>('.rl-palette');
-const tipOf = () => document.querySelector<HTMLElement>('.rl-palette-tip');
-const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-palette-item')];
+const panelOf = () => document.querySelector<HTMLElement>('.rl-toolbar');
+const tipOf = () => document.querySelector<HTMLElement>('.rl-toolbar-tip');
+const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-toolbar-item')];
 const itemFor = (id: string) =>
-  document.querySelector<HTMLButtonElement>(`.rl-palette-item[data-command="${id}"]`);
-const words = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-palette-word')];
+  document.querySelector<HTMLButtonElement>(`.rl-toolbar-item[data-command="${id}"]`);
+const words = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')];
 
 function pointer(
   target: Element,
@@ -133,19 +133,19 @@ function menuKey(editor: Editor): MouseEvent {
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 describe('no handle', () => {
-  it('draws nothing at the bottom of the window; the palette is hidden until summoned', () => {
+  it('draws nothing at the bottom of the window; the toolbar is hidden until summoned', () => {
     mount();
-    expect(document.querySelector('.rl-palette-handle')).toBeNull();
-    expect(document.querySelector('.rl-palette-grip')).toBeNull();
+    expect(document.querySelector('.rl-toolbar-handle')).toBeNull();
+    expect(document.querySelector('.rl-toolbar-grip')).toBeNull();
     expect(panelOf()?.hidden).toBe(true);
   });
 
-  it('puts away a palette that was summoned, when you go back to typing', () => {
-    const { editor, palette } = mount();
+  it('puts away a toolbar that was summoned, when you go back to typing', () => {
+    const { editor, toolbar } = mount();
     rightClick(editor);
     key(editor.view.contentDOM, 'a');
     expect(panelOf()?.hidden).toBe(true);
-    palette.show();
+    toolbar.show();
     expect(panelOf()?.hidden).toBe(false);
   });
 });
@@ -153,7 +153,7 @@ describe('no handle', () => {
 describe('the items', () => {
   it('are the commands of the registry, with no labels on them', () => {
     mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(buttons().map((button) => button.dataset['command'])).toEqual([
       'comment.add',
       'block.table',
@@ -174,28 +174,28 @@ describe('the items', () => {
 
   it('are in rows by group, with a hairline between them', () => {
     mount();
-    mounted.at(-1)?.palette.show();
-    const rows = [...document.querySelectorAll('.rl-palette-row')].map((row) =>
+    mounted.at(-1)?.toolbar.show();
+    const rows = [...document.querySelectorAll('.rl-toolbar-row')].map((row) =>
       row.getAttribute('aria-label'),
     );
     expect(rows).toEqual(['Comment', 'Insert', 'Format']);
-    expect(document.querySelectorAll('.rl-palette-rule')).toHaveLength(2);
+    expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(2);
   });
 
   it('shows an item once its command lands', () => {
     const { editor } = mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(itemFor('format.sub')).toBeNull();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     editor.commands.register([command('format.sub', { title: 'Subscript' })]);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(itemFor('format.sub')).not.toBeNull();
   });
 
-  it('runs the command, puts the palette away and leaves the keyboard in the text', () => {
+  it('runs the command, puts the toolbar away and leaves the keyboard in the text', () => {
     const ran = vi.fn(() => true);
     const { editor } = mount('Hello', {}, [command('format.bold', { title: 'Bold', run: ran })]);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     itemFor('format.bold')?.click();
     expect(ran).toHaveBeenCalledTimes(1);
     expect(panelOf()?.hidden).toBe(true);
@@ -204,7 +204,7 @@ describe('the items', () => {
 
   it('cancels a press on one, which is what keeps the text’s focus and selection', () => {
     mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     itemFor('format.bold')?.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
@@ -216,7 +216,7 @@ describe('the items', () => {
       command('format.italic', { isActive: () => false, disabledReason: () => 'Not here.' }),
       command('format.clear'),
     ]);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('true');
     expect(itemFor('format.italic')?.getAttribute('aria-pressed')).toBe('false');
     expect(itemFor('format.italic')?.disabled).toBe(true);
@@ -226,7 +226,7 @@ describe('the items', () => {
   it('follows the selection while it is open', () => {
     let bold = false;
     const { editor } = mount('Hello world', {}, [command('format.bold', { isActive: () => bold })]);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('false');
     bold = true;
     editor.view.dispatch({ selection: { anchor: 2 } });
@@ -237,7 +237,7 @@ describe('the items', () => {
 describe('the hint', () => {
   it('names an item and its keys after the title bar’s delay, and goes with the pointer', () => {
     mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     const button = itemFor('block.table')!;
     pointer(button, 'pointerenter');
     vi.advanceTimersByTime(399);
@@ -251,7 +251,7 @@ describe('the hint', () => {
 
   it('takes the delay it is given', () => {
     mount('Hello', { tooltipMs: 1000 });
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     pointer(itemFor('format.bold')!, 'pointerenter');
     vi.advanceTimersByTime(999);
     expect(tipOf()?.hidden).toBe(true);
@@ -267,9 +267,9 @@ describe('the hint', () => {
     expect(tipOf()?.hidden).toBe(true);
   });
 
-  it('goes when the palette does', () => {
+  it('goes when the toolbar does', () => {
     mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     pointer(itemFor('format.bold')!, 'pointerenter');
     vi.advanceTimersByTime(400);
     key(document, 'Escape');
@@ -278,7 +278,7 @@ describe('the hint', () => {
 });
 
 describe('the right-click', () => {
-  it('opens the palette in place of the browser’s menu', () => {
+  it('opens the toolbar in place of the browser’s menu', () => {
     const { editor } = mount();
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     const event = rightClick(editor);
@@ -324,7 +324,7 @@ describe('the right-click', () => {
     expect(editor.view.state.sliceDoc(...rangeOf(editor))).toBe("dosen't");
   });
 
-  it('puts the palette above the pointer where the window ends first', () => {
+  it('puts the toolbar above the pointer where the window ends first', () => {
     const { editor } = mount();
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     Object.defineProperty(panelOf()!, 'offsetHeight', { value: 150, configurable: true });
@@ -362,7 +362,7 @@ describe('the right-click', () => {
     expect(panelOf()?.hidden).toBe(false);
     expect(panelOf()?.style.left).toBe('140px');
     expect(panelOf()?.style.top).toBe('70px');
-    // The pointer's palette doesn't take the keyboard.
+    // The pointer's toolbar doesn't take the keyboard.
     expect(document.activeElement).not.toBe(buttons()[0]);
   });
 
@@ -409,12 +409,12 @@ describe('the right-click', () => {
     expect(panelOf()?.hidden).toBe(true);
   });
 
-  it('opens again for the next right-click, and shows only one palette', () => {
+  it('opens again for the next right-click, and shows only one toolbar', () => {
     const { editor } = mount();
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     rightClick(editor, { clientX: 10, clientY: 10 });
     rightClick(editor, { clientX: 200, clientY: 100 });
-    expect(document.querySelectorAll('.rl-palette')).toHaveLength(1);
+    expect(document.querySelectorAll('.rl-toolbar')).toHaveLength(1);
     expect(panelOf()?.style.left).toBe('200px');
   });
 });
@@ -425,7 +425,7 @@ function rangeOf(editor: Editor): [number, number] {
   return [from, to];
 }
 
-describe('where the palette goes', () => {
+describe('where the toolbar goes', () => {
   it('stays in the window for a caret that is scrolled out of it', () => {
     const { editor } = mount();
     Object.defineProperty(panelOf()!, 'offsetHeight', { value: 160, configurable: true });
@@ -437,7 +437,7 @@ describe('where the palette goes', () => {
       top: window.innerHeight + 300,
       bottom: window.innerHeight + 320,
     });
-    editor.commands.run('palette.show');
+    editor.commands.run('toolbar.show');
     const top = parseFloat(panelOf()!.style.top);
     expect(top).toBeLessThanOrEqual(window.innerHeight - 160 - 8);
     expect(top).toBeGreaterThanOrEqual(8);
@@ -454,32 +454,32 @@ describe('where the palette goes', () => {
 
 describe('what the page’s other boxes keep', () => {
   it('leaves Esc to a text box that has the keyboard', () => {
-    const { palette } = mount();
+    const { toolbar } = mount();
     const box = document.createElement('textarea');
     document.body.append(box);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     box.focus();
     const event = key(box, 'Escape');
     expect(event.defaultPrevented).toBe(false);
-    expect(palette.isOpen()).toBe(true);
+    expect(toolbar.isOpen()).toBe(true);
   });
 
-  it('puts the keyboard in the text for a choice made in the palette, whoever had it', () => {
+  it('puts the keyboard in the text for a choice made in the toolbar, whoever had it', () => {
     const ran = vi.fn(() => true);
     const { editor } = mount('Hello', {}, [command('format.bold', { run: ran })]);
     const box = document.createElement('textarea');
     document.body.append(box);
     box.focus();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     itemFor('format.bold')?.click();
     // The command ran, which the registry does not for a keyboard left in another box.
     expect(ran).toHaveBeenCalledTimes(1);
     expect(editor.view.hasFocus || document.activeElement === editor.view.contentDOM).toBe(true);
   });
 
-  it('cancels a press on the padding of the palette, as on an item', () => {
+  it('cancels a press on the padding of the toolbar, as on an item', () => {
     mount();
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     panelOf()?.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
@@ -493,7 +493,7 @@ describe('spelling suggestions', () => {
     ...extra,
   });
 
-  it('shows the suggestions at the top of a palette opened on a misspelled word', async () => {
+  it('shows the suggestions at the top of a toolbar opened on a misspelled word', async () => {
     const options = spelling(['world', 'word'], { learn: vi.fn() });
     const { editor } = mount('Hello wrold there', { spelling: options });
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
@@ -503,10 +503,10 @@ describe('spelling suggestions', () => {
     expect(words().map((word) => word.textContent)).toEqual(['world', 'word', 'Learn Spelling']);
     // They come before the items.
     const first = panelOf()?.firstElementChild;
-    expect(first?.classList.contains('rl-palette-spelling')).toBe(true);
+    expect(first?.classList.contains('rl-toolbar-spelling')).toBe(true);
   });
 
-  it('makes the suggestion that is picked, and puts the palette away', async () => {
+  it('makes the suggestion that is picked, and puts the toolbar away', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
     const focus = vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
@@ -605,7 +605,7 @@ describe('spelling suggestions', () => {
     expect(words().map((word) => word.textContent)).toEqual(['world']);
   });
 
-  it('keeps the keyboard in the palette when the suggestions come late', async () => {
+  it('keeps the keyboard in the toolbar when the suggestions come late', async () => {
     let answer: (suggestions: readonly string[]) => void = () => {};
     const slow = {
       enabled: () => true,
@@ -644,7 +644,7 @@ describe('spelling suggestions', () => {
     expect(editor.view.state.doc.toString()).toBe('Oh. Hello wrold there');
   });
 
-  it('drops an answer that comes after the palette went away', async () => {
+  it('drops an answer that comes after the toolbar went away', async () => {
     let answer: (suggestions: readonly string[]) => void = () => {};
     const slow = {
       enabled: () => true,
@@ -668,14 +668,14 @@ describe('spelling suggestions', () => {
     await settle();
     expect(words()).toHaveLength(1);
     editor.view.dispatch({ changes: { from: 0, insert: 'Oh. ' } });
-    // Rows that would do nothing are not left in the palette, and the items stay.
+    // Rows that would do nothing are not left in the toolbar, and the items stay.
     expect(words()).toEqual([]);
     expect(buttons().length).toBeGreaterThan(0);
     expect(panelOf()?.hidden).toBe(false);
     expect(editor.view.state.doc.toString()).toBe('Oh. Hello wrold there');
   });
 
-  it('keeps the keyboard in the palette when the suggestions go', async () => {
+  it('keeps the keyboard in the toolbar when the suggestions go', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
     editor.view.dispatch({ selection: { anchor: 8 } });
     menuKey(editor);
@@ -700,41 +700,37 @@ describe('spelling suggestions', () => {
 });
 
 describe('from the keyboard', () => {
-  it('opens with Show Formatting Palette, below the caret, with the keyboard in it', () => {
-    const { editor, palette } = mount();
-    expect(editor.commands.run('palette.show')).toBe(true);
-    expect(palette.isOpen()).toBe(true);
+  it('opens with Show Toolbar, below the caret, with the keyboard in it', () => {
+    const { editor, toolbar } = mount();
+    expect(editor.commands.run('toolbar.show')).toBe(true);
+    expect(toolbar.isOpen()).toBe(true);
     expect(document.activeElement).toBe(buttons()[0]);
     // The command has a key and a menu.
-    const shown = editor.commands.list().find(({ id }) => id === 'palette.show');
-    expect(shown?.shortcut).toBe('Mod-Alt-p');
+    const shown = editor.commands.list().find(({ id }) => id === 'toolbar.show');
+    expect(shown?.shortcut).toBe('Mod-Shift-p');
     expect(shown?.menu).toBe('view');
   });
 
   it('puts itself away when the command runs again', () => {
-    const { editor, palette } = mount();
-    editor.commands.run('palette.show');
-    editor.commands.run('palette.show');
-    expect(palette.isOpen()).toBe(false);
+    const { editor, toolbar } = mount();
+    editor.commands.run('toolbar.show');
+    editor.commands.run('toolbar.show');
+    expect(toolbar.isOpen()).toBe(false);
   });
 
-  it('moves with the arrow keys, along a row and between rows', () => {
+  it('moves with the arrow keys along its one row, and Home and End to the ends', () => {
     const { editor } = mount();
-    editor.commands.run('palette.show');
-    const [comment, table, link, , italic] = buttons();
+    editor.commands.run('toolbar.show');
+    const [comment, table, link] = buttons();
     key(comment!, 'ArrowRight');
-    // Only one item in the first row: the next in order is the next row's first.
     expect(document.activeElement).toBe(table);
     key(table!, 'ArrowRight');
     expect(document.activeElement).toBe(link);
-    // Down keeps the column: the second item of the next row.
-    key(link!, 'ArrowDown');
-    expect(document.activeElement).toBe(italic);
-    key(italic!, 'ArrowUp');
-    expect(document.activeElement).toBe(link);
-    // And up from the second column into the first row, which is shorter: its last item.
-    key(link!, 'ArrowUp');
-    expect(document.activeElement).toBe(comment);
+    key(link!, 'ArrowLeft');
+    expect(document.activeElement).toBe(table);
+    // Up and down have no other row to go to.
+    key(table!, 'ArrowDown');
+    expect(document.activeElement).toBe(table);
     key(table!, 'Home');
     expect(document.activeElement).toBe(comment);
     key(comment!, 'End');
@@ -744,21 +740,21 @@ describe('from the keyboard', () => {
   });
 
   it('puts itself away on Esc and on Tab, and gives the keyboard back to the text', () => {
-    const { editor, palette } = mount();
-    editor.commands.run('palette.show');
+    const { editor, toolbar } = mount();
+    editor.commands.run('toolbar.show');
     key(buttons()[0]!, 'Escape');
-    expect(palette.isOpen()).toBe(false);
+    expect(toolbar.isOpen()).toBe(false);
     expect(document.activeElement).toBe(editor.view.contentDOM);
-    editor.commands.run('palette.show');
+    editor.commands.run('toolbar.show');
     key(buttons()[1]!, 'Tab');
-    expect(palette.isOpen()).toBe(false);
+    expect(toolbar.isOpen()).toBe(false);
     expect(document.activeElement).toBe(editor.view.contentDOM);
   });
 
   it('presses the item the keyboard is on', () => {
     const ran = vi.fn(() => true);
     const { editor } = mount('Hello', {}, [command('format.bold', { run: ran })]);
-    editor.commands.run('palette.show');
+    editor.commands.run('toolbar.show');
     buttons()[0]?.click();
     expect(ran).toHaveBeenCalledTimes(1);
   });
@@ -769,7 +765,7 @@ describe('from the keyboard', () => {
       command('format.italic'),
       command('format.clear'),
     ]);
-    editor.commands.run('palette.show');
+    editor.commands.run('toolbar.show');
     expect(document.activeElement).toBe(itemFor('format.italic'));
   });
 });
@@ -781,7 +777,7 @@ describe('Cut, Copy and Paste', () => {
     paste: vi.fn(() => Promise.resolve()),
   });
 
-  it('are the palette’s own commands, and appear with a clipboard', () => {
+  it('are the toolbar’s own commands, and appear with a clipboard', () => {
     const none = mount('Hello');
     expect(none.editor.commands.list().some(({ id }) => id === 'edit.paste')).toBe(false);
     const { editor } = mount('Hello', { clipboard: clipboard() });
@@ -796,7 +792,7 @@ describe('Cut, Copy and Paste', () => {
 
   it('show the system’s keys', () => {
     mount('Hello', { clipboard: clipboard() });
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     pointer(itemFor('edit.copy')!, 'pointerenter');
     vi.advanceTimersByTime(400);
     expect(tipOf()?.textContent).toBe('Copy⌘C');
@@ -804,7 +800,7 @@ describe('Cut, Copy and Paste', () => {
 
   it('cut and copy need a selection', () => {
     const { editor } = mount('Hello world', { clipboard: clipboard() });
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     expect(itemFor('edit.cut')?.disabled).toBe(true);
     expect(itemFor('edit.copy')?.disabled).toBe(true);
     expect(itemFor('edit.paste')?.disabled).toBe(false);
@@ -817,13 +813,13 @@ describe('Cut, Copy and Paste', () => {
     const board = clipboard();
     const { editor } = mount('Hello world', { clipboard: board });
     editor.view.dispatch({ selection: { anchor: 0, head: 5 } });
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     itemFor('edit.copy')?.click();
     expect(board.copy).toHaveBeenCalledTimes(1);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     itemFor('edit.cut')?.click();
     expect(board.cut).toHaveBeenCalledTimes(1);
-    mounted.at(-1)?.palette.show();
+    mounted.at(-1)?.toolbar.show();
     itemFor('edit.paste')?.click();
     expect(board.paste).toHaveBeenCalledTimes(1);
   });
@@ -854,13 +850,13 @@ describe('Cut, Copy and Paste', () => {
 });
 
 describe('taking it out', () => {
-  it('removes the palette, the hint and the commands', () => {
-    const { editor, palette } = mount('Hello', { clipboard: { cut() {}, copy() {}, paste() {} } });
-    mounted.at(-1)?.palette.show();
-    palette.destroy();
+  it('removes the toolbar, the hint and the commands', () => {
+    const { editor, toolbar } = mount('Hello', { clipboard: { cut() {}, copy() {}, paste() {} } });
+    mounted.at(-1)?.toolbar.show();
+    toolbar.destroy();
     expect(panelOf()).toBeNull();
     expect(tipOf()).toBeNull();
-    expect(editor.commands.list().some(({ id }) => id.startsWith('palette.'))).toBe(false);
+    expect(editor.commands.list().some(({ id }) => id.startsWith('toolbar.'))).toBe(false);
     expect(editor.commands.list().some(({ id }) => id.startsWith('edit.'))).toBe(false);
     // The right-click is the browser's again.
     expect(rightClick(editor).defaultPrevented).toBe(false);
@@ -869,7 +865,7 @@ describe('taking it out', () => {
 
 describe('the plugin', () => {
   it('names itself and what it needs', () => {
-    expect(plugin.manifest.id).toBe('redlines.palette');
+    expect(plugin.manifest.id).toBe('redlines.toolbar');
     expect(plugin.manifest.needs).toContain('clipboard');
   });
 
@@ -878,8 +874,70 @@ describe('the plugin', () => {
     document.body.append(parent);
     const editor = createEditor(parent, { doc: 'Hello', author: ada });
     const remove = plugin.activate({ editor, host: {}, author: ada, notice: () => {} });
-    expect(editor.commands.list().map(({ id }) => id)).toEqual(['palette.show']);
+    expect(editor.commands.list().map(({ id }) => id)).toEqual(['toolbar.show']);
     remove();
     editor.destroy();
+  });
+});
+
+describe('docked, by the wrench or the preference', () => {
+  const press = (target: EventTarget) =>
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+
+  it('is shown by the wrench at the bottom center, and away by the wrench again', () => {
+    const changes: boolean[] = [];
+    const { toolbar } = mount('Hello', { onChange: (shown) => changes.push(shown) });
+    expect(toolbar.toggle()).toBe(true);
+    expect(panelOf()?.hidden).toBe(false);
+    expect(panelOf()?.classList.contains('rl-toolbar-docked')).toBe(true);
+    expect(panelOf()?.style.left).toBe('');
+    expect(toolbar.toggle()).toBe(false);
+    expect(panelOf()?.hidden).toBe(true);
+    expect(changes).toEqual([true, false]);
+  });
+
+  it('stays through a press elsewhere, a scroll, a resize, a zoom and typing', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    press(editor.view.contentDOM);
+    document.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+    toolbar.hide();
+    editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(toolbar.isOpen()).toBe(true);
+  });
+
+  it('keeps the keyboard in the text when it is used, and stays after a command', () => {
+    const ran = vi.fn(() => true);
+    const { editor, toolbar } = mount('Hello', {}, [command('format.bold', { run: ran })]);
+    toolbar.toggle();
+    itemFor('format.bold')?.click();
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(toolbar.isOpen()).toBe(true);
+    expect(document.activeElement).toBe(editor.view.contentDOM);
+  });
+
+  it('moves the keyboard in and out with the key, and Esc gives it back to the text', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    editor.commands.run('toolbar.show');
+    expect(document.activeElement).toBe(buttons()[0]);
+    key(buttons()[0]!, 'Escape');
+    expect(document.activeElement).toBe(editor.view.contentDOM);
+    expect(toolbar.isOpen()).toBe(true);
+    editor.commands.run('toolbar.show');
+    editor.commands.run('toolbar.show');
+    expect(document.activeElement).toBe(editor.view.contentDOM);
+    expect(toolbar.isOpen()).toBe(true);
+  });
+
+  it('follows the preference, and goes with it', () => {
+    const changes: boolean[] = [];
+    const { toolbar } = mount('Hello', { onChange: (shown) => changes.push(shown) });
+    toolbar.setAtBottom(true);
+    expect(toolbar.isOpen()).toBe(true);
+    toolbar.setAtBottom(false);
+    expect(toolbar.isOpen()).toBe(false);
+    expect(changes).toEqual([true, false]);
   });
 });

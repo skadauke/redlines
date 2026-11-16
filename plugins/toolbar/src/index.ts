@@ -1,69 +1,78 @@
-// The formatting palette (issue #313; design §5.1: there is no toolbar, and this is not one). It is
-// shown only when summoned, in two ways: on right-click, at the pointer, in place of WebKit's own
-// menu, and from the keyboard (Show Formatting Palette, below the caret). Its items are commands
+// The toolbar (issues #313 and #504; design §5.1). It is shown only when summoned, in three ways:
+// the title bar's wrench, which docks it at the bottom center (and a preference keeps it there), a
+// right-click, at the pointer, in place of WebKit's own menu, and from the keyboard (Show Toolbar,
+// ⇧⌘P, below the caret). What puts it away is `model.ts`'s. Its items are commands
 // of the registry, by id, so that it, the Format menu and the shortcuts never disagree about names,
 // keys or whether an item is there. Items show no labels: hovering names one and its keys, after the
-// title bar's delay. Esc closes it, and it is reachable from the keyboard (Show Formatting Palette,
+// title bar's delay. Esc closes it, and it is reachable from the keyboard (Show Toolbar,
 // or the context menu key), where the arrow keys move among its items.
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { Editor, EditorCommand } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
-import { editCommands, type PaletteClipboard, pageClipboard } from './edit.ts';
+import { type Dismissal, dismiss, keyAction, type Summoned } from './model.ts';
+import { editCommands, type ToolbarClipboard, pageClipboard } from './edit.ts';
 import { shownGroups } from './items.ts';
 import { type DrawnPanel, drawPanel, type PanelHandlers, type SpellingRows } from './panel.ts';
-import { type PaletteSpelling, SPELLING_WAIT_MS, within } from './spelling.ts';
+import { type ToolbarSpelling, SPELLING_WAIT_MS, within } from './spelling.ts';
 import { installStyle } from './styles.ts';
 
-export type { PaletteClipboard } from './edit.ts';
+export type { ToolbarClipboard } from './edit.ts';
 export { pageClipboard } from './edit.ts';
-export type { PaletteSpelling } from './spelling.ts';
+export type { ToolbarSpelling } from './spelling.ts';
 export { formatShortcut } from './shortcuts.ts';
 
-export interface PaletteOptions {
+export interface ToolbarOptions {
   /**
-   * The box the palette goes in. Default: the editor's own element. Where it goes
+   * The box the toolbar goes in. Default: the editor's own element. Where it goes
    * makes no difference to where it appears: it is fixed to the window.
    */
   container?: HTMLElement;
   /** How long the pointer rests on an item before its hint shows: the title bar's `TOOLTIP_MS`. */
   tooltipMs?: number;
   /** How the Edit items reach the clipboard. Without it, Cut, Copy and Paste are left out. */
-  clipboard?: PaletteClipboard;
+  clipboard?: ToolbarClipboard;
   /** The spell checker, for suggestions on a right-click on a misspelled word. Default: none. */
-  spelling?: PaletteSpelling;
+  spelling?: ToolbarSpelling;
   /**
-   * Whether a right-click in the text opens the palette. Default: true. Where false, the browser's
-   * own menu stays. ⇧ with the right-click always shows that one, which has what the palette
+   * Whether a right-click in the text opens the toolbar. Default: true. Where false, the browser's
+   * own menu stays. ⇧ with the right-click always shows that one, which has what the toolbar
    * doesn't (Look Up, Services, Writing Tools).
    */
   contextMenu?: boolean;
   /** Shows a one-line message that doesn't interrupt, for what can't be done. */
   notice(message: string): void;
+  /** Called when the toolbar appears or goes away, however it came to: the wrench follows it. */
+  onChange?(shown: boolean): void;
 }
 
-export interface Palette {
+export interface Toolbar {
   /**
-   * Opens the palette below the caret with the keyboard in its first item, or puts it away when it
-   * is open. Returns whether it is open.
+   * ⇧⌘P: opens the toolbar below the caret with the keyboard in its first item, or puts it away
+   * when it is open there. Docked, it moves the keyboard between the toolbar and the text. Returns
+   * whether it is open.
    */
   show(): boolean;
-  /** Puts the palette away. */
+  /** The wrench: docks the toolbar at the bottom center, or puts it away. Returns whether it shows. */
+  toggle(): boolean;
+  /** The preference: keeps the toolbar docked at the bottom of the window, or lets it go again. */
+  setAtBottom(atBottom: boolean): void;
+  /**
+   * Puts away a toolbar at the pointer or the caret, as a zoom does (it was placed for the old
+   * layout). A docked one stays, where CSS places it.
+   */
   hide(): void;
   isOpen(): boolean;
-  /** Takes the palette and its commands out of the page. */
+  /** Takes the toolbar and its commands out of the page. */
   destroy(): void;
 }
-
-/** How the palette was opened, which says what puts it away. */
-type How = 'keyboard' | 'context';
 
 /** How soon, and how near, a press of the mouse comes before the menu event it is the pointer's for. */
 const PRESS_MS = 1000;
 const PRESS_PX = 6;
 
-/** The space around the palette, and between it and what it is placed against. */
+/** The space around the toolbar, and between it and what it is placed against. */
 const MARGIN = 8;
 const GAP = 8;
 /** The hint's distance from the item it names. */
@@ -89,40 +98,42 @@ function moveSelectionTo(editor: Editor, pos: number): void {
 }
 
 /**
- * Adds the palette to an editor: its right-click, and the commands Show Formatting
- * Palette (⌥⌘P, in the View menu) and, with a clipboard, Cut, Copy and Paste (which have no menu
+ * Adds the toolbar to an editor: its right-click, and the commands Show Formatting
+ * Toolbar (⌥⌘P, in the View menu) and, with a clipboard, Cut, Copy and Paste (which have no menu
  * or key here). Register the plugins whose commands it shows first, or later: an item appears when
- * its command is registered. Returns the palette, whose `destroy` takes it out again.
+ * its command is registered. Returns the toolbar, whose `destroy` takes it out again.
  */
-export function createPalette(editor: Editor, options: PaletteOptions): Palette {
+export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar {
   const { view } = editor;
   const doc = view.dom.ownerDocument;
   const win = doc.defaultView ?? window;
   const tooltipMs = options.tooltipMs ?? 400;
   const removeStyle = installStyle(doc);
 
-  // The parts: the palette, and the hint, which is the palette's own.
+  // The parts: the toolbar, and the hint, which is the toolbar's own.
   const panel = doc.createElement('div');
-  panel.className = 'rl-palette';
+  panel.className = 'rl-toolbar';
   panel.setAttribute('role', 'toolbar');
-  panel.setAttribute('aria-label', 'Formatting palette');
+  panel.setAttribute('aria-label', 'Toolbar');
   panel.hidden = true;
   const tip = doc.createElement('div');
-  tip.className = 'rl-palette-tip';
+  tip.className = 'rl-toolbar-tip';
   tip.setAttribute('role', 'tooltip');
   tip.hidden = true;
   const tipName = doc.createElement('span');
   const tipKeys = doc.createElement('span');
-  tipKeys.className = 'rl-palette-tip-keys';
+  tipKeys.className = 'rl-toolbar-tip-keys';
   tip.append(tipName, tipKeys);
   const container = options.container ?? view.dom;
   container.append(panel, tip);
 
-  let how: How | null = null;
+  let how: Summoned | null = null;
+  let atBottom = false;
+  let told = false;
   let drawn: DrawnPanel | null = null;
-  /** The spelling rows the palette holds, and where the word they are for is. */
+  /** The spelling rows the toolbar holds, and where the word they are for is. */
   let spelling: { rows: SpellingRows; from: number; to: number } | null = null;
-  /** Counts the palette's openings, so that an answer that comes late knows its own. */
+  /** Counts the toolbar's openings, so that an answer that comes late knows its own. */
   let opening = 0;
   let placeAgain: () => void = () => {};
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
@@ -151,7 +162,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     }, tooltipMs);
   };
 
-  // Where the palette goes: at a point, above a point, or below a box, kept inside the window.
+  // Where the toolbar goes: at a point, above a point, or below a box, kept inside the window.
   const clamp = (value: number, size: number, limit: number) =>
     Math.max(MARGIN, Math.min(value, limit - size - MARGIN));
   const placeAt = (x: number, y: number) => {
@@ -166,7 +177,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
     const fits = rect.bottom + GAP + height + MARGIN <= win.innerHeight;
-    // A caret scrolled out of the window is still a place: the palette stays in the window.
+    // A caret scrolled out of the window is still a place: the toolbar stays in the window.
     const top = fits ? rect.bottom + GAP : rect.top - GAP - height;
     panel.style.left = `${clamp(rect.left, width, win.innerWidth)}px`;
     panel.style.top = `${clamp(top, height, win.innerHeight)}px`;
@@ -179,7 +190,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
       drawn = drawPanel(panel, groups(), spelling?.rows ?? null, handlers);
   };
 
-  /** Draws the palette again with other spelling rows, or none, and the keyboard where it was. */
+  /** Draws the toolbar again with other spelling rows, or none, and the keyboard where it was. */
   const respell = (next: typeof spelling): void => {
     const hadFocus = panel.contains(doc.activeElement);
     spelling = next;
@@ -191,9 +202,10 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   };
   const dropSpelling = () => respell(null);
 
-  /** Puts the palette away and the keyboard in the text: a choice made in the palette is for it. */
+  /** Puts the toolbar away and the keyboard in the text: a choice made in the toolbar is for it. */
   const choose = (): void => {
-    close();
+    // A docked toolbar stays: the next command may be one more.
+    if (how !== 'docked') close();
     view.focus();
   };
 
@@ -217,54 +229,81 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     hint,
   };
 
-  // What puts the palette away: Esc, a press elsewhere, leaving the window, a scroll or a resize,
+  // What puts the toolbar away: Esc, a press elsewhere, leaving the window, a scroll or a resize,
   // and typing, which means the person went back to writing.
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || event.isComposing) return;
     // A text box of the page that has the keyboard, a comment's or the find bar's, has the key.
     if (inOtherField()) return;
+    // A docked toolbar stays; Esc in it only gives the keyboard back to the text.
+    if (how === 'docked') {
+      if (!panel.contains(doc.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      view.focus();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     close(true);
   };
+  /** Puts the toolbar away for a reason, if the model says it goes. */
+  const away = (why: Dismissal): void => {
+    if (how !== null && dismiss({ how, atBottom }, why).how === null) close();
+  };
   const onPress = (event: PointerEvent) => {
     const target = event.target;
     if (target instanceof Node && panel.contains(target)) return;
-    close();
+    away('press');
   };
   const onScroll = (event: Event) => {
-    // The palette is fixed to the window, and what is under it can scroll.
-    if (!(event.target instanceof Node) || !panel.contains(event.target)) close();
+    // The toolbar is fixed to the window, and what is under it can scroll.
+    if (!(event.target instanceof Node) || !panel.contains(event.target)) away('scroll');
   };
-  const onGone = () => close();
+  const onGone = () => away('blur');
+  const onResize = () => away('resize');
 
   function listen(): void {
     doc.addEventListener('keydown', onKey, true);
     doc.addEventListener('pointerdown', onPress, true);
     doc.addEventListener('scroll', onScroll, true);
     win.addEventListener('blur', onGone);
-    win.addEventListener('resize', onGone);
+    win.addEventListener('resize', onResize);
   }
   function unlisten(): void {
     doc.removeEventListener('keydown', onKey, true);
     doc.removeEventListener('pointerdown', onPress, true);
     doc.removeEventListener('scroll', onScroll, true);
     win.removeEventListener('blur', onGone);
-    win.removeEventListener('resize', onGone);
+    win.removeEventListener('resize', onResize);
   }
 
-  function open(next: How, place: () => void, rows: typeof spelling = null): void {
+  function open(next: Summoned, place: () => void, rows: typeof spelling = null): void {
     hideHint();
     if (how === null) listen();
     how = next;
     spelling = rows;
     drawn = drawPanel(panel, groups(), rows?.rows ?? null, handlers);
+    // Docked, CSS places it; elsewhere, `place` does, with a left and a top of its own.
+    panel.classList.toggle('rl-toolbar-docked', next === 'docked');
+    if (next === 'docked') {
+      panel.style.removeProperty('left');
+      panel.style.removeProperty('top');
+    }
     panel.hidden = false;
     placeAgain = place;
     place();
+    tell();
+  }
+  /** Tells the host whether the toolbar shows, when that has changed. */
+  function tell(): void {
+    const shown = how !== null;
+    if (shown === told) return;
+    told = shown;
+    options.onChange?.(shown);
   }
 
-  /** Whether the keyboard is in a text field of the page other than the document and the palette. */
+  /** Whether the keyboard is in a text field of the page other than the document and the toolbar. */
   function inOtherField(): boolean {
     const active = doc.activeElement;
     if (!(active instanceof HTMLElement) || panel.contains(active) || view.dom.contains(active)) {
@@ -290,12 +329,13 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     spelling = null;
     panel.hidden = true;
     unlisten();
+    tell();
     if (takeBack) view.focus();
   }
 
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
   panel.addEventListener('mousedown', (event) => event.preventDefault());
-  // The keys in the palette: the arrows move among the items, Home and End to the ends, and Tab and
+  // The keys in the toolbar: the arrows move among the items, Home and End to the ends, and Tab and
   // Esc put it away. Return and Space press the item, as a button does.
   panel.addEventListener('keydown', (event) => {
     const rows = drawn?.rows() ?? [];
@@ -335,12 +375,12 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
     event.stopPropagation();
   });
 
-  // Typing: a palette that the pointer opened goes, as the person went back to writing. A key that
+  // Typing: a toolbar that the pointer opened goes, as the person went back to writing. A key that
   // only moves the caret or holds a modifier is not writing.
   const onWriting = (event: KeyboardEvent) => {
     if (event.key.length > 1 && !/^(Backspace|Delete|Enter|Tab)$/.test(event.key)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (how !== null && how !== 'keyboard') close();
+    away('writing');
   };
   view.contentDOM.addEventListener('keydown', onWriting);
 
@@ -375,7 +415,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
         to: found.to,
       });
       if (answer === 'late') {
-        // The palette opens without them, and takes them in if they come while it is open.
+        // The toolbar opens without them, and takes them in if they come while it is open.
         void asked.then(
           (late) => {
             if (mine !== opening || how === null || !late || view.state.doc !== foundIn) return;
@@ -398,7 +438,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
         : () => placeAt(x, y),
       rows,
     );
-    // From the keyboard, the keyboard goes into the palette.
+    // From the keyboard, the keyboard goes into the toolbar.
     if (fromKeyboard) drawn?.rows()[0]?.[0]?.focus();
   }
 
@@ -424,7 +464,7 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   };
   view.contentDOM.addEventListener('contextmenu', onContextMenu);
 
-  // The palette stays true to the selection while it is open: Bold is on inside bold text, and
+  // The toolbar stays true to the selection while it is open: Bold is on inside bold text, and
   // Cut and Copy need a selection.
   const removeExtension = editor.addExtension(
     EditorView.updateListener.of((update) => {
@@ -438,26 +478,52 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
   const failed = (what: 'cut' | 'copy' | 'paste') =>
     options.notice(what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`);
   const show = (): boolean => {
-    if (how !== null) {
-      close(true);
-      return false;
+    switch (keyAction({ how, atBottom }, panel.contains(doc.activeElement))) {
+      case 'hide':
+        close(true);
+        return false;
+      case 'focus-toolbar':
+        drawn?.rows()[0]?.[0]?.focus();
+        return true;
+      case 'focus-document':
+        view.focus();
+        return true;
+      case 'show-at-caret':
+        open('keyboard', () =>
+          placeBelow(
+            view.coordsAtPos(view.state.selection.main.head) ?? view.dom.getBoundingClientRect(),
+          ),
+        );
+        drawn?.rows()[0]?.[0]?.focus();
+        return true;
     }
-    open('keyboard', () =>
-      placeBelow(
-        view.coordsAtPos(view.state.selection.main.head) ?? view.dom.getBoundingClientRect(),
-      ),
-    );
-    drawn?.rows()[0]?.[0]?.focus();
-    return true;
+  };
+  const toggle = (): boolean => {
+    if (how === null) open('docked', () => {});
+    else close();
+    return how !== null;
+  };
+  const setAtBottom = (next: boolean): void => {
+    if (next === atBottom) return;
+    // At the bottom the toolbar is docked, and away from it a docked one goes.
+    atBottom = next;
+    if (next) {
+      if (how !== 'docked') {
+        close();
+        open('docked', () => {});
+      }
+    } else if (how === 'docked') {
+      close();
+    }
   };
 
   const commands: EditorCommand[] = [
     {
-      id: 'palette.show',
-      title: 'Show Formatting Palette',
-      shortcut: 'Mod-Alt-p',
+      id: 'toolbar.show',
+      title: 'Show Toolbar',
+      shortcut: 'Mod-Shift-p',
       menu: 'view',
-      group: 'palette',
+      group: 'toolbar',
       run: () => {
         show();
         return true;
@@ -469,7 +535,9 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
 
   return {
     show,
-    hide: () => close(),
+    toggle,
+    setAtBottom,
+    hide: () => away('zoom'),
     isOpen: () => how !== null,
     destroy() {
       close();
@@ -487,18 +555,18 @@ export function createPalette(editor: Editor, options: PaletteOptions): Palette 
 
 export const plugin: Plugin = {
   manifest: {
-    id: 'redlines.palette',
-    name: 'Formatting palette',
+    id: 'redlines.toolbar',
+    name: 'Toolbar',
     version: '0.0.0',
     needs: ['document:read', 'document:edit', 'clipboard'],
     contributes: {
-      commands: [{ id: 'palette.show', title: 'Show Formatting Palette', shortcut: 'Mod-Alt-p' }],
+      commands: [{ id: 'toolbar.show', title: 'Show Toolbar', shortcut: 'Mod-Shift-p' }],
     },
   },
   activate: (context) => {
     const editor = context.editor as Editor;
     const read = context.host.clipboard;
-    const palette = createPalette(editor, {
+    const toolbar = createToolbar(editor, {
       notice: (message) => context.notice(message),
       ...(read
         ? {
@@ -506,6 +574,6 @@ export const plugin: Plugin = {
           }
         : {}),
     });
-    return () => palette.destroy();
+    return () => toolbar.destroy();
   },
 };

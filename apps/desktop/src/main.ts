@@ -27,7 +27,7 @@ import {
 import { EditError, newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
-import { createPalette, pageClipboard } from '@redlines/palette';
+import { createToolbar, pageClipboard } from '@redlines/toolbar';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -488,12 +488,15 @@ const review = createReview(editor, {
   },
 });
 
-// The formatting palette: shown only when summoned: on right-click, in place of WebKit's own menu,
-// and from the keyboard. Its items are commands of the registry, so it
+// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
+// (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
-const palette = createPalette(editor, {
+const toolbar = createToolbar(editor, {
   container: main,
+  // The wrench follows the toolbar, however it came to show or go.
+  onChange: () => render(),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
@@ -904,6 +907,7 @@ function renameDocument(): void {
 }
 
 const titleBar = createTitleBar(element('#titlebar'), {
+  toggleToolbar: () => toolbar.toggle(),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -929,6 +933,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The toolbar is at the bottom of the window from the start when the person wants it there.
+toolbar.setAtBottom(settings.toolbarAtBottom);
 
 // The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
 // editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
@@ -1091,6 +1098,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    toolbarShown: toolbar.isOpen(),
   });
   menuState = {
     view: ui.view,
@@ -1166,7 +1174,7 @@ if (isTauri) {
       kept = readingPlace(editor.view, scroller);
       titleBar.closeMenus();
       review.closePopovers();
-      palette.hide();
+      toolbar.hide();
     },
     after: (level, from) => {
       if (kept) {
@@ -1265,6 +1273,7 @@ watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
+  toolbar.setAtBottom(settings.toolbarAtBottom);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
@@ -1297,7 +1306,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
 }
 
-// Debug only (palette-check.ts): the formatting palette's right-click and hints, and Ask's
+// Debug only (palette-check.ts): the toolbar's right-click and hints, and Ask's
 // bubble with the page's scripted agent, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
   void import('./palette-check.ts').then(({ runPaletteCheck }) =>

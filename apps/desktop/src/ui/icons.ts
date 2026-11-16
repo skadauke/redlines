@@ -16,6 +16,9 @@ const ICONS = {
   /** Review while your edits are tracked: a pen over a line, drawn a little heavier. */
   tracking:
     '<path d="M10.3 2.2l2.3 2.3-6.4 6.4-2.9.6.6-2.9z" stroke-width="1.4"/><path d="M2.5 14h11" stroke-width="1.4"/>',
+  /** The toolbar: a wrench, drawn on a 24 grid and scaled to this one. */
+  wrench:
+    '<path transform="scale(.6667)" stroke-width="1.95" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
   /** The Clean view: a page of text. */
   clean:
     '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/>',

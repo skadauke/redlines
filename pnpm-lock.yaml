@@ -74,9 +74,6 @@ importers:
       '@redlines/outline':
         specifier: workspace:*
         version: link:../../plugins/outline
-      '@redlines/palette':
-        specifier: workspace:*
-        version: link:../../plugins/palette
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
@@ -89,6 +86,9 @@ importers:
       '@redlines/themes':
         specifier: workspace:*
         version: link:../../plugins/themes
+      '@redlines/toolbar':
+        specifier: workspace:*
+        version: link:../../plugins/toolbar
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
@@ -447,21 +447,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-api
 
-  plugins/palette:
-    dependencies:
-      '@codemirror/state':
-        specifier: ^6.7.6
-        version: 6.7.6
-      '@codemirror/view':
-        specifier: ^6.43.14
-        version: 6.43.14
-      '@redlines/editor':
-        specifier: workspace:*
-        version: link:../../packages/editor
-      '@redlines/plugin-api':
-        specifier: workspace:*
-        version: link:../../packages/plugin-api
-
   plugins/review:
     dependencies:
       '@codemirror/state':
@@ -513,6 +498,21 @@ importers:
       '@fontsource/gelasio':
         specifier: ^5.3.0
         version: 5.3.0
+
+  plugins/toolbar:
+    dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
 
 packages:
 

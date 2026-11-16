@@ -64,7 +64,7 @@ and when, and the comment threads, are in a block at the end of the file.
 - **The window.** The title bar is the page: the text scrolls under it, the document icon next to
   the name drags the file, a double-click on the name renames it, and the eye and the pen switch
   Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
-  corner. A formatting palette opens on right-click and from the keyboard, and
+  corner. A toolbar opens from the wrench in the title bar, on right-click and from the keyboard, and
   ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.
 - **Reviewing.** The View menu lists Clean, Redlines and Raw. A click on a change bar, or View ›
   Simple Look, switches Redlines to its simple look; a note's Accept and Reject there decide in
@@ -73,7 +73,7 @@ and when, and the comment threads, are in a block at the end of the file.
 - **Preferences** (⌘,): your name and handle, the default folder for new documents, themes, zoom and
   text size (the text alone goes to 400%), the editor's habits (including where images are saved
   and whether the word count shows), and the agents.
-- **Agents.** Select text and press ⌥⌘A (or Ask in the palette) to ask a question, answered in a
+- **Agents.** Select text and press ⌥⌘A (or Ask in the toolbar) to ask a question, answered in a
   bubble beside it. Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
   thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
   thread, and any change it makes is a tracked change in its name, for you to accept or reject. An

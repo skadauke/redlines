@@ -1,15 +1,15 @@
-// What the palette holds (issue #313): its items are commands of the registry, by id, so that the
-// palette, the Format menu and the shortcuts never disagree about names, keys or whether an item is
+// What the toolbar holds (issue #313): its items are commands of the registry, by id, so that the
+// toolbar, the Format menu and the shortcuts never disagree about names, keys or whether an item is
 // there. An item whose command isn't registered is left out, and appears when its command lands.
 
 import type { EditorState } from '@codemirror/state';
 import type { EditorCommand } from '@redlines/editor';
-import type { PaletteIcon } from './icons.ts';
+import type { ToolbarIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 
 export type GroupId = 'review' | 'insert' | 'format' | 'edit';
 
-/** The groups, in the order the palette shows them, each with the name a screen reader says. */
+/** The groups, in the order the toolbar shows them, each with the name a screen reader says. */
 export const GROUPS: readonly { id: GroupId; label: string }[] = [
   { id: 'review', label: 'Comment' },
   { id: 'insert', label: 'Insert' },
@@ -17,12 +17,12 @@ export const GROUPS: readonly { id: GroupId; label: string }[] = [
   { id: 'edit', label: 'Edit' },
 ];
 
-/** An item the palette may hold: the command it runs, and how it is drawn. */
+/** An item the toolbar may hold: the command it runs, and how it is drawn. */
 export interface ItemSpec {
   /** The command's id in the registry. */
   command: string;
   group: GroupId;
-  icon: PaletteIcon;
+  icon: ToolbarIcon;
   /**
    * The keys to show when the registry binds none: the system's own, for Cut, Copy and Paste,
    * which the Edit menu's items carry.
@@ -35,7 +35,7 @@ export interface ItemSpec {
  * select text and right-click. The commands of other plugins are known by the ids they were given:
  * `format.sub` and `format.sup` (Subscript, Superscript) and `block.alert` by the Markdown
  * rendering, `image.insert` by the images, `highlight.toggle` by the review interface, `ask.start`
- * by the agents. Cut, Copy and Paste are the palette's own (`edit.ts`).
+ * by the agents. Cut, Copy and Paste are the toolbar's own (`edit.ts`).
  */
 export const ITEMS: readonly ItemSpec[] = [
   { command: 'comment.add', group: 'review', icon: 'comment' },
@@ -61,7 +61,7 @@ export const ITEMS: readonly ItemSpec[] = [
 export interface ShownItem {
   /** The command's id: what the item runs, and what names it in the page. */
   id: string;
-  icon: PaletteIcon;
+  icon: ToolbarIcon;
   /** The command's name as a hint says it: "Link", for a title that opens a box, "Link…". */
   name: string;
   /** The shortcut as the Mac writes it, or null for a command with none. */
@@ -96,7 +96,7 @@ function shown(spec: ItemSpec, command: EditorCommand, state: EditorState): Show
 }
 
 /**
- * The palette's items as `commands` and `state` have them: the groups in the palette's order, with
+ * The toolbar's items as `commands` and `state` have them: the groups in the toolbar's order, with
  * the items whose commands are registered, and no group that is left with none.
  */
 export function shownGroups(commands: readonly EditorCommand[], state: EditorState): ShownGroup[] {

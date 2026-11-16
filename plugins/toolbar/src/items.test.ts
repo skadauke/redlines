@@ -12,14 +12,14 @@ const command = (id: string, fields: Partial<EditorCommand> = {}): EditorCommand
 
 const state = EditorState.create({ doc: 'Some text' });
 
-/** The ids the palette shows, group by group. */
+/** The ids the toolbar shows, group by group. */
 const ids = (commands: readonly EditorCommand[], at: EditorState = state) =>
   shownGroups(commands, at).map((group) => ({
     group: group.id,
     items: group.items.map((item) => item.id),
   }));
 
-describe('the palette items', () => {
+describe('the toolbar items', () => {
   it('leaves out an item whose command is not registered, and a group with none left', () => {
     expect(ids([])).toEqual([]);
     expect(ids([command('format.bold')])).toEqual([{ group: 'format', items: ['format.bold'] }]);
@@ -28,7 +28,7 @@ describe('the palette items', () => {
   it('shows an item once its command is registered', () => {
     const base = [command('format.bold'), command('format.italic')];
     expect(ids(base)[0]?.items).toEqual(['format.bold', 'format.italic']);
-    // A later plugin's command lands: its item appears, in the palette's own order.
+    // A later plugin's command lands: its item appears, in the toolbar's own order.
     expect(ids([...base, command('format.sub')])[0]?.items).toEqual([
       'format.bold',
       'format.italic',
@@ -36,7 +36,7 @@ describe('the palette items', () => {
     ]);
   });
 
-  it('keeps the palette’s order whatever the order of registering', () => {
+  it('keeps the toolbar’s order whatever the order of registering', () => {
     const shown = ids([
       command('format.link'),
       command('format.bold'),

@@ -320,6 +320,12 @@ body {
   outline-offset: -2px;
 }
 
+/* The wrench is pressed while the toolbar shows. */
+.rl-wrench-button[aria-pressed='true'] {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
+}
+
 /* The Review pen is red while your edits are tracked (design §5.4). */
 .rl-pen-on {
   color: var(--rl-red, #d42a1e);

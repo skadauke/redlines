@@ -1,7 +1,7 @@
 // The spelling suggestions of a right-click, from the system's checker (src-tauri/src/spelling.rs):
-// the formatting palette shows them in place of WebKit's menu, which a right-click no longer opens.
+// the toolbar shows them in place of WebKit's menu, which a right-click no longer opens.
 
-import type { PaletteSpelling } from '@redlines/palette';
+import type { ToolbarSpelling } from '@redlines/toolbar';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface SystemSpellingOptions {
@@ -14,7 +14,7 @@ export interface SystemSpellingOptions {
   learned(): void;
 }
 
-export function systemSpelling(options: SystemSpellingOptions): PaletteSpelling {
+export function systemSpelling(options: SystemSpellingOptions): ToolbarSpelling {
   return {
     enabled: () => options.enabled(),
     // Nothing for a word that is spelled right, or when the checker can't be asked.

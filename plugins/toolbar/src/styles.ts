@@ -1,13 +1,13 @@
-// The palette's look (design §5.1): a card in the interface's grays on the card color, with small
-// line icons and no labels, and a hint after the title bar's delay. Everything is through the
-// theme's tokens. It is a control like the review bar, not part of the page, so it keeps the
+// The toolbar's look (design §5.1): a card in the interface's grays on the card color, with small
+// line icons and no labels, in one row, docked at the bottom center or at the pointer or caret, and
+// a hint after the title bar's delay. Everything is through the theme's tokens. It is a control like the review bar, not part of the page, so it keeps the
 // interface's own sizes and doesn't follow the text size.
 
-const STYLE_ID = 'rl-palette-style';
+const STYLE_ID = 'rl-toolbar-style';
 
-export const PALETTE_STYLE = `
-/* The palette. */
-.rl-palette {
+export const TOOLBAR_STYLE = `
+/* The toolbar. */
+.rl-toolbar {
   position: fixed;
   z-index: 310;
   box-sizing: border-box;
@@ -25,19 +25,42 @@ export const PALETTE_STYLE = `
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
-  animation: rl-palette-appear 100ms ease-out;
+  animation: rl-toolbar-appear 100ms ease-out;
 }
-.rl-palette[hidden] { display: none; }
-.rl-palette-row {
+.rl-toolbar[hidden] { display: none; }
+/* Docked: the bottom center, above the word count's corner. It has no left or top of its own. */
+.rl-toolbar-docked {
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  margin: 0 auto;
+}
+/* The groups, side by side, wrapping in a window too narrow for them. */
+.rl-toolbar-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.rl-toolbar-row {
   display: flex;
   gap: 2px;
 }
-.rl-palette-rule {
-  height: 1px;
-  margin: 4px 6px;
+.rl-toolbar-rule {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 4px;
   background: var(--rl-rule);
 }
-.rl-palette-item {
+/* Under the spelling rows: across the card. */
+.rl-toolbar-rule-under {
+  width: auto;
+  height: 1px;
+  margin: 4px 6px;
+}
+.rl-toolbar-item {
   display: flex;
   flex: none;
   align-items: center;
@@ -51,31 +74,31 @@ export const PALETTE_STYLE = `
   color: var(--rl-ink-2);
   cursor: default;
 }
-.rl-palette-item:enabled:hover,
-.rl-palette-item:focus-visible {
+.rl-toolbar-item:enabled:hover,
+.rl-toolbar-item:focus-visible {
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
   color: var(--rl-ink);
 }
-.rl-palette-item[aria-pressed='true'] {
+.rl-toolbar-item[aria-pressed='true'] {
   background: var(--rl-pressed);
   color: var(--rl-ink);
 }
-.rl-palette-item:focus-visible {
+.rl-toolbar-item:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
-.rl-palette-item:disabled {
+.rl-toolbar-item:disabled {
   color: var(--rl-ink-3);
   opacity: 0.55;
 }
 
 /* Spelling suggestions, when the right-click is on a misspelled word: the only words in it. */
-.rl-palette-spelling {
+.rl-toolbar-spelling {
   display: flex;
   flex-direction: column;
   min-width: 190px;
 }
-.rl-palette-word {
+.rl-toolbar-word {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -89,20 +112,20 @@ export const PALETTE_STYLE = `
   text-align: left;
   cursor: default;
 }
-.rl-palette-suggestion { font-weight: 700; }
-.rl-palette-learn { color: var(--rl-ink-2); }
-.rl-palette-word:enabled:hover,
-.rl-palette-word:focus-visible {
+.rl-toolbar-suggestion { font-weight: 700; }
+.rl-toolbar-learn { color: var(--rl-ink-2); }
+.rl-toolbar-word:enabled:hover,
+.rl-toolbar-word:focus-visible {
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
-.rl-palette-word:focus-visible {
+.rl-toolbar-word:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
-.rl-palette-word:disabled { color: var(--rl-ink-3); }
+.rl-toolbar-word:disabled { color: var(--rl-ink-3); }
 
 /* The hint: an item's name and its keys, under the pointer, after the title bar's delay. */
-.rl-palette-tip {
+.rl-toolbar-tip {
   position: fixed;
   z-index: 311;
   display: flex;
@@ -118,28 +141,28 @@ export const PALETTE_STYLE = `
   white-space: nowrap;
   pointer-events: none;
   transform: translateX(-50%);
-  animation: rl-palette-appear 90ms ease-out;
+  animation: rl-toolbar-appear 90ms ease-out;
 }
-.rl-palette-tip[hidden] { display: none; }
-.rl-palette-tip-keys {
+.rl-toolbar-tip[hidden] { display: none; }
+.rl-toolbar-tip-keys {
   color: rgb(255 255 255 / 0.62);
   letter-spacing: 0.04em;
 }
 
-@keyframes rl-palette-appear {
+@keyframes rl-toolbar-appear {
   from { opacity: 0; transform: translateY(2px); }
 }
-.rl-palette-tip { animation-name: rl-palette-tip-appear; }
-@keyframes rl-palette-tip-appear {
+.rl-toolbar-tip { animation-name: rl-toolbar-tip-appear; }
+@keyframes rl-toolbar-tip-appear {
   from { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rl-palette, .rl-palette-tip { animation: none; }
+  .rl-toolbar, .rl-toolbar-tip { animation: none; }
 }
 
 @media print {
-  .rl-palette, .rl-palette-tip { display: none !important; }
+  .rl-toolbar, .rl-toolbar-tip { display: none !important; }
 }
 `;
 
@@ -148,7 +171,7 @@ export function installStyle(doc: Document): () => void {
   if (doc.getElementById(STYLE_ID)) return () => {};
   const style = doc.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = PALETTE_STYLE;
+  style.textContent = TOOLBAR_STYLE;
   doc.head.append(style);
   return () => style.remove();
 }

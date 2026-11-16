@@ -686,6 +686,11 @@ function editing(deps: PaneDeps): Section[] {
           'Show word count',
           toggle(current.showWordCount, (value) => update({ showWordCount: value })),
         ),
+        row(
+          'Show the toolbar at the bottom',
+          toggle(current.toolbarAtBottom, (value) => update({ toolbarAtBottom: value })),
+          line('Otherwise the wrench in the title bar, ⇧⌘P and a right-click show it.'),
+        ),
       ],
     },
     { title: 'Images', rows: [imagesRow(deps)] },

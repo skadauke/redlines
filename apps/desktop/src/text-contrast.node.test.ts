@@ -84,7 +84,7 @@ describe('text contrast (#578)', () => {
     const uses = all.flatMap(({ file, uses }) => uses.map((selector) => `${file}: ${selector}`));
     expect(uses.length).toBeGreaterThan(5);
     expect(uses).toContain('apps/desktop/src/styles.css: .rl-menu-item:disabled');
-    expect(uses).toContain('plugins/palette/src/styles.ts: .rl-palette-item:disabled');
+    expect(uses).toContain('plugins/toolbar/src/styles.ts: .rl-toolbar-item:disabled');
   });
 
   it('colors text with --rl-ink-3 only in a disabled control or a decorative glyph', () => {
