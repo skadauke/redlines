@@ -1,6 +1,6 @@
 // A tracked move of blocks: the delete-and-insert that `moveBlockEdits` gives, written by the tracked
 // layer with one group, reads as the moved file when accepted and as the first when rejected, and
-// reads alike in every order of decisions, judged by micromark (format §3.15).
+// reads alike in every order of decisions, judged by micromark (format §3.14).
 
 import { describe, expect, it, vi } from 'vitest';
 
