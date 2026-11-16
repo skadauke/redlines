@@ -180,6 +180,8 @@ const deps: PaneDeps = {
               signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
               signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
               stop: () => agentSetup.stop(provider.id),
+              // The newest version, so that Update shows only when there is one (#527).
+              latest: (fresh?: boolean) => agentSetup.latest(provider.id, fresh),
               running: () => setups.running(provider.id),
               // The skill that teaches the agent Redlines files, in the folder it reads skills
               // from. OpenClaw reads Codex's folder too.
@@ -188,6 +190,15 @@ const deps: PaneDeps = {
                 install: () => agentSkills.install(provider.id),
                 ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
               },
+            }
+          : {}),
+        // A plain page in development says a newer Codex is out, so that Update can be seen.
+        ...(!isTauri && import.meta.env.DEV
+          ? {
+              // Nothing to update here: an update ends well, and changes nothing.
+              update: () => Promise.resolve({ ok: true, message: '' }),
+              latest: () =>
+                import('./dev-detect.ts').then(({ devLatest }) => devLatest(provider.id)),
             }
           : {}),
       })),

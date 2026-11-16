@@ -44,6 +44,12 @@ test.describe('the agents pane @views', () => {
     await expect(row).toContainText('Ada');
     await j.shot('agents-picker-ada');
 
+    // Update shows only for an agent with a newer version out (#527): the page's Codex has one.
+    await expect(prefs.getByRole('button', { name: 'Update Codex' })).toBeVisible();
+    await expect(prefs.getByRole('button', { name: 'Update Claude Code' })).toHaveCount(0);
+    await expect(prefs.locator('[data-row="Codex"]')).toContainText('Version 0.41.0 is available.');
+    await shot('agents-pane-update');
+
     // The Model of an agent (#530): Default, then the models its program takes.
     const model = prefs.getByLabel('Model for Claude Code');
     await expect(model.locator('option')).toHaveText(['Default', 'Opus', 'Sonnet', 'Haiku']);

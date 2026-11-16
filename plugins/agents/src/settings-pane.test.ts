@@ -1697,3 +1697,62 @@ describe('the Model field (#530)', () => {
     expect(now().agentModels).toEqual({});
   });
 });
+
+describe('Update, only when there is a newer version (#527)', () => {
+  const claude = '/Users/me/.local/bin/claude';
+  const installed: AgentState = { found: true, signedIn: true, version: '2.1.400', path: claude };
+  const buttonsOf = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-row="Claude"] button')].map((b) => b.textContent);
+
+  const withLatest = (latest: (fresh?: boolean) => Promise<string>) => {
+    const made = setup({ claude: installed, codex: installed });
+    made.deps.agents = made.deps.agents.map((agent) => ({ ...agent, latest }));
+    return made;
+  };
+
+  it('offers Update, and says which version is out, when a newer one is', async () => {
+    const { container, deps } = withLatest(() => Promise.resolve('2.2.0'));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    expect(row(container, 'Claude').textContent).toContain('Version 2.2.0 is available.');
+  });
+
+  it('offers none when the program is the newest, or ahead', async () => {
+    for (const latest of ['2.1.400', '2.1.3']) {
+      const { container, deps } = withLatest(() => Promise.resolve(latest));
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(buttonsOf(container)).not.toContain('Update');
+    }
+  });
+
+  it('offers none, and says nothing, when the newest can not be found', async () => {
+    const { container, deps } = withLatest(() => Promise.reject(new Error('offline')));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).not.toContain('Update');
+    expect(row(container, 'Claude').textContent).not.toContain('offline');
+  });
+
+  it('asks afresh on Check Again, and Update goes once the program is current', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const { container, deps, detect } = withLatest((fresh) => {
+      asked.push(fresh);
+      return Promise.resolve('2.2.0');
+    });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    detect.mockImplementation((id) =>
+      Promise.resolve(id === 'claude' ? { ...installed, version: '2.2.0' } : installed),
+    );
+    const again = [...container.querySelectorAll('[data-row="Claude"] button')].find(
+      (b) => b.textContent === 'Check Again',
+    ) as HTMLButtonElement;
+    again.click();
+    await settle();
+    expect(asked.at(-1)).toBe(true);
+    expect(buttonsOf(container)).not.toContain('Update');
+  });
+});
