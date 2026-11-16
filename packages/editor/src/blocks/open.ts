@@ -837,7 +837,7 @@ function takeBackSpec(
 
 /**
  * Takes the open block back when the selection leaves it and the block Return was pressed in, and
- * before the view switches to Raw. A mouse selection waits for the button to come up, so that the
+ * before the view switches to Plain. A mouse selection waits for the button to come up, so that the
  * text under the pointer doesn't move first; an input method's composition is never interrupted.
  */
 const leaving = EditorState.transactionFilter.of((tr) => {

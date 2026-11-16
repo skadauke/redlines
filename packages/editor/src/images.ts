@@ -336,7 +336,7 @@ export function images(
   ) => {
     if (!files.length) return false;
     event.preventDefault();
-    // Raw while it is read-only says why for every paste and drop (`rawEditsRefused`).
+    // Plain while it is read-only says why for every paste and drop (`rawEditsRefused`).
     if (rawIsReadOnly(view.state)) return true;
     const spot = imageSpot(view, at, notice);
     if (spot) onImageFiles(files, spot, pasted);

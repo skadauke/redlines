@@ -35,7 +35,7 @@ describe('reading the view (format §5.6)', () => {
   });
 
   it('warns about a view it does not know, such as raw, and drops it', () => {
-    // Raw is never saved: nobody wants a document to open as source (format §5.6).
+    // Plain is never saved: nobody wants a document to open as source (format §5.6).
     for (const value of ['raw', 'Simple', 'Clean', 'on', '']) {
       const parsed = parse(withLines(`view: ${value}`));
       expect(parsed.ledger.view, value).toBeUndefined();

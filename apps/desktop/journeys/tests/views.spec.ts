@@ -23,11 +23,12 @@ test.describe('the eye @views', () => {
     const j = await start({ doc: 'Hello\n', tracking: false });
     const eye = await openEye(j);
     await j.shot('eye-menu');
-    for (const label of ['Clean', 'Redlines', 'Raw']) await expect(eye.item(label)).toHaveCount(1);
+    for (const label of ['Clean', 'Redlines', 'Plain'])
+      await expect(eye.item(label)).toHaveCount(1);
     expect(await isOpaque(j.page.locator('.rl-menu').filter({ visible: true }))).toBe(true);
   });
 
-  test('in a file with no changes, Redlines is disabled in the eye, and Clean and Raw are not', async ({
+  test('in a file with no changes, Redlines is disabled in the eye, and Clean and Plain are not', async ({
     start,
   }) => {
     const j = await start({ doc: 'Hello\n', tracking: false });
@@ -35,7 +36,7 @@ test.describe('the eye @views', () => {
     await expect(eye.item('Redlines'), 'the Redlines row is there').toHaveCount(1);
     await expect(eye.item('Redlines'), 'Redlines is disabled').toBeDisabled();
     await expect(eye.item('Clean')).toBeEnabled();
-    await expect(eye.item('Raw')).toBeEnabled();
+    await expect(eye.item('Plain')).toBeEnabled();
     await j.shot('eye-menu-no-changes');
   });
 
@@ -49,12 +50,12 @@ test.describe('the eye @views', () => {
     await j.shot('eye-menu-with-changes');
   });
 
-  test('the eye has no Simple Look row, and Raw is below a separator', async ({ start }) => {
+  test('the eye has no Simple Look row, and Plain is below a separator', async ({ start }) => {
     const j = await start({ doc: 'Hello\n', tracking: false });
     const eye = await openEye(j);
     await expect(eye.item('Clean'), 'the menu is open').toHaveCount(1);
     await expect(eye.item('Simple Look'), 'no Simple Look row').toHaveCount(0);
-    // Clean, Redlines, a separator, Raw.
+    // Clean, Redlines, a separator, Plain.
     const order = await j.page.evaluate(() =>
       [...document.querySelectorAll('.rl-menu')]
         .filter((menu) => (menu as HTMLElement).offsetParent !== null)
@@ -68,7 +69,7 @@ test.describe('the eye @views', () => {
             ),
         ),
     );
-    expect(order.slice(0, 4)).toEqual(['Clean', 'Redlines', '—', 'Raw']);
+    expect(order.slice(0, 4)).toEqual(['Clean', 'Redlines', '—', 'Plain']);
     expect(order.includes('Simple Look')).toBe(false);
   });
 

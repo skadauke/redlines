@@ -268,7 +268,7 @@ describe('Redlines', () => {
     expect(editor.view.moveByChar(EditorSelection.cursor(from), true).head).toBe(lineEnd);
   });
 
-  it('lets the caret step over markers and the ledger, except in Raw', () => {
+  it('lets the caret step over markers and the ledger, except in Plain', () => {
     const editor = load(fixture);
     const ranges = atomic(editor);
     const parsed = parse(fixture);
@@ -1053,8 +1053,8 @@ describe('Simple', () => {
   });
 });
 
-describe('Raw', () => {
-  it('Raw has no replace decorations', () => {
+describe('Plain', () => {
+  it('Plain has no replace decorations', () => {
     const editor = load(fixture);
     editor.setViewMode('raw');
     const { state } = editor.view;
@@ -1072,12 +1072,12 @@ describe('Raw', () => {
     const markers = [...editor.view.contentDOM.querySelectorAll('.rl-tok-comment')];
     expect(markers.map((m) => m.textContent)).toContain('<!--ins k3x9-->');
     expect(getComputedStyle(markers[0]!).color).toBe('#6e6e73');
-    // The other views draw the document, without Raw's highlighting.
+    // The other views draw the document, without Plain's highlighting.
     editor.setViewMode('redlines');
     expect(editor.view.contentDOM.querySelector('[class*="rl-tok-"]')).toBeNull();
   });
 
-  it('moves the caret out of a marker when Raw is left', () => {
+  it('moves the caret out of a marker when Plain is left', () => {
     const editor = load(fixture, { view: 'raw' });
     editor.view.dispatch({ selection: { anchor: fixture.indexOf('k3x9') } });
     editor.setViewMode('redlines');
@@ -1247,7 +1247,7 @@ describe('loading', () => {
     editor.reloadDoc(fixture);
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: true });
 
-    // Clean chosen for a document with redlines stays Clean, and Raw stays Raw.
+    // Clean chosen for a document with redlines stays Clean, and Plain stays Plain.
     editor.setViewMode('clean');
     editor.reloadDoc(fixture.replace('April', 'May'));
     expect(editor.getUiState().view).toBe('clean');

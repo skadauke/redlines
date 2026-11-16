@@ -111,7 +111,7 @@ describe('the tables plugin', () => {
     expect({ doc: editor.getDoc(), head: editor.view.state.selection.main.head }).toEqual(expected);
   });
 
-  it('leaves ⌘↩ in Raw to the editor too, where nothing else is in front of it', () => {
+  it('leaves ⌘↩ in Plain to the editor too, where nothing else is in front of it', () => {
     const mod = {
       ctrlKey: !/Mac/.test(navigator.platform),
       metaKey: /Mac/.test(navigator.platform),

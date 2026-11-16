@@ -80,11 +80,11 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
-/** The views a click on the View icon switches between: Raw is for the menu. */
+/** The views a click on the View icon switches between: Plain is for the menu. */
 type SwitchView = Exclude<MenuView, 'raw'>;
 
 /** The views' names, and the keys the menu bar gives them (menu-model.ts, which a test compares). */
-const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Raw' };
+const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Plain' };
 export const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
 /** The same keys as assistive technology names them (`aria-keyshortcuts`). */
 export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
@@ -339,11 +339,11 @@ export function createTitleBar(
 
   /**
    * The one of Clean and Redlines shown last, by any means (the menu, the keys, a click on a change
-   * bar): what a click on the eye goes back to from Raw. Redlines for a window that has shown
+   * bar): what a click on the eye goes back to from Plain. Redlines for a window that has shown
    * neither.
    */
   let lastShown: SwitchView = 'redlines';
-  /** What a click on the eye shows: Clean and Redlines in turn, and from Raw the one shown last. */
+  /** What a click on the eye shows: Clean and Redlines in turn, and from Plain the one shown last. */
   const viewAfterClick = (view: ViewMode): SwitchView => {
     const shownNow = menuViewOf(view);
     if (shownNow === 'raw') return lastShown;
@@ -381,7 +381,7 @@ export function createTitleBar(
       'divider',
       viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
     ],
-    // A click switches Clean and Redlines; Raw is for the menu.
+    // A click switches Clean and Redlines; Plain is for the menu.
     activate: (event) => {
       actions.setView(viewAfterClick(state.view));
       // The pointer is still there: what the next click will do is said once it has rested.

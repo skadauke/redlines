@@ -88,7 +88,7 @@ const PLACE =
 /** The words of a refusal to align while more changes than are looked at in every order are pending in the header's last cell. */
 const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
 const LOST =
-  "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Raw with Track Changes off.";
+  "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Plain with Track Changes off.";
 
 type Shape =
   | { kind: 'align'; cols: number[]; align: TableAlign }
@@ -2027,7 +2027,7 @@ describe('a plain column operation beside a pending alignment change (format §3
     const HIDDEN_BY_DELETING =
       'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.';
     const HIDDEN_BY_EDITING =
-      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.';
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.';
     /** The marks that a file reads and the entries of its ledger, and the markers that are text. */
     const readMarks = (text: string) => ({
       marks: parse(text).marks.map((mark) => mark.id),
@@ -2509,7 +2509,7 @@ describe('keepAlignInStep (format §3.7, §3.10, #281)', () => {
 // refuses a mark that is not read before it walks the orders of decisions).
 describe('an alignment change that the file a plain column operation made does not read (format §3.7, #281)', () => {
   const HIDDEN_BY_EDITING =
-    'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.';
+    'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.';
   const HIDDEN_BY_DELETING =
     'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.';
   const MARK_OF = (row: string) => markFor(row, 'k3x9');

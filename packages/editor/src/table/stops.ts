@@ -328,7 +328,7 @@ export function tableStops() {
 }
 
 /** Whether the selection is in a table's cells, as a view that draws tables shows them: the Paragraph
- * menu's block commands are not for text there. False in Raw, which draws none. */
+ * menu's block commands are not for text there. False in Plain, which draws none. */
 export function selectionInTable(state: EditorState): boolean {
   if (state.field(viewModeField, false) === 'raw') return false;
   const { head, anchor } = state.selection.main;
@@ -336,7 +336,7 @@ export function selectionInTable(state: EditorState): boolean {
 }
 
 /** Whether the head of the selection is in a cell: where a command that works from the caret (Insert
- * Row Below) has a row to work from, which `selectionInTable` is wider than. False in Raw. */
+ * Row Below) has a row to work from, which `selectionInTable` is wider than. False in Plain. */
 export function headInTable(state: EditorState): boolean {
   if (state.field(viewModeField, false) === 'raw') return false;
   return shownCellAt(state, state.selection.main.head) !== null;

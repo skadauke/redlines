@@ -62,11 +62,11 @@ export interface FormattingOptions {
 }
 
 const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
-/** Why a format or block command is disabled in Raw while edits are tracked (Raw shows the file's
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Why a format or block command is disabled in Plain while edits are tracked (Plain shows the file's
  * own text, where nothing can be marked; typing there is asked about, a command is not). */
 const RAW_FORMAT =
-  "Raw shows the file's own text, where Redlines can't mark changes. Switch to Clean or Redlines, or turn off Track Changes.";
+  "Plain shows the file's own text, where Redlines can't mark changes. Switch to Clean or Redlines, or turn off Track Changes.";
 /** What is said where a command is disabled (design §4.1: the hint says what the thing is, then what to do). */
 const FRONT_MATTER_HINT = 'Front matter is YAML, not text to format. Select text in the body.';
 const IN_CODE_HINT = "Formatting doesn't apply inside code. Select text outside it.";
@@ -80,7 +80,7 @@ const ITEM_NEEDS_TEXT_HINT = "Write the item first. An item with no text can't c
 /** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
  * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
 const TAGS_NOT_A_PAIR =
-  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Raw.";
+  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Plain.";
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
@@ -208,7 +208,7 @@ function computeActiveBlocks(state: EditorState): Set<string> {
   return on;
 }
 
-/** Whether edits are tracked in Raw, which shows the file's own text and marks nothing. */
+/** Whether edits are tracked in Plain, which shows the file's own text and marks nothing. */
 function rawTracked(state: EditorState): boolean {
   return state.field(trackingField, false) === true && state.field(viewModeField, false) === 'raw';
 }
@@ -352,7 +352,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
   const removeTheme = editor.addExtension(linkTheme);
 
-  /** Whether the selection can be edited at all: Raw is read-only while edits are tracked. */
+  /** Whether the selection can be edited at all: Plain is read-only while edits are tracked. */
   const editable = (): boolean => {
     if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
       notice(RAW_READ_ONLY);
@@ -724,7 +724,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     group,
     ...fields,
     disabledReason: (state: EditorState) => {
-      // Raw shows the file's own text: nothing in it can be marked (typing there is asked about).
+      // Plain shows the file's own text: nothing in it can be marked (typing there is asked about).
       if (rawTracked(state)) return RAW_FORMAT;
       // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
       if (menu === 'paragraph' && selectionInTable(state)) return NOT_IN_CELL_HINT;

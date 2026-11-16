@@ -124,7 +124,7 @@ const mac = /Mac/.test(navigator.platform);
 /**
  * Presses a key through the editor's keymaps. `Mod` is Cmd on a Mac and Ctrl elsewhere. Enter is
  * CodeMirror's, the one line break (or the continued markup) that these tests of the tracked
- * layer are about, which Raw and the blocks the block keys leave alone still get; Return as block
+ * layer are about, which Plain and the blocks the block keys leave alone still get; Return as block
  * editing makes it is the block suite's (`blocks/*-keys.test.ts`).
  */
 function press(editor: Editor, key: string): boolean {
@@ -594,21 +594,21 @@ describe('tracked typing', () => {
     }
   });
 
-  it('makes Raw read-only while Track Changes is on', () => {
+  it('makes Plain read-only while Track Changes is on', () => {
     const editor = load(fixture, { view: 'raw' });
     expect(editor.view.state.readOnly).toBe(true);
     caret(editor, fixture.indexOf('new '));
     press(editor, 'Backspace');
     expect(editor.getDoc()).toBe(fixture);
 
-    // With tracking off, Raw edits the source as written.
+    // With tracking off, Plain edits the source as written.
     editor.setTracking(false);
     expect(editor.view.state.readOnly).toBe(false);
     press(editor, 'Backspace');
     expect(editor.getDoc()).toBe(fixture.replace('k3x9-->new', 'k3x9--new'));
   });
 
-  it('says why Raw takes no edits while Track Changes is on', () => {
+  it('says why Plain takes no edits while Track Changes is on', () => {
     const notices: string[] = [];
     const doc = '- one\n- two\n';
     const editor = load(doc, { view: 'raw', onNotice: (message) => notices.push(message) });
@@ -633,7 +633,7 @@ describe('tracked typing', () => {
     expect(said()).toEqual([RAW_READ_ONLY]);
     expect(editor.getDoc()).toBe(doc);
 
-    // With tracking off, Raw takes edits, and says nothing.
+    // With tracking off, Plain takes edits, and says nothing.
     editor.setTracking(false);
     press(editor, 'Backspace');
     expect(editor.getDoc()).not.toBe(doc);
@@ -2122,7 +2122,7 @@ describe('every way to change text', () => {
 describe('the ledger', () => {
   const ledgerStart = parse(fixture).ledgerRange!.from;
 
-  it('keeps the caret off the line after the hidden ledger when Raw is left', () => {
+  it('keeps the caret off the line after the hidden ledger when Plain is left', () => {
     const editor = load(fixture, { view: 'raw', tracking: false });
     caret(editor, fixture.lastIndexOf('-->'));
     editor.setViewMode('redlines');

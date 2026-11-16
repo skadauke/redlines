@@ -55,7 +55,7 @@ describe('hard breaks drawn', () => {
     expect(hidden(load(doc))).toContainEqual([doc.indexOf('\\'), doc.indexOf('\\') + 1]);
   });
 
-  it('hides nothing in Raw, nor for an escaped backslash', () => {
+  it('hides nothing in Plain, nor for an escaped backslash', () => {
     expect(hidden(load('One\\\ntwo.', 'raw'))).toEqual([]);
     // An escaped backslash is the escape's, and the line break after it is soft.
     expect(hidden(load('One\\\\\ntwo.'))).toEqual([[3, 4]]);

@@ -65,7 +65,7 @@ export interface AskOptions extends AskDeps {
 export interface Ask {
   /**
    * Opens the box for a question about the selection, or the word under the caret, and puts the
-   * keyboard in it. Returns false when it can't: nothing to ask about, or Raw, which shows markers
+   * keyboard in it. Returns false when it can't: nothing to ask about, or Plain, which shows markers
    * that no answer could be about; the editor's `onNotice`-style message says why.
    */
   start(): boolean;

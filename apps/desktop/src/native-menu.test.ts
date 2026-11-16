@@ -220,16 +220,16 @@ describe('the menu bar', () => {
     expect(redlines.checked).toBe(true);
   });
 
-  it('lists Clean, Redlines and Raw, with Redlines checked in its simple look too', async () => {
+  it('lists Clean, Redlines and Plain, with Redlines checked in its simple look too', async () => {
     const menu = await createNativeMenu(modelOf(commands()));
-    const names = ['Clean', 'Simple', 'Redlines', 'Raw'];
+    const names = ['Clean', 'Simple', 'Redlines', 'Plain'];
     const views = made.items.filter(
       (item) => item.kind === 'check' && item.text !== undefined && names.includes(item.text),
     );
     expect(views.map((item) => [item.text, item.accelerator])).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
       ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Plain', 'Alt+CmdOrCtrl+3'],
     ]);
     menu.update(documentState({ hasRedlines: true, view: 'simple' }));
     expect(views.map((item) => item.checked)).toEqual([false, true, false]);
@@ -362,7 +362,7 @@ describe('the menu bar', () => {
 
   it('sends the menu only what changed', async () => {
     const menu = await createNativeMenu(modelOf(commands()));
-    const raw = itemWith('check', 'Raw');
+    const raw = itemWith('check', 'Plain');
     const setChecked = vi.spyOn(raw as unknown as { setChecked(on: boolean): void }, 'setChecked');
     menu.update(documentState({ view: 'clean' }));
     menu.update(documentState({ view: 'clean', tracking: true }));

@@ -95,7 +95,7 @@ export function startOver(state: EditorState): StateEffect<unknown>[] {
   return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of(dropped)];
 }
 
-/** Why Undo or Redo would do nothing, when there is something to say: Raw, or a reload. */
+/** Why Undo or Redo would do nothing, when there is something to say: Plain, or a reload. */
 function whyNot(state: EditorState, afterReload: string): string | null {
   if (rawIsReadOnly(state)) return RAW_READ_ONLY;
   return !state.readOnly && state.field(droppedField, false) ? afterReload : null;
@@ -109,7 +109,7 @@ export const redoHasSomething = (state: EditorState) => redoDepth(state) > 0;
 
 /**
  * Why Undo is grayed, when there is something to say beyond "nothing to undo": a reload took its
- * steps away, or Raw is read-only (a hint for the Edit menu and the toolbar, as a command's is).
+ * steps away, or Plain is read-only (a hint for the Edit menu and the toolbar, as a command's is).
  */
 export const undoDisabledReason = (state: EditorState): string | undefined =>
   undoDepth(state) > 0 ? undefined : (whyNot(state, UNDO_AFTER_RELOAD) ?? undefined);
@@ -119,7 +119,7 @@ export const redoDisabledReason = (state: EditorState): string | undefined =>
   redoDepth(state) > 0 ? undefined : (whyNot(state, REDO_AFTER_RELOAD) ?? undefined);
 
 /**
- * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is
+ * Undo or Redo, which says why it does nothing: in Plain while Track Changes is on, which is
  * read-only, or after a reload took its steps away.
  */
 function sayingWhy(command: StateCommand, message: string): Command {
