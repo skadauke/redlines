@@ -40,6 +40,7 @@ const DRAW_MS = 80;
 class Scanned {
   private scanned: Scan | null;
   private pending: ChangeSet | null = null;
+  private composed = 0;
 
   readonly doc: Text;
 
@@ -55,10 +56,21 @@ class Scanned {
   }
 
   /** The scan of the document after `changes`, made only when asked for, from this one if it exists. */
-  after(changes: ChangeSet, doc: Text): Scanned {
+  after(changes: ChangeSet, before: Text, doc: Text): Scanned {
     if (!this.scanned) return new Scanned(doc);
+    // An edit across a line break may have made or ended a block, a fence or a blank: scanned again
+    // when it is next needed.
+    let breaks = false;
+    changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      if (inserted.lines > 1 || before.lineAt(fromA).number !== before.lineAt(toA).number)
+        breaks = true;
+    });
+    if (breaks) return new Scanned(doc);
     const next = new Scanned(doc, this.scanned);
     next.pending = this.pending ? this.pending.compose(changes) : changes;
+    next.composed = this.composed + 1;
+    // A long run of edits is carried through now and then, not all at once.
+    if (next.composed > 100) next.current();
     return next;
   }
 
@@ -68,7 +80,9 @@ class Scanned {
     if (this.pending) {
       const changes = this.pending;
       this.pending = null;
-      const map = (pos: number) => changes.mapPos(pos, 1);
+      this.composed = 0;
+      // A line's start stays before what is typed at it.
+      const map = (pos: number) => changes.mapPos(pos, -1);
       this.scanned = {
         restarts: scanned.restarts.map(map),
         refs: scanned.refs
@@ -92,6 +106,12 @@ interface Inside {
 
 /** The context's parts that the likely parse changes. */
 const inside = (cx: ParseContext): Inside => cx as unknown as Inside;
+
+/** Lets go of the parse that is going on, and of what it was to cut from the fragments. */
+function dropParse(cx: ParseContext): void {
+  inside(cx).parse = null;
+  inside(cx).tempSkipped = [];
+}
 
 /** What one editor's likely parsing keeps. */
 interface Shared {
@@ -179,7 +199,8 @@ export function likelyParsing(parser: Parser, restMs = REST_MS): Extension {
 
   const scans = StateField.define<Scanned>({
     create: (state) => new Scanned(state.doc),
-    update: (value, tr) => (tr.docChanged ? value.after(tr.changes, tr.newDoc) : value),
+    update: (value, tr) =>
+      tr.docChanged ? value.after(tr.changes, tr.startState.doc, tr.newDoc) : value,
   });
 
   parser.createParse = (
@@ -233,12 +254,13 @@ export function likelyParsing(parser: Parser, restMs = REST_MS): Extension {
         const cx = contextOf(this.view);
         if (!cx) return;
         const { from } = this.view.viewport;
+        if (update.docChanged) shared.headEnd = update.changes.mapPos(shared.headEnd, 1);
         if (shared.headEnd > 0 && from < shared.headEnd) {
           // The viewport is above where the likely parse starts: it starts nearer again, or, near
           // the start, parses from it. The tree on the screen stays until the new one reaches it.
           shared.headEnd = 0;
           inside(cx).skipped = inside(cx).skipped.filter((span) => span.from !== 0);
-          inside(cx).parse = null;
+          dropParse(cx);
           inside(cx).treeLen = 0;
         } else if (update.viewportChanged) {
           const reach = Math.max(inside(cx).treeLen, inside(cx).parse?.parsedPos ?? 0);
@@ -247,10 +269,15 @@ export function likelyParsing(parser: Parser, restMs = REST_MS): Extension {
             shared.exact = false;
             shared.headEnd = 0;
             inside(cx).skipped = inside(cx).skipped.filter((span) => span.from !== 0);
-            inside(cx).parse = null;
+            dropParse(cx);
           }
         }
-        if (!inside(cx).parse && inside(cx).treeLen < this.view.viewport.to) this.draw();
+        if (
+          update.viewportChanged &&
+          !inside(cx).parse &&
+          inside(cx).treeLen < this.view.viewport.to
+        )
+          this.draw();
         if (update.viewportChanged) this.rest();
       }
 
@@ -291,7 +318,7 @@ export function likelyParsing(parser: Parser, restMs = REST_MS): Extension {
           shared.exact = true;
           shared.headEnd = 0;
           inside(cx).skipped = inside(cx).skipped.filter((span) => span.from !== 0);
-          inside(cx).parse = null;
+          dropParse(cx);
           inside(cx).treeLen = 0;
           // Wakes the parse worker.
           this.view.dispatch({});

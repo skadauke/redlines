@@ -24,7 +24,8 @@ export interface Scan {
 /** The most definitions kept: a document that holds more reads them from its first part. */
 const MAX_REFS = 4000;
 
-const FENCE = /^\s*(`{3,}|~{3,})/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const LIST_ITEM = /^(?:[-+*]|\d{1,9}[.)])(?:\s|$)/;
 const REF = /^ {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*\S/;
 /** The HTML blocks that end at a line with their own closing text (CommonMark's types 1 to 5). */
@@ -72,14 +73,8 @@ export function scan(doc: Text): Scan {
       continue;
     }
     if (fence) {
-      const close = FENCE.exec(line);
-      if (
-        close &&
-        close[1]![0] === fence.char &&
-        close[1]!.length >= fence.size &&
-        /^\s*\S+\s*$/.test(line)
-      )
-        fence = null;
+      const close = FENCE_CLOSE.exec(line);
+      if (close && close[1]![0] === fence.char && close[1]!.length >= fence.size) fence = null;
       previousBlank = false;
       continue;
     }

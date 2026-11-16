@@ -126,6 +126,26 @@ describe('where Markdown starts afresh', () => {
     expect(restartBefore(restarts, -1)).toBeNull();
   });
 
+  it('closes a fence only by a bare closing line, and ignores a fence that is indented code', () => {
+    const text = [
+      '~~~',
+      'a',
+      '',
+      '```js',
+      'not a close',
+      '',
+      '~~~',
+      '',
+      'after',
+      '',
+      '    ```',
+      '',
+      'still outside a fence',
+    ].join('\n');
+    const { restarts } = scan(Text.of(text.split('\n')));
+    expect(restarts).toEqual([0, text.indexOf('after'), text.indexOf('still')]);
+  });
+
   it('is fast on megabytes', () => {
     const doc = Text.of(longText(30_000).split('\n'));
     const start = performance.now();
