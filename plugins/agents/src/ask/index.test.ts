@@ -567,7 +567,8 @@ describe('putting it away', () => {
     select(editor, 'first lien');
     editor.commands.run('ask.start');
     const card = document.body.appendChild(document.createElement('section'));
-    card.className = 'rl-notifications';
+    card.className = 'rl-notification';
+    card.dataset['key'] = 'web-access 1';
     const button = card.appendChild(document.createElement('button'));
     button.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
     expect(bubble()).not.toBeNull();

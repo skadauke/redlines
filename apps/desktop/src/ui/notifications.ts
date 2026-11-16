@@ -72,6 +72,7 @@ export function createNotifications(container: HTMLElement): Notifications {
 
     const card = document.createElement('div');
     card.className = 'rl-notification';
+    if (options.key !== undefined) card.dataset['key'] = options.key;
     const text = document.createElement('p');
     text.className = 'rl-notification-text';
     text.textContent = options.text;

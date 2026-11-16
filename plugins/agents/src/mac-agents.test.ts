@@ -104,6 +104,24 @@ describe('web access (#529)', () => {
     expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Could not.' });
   });
 
+  it('does not start a run again that has written, which would write twice', async () => {
+    const relay = fakeRelay();
+    const claude = fakeProvider({
+      relay,
+      script: async function* ({ tools }) {
+        await tools.initialize();
+        await tools.call('reply', { text: 'Working on it.' });
+        yield { type: 'web', allowed: false, text: 'Searching the web' };
+        yield { type: 'done', finalText: 'Done.' };
+      },
+    });
+    const askWeb = vi.fn<NonNullable<MacAgentsOptions['askWeb']>>(() => Promise.resolve('once'));
+    const all = await run(createMacAgents([claude], relay, { askWeb }));
+    expect(askWeb).not.toHaveBeenCalled();
+    expect(claude.requests).toHaveLength(1);
+    expect(all.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
+  });
+
   it('answers no without anyone to ask', async () => {
     const relay = fakeRelay();
     const claude = webby(relay);

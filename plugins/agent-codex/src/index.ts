@@ -196,7 +196,7 @@ export function newCodexState(reach?: RunReach, web = false): CodexState {
  * so a run that wants the web can only try a command, which the profile holds back: seeing one is
  * how the host knows to ask (#529).
  */
-const WEB_COMMAND = /(?:^|[\s;&|(`'"/])(?:curl|wget)(?=[\s;&|)`'"]|$)/;
+const WEB_COMMAND = /(?:^|[;&|(`'"]\s*)(?:\/[^\s;&|]*\/)?(?:curl|wget)(?=[\s;&|)`'"]|$)/;
 
 /**
  * The files a command's output says it couldn't read: `cat: /path: Operation not permitted`, as the

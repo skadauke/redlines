@@ -411,9 +411,14 @@ describe('parseCodexLine', () => {
     expect(parseCodexLine(wants, newCodexState(undefined, true))).toEqual(
       expect.objectContaining({ type: 'status' }),
     );
+    for (const command of ['ls curly', 'rg curl src', 'ls /usr/bin/curl', 'cat curl.md']) {
+      expect(parseCodexLine(item('command_execution', { command }), newCodexState())).toEqual(
+        expect.objectContaining({ type: 'status' }),
+      );
+    }
     expect(
-      parseCodexLine(item('command_execution', { command: 'ls curly' }), newCodexState()),
-    ).toEqual(expect.objectContaining({ type: 'status' }));
+      parseCodexLine(item('command_execution', { command: '/usr/bin/curl -s x' }), newCodexState()),
+    ).toEqual(expect.objectContaining({ type: 'web' }));
   });
 
   it('says the web was used, and marks the answer', () => {

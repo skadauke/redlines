@@ -28,6 +28,9 @@ const KEEP_MS = 60_000;
 /** What an agent with no toolbox is handed in its place: nothing to connect to. */
 const NO_TOOLS: McpEndpoint = { command: '', args: [] };
 
+/** The toolbox's tools that write to the document or its thread. */
+const WRITES = new Set(['str_replace', 'comment', 'reply']);
+
 export interface MacAgents extends HostAgents {
   forget(): void;
 }
@@ -134,6 +137,18 @@ export function createMacAgents(
       // once, a run that is turned down goes on without, and is not asked again.
       let web = options.web?.() === true;
       let turnedDown = false;
+      // A run that has written (a reply, a comment, an edit) isn't started again: its writes would
+      // be made twice. It goes on, and its web call is refused.
+      let wrote = false;
+      const watching: ToolLines = (line) => {
+        try {
+          const call = JSON.parse(line) as { method?: unknown; params?: { name?: unknown } };
+          if (call.method === 'tools/call' && WRITES.has(String(call.params?.name))) wrote = true;
+        } catch {
+          // Not JSON: the toolbox says so.
+        }
+        return tools(line);
+      };
       for (;;) {
         const stop = new AbortController();
         const forward = () => stop.abort();
@@ -142,10 +157,10 @@ export function createMacAgents(
         let wanted: string | undefined;
         let used = false;
         try {
-          for await (const event of runOnce(agent, { ...asked, web }, tools, stop.signal)) {
+          for await (const event of runOnce(agent, { ...asked, web }, watching, stop.signal)) {
             if (event.type === 'web') {
               if (event.allowed) used = true;
-              else if (!web && !turnedDown) {
+              else if (!web && !turnedDown && !wrote) {
                 wanted = event.text;
                 stop.abort();
                 break;

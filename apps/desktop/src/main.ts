@@ -325,6 +325,7 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
 // doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
+let webAsks = 0;
 const webAccess = {
   web: () => loadSettings().webAccess,
   allowWeb: () => void updateSettings({ webAccess: true }),
@@ -335,11 +336,12 @@ const webAccess = {
         card.close();
         resolve(answer);
       };
+      // Its own key: another run's card doesn't take this one's place.
       const card = notifications.show({
-        key: 'web-access',
+        key: `web-access ${++webAsks}`,
         text: `${name} wants to use the web, to look something up or check a source.`,
         dismissLabel: 'Don’t Allow',
-        onDismiss: () => resolve('no'),
+        onDismiss: () => done('no')(card),
         alternative: { label: 'Allow Once', run: done('once') },
         action: { label: 'Allow Always', run: done('always') },
       });
