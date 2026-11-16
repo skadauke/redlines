@@ -531,7 +531,7 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     for (const edit of [type(5, '\n\n'), remove(0, 6)]) {
       expect(refusal(text, edit), JSON.stringify(edit)).toBe('would-hide-marks');
       expect(message(text, edit), JSON.stringify(edit)).toBe(
-        'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.',
+        'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain.',
       );
     }
     // A line break that leaves no blank line keeps it a line of the paragraph.

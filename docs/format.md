@@ -195,7 +195,7 @@ mark's markers there than the file had.
   later one gets a new one.
 - In a live session, an id may change until the server confirms the edit, and never after that.
 - People don't see ids. The editor numbers changes in document order ("Change 3 of 17"), as
-  Word's Reviewing pane does. Ids appear only in the raw view, the inspector and the agent API.
+  Word's Reviewing pane does. Ids appear only in the Plain view, the inspector and the agent API.
 
 Sequential numbers would be shorter, but they collide whenever two people work in parallel. In
 simulated live sessions, 14–30% of new sequential ids were already taken by another client, and
@@ -2621,7 +2621,7 @@ it, one per line:
     text the ones before leave, so that every order of decisions writes the same bytes. A mark
     whose table has other columns than `SPEC` has, and a mark that no table holds, can be accepted
     and not rejected: "This alignment change can't be rejected, because its table no longer has
-    the columns it had. Accept it, or change the text in Raw with Track Changes off."
+    the columns it had. Accept it, or change the text in Plain with Track Changes off."
   - **One change per table.** The author's own pending alignment change is changed in place, the
     mark staying where it is, and is taken away, with its old row written back as it was, when the
     new alignments are the old ones. Another person's pending alignment change refuses yours: "Bo
@@ -2674,7 +2674,7 @@ it, one per line:
       cells and the rows of a table, so a column that goes or moves can put the mark inside code or
       a comment. The words are those of any change that an edit would hide there ("This edit would
       hide other changes in code or an HTML comment, where they would no longer be read. Accept or
-      reject them first, or edit the source in Raw with Track Changes off."; deleting columns says
+      reject them first, or edit the source in Plain with Track Changes off."; deleting columns says
       "This decision would hide other changes in code or an HTML comment, where they would no longer
       be read. Decide the changes next to it first.", as it does beside any other change).
   - A table keeps its alignment when its columns are inserted (a new column has none), deleted or
@@ -3034,7 +3034,7 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Raw, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3216,7 +3216,7 @@ Every order of decisions reads the same, judged against micromark 4.0.2 with GFM
 
 ### 3.13 Untracked edits
 
-An edit that can't be tracked, and that no unit holds, or that is in front matter or in Raw while
+An edit that can't be tracked, and that no unit holds, or that is in front matter or in Plain while
 Track Changes is on, is made without tracking after the person is asked, and leaves no mark and no
 ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
 Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
@@ -3518,8 +3518,8 @@ same values.
     that only records how it was left, open in Clean, whatever view was used last and whatever the
     ledger says, since there is nothing for another view to show. A file that gains redlines is
     saved with its view, and opens in it.
-  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
-    source, and a save made in Raw leaves the view the file had.
+  - Clean, Redlines and Simple are written. Plain never is: nobody wants a document to open as
+    source, and a save made in Plain leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave

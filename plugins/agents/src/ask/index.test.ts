@@ -231,7 +231,7 @@ describe('the command', () => {
     expect(bubble()).toBeNull();
   });
 
-  it('is not for Raw, where a selection holds markers', () => {
+  it('is not for Plain, where a selection holds markers', () => {
     const { editor, notices } = mount({ view: 'raw' });
     select(editor, 'first lien');
     expect(editor.commands.run('ask.start')).toBe(false);

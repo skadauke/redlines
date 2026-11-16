@@ -197,7 +197,7 @@ describe('markdownPreview', () => {
     expect(numbers.sizes).toEqual(['', '']); // already as wide as drawn
   });
 
-  it('hides blank lines between blocks, but not in code or Raw', () => {
+  it('hides blank lines between blocks, but not in code or Plain', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);
     const lines = () =>

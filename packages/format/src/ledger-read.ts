@@ -117,14 +117,14 @@ const THREAD_KEYS = new Set([
 ]);
 const REPLY_KEYS = new Set(['id', 'by', 'at', 'text']);
 
-type Raw = Record<string, unknown>;
+type Plain = Record<string, unknown>;
 
 /** A key with nothing after it, which the `failsafe` schema reads as an empty string. */
 function isBlank(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-function isMap(value: unknown): value is Raw {
+function isMap(value: unknown): value is Plain {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -312,7 +312,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
 }
 
 type Warn = (code: WarningCode, message: string, id?: string) => void;
-type UnknownFields = (where: string, map: Raw, known: Set<string>) => ExtraFields | undefined;
+type UnknownFields = (where: string, map: Plain, known: Set<string>) => ExtraFields | undefined;
 
 function readPerson(
   handle: string,

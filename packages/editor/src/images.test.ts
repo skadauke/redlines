@@ -584,7 +584,7 @@ describe('an image written while Track Changes is on', () => {
 });
 
 describe('where the editor takes no image', () => {
-  it('refuses in Raw while Track Changes is on, with the reason, and pastes nothing', () => {
+  it('refuses in Plain while Track Changes is on, with the reason, and pastes nothing', () => {
     const { editor, given, notices } = load('One two\n', { view: 'raw', tracking: true });
     editor.view.dispatch({ selection: { anchor: 3 } });
     const event = pasteFiles(editor, [png()]);
@@ -595,7 +595,7 @@ describe('where the editor takes no image', () => {
     expect(editor.getDoc()).toBe('One two\n');
   });
 
-  it('takes one in Raw while Track Changes is off', () => {
+  it('takes one in Plain while Track Changes is off', () => {
     const { editor, given, notices } = load('One two\n', { view: 'raw', tracking: false });
     editor.view.dispatch({ selection: { anchor: 3 } });
     pasteFiles(editor, [png()]);

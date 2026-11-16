@@ -704,7 +704,7 @@ describe('where nothing is corrected', () => {
     expect(notices).toEqual([]);
   });
 
-  it('leaves Raw as typed', async () => {
+  it('leaves Plain as typed', async () => {
     const editor = load('Hello ', { view: 'raw' });
     editor.view.dispatch({ selection: { anchor: 6 } });
     type(editor, 'teh ');

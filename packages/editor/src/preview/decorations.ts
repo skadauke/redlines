@@ -529,7 +529,7 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
 }
 
 /**
- * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
+ * The preview's decorations for a state. Exported for tests; the editor caches them. The Plain view
  * shows the source as written, without them.
  */
 export function previewDecorations(state: EditorState): DecorationSet {
@@ -672,8 +672,8 @@ function hardBreaksOf(decorations: DecorationSet): DecorationSet {
  */
 const hardBreakCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
-    // A change, a selection, or a switch of the view (Raw has no atoms: a caret between the spaces
-    // that Raw allowed goes out when the spaces hide).
+    // A change, a selection, or a switch of the view (Plain has no atoms: a caret between the spaces
+    // that Plain allowed goes out when the spaces hide).
     if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
       return tr;
     }

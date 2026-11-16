@@ -152,7 +152,7 @@ const REFERENCE =
 const DEFINES = 'This line defines a link.';
 
 const STRAY_TAG =
-  'This text has a <sub> or <sup> tag without its pair. Select whole pairs of tags, or take the stray tag away in Raw first.';
+  'This text has a <sub> or <sup> tag without its pair. Select whole pairs of tags, or take the stray tag away in Plain first.';
 
 /** A stretch of the visible text. */
 type Piece = Range;

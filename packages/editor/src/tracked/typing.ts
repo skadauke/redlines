@@ -2,14 +2,14 @@
 // author's edits through the format's trackedEdit: typing becomes an insertion, deleting a
 // deletion and replacing a substitution, each with the markers and the ledger entry the format
 // writes for it, in one transaction, so one Undo takes it back exactly. A tracked edit made in
-// Clean switches the view to Redlines, and Raw is read-only while Track Changes is on, because
+// Clean switches the view to Redlines, and Plain is read-only while Track Changes is on, because
 // typing there could forge or break markers.
 //
-// With Track Changes off, outside Raw, an edit is an edit of the text itself (format §3.10), which
+// With Track Changes off, outside Plain, an edit is an edit of the text itself (format §3.10), which
 // the format's untrackedEdit writes: what is typed never becomes part of a pending change, and what
 // is deleted is gone for good, with the marks that have no text left. It is one transaction too.
 //
-// With Track Changes on or off, outside Raw, Backspace and Delete never delete a marker: next to
+// With Track Changes on or off, outside Plain, Backspace and Delete never delete a marker: next to
 // hidden text they act on the visible character beyond it, and nothing is typed after the ledger
 // at the end of the file.
 
@@ -102,9 +102,9 @@ export const refusedEditEffect = StateEffect.define<string>();
 export const editGroupAnnotation = Annotation.define<boolean>();
 
 export const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
-/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+/** Plain shows markers as text, which typing could forge or break while edits are tracked. */
 export function rawIsReadOnly(state: EditorState): boolean {
   return state.field(trackingField) && state.field(viewModeField) === 'raw';
 }
@@ -688,7 +688,7 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
 export const composedTextFacet =
   Facet.define<(state: EditorState, from: number, text: string) => string>();
 
-/** Text an input method composes outside Raw (see `compositionField`). */
+/** Text an input method composes outside Plain (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
   return (
     tr.isUserEvent('input.type.compose') &&
@@ -861,19 +861,19 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
   },
 });
 
-/** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
+/** Plain is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
   [trackingField, viewModeField],
   rawIsReadOnly,
 );
 
-/** In Raw while it is read-only, says why what the page would edit doesn't go in. */
+/** In Plain while it is read-only, says why what the page would edit doesn't go in. */
 function sayReadOnly(view: EditorView): void {
   if (rawIsReadOnly(view.state)) view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
 }
 
 /**
- * Typing, deleting, pasting, cutting and dropping in Raw while it is read-only, which the editor
+ * Typing, deleting, pasting, cutting and dropping in Plain while it is read-only, which the editor
  * takes no change from. Undo and Redo say why themselves.
  */
 const rawEditsRefused = EditorView.domEventObservers({

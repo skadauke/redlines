@@ -210,7 +210,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'plugins/formatting/src/index.ts',
     'RAW_FORMAT',
     'disable',
-    'format and block commands are grayed in Raw while edits are tracked (R6a)',
+    'format and block commands are grayed in Plain while edits are tracked (R6a)',
   ],
   ['packages/editor/src/tracked/typing.ts', 'RAW_READ_ONLY', 'alert', 'inventory #73'],
   [
@@ -1019,13 +1019,13 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'plugins/review/src/highlight.ts',
     'IN_RAW_HINT',
     'disable',
-    'Highlight is grayed in Raw, where its markers are text (R6a)',
+    'Highlight is grayed in Plain, where its markers are text (R6a)',
   ],
   [
     'plugins/review/src/highlight.ts',
     'REFUSED_IN_RAW',
     'alert',
-    'Raw shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
+    'Plain shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
   ],
   [
     'plugins/review/src/highlight.ts',
@@ -1037,6 +1037,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'plugins/review/src/rail.ts',
     'REFUSED_IN_RAW',
     'alert',
-    'Raw shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
+    'Plain shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
   ],
 ];
