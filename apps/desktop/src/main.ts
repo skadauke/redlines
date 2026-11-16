@@ -19,6 +19,7 @@ import {
 import { codeLanguages } from '@redlines/code';
 import {
   createEditor,
+  PLAIN_ONLY_TRACKING,
   type Author,
   type EditorTyping,
   type EditorUiState,
@@ -858,6 +859,8 @@ async function restoreAfterCrash(): Promise<void> {
 }
 
 const toggleTracking = () => {
+  // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
+  if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
@@ -1189,6 +1192,7 @@ function render(): void {
     name: doc.name,
     dirty: doc.dirty,
     fileDraggable: doc.path !== null && canDragFile,
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -1196,6 +1200,7 @@ function render(): void {
     showResolved: settings.showResolved,
   });
   menuState = {
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,

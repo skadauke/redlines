@@ -25,6 +25,7 @@ import {
 } from '@redlines/format';
 import type {
   Author,
+  DocumentKind,
   Editor,
   EditorOptions,
   MetPerson,
@@ -114,6 +115,7 @@ import {
   menuViewOf,
   parsedField,
   peopleFacet,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -203,6 +205,9 @@ export {
   markupViewFacet,
   menuViewOf,
   parsedField,
+  PLAIN_ONLY_TRACKING,
+  PLAIN_ONLY_VIEWS,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -261,6 +266,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const peopleCompartment = new Compartment();
   const typingCompartment = new Compartment();
   const lineBreakMarksCompartment = new Compartment();
+  let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
@@ -407,6 +413,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       doc: loaded.doc,
       extensions: [
         loaded.extension,
+        plainOnlyFacet.of(kind === 'plain-only'),
         markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
@@ -421,7 +428,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
-  const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
+  const plain = () => kind === 'plain-only';
+  const initial = stateFor(loadFile(options.doc, plain()), options.view, options.tracking);
   told = fileText(initial);
   const commands = createCommandRegistry(
     () => editor,
@@ -432,6 +440,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const parsed = state.field(parsedField);
     const reasons = disabledReasons(commands.list(), state);
     return {
+      kind: state.facet(plainOnlyFacet) ? 'plain-only' : 'markdown',
       view: state.field(viewModeField),
       markupView: state.facet(markupViewFacet),
       tracking: state.field(trackingField),
@@ -527,8 +536,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     view,
     commands,
     getDoc: () => fileText(view.state),
-    setDoc: (doc) => {
-      view.setState(stateFor(loadFile(doc)));
+    setDoc: (doc, next) => {
+      kind = next ?? 'markdown';
+      view.setState(stateFor(loadFile(doc, plain())));
       trackingChosen = null;
       shownLook = lookOf(view.state);
       told = fileText(view.state);
@@ -536,7 +546,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tellNewPeople();
     },
     reloadDoc: (doc) => {
-      const next = loadFile(doc);
+      const next = loadFile(doc, plain());
       const { state } = view;
       const asked = state.field(parsedField).ledger.tracking === 'everyone';
       const { changes, selection, effects } = newVersion(state, next.doc);
@@ -568,7 +578,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     applyAgentEdit: (doc, step) => {
       if (doc === fileText(view.state)) return;
-      const next = loadFile(doc);
+      const next = loadFile(doc, plain());
       const { state } = view;
       const { changes, selection, effects } = newVersion(state, next.doc);
       view.dispatch({
@@ -582,8 +592,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
-    setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    setViewMode: (mode) => {
+      if (!plain()) view.dispatch({ effects: chooseViewEffects(mode) });
+    },
     showView: (menuView) => {
+      // A Plain-only file has Plain alone.
+      if (plain()) return;
       if (menuView !== 'redlines') {
         view.dispatch({ effects: chooseViewEffects(menuView) });
         return;
@@ -605,6 +619,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
     setTracking: (on, switched) => {
+      // A Plain-only file is never tracked, and has no ledger to record a choice in.
+      if (plain()) return;
       view.dispatch({ effects: setTrackingEffect.of(on) });
       // The switch writes nothing and makes no edit (format §5.6): the file records it when it is
       // saved for another reason (`recordTracking`). A switch that is the person's own preference,

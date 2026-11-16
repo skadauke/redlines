@@ -16,6 +16,7 @@
 
 import type { AgentStep, Editor } from '@redlines/editor';
 import { agentWorkOf, type Handle } from '@redlines/format';
+import { documentKind } from './file-names.ts';
 import {
   basename,
   dirname,
@@ -641,7 +642,7 @@ export class DocumentController {
     this.#disk = saved;
     this.#savedAt = null;
     this.#onLoading(path);
-    this.#editor.setDoc(text);
+    this.#editor.setDoc(text, (path !== null && documentKind(path)) || 'markdown');
     const everyone = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#state = {
       path,

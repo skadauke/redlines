@@ -6,7 +6,7 @@
 // last saved, on hover, and a double-click on it renames the document. A small document icon beside
 // it drags the file, as a native title bar's proxy icon does.
 
-import { menuViewOf } from '@redlines/editor';
+import { menuViewOf, PLAIN_ONLY_TRACKING, PLAIN_ONLY_VIEWS } from '@redlines/editor';
 import type { MenuView, ViewMode } from '@redlines/editor';
 import { icon, type IconName } from './icons.ts';
 import { createMenu, type Menu } from './menu.ts';
@@ -20,6 +20,8 @@ export interface TitleBarState {
    * is shown for it.
    */
   fileDraggable: boolean;
+  /** A Plain-only file (text or code): Plain alone, and no Track Changes. */
+  plainOnly: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
@@ -144,6 +146,7 @@ export function createTitleBar(
     name: '',
     dirty: false,
     fileDraggable: false,
+    plainOnly: false,
     view: 'clean',
     tracking: false,
     hasRedlines: false,
@@ -361,6 +364,7 @@ export function createTitleBar(
     shortcut,
     checked: menuViewOf(state.view) === view,
     disabled,
+    disabledHint: state.plainOnly && view !== 'raw' ? PLAIN_ONLY_VIEWS : undefined,
     select: () => actions.setView(view),
   });
   const viewMenu: Menu = createMenu({
@@ -369,14 +373,14 @@ export function createTitleBar(
     button: viewButton,
     // The keys are the menu bar's, as in menu-model.ts.
     entries: () => [
-      viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
+      viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean, state.plainOnly),
       // Not disabled while it is the view shown: the menu opens on the row that is checked, and
       // a disabled row can't be focused (the keys and VoiceOver would not find the current view).
       viewItem(
         'redlines',
         VIEW_NAMES.redlines,
         VIEW_KEYS.redlines,
-        !state.hasRedlines && menuViewOf(state.view) !== 'redlines',
+        state.plainOnly || (!state.hasRedlines && menuViewOf(state.view) !== 'redlines'),
       ),
       'divider',
       viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
@@ -402,6 +406,8 @@ export function createTitleBar(
         iconClass: state.tracking ? 'rl-pen-on' : undefined,
         shortcut: TRACKING_KEY,
         checked: state.tracking,
+        disabled: state.plainOnly,
+        disabledHint: PLAIN_ONLY_TRACKING,
         select: () => actions.toggleTracking(),
       },
       'divider',
@@ -411,7 +417,8 @@ export function createTitleBar(
         icon: 'list',
         // No key, as in the menu bar: ⌥⌘] is Next Change.
         // Nothing to review in a document without redlines.
-        disabled: !state.hasRedlines,
+        disabled: !state.hasRedlines || state.plainOnly,
+        disabledHint: state.plainOnly ? PLAIN_ONLY_TRACKING : undefined,
         select: () => actions.openReview(),
       },
       'divider',

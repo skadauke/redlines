@@ -19,6 +19,7 @@ const BASE: TitleBarState = {
   name: 'launch-plan.md',
   dirty: false,
   fileDraggable: true,
+  plainOnly: false,
   view: 'redlines',
   tracking: false,
   hasRedlines: true,
@@ -589,6 +590,23 @@ describe('title bar', () => {
     expect(redlines().disabled).toBe(false);
     bar.update({ ...BASE, hasRedlines: false, view: 'raw' });
     expect(redlines().disabled).toBe(true);
+  });
+
+  it('disables Clean, Redlines and Track Changes in a text or code file, with the reason as their hint', () => {
+    const { actions, button, menu } = setup({ plainOnly: true, view: 'raw', hasRedlines: false });
+    hover(button('View'));
+    for (const name of ['Clean', 'Redlines']) {
+      const row = item(menu('View'), name);
+      expect(row.disabled, name).toBe(true);
+      expect(row.title).toBe('Only Markdown files have Clean and Redlines views.');
+    }
+    expect(item(menu('View'), 'Plain').disabled).toBe(false);
+    expect(item(menu('View'), 'Plain').getAttribute('aria-checked')).toBe('true');
+    const tracking = item(menu('Review'), 'Track Changes');
+    expect(tracking.disabled).toBe(true);
+    expect(tracking.title).toBe('Only Markdown files have Track Changes and review.');
+    tracking.click();
+    expect(actions.toggleTracking).not.toHaveBeenCalled();
   });
 
   it('lists Clean, Redlines and Plain in order, with their keys and one check mark', () => {

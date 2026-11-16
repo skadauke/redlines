@@ -120,7 +120,7 @@ export interface LoadedFile {
   effects: readonly StateEffect<unknown>[];
 }
 
-export function loadFile(text: string): LoadedFile {
+export function loadFile(text: string, plainOnly = false): LoadedFile {
   const lines: string[] = [];
   /** Each line break: where its LF is in the document, and how the file writes it. */
   const found: [at: number, style: string][] = [];
@@ -141,7 +141,8 @@ export function loadFile(text: string): LoadedFile {
   const ending = lineBreak ?? '\n';
   // The blank line in front of the ledger is kept as the file has it, whatever its style: the
   // format writes it with a new ledger and never again (format §5.1, §9.2), and so does the editor.
-  const blank = blankLineOf(doc);
+  // A Plain-only file has no ledger, and a `<!-- redlines` in it is text.
+  const blank = plainOnly ? null : blankLineOf(doc);
   const inBlank = (at: number) => blank !== null && at >= blank.from && at < blank.to;
   const breaks = found
     .filter(([at, style]) => style !== ending || inBlank(at))

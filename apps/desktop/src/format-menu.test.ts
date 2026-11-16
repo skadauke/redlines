@@ -69,6 +69,7 @@ function normalized(accelerator: string): string {
 }
 
 const STATE = {
+  plainOnly: false,
   inDocument: true,
   sidebarOpen: false,
   showResolved: false,

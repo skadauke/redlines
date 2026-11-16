@@ -82,6 +82,7 @@ import {
   holdViewAnnotation,
   markupViewFacet,
   parsedField,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -102,8 +103,11 @@ export const trackingStepEffect = StateEffect.define<{ set: boolean; back: boole
  * (`tracking: everyone`, format §5.6).
  */
 export const trackingField = StateField.define<boolean>({
-  create: (state) => state.field(parsedField).ledger.tracking === 'everyone',
+  create: (state) =>
+    !state.facet(plainOnlyFacet) && state.field(parsedField).ledger.tracking === 'everyone',
   update(on, tr) {
+    // A Plain-only file is never tracked.
+    if (tr.state.facet(plainOnlyFacet)) return false;
     for (const effect of tr.effects.toReversed()) {
       if (effect.is(setTrackingEffect)) return effect.value;
       if (effect.is(trackingStepEffect)) return effect.value.set;

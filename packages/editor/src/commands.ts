@@ -10,10 +10,33 @@
 import { EditorState, Prec } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
+import { plainOnlyFacet } from './tracked/field.ts';
+
+/**
+ * The commands that work in a Plain-only file, by the start of their id: Edit's, find and replace,
+ * and the outline. Every other command makes or reads marks or Markdown, which such a file has
+ * none of.
+ */
+const PLAIN_ONLY_COMMANDS = ['edit.', 'find.', 'outline.'];
+
+/** Why a command that makes or reads Markdown can't run in a Plain-only file. */
+function plainOnlyReason(id: string): string {
+  if (id.startsWith('ask.') || id.startsWith('comment.') || id.startsWith('highlight.')) {
+    return 'Only Markdown files have comments, highlights and Ask.';
+  }
+  return 'Only Markdown files have formatting.';
+}
 
 /** Why `command` can't run in `state`, or undefined when it can. */
-export const disabledReasonOf = (command: EditorCommand, state: EditorState): string | undefined =>
-  command.disabledReason?.(state);
+export const disabledReasonOf = (
+  command: EditorCommand,
+  state: EditorState,
+): string | undefined => {
+  if (state.facet(plainOnlyFacet) && !PLAIN_ONLY_COMMANDS.some((id) => command.id.startsWith(id))) {
+    return plainOnlyReason(command.id);
+  }
+  return command.disabledReason?.(state);
+};
 
 const isEnabled = (command: EditorCommand, state: EditorState) =>
   disabledReasonOf(command, state) === undefined;

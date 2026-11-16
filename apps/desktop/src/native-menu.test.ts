@@ -174,6 +174,7 @@ const press = (code: string, modifiers: KeyboardEventInit) => {
 };
 
 const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
+  plainOnly: false,
   view: 'clean',
   tracking: false,
   hasRedlines: false,
@@ -500,17 +501,19 @@ describe('the menu bar', () => {
       expect(link.enabled).toBe(true);
     });
 
-    it('draws a command with nothing to follow as a plain item, under its menu', async () => {
+    it('draws every command as an item that follows enabledCommands, under its menu', async () => {
       const registry = registered();
-      await createNativeMenu(modelOf(commands(), registry));
+      const menu = await createNativeMenu(modelOf(commands(), registry));
       const rows = itemWith('submenu', 'Format').options['items'] as unknown[];
       expect(rows[0]).toBe(itemWith('check', 'Bold'));
       expect(rows[1]).toEqual({ item: 'Separator' });
       expect(rows[2]).toBe(itemWith('item', 'Link…'));
-      const clear = rows[3] as { text: string; action: () => void };
-      expect(clear.text).toBe('Clear');
-      clear.action();
-      expect(registry.run).toHaveBeenCalledWith('format.clear');
+      // A command with no reason of its own is disabled too when the document is a text file's.
+      const clear = itemWith('item', 'Clear');
+      menu.update(documentState({ enabledCommands: [] }));
+      expect(clear.enabled).toBe(false);
+      menu.update(documentState({ enabledCommands: ['format.clear'] }));
+      expect(clear.enabled).toBe(true);
     });
   });
 
