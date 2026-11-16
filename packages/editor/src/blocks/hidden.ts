@@ -154,6 +154,11 @@ export function blankLines(
       else runs.push({ from: line.from, to: line.to });
     }
   }
+  return keepLines(doc, runs, kept, open);
+}
+
+/** The lines that stay, the caret's and the open block's, taken out of the runs they are in. */
+function keepLines(doc: Text, runs: Span[], kept: number | null, open: Span | null): Span[] {
   // The lines that stay: the caret's, and the open block's, taken out of the runs they are in.
   const keep = (from: number, to: number) => {
     for (let i = 0; i < runs.length; i++) {
@@ -176,4 +181,82 @@ export function blankLines(
     }
   }
   return runs;
+}
+
+/** Where the lines that the tree has not reached are read as they stand (`blankLines`). */
+export const TAIL_LENGTH = TAIL;
+
+/**
+ * The ordinary comments of the parsed part of the text that start from `from` up to `to`, as
+ * `commentSpans` has them, read from the tree of that stretch alone (#744).
+ */
+export function commentSpansIn(state: EditorState, from: number, to: number): Span[] {
+  const tree = syntaxTree(state);
+  const found: Span[] = [];
+  if (from >= tree.length) return found;
+  tree.iterate({
+    from,
+    to: Math.min(to, tree.length),
+    enter: (node) => {
+      if (node.name !== 'Comment' && node.name !== 'CommentBlock') return true;
+      const text = state.sliceDoc(node.from, node.to);
+      for (let open = text.indexOf('<!--'); open !== -1;) {
+        const close = text.indexOf('-->', open + 2);
+        if (close === -1) break;
+        const start = node.from + open;
+        if (start >= from && start < to) found.push({ from: start, to: node.from + close + 3 });
+        open = text.indexOf('<!--', close + 3);
+      }
+      return false;
+    },
+  });
+  return found;
+}
+
+/**
+ * The runs of blank lines that start from `from` up to `to`, as `blankLines` has them, read from
+ * the lines and the tree of that stretch alone (#744). The stretch starts and ends at lines the
+ * runs don't reach across, so that no run is cut.
+ */
+export function blankLinesIn(
+  state: EditorState,
+  from: number,
+  to: number,
+  kept: number | null = keptLine(state),
+  open: Span | null = null,
+): Span[] {
+  const { doc } = state;
+  const tree = syntaxTree(state);
+  const first = doc.lineAt(Math.min(from, doc.length));
+  const holders: Span[] = [];
+  if (from <= tree.length) {
+    tree.iterate({
+      from,
+      to: Math.min(to, tree.length),
+      enter: (node) => {
+        if (!HOLDERS.has(node.name)) return true;
+        holders.push({ from: node.from, to: node.to });
+        return false;
+      },
+    });
+  }
+  const end = Math.min(doc.length, tree.length + TAIL);
+  const runs: Span[] = [];
+  let next = 0;
+  for (let n = first.number; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    if (line.from >= to) break;
+    // Past the parsed part: the lines as they stand, up to the tail, and none after it.
+    if (line.from >= tree.length && tree.length < doc.length && line.from > end) break;
+    if (line.from < from || !BLANK.test(line.text)) continue;
+    if (line.from < tree.length || tree.length >= doc.length) {
+      while (next < holders.length && holders[next]!.to < line.from) next++;
+      const holder = holders[next];
+      if (holder && holder.from <= line.from && line.to <= holder.to) continue;
+    }
+    const run = runs.at(-1);
+    if (run && run.to === line.from - 1) run.to = line.to;
+    else runs.push({ from: line.from, to: line.to });
+  }
+  return keepLines(doc, runs, kept, open);
 }

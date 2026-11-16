@@ -8,6 +8,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import {
+  type ChangeSet,
   EditorSelection,
   EditorState,
   type Extension,
@@ -37,8 +38,16 @@ import {
   type Parsed,
   type Segment,
 } from '@redlines/format';
-import { blankLines, commentSpans, keptLine } from '../blocks/hidden.ts';
+import {
+  blankLines,
+  blankLinesIn,
+  TAIL_LENGTH,
+  commentSpans,
+  commentSpansIn,
+  keptLine,
+} from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
+import { resync } from '../restyle.ts';
 import { BULLETS, LEVEL_COLS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
 import {
@@ -51,6 +60,14 @@ import {
 } from '../table/ghost-table.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
+import {
+  markEnd,
+  marksOverlapping,
+  marksStartingIn,
+  windowEnd,
+  windowStart,
+  type Zone,
+} from './windows.ts';
 import {
   authorFacet,
   bodyEnd,
@@ -462,7 +479,7 @@ function struckBlocks(
   return { struck, absorbed };
 }
 
-function analyze(state: EditorState, kept: number | null): Model {
+function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
   const model: Model = {
     hidden: [],
     blocks: [],
@@ -475,7 +492,10 @@ function analyze(state: EditorState, kept: number | null): Model {
   };
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
-  const parsed = state.field(parsedField);
+  const whole = state.field(parsedField);
+  // In a window, the marks that open in it: none reaches out of it (`windows.ts`).
+  const marksHere = zone ? marksStartingIn(whole, zone.from, zone.to) : whole.marks;
+  const parsed = zone ? { ...whole, marks: marksHere } : whole;
   // Simple is Redlines with the changes' looks mostly off (design: The views and the looks): the same
   // parts and layers, so that the bars land on the same lines, with no deleted text, no underline
   // (an insertion is only in its author's color), no tint and no marks of line breaks.
@@ -636,7 +656,8 @@ function analyze(state: EditorState, kept: number | null): Model {
     }
   }
   model.hidden.sort((a, b) => a.from - b.from);
-  const comments = ordinaryComments(state, model.hidden, parsed.ledgerRange);
+  const here = zone ? commentSpansIn(state, zone.from, zone.to) : commentSpans(state);
+  const comments = ordinaryComments(here, model.hidden, parsed.ledgerRange);
   // Small dimmed notes in Redlines (design §5.5); Clean is the document without them.
   if (redlines) model.comments = comments;
   else {
@@ -644,15 +665,50 @@ function analyze(state: EditorState, kept: number | null): Model {
     model.hidden.push(...hidden);
     model.hidden.sort((a, b) => a.from - b.from);
   }
-  hideLedger(state.doc, parsed.ledgerRange, model);
+  const ledger = parsed.ledgerRange;
+  if (!zone || (ledger && ledger.from >= zone.from && ledger.from < zone.to)) {
+    hideLedger(state.doc, ledger, model);
+  }
   // Blank lines between blocks are structure, never lines (design: block editing).
   // The empty paragraph Return opened is drawn, wherever the caret is, while it is open.
-  model.blocks.push(...blankLines(state, kept, openBlock(state)?.empty ?? null));
+  const blank = openBlock(state)?.empty ?? null;
+  model.blocks.push(
+    ...(zone
+      ? blankLinesIn(state, zone.from, zone.to, kept, blank)
+      : blankLines(state, kept, blank)),
+  );
   // The empty paragraph that is open is no blank line that a marker's line takes along.
   const open = openBlock(state)?.empty ?? null;
   const drawn = (line: Line) => open !== null && line.from <= open.to && line.to >= open.from;
   hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length, drawn);
+  return zone ? within(model, zone) : sorted(model);
+}
+
+/** The model in the order its pieces start, as a window's pieces are put among the others'. */
+function sorted(model: Model): Model {
+  model.placed.sort((a, b) => a.at - b.at);
+  model.layers.sort((a, b) => a.from - b.from);
+  model.rows.sort((a, b) => a.at - b.at);
+  model.struck.sort((a, b) => a.at - b.at);
   return model;
+}
+
+const startsIn = (zone: Zone, pos: number) => pos >= zone.from && pos < zone.to;
+
+/** What a window's model holds of the pieces that start in it. */
+function within(model: Model, zone: Zone): Model {
+  const keep = <T>(items: T[], at: (item: T) => number) =>
+    items.filter((item) => startsIn(zone, at(item)));
+  return sorted({
+    hidden: keep(model.hidden, (item) => item.from),
+    blocks: keep(model.blocks, (item) => item.from),
+    placed: keep(model.placed, (item) => item.at),
+    layers: keep(model.layers, (item) => item.from),
+    rows: keep(model.rows, (item) => item.at),
+    comments: keep(model.comments, (item) => item.from),
+    struck: keep(model.struck, (item) => item.at),
+    carriedLines: new Map([...model.carriedLines].filter(([line]) => startsIn(zone, line))),
+  });
 }
 
 /**
@@ -661,11 +717,11 @@ function analyze(state: EditorState, kept: number | null): Model {
  * with the `-->`, and that line may hold more text and comments. To the parser, markers and the
  * ledger are comments too. A `<!--` that is never closed stays text.
  */
-function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | null): Span[] {
+function ordinaryComments(spans: readonly Span[], markers: Span[], ledger: Span | null): Span[] {
   const taken = (ledger ? [...markers, ledger] : markers).toSorted((a, b) => a.from - b.from);
   const comments: Span[] = [];
   let next = 0;
-  for (const span of commentSpans(state)) {
+  for (const span of spans) {
     while (next < taken.length && taken[next]!.to <= span.from) next++;
     const overlap = taken[next];
     if (!overlap || overlap.from >= span.to) comments.push(span);
@@ -1129,6 +1185,7 @@ const SHOWN = new Atom(true);
 const BLANK_ATOM = new Atom(false);
 
 interface Display {
+  /** What `trackedText` reads: the hidden text and the layers; the rest of the model is not kept. */
   model: Model;
   /** The changes, where the bars are drawn (`bar-layer.ts`). */
   spans: ChangeSpan[];
@@ -1137,9 +1194,14 @@ interface Display {
   decorations: DecorationSet;
   /** What the caret steps over: hidden text, and hidden lines with the line breaks around them. */
   atomic: RangeSet<Atom>;
+  /** The runs of hidden lines, by where each starts. */
+  runs: RangeSet<HiddenRun>;
+  /** How many lines they hold. */
+  lines: number;
 }
 
-function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
+/** The ranges the caret steps over: hidden text, and hidden lines with their line breaks. */
+function atomRanges(doc: Text, model: Model): Range<Atom>[] {
   // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
     ...model.hidden.map(({ from, to, parts }) => ({
@@ -1168,15 +1230,18 @@ function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
       previous.visible ||= span.visible;
     } else merged.push(span);
   }
-  return RangeSet.of(
-    merged.map(({ from, to, visible }) => (visible ? SHOWN : BLANK_ATOM).range(from, to)),
-  );
+  return merged.map(({ from, to, visible }) => (visible ? SHOWN : BLANK_ATOM).range(from, to));
 }
 
-function display(state: EditorState): Display {
-  const kept = keptLine(state);
-  const model = analyze(state, kept);
-  const { doc } = state;
+/** What a model draws: its decorations, where the bars are, what the caret steps over. */
+interface Drawing {
+  ranges: Range<Decoration>[];
+  spans: ChangeSpan[];
+  atoms: Range<Atom>[];
+  runs: Range<HiddenRun>[];
+}
+
+function draw(doc: Text, model: Model, zone?: Zone): Drawing {
   const ranges: Range<Decoration>[] = [];
   for (const { from, to, parts } of model.hidden) {
     const shown = drawn(parts);
@@ -1238,19 +1303,52 @@ function display(state: EditorState): Display {
   for (const { at, className } of model.rows) {
     ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
   }
-  const spans = changeSpans(model);
+  const spans = changeSpans(model).sort((a, b) => a.from - b.from);
   for (const [n, className] of bars(doc, spans)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
     if (block && line.to <= block.to) continue;
     ranges.push(Decoration.line({ class: className }).range(line.from));
   }
+  const runs = model.blocks.map(({ from, to }) =>
+    new HiddenRun(doc.lineAt(to).number - doc.lineAt(from).number + 1).range(from, to),
+  );
+  const atoms = atomRanges(doc, model);
+  if (!zone) return { ranges, spans, atoms, runs };
   return {
-    model,
+    ranges: ranges.filter((range) => startsIn(zone, range.from)),
     spans,
+    atoms: atoms.filter((range) => startsIn(zone, range.from)),
+    runs,
+  };
+}
+
+/** What the display keeps of a model. */
+function keptOf(model: Model): Model {
+  return {
+    hidden: model.hidden,
+    blocks: [],
+    placed: [],
+    layers: model.layers,
+    rows: [],
+    comments: [],
+    struck: [],
+    carriedLines: new Map(),
+  };
+}
+
+function display(state: EditorState): Display {
+  const kept = keptLine(state);
+  const model = analyze(state, kept);
+  const drawing = draw(state.doc, model);
+  return {
+    model: keptOf(model),
+    spans: drawing.spans,
     kept,
-    decorations: Decoration.set(ranges, true),
-    atomic: atomicRanges(doc, model),
+    decorations: Decoration.set(drawing.ranges, true),
+    atomic: RangeSet.of(drawing.atoms),
+    runs: RangeSet.of(drawing.runs),
+    lines: drawing.runs.reduce((sum, run) => sum + run.value.lines, 0),
   };
 }
 
@@ -1267,6 +1365,285 @@ export function trackedDecorations(state: EditorState): DecorationSet {
   return display(state).decorations;
 }
 
+/** How many times the display was drawn in windows and how many whole, for tests. */
+export const trackedStats = { windowed: 0, whole: 0 };
+
+/** More windows than this, or windows this much of the text, and the display is drawn whole. */
+const MAX_ZONES = 16;
+const MAX_PLACES = 32;
+const MAX_SHARE = 0.5;
+
+/**
+ * Where the ledger changed what a mark is drawn as: marks whose author or move differ, and the
+ * comments whose thread was resolved or reopened (`tinted`), by where they are in the new text.
+ */
+function ledgerRegions(before: Parsed, parsed: Parsed, map: (pos: number) => number) {
+  const regions: [number, number][] = [];
+  const entries = new Map(before.marks.map((mark) => [mark.id, mark]));
+  const resolved = (of: Parsed) =>
+    new Set(of.ledger.comments.filter((thread) => thread.resolved).map((thread) => thread.id));
+  const was = resolved(before);
+  const now = resolved(parsed);
+  const unlike = (mark: MarkRange, other: MarkRange | undefined) =>
+    !other ||
+    other.kind !== mark.kind ||
+    other.entry.by !== mark.entry.by ||
+    other.entry.move !== mark.entry.move ||
+    (mark.kind === 'cmt' && was.has(mark.id) !== now.has(mark.id));
+  const seen = new Set<string>();
+  for (const mark of parsed.marks) {
+    seen.add(mark.id);
+    if (unlike(mark, entries.get(mark.id))) {
+      regions.push([mark.segments[0]!.open.from, markEnd(mark)]);
+    }
+  }
+  for (const mark of before.marks) {
+    if (seen.has(mark.id)) continue;
+    const [a, b] = [map(mark.segments[0]!.open.from), map(markEnd(mark))];
+    regions.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  return regions;
+}
+
+/** The map `items` have after the changes, and those before `from` as they were. */
+function mapped<T>(
+  items: readonly T[],
+  changes: ChangeSet | null,
+  move: (item: T, map: (pos: number) => number) => T,
+): readonly T[] {
+  if (!changes) return items;
+  const map = (pos: number) => changes.mapPos(pos, 1);
+  return items.map((item) => move(item, map));
+}
+
+/**
+ * The items with the windows' replaced by the new ones. Both are in the order they start in, and
+ * the windows are in order and apart.
+ */
+function spliced<T>(
+  items: readonly T[],
+  start: (item: T) => number,
+  zones: readonly Zone[],
+  fresh: readonly (readonly T[])[],
+): T[] {
+  const result: T[] = [];
+  let at = 0;
+  const firstFrom = (from: number, low: number) => {
+    let high = items.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (start(items[middle]!) < from) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  zones.forEach((zone, i) => {
+    const from = firstFrom(zone.from, at);
+    for (let k = at; k < from; k++) result.push(items[k]!);
+    at = firstFrom(zone.to, from);
+    for (const item of fresh[i]!) result.push(item);
+  });
+  for (let k = at; k < items.length; k++) result.push(items[k]!);
+  return result;
+}
+
+/**
+ * The display after a transaction, drawn again only in the windows that it can have changed (#744):
+ * where the text was edited, the marks the edit touched, what the parse added, the lines the caret
+ * left and came to. Everything else is kept and mapped. Null where the whole is drawn again.
+ */
+function advance(value: Display, tr: Transaction): Display | null {
+  const { state, startState } = tr;
+  const mode = state.field(viewModeField);
+  if (
+    mode === 'raw' ||
+    mode !== startState.field(viewModeField) ||
+    startState.facet(peopleFacet) !== state.facet(peopleFacet) ||
+    startState.facet(authorFacet) !== state.facet(authorFacet) ||
+    startState.facet(lineBreakMarksFacet) !== state.facet(lineBreakMarksFacet)
+  ) {
+    return null;
+  }
+  const { doc } = state;
+  const parsed = state.field(parsedField);
+  const before = startState.field(parsedField);
+  const tree = syntaxTree(state);
+  const oldTree = syntaxTree(startState);
+  const changes = tr.docChanged ? tr.changes : null;
+  const regions: [number, number][] = [];
+  if (changes) {
+    // An edit in very many places (a deletion that marks each of many marks inside it) is drawn whole.
+    let places = 0;
+    changes.iterChangedRanges(() => places++);
+    if (places > MAX_PLACES) return null;
+    // What a ledger says of the marks far from the edit: an author, a move, a resolved thread.
+    if (parsed.ledger !== before.ledger) {
+      regions.push(...ledgerRegions(before, parsed, (pos) => changes.mapPos(pos, 1)));
+    }
+    const colors = colorsOf(state);
+    const old = colorsOf(startState);
+    if (
+      colors.size !== old.size ||
+      [...colors].some(([handle, color]) => old.get(handle) !== color)
+    ) {
+      return null;
+    }
+    changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      regions.push([fromB - 1, Math.max(resync(changes, oldTree, tree, toB), toB) + 1]);
+      for (const mark of marksOverlapping(before, fromA - 1, toA + 1)) {
+        const [a, b] = [
+          changes.mapPos(mark.segments[0]!.open.from, 1),
+          changes.mapPos(markEnd(mark), -1),
+        ];
+        regions.push([Math.min(a, b), Math.max(a, b)]);
+      }
+      for (const mark of marksOverlapping(parsed, fromB - 1, toB + 1)) {
+        regions.push([mark.segments[0]!.open.from, markEnd(mark)]);
+      }
+    });
+    if (regions.length > 200) return null;
+    const was = before.ledgerRange;
+    const now = parsed.ledgerRange;
+    if (
+      (was === null) !== (now === null) ||
+      (was &&
+        now &&
+        (changes.mapPos(was.from, 1) !== now.from || changes.mapPos(was.to, -1) !== now.to))
+    ) {
+      const from = Math.min(
+        now?.from ?? doc.length,
+        was ? changes.mapPos(was.from, 1) : doc.length,
+      );
+      regions.push([from - 2, doc.length]);
+    }
+  }
+  // What the parse added, and the stretch below it that is read as it stands (`blankLines`).
+  const reach = changes ? changes.mapPos(oldTree.length, -1) : oldTree.length;
+  if (tree.length !== reach) {
+    const lo = Math.min(tree.length, reach);
+    const block = tree.topNode.childBefore(lo);
+    regions.push([
+      block?.prevSibling?.from ?? block?.from ?? 0,
+      Math.max(tree.length, reach) + TAIL_LENGTH,
+    ]);
+  }
+  // The lines the caret left and came to, and the empty paragraph that opened and closed.
+  const kept = keptLine(state);
+  const line = (pos: number) => {
+    const at = doc.lineAt(Math.min(Math.max(pos, 0), doc.length));
+    regions.push([at.from - 1, at.to + 1]);
+  };
+  if (kept !== value.kept) {
+    if (kept !== null) line(kept);
+    if (value.kept !== null) line(changes ? changes.mapPos(value.kept, -1) : value.kept);
+  }
+  const open = openBlock(state);
+  const wasOpen = openBlock(startState);
+  if (open !== wasOpen) {
+    for (const [block, map] of [
+      [open, false],
+      [wasOpen, true],
+    ] as const) {
+      if (!block) continue;
+      const [a, b] = [block.empty.from, block.empty.to];
+      regions.push(map && changes ? [changes.mapPos(a, 1), changes.mapPos(b, -1)] : [a, b]);
+      if (block.pressedIn) regions.push([block.pressedIn.from, block.pressedIn.to]);
+    }
+  }
+  if (!regions.length) return value;
+  regions.sort((x, y) => x[0] - y[0]);
+  const zones: Zone[] = [];
+  let share = 0;
+  for (const [a, b] of regions) {
+    const [lo, hi] = [Math.min(a, b), Math.max(a, b)];
+    const from = windowStart(state, parsed, Math.max(0, Math.min(lo, doc.length)));
+    const to = windowEnd(state, parsed, Math.max(0, Math.min(hi, doc.length)));
+    const previous = zones.at(-1);
+    if (previous && from <= previous.to) {
+      previous.from = Math.min(previous.from, from);
+      previous.to = Math.max(previous.to, to);
+    } else zones.push({ from, to });
+  }
+  if (zones.length > MAX_ZONES) return null;
+  for (const zone of zones) share += Math.min(zone.to, doc.length) - zone.from;
+  if (share > Math.max(20_000, doc.length * MAX_SHARE)) return null;
+  let decorations = changes ? value.decorations.map(changes) : value.decorations;
+  let atomic = changes ? value.atomic.map(changes) : value.atomic;
+  let runs = changes ? value.runs.map(changes) : value.runs;
+  let lines = value.lines;
+  const hidden: Hidden[][] = [];
+  const layers: Layer[][] = [];
+  const spans: ChangeSpan[][] = [];
+  for (const zone of zones) {
+    const model = analyze(state, kept, zone);
+    const drawing = draw(doc, model, zone);
+    // The runs it held, as they were before the changes (a run deleted whole is gone from the
+    // mapped set).
+    const back = changes?.invertedDesc;
+    const old = {
+      from: back ? back.mapPos(zone.from, -1) : zone.from,
+      to: !back
+        ? zone.to
+        : zone.to > doc.length
+          ? startState.doc.length + 1
+          : back.mapPos(zone.to, 1),
+    };
+    value.runs.between(old.from, old.to, (from, _to, run) => {
+      if (startsIn(old, from)) lines -= run.lines;
+    });
+    for (const run of drawing.runs) lines += run.value.lines;
+    const filter = (from: number) => !startsIn(zone, from);
+    const bounds = { filter, filterFrom: zone.from, filterTo: zone.to };
+    decorations = decorations.update({ ...bounds, add: drawing.ranges, sort: true });
+    atomic = atomic.update({ ...bounds, add: drawing.atoms, sort: true });
+    runs = runs.update({ ...bounds, add: drawing.runs, sort: true });
+    hidden.push(model.hidden);
+    layers.push(model.layers);
+    spans.push(drawing.spans);
+  }
+  const model = value.model;
+  return {
+    model: {
+      ...model,
+      hidden: spliced(
+        mapped(model.hidden, changes, (item, map) => ({
+          ...item,
+          from: map(item.from),
+          to: map(item.to),
+        })),
+        (item) => item.from,
+        zones,
+        hidden,
+      ),
+      layers: spliced(
+        mapped(model.layers, changes, (item, map) => ({
+          ...item,
+          from: map(item.from),
+          to: map(item.to),
+        })),
+        (item) => item.from,
+        zones,
+        layers,
+      ),
+    },
+    spans: spliced(
+      mapped(value.spans, changes, (item, map) => ({
+        ...item,
+        from: map(item.from),
+        to: map(item.to),
+      })),
+      (item) => item.from,
+      zones,
+      spans,
+    ),
+    kept,
+    decorations,
+    atomic,
+    runs,
+    lines,
+  };
+}
+
 const trackedField = StateField.define<Display>({
   create: display,
   update(value, tr) {
@@ -1281,7 +1658,11 @@ const trackedField = StateField.define<Display>({
       // The caret onto a blank line, or off it, which is hidden again.
       (tr.selection !== undefined && keptLine(tr.state) !== value.kept) ||
       openBlock(tr.state) !== openBlock(tr.startState);
-    return changed ? display(tr.state) : value;
+    if (!changed) return value;
+    const kept = advance(value, tr);
+    if (kept) trackedStats.windowed++;
+    else trackedStats.whole++;
+    return kept ?? display(tr.state);
   },
   // From a state field rather than a view plugin, because hidden lines and the ledger replace
   // line breaks.
@@ -1293,20 +1674,33 @@ const trackedField = StateField.define<Display>({
 
 /** A run of whole lines hidden from view: blank lines, lines of markers alone, the ledger. */
 export class HiddenRun extends RangeValue {
+  /** How many lines it holds. */
+  readonly lines: number;
+
+  constructor(lines: number) {
+    super();
+    this.lines = lines;
+  }
+
   override eq(other: RangeValue): boolean {
-    return other instanceof HiddenRun;
+    return other instanceof HiddenRun && other.lines === this.lines;
   }
 }
-
-const HIDDEN_RUN = new HiddenRun();
 
 /**
  * The lines Clean and Redlines hide, each run from the start of its first line to the end of its
  * last (the caret steps over it with the line breaks around it); none in Raw.
  */
 export function hiddenLines(state: EditorState): RangeSet<HiddenRun> {
-  const model = state.field(trackedField, false)?.model ?? analyze(state, keptLine(state));
-  return RangeSet.of(model.blocks.map(({ from, to }) => HIDDEN_RUN.range(from, to)));
+  const shown = state.field(trackedField, false);
+  if (shown) return shown.runs;
+  const { doc } = state;
+  const model = analyze(state, keptLine(state));
+  return RangeSet.of(
+    model.blocks.map(({ from, to }) =>
+      new HiddenRun(doc.lineAt(to).number - doc.lineAt(from).number + 1).range(from, to),
+    ),
+  );
 }
 
 /** A stretch of text as the tracked layer draws it. */
@@ -1397,12 +1791,16 @@ export function visibleSelection(
   state: EditorState,
   selection: EditorSelection = state.selection,
 ): EditorSelection {
-  const { atomic: atoms, model } = state.field(trackedField);
+  const { atomic: atoms, runs } = state.field(trackedField);
   if (!atoms.size) return selection;
   const end = bodyEnd(state.field(parsedField)) ?? state.doc.length;
   const length = state.doc.length;
   // Whether the document's last line is hidden, with nothing after it to rest on.
-  const lastHidden = spanAt(model.blocks, length) !== undefined;
+  let lastHidden = false;
+  runs.between(length, length, () => {
+    lastHidden = true;
+    return false;
+  });
   const open = openBlock(state);
   const outside = (pos: number, side: -1 | 0 | 1) => {
     // The empty paragraph that is open is a place for the caret, wherever it is.
@@ -1488,12 +1886,7 @@ const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
  * that the page can be asked (a check in WebKit by hand, as no runner draws it here).
  */
 const hiddenCount = EditorView.contentAttributes.compute([trackedField], (state) => {
-  const { doc } = state;
-  let count = 0;
-  for (const { from, to } of state.field(trackedField).model.blocks) {
-    count += doc.lineAt(to).number - doc.lineAt(from).number + 1;
-  }
-  return { 'data-rl-hidden-lines': String(count) };
+  return { 'data-rl-hidden-lines': String(state.field(trackedField).lines) };
 });
 
 /** The view's class on the editor: `rl-view-clean`, `-simple`, `-redlines` or `-raw`. */
@@ -1728,3 +2121,42 @@ export function trackedChanges(): Extension {
     theme,
   ];
 }
+
+/** What a display holds, as text, for tests: the display kept by the field, and one drawn whole. */
+function describeDisplay(display: Display): string[] {
+  const lines: string[] = [];
+  const replacer = (_key: string, value: unknown) =>
+    value instanceof Set ? [...value] : value instanceof Map ? [...value] : value;
+  for (const cursor = display.decorations.iter(); cursor.value; cursor.next()) {
+    const { value } = cursor;
+    const spec = value.spec as { class?: string; attributes?: object; widget?: WidgetType };
+    const widget = spec.widget;
+    const made =
+      widget instanceof MarkupWidget
+        ? JSON.stringify(widget.parts)
+        : widget instanceof StruckWidget
+          ? JSON.stringify([widget.deleted, widget.afterItem, widget.after], replacer)
+          : '';
+    lines.push(
+      `deco ${cursor.from} ${cursor.to} ${value.startSide} ${value.endSide} ${spec.class ?? ''} ${JSON.stringify(spec.attributes ?? null)} ${made}`,
+    );
+  }
+  for (const cursor = display.atomic.iter(); cursor.value; cursor.next()) {
+    lines.push(`atom ${cursor.from} ${cursor.to} ${cursor.value.visible}`);
+  }
+  for (const cursor = display.runs.iter(); cursor.value; cursor.next()) {
+    lines.push(`run ${cursor.from} ${cursor.to} ${cursor.value.lines}`);
+  }
+  for (const span of display.spans) lines.push(`span ${JSON.stringify(span)}`);
+  for (const item of display.model.hidden) lines.push(`hidden ${JSON.stringify(item)}`);
+  for (const item of display.model.layers) lines.push(`layer ${JSON.stringify(item)}`);
+  lines.push(`lines ${display.lines} kept ${display.kept}`);
+  return lines;
+}
+
+/** For tests: the display the field keeps. */
+export const keptDisplay = (state: EditorState): string[] =>
+  describeDisplay(state.field(trackedField));
+
+/** For tests: the display that drawing the whole text again gives. */
+export const freshDisplay = (state: EditorState): string[] => describeDisplay(display(state));
