@@ -4,6 +4,7 @@ import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from './index.ts';
 import { blockGaps, PROJECT_IMAGE_TYPE } from './image-drop.ts';
+import { NO_LINK } from './images.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -74,6 +75,23 @@ describe('the gaps between blocks', () => {
     ]);
   });
 
+  it('are only where a block stands apart, never inside a paragraph a quote, a list or a marker cuts', () => {
+    // The quote and the list abut the paragraph above them: the image would join it.
+    expect(gaps('Para\n> quote\n\nNext\n')).toEqual([
+      [0, '', '\n\n'],
+      [14, '', '\n\n'],
+      [18, '\n\n', ''],
+    ]);
+    expect(gaps('Para\n- a\n')).toEqual([
+      [0, '', '\n\n'],
+      [8, '\n\n', ''],
+    ]);
+    // A paragraph that opens with a change's marker is an HTML block to the parse; its second
+    // line is no gap.
+    const marked = '<!--ins k3x9-->Some text\ncontinued<!--/k3x9-->\n\nTwo\n';
+    expect(gaps(marked).map(([pos]) => pos)).toEqual([0, marked.indexOf('Two'), marked.length - 1]);
+  });
+
   it('are one place in an empty document', () => {
     expect(gaps('')).toEqual([[0, '', '']]);
   });
@@ -116,6 +134,17 @@ describe('an image file dragged from the sidebar', () => {
     expect(text.match(/<!--ins /g)).toHaveLength(1);
     // As a reader sees it: the image is a paragraph of its own between One and Two.
     expect(newestView(text).text.trim()).toBe('One\n\n![](img/shot.png)\n\nTwo');
+  });
+
+  it('says so when the host has no link for it, and writes nothing', () => {
+    const notices: string[] = [];
+    const { editor } = load('One\n\nTwo\n', {
+      projectImageLink: () => null,
+      onNotice: (message) => notices.push(message),
+    });
+    drag(editor, 'drop', 30);
+    expect(notices).toEqual([NO_LINK]);
+    expect(editor.view.state.doc.toString()).toBe('One\n\nTwo\n');
   });
 
   it('writes nothing when the host has no link for it, and leaves other drags alone', () => {

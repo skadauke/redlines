@@ -85,6 +85,9 @@ const spots = ViewPlugin.define(() => ({
   },
 }));
 
+/** Why a project image isn't linked: the document has no folder to reach it from. */
+export const NO_LINK = 'The image can’t be linked from this document.';
+
 /** What stands for the links in the probe that asks whether the document takes them. */
 const PROBE = imageLink('image.png');
 
@@ -500,7 +503,8 @@ function projectDrops(
   };
   return EditorView.domEventHandlers({
     dragover(event, view) {
-      if (!carriesProjectImage(event)) return false;
+      // Raw, with Track Changes on, takes no image: no line, and the drop is not allowed.
+      if (!carriesProjectImage(event) || rawIsReadOnly(view.state)) return false;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
       const near = nearestGap(view, event.clientY);
@@ -521,7 +525,10 @@ function projectDrops(
       if (rawIsReadOnly(view.state)) return true;
       const dragged = event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '';
       const link = dragged ? linkFor(dragged) : null;
-      if (link === null) return true;
+      if (link === null) {
+        notice?.(NO_LINK);
+        return true;
+      }
       const near = nearestGap(view, event.clientY);
       if (!near) return true;
       const { gap } = near;
