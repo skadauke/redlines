@@ -39,6 +39,16 @@ describe('refusals', () => {
     }
   });
 
+  it('asks first for front matter and for typing in Raw, and for nothing a command can gray', () => {
+    const tierOf = (file: string, key: string) =>
+      REFUSALS.find(([f, k]) => f === file && k === key)?.[2];
+    expect(tierOf('packages/format/src/track.ts', 'FRONT_MATTER')).toBe('alert');
+    expect(tierOf('packages/format/src/anchors.ts', 'words.frontMatter')).toBe('alert');
+    expect(tierOf('packages/editor/src/tracked/typing.ts', 'RAW_READ_ONLY')).toBe('alert');
+    expect(tierOf('plugins/review/src/rail.ts', 'REFUSED_IN_RAW')).toBe('disable');
+    expect(tierOfCode('front-matter')).toBe('alert');
+  });
+
   it('keeps a refusal only for what no write can set right', () => {
     // An error with one of these codes is a refusal that stays; the others are widened or asked about.
     expect(KEPT_CODES).toEqual([

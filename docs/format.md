@@ -2893,7 +2893,8 @@ Changes on is made after the alert of §3.13, and leaves no mark. The commands f
 highlight are disabled in front matter, with the reason in their hint.
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
-the body's, and are written plain; anything else typed there is refused as an edit of front matter.
+the body's, and are written plain; anything else typed there with Track Changes on is asked about
+first (§3.13), and made without tracking if the person says so.
 
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends
@@ -3221,6 +3222,15 @@ Track Changes is on, is made without tracking after the person is asked, and lea
 ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
 Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
 agent.
+
+The question is a sheet with the title "This edit can't be tracked. Make it without tracking?", a line
+that says why, "Don't ask again in this document", Cancel and Make Edit. Return and Escape are
+Cancel; Make Edit is a click or ⌘↩. The edit waits for the answer, whether it is a key, a paste, a drop
+or an input method's composition (which is asked about when it ends), and is made if the document is
+still the one it was made against, and dropped if not. One answer holds for the edits that follow in
+the same run (the same reason, no pause of five seconds). "Don't ask again" is the app's, kept for
+the file by its path and never in the file, so that somebody else who opens it is asked. Where the
+host has no sheet, such an edit is refused as before.
 
 ## 4. Comments
 

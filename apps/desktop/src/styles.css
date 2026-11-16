@@ -160,6 +160,8 @@ body {
   white-space: nowrap;
   -webkit-user-select: none;
   user-select: none;
+  /* The fade lets the pointer through to the text; the label takes it, for its hint (#682). */
+  pointer-events: auto;
 }
 
 /*
@@ -342,8 +344,10 @@ body {
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--rl-tip, #1d1d1f);
-  color: #ffffff;
+  border: 1px solid var(--rl-rule);
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
   white-space: nowrap;
@@ -358,7 +362,7 @@ body {
 }
 
 .rl-tip-shortcut {
-  color: rgb(255 255 255 / 0.62);
+  color: var(--rl-ink-2);
   letter-spacing: 0.04em;
 }
 
@@ -815,6 +819,7 @@ body {
   .rl-tip,
   .rl-menu,
   .rl-notice,
+  .rl-sheet,
   .rl-notification {
     animation: none;
   }
@@ -850,6 +855,7 @@ body {
   .rl-review-panel,
   .rl-notice,
   .rl-notifications,
+  .rl-sheet-backdrop,
   .rl-menu-anchor {
     display: none !important;
   }
@@ -950,4 +956,85 @@ body {
   #editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before {
     border-left-color: var(--rl-mixed);
   }
+}
+
+/*
+ * The alert's sheet (ui/untracked-sheet.ts): the one interruption, a card that drops from the title
+ * bar over a veil, modal to its window. Cancel is the default button, drawn as such.
+ */
+
+.rl-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--rl-page, Canvas) 40%, transparent);
+}
+
+.rl-sheet {
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  margin-top: calc(56 * var(--rl-pt));
+  padding: 16px 18px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  line-height: 1.4;
+  animation: rl-appear 120ms ease-out;
+}
+
+.rl-sheet-title {
+  font-weight: 700;
+}
+
+.rl-sheet-detail {
+  margin-top: 4px;
+  color: var(--rl-ink-2);
+}
+
+.rl-sheet-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-sheet-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.rl-sheet-button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  cursor: default;
+}
+
+.rl-sheet-button:hover {
+  background: var(--rl-pressed);
+}
+
+.rl-sheet-default {
+  background: var(--rl-pressed);
+  font-weight: 700;
+}
+
+.rl-sheet-button:focus-visible,
+.rl-sheet-check input:focus-visible {
+  outline: 2px solid var(--rl-ink-2);
+  outline-offset: 1px;
 }
