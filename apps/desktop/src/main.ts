@@ -641,6 +641,7 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  showPlainOnly: () => settings.showPlainOnlyFiles,
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -1370,6 +1371,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
+  const plainOnlyListed = settings.showPlainOnlyFiles;
   settings = {
     ...changed,
     sidebarOpen: settings.sidebarOpen,
@@ -1378,6 +1380,7 @@ watchSettings((changed) => {
   };
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
+  if (settings.showPlainOnlyFiles !== plainOnlyListed) void sidebar.refresh();
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);

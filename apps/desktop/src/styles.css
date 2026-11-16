@@ -646,6 +646,10 @@ body {
   color: var(--rl-ink-2);
 }
 
+.rl-sidebar-plain {
+  color: var(--rl-ink-2);
+}
+
 .rl-sidebar-folder svg {
   flex: none;
   margin-left: -4px;
