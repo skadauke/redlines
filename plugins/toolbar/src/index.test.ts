@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { forceParsing } from '@codemirror/language';
 import {
   createEditor,
   type Editor,
@@ -191,13 +192,15 @@ describe('the items', () => {
     expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(0);
   });
 
-  it('puts Ask first, with a rule after it, and the List menu only for a paragraph', () => {
-    const ids = ['ask.start', 'block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
-    mount(
-      'Hello',
-      {},
-      ids.map((id) => command(id, { isActive: () => id === 'block.body' })),
-    );
+  it('puts Ask first, with a rule after it, and the List menu only where a list can be made', () => {
+    const { editor } = mount('Hello\n\n# Title\n', {}, [
+      command('ask.start'),
+      command('block.body'),
+      command('block.ul'),
+      command('format.bold'),
+    ]);
+    forceParsing(editor.view, editor.view.state.doc.length, 1000);
+    editor.view.dispatch({ selection: { anchor: 2 } });
     mounted.at(-1)?.toolbar.show();
     expect(tops().map((top) => top.textContent)).toEqual(['Ask', 'List', 'Format']);
     expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(1);
@@ -1049,22 +1052,22 @@ describe('docked, by the wrench or the preference', () => {
     expect(document.activeElement).toBe(tops()[0]);
   });
 
-  it('draws again when the items change, with the open menu open and the keyboard kept', () => {
-    let paragraph = true;
-    const ids = ['block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
+  it('draws again when the items change, with the keyboard kept in the bar', () => {
+    const ids = ['block.body', 'block.ul', 'format.bold'];
     const { editor, toolbar } = mount(
-      'Hello',
+      'Hello\n\n# Title\n',
       {},
-      ids.map((id) => command(id, { isActive: () => paragraph && id === 'block.body' })),
+      ids.map((id) => command(id)),
     );
+    forceParsing(editor.view, editor.view.state.doc.length, 1000);
+    editor.view.dispatch({ selection: { anchor: 2 } });
     toolbar.toggle();
     tops()[0]!.focus();
     key(tops()[0]!, 'ArrowDown');
     expect(tops().map((top) => top.textContent)).toEqual(['List', 'Format']);
     expect(document.activeElement).toBe(itemFor('block.ul'));
-    // The selection moves out of the paragraph: List goes, and the keyboard stays in the bar.
-    paragraph = false;
-    editor.view.dispatch({ selection: { anchor: 2 } });
+    // The selection moves into the heading: List goes, and the keyboard stays in the bar.
+    editor.view.dispatch({ selection: { anchor: 10 } });
     expect(tops().map((top) => top.textContent)).toEqual(['Format']);
     expect(panelOf()?.contains(document.activeElement)).toBe(true);
   });
@@ -1136,6 +1139,230 @@ describe('docked, by the wrench or the preference', () => {
     rightClick(editor);
     await vi.advanceTimersByTimeAsync(0);
     toolbar.toggle();
+    expect(toolbar.isOpen()).toBe(false);
+  });
+});
+
+describe('the palette in the toolbar', () => {
+  const searchBox = () => document.querySelector<HTMLInputElement>('.rl-toolbar-input');
+  const results = () =>
+    [...document.querySelectorAll<HTMLElement>('.rl-toolbar-result')].map(
+      (line) => line.querySelector('.rl-toolbar-result-name')?.textContent,
+    );
+  const type = (text: string) => {
+    const input = searchBox()!;
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const COMMANDS_FOR_SEARCH = [
+    command('format.link', { title: 'Link…', shortcut: 'Mod-k' }),
+    command('block.ul', { title: 'Bulleted List' }),
+    command('block.task', { title: 'Task List' }),
+    command('format.bold', { title: 'Bold', shortcut: 'Mod-b' }),
+    command('format.italic', { title: 'Italic', disabledReason: () => 'Not here.' }),
+  ];
+
+  it('opens on a character typed in the bar, with it as the query, in place of the bar’s row', () => {
+    const { editor } = mount('Hello', {}, COMMANDS_FOR_SEARCH);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 't');
+    expect(panelOf()?.hasAttribute('data-search')).toBe(true);
+    expect(searchBox()?.value).toBe('t');
+    expect(document.activeElement).toBe(searchBox());
+    expect(results()).toEqual(['Make Checklist']);
+  });
+
+  it('finds by synonym, leaves out what does not work here, and names a command as a verb phrase', () => {
+    const { editor } = mount('Hello', {}, COMMANDS_FOR_SEARCH);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'x');
+    type('todo');
+    expect(results()).toEqual(['Make Checklist']);
+    type('link');
+    expect(results()).toEqual(['Insert Link']);
+    expect(document.querySelector('.rl-toolbar-result .rl-toolbar-result-keys')?.textContent).toBe(
+      '⌘K',
+    );
+    // Italic is grayed at the caret, so it isn't offered.
+    type('italic');
+    expect(results()).toEqual([]);
+    expect(document.querySelector('.rl-toolbar-none-found')).not.toBeNull();
+  });
+
+  it('runs the chosen command on Return, puts the toolbar away and gives the text the keyboard', () => {
+    const ran = vi.fn(() => true);
+    const { editor, toolbar } = mount('Hello', {}, [
+      command('format.bold', { title: 'Bold', run: ran }),
+    ]);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'b');
+    key(searchBox()!, 'Enter');
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(toolbar.isOpen()).toBe(false);
+    expect(document.activeElement).toBe(editor.view.contentDOM);
+  });
+
+  it('moves among the lines with ↑ and ↓, and a click runs one', () => {
+    const ran = vi.fn(() => true);
+    const { editor } = mount('Hello', {}, [
+      command('block.ul', { title: 'Bulleted List' }),
+      command('block.ol', { title: 'Numbered List', run: ran }),
+      command('format.bold', { title: 'Bold' }),
+    ]);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'l');
+    expect(results()).toEqual(['Make Bulleted List', 'Make Numbered List']);
+    key(searchBox()!, 'ArrowDown');
+    expect(document.querySelectorAll('.rl-toolbar-result')[1]?.getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    key(searchBox()!, 'ArrowDown');
+    expect(document.querySelectorAll('.rl-toolbar-result')[0]?.getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    key(searchBox()!, 'ArrowUp');
+    (document.querySelectorAll('.rl-toolbar-result')[1] as HTMLElement).click();
+    expect(ran).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the bar back on Esc, then closes', () => {
+    const { editor, toolbar } = mount('Hello', {}, COMMANDS_FOR_SEARCH);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'b');
+    key(searchBox()!, 'Escape');
+    expect(panelOf()?.hasAttribute('data-search')).toBe(false);
+    expect(searchBox()).toBeNull();
+    expect(toolbar.isOpen()).toBe(true);
+    expect(tops().length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(tops()[0]);
+    key(tops()[0]!, 'Escape');
+    expect(toolbar.isOpen()).toBe(false);
+  });
+
+  it('keeps a docked toolbar docked after a command, with the bar back', () => {
+    const { editor, toolbar } = mount('Hello', {}, COMMANDS_FOR_SEARCH);
+    toolbar.toggle();
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'b');
+    key(searchBox()!, 'Enter');
+    expect(toolbar.isOpen()).toBe(true);
+    expect(panelOf()?.hasAttribute('data-search')).toBe(false);
+    expect(tops().length).toBeGreaterThan(0);
+  });
+
+  it('shows a setting as a live control in its line, which stays open as it is used', () => {
+    let on = false;
+    let size = 100;
+    let look = 'light';
+    const { editor, toolbar } = mount('Hello', {
+      appCommands: () => [
+        {
+          id: 'tracking',
+          title: 'Track Changes',
+          keys: '⇧⌘E',
+          control: { kind: 'switch', get: () => on, set: (value) => (on = value) },
+        },
+        {
+          id: 'appearance',
+          title: 'Appearance',
+          synonyms: ['dark mode'],
+          control: {
+            kind: 'choice',
+            options: [
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ],
+            get: () => look,
+            set: (value) => (look = value),
+          },
+        },
+        {
+          id: 'size',
+          title: 'Text Size',
+          control: {
+            kind: 'slider',
+            min: 80,
+            max: 160,
+            step: 10,
+            get: () => size,
+            set: (value) => (size = value),
+            format: (value) => `${value}%`,
+          },
+        },
+      ],
+    });
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'T');
+    type('track');
+    const track = () => document.querySelector('.rl-toolbar-switch')!;
+    expect(track().getAttribute('aria-checked')).toBe('false');
+    // The key and the control sit together in the line.
+    expect(document.querySelector('.rl-toolbar-result-keys')?.textContent).toBe('⇧⌘E');
+    key(searchBox()!, 'Enter');
+    expect(on).toBe(true);
+    expect(track().getAttribute('aria-checked')).toBe('true');
+    expect(toolbar.isOpen()).toBe(true);
+    expect(searchBox()).not.toBeNull();
+    // A choice: found by a synonym, and the arrows change it.
+    type('dark mode');
+    expect(results()).toEqual(['Appearance']);
+    key(searchBox()!, 'ArrowRight');
+    expect(look).toBe('dark');
+    expect(document.querySelector('.rl-toolbar-segment[aria-checked="true"]')?.textContent).toBe(
+      'Dark',
+    );
+    key(searchBox()!, 'ArrowLeft');
+    expect(look).toBe('light');
+    // A slider: the arrows move it by its step, within its ends.
+    type('text size');
+    key(searchBox()!, 'ArrowRight');
+    expect(size).toBe(110);
+    expect(document.querySelector('.rl-toolbar-value')?.textContent).toBe('110%');
+    expect(toolbar.isOpen()).toBe(true);
+    expect(searchBox()).not.toBeNull();
+  });
+
+  it('returns from a control to the search box on Esc, and only then gives the bar back', () => {
+    const { editor, toolbar } = mount('Hello', {
+      appCommands: () => [
+        {
+          id: 'size',
+          title: 'Text Size',
+          control: { kind: 'slider', min: 80, max: 160, step: 10, get: () => 100, set: () => {} },
+        },
+      ],
+    });
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 't');
+    const range = document.querySelector<HTMLInputElement>('.rl-toolbar-range')!;
+    range.focus();
+    key(range, 'Escape');
+    expect(document.activeElement).toBe(searchBox());
+    expect(toolbar.isOpen()).toBe(true);
+    key(searchBox()!, 'Escape');
+    expect(searchBox()).toBeNull();
+  });
+
+  it('ends with an Ask line for what was typed, when the host can ask', () => {
+    const asked = vi.fn();
+    const { editor } = mount('Hello', { askAbout: asked }, COMMANDS_FOR_SEARCH);
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'q');
+    type('why is this here');
+    expect(results()).toEqual(['Ask about “why is this here”']);
+    key(searchBox()!, 'Enter');
+    expect(asked).toHaveBeenCalledWith('why is this here');
+  });
+
+  it('runs an app command and puts the toolbar away', () => {
+    const run = vi.fn();
+    const { editor, toolbar } = mount('Hello', {
+      appCommands: () => [{ id: 'prefs', title: 'Open Preferences', run }],
+    });
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'p');
+    key(searchBox()!, 'Enter');
+    expect(run).toHaveBeenCalledTimes(1);
     expect(toolbar.isOpen()).toBe(false);
   });
 });

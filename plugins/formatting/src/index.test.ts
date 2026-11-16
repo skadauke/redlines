@@ -268,14 +268,14 @@ describe('blocks', () => {
     const rows = () => editor.view.contentDOM.querySelectorAll('.cm-line.rl-trow');
     expect(rows()).toHaveLength(2);
     expect([...rows()].some((row) => row.textContent?.includes('<!--'))).toBe(false);
-    // The first cell's word is selected: typing replaces it, in the pending insertion.
+    // The first header cell is empty with the caret in it: typing names the column, in the pending insertion.
     editor.view.dispatch(editor.view.state.replaceSelection('Name'), { userEvent: 'input.type' });
     expect(rows()).toHaveLength(2);
-    expect(visible(editor)).toContain('| Name | Column |');
+    expect(visible(editor)).toContain('| Name |  |');
     // Accepting everything leaves the table plain, rejecting everything takes it away.
     const doc = editor.getDoc();
     expect(newestView(doc).text).toMatch(
-      /^One\.\n\n\| Name \| Column \|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\nTwo\./,
+      /^One\.\n\n\| Name \| {2}\|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\nTwo\./,
     );
     expect(originalView(doc).text.trim()).toBe('One.\n\nTwo.');
     // Undo takes the typing and the table back.
@@ -304,21 +304,21 @@ describe('blocks', () => {
     expect(editor.getDoc()).toBe('Intro.\n\nlet x = 1;\nlet y = 2;\n');
   });
 
-  it('fences the paragraph under the caret, and an empty line gets an empty block', () => {
+  it('puts an empty code block below the paragraph under the caret, and on an empty line (#555)', () => {
     const { editor } = mount('Intro.\n\nrun `a`\nnow\n\n');
     select(editor, 12);
     editor.commands.run('block.code');
-    expect(editor.getDoc()).toBe('Intro.\n\n```\nrun `a`\nnow\n```\n\n');
+    expect(editor.getDoc()).toBe('Intro.\n\nrun `a`\nnow\n\n```\n\n```\n\n');
     select(editor, editor.getDoc().length);
     editor.commands.run('block.code');
     expect(editor.getDoc().endsWith('```\n\n```')).toBe(true);
   });
 
-  it('fences a paragraph as a tracked substitution with tracking on', () => {
+  it('fences selected lines as a tracked substitution with tracking on', () => {
     const { editor, notices, refused } = mount('Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.\n', {
       tracking: true,
     });
-    select(editor, 12);
+    select(editor, 8, 29);
     expect(editor.commands.run('block.code')).toBe(true);
     expect(notices).toEqual([]);
     expect(refused).toEqual([]);
@@ -345,7 +345,7 @@ describe('blocks', () => {
   it("says why a code block can't be made", () => {
     // Tracked, a heading keeps its `#`s in front of the change, and a fence after them is none.
     const heading = mount('Intro.\n\n# Head\n\nEnd.\n', { tracking: true });
-    select(heading.editor, 11);
+    select(heading.editor, 10, 14);
     expect(heading.editor.commands.run('block.code')).toBe(false);
     expect(heading.notices).toEqual([
       "A heading can't become a code block while Track Changes is on. Make it body text first.",
@@ -359,7 +359,7 @@ describe('blocks', () => {
     expect(code.refused).toEqual(['This is already a code block.']);
 
     const quoted = mount('> quoted text\n');
-    select(quoted.editor, 4);
+    select(quoted.editor, 2, 8);
     expect(quoted.editor.commands.run('block.code')).toBe(false);
     expect(quoted.notices).toHaveLength(1);
   });
@@ -374,13 +374,13 @@ describe('blocks on an empty line (#167)', () => {
       const { editor, notices, refused } = mount('One.\n\nTwo.\n', { tracking });
       select(editor, 5);
       expect(editor.commands.run('block.table')).toBe(true);
-      expect(visible(editor)).toBe('One.\n\n| Column | Column |\n| --- | --- |\n|  |  |\n\nTwo.\n');
+      expect(visible(editor)).toBe('One.\n\n|  |  |\n| --- | --- |\n|  |  |\n\nTwo.\n');
       expect(notices).toEqual([]);
       expect(refused).toEqual([]);
-      // The first header cell's text is selected, so that typing names the column.
+      // The header cells are empty, and the caret is in the first, so that typing names the column.
       const { from, to } = editor.view.state.selection.main;
-      expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
-      expect(editor.view.state.sliceDoc(from - 2, from)).toBe('| ');
+      expect(from).toBe(to);
+      expect(editor.view.state.sliceDoc(from - 2, from + 3)).toBe('|  | ');
       expect(caretAt(editor)).toBe(to);
     },
   );
@@ -426,7 +426,7 @@ describe('blocks on an empty line (#167)', () => {
     expect(editor.commands.run('block.table')).toBe(true);
     expect(notices).toEqual([]);
     expect(refused).toEqual([]);
-    expect(visible(editor)).toContain('```\n\n| Column |');
+    expect(visible(editor)).toContain('```\n\n|  |  |\n| --- |');
     expect(visible(editor)).toContain('|  |  |\n\nTwo.');
   });
 
@@ -549,9 +549,9 @@ describe('the Paragraph menu on an empty paragraph (#170)', () => {
     const table = mount('One.\n\n\n\nTwo.\n', { tracking: t });
     select(table.editor, 6);
     expect(table.editor.commands.run('block.table')).toBe(true);
-    expect(visible(table.editor)).toContain('| Column | Column |\n| --- | --- |\n|  |  |');
+    expect(visible(table.editor)).toContain('|  |  |\n| --- | --- |\n|  |  |');
     const { from, to } = table.editor.view.state.selection.main;
-    expect(table.editor.view.state.sliceDoc(from, to)).toBe('Column');
+    expect(from).toBe(to);
   });
 
   it('changes the type of a block that has text, as before', () => {
@@ -779,12 +779,13 @@ describe('commands in a table', () => {
     expect(editor.getDoc()).toContain('| **one** | two |');
   });
 
-  it('leaves the first header cell’s text selected after Insert Table', () => {
+  it('leaves the caret in the first, empty header cell after Insert Table', () => {
     const { editor } = mount('One.\n\nTwo.\n');
     select(editor, 2);
     expect(editor.commands.run('block.table')).toBe(true);
     const { from, to } = editor.view.state.selection.main;
-    expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
+    expect(from).toBe(to);
+    expect(editor.view.state.sliceDoc(from - 2, from + 3)).toBe('|  | ');
   });
 });
 

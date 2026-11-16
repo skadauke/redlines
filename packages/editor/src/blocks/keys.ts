@@ -1,5 +1,5 @@
 // The block keys (design: block editing, "Mechanism"): a keymap above the editor's others, in Clean
-// and Redlines only (Raw keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
+// and Redlines only (Plain keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
 // (`edits.ts`) and `applyKeyEdit` dispatches it as one step to undo, with the user event the
 // tracked layer records it by, the record of Returns and the empty paragraph it opens.
 
@@ -23,9 +23,12 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
+import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import {
   type KeyEdit,
+  inRoomParagraph,
+  NBSP_LINE,
   planReturn,
   planSelectionReturn,
   planShiftReturn,
@@ -49,7 +52,10 @@ import {
 } from './motion.ts';
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
+import { blockDrag } from './drag.ts';
+import { moveBlocks } from './move.ts';
 import { planTab } from './tab.ts';
+import { convertTwin, htmlListMoves } from './twin.ts';
 import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
@@ -222,7 +228,7 @@ export function applyKeyEdit(
     scrollIntoView: true,
   });
   // Refused, where the key has another form: that one.
-  if (edit.fallback && tr.effects.some((effect) => effect.is(refusedEditEffect))) {
+  if (edit.fallback && (wasHeld(tr) || tr.effects.some((effect) => effect.is(refusedEditEffect)))) {
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
@@ -243,7 +249,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   const refused = (at: EditorState, edit: KeyEdit) =>
     at
       .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
-      .effects.some((effect) => effect.is(refusedEditEffect));
+      .effects.some((effect) => effect.is(refusedEditEffect) || effect.is(heldEditEffect));
   if (main.empty) {
     const bare = bareMarkerAt(state);
     if (bare !== null) {
@@ -316,7 +322,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   return true;
 }
 
-/** A key that acts in Clean and Redlines, and leaves Raw to CodeMirror. */
+/** A key that acts in Clean and Redlines, and leaves Plain to CodeMirror. */
 function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }
@@ -363,6 +369,25 @@ const returnKey = blockKey((view) => {
     return again
       ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
       : true;
+  }
+  // Return again in the empty paragraph: `&nbsp;` is typed into it, a line of room (format §3.4;
+  // with Track Changes on, the paragraph is the author's insertion), and Return opens the next
+  // empty paragraph below it: one step to undo.
+  if (inRoomParagraph(view.state)) {
+    const head = view.state.selection.main.head;
+    applyKeyEdit(view, {
+      changes: [{ from: head, insert: NBSP_LINE }],
+      selection: EditorSelection.single(head + NBSP_LINE.length),
+      userEvent: 'input.type',
+      record: true,
+      join: true,
+      isolateBefore: true,
+    });
+    const then = planReturn(view.state);
+    if (then) {
+      applyKeyEdit(view, { ...then, userEvent: 'delete.selection', join: true, record: true });
+    }
+    return true;
   }
   const over = planSelectionReturn(view.state);
   if (over) {
@@ -453,6 +478,9 @@ const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition'])
 const tabKey = (outdent: boolean) =>
   blockKey((view) => {
     if (view.state.selection.ranges.length > 1) return false;
+    // Tab in an item of an HTML list (that has an exact twin) converts the list first (#690), and
+    // only when there is an item above to go under (or, for Shift-Tab, a level to leave).
+    if (htmlListMoves(view.state, outdent) && convertTwin(view) !== true) return true;
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);
@@ -478,7 +506,8 @@ const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
     return edit ? applyKeyEdit(view, edit) : false;
   });
 
-/** ⌥↑ and ⌥↓ by paragraph, and with ⇧ selecting: never CodeMirror's, which move the source line. */
+/** ⇧⌥↑ and ⇧⌥↓ select by paragraph: never CodeMirror's, which move the source line. (⌥↑ and ⌥↓ move
+ * the blocks, `move.ts`.) */
 const paragraphKey = (forward: boolean, extend: boolean) =>
   blockKey((view) => {
     const edit = planParagraphMotion(view.state, forward, extend);
@@ -691,8 +720,8 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
-        { key: 'Alt-ArrowUp', run: paragraphKey(false, false) },
-        { key: 'Alt-ArrowDown', run: paragraphKey(true, false) },
+        { key: 'Alt-ArrowUp', run: blockKey((view) => moveBlocks(view, true)) },
+        { key: 'Alt-ArrowDown', run: blockKey((view) => moveBlocks(view, false)) },
         { key: 'Shift-Alt-ArrowUp', run: paragraphKey(false, true) },
         { key: 'Shift-Alt-ArrowDown', run: paragraphKey(true, true) },
         { key: 'Alt-ArrowLeft', run: groupKey(false, false) },
@@ -722,6 +751,7 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
+    blockDrag(),
     Prec.lowest(openLineSpaces),
   ];
 }

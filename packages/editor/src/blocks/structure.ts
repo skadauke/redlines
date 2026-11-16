@@ -581,7 +581,7 @@ export function breakAfter(state: EditorState, block: Block): Break | null {
 
 /** An inline construct that a position is inside of. */
 export interface OpenConstruct {
-  kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'sub' | 'sup' | 'link' | 'atom';
+  kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'sub' | 'sup' | 'html' | 'link' | 'atom';
   /** The construct, its delimiters included. */
   from: number;
   to: number;
@@ -600,10 +600,15 @@ const DELIMITED: Record<string, { kind: OpenConstruct['kind']; mark: string }> =
   // The tags are the delimiters: a break inside closes `</sub>` and opens `<sub>` again.
   Subscript: { kind: 'sub', mark: 'SubscriptMark' },
   Superscript: { kind: 'sup', mark: 'SuperscriptMark' },
+  // Any other inline tag GitHub keeps (html-inline.ts).
+  HtmlElement: { kind: 'html', mark: 'HtmlTagMark' },
 };
 
 /** Constructs that can't be parted: the break goes after them. */
-const ATOMS = new Set(['Image', 'Autolink', 'HTMLTag', 'Entity', 'URL']);
+const ATOMS = new Set([
+  ...['Image', 'Autolink', 'HTMLTag', 'Entity', 'URL'],
+  ...['HtmlBreak', 'HtmlWbr', 'HtmlDropped', 'HtmlChip'],
+]);
 
 /**
  * The inline constructs open at `pos`, innermost last: those whose text holds it, between their

@@ -41,9 +41,35 @@ function spaceRules(): ThemeSpec {
     // tint would paint, so the tint is clipped to the box (a transparent border would square the
     // box's top corners, which the radius rounds from the border box). The alert's own padding is
     // the same as `.rl-callout-first`'s.
+    // Code, a table or an alert under a tinted block (#639) do the same: the space is padding on the
+    // line that starts the box (an alert's has its own padding, code's none), clipped out of the
+    // tint, and for a table under a box, padding on the box's last line, clipped the same way. The
+    // clip's insets and corners are variables, so a single line that is both ends takes both.
+    const clipped =
+      'inset(var(--rl-clip-top, 0px) 0 var(--rl-clip-bottom, 0px) 0 round var(--rl-clip-rt, 0px) var(--rl-clip-rt, 0px) var(--rl-clip-rb, 0px) var(--rl-clip-rb, 0px))';
     rules[`.cm-line.rl-callout-first.rl-space-${kind}-apart`] = {
       paddingTop: `calc(${space(kind)} + ${textPx(10)})`,
-      clipPath: `inset(${space(kind)} 0 0 0 round 8px 8px 0 0)`,
+      '--rl-clip-top': space(kind),
+      '--rl-clip-rt': '8px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-codeblock-first.rl-space-${kind}-apart`] = {
+      paddingTop: space(kind),
+      '--rl-clip-top': space(kind),
+      '--rl-clip-rt': '6px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-callout-last.rl-space-${kind}-clip`] = {
+      paddingBottom: `calc(${space(kind)} + ${textPx(10)})`,
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '8px',
+      clipPath: clipped,
+    };
+    rules[`.cm-line.rl-codeblock-last.rl-space-${kind}-clip`] = {
+      paddingBottom: space(kind),
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '6px',
+      clipPath: clipped,
     };
   }
   return rules;
@@ -124,6 +150,48 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-sub': { bottom: '-0.25em' },
   '.rl-sup': { top: '-0.5em' },
+  // Inline HTML as GitHub draws it (#687), in the text's ink unless it says otherwise.
+  '.rl-h-kbd': {
+    fontFamily: 'var(--rl-font-mono)',
+    fontSize: '0.84em',
+    border: '1px solid var(--rl-rule)',
+    borderBottomWidth: '2px',
+    borderRadius: '5px',
+    backgroundColor: 'var(--rl-tint)',
+    padding: '0.08em 0.38em',
+  },
+  '.rl-h-samp, .rl-h-tt, .rl-h-code': {
+    fontFamily: 'var(--rl-font-mono)',
+    fontSize: '0.84em',
+  },
+  '.rl-h-code': {
+    backgroundColor: 'var(--rl-tint)',
+    borderRadius: '5px',
+    padding: '0.12em 0.38em',
+  },
+  '.rl-h-var, .rl-h-dfn, .rl-h-cite, .rl-h-i, .rl-h-em': { fontStyle: 'italic' },
+  '.rl-h-b, .rl-h-strong': { fontWeight: '700' },
+  '.rl-h-mark': {
+    backgroundColor: 'light-dark(#fff8c5, rgba(187, 128, 9, 0.35))',
+    color: 'inherit',
+    padding: '0 0.1em',
+  },
+  '.rl-h-small': { fontSize: '0.85em' },
+  '.rl-h-abbr': {
+    textDecoration: 'underline dotted',
+    textUnderlineOffset: '0.2em',
+  },
+  '.rl-h-ins': { textDecoration: 'underline' },
+  '.rl-h-del, .rl-h-s, .rl-h-strike': { textDecoration: 'line-through' },
+  '.rl-html-chip': {
+    display: 'inline-block',
+    fontSize: 'var(--rl-size-ui-small)',
+    color: 'var(--rl-ink-2)',
+    backgroundColor: 'var(--rl-tint)',
+    borderRadius: '5px',
+    padding: '0 0.4em',
+    cursor: 'default',
+  },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.84em',
@@ -230,9 +298,19 @@ export const baseThemeSpec: ThemeSpec = {
     verticalAlign: 'top',
   },
   '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
+  // In a line of text the frame sits where the picture did: on the text's middle.
+  '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
+  '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
+  // A click selects the image: an outline in the theme's focus-ring ink, and its handles.
+  '.rl-image-selected img': { outline: '2px solid var(--rl-ink-3)' },
+  '.rl-image-selected .rl-image-handle': { opacity: '1' },
+  '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
+    backgroundColor: 'transparent',
+  },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
-  // Each is a strip along its edge, wide enough to grab, with a light pill that shows on any picture.
+  // Each is a strip along its edge, wide enough to grab, just outside it (#676) so that it never covers
+  // the picture, with a light pill that shows on any background.
   '.rl-image-handle': {
     position: 'absolute',
     top: '0',
@@ -246,8 +324,11 @@ export const baseThemeSpec: ThemeSpec = {
     touchAction: 'none',
     userSelect: 'none',
   },
-  '.rl-image-handle-left': { left: '0' },
-  '.rl-image-handle-right': { right: '0' },
+  '.rl-image-handle-left': { right: '100%' },
+  '.rl-image-handle-right': { left: '100%' },
+  // Where that is outside the text column (a column-wide image): inside the edge, off the margin's notes.
+  '.rl-handle-in-left .rl-image-handle-left': { right: 'auto', left: '0' },
+  '.rl-handle-in-right .rl-image-handle-right': { left: 'auto', right: '0' },
   '.rl-image-handle::before': {
     content: '""',
     width: '6px',
@@ -259,6 +340,15 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
     { opacity: '1' },
+  // The line a dragged image file shows between blocks (#681), in the theme's gray, never red.
+  '.rl-drop-line': {
+    position: 'absolute',
+    height: '2px',
+    borderRadius: '1px',
+    backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+    pointerEvents: 'none',
+    zIndex: '5',
+  },
   '.rl-image-badge': {
     position: 'absolute',
     top: '6px',
@@ -266,8 +356,10 @@ export const baseThemeSpec: ThemeSpec = {
     transform: 'translateX(-50%)',
     padding: '2px 8px',
     borderRadius: '10px',
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    color: '#fff',
+    border: '1px solid var(--rl-rule)',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
     fontSize: 'var(--rl-size-ui-small)',
     lineHeight: '1.4',
     whiteSpace: 'nowrap',
@@ -419,6 +511,32 @@ export const baseThemeSpec: ThemeSpec = {
     overflow: 'hidden',
     verticalAlign: 'top',
   },
+  // An empty header cell shows a faint placeholder, which is drawn and not in the file (a new table's
+  // header cells are empty). It hangs from the cell's filler, which takes no room, so that it changes
+  // no width and no height; a centered or right-aligned column's reaches back from the filler, which
+  // stands where its text would.
+  '.rl-tbl > .rl-th:not(.rl-ghost) .rl-tc:not(.rl-tc-missing) .rl-tc-fill': {
+    position: 'relative',
+    overflow: 'visible',
+  },
+  '.rl-tbl > .rl-th:not(.rl-ghost) .rl-tc:not(.rl-tc-missing) .rl-tc-fill::before': {
+    content: '"Header"',
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    whiteSpace: 'nowrap',
+    fontWeight: '400',
+    color: 'var(--rl-ink-2)',
+    opacity: '0.6',
+    pointerEvents: 'none',
+    userSelect: 'none',
+  },
+  '.rl-tbl > .rl-th .rl-tc[data-align="center"]:not(.rl-tc-missing) .rl-tc-fill::before': {
+    transform: 'translateX(-50%)',
+  },
+  '.rl-tbl > .rl-th .rl-tc[data-align="right"]:not(.rl-tc-missing) .rl-tc-fill::before': {
+    transform: 'translateX(-100%)',
+  },
   // The cells a row lacks (`table/missing.ts`) stand at the end of the row, where the page's own caret
   // can't say which of them it is in: the one the caret is in draws it, and the line's own is hidden.
   // (The last cell of a row has no padding on its right, and the break CodeMirror ends a line with, hidden
@@ -448,15 +566,35 @@ export const baseThemeSpec: ThemeSpec = {
   // cell; the text highlight stays for what lies outside the table.
   // The cell is painted, not the mark: a block mark inside a cell, between the widget buffers
   // around it, stacks into lines and makes the row taller (found in a measure of a selected row).
+  // The tint runs from one column line to the next, not over the cell's box: the lines are drawn half a
+  // gap (8px) left of the cell, so the box is that far to the right of them. The cell's own background
+  // covers the box but for the gap, and a block before the cell (a cell but the first has one: the line
+  // is its ::after) covers the gap before it, short of the cell's bottom rule. The last cell has no
+  // gap after it.
   '.rl-tc:has(.rl-sel)': {
-    backgroundColor: 'Highlight',
+    backgroundColor: 'transparent',
+    backgroundImage: 'linear-gradient(Highlight, Highlight)',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: '0 0',
+    backgroundSize: `calc(100% - ${s(8)}) 100%`,
     color: 'HighlightText',
+  },
+  '.rl-tc:last-child:has(.rl-sel)': { backgroundSize: '100% 100%' },
+  '.rl-tc:not(:first-child):has(.rl-sel)::before': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: s(-8),
+    width: s(8),
+    backgroundColor: 'Highlight',
+    pointerEvents: 'none',
   },
   // One tint for every selection: over a row or a column a change has made (the author's tint, which
   // an inserted row's cells and an inserted column's have), the selection's blue wins and the text
   // keeps the readable ink (#522).
   '&.rl-cell-selecting .rl-trow > .rl-tc:has(.rl-sel)': {
-    backgroundColor: 'Highlight',
+    backgroundColor: 'transparent',
     color: 'HighlightText',
     textDecorationColor: 'currentColor',
   },

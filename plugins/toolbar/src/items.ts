@@ -12,6 +12,7 @@
 
 import type { EditorState } from '@codemirror/state';
 import {
+  disabledReasonOf,
   imageInSelection,
   rectOf,
   touchedCols,
@@ -19,6 +20,7 @@ import {
   wholeRect,
   type EditorCommand,
 } from '@redlines/editor';
+import { holds as selectionHolds, type Holds } from './convert.ts';
 import type { ToolbarIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 
@@ -30,6 +32,8 @@ export interface Context {
   isOn(id: string): boolean;
   /** Whether the command `id` is registered and has no reason against it where the selection is. */
   canRun(id: string): boolean;
+  /** What the selection holds: paragraphs, list items. */
+  holds: Holds;
 }
 
 /** An item the toolbar may hold: the command it runs, and how it is drawn. */
@@ -69,10 +73,6 @@ export interface MenuSpec {
 
 /** Ask has no menu: it is the bar's first button, and a rule follows it. */
 export const ASK: ItemSpec = { command: 'ask.start', icon: 'ask', label: 'Ask' };
-
-/** The commands that mean "the selection is in a paragraph or a list item". */
-export const CONVERTIBLE = ['block.body', 'block.ul', 'block.ol', 'block.task'] as const;
-export const LISTS = ['block.ul', 'block.ol', 'block.task'] as const;
 
 const one = (spec: ItemSpec): readonly ItemSpec[] => [spec];
 
@@ -146,7 +146,7 @@ export const MENUS: readonly MenuSpec[] = [
       one({ command: 'image.insert', icon: 'image' }),
       one({ command: 'block.table', icon: 'table' }),
       one({ command: 'block.code', icon: 'code-block' }),
-      one({ command: 'block.quote', icon: 'quote' }),
+      one({ command: 'insert.quote', icon: 'quote', label: 'Quote' }),
       one({ command: 'block.alert', icon: 'alert', label: 'Callout' }),
       // A later lane's: the item appears when its command is registered.
       one({ command: 'block.collapsible', icon: 'collapsible' }),
@@ -169,7 +169,7 @@ export const MENUS: readonly MenuSpec[] = [
     id: 'list',
     label: 'List',
     // Only where the selection holds a paragraph or a list item, which a list can be made of.
-    shownWhen: (context) => CONVERTIBLE.some((id) => context.isOn(id)),
+    shownWhen: ({ holds }) => holds.paragraph || holds.item,
     rows: [
       one({ command: 'block.ul', icon: 'bullets', label: 'Bullets' }),
       one({ command: 'block.ol', icon: 'numbers', label: 'Numbers' }),
@@ -179,10 +179,8 @@ export const MENUS: readonly MenuSpec[] = [
         icon: 'no-list',
         label: 'No List',
         // Body is already what a paragraph is: removing a list from one has nothing to do.
-        reason: (_state, context) =>
-          LISTS.some((id) => context.isOn(id))
-            ? undefined
-            : 'This is not a list, so there is nothing to remove.',
+        reason: (_state, { holds }) =>
+          holds.item ? undefined : 'This is not a list, so there is nothing to remove.',
       }),
     ],
   },
@@ -377,7 +375,7 @@ function shown(
 ): ShownItem {
   const title = typeof command.title === 'function' ? command.title(state) : command.title;
   const name = title.replace(/…$/, '');
-  const reason = command.disabledReason?.(state) ?? spec.reason?.(state, context) ?? null;
+  const reason = disabledReasonOf(command, state) ?? spec.reason?.(state, context) ?? null;
   return {
     id: command.id,
     icon: spec.icon,
@@ -396,14 +394,20 @@ function shown(
 }
 
 /** The toolbar as `commands` and `state` have it: the menus in the bar's order. */
-export function shownBar(commands: readonly EditorCommand[], state: EditorState): ShownBar {
+export function shownBar(
+  commands: readonly EditorCommand[],
+  state: EditorState,
+  /** What the selection holds; the Markdown parse's reading of `state` by default. */
+  holds: Holds = selectionHolds(state),
+): ShownBar {
   const byId = new Map(commands.map((command) => [command.id, command]));
   const context: Context = {
     isOn: (id) => byId.get(id)?.isActive?.(state) ?? false,
     canRun: (id) => {
       const found = byId.get(id);
-      return found !== undefined && found.disabledReason?.(state) === undefined;
+      return found !== undefined && disabledReasonOf(found, state) === undefined;
     },
+    holds,
   };
   const item = (spec: ItemSpec): ShownItem[] => {
     const command = byId.get(spec.command);

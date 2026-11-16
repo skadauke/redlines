@@ -550,7 +550,7 @@ function join(
 function holdsOthersChange(state: EditorState, from: number, to: number): string | null {
   const names = markNames(state, from, to);
   if (!names.length) return null;
-  return `This line holds a tracked change by ${names.join(' and ')}, which the join would have to write again. Decide that change first, or edit it in the raw view.`;
+  return `This line holds a tracked change by ${names.join(' and ')}, which the join would have to write again. Decide that change first, or edit it in the Plain view.`;
 }
 
 /** The names of the people whose marks have a marker in `from`–`to`. */

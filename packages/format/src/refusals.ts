@@ -194,6 +194,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'shows an error or a refusal that has its own tier',
   ],
   [
+    'packages/editor/src/blocks/move.ts',
+    'message',
+    'info',
+    "a move that reaches more blocks than a widened edit can hold asks first, through the sheet, and is made untracked on Make Edit (§3.13); the notice is only the format's own message for a ledger that can't be read",
+  ],
+  [
     'packages/editor/src/table/paste.ts',
     'message',
     'info',
@@ -210,9 +216,26 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'plugins/formatting/src/index.ts',
     'RAW_FORMAT',
     'disable',
-    'format and block commands are grayed in Raw while edits are tracked (R6a)',
+    'format and block commands are grayed in Plain while edits are tracked (R6a)',
   ],
-  ['packages/editor/src/tracked/typing.ts', 'RAW_READ_ONLY', 'alert', 'inventory #73'],
+  [
+    'packages/editor/src/tracked/ask.ts',
+    'UNTRACKED_TITLE',
+    'alert',
+    'the sheet itself: the title of the alert that offers to make the edit without tracking (format §3.13)',
+  ],
+  [
+    'packages/editor/src/images.ts',
+    'RAW_READ_ONLY',
+    'disable',
+    'an image file pasted or dropped in Plain while edits are tracked holds no text to ask about: it says why',
+  ],
+  [
+    'packages/editor/src/tracked/typing.ts',
+    'RAW_READ_ONLY',
+    'alert',
+    'inventory #73: typing in Plain asks first (format §3.13); Undo in Plain and a host with no sheet still say it',
+  ],
   [
     'packages/editor/src/tracked/typing.ts',
     "Redlines can't make this change here yet.",
@@ -742,8 +765,8 @@ export const REFUSALS: readonly RefusalEntry[] = [
   [
     'packages/format/src/track.ts',
     'FRONT_MATTER',
-    'widen',
-    'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
+    'alert',
+    'no unit can hold YAML: the host asks, and the edit is made without tracking (format §3.13); with no host to ask it stays a refusal',
   ],
   [
     'packages/format/src/track.ts',
@@ -960,7 +983,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'widen',
     'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
   ],
-  ['plugins/formatting/src/index.ts', 'RAW_READ_ONLY', 'alert', 'inventory #73'],
+  [
+    'plugins/formatting/src/index.ts',
+    'RAW_READ_ONLY',
+    'disable',
+    'a format or block command in Plain is grayed with its reason (R6a); this is what its key says if it runs past that',
+  ],
   [
     'plugins/formatting/src/index.ts',
     'TAGS_NOT_A_PAIR',
@@ -992,19 +1020,31 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
+    'plugins/review/src/index.ts',
+    'NO_CHANGE',
+    'disable',
+    'Accept and Reject are grayed with the caret outside a tracked change, and say why',
+  ],
+  [
+    'plugins/formatting/src/index.ts',
+    'NOT_WRAPPED',
+    'info',
+    'tells where an inserted block went when the selection could not be wrapped; nothing is refused',
+  ],
+  [
     'plugins/outline/src/index.ts',
     'message',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     'message',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     "what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`",
     'disable',
     'an image paste holds no text',
@@ -1019,13 +1059,13 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'plugins/review/src/highlight.ts',
     'IN_RAW_HINT',
     'disable',
-    'Highlight is grayed in Raw, where its markers are text (R6a)',
+    'Highlight is grayed in Plain, where its markers are text (R6a)',
   ],
   [
     'plugins/review/src/highlight.ts',
     'REFUSED_IN_RAW',
-    'alert',
-    'Raw shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
+    'disable',
+    'a comment is a mark, so it is never made untracked: Add Comment is grayed in Plain with its reason (R6a)',
   ],
   [
     'plugins/review/src/highlight.ts',
@@ -1036,7 +1076,31 @@ export const REFUSALS: readonly RefusalEntry[] = [
   [
     'plugins/review/src/rail.ts',
     'REFUSED_IN_RAW',
-    'alert',
-    'Raw shows the file as it is, so a comment is refused there: the person is asked (format §3.13)',
+    'disable',
+    'a comment is a mark, so it is never made untracked: Add Comment is grayed in Plain with its reason (R6a)',
+  ],
+  [
+    'packages/editor/src/blocks/twin.ts',
+    'IN_CONTAINER',
+    'disable',
+    'the reason a structure command is disabled in HTML inside a quote or item (it goes through disabledReason, before the click)',
+  ],
+  [
+    'packages/editor/src/commands.ts',
+    'ACCEPT_FIRST',
+    'disable',
+    'the reason a structure command is disabled on HTML with a twin while Track Changes is on (disabledReason, #690)',
+  ],
+  [
+    'packages/editor/src/commands.ts',
+    'converted',
+    'keep',
+    "the format library's own error when it can't write the conversion of an HTML block that was enabled; its words are the library's",
+  ],
+  [
+    'packages/format/src/html-twin.ts',
+    'NO_TWIN',
+    'disable',
+    'the general reason a structure command is disabled on HTML that has no exact Markdown twin (disabledReason)',
   ],
 ];

@@ -1,13 +1,14 @@
 // The editor's public interface. Hosts (the desktop app, the React component, VS Code) and
 // plugins such as @redlines/review use only what is here.
 
+import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
- * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
+ * How the document is shown (design §5.3): Clean, Redlines or Plain, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
  * insertions in their author's color without the underline, change bars and comments kept). Simple is no view of its own: a click on a
  * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
@@ -16,7 +17,7 @@ import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
- * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
+ * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
  * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
@@ -107,7 +108,7 @@ export interface EditorCommand {
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
+  menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**
@@ -122,6 +123,21 @@ export interface EditorCommand {
    * disabled and still the table's, and outside a table it is the core's.
    */
   keyFallsThrough?: boolean | ((state: EditorState) => boolean);
+  /**
+   * The kinds of HTML block whose structure it changes (a heading's level, a list item's depth, a
+   * table's rows and columns). In HTML of one of these kinds that has an exact Markdown twin
+   * (#690), the command first converts the block to its twin, as one change, and then runs; in
+   * HTML of one that has none it is disabled, with the reason in its hint, and its own
+   * `disabledReason` is not asked.
+   */
+  structure?: readonly TwinKind[];
+  /**
+   * With Track Changes on, a pending conversion can't be acted on until it is decided (a block
+   * change can't start at a pending change). A command that can say what it would make of the
+   * twin gives it here, and the conversion is written as that, in one substitution; the command
+   * does not run. Null: the conversion is written as it is and the command runs after it.
+   */
+  twinAs?(twin: Twin): string | null;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
@@ -227,7 +243,7 @@ export interface EditorOptions {
    * its own. `before` is the text of the block up to the word, for its language. The answer is the
    * corrected word, or null; it is made, as WebKit's corrections are, only if the word is still
    * exactly where it was. Asked only while `typing.spellCheck` is on, of a word in prose, and
-   * never in Raw. Default: none, and nothing is asked.
+   * never in Plain. Default: none, and nothing is asked.
    */
   correctWord?: (word: string, before: string) => Promise<string | null>;
   /**
@@ -259,6 +275,18 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * The size in px of a local image's file, given the path as `resolveImage` is: read from the
+   * file's header, so that the page holds the image's room before it loads and doesn't move when
+   * it arrives. May answer later (a promise); null for a size not known. Default: none.
+   */
+  imageSize?: (src: string) =>
+    | { width: number; height: number }
+    | null
+    | Promise<{
+        width: number;
+        height: number;
+      } | null>;
+  /**
    * Opens the file of a local image in another app, for a double-click on the image, and for the
    * `image.edit` command (Edit Image in Preview): given the image's path as the document writes it,
    * decoded and relative to the document (`img/a b.png`). The host knows where the document is and
@@ -274,10 +302,20 @@ export interface EditorOptions {
    * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
    * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
    * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
-   * image where it can't (Raw while Track Changes is on, code) through `onNotice`, and the host is
+   * image where it can't (Plain while Track Changes is on, code) through `onNotice`, and the host is
    * not called. Default: none, and the browser does what it does with such a paste or a drop.
    */
   onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
+  /**
+   * Called when an image file of the project is dragged into the document from the sidebar
+   * (`PROJECT_IMAGE_TYPE` in the drag's data, holding the file's path), with that path. Returns the
+   * path to write for it, relative to the document as `ImageSpot.insert` takes it, or null when it
+   * can't be linked (the editor then writes nothing). The file is not copied: it is the project's
+   * own. While the drag is over the document a line shows the gap between blocks it will land at,
+   * and the link is written there as a block of its own. Default: none, and such a drag is left
+   * alone.
+   */
+  projectImageLink?: (dragged: string) => string | null;
   /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
@@ -298,10 +336,19 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read, typing in Raw while Track
+   * tracked change inside code, where its markers would not be read, typing in Plain while Track
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
+  onError?: (error: unknown) => void;
+  /**
+   * The alert of an edit that no mark can hold: an edit in the YAML front matter, and typing in Raw,
+   * with Track Changes on. The host shows a sheet that offers to make the edit without tracking
+   * (`ask`, answered `make` or `cancel`) and keeps "Don't ask again" (`skip`). The edit waits for the
+   * answer. Without it those edits are refused through `onNotice`.
+   */
+  askUntracked?: UntrackedAsker;
   /**
    * Called when Undo or Redo, by key or through `undo()` and `redo()`, finds nothing to take and
    * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
@@ -325,9 +372,9 @@ export interface AgentStep {
 export interface EditorTyping {
   /** The browser's spell check underlines. */
   spellCheck: boolean;
-  /** Curly quotes, and an em dash for two hyphens, except in code and in Raw. */
+  /** Curly quotes, and an em dash for two hyphens, except in code and in Plain. */
   smartPunctuation: boolean;
-  /** Closing brackets and backticks as you type them, except in code and in Raw. */
+  /** Closing brackets and backticks as you type them, except in code and in Plain. */
   closePairs: boolean;
 }
 
@@ -388,7 +435,7 @@ export interface Editor {
    */
   setViewMode(mode: ViewMode): void;
   /**
-   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Plain. Redlines is
    * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
    * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
@@ -400,7 +447,7 @@ export interface Editor {
    * effect: the full markup goes to the simple look and the simple look to the full markup, the
    * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
    * looking at (the one with the caret when it is on the screen, else the first on it) stays where
-   * it was. It does nothing in Clean and Raw, which have no look. A host's View menu has it as a
+   * it was. It does nothing in Clean and Plain, which have no look. A host's View menu has it as a
    * switch (design §5.3), so that the looks need no pointer.
    */
   switchLook(): void;
@@ -413,11 +460,11 @@ export interface Editor {
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
-   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
+   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Plain is
    * read-only, where an edit says why through `onNotice`. While it is off, an edit is an edit of
    * the text itself (format §3.10): what you type joins no pending change, and what you delete is
    * gone, with the marks that have no text left; an edit with no legal form says why through
-   * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
+   * `onNotice`. On or off, outside Plain, Backspace and Delete never delete a marker.
    *
    * The switch changes the editor's state and nothing else: it makes no edit, so it never makes the
    * document edited and has no step to undo, and it writes nothing to the file (format §5.6). With
@@ -442,7 +489,7 @@ export interface Editor {
   /**
    * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
    * `view: simple` (format §5.6): for the host to call when it saves the file, so that a document
-   * that has redlines opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * that has redlines opens in it. Plain leaves the view the file had. A view alone is no reason for a ledger, so a
    * file with none gets none, and a ledger that can't be read is left as it is. It is
    * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
    * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
@@ -502,7 +549,8 @@ export interface Editor {
   /**
    * The spot an image added now would go, for a host that has the images by other means than a
    * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
-   * client point `at` is in the text, when given and over some, and otherwise the selection. Null
+   * client point `at` is nearest between blocks, when given and over some text (an image lands as a
+   * block of its own, never inside another block), and otherwise the selection. Null
    * when the editor takes no image there, which `onNotice` then says.
    */
   imageSpot(at?: { x: number; y: number }): ImageSpot | null;
@@ -510,7 +558,7 @@ export interface Editor {
    * The word at a position of the document, as the host's spell checker is asked about it: letters
    * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
    * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
-   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Plain. The
    * formatting palette asks it for the word under a right-click.
    */
   wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
@@ -525,7 +573,7 @@ export interface Editor {
   pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
-   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
+   * reason is said through `onNotice` (Plain read-only, or the history started over by a reload), or
    * else `onNothingToUndo` is called. Returns whether it did or said something.
    */
   undo(): boolean;

@@ -16,7 +16,7 @@ import {
   noticeFacet,
   setImageLook,
 } from '../image-size.ts';
-import { parsedField } from '../tracked/field.ts';
+import { parsedField, viewModeField } from '../tracked/field.ts';
 import { textPx } from './theme.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -29,19 +29,40 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
   combine: (values) => values[0] ?? null,
 });
 
+/** An image's size in px, as its file says: what a page may reserve the room for before it loads. */
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+/** The host's answer for the size of a local image, as written in the document; null for unknown. */
+export type ImageSizer = (src: string) => ImageSize | null | Promise<ImageSize | null>;
+
+/** The host's sizer (`EditorOptions.imageSize`). */
+export const imageSizer = Facet.define<ImageSizer, ImageSizer | null>({
+  combine: (values) => values[0] ?? null,
+});
+
 /** The host's resolver would answer differently now: images are drawn again. */
 export const refreshImagesEffect = StateEffect.define<null>();
 
 const REMOTE = /^https?:\/\//i;
+/** Embedded image data: nothing is fetched, so a pending change doesn't hold it back. */
+const DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|svg\+xml)[;,]/i;
 const SCHEME = /^[a-z][a-z0-9+.-]*:|^\/\//i;
 
 /** Where an image's file is, as a URL or a path written in the document. */
-type Source = { kind: 'remote'; url: string } | { kind: 'local'; path: string } | { kind: 'none' };
+type Source =
+  | { kind: 'remote'; url: string }
+  | { kind: 'data'; url: string }
+  | { kind: 'local'; path: string }
+  | { kind: 'none' };
 
 function sourceOf(written: string): Source {
   let url = written.trim();
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };
+  if (DATA_IMAGE.test(url)) return { kind: 'data', url };
   if (!url || SCHEME.test(url)) return { kind: 'none' };
   return { kind: 'local', path: decodePath(url) };
 }
@@ -100,6 +121,9 @@ const LEAST_WIDTH = 24;
 /** How near the image's own size a drag ends to give the image its own size again, in px. */
 const SNAP = 4;
 
+/** The width of a resize handle's strip (the theme's `.rl-image-handle`). */
+const HANDLE_WIDTH = 14;
+
 /** The text column's width at `line`, in px as it is on screen: what an image may fill. */
 function columnPx(view: EditorView, line: Element | null): number {
   const el = line ?? view.contentDOM;
@@ -130,6 +154,10 @@ class ImageWidget extends WidgetType {
   /** The width the document gives it, in px at the theme's own text size, or null. */
   readonly width: number | null;
   readonly align: ImageAlign;
+  /** The local path the host may know the size of, or null. */
+  readonly path: string | null;
+  /** The selection is this image (a click on it): it is drawn with an outline and its handles. */
+  readonly selected: boolean;
 
   constructor(
     alt: string,
@@ -137,8 +165,12 @@ class ImageWidget extends WidgetType {
     own: boolean,
     width: number | null = null,
     align: ImageAlign = 'center',
+    path: string | null = null,
+    selected = false,
   ) {
     super();
+    this.path = path;
+    this.selected = selected;
     this.alt = alt;
     this.url = url;
     this.own = own;
@@ -152,7 +184,9 @@ class ImageWidget extends WidgetType {
       other.url === this.url &&
       other.own === this.own &&
       other.width === this.width &&
-      other.align === this.align
+      other.align === this.align &&
+      other.path === this.path &&
+      other.selected === this.selected
     );
   }
 
@@ -160,6 +194,7 @@ class ImageWidget extends WidgetType {
     const wrap = document.createElement('span');
     wrap.className = this.own ? 'rl-image rl-image-own' : 'rl-image';
     if (this.own && this.align !== 'center') wrap.classList.add(`rl-image-${this.align}`);
+    if (this.selected) wrap.classList.add('rl-image-selected');
     const showAlt = () => {
       wrap.className += ' rl-image-missing';
       wrap.replaceChildren(this.alt || 'image');
@@ -172,6 +207,11 @@ class ImageWidget extends WidgetType {
     const img = document.createElement('img');
     img.alt = this.alt;
     img.draggable = false;
+    // The file is read when it is near, and its size is known before: the room is held, and the
+    // page doesn't move when it arrives.
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    this.reserve(view, img);
     // A remote image learns nothing of the document it is in.
     img.referrerPolicy = 'no-referrer';
     // The width that is written, times the text size, which a CSS max-width keeps within the column.
@@ -185,14 +225,28 @@ class ImageWidget extends WidgetType {
     });
     img.addEventListener('error', showAlt);
     img.src = this.url;
-    // An image on a line of its own sits in a frame as wide as it is, so that its handles are at
-    // its edges and not at the text column's.
-    const frame = this.own ? document.createElement('span') : wrap;
-    if (this.own) {
-      frame.className = 'rl-image-frame';
-      wrap.append(frame);
-    }
+    // The image sits in a frame as big as it is, so that its handles are at its edges and as tall as
+    // it: an image on a line of its own would else have them at the text column's, and one in a line of
+    // text at the height of the line.
+    const frame = document.createElement('span');
+    frame.className = 'rl-image-frame';
+    wrap.append(frame);
     frame.append(img);
+    // A handle stands outside the picture, unless that is outside the text column (a column-wide
+    // image): there it would lie in the margin, under a note, so it stands inside that edge instead.
+    const placeHandles = () => {
+      // Not while a drag holds a handle: it stays where the pointer took it.
+      if (frame.closest('.rl-image-resizing')) return;
+      const line = wrap.closest('.cm-line')?.getBoundingClientRect();
+      const box = frame.getBoundingClientRect();
+      if (!line || box.width === 0) return;
+      frame.classList.toggle('rl-handle-in-left', box.left - HANDLE_WIDTH < line.left);
+      frame.classList.toggle('rl-handle-in-right', box.right + HANDLE_WIDTH > line.right);
+    };
+    // On entering, and as the pointer moves over the image, so that a width or window that changed
+    // since is seen (a toggle that changes nothing costs nothing).
+    frame.addEventListener('pointerenter', placeHandles);
+    frame.addEventListener('pointermove', placeHandles);
     for (const side of ['left', 'right'] as const) {
       const handle = document.createElement('span');
       handle.className = `rl-image-handle rl-image-handle-${side}`;
@@ -210,12 +264,39 @@ class ImageWidget extends WidgetType {
     return wrap;
   }
 
+  /**
+   * Gives `img` the width and height of its file before it loads, from the host (`imageSize`): the
+   * width attribute and the height attribute make the browser hold the aspect ratio, and, unless the
+   * document says a width, the natural width times the text size is held too. Does nothing once the
+   * image has loaded, which knows its own size.
+   */
+  private reserve(view: EditorView, img: HTMLImageElement): void {
+    const sizer = this.path === null ? null : view.state.facet(imageSizer);
+    if (!sizer || this.path === null) return;
+    const apply = (size: ImageSize | null) => {
+      if (!size || !(size.width > 0) || !(size.height > 0) || img.naturalWidth > 0) return;
+      img.setAttribute('width', String(size.width));
+      img.setAttribute('height', String(size.height));
+      if (this.width === null && !img.style.getPropertyValue('width')) {
+        img.style.setProperty('width', textPx(size.width));
+      }
+    };
+    let answer: ReturnType<ImageSizer>;
+    try {
+      answer = sizer(this.path);
+    } catch {
+      return;
+    }
+    if (answer instanceof Promise) answer.then(apply, () => {});
+    else apply(answer);
+  }
+
   /** A drag on a handle ends with the widget, whose pointer events then have nowhere to go. */
   override destroy(dom: HTMLElement): void {
     drags.get(dom)?.();
   }
 
-  /** Clicking the image puts the caret on it, which shows its source; a handle is pressed instead. */
+  /** A click on the image selects it (`imageSelection`); a handle is pressed instead. */
   override ignoreEvent(event: Event): boolean {
     return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
   }
@@ -349,14 +430,23 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   if (!image) return null;
   const source = sourceOf(image.src);
   let url: string | null = null;
+  let path: string | null = null;
   if (source.kind === 'remote') {
     url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
+  } else if (source.kind === 'data') {
+    url = source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
+    if (url !== null) path = source.path;
   }
   const own = aloneInItsLine(state, node);
+  const selected = state.selection.ranges.some(
+    (range) => !range.empty && range.from === node.from && range.to === node.to,
+  );
+  // The caret steps over the image as one unit (`imageAtom`), as over a hard break's spaces.
   return Decoration.replace({
-    widget: new ImageWidget(image.alt, url, own, image.width, image.align),
+    widget: new ImageWidget(image.alt, url, own, image.width, image.align, path, selected),
+    imageAtom: true,
   });
 }
 
@@ -428,6 +518,66 @@ export function localImageAt(state: EditorState): string | null {
   });
   return found;
 }
+
+/**
+ * Whether the selection has an end strictly inside the image's syntax, which only a click in
+ * hidden text or an edit can bring about: the source shows then, so that it can be read and
+ * mended. A caret at either end of the image, or a selection of the whole image, does not show it.
+ */
+export function selectionInside(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some((range) =>
+    range.empty
+      ? range.head > from && range.head < to
+      : (range.from > from && range.from < to) || (range.to > from && range.to < to),
+  );
+}
+
+/**
+ * A click on an image selects it, drawn as the image with its handles and an outline; its Markdown
+ * or HTML stays hidden (it shows in Plain, and the Image menu and the handles change its alt text
+ * and size). The caret moves past it with the arrows, and Delete or typing replaces it.
+ */
+export function imageSelection(): Extension {
+  return [selectedImageLook, clickSelects];
+}
+
+/** While the selection is one image, the page's own selection color stays off the line: the image's
+ * outline is the selection. */
+const selectedImageLook = EditorView.editorAttributes.compute(
+  ['selection', 'doc'],
+  (state): Record<string, string> => {
+    const { from, to, empty } = state.selection.main;
+    // Raw draws no image: its selection is the page's own.
+    if (empty || state.selection.ranges.length !== 1) return {};
+    if (state.field(viewModeField, false) === 'raw') return {};
+    const node = imageNodeAt(state, from);
+    return node && node.from === from && node.to === to ? { class: 'rl-image-is-selected' } : {};
+  },
+);
+
+// A click, not the press: a press that starts a drag across text is the editor's own.
+const clickSelects = EditorView.domEventHandlers({
+  click(event, view) {
+    if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey) return false;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('.rl-image-handle')) return false;
+    const wrap = target.closest('.rl-image');
+    if (!wrap || !view.contentDOM.contains(wrap)) return false;
+    let node: SyntaxNode | null;
+    try {
+      node = imageNodeAt(view.state, view.posAtDOM(wrap));
+    } catch {
+      return false;
+    }
+    if (!node) return false;
+    view.focus();
+    view.dispatch({
+      selection: { anchor: node.from, head: node.to },
+      userEvent: 'select.pointer',
+    });
+    return true;
+  },
+});
 
 /** How long after the first click of a double-click the second may come, and how far it may move. */
 const DOUBLE_CLICK_MS = 700;

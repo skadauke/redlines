@@ -92,6 +92,11 @@ const ICONS = {
     '<path d="M7 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 2.5h4v4M13.5 2.5L8 8"/>',
   /** Alt Text: a frame with a line of words under it. */
   'alt-text': '<rect x="2" y="2.5" width="12" height="7" rx="1.4"/><path d="M3 12.5h10M3 14.5h6"/>',
+  /** A command with no icon of its own: a slider's line and knob. */
+  command:
+    '<path d="M2.5 5h4M10.5 5h3M2.5 11h2M8.5 11h5"/><circle cx="8.5" cy="5" r="1.7"/><circle cx="6.5" cy="11" r="1.7"/>',
+  /** The search box's mark. */
+  search: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/>',
   /** The mark of a menu in the bar. */
   chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */

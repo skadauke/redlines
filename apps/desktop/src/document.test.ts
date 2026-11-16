@@ -138,6 +138,9 @@ class FakeHost implements Host {
   imageStamps() {
     return Promise.resolve([]);
   }
+  imageSizes() {
+    return Promise.resolve([]);
+  }
   imageUrl() {
     return null;
   }
@@ -316,13 +319,13 @@ describe('DocumentController', () => {
       '/docs/notes.txt': 'Two\n',
     });
     await controller.open('/docs/plan.md');
-    expect(await controller.rename('notes.ts')).toBe(true);
-    expect(state()?.name).toBe('notes.ts.md');
+    expect(await controller.rename('notes.zig')).toBe(true);
+    expect(state()?.name).toBe('notes.zig.md');
     await controller.open('/docs/notes.txt');
     expect(await controller.rename('v1.2 notes')).toBe(true);
     expect(state()?.name).toBe('v1.2 notes.txt');
     expect(host.renames).toEqual([
-      { from: '/docs/plan.md', to: '/docs/notes.ts.md' },
+      { from: '/docs/plan.md', to: '/docs/notes.zig.md' },
       { from: '/docs/notes.txt', to: '/docs/v1.2 notes.txt' },
     ]);
   });
@@ -920,7 +923,7 @@ describe('DocumentController', () => {
     controller.couldNotOpen('/docs/logo.png', 'Redlines opens Markdown and text files.');
     expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
     // Whatever the reason the app gave: a file that isn't a document is never one to open.
-    controller.couldNotOpen('/docs/main.ts', 'the path can’t be allowed');
+    controller.couldNotOpen('/docs/main.zig', 'the path can’t be allowed');
     expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
     // Nor is a folder, which only the app can tell from a document by its name, and says so.
     controller.couldNotOpen('/docs/notes.md', 'Redlines opens Markdown and text files.');
@@ -935,11 +938,11 @@ describe('DocumentController', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({
       '/docs/plan.md': 'One\n',
-      '/docs/main.ts': 'const a = 1;\n',
+      '/docs/main.zig': 'const a = 1;\n',
     });
     await controller.open('/docs/plan.md');
     editor.type('One, edited\n');
-    await controller.open('/docs/main.ts');
+    await controller.open('/docs/main.zig');
     // No question about the edits: there is nothing to open in place of them.
     expect(host.asked).toBe(0);
     expect(editor.getDoc()).toBe('One, edited\n');
@@ -1250,6 +1253,48 @@ describe('asking about unsaved edits', () => {
   });
 });
 
+describe('edits recovered after a crash (#693)', () => {
+  it('puts the edits back as unsaved ones, over the file as it was saved', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/plan.md', 'Saved\nAnd more typed\n')).toBe(true);
+    expect(editor.getDoc()).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(true);
+    // It is a reload, not an edit, and the file is not written.
+    expect(editor.reloadDoc).toHaveBeenCalledOnce();
+    expect(host.writes).toEqual([]);
+    await controller.save();
+    expect(host.files.get('/docs/plan.md')).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('restores an untitled document, which was never saved', async () => {
+    const { controller, state } = setup();
+    await controller.create();
+    expect(controller.restore(null, 'Typed, never saved')).toBe(true);
+    expect(state()).toMatchObject({ path: null, dirty: true });
+  });
+
+  it('puts back nothing over what was typed since, for another document, or for the same text', async () => {
+    const { editor, controller } = setup({ '/docs/plan.md': 'Saved\n', '/docs/other.md': 'x' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/other.md', 'Other edits')).toBe(false);
+    expect(controller.restore('/docs/plan.md', 'Saved\n')).toBe(false);
+    editor.type('Typed already\n');
+    expect(controller.restore('/docs/plan.md', 'Old copy')).toBe(false);
+    expect(editor.getDoc()).toBe('Typed already\n');
+  });
+
+  it('shows the saved version in place of the recovered edits', async () => {
+    const { editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    controller.restore('/docs/plan.md', 'Recovered\n');
+    await controller.showSavedVersion();
+    expect(editor.getDoc()).toBe('Saved\n');
+    expect(state()?.dirty).toBe(false);
+  });
+});
+
 describe('an untitled document made with text', () => {
   // What a window opened for text starts with (Open in New Window): not a file, and not saved.
   const ANSWER = '# The answer\n\nIt is **42**.\n';
@@ -1536,7 +1581,7 @@ describe('Open…, with one document per window', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup();
     await controller.create();
-    host.picked = { path: '/docs/main.ts', text: 'const a = 1;\n' };
+    host.picked = { path: '/docs/main.zig', text: 'const a = 1;\n' };
     await controller.openWithDialog();
     expect(editor.getDoc()).toBe('');
     expect(host.openedWindows).toEqual([]);

@@ -158,6 +158,111 @@ export const TOOLBAR_STYLE = `
 /* Grayed: dimmed, and its hint says why. */
 .rl-toolbar-item[aria-disabled='true'] { opacity: 0.5; }
 
+/* The palette: the search box and its lines take the bar's place in the card. */
+.rl-toolbar[data-search] .rl-toolbar-bar,
+.rl-toolbar[data-search] .rl-toolbar-spelling,
+.rl-toolbar[data-search] .rl-toolbar-rule-under { display: none; }
+.rl-toolbar[data-search] { width: min(440px, calc(100vw - 16px)); }
+.rl-toolbar-search { display: flex; flex-direction: column; gap: 4px; }
+.rl-toolbar-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--rl-ink-2);
+}
+.rl-toolbar-field svg { flex: none; }
+.rl-toolbar-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.rl-toolbar-input::placeholder { color: var(--rl-ink-2); }
+.rl-toolbar-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 264px;
+  overflow-y: auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--rl-rule);
+}
+.rl-toolbar-result {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--rl-ink);
+  cursor: default;
+}
+.rl-toolbar-result svg { flex: none; color: var(--rl-ink-2); }
+.rl-toolbar-result[aria-selected='true'] {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+}
+.rl-toolbar-result-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-toolbar-result-state { display: flex; flex: none; align-items: center; }
+/* The keys have a column of their own, whether the line has any or not. */
+.rl-toolbar-result-keys { min-width: 56px; text-align: right; }
+.rl-toolbar-none-found { padding: 8px 10px; color: var(--rl-ink-2); }
+
+/* A switch, as the app's others: a mid gray when on and a pale one when off, never black. */
+.rl-toolbar-switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--rl-rule);
+}
+.rl-toolbar-switch[aria-checked='true'] { background: var(--rl-ink-3); }
+.rl-toolbar-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--rl-card, Canvas);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+.rl-toolbar-switch[aria-checked='true'] .rl-toolbar-knob { left: 14px; }
+.rl-toolbar-segments {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+}
+.rl-toolbar-segment {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  font: inherit;
+  font-size: var(--rl-size-ui-small);
+  cursor: default;
+}
+.rl-toolbar-segment[aria-checked='true'] {
+  background: var(--rl-card, Canvas);
+  color: var(--rl-ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+.rl-toolbar-slider { display: flex; align-items: center; gap: 8px; }
+.rl-toolbar-range { width: 96px; accent-color: var(--rl-ink-3); }
+.rl-toolbar-value { min-width: 40px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); text-align: right; }
+
 /* The bar goes while the person types, and comes back when the pointer moves. */
 .rl-toolbar[data-writing] {
   opacity: 0;
@@ -208,8 +313,10 @@ export const TOOLBAR_STYLE = `
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--rl-tip, #1d1d1f);
-  color: #ffffff;
+  border: 1px solid var(--rl-rule);
+  background: var(--rl-card);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
   font-family: var(--rl-font-ui);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
@@ -220,7 +327,7 @@ export const TOOLBAR_STYLE = `
 }
 .rl-toolbar-tip[hidden] { display: none; }
 .rl-toolbar-tip-keys {
-  color: rgb(255 255 255 / 0.62);
+  color: var(--rl-ink-2);
   letter-spacing: 0.04em;
 }
 

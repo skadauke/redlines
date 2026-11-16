@@ -130,3 +130,28 @@ function compute(tr: Transaction): Dirty | null {
   for (const table of old.values()) dirty.gone.push(reaching(place(table)));
   return dirty;
 }
+
+/**
+ * What a parse that went on, with no change to the text, changes in the tables (#744): the tables
+ * that are new are built, and the places of those that are gone are cleared. The tables the parse
+ * did not read again are the same objects, and are left as they are.
+ */
+export function dirtyOfParse(tr: Transaction): Dirty {
+  const was = tr.startState.field(tablesField, false) ?? [];
+  const now = tr.state.field(tablesField, false) ?? [];
+  // The tables the parse didn't read again are the same objects, in the same places.
+  let same = 0;
+  while (same < was.length && same < now.length && was[same] === now[same]) same++;
+  const before = new Set(was.slice(same));
+  const after = new Set(now.slice(same));
+  return {
+    tables: now
+      .slice(same)
+      .filter((table) => !before.has(table))
+      .map((table) => ({ table, rows: null, clear: { from: table.from, to: table.to } })),
+    gone: was
+      .slice(same)
+      .filter((table) => !after.has(table))
+      .map((table) => ({ from: table.from, to: table.to })),
+  };
+}

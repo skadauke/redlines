@@ -116,6 +116,18 @@ repo root.
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that printing holds the whole document. They read nothing in a
   release build, and are no part of CI
+- Crashes (`apps/desktop/src-tauri/src/crash.rs`, `src/crash.ts`): errors in the page, the web content
+  process ending, Rust panics, the last run's macOS crash report and a page that stops answering are
+  written to `crash.log` in the app's log folder (`~/Library/Logs/md.redlines.editor/crash/`, slow
+  timers in `slow.log`), and a gray notification offers **Report…** (a filled-in GitHub issue with the
+  build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
+  In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
+  the page's console makes each happen
+- Recovery (`apps/desktop/src-tauri/src/recovery.rs`, `src/recovery.ts`): while a document has
+  unsaved edits its window keeps a copy of the text in the app's support folder
+  (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
+  closing without saving deletes it, and so does a quit that asked about every document. A window
+  that opens the document after a crash puts the edits back and says so in a notification
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -169,25 +181,44 @@ repo root.
 
 ## CI (`.github/workflows/`)
 
-- `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
-  `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
-  for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
-  changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
-  test checks.
+- `ci.yml`: a `changes` job (Ubuntu, no install) lists the files a change touches, against the
+  pull request's base or the push's previous commit, and sets flags: `rust` (`apps/desktop/src-tauri`,
+  `apps/desktop/redlines`, `packages/cli`, and on main `packages/format`), `quicklook`
+  (`apps/desktop/quicklook`, `scripts/build-quicklook`, and on main `packages/format`) and `ui` (the desktop's `src` and `journeys`,
+  `plugins`, `packages/editor`, `packages/format`); a change to `.github/workflows/**`, or a diff
+  that can't be made, sets all. Then:
+  - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
+    request** its tests are `vitest run --changed <base sha>`: the tests that import, through any
+    chain, a file the PR changed (a package's dependents' among them), and all of them when a
+    config or `package.json` changes, plus the tests that read the source files to hold every change
+    to a rule (refusals, text contrast and sizes, styles, hints, command permissions, the skill). **On main** it runs every test, the timing tests included.
+  - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
+    `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
+    set; otherwise the job is skipped, which counts as passing.
+  **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
+  `gh workflow run ci.yml --ref main`) sets every flag, runs every test with `REDLINES_COST=check`
+  and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
+  cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
+  cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
+  skill's files, which a test checks. The Epic's final sweep runs everything.
 - `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
-  baselines are drawn by it), as a job of its own beside `check`: **pull requests** run the smoke
+  baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
+  someone adds the **`journeys` label** (lanes run their journeys locally and attach screenshots;
+  a push doesn't run them), and then run the smoke
   journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
-  look; **pushes to main** run every journey in the light look and the smoke journeys in the other
-  three looks (nobody waits on it; a red main goes to the coordinator); **manual dispatch is the
+  look; **main** runs every journey in the light look and the smoke journeys in the other
+  three looks from `ci.yml`'s full run every two hours, not on every push (nobody waits on it;
+  a red main goes to the coordinator); **manual dispatch is the
   sweep**: every journey in all four looks. It skips docs, the website and Markdown, as `ci.yml` does (but for the sample document). Every run uploads
   `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
   failed comparison) and `look-review` (the pictures in order, with INDEX.md).
-- The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
-  (`scripts/build-quicklook --check`), since no other job compiles Swift.
+- The `quicklook` job of `ci.yml` runs on macOS, when its flag is set (on a pull request, only for
+  a change to the Quick Look code; on main, also for `packages/format`): it builds the Quick Look
+  extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
-  `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
-  `docs/design.md`, the lockfile or the workflow itself.
+  `website/**`, `apps/website-embed/**`, the icon masters, `docs/design.md`, the lockfile or the
+  workflow itself, and, on main only, to the packages and plugins the embed bundles.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
   (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
@@ -201,7 +232,7 @@ repo root.
   touch the site, the embed, the icon masters or the packages the embed bundles; when `release.yml`
   calls it; and by manual dispatch.
 
-`.syrus.yml` mirrors the `check` job as graders.
+`.syrus.yml` mirrors the `check` job as graders (the full test run).
 
 ## Conventions
 

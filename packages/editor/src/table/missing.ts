@@ -73,7 +73,7 @@ export interface MissingCaret {
  * The cell the caret is in, when it is in one its row lacks: an empty selection at the end of a body row
  * that has fewer cells than the header, in the column the field says, or in the first the row lacks
  * where the caret is past the text of the row's last cell (a caret that Undo, a key or a press put at the
- * end of the row). Null in Raw, which draws no cells.
+ * end of the row). Null in Plain, which draws no cells.
  */
 export function missingCaret(state: EditorState): MissingCaret | null {
   if (state.field(viewModeField, false) === 'raw') return null;

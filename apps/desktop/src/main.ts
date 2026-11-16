@@ -15,6 +15,7 @@ import {
   createLiveLines,
   createMacAgents,
   createRuns,
+  defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
@@ -28,7 +29,7 @@ import {
 import { EditError, newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
-import { createToolbar, pageClipboard } from '@redlines/toolbar';
+import { type AppCommand, createToolbar, pageClipboard } from '@redlines/toolbar';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -44,7 +45,8 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
-import { localImagePath, localImageUrl } from './images.ts';
+import { createImageSizes } from './image-sizes.ts';
+import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
@@ -69,6 +71,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -78,8 +81,13 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
+import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
@@ -100,6 +108,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
@@ -113,7 +122,9 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-followTheme(document.documentElement, settings, { ...(isTauri ? { setAppearance } : {}) });
+const windowTheme = followTheme(document.documentElement, settings, {
+  ...(isTauri ? { setAppearance } : {}),
+});
 // The window zoom the app handed this page, before anything draws (zoom.ts); 1 in a browser.
 applyZoom(document.documentElement, initialZoom() ?? 1);
 
@@ -196,6 +207,8 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The size of each local image file, read from its header once and kept until it is saved again. */
+const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
 /** The images the preview has drawn, which are looked at again when the window regains the focus. */
 const imageWatch = createImageWatch((paths) => host.imageStamps(paths));
 
@@ -225,7 +238,10 @@ async function refreshSavedImages(): Promise<void> {
   imageWatch.begin();
   editor.refreshImages();
   const changed = await imageWatch.check();
-  if (changed.length) editor.refreshImages();
+  if (changed.length) {
+    imageSizes.forget(changed);
+    editor.refreshImages();
+  }
 }
 
 /** The system's beep, as the Mac makes it for a key or an item that does nothing. */
@@ -253,9 +269,24 @@ function dragFile(): void {
   });
 }
 
+// Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
+// is a document to take the shape of.
+let crashes: CrashWatch | null = null;
+// Unsaved edits are kept in the app's support folder while there are any (recovery.ts, #693).
+let recovery: Recovery | null = null;
+const untrackedAnswers = createUntrackedAnswers();
+
 const editor = createEditor(element('#editor'), {
   doc: '',
+  onError: (error) => crashes?.caught(error),
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
@@ -287,6 +318,11 @@ const editor = createEditor(element('#editor'), {
       return url === null ? null : imageWatch.url(file, url);
     });
   },
+  imageSize: (src) => {
+    const path = imageDocument;
+    const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
+    return file === null ? null : imageSizes.of(file);
+  },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
   openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
@@ -300,6 +336,8 @@ const editor = createEditor(element('#editor'), {
   markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
+    crashes?.documentChanged();
+    recovery?.changed();
     // Images the text shows now are watched once the typing pauses.
     imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -311,6 +349,8 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
+  projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -325,28 +365,61 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
 // doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
+let webAsks = 0;
+const webAccess = {
+  web: () => loadSettings().webAccess,
+  allowWeb: () => void updateSettings({ webAccess: true }),
+  askWeb: (_agent: string, name: string, signal: AbortSignal) =>
+    new Promise<'once' | 'always' | 'no'>((resolve) => {
+      const done = (answer: 'once' | 'always' | 'no') => (card: { close(): void }) => {
+        signal.removeEventListener('abort', stopped);
+        card.close();
+        resolve(answer);
+      };
+      // Its own key: another run's card doesn't take this one's place.
+      const card = notifications.show({
+        key: `web-access ${++webAsks}`,
+        text: `${name} wants to use the web, to look something up or check a source.`,
+        dismissLabel: 'Don’t Allow',
+        onDismiss: () => done('no')(card),
+        secondaryAction: { label: 'Allow Once', run: done('once') },
+        action: { label: 'Allow Always', run: done('always') },
+      });
+      const stopped = () => done('no')(card);
+      signal.addEventListener('abort', stopped, { once: true });
+    }),
+};
 const agents =
   !isTauri && import.meta.env.DEV
     ? // A plain page has no agent programs: in development a scripted one stands in, which answers
       // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
-      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents(webAccess))
     : createMacAgents(
         isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
         createRelay(),
-        isTauri
-          ? {
-              more: async () =>
-                (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
-                  createAcpProvider(processes, {
-                    id,
-                    name,
-                    command: program,
-                    args,
-                    ...(bridge === undefined ? {} : { bridge }),
-                  }),
-                ),
-            }
-          : {},
+        {
+          // What the person named each agent in Preferences, read at every look.
+          handles: () => loadSettings().agentHandles,
+          // The model the person chose for each agent, read at every run.
+          models: () => loadSettings().agentModels,
+          // The web (#529): one switch for every agent. An agent that reaches for it with the
+          // switch off asks here: Allow Once, or Allow Always, which turns the switch on.
+          ...webAccess,
+          ...(isTauri
+            ? {
+                more: async () =>
+                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                    createAcpProvider(processes, {
+                      id,
+                      name,
+                      command: program,
+                      args,
+                      ...(bridge === undefined ? {} : { bridge }),
+                    }),
+                  ),
+              }
+            : {}),
+        },
       );
 // An agent added or removed by another window, or one that Preferences has updated, signed in or
 // found changed, is looked for again at the next comment box.
@@ -379,12 +452,12 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     getParsed: () => editor.getParsed(),
     getMet: () => settings.people,
     me: author.handle,
-    agents: () => knownAgents,
+    // The default agent comes first in the list (#528).
+    agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
   });
 };
 
-// The formatting commands are the Format and Paragraph menus. They register before the review
-// interface, so that its Add Comment comes last in Format.
+// The formatting commands are the Insert, Format and Paragraph menus.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
@@ -421,12 +494,11 @@ async function insertChosenImages(spot: ImageSpot): Promise<void> {
   }
 }
 
-// Registered before the review plugin's Add Comment, which comes last in Format.
 editor.commands.register([
   {
     id: 'image.insert',
     title: 'Image…',
-    menu: 'format',
+    menu: 'insert',
     group: 'insert',
     run: () => {
       const spot = editor.imageSpot();
@@ -437,8 +509,8 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
-// a plugin with commands in that menu registers before this one.
+// A menu lists its commands in the order they are registered: Add Comment and Ask… come last in the Review menu, after its own rows: its
+// commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
   // Why the toolbar's Accept or Reject was refused: a line that doesn't interrupt.
@@ -498,6 +570,11 @@ const review = createReview(editor, {
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // The palette (type with the toolbar open) searches the app's own commands and settings beside
+  // the registry's; a setting is a live control in its line (toolbar-commands.ts).
+  appCommands: () => toolbarCommands(),
+  // Ask has no way yet to start with a question typed: its box opens for the selection.
+  askAbout: () => void editor.commands.run('ask.start'),
   // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
   tooltipMs: TOOLTIP_MS,
@@ -585,6 +662,7 @@ function showDocument(state: DocumentState): void {
     settings = { ...settings, recent };
     void refreshRecent();
   }
+  recovery?.follow(state);
   notice.setStanding(state.notice, () => controller.dismissNotice());
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
@@ -616,6 +694,11 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
+  onClose: () => {
+    changeSettings({ sidebarOpen: false });
+    render();
+  },
   notice: (message) => notice.flash(message),
 });
 
@@ -632,6 +715,7 @@ const projectOf = (path: string) => host.projectRoot(path);
 async function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
+  imageSizes.forget();
   editor.refreshImages();
   if (path === null) return;
   try {
@@ -773,6 +857,8 @@ const ask = createAsk(editor, {
   },
   projectRoot: projectOf,
   settings: agentSettings,
+  // An Ask that names no agent goes to the one the person chose in Preferences (#528).
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
@@ -822,6 +908,19 @@ function showAgentLogs(): void {
   });
 }
 
+/**
+ * A window that opens a document finds the copy of its unsaved edits, if the page's process ended or
+ * the app crashed meanwhile, and puts the edits back.
+ */
+async function restoreAfterCrash(): Promise<void> {
+  const kept = await recovery?.find();
+  if (!kept || !controller.restore(kept.path, kept.text)) return;
+  await crashes?.recovered(() => {
+    void controller.showSavedVersion();
+    recovery?.discard();
+  });
+}
+
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
@@ -850,12 +949,104 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/**
+ * What the toolbar's palette offers besides the registry's commands: the app's own commands and
+ * the settings that are no part of the page's editing, each with the control that fits it. They
+ * read the live state when they are asked for, as the palette draws them again after each change.
+ */
+function toolbarCommands(): AppCommand[] {
+  const ui = () => editor.getUiState();
+  return [
+    {
+      id: 'app.tracking',
+      title: 'Track Changes',
+      keys: '⇧⌘E',
+      synonyms: ['suggest', 'suggesting', 'redline'],
+      control: {
+        kind: 'switch',
+        get: () => ui().tracking,
+        set: (on) => {
+          if (on !== ui().tracking) toggleTracking();
+        },
+      },
+    },
+    {
+      id: 'app.resolved',
+      title: 'Show Resolved Comments',
+      synonyms: ['done', 'closed'],
+      control: {
+        kind: 'switch',
+        get: () => settings.showResolved,
+        set: (on) => {
+          if (on !== settings.showResolved) toggleResolved();
+        },
+      },
+    },
+    {
+      id: 'app.appearance',
+      title: 'Appearance',
+      synonyms: ['dark mode', 'light mode', 'theme', 'night'],
+      control: {
+        kind: 'choice',
+        options: [
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+          { value: 'system', label: 'System' },
+        ],
+        get: () => settings.appearance,
+        set: (value) => {
+          if (value !== 'light' && value !== 'dark' && value !== 'system') return;
+          changeSettings({ appearance: value });
+          windowTheme.show(settings);
+        },
+      },
+    },
+    {
+      id: 'app.clean',
+      title: 'Show Clean View',
+      keys: '⌥⌘1',
+      synonyms: ['preview', 'read'],
+      run: () => editor.showView('clean'),
+    },
+    {
+      id: 'app.redlines',
+      title: 'Show Redlines View',
+      keys: '⌥⌘2',
+      synonyms: ['changes', 'markup'],
+      run: () => editor.showView('redlines'),
+    },
+    {
+      id: 'app.raw',
+      title: 'Show Raw View',
+      keys: '⌥⌘3',
+      synonyms: ['markdown', 'source'],
+      run: () => editor.showView('raw'),
+    },
+    {
+      id: 'app.simple',
+      title: 'Simple Look',
+      keys: '⌥⌘4',
+      synonyms: ['plain', 'quiet'],
+      run: () => editor.switchLook(),
+    },
+    {
+      id: 'app.preferences',
+      title: 'Open Preferences',
+      keys: '⌘,',
+      synonyms: ['settings', 'options'],
+      run: () => commands.openPreferences(),
+    },
+    {
+      id: 'app.updates',
+      title: 'Check for Updates',
+      run: () => commands.checkForUpdates(),
+      available: () => updateNotifications !== undefined,
+    },
+  ];
+}
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
 
@@ -892,6 +1083,12 @@ const textZoom = followTextZoom(window, {
   say: (text) => notice.flash(text),
 });
 
+const toggleWordCount = () => {
+  changeSettings({ showWordCount: !settings.showWordCount });
+  wordCount.setVisible(settings.showWordCount);
+  render();
+};
+
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
@@ -915,6 +1112,8 @@ function renameDocument(): void {
   if (doc?.path) titleBar.beginRename();
   else void controller.saveAs();
 }
+
+installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   toggleToolbar: () => toolbar.toggle(),
@@ -962,6 +1161,32 @@ const wordCount = createEditorWordCount(main, editor, { visible: settings.showWo
 // off, and downloaded in the background. Restarting into the new version asks each window about its
 // unsaved edits first, as quitting does, and the new version reopens the documents. The app checks,
 // downloads and installs for all the windows (#122); this one shows what it says, and asks.
+// Failures leave a trace in the app's log and offer a report (crash.ts, #692); the app is where they
+// are logged, so a browser tab has none.
+if (isTauri) {
+  recovery = createRecovery({
+    link: tauriRecoveryLink(),
+    label: getCurrentWindow().label,
+    getText: () => editor.getDoc(),
+  });
+  const crashLink = tauriCrashLink();
+  crashes = watchCrashes({
+    link: crashLink,
+    notifications,
+    getText: () => editor.getDoc(),
+    where: () => {
+      const room = scroller.scrollHeight - scroller.clientHeight;
+      return room > 0 ? `${Math.round((scroller.scrollTop / room) * 100)}% down` : 'at the top';
+    },
+  });
+  if (import.meta.env.DEV) {
+    // In a debug build: `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')`.
+    (window as unknown as { __simulateFailure: (kind: string) => void }).__simulateFailure = (
+      kind,
+    ) => simulateFailure(kind, crashLink);
+  }
+}
+
 const updates = isTauri ? windowUpdates(tauriUpdateLink()) : null;
 const updateNotifications =
   updates &&
@@ -1011,6 +1236,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
   openReview,
@@ -1040,6 +1266,14 @@ const commands: MenuCommands = {
     else notice.flash('Preferences are in the app.');
   },
   showAgentLogs,
+  reportProblem: () => {
+    if (crashes) void crashes.reportProblem();
+    else notice.flash('Problem reports are in the app.');
+  },
+  revealCrashLog: () => {
+    if (crashes) void crashes.revealLog();
+    else notice.flash('The log is in the app.');
+  },
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -1047,6 +1281,23 @@ const commands: MenuCommands = {
 activatePlugins(editor, {}, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
+  toast: ({ text, action }) =>
+    notifications.show({
+      text,
+      key: 'plugin toast',
+      timeout: 8000,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                action.run();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
   documentData: (manifest) => documentData.forPlugin(manifest),
 });
 
@@ -1098,6 +1349,7 @@ function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
+  sidebar.setWidth(settings.sidebarWidth);
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
     name: doc.name,
@@ -1117,6 +1369,7 @@ function render(): void {
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
@@ -1149,6 +1402,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // Closed without saving, or with nothing unsaved: no copy is kept of it.
+      recovery?.discard();
       runs.stopAll();
       ask.close();
     }
@@ -1230,12 +1485,10 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
-  // person's own preference, not the document's, so nothing is written to it. A window opened for
-  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
-  if (controller.state.path === null && settings.trackNewDocuments) {
-    editor.setTracking(true, { inFile: false });
-  }
+  // A new document always starts with Track Changes off (#660): the switch is the document's own,
+  // written at save, so no setting and no earlier document decides it.
+  // After a crash: the edits the window had, put back, with a card that says so (#693).
+  void restoreAfterCrash();
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
@@ -1280,7 +1533,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   toolbar.setAtBottom(settings.toolbarAtBottom);

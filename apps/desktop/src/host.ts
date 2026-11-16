@@ -18,7 +18,7 @@ import { deriveHandle } from './handle.ts';
 import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
-import { extension, isDocument } from './file-names.ts';
+import { DOCUMENT_EXTENSIONS, extension, isDocument } from './file-names.ts';
 import { savedImageName } from './image-add.ts';
 import sample from './sample.md?raw';
 
@@ -138,6 +138,12 @@ export interface Host {
    * (`src/image-watch.ts`). Null for a file the page may not load or that isn't there.
    */
   imageStamps(paths: string[]): Promise<(string | null)[]>;
+  /**
+   * The width and height in px of each image file, in order, read from its header: null for a file
+   * the page may not load, that isn't there, or whose format isn't read. The preview holds the
+   * room of an image before it loads from it.
+   */
+  imageSizes(paths: string[]): Promise<({ width: number; height: number } | null)[]>;
   /**
    * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
    * doesn't let the windows use them again.
@@ -322,7 +328,7 @@ export function createHost(): Host {
 }
 
 /** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
-const PANEL_EXTENSIONS = ['md', 'markdown', 'qmd', 'Rmd', 'txt'];
+const PANEL_EXTENSIONS = DOCUMENT_EXTENSIONS;
 
 /**
  * The panels' filter, with the extension of the document `name` first when there is one: the save
@@ -332,7 +338,7 @@ function panelFilters(name = '') {
   const own = isDocument(name) ? extension(name) : '';
   const first = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() === own);
   const rest = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() !== own);
-  return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
+  return [{ name: 'Markdown, text and code', extensions: [...first, ...rest] }];
 }
 
 /** How long Save waits to hear whether the default folder is there, before it goes without. */
@@ -466,6 +472,10 @@ function createTauriHost(): Host {
     allowImages: (path) => invoke<boolean>('show_images', { path }),
     imageUrl: (path) => convertFileSrc(path),
     imageStamps: (paths) => invoke<(string | null)[]>('image_stamps', { paths }),
+    imageSizes: async (paths) =>
+      (await invoke<([number, number] | null)[]>('image_sizes', { paths })).map((size) =>
+        size ? { width: size[0], height: size[1] } : null,
+      ),
     forgetDocuments: async () => {
       await invoke('forget_documents');
     },
@@ -659,8 +669,11 @@ function createBrowserHost(): Host {
     watch: () => Promise.resolve(() => {}),
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
+    // The images added in this tab are files of the folder too, to be dragged into the document.
     list: () =>
-      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+      Promise.resolve(
+        [...files.keys(), ...images.keys()].map((name) => ({ name, path: name, isDir: false })),
+      ),
     // The development page has a stand-in for Preview (`DevImages`); a tab has no other apps.
     openDefault: (path) => {
       if (!dev)
@@ -685,6 +698,7 @@ function createBrowserHost(): Host {
       Promise.resolve(
         paths.map((path) => (images.has(path) ? String(stamps.get(path) ?? 0) : null)),
       ),
+    imageSizes: (paths) => Promise.resolve(paths.map(() => null)),
     forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.

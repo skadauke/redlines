@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import type { WidgetType } from '@codemirror/view';
+import { EditorView, type WidgetType } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
@@ -18,10 +18,13 @@ function editorWith(
   doc: string,
   resolveImage?: (src: string) => string | null,
   cursor = doc.length,
+  imageSize?: (
+    src: string,
+  ) => { width: number; height: number } | null | Promise<{ width: number; height: number } | null>,
 ): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author, view: 'redlines', resolveImage });
+  const editor = createEditor(parent, { doc, author, view: 'redlines', resolveImage, imageSize });
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   editor.view.dispatch({ selection: { anchor: cursor } });
   open.push(editor);
@@ -47,7 +50,81 @@ const ledger = (ids: string[]) =>
 
 const local = (src: string) => `app://${src}`;
 
+describe('an image under the selection (#675)', () => {
+  const DOC = 'Before ![A cat](cat.png) after';
+  const from = DOC.indexOf('![');
+  const to = DOC.indexOf(')') + 1;
+
+  it('is drawn with the caret at either end, and its source stays hidden', () => {
+    for (const at of [from, to]) {
+      const [image] = drawn(editorWith(DOC, local, at));
+      expect(image, `drawn with the caret at ${at}`).toBeDefined();
+      expect(image?.classList.contains('rl-image-selected')).toBe(false);
+    }
+  });
+
+  it('is drawn selected when the selection is exactly the image, with the handles to grab', () => {
+    const editor = editorWith(DOC, local, 0);
+    editor.view.dispatch({ selection: { anchor: from, head: to } });
+    const [image] = drawn(editor);
+    expect(image?.classList.contains('rl-image-selected')).toBe(true);
+    expect(image?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+  });
+
+  it('shows its source only when the selection has an end inside it', () => {
+    expect(drawn(editorWith(DOC, local, from + 4))).toHaveLength(0);
+    const editor = editorWith(DOC, local, 0);
+    editor.view.dispatch({ selection: { anchor: from + 2, head: to + 3 } });
+    expect(drawn(editor)).toHaveLength(0);
+    // A selection that runs across the whole image, and past it, still draws it.
+    editor.view.dispatch({ selection: { anchor: 0, head: to + 3 } });
+    expect(drawn(editor)).toHaveLength(1);
+  });
+
+  it('is one unit that the caret steps over', () => {
+    const editor = editorWith(DOC, local, from);
+    const atomic = editor.view.state.facet(EditorView.atomicRanges);
+    const found: [number, number][] = [];
+    for (const source of atomic) {
+      source(editor.view).between(0, DOC.length, (a, b) => void found.push([a, b]));
+    }
+    expect(found).toContainEqual([from, to]);
+  });
+});
+
 describe('images', () => {
+  it('holds an image’s room before it loads, from the size the host knows', async () => {
+    const asked: string[] = [];
+    const editor = editorWith(
+      '![cat](img/cat.png)\n\nend',
+      (src) => `asset://${src}`,
+      undefined,
+      (src) => {
+        asked.push(src);
+        return Promise.resolve({ width: 640, height: 480 });
+      },
+    );
+    const img = drawn(editor)[0]!.querySelector('img')!;
+    expect(img.loading).toBe('lazy');
+    expect(img.decoding).toBe('async');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(new Set(asked)).toEqual(new Set(['img/cat.png']));
+    expect(img.getAttribute('width')).toBe('640');
+    expect(img.getAttribute('height')).toBe('480');
+    expect(img.style.getPropertyValue('width')).not.toBe('');
+  });
+
+  it('draws an image whose size isn’t known as it did', () => {
+    const editor = editorWith(
+      '![cat](img/cat.png)\n\nend',
+      (src) => `asset://${src}`,
+      undefined,
+      () => null,
+    );
+    const img = drawn(editor)[0]!.querySelector('img')!;
+    expect(img.hasAttribute('width')).toBe(false);
+  });
+
   it('centers an image alone in its paragraph, with its pending change around it or not', () => {
     const alone = (doc: string) => drawn(editorWith(doc, local, 0))[0];
     const plain = 'Before\n\n![A cat](cat.png)\n\nAfter';
@@ -287,8 +364,8 @@ describe('opening an image', () => {
     );
     const [cat] = editor.view.dom.querySelectorAll('.rl-image');
     expect(press(cat!, 1)).toBe(false);
-    // The first click puts the caret on the image, which shows its source in place of the picture,
-    // and the second lands there: it is taken whole, so that it selects no word.
+    // The first click selects the image, and the second lands there: it is taken whole, so that it
+    // selects no word.
     expect(press(editor.view.contentDOM, 2)).toBe(true);
     expect(opened).toEqual(['img/a cat.png']);
   });
@@ -401,6 +478,27 @@ describe('an image with a size (#526)', () => {
     );
     const [missing] = drawn(editorWith('Before\n\n![A cat](cat.png)', () => null, 0));
     expect(missing?.querySelectorAll('.rl-image-handle')).toHaveLength(0);
+  });
+
+  it('puts a handle inside the edge where outside is outside the text column (#676)', () => {
+    const [image] = drawn(editorWith('Before\n\n![A cat](cat.png)', local, 0));
+    const frame = image!.querySelector<HTMLElement>('.rl-image-frame')!;
+    const line = document.createElement('div');
+    line.className = 'cm-line';
+    image!.replaceWith(line);
+    line.append(image!);
+    const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect;
+    line.getBoundingClientRect = () => rect(100, 700);
+    // As wide as the column: both handles would lie in the margin.
+    frame.getBoundingClientRect = () => rect(100, 700);
+    frame.dispatchEvent(new Event('pointerenter'));
+    expect(frame.classList.contains('rl-handle-in-left')).toBe(true);
+    expect(frame.classList.contains('rl-handle-in-right')).toBe(true);
+    // Narrower: they stand outside, as before.
+    frame.getBoundingClientRect = () => rect(200, 600);
+    frame.dispatchEvent(new Event('pointermove'));
+    expect(frame.classList.contains('rl-handle-in-left')).toBe(false);
+    expect(frame.classList.contains('rl-handle-in-right')).toBe(false);
   });
 
   /** A drag of the handle on `side` by `dx` px, of an image `width` px wide in a column of 600. */

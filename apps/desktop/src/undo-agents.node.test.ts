@@ -24,7 +24,7 @@ import {
 
 const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
 const windows: Window[] = [];
 afterEach(() => {
@@ -350,7 +350,7 @@ describe('undo of a run', () => {
     expect(w.editor.getDoc()).toBe(mixed);
   });
 
-  it('refuses ⌘Z in Raw with Track Changes on, in Raw’s words, and takes the run back with it off', async () => {
+  it('refuses ⌘Z in Plain with Track Changes on, in Plain’s words, and takes the run back with it off', async () => {
     const w = await open();
     w.claude.script = script([replace('Try it', 'Try it now'), reply('Done.')]);
     const posted = await ask(w, '@Claude go');

@@ -547,7 +547,7 @@ function undoEach(script: Script, expanded: Expanded): string[] {
       const before = docOf(mounted.editor);
       const selection = selectionOf(mounted.editor);
       view.dispatch({ annotations: isolateHistory.of('full') });
-      const opened = openBlock(view.state) ? textWithoutOpen(view.state) : null;
+      const opened = openBlock(view.state) ? textWithoutOpen(view.state, true) : null;
       play(mounted.editor, step);
       const after = docOf(mounted.editor);
       if (after === before) return;

@@ -376,6 +376,12 @@ def fixture_checks(checks: Checks) -> None:
     has(page, "plain.md", "<h1>Field notes</h1>", "<em>plain</em>", "<del>struck</del>", '<input type="checkbox" disabled="" checked="" />', 'class="rl-image">A red caret on warm paper<', "&lt;script&gt;alert", "<hr />")
     lacks(page, "plain.md", "<script", "<img", "only the author sees", 'class="rl-notice"', "<!--")
 
+    # The HTML that GitHub draws (#686, #691): its allowed tags drawn, folding with WebKit's own
+    # <details>, GFM's escaped tags as text, and nothing live from a hostile line.
+    page = render(FIXTURES / "html.md")
+    has(page, "html.md", '<div align="center">', "<h1>Harbor notes</h1>", "H<sub>2</sub>O", "<kbd>Esc</kbd>", "<mark>marked</mark>", '<abbr title="HyperText Markup Language">HTML</abbr>', '<a href="https://example.com/harbor">a link</a>', "<br />A second line.", "<details>\n<summary>A closed section</summary>", '<details open="">', '<table align="center">', '<th colspan="2">Tide</th>', '<td align="right">3.1 m</td>', "&lt;script&gt;alert", "&lt;iframe", 'class="rl-chip">video<', "kept text", "<a>js link</a>", 'class="rl-image">remote picture<', "<b>styled</b>")
+    lacks(page, "html.md", "<script", "<iframe", "<video", "<img", "<u>", "javascript:", "onclick", "onerror", "onmouseover", 'style="color')
+
     page = render(FIXTURES / "redlines.md")
     has(page, "redlines.md", "3 changes and 1 comment by Ada Lovelace, Claude and Bo Chen. Open in Redlines to review them.", "We will ship the new importer in April, after the security review.")
     lacks(page, "redlines.md", "March", "The old exporter", "k3x9", "Who signs off", "<!--")
@@ -502,7 +508,8 @@ def image_checks(checks: Checks) -> None:
             f"![absolute outside]({base / 'outside.png'}) ![hidden folder](../.hidden/h.png) "
             "![hidden file](../images/.h.png) ![fake](../images/fake.png) ![evil](../images/evil.svg) "
             "![big](../images/big.png) ![missing](../images/missing.png) ![folder](../images) "
-            "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n",
+            "![remote](https://example.com/r.png) ![data](data:image/png;base64,AAAA)\n\n"
+            '<img src="local.png" alt="tag" width="64" height="48"> <img src="https://example.com/t.png" alt="remote tag">\n',
             encoding="utf-8",
         )
 
@@ -541,6 +548,8 @@ def image_checks(checks: Checks) -> None:
             checks.ok(f'src="cid:{row["name"]}"' in page, f"the page draws {row['source']!r} as cid:{row['name']}")
         for alt in ["link out", "outside", "absolute outside", "hidden folder", "hidden file", "fake", "evil", "big", "missing", "folder", "remote", "data"]:
             checks.ok(f'<span class="rl-image">{alt}</span>' in page, f"the page shows {alt!r} as its alt text")
+        checks.ok(re.search(r'<img [^>]*alt="tag" width="64" height="48">', page) is not None, "an <img> tag is the picture, at its width and height")
+        checks.ok('<span class="rl-image">remote tag</span>' in page, "an <img> tag of a server is its alt text")
         checks.ok(re.search(r'<img[^>]*src="(?!cid:)', page) is None, "the page draws no image from anywhere but its attachments")
         checks.ok("img-src cid:" in page, "the page's policy allows images from its attachments")
         without = subprocess.run([HARNESS, script, document], capture_output=True, text=True).stdout

@@ -23,12 +23,15 @@ import {
 import { editCommands, type ToolbarClipboard, pageClipboard } from './edit.ts';
 import { shownBar } from './items.ts';
 import { type DrawnPanel, drawPanel, type PanelHandlers, type SpellingRows } from './panel.ts';
+import { type AppCommand, entriesOf, type Entry } from './palette.ts';
+import { drawSearch, type Search } from './search.ts';
 import { type ToolbarSpelling, SPELLING_WAIT_MS, within } from './spelling.ts';
 import { installStyle } from './styles.ts';
 
 export type { ToolbarClipboard } from './edit.ts';
 export { pageClipboard } from './edit.ts';
 export type { ToolbarSpelling } from './spelling.ts';
+export type { AppCommand, Control } from './palette.ts';
 export { formatShortcut } from './shortcuts.ts';
 
 export interface ToolbarOptions {
@@ -49,6 +52,16 @@ export interface ToolbarOptions {
    * doesn't (Look Up, Services, Writing Tools).
    */
   contextMenu?: boolean;
+  /**
+   * The app's own commands and settings, which the palette searches beside the registry's: Track
+   * Changes, Appearance, Preferences… A setting has a control that stays live in its line.
+   * Default: none.
+   */
+  appCommands?: () => readonly AppCommand[];
+  /**
+   * What the palette's last line does: "Ask about “…”", for what was typed. Default: no such line.
+   */
+  askAbout?: (text: string) => void;
   /** Shows a one-line message that doesn't interrupt, for what can't be done. */
   notice(message: string): void;
   /** Called when the toolbar appears or goes away, however it came to: the wrench follows it. */
@@ -151,6 +164,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   let opening = 0;
   let placeAgain: () => void = () => {};
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The palette, while the person is searching: it takes the bar's place in the card. */
+  let searching: Search | null = null;
 
   const bar = () => shownBar(editor.commands.list(), view.state);
 
@@ -172,7 +187,10 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       // Under the item; above it when there is no room under.
       const room = win.innerHeight - below - tip.offsetHeight;
       tip.style.left = `${rect.left + rect.width / 2}px`;
-      tip.style.top = `${room >= MARGIN || tip.offsetHeight === 0 ? below : rect.top - HINT_GAP - tip.offsetHeight}px`;
+      // An item of a menu that opened over the bar has its hint above it: below would cover the bar.
+      const over = button.closest('.rl-toolbar-menu-up') !== null;
+      const under = !over && (room >= MARGIN || tip.offsetHeight === 0);
+      tip.style.top = `${under ? below : rect.top - HINT_GAP - tip.offsetHeight}px`;
     }, tooltipMs);
   };
 
@@ -204,7 +222,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
 
   /** Draws the items as the registry has them now; in place when they are the ones drawn. */
   const refresh = () => {
-    if (how === null) return;
+    if (how === null || searching) return;
     if (drawn?.refresh(bar())) return;
     // The items changed (List came or went with the selection): drawn again, with the menu that was
     // open open, and the keyboard on the same item, or at the start when that is gone.
@@ -224,8 +242,10 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
 
   /** Draws the toolbar again with other spelling rows, or none, and the keyboard where it was. */
   const respell = (next: typeof spelling): void => {
-    const hadFocus = panel.contains(doc.activeElement);
     spelling = next;
+    // The palette has the card: the suggestions are drawn with the bar when it comes back.
+    if (searching) return;
+    const hadFocus = panel.contains(doc.activeElement);
     // A hint waiting for a button that is gone goes too.
     hideHint();
     draw(next?.rows ?? null);
@@ -237,9 +257,61 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   /** Puts the toolbar away and the keyboard in the text: a choice made in the toolbar is for it. */
   const choose = (): void => {
     drawn?.openMenu(null);
+    // A docked toolbar stays, and has the bar back for the next command.
+    if (how === 'docked') stopSearch(false);
     // A docked toolbar stays: the next command may be one more.
     if (how !== 'docked') close();
     view.focus();
+  };
+
+  /** Puts the palette in the card, in place of the bar's row, with `initial` typed in. */
+  const startSearch = (initial: string): void => {
+    if (searching) return;
+    drawn?.openMenu(null);
+    hideHint();
+    const entries = (): Entry[] =>
+      entriesOf(editor.commands.list(), view.state, options.appCommands?.() ?? [], (id) => {
+        choose();
+        editor.commands.run(id);
+      });
+    const asked = options.askAbout;
+    searching = drawSearch(initial, {
+      entries,
+      ask: asked
+        ? (query) => ({
+            id: 'ask.about',
+            name: `Ask about “${query}”`,
+            icon: 'ask',
+            keys: null,
+            words: '',
+            control: null,
+            kind: 'app',
+            run: () => asked(query),
+          })
+        : null,
+      choose: (entry) => {
+        // A command of the registry closes the toolbar itself; an app command does, here.
+        if (entry.kind === 'app') choose();
+        entry.run();
+      },
+      leave: () => stopSearch(true),
+    });
+    panel.setAttribute('data-search', '');
+    panel.append(searching.element);
+    placeAgain();
+    searching.input.focus();
+    searching.input.setSelectionRange(initial.length, initial.length);
+  };
+  /** Takes the palette away and gives the bar back, with the keyboard on its first button. */
+  const stopSearch = (focusBar: boolean): void => {
+    if (!searching) return;
+    searching.element.remove();
+    searching = null;
+    panel.removeAttribute('data-search');
+    // The bar as the selection has it now, and the spelling rows that came while it was away.
+    draw(spelling?.rows ?? null);
+    placeAgain();
+    if (focusBar) drawn?.entry()?.focus();
   };
 
   const handlers: PanelHandlers = {
@@ -268,6 +340,15 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (event.key !== 'Escape' || event.isComposing) return;
     // A text box of the page that has the keyboard, a comment's or the find bar's, has the key.
     if (inOtherField()) return;
+    // The palette goes first: Esc gives the bar back.
+    if (searching) {
+      event.preventDefault();
+      event.stopPropagation();
+      // From a control (a slider the pointer used), Esc returns to the search box first.
+      if (doc.activeElement !== searching.input) searching.input.focus();
+      else stopSearch(true);
+      return;
+    }
     // A menu that is open goes first, with the keyboard on its button.
     if (drawn?.escape()) {
       event.preventDefault();
@@ -296,6 +377,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (target instanceof Node && panel.contains(target)) return;
     // A press in the text puts an open menu away, whichever way the toolbar was shown.
     drawn?.openMenu(null);
+    stopSearch(false);
     // The control that shows and hides the toolbar (the title bar's wrench) acts on the click.
     if (target instanceof Element && target.closest('[data-toolbar-control]')) return;
     away('press');
@@ -354,13 +436,25 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   function keepRoom(): void {
     const docked = how === 'docked' && !panel.hidden;
     if (docked) {
-      const room = panel.offsetHeight + DOCK_BOTTOM + DOCK_GAP;
-      container.style.setProperty('--rl-toolbar-room', `${room}px`);
-    } else container.style.removeProperty('--rl-toolbar-room');
+      const room = `${panel.offsetHeight + DOCK_BOTTOM + DOCK_GAP}px`;
+      if (container.style.getPropertyValue('--rl-toolbar-room') !== room) {
+        container.style.setProperty('--rl-toolbar-room', room);
+      }
+    } else if (container.style.getPropertyValue('--rl-toolbar-room') !== '') {
+      container.style.removeProperty('--rl-toolbar-room');
+    }
   }
   // A docked toolbar that wraps in a narrow window changes height.
+  // (Next frame: what it publishes changes the layout around the toolbar, which an observer's own
+  // callback may not do.)
+  let sizing = 0;
   const watchSize =
-    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => keepRoom());
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          cancelAnimationFrame(sizing);
+          sizing = requestAnimationFrame(keepRoom);
+        });
   watchSize?.observe(panel);
   /** Tells the host whether the toolbar shows, when that has changed. */
   function tell(): void {
@@ -394,6 +488,9 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     how = null;
     drawn = null;
     spelling = null;
+    searching?.element.remove();
+    searching = null;
+    panel.removeAttribute('data-search');
     panel.hidden = true;
     panel.removeAttribute('data-writing');
     keepRoom();
@@ -406,16 +503,36 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   }
 
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
-  panel.addEventListener('mousedown', (event) => event.preventDefault());
+  // (A slider in the palette takes the press, which a drag needs.)
+  panel.addEventListener('mousedown', (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.type === 'range') return;
+    event.preventDefault();
+  });
   // The keys in the toolbar: the arrows move among the items, Home and End to the ends, and Tab and
   // Esc put it away. Return and Space press the item, as a button does.
   panel.addEventListener('keydown', (event) => {
     if (event.key === 'Tab') {
       event.preventDefault();
       drawn?.openMenu(null);
+      stopSearch(false);
       // A docked toolbar stays: Tab only gives the keyboard back to the text.
       if (how === 'docked') view.focus();
       else close(true);
+      return;
+    }
+    if (searching) return;
+    // Typing with the bar open searches: the first character is the query's start.
+    if (
+      event.key.length === 1 &&
+      event.key !== ' ' &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.isComposing
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      startSearch(event.key);
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey || !drawn?.key(event)) return;
@@ -616,6 +733,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       removeCommands();
       removeExtension();
       watchSize?.disconnect();
+      cancelAnimationFrame(sizing);
       container.style.removeProperty('--rl-toolbar-room');
       view.contentDOM.removeEventListener('keydown', onWriting);
       view.contentDOM.removeEventListener('contextmenu', onContextMenu);

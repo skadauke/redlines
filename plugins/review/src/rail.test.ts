@@ -1157,13 +1157,13 @@ describe('a new comment', () => {
     expect(field(editor)!.value).toBe('Mine');
   });
 
-  it('refuses in Raw, with text too', () => {
+  it('refuses in Plain, with text too', () => {
     const { editor, review, notices } = mount(plain);
     editor.setViewMode('raw');
     select(editor, 'importer');
     expect(review.startComment('x')).toBe(false);
     expect(field(editor)).toBeUndefined();
-    expect(notices.at(-1)).toContain('Raw');
+    expect(notices.at(-1)).toContain('Plain');
   });
 
   it("has its spelling checked, as a reply's box does, whatever the document's spell check", () => {
@@ -1420,7 +1420,7 @@ describe('a new comment', () => {
     }
   });
 
-  it('takes no comment in Raw, and says so', () => {
+  it('takes no comment in Plain, and says so', () => {
     const { editor, review, notices } = mount(plain);
     editor.setViewMode('raw');
     select(editor, 'importer');
@@ -1428,7 +1428,7 @@ describe('a new comment', () => {
     expect(field(editor)).toBeUndefined();
     expect(editor.getDoc()).toBe(plain);
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain('Raw');
+    expect(notices[0]).toContain('Plain');
     expect(editor.getUiState().view).toBe('raw');
   });
 
@@ -1782,7 +1782,7 @@ describe('a new comment', () => {
     expect(editor.getParsed().ledger.comments[0]?.id).toBe('c2dk');
   });
 
-  it('keeps a reply being written through Clean and Raw, out of sight', () => {
+  it('keeps a reply being written through Clean and Plain, out of sight', () => {
     const { editor, review } = mount(threads);
     button(notes(editor)[0]!, 'Reply').click();
     const box = field(editor)!;
@@ -1996,7 +1996,7 @@ describe('a new comment', () => {
     expect(texts(shown[2]!)[0]).toBe('Or May?');
   });
 
-  it('keeps the draft through Clean and Raw, out of sight', () => {
+  it('keeps the draft through Clean and Plain, out of sight', () => {
     const { editor, review } = mount(plain);
     select(editor, 'importer');
     review.startComment();
@@ -2066,7 +2066,7 @@ describe('a new comment', () => {
     expect(editor.view.dom.querySelector('.rl-card')).toBeNull();
   });
 
-  it('opens again after Raw or Clean, in a narrow editor', async () => {
+  it('opens again after Plain or Clean, in a narrow editor', async () => {
     const { editor, review } = mount(threads);
     stubWidth(editor.view.scrollDOM, 700);
     await frame();
@@ -2171,15 +2171,15 @@ describe('a new comment', () => {
 });
 
 describe('the Add Comment command', () => {
-  it('is for the Format menu, with its key', () => {
+  it('is for the Review menu, with its key', () => {
     const { editor } = mount(plain);
     const command = editor.commands.list().find(({ id }) => id === 'comment.add');
-    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'format' });
-    // Disabled in Raw and in front matter: the item is grayed, and its key says why.
+    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'review' });
+    // Disabled in Plain and in front matter: the item is grayed, and its key says why.
     expect('disabledReason' in command!).toBe(true);
   });
 
-  it('opens the box from the key and from a menu, and says why in Raw', () => {
+  it('opens the box from the key and from a menu, and says why in Plain', () => {
     const { editor, notices } = mount(plain);
     select(editor, 'importer');
     shortcut(editor, 'm', { altKey: true });
@@ -2912,10 +2912,24 @@ describe('the notes follow the view', () => {
       const scroll = { by: 0 };
       const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 22 });
       const { editor } = mount(long);
+      const indexAt = (pos: number) =>
+        Math.floor((editor.view.state.doc.lineAt(pos).number - 1) / 2);
       vi.spyOn(editor.view, 'coordsAtPos').mockImplementation((pos) => {
-        const index = Math.floor((editor.view.state.doc.lineAt(pos).number - 1) / 2);
-        const top = 100 + 65 * index - scroll.by;
+        const top = 100 + 65 * indexAt(pos) - scroll.by;
         return { left: 0, right: 5, top, bottom: top + 20 };
+      });
+      // The editor's own estimate of a line, which the rail builds the notes near the screen by.
+      vi.spyOn(editor.view, 'lineBlockAt').mockImplementation((pos) => {
+        const line = editor.view.state.doc.lineAt(pos);
+        const top = 100 + 65 * indexAt(pos);
+        return {
+          from: line.from,
+          to: line.to,
+          top,
+          bottom: top + 20,
+          height: 20,
+          length: line.length,
+        } as never;
       });
       const scrollTo = async (by: number) => {
         scroll.by = by;
@@ -2936,7 +2950,10 @@ describe('the notes follow the view', () => {
         notes(editor)[20]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
         await frame();
         const before = tops(editor);
-        expect(before).toHaveLength(COUNT);
+        // Only the notes within a screen of the page are built (#697), the rest are laid out at an
+        // estimate of their height.
+        expect(before.length).toBeGreaterThan(20);
+        expect(before.length).toBeLessThan(COUNT / 4);
         expect(before.slice(0, 3)).toEqual([95, 163, 231]);
         // Scrolled so that its anchor is in view, the selected note is level with it, and every
         // note moves: those within a screen of the window are written, the rest wait.
@@ -2944,12 +2961,30 @@ describe('the notes follow the view', () => {
         const moved = tops(editor);
         expect(moved.slice(19, 22)).toEqual([1327, 1395, 1463]);
         expect(moved.filter((top, i) => top !== before[i]).length).toBeLessThan(60);
-        expect(moved[33]).toBe(95 + 68 * 33);
+        expect(moved[30]).toBe(35 + 68 * 30);
         // The same note is level with its anchor as the page goes on: what comes near the screen
         // is written, with the place it has had since.
         await scrollTo(1000);
         expect(tops(editor)[33]).toBe(35 + 68 * 33);
         expect(tops(editor).slice(19, 22)).toEqual([1327, 1395, 1463]);
+      } finally {
+        restore();
+      }
+    });
+
+    it('builds the notes near a far jump and drops those left behind (#697)', async () => {
+      const { editor, scrollTo, restore } = loadDense();
+      try {
+        await frame();
+        expect(notes(editor).length).toBeLessThan(COUNT / 4);
+        await scrollTo(9000);
+        await frame();
+        const shown = notes(editor);
+        // The notes around the 140th are built, and placed; those at the top are gone.
+        expect(shown.length).toBeGreaterThan(15);
+        expect(shown.length).toBeLessThan(COUNT / 4);
+        expect(shown.every((note) => note.style.top !== '')).toBe(true);
+        expect(Math.min(...shown.map(top))).toBeGreaterThan(6000);
       } finally {
         restore();
       }

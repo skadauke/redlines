@@ -59,6 +59,7 @@ interface Hook {
         selection: { main: { anchor: number; head: number } };
       };
       contentDOM: HTMLElement;
+      viewport: { from: number; to: number };
       coordsAtPos(pos: number): { left: number; right: number; top: number; bottom: number } | null;
       focus(): void;
       requestMeasure(): void;
@@ -72,6 +73,7 @@ interface Hook {
   };
   controller: { createWith(text: string): Promise<void> };
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
+  parsedAtViewport(): boolean;
 }
 
 declare global {
