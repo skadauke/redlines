@@ -345,8 +345,9 @@ describe('openConstructs', () => {
     for (const doc of ['a <su‸b>b</sub> c', 'a <sub>b</su‸b> c', 'a <su‸b> b', 'a b</su‸p> c']) {
       expect(constructs(doc).at(-1)?.kind, doc).toBe('atom');
     }
-    // A tag of another name is an `HTMLTag`, which was an atom before.
-    expect(constructs('a <spa‸n> b').at(-1)?.kind).toBe('atom');
+    // A tag of a name GFM escapes is an `HTMLTag`, which was an atom before. (A `span` is drawn as
+    // its element now, #687, and a lone one is text.)
+    expect(constructs('a <scri‸pt> b').at(-1)?.kind).toBe('atom');
   });
 
   it("gives a link's destination as its tail", () => {

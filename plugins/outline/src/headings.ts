@@ -31,6 +31,8 @@ const MARKS = new Set([
   'LinkTitle',
   'QuoteMark',
   'HTMLTag',
+  'HtmlTagMark',
+  'HtmlDropped',
   'Comment',
 ]);
 
