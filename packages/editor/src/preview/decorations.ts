@@ -23,6 +23,7 @@ import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { imageOfNode } from '../image-size.ts';
+import { htmlBreak, htmlChip, htmlElement, htmlWbr } from './html-draw.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
@@ -612,6 +613,12 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
+      else if (name === 'HtmlElement') htmlElement(b, node);
+      else if (name === 'HtmlBreak') b.push(htmlBreak().range(node.from, node.to));
+      else if (name === 'HtmlWbr') b.push(htmlWbr().range(node.from, node.to));
+      else if (name === 'HtmlDropped')
+        b.syntax(node.from, node.to, touches(state, node.from, node.to));
+      else if (name === 'HtmlChip') htmlChip(b, node);
       else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
         // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
         if (imageOfNode(state, node.node)) {

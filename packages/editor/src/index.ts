@@ -91,6 +91,7 @@ import {
   refreshImagesEffect,
 } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
+import { htmlInline } from './preview/html-inline.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
@@ -294,7 +295,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+      extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
