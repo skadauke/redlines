@@ -10,6 +10,7 @@ import {
   caretAlign,
   colTitles,
   type Editor,
+  twinAt,
   type EditorCommand,
   deleteCols,
   deleteColsReason,
@@ -80,7 +81,11 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     shortcut,
     // A command with more reasons than the caret outside a table (a move at the edge, the last row)
     // is disabled there, and in a table its key stays the table's, and says why.
-    keyFallsThrough: disabledReason === inTable ? true : (state) => !headInTable(state),
+    keyFallsThrough:
+      disabledReason === inTable
+        ? true
+        : (state) =>
+            !headInTable(state) && twinAt(state, state.selection.main.head)?.kind !== 'table',
     menu: 'table',
     group,
     structure: ['table'],

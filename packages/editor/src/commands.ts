@@ -142,6 +142,15 @@ export function createCommandRegistry(
         return false;
       }
       if (as != null) return true;
+      // A tracked conversion is pending, and a change can't start at a pending change: say so when
+      // the command could not follow it.
+      const done = command.run(editor());
+      if (!done && view.state.field(trackingField)) {
+        notice(
+          'Converted to Markdown as a pending change. Accept it, then make this change again.',
+        );
+      }
+      return done;
     }
     return command.run(editor());
   };

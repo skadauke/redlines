@@ -478,7 +478,7 @@ const tabKey = (outdent: boolean) =>
     if (view.state.selection.ranges.length > 1) return false;
     // Tab in an item of an HTML list (that has an exact twin) converts the list first (#690), and
     // only when there is an item above to go under (or, for Shift-Tab, a level to leave).
-    if (htmlListMoves(view.state, outdent)) convertTwin(view);
+    if (htmlListMoves(view.state, outdent) && convertTwin(view) !== true) return true;
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);

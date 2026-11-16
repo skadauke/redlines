@@ -11,7 +11,8 @@
 // change and one step to undo, made before the command's own.
 
 import { isolateHistory } from '@codemirror/commands';
-import { forceParsing } from '@codemirror/language';
+import { forceParsing, syntaxTree } from '@codemirror/language';
+import type { SyntaxNode } from '@lezer/common';
 import { EditorSelection, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
@@ -57,6 +58,15 @@ export function twinAt(state: EditorState, pos: number): TwinHere | null {
 
 function findTwin(state: EditorState, pos: number): TwinHere | null {
   if (pos < 0 || pos > state.doc.length) return null;
+  // Most positions are not in HTML at all: look at the syntax tree before reading blocks.
+  for (
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, -1);
+    ;
+    node = node.parent
+  ) {
+    if (!node) return null;
+    if (node.name === 'HTMLBlock') break;
+  }
   const block = blockAt(state, pos);
   if (!block || block.kind !== 'html') return null;
   const source = state.sliceDoc(block.lines.from, block.lines.to);
