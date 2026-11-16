@@ -141,6 +141,27 @@ describe('sidebar', () => {
     for (const [, root] of list.mock.calls) expect(root).toBe('/repo');
   });
 
+  it('lists text and code files in the secondary ink, and with the preference off only the open one', async () => {
+    let shown = true;
+    const { sidebar, rows, button } = setUp(
+      { '/repo': ['README.md', 'run.py', 'notes.txt', 'app.ts'] },
+      { showPlainOnly: () => shown },
+    );
+    sidebar.setDocument({ path: '/repo/README.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    expect(rows()).toEqual(['app.ts', 'notes.txt', 'README.md', 'run.py']);
+    expect(button('run.py').classList.contains('rl-sidebar-plain')).toBe(true);
+    expect(button('README.md').classList.contains('rl-sidebar-plain')).toBe(false);
+    shown = false;
+    await sidebar.refresh();
+    expect(rows()).toEqual(['README.md']);
+    // The one that is open stays, so that the sidebar shows where it is.
+    sidebar.setDocument({ path: '/repo/run.py', root: REPO });
+    await sidebar.refresh();
+    expect(rows()).toEqual(['README.md', 'run.py']);
+  });
+
   it("lists the document's own folder when the root is too broad", async () => {
     const { sidebar, list, rows, label } = setUp({
       '/Users/ada': ['Library/', 'notes/'],

@@ -190,6 +190,7 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     },
+    setKind: vi.fn(),
     reloadDoc: vi.fn((text: string) => {
       doc = text;
       onChange(text);
@@ -2040,6 +2041,7 @@ describe('a run, with the live editor and the file', () => {
       author: me,
       document: {
         path: () => doc.state.path,
+        plainOnly: () => false,
         generation: () => doc.generation,
         read: () => editor.getDoc(),
         parsed: () => editor.getParsed(),

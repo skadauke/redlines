@@ -11,7 +11,23 @@ import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandKeys, CommandRegistry, Editor, EditorCommand } from './api.ts';
 import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+import { plainOnlyFacet } from './tracked/field.ts';
 import { trackingField } from './tracked/typing.ts';
+
+/**
+ * The commands that work in a Plain-only file, by the start of their id: Edit's, find and replace,
+ * and the outline. Every other command makes or reads marks or Markdown, which such a file has
+ * none of.
+ */
+const PLAIN_ONLY_COMMANDS = ['edit.', 'find.', 'outline.'];
+
+/** Why a command that makes or reads Markdown can't run in a Plain-only file. */
+function plainOnlyReason(id: string): string {
+  if (id.startsWith('ask.') || id.startsWith('comment.') || id.startsWith('highlight.')) {
+    return 'Only Markdown files have comments, highlights and Ask.';
+  }
+  return 'Only Markdown files have formatting.';
+}
 
 const ACCEPT_FIRST =
   "This HTML must be changed to Markdown first, and with Track Changes on that is a pending change that this can't build on. Turn Track Changes off to make this change.";
@@ -21,6 +37,9 @@ export const disabledReasonOf = (
   command: EditorCommand,
   state: EditorState,
 ): string | undefined => {
+  if (state.facet(plainOnlyFacet) && !PLAIN_ONLY_COMMANDS.some((id) => command.id.startsWith(id))) {
+    return plainOnlyReason(command.id);
+  }
   // In HTML that has a Markdown twin the command converts it first; in HTML that has none it can't.
   if (command.structure) {
     const reason = twinReason(state, command.structure);

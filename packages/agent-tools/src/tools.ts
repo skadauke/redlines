@@ -37,6 +37,12 @@ export interface ToolContext {
   onStatus(text: string): void;
   onReply(): void;
   /**
+   * Whether the document is a Plain-only file (text or code, format §9.1), which holds no tracked
+   * changes, comments or ledger. The tools that would mark it refuse; `view` and `status` don't.
+   * Default: false. Asked on each call, since the app may rename the document into another kind.
+   */
+  plainOnly?(): boolean;
+  /**
    * The one picture this run may be shown, for `view_image`: only a request to describe an image
    * (Alt Text) gives it, and the tool has no argument that names another file. Without it, there
    * is no such tool.
@@ -57,6 +63,10 @@ export interface ToolImage {
   /** Reads it; rejects with a line for the agent when it can't be read. */
   read(): Promise<ImageBytes>;
 }
+
+/** What `str_replace`, `comment` and `reply` say in a Plain-only file. */
+export const PLAIN_ONLY_ERROR =
+  "This is a plain text file, which can't hold tracked changes or comments.";
 
 export interface ToolResult {
   text: string;
@@ -379,6 +389,9 @@ function messageOf(error: unknown): string {
   }
 }
 
+/** The tools that write a mark, a comment or a ledger. */
+const MARKING_TOOLS: ReadonlySet<string> = new Set(['str_replace', 'comment', 'reply']);
+
 async function viewImage(ctx: ToolContext): Promise<ToolResult> {
   if (!ctx.image) return fail('There is no image to look at in this request.');
   const image = await ctx.image.read();
@@ -393,6 +406,7 @@ async function viewImage(ctx: ToolContext): Promise<ToolResult> {
 export async function callTool(ctx: ToolContext, name: string, args: unknown): Promise<ToolResult> {
   const given = record(args);
   try {
+    if (MARKING_TOOLS.has(name) && ctx.plainOnly?.() === true) return fail(PLAIN_ONLY_ERROR);
     switch (name) {
       case 'view':
         return view(ctx, given);

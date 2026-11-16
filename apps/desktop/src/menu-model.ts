@@ -83,6 +83,11 @@ export interface MenuCommands {
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
 export interface MenuState {
+  /**
+   * Whether the document is a Plain-only file (text or code): it has Plain alone, and no Track
+   * Changes or review (`EditorUiState.kind`).
+   */
+  plainOnly: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
@@ -245,7 +250,8 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
     ),
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,
-    enabled: command.disabledReason ? (state) => state.enabledCommands.includes(id) : undefined,
+    // Every command can be disabled: a Plain-only file disables all but a few (`disabledReasonOf`).
+    enabled: (state) => state.enabledCommands.includes(id),
     keyInMenuOnly: true,
   };
 }
@@ -307,6 +313,8 @@ export function appMenuModel(
     accelerator: `Alt+CmdOrCtrl+${key}`,
     action: () => commands.setView(view),
     checked: (state) => menuViewOf(state.view) === view,
+    // A Plain-only file has Plain alone (the title bar's menu says why, in its hint).
+    enabled: view === 'raw' ? undefined : (state) => !state.plainOnly,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
@@ -532,6 +540,7 @@ export function appMenuModel(
           accelerator: 'Shift+CmdOrCtrl+E',
           action: () => commands.toggleTracking(),
           checked: (state) => state.tracking,
+          enabled: (state) => !state.plainOnly,
         },
         {
           text: 'Accept All Changes and Stop Tracking',

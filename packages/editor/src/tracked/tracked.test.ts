@@ -1150,6 +1150,7 @@ describe('ui state', () => {
   it('uiState.hasRedlines is true for the fixture and false for a plain file', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
+      kind: 'markdown',
       view: 'clean',
       markupView: 'redlines',
       tracking: false,

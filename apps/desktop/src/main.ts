@@ -19,9 +19,10 @@ import {
   defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
-import { codeLanguages } from '@redlines/code';
+import { codeFileHighlight, codeLanguages } from '@redlines/code';
 import {
   createEditor,
+  PLAIN_ONLY_TRACKING,
   type Author,
   type EditorTyping,
   type EditorUiState,
@@ -43,6 +44,7 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
+import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
@@ -651,7 +653,27 @@ const focusEditor = () => {
   if (!editor.view.dom.contains(document.activeElement)) editor.focus();
 };
 
+/** The file whose name the editor is colored by, with the extension that does it. */
+let coloredAs: { path: string; remove: () => void } | null = null;
+
+/**
+ * Colors a text or code file as its name says (`codeFileHighlight`), and takes the colors off when
+ * another file, or a Markdown one, takes its place or its name changes.
+ */
+function colorFile(path: string | null): void {
+  const wanted = path !== null && documentKind(path) === 'plain-only' ? path : null;
+  if (coloredAs?.path === wanted) return;
+  coloredAs?.remove();
+  coloredAs = wanted
+    ? {
+        path: wanted,
+        remove: editor.addExtension(codeFileHighlight(wanted, editor.getDoc().length)),
+      }
+    : null;
+}
+
 function showDocument(state: DocumentState): void {
+  colorFile(state.path);
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
     // Another document took this one's place: the old one's runs have nothing to act on, and its
@@ -705,6 +727,7 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  showPlainOnly: () => settings.showPlainOnlyFiles,
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -779,6 +802,7 @@ const runs = createRuns({
   author,
   document: {
     path: () => controller.state.path,
+    plainOnly: () => editor.getUiState().kind === 'plain-only',
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     parsed: () => editor.getParsed(),
@@ -979,6 +1003,8 @@ async function restoreAfterCrash(): Promise<void> {
 }
 
 const toggleTracking = () => {
+  // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
+  if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
@@ -1424,6 +1450,7 @@ function render(): void {
     name: doc.name,
     dirty: doc.dirty,
     fileDraggable: doc.path !== null && canDragFile,
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -1432,6 +1459,7 @@ function render(): void {
     toolbarShown: toolbar.isOpen(),
   });
   menuState = {
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -1581,6 +1609,10 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      openFile: async (path, text) => {
+        await host.write(path, text);
+        await controller.open(path);
+      },
       // The menu bar is the app's, and a page has none: a journey chooses a row through this, which
       // runs it only while the menu would have it enabled.
       menuRow: (text) => {
@@ -1603,10 +1635,12 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
+  const plainOnlyListed = settings.showPlainOnlyFiles;
   settings = keepWindowOwn(settings, changed);
   shortcutBook.load(settings.shortcuts);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
+  if (settings.showPlainOnlyFiles !== plainOnlyListed) void sidebar.refresh();
   toolbar.setAtBottom(settings.toolbarAtBottom);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));

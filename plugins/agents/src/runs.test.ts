@@ -162,6 +162,7 @@ function setup(options: Options = {}): Setup {
     author: me,
     document: {
       path: () => doc.path,
+      plainOnly: () => false,
       generation: () => doc.generation,
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),
@@ -413,6 +414,7 @@ function depsLike(s: Setup) {
     author: me,
     document: {
       path: () => s.doc.path,
+      plainOnly: () => false,
       generation: () => s.doc.generation,
       read: () => s.editor.getDoc(),
       parsed: () => s.editor.getParsed(),
