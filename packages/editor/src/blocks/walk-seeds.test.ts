@@ -626,8 +626,6 @@ describe('#440: Return twice at the end of a nested item whose marker is another
 });
 
 describe('walk seed 331 of the lists side by side (#598): Return at the start of a lazy line the substitution holds', () => {
-  const MARKER_AT_START =
-    'A line break here would leave a change marker at the start of the new line.';
   scriptRows([
     {
       name: 'Backspace outdents the lazy line of a loose item, Return is written as a replacement, Track Changes on',
