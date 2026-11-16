@@ -37,7 +37,7 @@ import {
   type Parsed,
   type Segment,
 } from '@redlines/format';
-import { blankLines, keptLine } from '../blocks/hidden.ts';
+import { blankLines, commentSpans, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS, LEVEL_COLS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
@@ -665,22 +665,11 @@ function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | nu
   const taken = (ledger ? [...markers, ledger] : markers).toSorted((a, b) => a.from - b.from);
   const comments: Span[] = [];
   let next = 0;
-  syntaxTree(state).iterate({
-    enter: (node) => {
-      if (node.name !== 'Comment' && node.name !== 'CommentBlock') return;
-      const text = state.sliceDoc(node.from, node.to);
-      for (let open = text.indexOf('<!--'); open !== -1;) {
-        const close = text.indexOf('-->', open + 2);
-        if (close === -1) break;
-        const span = { from: node.from + open, to: node.from + close + 3 };
-        while (next < taken.length && taken[next]!.to <= span.from) next++;
-        const overlap = taken[next];
-        if (!overlap || overlap.from >= span.to) comments.push(span);
-        open = text.indexOf('<!--', close + 3);
-      }
-      return false;
-    },
-  });
+  for (const span of commentSpans(state)) {
+    while (next < taken.length && taken[next]!.to <= span.from) next++;
+    const overlap = taken[next];
+    if (!overlap || overlap.from >= span.to) comments.push(span);
+  }
   return comments;
 }
 
