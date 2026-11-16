@@ -35,16 +35,12 @@ export const TOOLBAR_STYLE = `
   bottom: 16px;
   margin: 0 auto;
 }
-/* The groups, side by side, wrapping in a window too narrow for them. */
+/* The bar: Ask, a rule, and a button for each menu, side by side. */
 .rl-toolbar-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-}
-.rl-toolbar-row {
-  display: flex;
   gap: 2px;
 }
 .rl-toolbar-rule {
@@ -60,37 +56,105 @@ export const TOOLBAR_STYLE = `
   height: 1px;
   margin: 4px 6px;
 }
-.rl-toolbar-item {
+.rl-toolbar-menubox { position: relative; display: flex; }
+.rl-toolbar-top {
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: center;
-  width: 32px;
+  gap: 6px;
   height: 30px;
-  padding: 0;
+  padding: 0 9px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--rl-ink-2);
+  font: inherit;
   cursor: default;
 }
-.rl-toolbar-item:enabled:hover,
-.rl-toolbar-item:focus-visible {
+.rl-toolbar-top:hover,
+.rl-toolbar-top-open,
+.rl-toolbar-top:focus-visible {
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
   color: var(--rl-ink);
 }
-.rl-toolbar-item[aria-pressed='true'] {
-  background: var(--rl-pressed);
-  color: var(--rl-ink);
+.rl-toolbar-top-open { background: var(--rl-pressed); }
+.rl-toolbar-top:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
+.rl-toolbar-top[aria-disabled='true'] { color: var(--rl-ink-3); opacity: 0.55; }
+.rl-toolbar-top svg { flex: none; }
+
+/* A menu: opaque, on its own card, over or under the bar (never on it), scrolling when taller than
+   the room. */
+.rl-toolbar-menu {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 10px);
+  left: 0;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 232px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background-color: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+}
+.rl-toolbar-menu[hidden] { display: none; }
+.rl-toolbar-menu-up { top: auto; bottom: calc(100% + 10px); }
+.rl-toolbar-menu-head {
+  padding: 6px 10px 5px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1.2;
+}
+.rl-toolbar-line { display: flex; gap: 2px; }
+.rl-toolbar-item {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.rl-toolbar-item svg { flex: none; color: var(--rl-ink-2); }
+.rl-toolbar-label { flex: 1; white-space: nowrap; }
+.rl-toolbar-keys {
+  flex: none;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  letter-spacing: 0.04em;
+}
+.rl-toolbar-item:hover:not([aria-disabled='true']),
+.rl-toolbar-item:focus-visible {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+}
+.rl-toolbar-item[aria-checked='true'] { background: var(--rl-pressed); }
 .rl-toolbar-item:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
-.rl-toolbar-item:disabled {
-  color: var(--rl-ink-3);
-  opacity: 0.55;
+/* Grayed: dimmed, and its hint says why. */
+.rl-toolbar-item[aria-disabled='true'] { opacity: 0.5; }
+
+/* The bar goes while the person types, and comes back when the pointer moves. */
+.rl-toolbar[data-writing] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
 }
+.rl-toolbar:not([data-writing]) { transition: opacity 120ms ease-out; }
 
 /* Spelling suggestions, when the right-click is on a misspelled word: the only words in it. */
 .rl-toolbar-spelling {

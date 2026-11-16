@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import type { EditorCommand } from '@redlines/editor';
 import { describe, expect, it } from 'vitest';
-import { ITEMS, shownGroups } from './items.ts';
+import { MENUS, shownBar } from './items.ts';
 
 const command = (id: string, fields: Partial<EditorCommand> = {}): EditorCommand => ({
   id,
@@ -12,70 +12,95 @@ const command = (id: string, fields: Partial<EditorCommand> = {}): EditorCommand
 
 const state = EditorState.create({ doc: 'Some text' });
 
-/** The ids the toolbar shows, group by group. */
+/** The ids the toolbar shows, menu by menu. */
 const ids = (commands: readonly EditorCommand[], at: EditorState = state) =>
-  shownGroups(commands, at).map((group) => ({
-    group: group.id,
-    items: group.items.map((item) => item.id),
+  shownBar(commands, at).menus.map((menu) => ({
+    menu: menu.id,
+    rows: menu.rows.map((row) => row.map((item) => item.id)),
   }));
 
-describe('the toolbar items', () => {
-  it('leaves out an item whose command is not registered, and a group with none left', () => {
+const everything = [{ command: 'ask.start' }, ...MENUS.flatMap((menu) => menu.rows.flat())].map(
+  ({ command: id }) => command(id, { isActive: () => true }),
+);
+
+describe('the toolbar menus', () => {
+  it('leaves out an item whose command is not registered, and a menu with none left', () => {
     expect(ids([])).toEqual([]);
-    expect(ids([command('format.bold')])).toEqual([{ group: 'format', items: ['format.bold'] }]);
+    expect(ids([command('format.bold')])).toEqual([{ menu: 'format', rows: [['format.bold']] }]);
   });
 
-  it('shows an item once its command is registered', () => {
-    const base = [command('format.bold'), command('format.italic')];
-    expect(ids(base)[0]?.items).toEqual(['format.bold', 'format.italic']);
-    // A later plugin's command lands: its item appears, in the toolbar's own order.
-    expect(ids([...base, command('format.sub')])[0]?.items).toEqual([
+  it('shows an item once its command is registered, in the menu’s own order', () => {
+    const base = [command('format.italic'), command('format.bold')];
+    expect(ids(base)[0]?.rows).toEqual([['format.bold'], ['format.italic']]);
+    expect(ids([...base, command('format.sub')])[0]?.rows.flat()).toEqual([
       'format.bold',
       'format.italic',
       'format.sub',
     ]);
   });
 
-  it('keeps the toolbar’s order whatever the order of registering', () => {
-    const shown = ids([
-      command('format.link'),
-      command('format.bold'),
-      command('comment.add'),
-      command('block.table'),
-    ]);
-    expect(shown.map(({ group }) => group)).toEqual(['review', 'insert', 'format']);
-    expect(shown[1]?.items).toEqual(['block.table', 'format.link']);
-  });
-
-  it('holds Insert, Format and Edit, with the comment group first', () => {
-    const shown = ids(ITEMS.map(({ command: id }) => command(id)));
-    expect(shown.map(({ group }) => group)).toEqual(['review', 'insert', 'format', 'edit']);
-  });
-
-  it('puts Ask beside Add Comment and Highlight', () => {
-    const shown = ids([command('ask.start'), command('highlight.toggle'), command('comment.add')]);
-    expect(shown).toEqual([
-      { group: 'review', items: ['comment.add', 'highlight.toggle', 'ask.start'] },
+  it('orders the bar Ask | Insert · Review · List · Format · Edit', () => {
+    const bar = shownBar(everything, state);
+    expect(bar.ask?.id).toBe('ask.start');
+    expect(bar.menus.map((menu) => menu.id)).toEqual([
+      'insert',
+      'review',
+      'list',
+      'format',
+      'edit',
     ]);
   });
 
-  it('names an item by its command’s title, without the ellipsis of a title that opens a box', () => {
-    const [group] = shownGroups([command('format.link', { title: 'Link…' })], state);
-    expect(group?.items[0]?.name).toBe('Link');
+  it('keeps Ask out of the menus and leaves it out when the agents are not there', () => {
+    expect(shownBar([command('format.bold')], state).ask).toBeNull();
+    expect(ids([command('ask.start')])).toEqual([]);
+  });
+
+  it('puts Accept and Reject in one line of the Review menu', () => {
+    const review = shownBar(everything, state).menus.find((menu) => menu.id === 'review');
+    expect(review?.rows.map((row) => row.map((item) => item.id))).toEqual([
+      ['comment.add'],
+      ['highlight.toggle'],
+      ['change.accept', 'change.reject'],
+      ['review.start'],
+    ]);
+  });
+
+  it('leaves a place in Insert for a Collapsible Section that a later lane registers', () => {
+    const base = ['format.link', 'block.table'].map((id) => command(id));
+    expect(ids(base)[0]?.rows.flat()).toEqual(['format.link', 'block.table']);
+    const later = ids([...base, command('block.collapsible')])[0]?.rows.flat();
+    expect(later?.at(-1)).toBe('block.collapsible');
+  });
+
+  it('names an item as its menu does, and by the command’s title where the menu has no word', () => {
+    const bar = shownBar(
+      [
+        command('block.alert', { title: 'Alert' }),
+        command('format.link', { title: 'Link…' }),
+        command('comment.add', { title: 'Add Comment' }),
+      ],
+      state,
+    );
+    const items = bar.menus.flatMap((menu) => menu.rows.flat());
+    expect(items.map((item) => [item.label, item.name])).toEqual([
+      ['Link…', 'Link'],
+      ['Callout', 'Alert'],
+      ['Comment', 'Add Comment'],
+    ]);
   });
 
   it('follows a title that reads the state', () => {
     const toggle = command('highlight.toggle', {
       title: (at) => (at.doc.length > 5 ? 'Remove Highlight' : 'Highlight'),
     });
-    expect(shownGroups([toggle], state)[0]?.items[0]?.name).toBe('Remove Highlight');
-    expect(shownGroups([toggle], EditorState.create({ doc: 'Hi' }))[0]?.items[0]?.name).toBe(
-      'Highlight',
-    );
+    const name = (at: EditorState) => shownBar([toggle], at).menus[0]?.rows[0]?.[0]?.name;
+    expect(name(state)).toBe('Remove Highlight');
+    expect(name(EditorState.create({ doc: 'Hi' }))).toBe('Highlight');
   });
 
   it('shows the shortcut the way the Mac writes it', () => {
-    const [group] = shownGroups(
+    const bar = shownBar(
       [
         command('format.bold', { shortcut: 'Mod-b' }),
         command('format.italic', { shortcut: 'Mod-i' }),
@@ -83,20 +108,18 @@ describe('the toolbar items', () => {
       ],
       state,
     );
-    expect(group?.items.map((item) => item.keys)).toEqual(['⌘B', '⌘I', null]);
-    expect(group?.items[0]?.aria).toBe('Meta+B');
+    const items = bar.menus[0]?.rows.flat();
+    expect(items?.map((item) => item.keys)).toEqual(['⌘B', '⌘I', null]);
+    expect(items?.[0]?.aria).toBe('Meta+B');
   });
 
   it('shows the system’s keys for the Edit items, which the registry binds none to', () => {
-    const shown = shownGroups(
-      [command('edit.cut'), command('edit.copy'), command('edit.paste')],
-      state,
-    );
-    expect(shown[0]?.items.map((item) => item.keys)).toEqual(['⌘X', '⌘C', '⌘V']);
+    const bar = shownBar([command('edit.cut'), command('edit.copy'), command('edit.paste')], state);
+    expect(bar.menus[0]?.rows.flat().map((item) => item.keys)).toEqual(['⌘X', '⌘C', '⌘V']);
   });
 
-  it('says whether an item is enabled and whether it is on', () => {
-    const [group] = shownGroups(
+  it('says whether an item is enabled, why not, and whether it is on', () => {
+    const bar = shownBar(
       [
         command('format.bold', { isActive: () => true }),
         command('format.italic', { disabledReason: () => 'Not here.' }),
@@ -105,21 +128,69 @@ describe('the toolbar items', () => {
       state,
     );
     expect(
-      group?.items.map(({ enabled, toggle, active }) => ({ enabled, toggle, active })),
+      bar.menus[0]?.rows.flat().map(({ enabled, reason, toggle, active }) => ({
+        enabled,
+        reason,
+        toggle,
+        active,
+      })),
     ).toEqual([
-      { enabled: true, toggle: true, active: true },
-      { enabled: false, toggle: false, active: false },
-      { enabled: true, toggle: false, active: false },
+      { enabled: true, reason: null, toggle: true, active: true },
+      { enabled: false, reason: 'Not here.', toggle: false, active: false },
+      { enabled: true, reason: null, toggle: false, active: false },
     ]);
   });
+});
 
-  it('knows the commands of the plugins that come later by the ids they were given', () => {
-    const later = ['format.sub', 'format.sup', 'block.alert', 'image.insert', 'highlight.toggle'];
-    const shown = ids(later.map((id) => command(id)));
-    expect(shown).toEqual([
-      { group: 'review', items: ['highlight.toggle'] },
-      { group: 'insert', items: ['block.alert', 'image.insert'] },
-      { group: 'format', items: ['format.sub', 'format.sup'] },
-    ]);
+describe('the List menu', () => {
+  const paragraph = [
+    command('block.body', { isActive: () => true }),
+    command('block.ul', { isActive: () => false }),
+    command('block.ol', { isActive: () => false }),
+    command('block.task', { isActive: () => false }),
+  ];
+  const listMenu = (commands: readonly EditorCommand[]) =>
+    shownBar(commands, state).menus.find((menu) => menu.id === 'list');
+
+  it('shows for a paragraph, which a list can be made of', () => {
+    expect(
+      listMenu(paragraph)
+        ?.rows.flat()
+        .map((item) => item.label),
+    ).toEqual(['Bullets', 'Numbers', 'Checkboxes', 'No List']);
+  });
+
+  it('shows for a list item, and is not in the bar for anything else', () => {
+    const inList = paragraph.map((each) =>
+      each.id === 'block.ol'
+        ? { ...each, isActive: () => true }
+        : { ...each, isActive: () => false },
+    );
+    expect(listMenu(inList)).toBeDefined();
+    // A heading, a code block, a table: none of the four is on.
+    expect(listMenu(paragraph.map((each) => ({ ...each, isActive: () => false })))).toBeUndefined();
+  });
+
+  it('grays No List on a paragraph, with the reason, and leaves it on in a list', () => {
+    const noList = (commands: readonly EditorCommand[]) =>
+      listMenu(commands)
+        ?.rows.flat()
+        .find((item) => item.id === 'block.body');
+    expect(noList(paragraph)?.enabled).toBe(false);
+    expect(noList(paragraph)?.reason).toMatch(/not a list/);
+    const inBullets = paragraph.map((each) =>
+      each.id === 'block.ul' ? { ...each, isActive: () => true } : each,
+    );
+    expect(noList(inBullets)?.enabled).toBe(true);
+  });
+
+  it('grays a conversion the command says makes no sense, with the command’s own reason', () => {
+    const grayed = paragraph.map((each) =>
+      each.id === 'block.task' ? { ...each, disabledReason: () => 'Not in a cell.' } : each,
+    );
+    const item = listMenu(grayed)
+      ?.rows.flat()
+      .find((each) => each.id === 'block.task');
+    expect(item).toMatchObject({ enabled: false, reason: 'Not in a cell.' });
   });
 });

@@ -39,6 +39,33 @@ const ICONS = {
     '<path d="M2.5 5.9l5.6 6.6M8.1 5.9L2.5 12.5"/><path d="M10.2 2.6c.2-.8 1.2-1.1 2-.8.8.3.9 1.3.3 1.9l-2.3 2h3.1"/>',
   /** Clear Formatting: a T struck through. */
   clear: '<path d="M4 3.5h8M8 3.5v6.5"/><path d="M4.5 13.5L12 6.5"/>',
+  /** Strikethrough: a line through a word. */
+  strike:
+    '<path d="M3 8h10"/><path d="M10.6 5c-.3-1.1-1.3-1.8-2.7-1.8-1.5 0-2.6.8-2.6 2 0 .8.5 1.3 1.3 1.6M5.4 11c.4 1.1 1.4 1.8 2.8 1.8 1.6 0 2.6-.8 2.6-2 0-.5-.2-.9-.5-1.2"/>',
+  /** Code: angle brackets. */
+  code: '<path d="M6 4.5L2.5 8 6 11.5M10 4.5L13.5 8 10 11.5"/>',
+  /** Accept: a check mark. */
+  accept: '<path d="M3 8.4l3.2 3.2L13 4.6"/>',
+  /** Reject: a cross. */
+  reject: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  /** Review Changes: a sheet with a check. */
+  review:
+    '<path d="M4 2.5h5.5L12.5 5.5v8H4z"/><path d="M9.5 2.5v3h3"/><path d="M6 9.6l1.3 1.3L10 8.2"/>',
+  /** Bullets: dots beside lines. */
+  bullets:
+    '<path d="M6.5 4h7M6.5 8h7M6.5 12h7"/><path d="M3 4h.01M3 8h.01M3 12h.01" stroke-width="2"/>',
+  /** Numbers: digits beside lines. */
+  numbers:
+    '<path d="M7 4h6.5M7 8h6.5M7 12h6.5"/><path d="M2.6 3.2l1-.5v3M2.4 8.6c.2-.7 1.5-.8 1.6 0 .1.6-1.2 1.2-1.7 1.8H4.2"/>',
+  /** Checkboxes: boxes beside lines. */
+  checkboxes:
+    '<rect x="2" y="2.8" width="3.2" height="3.2" rx=".8"/><rect x="2" y="9.6" width="3.2" height="3.2" rx=".8"/><path d="M7.5 4.4h6M7.5 11.2h6"/>',
+  /** No List: lines with a stroke across. */
+  'no-list': '<path d="M3 4.5h10M3 8h10M3 11.5h6"/><path d="M11 10.5l3 3M14 10.5l-3 3"/>',
+  /** Collapsible Section: a triangle beside a line. */
+  collapsible: '<path d="M3.5 4.5l3 3-3 3z"/><path d="M8.5 6h4.5M8.5 10h4.5"/>',
+  /** The mark of a menu in the bar. */
+  chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */
   cut: '<circle cx="4.8" cy="11.6" r="1.8"/><circle cx="11.2" cy="11.6" r="1.8"/><path d="M6 10.2L12 2.8M10 10.2L4 2.8"/>',
   /** Copy: two sheets. */

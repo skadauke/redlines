@@ -73,6 +73,7 @@ const tipOf = () => document.querySelector<HTMLElement>('.rl-toolbar-tip');
 const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-toolbar-item')];
 const itemFor = (id: string) =>
   document.querySelector<HTMLButtonElement>(`.rl-toolbar-item[data-command="${id}"]`);
+const tops = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-toolbar-top')];
 const words = () => [...document.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')];
 
 function pointer(
@@ -151,35 +152,97 @@ describe('no handle', () => {
 });
 
 describe('the items', () => {
-  it('are the commands of the registry, with no labels on them', () => {
+  it('are the commands of the registry, in menus, each with its name and keys', () => {
     mount();
     mounted.at(-1)?.toolbar.show();
     expect(buttons().map((button) => button.dataset['command'])).toEqual([
-      'comment.add',
-      'block.table',
       'format.link',
+      'block.table',
+      'comment.add',
       'format.bold',
       'format.italic',
       'format.clear',
     ]);
-    // Icons only: the name is for assistive technology, and for the hint.
     for (const button of buttons()) {
-      expect(button.textContent).toBe('');
       expect(button.querySelector('svg')).not.toBeNull();
       expect(button.getAttribute('aria-label')).toBeTruthy();
+      expect(button.querySelector('.rl-toolbar-label')?.textContent).toBeTruthy();
     }
     expect(itemFor('format.link')?.getAttribute('aria-label')).toBe('Link');
+    expect(itemFor('format.link')?.textContent).toBe('Link…⌘K');
+    expect(itemFor('comment.add')?.querySelector('.rl-toolbar-label')?.textContent).toBe('Comment');
     expect(itemFor('format.bold')?.getAttribute('aria-keyshortcuts')).toBe('Meta+B');
   });
 
-  it('are in rows by group, with a hairline between them', () => {
+  it('are in a menu for each group, in the bar’s order, shut until a menu opens', () => {
     mount();
     mounted.at(-1)?.toolbar.show();
-    const rows = [...document.querySelectorAll('.rl-toolbar-row')].map((row) =>
-      row.getAttribute('aria-label'),
+    expect(tops().map((top) => top.textContent)).toEqual(['Insert', 'Review', 'Format']);
+    const menus = [...document.querySelectorAll<HTMLElement>('.rl-toolbar-menu')];
+    expect(menus.map((menu) => menu.getAttribute('aria-label'))).toEqual([
+      'Insert',
+      'Review',
+      'Format',
+    ]);
+    expect(menus.every((menu) => menu.hidden)).toBe(true);
+    // No Ask here, so no rule after it.
+    expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(0);
+  });
+
+  it('puts Ask first, with a rule after it, and the List menu only for a paragraph', () => {
+    const ids = ['ask.start', 'block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
+    mount(
+      'Hello',
+      {},
+      ids.map((id) => command(id, { isActive: () => id === 'block.body' })),
     );
-    expect(rows).toEqual(['Comment', 'Insert', 'Format']);
-    expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(2);
+    mounted.at(-1)?.toolbar.show();
+    expect(tops().map((top) => top.textContent)).toEqual(['Ask', 'List', 'Format']);
+    expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(1);
+  });
+
+  it('opens a menu on a click, shows one at a time, and switches on hover', () => {
+    mount();
+    mounted.at(-1)?.toolbar.show();
+    const [insert, review] = tops();
+    const menu = (name: string) =>
+      document.querySelector<HTMLElement>(`.rl-toolbar-menu[aria-label="${name}"]`)!;
+    insert!.click();
+    expect(menu('Insert').hidden).toBe(false);
+    expect(insert!.getAttribute('aria-expanded')).toBe('true');
+    expect(menu('Insert').querySelector('.rl-toolbar-menu-head')?.textContent).toBe('Insert');
+    // Hovering from the open menu to another switches menus.
+    pointer(review!, 'pointerenter');
+    expect(menu('Insert').hidden).toBe(true);
+    expect(menu('Review').hidden).toBe(false);
+    // The same button again puts it away.
+    review!.click();
+    expect(menu('Review').hidden).toBe(true);
+    // With none open, hovering opens nothing.
+    pointer(insert!, 'pointerenter');
+    expect(menu('Insert').hidden).toBe(true);
+  });
+
+  it('puts an open menu away on Esc first, with the keyboard on its button, and on a press outside', () => {
+    const { editor, toolbar } = mount();
+    editor.commands.run('toolbar.show');
+    tops()[1]!.focus();
+    key(tops()[1]!, 'ArrowDown');
+    const open = document.querySelector<HTMLElement>('.rl-toolbar-menu:not([hidden])');
+    expect(open?.getAttribute('aria-label')).toBe('Review');
+    expect(document.activeElement).toBe(itemFor('comment.add'));
+    key(itemFor('comment.add')!, 'Escape');
+    expect(document.querySelector('.rl-toolbar-menu:not([hidden])')).toBeNull();
+    expect(document.activeElement).toBe(tops()[1]);
+    expect(toolbar.isOpen()).toBe(true);
+    key(tops()[1]!, 'Escape');
+    expect(toolbar.isOpen()).toBe(false);
+    // A press in the text puts a menu away, though the toolbar stays docked.
+    toolbar.toggle();
+    tops()[0]!.click();
+    pointer(editor.view.contentDOM, 'pointerdown');
+    expect(document.querySelector('.rl-toolbar-menu:not([hidden])')).toBeNull();
+    expect(toolbar.isOpen()).toBe(true);
   });
 
   it('shows an item once its command lands', () => {
@@ -217,40 +280,58 @@ describe('the items', () => {
       command('format.clear'),
     ]);
     mounted.at(-1)?.toolbar.show();
-    expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('true');
-    expect(itemFor('format.italic')?.getAttribute('aria-pressed')).toBe('false');
-    expect(itemFor('format.italic')?.disabled).toBe(true);
-    expect(itemFor('format.clear')?.hasAttribute('aria-pressed')).toBe(false);
+    expect(itemFor('format.bold')?.getAttribute('aria-checked')).toBe('true');
+    expect(itemFor('format.italic')?.getAttribute('aria-checked')).toBe('false');
+    expect(itemFor('format.italic')?.getAttribute('aria-disabled')).toBe('true');
+    expect(itemFor('format.bold')?.getAttribute('aria-disabled')).toBe('false');
+    expect(itemFor('format.clear')?.hasAttribute('aria-checked')).toBe(false);
   });
 
   it('follows the selection while it is open', () => {
     let bold = false;
     const { editor } = mount('Hello world', {}, [command('format.bold', { isActive: () => bold })]);
     mounted.at(-1)?.toolbar.show();
-    expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('false');
+    expect(itemFor('format.bold')?.getAttribute('aria-checked')).toBe('false');
     bold = true;
     editor.view.dispatch({ selection: { anchor: 2 } });
-    expect(itemFor('format.bold')?.getAttribute('aria-pressed')).toBe('true');
+    expect(itemFor('format.bold')?.getAttribute('aria-checked')).toBe('true');
   });
 });
 
 describe('the hint', () => {
-  it('names an item and its keys after the title bar’s delay, and goes with the pointer', () => {
-    mount();
+  it('says why a grayed item can’t be used, after the title bar’s delay, and goes with the pointer', () => {
+    mount('Hello', {}, [
+      command('format.italic', { title: 'Italic', disabledReason: () => 'Not in code.' }),
+    ]);
     mounted.at(-1)?.toolbar.show();
-    const button = itemFor('block.table')!;
+    const button = itemFor('format.italic')!;
     pointer(button, 'pointerenter');
     vi.advanceTimersByTime(399);
     expect(tipOf()?.hidden).toBe(true);
     vi.advanceTimersByTime(1);
     expect(tipOf()?.hidden).toBe(false);
-    expect(tipOf()?.textContent).toBe('Table⌥⌘T');
+    expect(tipOf()?.textContent).toBe('Not in code.');
     pointer(button, 'pointerleave');
     expect(tipOf()?.hidden).toBe(true);
   });
 
+  it('names the icons of a shared line and their keys, which the line doesn’t write', () => {
+    mount('Hello', {}, [
+      command('change.accept', { title: 'Accept', shortcut: 'Mod-Alt-y' }),
+      command('change.reject', { title: 'Reject' }),
+    ]);
+    mounted.at(-1)?.toolbar.show();
+    expect(document.querySelectorAll('.rl-toolbar-pair')).toHaveLength(1);
+    expect(itemFor('change.accept')?.querySelector('.rl-toolbar-keys')).toBeNull();
+    pointer(itemFor('change.accept')!, 'pointerenter');
+    vi.advanceTimersByTime(400);
+    expect(tipOf()?.textContent).toBe('Accept⌥⌘Y');
+  });
+
   it('takes the delay it is given', () => {
-    mount('Hello', { tooltipMs: 1000 });
+    mount('Hello', { tooltipMs: 1000 }, [
+      command('format.bold', { disabledReason: () => 'Not here.' }),
+    ]);
     mounted.at(-1)?.toolbar.show();
     pointer(itemFor('format.bold')!, 'pointerenter');
     vi.advanceTimersByTime(999);
@@ -346,7 +427,7 @@ describe('the right-click', () => {
     const event = menuKey(editor);
     expect(event.defaultPrevented).toBe(true);
     expect(panelOf()?.hidden).toBe(false);
-    expect(document.activeElement).toBe(buttons()[0]);
+    expect(document.activeElement).toBe(tops()[0]);
     // Under the caret, not at the pointer the event carries (5, 5): the panel has no size here.
     expect(panelOf()?.style.left).toBe('100px');
     expect(panelOf()?.style.top).toBe(`${220 + 8}px`);
@@ -387,13 +468,13 @@ describe('the right-click', () => {
         clientY: 300,
       }),
     );
-    expect(document.activeElement).toBe(buttons()[0]);
+    expect(document.activeElement).toBe(tops()[0]);
   });
 
   it('puts itself away on Esc, and gives the keyboard back to the text', () => {
     const { editor } = mount();
     menuKey(editor);
-    key(buttons()[0]!, 'Escape');
+    key(tops()[0]!, 'Escape');
     expect(panelOf()?.hidden).toBe(true);
     expect(document.activeElement).toBe(editor.view.contentDOM);
   });
@@ -616,7 +697,7 @@ describe('spelling suggestions', () => {
     menuKey(editor);
     await vi.advanceTimersByTimeAsync(120);
     const before = document.activeElement;
-    expect(before).toBe(buttons()[0]);
+    expect(before).toBe(tops()[0]);
     answer(['world']);
     await settle();
     // The panel was drawn again, and the keyboard is in it, on the first suggestion.
@@ -683,7 +764,7 @@ describe('spelling suggestions', () => {
     expect(document.activeElement).toBe(words()[0]);
     editor.view.dispatch({ changes: { from: 0, insert: 'Oh. ' } });
     expect(words()).toEqual([]);
-    expect(document.activeElement).toBe(buttons()[0]);
+    expect(document.activeElement).toBe(tops()[0]);
   });
 
   it('keeps the arrows among the suggestions and the items', async () => {
@@ -695,7 +776,7 @@ describe('spelling suggestions', () => {
     key(words()[0]!, 'ArrowDown');
     expect(document.activeElement).toBe(words()[1]);
     key(words()[1]!, 'ArrowDown');
-    expect(document.activeElement).toBe(buttons()[0]);
+    expect(document.activeElement).toBe(tops()[0]);
   });
 });
 
@@ -704,7 +785,7 @@ describe('from the keyboard', () => {
     const { editor, toolbar } = mount();
     expect(editor.commands.run('toolbar.show')).toBe(true);
     expect(toolbar.isOpen()).toBe(true);
-    expect(document.activeElement).toBe(buttons()[0]);
+    expect(document.activeElement).toBe(tops()[0]);
     // The command has a key and a menu.
     const shown = editor.commands.list().find(({ id }) => id === 'toolbar.show');
     expect(shown?.shortcut).toBe('Mod-Shift-p');
@@ -718,35 +799,50 @@ describe('from the keyboard', () => {
     expect(toolbar.isOpen()).toBe(false);
   });
 
-  it('moves with the arrow keys along its one row, and Home and End to the ends', () => {
+  it('moves with the arrow keys along its bar, and Home and End to the ends', () => {
     const { editor } = mount();
     editor.commands.run('toolbar.show');
-    const [comment, table, link] = buttons();
-    key(comment!, 'ArrowRight');
-    expect(document.activeElement).toBe(table);
-    key(table!, 'ArrowRight');
-    expect(document.activeElement).toBe(link);
-    key(link!, 'ArrowLeft');
-    expect(document.activeElement).toBe(table);
-    // Up and down have no other row to go to.
-    key(table!, 'ArrowDown');
-    expect(document.activeElement).toBe(table);
-    key(table!, 'Home');
-    expect(document.activeElement).toBe(comment);
-    key(comment!, 'End');
-    expect(document.activeElement).toBe(buttons().at(-1));
-    key(buttons().at(-1)!, 'ArrowRight');
-    expect(document.activeElement).toBe(comment);
+    const [insert, review, format] = tops();
+    key(insert!, 'ArrowRight');
+    expect(document.activeElement).toBe(review);
+    key(review!, 'ArrowRight');
+    expect(document.activeElement).toBe(format);
+    key(format!, 'ArrowLeft');
+    expect(document.activeElement).toBe(review);
+    key(review!, 'Home');
+    expect(document.activeElement).toBe(insert);
+    key(insert!, 'End');
+    expect(document.activeElement).toBe(format);
+    key(format!, 'ArrowRight');
+    expect(document.activeElement).toBe(insert);
+  });
+
+  it('opens a menu on ↓, moves by line in it, and switches menus past a line’s end', () => {
+    const { editor } = mount();
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(itemFor('format.link'));
+    key(itemFor('format.link')!, 'ArrowDown');
+    expect(document.activeElement).toBe(itemFor('block.table'));
+    key(itemFor('block.table')!, 'ArrowUp');
+    key(itemFor('format.link')!, 'ArrowRight');
+    // Past the end of Insert's line: Review, which opens.
+    expect(document.activeElement).toBe(itemFor('comment.add'));
+    expect(
+      document.querySelector('.rl-toolbar-menu:not([hidden])')?.getAttribute('aria-label'),
+    ).toBe('Review');
+    key(itemFor('comment.add')!, 'ArrowLeft');
+    expect(document.activeElement).toBe(itemFor('format.link'));
   });
 
   it('puts itself away on Esc and on Tab, and gives the keyboard back to the text', () => {
     const { editor, toolbar } = mount();
     editor.commands.run('toolbar.show');
-    key(buttons()[0]!, 'Escape');
+    key(tops()[0]!, 'Escape');
     expect(toolbar.isOpen()).toBe(false);
     expect(document.activeElement).toBe(editor.view.contentDOM);
     editor.commands.run('toolbar.show');
-    key(buttons()[1]!, 'Tab');
+    key(tops()[1]!, 'Tab');
     expect(toolbar.isOpen()).toBe(false);
     expect(document.activeElement).toBe(editor.view.contentDOM);
   });
@@ -759,14 +855,19 @@ describe('from the keyboard', () => {
     expect(ran).toHaveBeenCalledTimes(1);
   });
 
-  it('skips the items that are disabled', () => {
+  it('keeps a grayed item in reach of the keys, so that its hint can say why', () => {
     const { editor } = mount('Hello', {}, [
       command('format.bold', { disabledReason: () => 'Not here.' }),
       command('format.italic'),
-      command('format.clear'),
     ]);
     editor.commands.run('toolbar.show');
-    expect(document.activeElement).toBe(itemFor('format.italic'));
+    key(tops()[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(itemFor('format.bold'));
+    vi.advanceTimersByTime(400);
+    expect(tipOf()?.textContent).toBe('Not here.');
+    // And it does nothing when pressed.
+    itemFor('format.bold')?.click();
+    expect(panelOf()?.hidden).toBe(false);
   });
 });
 
@@ -793,20 +894,20 @@ describe('Cut, Copy and Paste', () => {
   it('show the system’s keys', () => {
     mount('Hello', { clipboard: clipboard() });
     mounted.at(-1)?.toolbar.show();
-    pointer(itemFor('edit.copy')!, 'pointerenter');
-    vi.advanceTimersByTime(400);
-    expect(tipOf()?.textContent).toBe('Copy⌘C');
+    expect(itemFor('edit.copy')?.querySelector('.rl-toolbar-keys')?.textContent).toBe('⌘C');
+    expect(itemFor('edit.cut')?.querySelector('.rl-toolbar-keys')?.textContent).toBe('⌘X');
+    expect(itemFor('edit.paste')?.querySelector('.rl-toolbar-keys')?.textContent).toBe('⌘V');
   });
 
   it('cut and copy need a selection', () => {
     const { editor } = mount('Hello world', { clipboard: clipboard() });
     mounted.at(-1)?.toolbar.show();
-    expect(itemFor('edit.cut')?.disabled).toBe(true);
-    expect(itemFor('edit.copy')?.disabled).toBe(true);
-    expect(itemFor('edit.paste')?.disabled).toBe(false);
+    expect(itemFor('edit.cut')?.getAttribute('aria-disabled')).toBe('true');
+    expect(itemFor('edit.copy')?.getAttribute('aria-disabled')).toBe('true');
+    expect(itemFor('edit.paste')?.getAttribute('aria-disabled')).toBe('false');
     editor.view.dispatch({ selection: { anchor: 0, head: 5 } });
-    expect(itemFor('edit.cut')?.disabled).toBe(false);
-    expect(itemFor('edit.copy')?.disabled).toBe(false);
+    expect(itemFor('edit.cut')?.getAttribute('aria-disabled')).toBe('false');
+    expect(itemFor('edit.copy')?.getAttribute('aria-disabled')).toBe('false');
   });
 
   it('go through the host’s clipboard', () => {
@@ -907,6 +1008,45 @@ describe('docked, by the wrench or the preference', () => {
     expect(toolbar.isOpen()).toBe(true);
   });
 
+  it('fades while the person types and comes back when the pointer moves', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+    editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(true);
+    expect(toolbar.isOpen()).toBe(true);
+    // A key that only moves the caret is not writing.
+    document.dispatchEvent(new MouseEvent('pointermove', { bubbles: true }));
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+    editor.view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
+    );
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+  });
+
+  it('puts an open menu away as it fades, and fades no toolbar that the keyboard is in', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    tops()[0]!.click();
+    editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+    expect(document.querySelector('.rl-toolbar-menu:not([hidden])')).toBeNull();
+    // The toolbar at the caret goes on showing while the person types in it.
+    toolbar.toggle();
+    editor.commands.run('toolbar.show');
+    editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+  });
+
+  it('leaves the room it takes at the bottom to the page, and gives it back', () => {
+    const { toolbar } = mount();
+    const container = document.querySelector<HTMLElement>('.cm-editor')!;
+    expect(container.style.getPropertyValue('--rl-toolbar-room')).toBe('');
+    toolbar.toggle();
+    expect(container.style.getPropertyValue('--rl-toolbar-room')).toBe('24px');
+    toolbar.toggle();
+    expect(container.style.getPropertyValue('--rl-toolbar-room')).toBe('');
+  });
+
   it('keeps the keyboard in the text when it is used, and stays after a command', () => {
     const ran = vi.fn(() => true);
     const { editor, toolbar } = mount('Hello', {}, [command('format.bold', { run: ran })]);
@@ -921,8 +1061,8 @@ describe('docked, by the wrench or the preference', () => {
     const { editor, toolbar } = mount();
     toolbar.toggle();
     editor.commands.run('toolbar.show');
-    expect(document.activeElement).toBe(buttons()[0]);
-    key(buttons()[0]!, 'Escape');
+    expect(document.activeElement).toBe(tops()[0]);
+    key(tops()[0]!, 'Escape');
     expect(document.activeElement).toBe(editor.view.contentDOM);
     expect(toolbar.isOpen()).toBe(true);
     editor.commands.run('toolbar.show');

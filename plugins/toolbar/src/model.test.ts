@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type Dismissal,
   dismiss,
+  fades,
   isShown,
   keyAction,
   setAtBottom,
@@ -64,5 +65,12 @@ describe('the toolbar’s model', () => {
     expect(keyAction(summon(start(false), 'context'), false)).toBe('hide');
     expect(keyAction(wrench(start(false)), false)).toBe('focus-toolbar');
     expect(keyAction(wrench(start(false)), true)).toBe('focus-document');
+  });
+
+  it('fades only the docked toolbar, which typing does not put away', () => {
+    expect(fades(wrench(start(false)))).toBe(true);
+    expect(fades(summon(start(false), 'keyboard'))).toBe(false);
+    expect(fades(summon(start(false), 'context'))).toBe(false);
+    expect(fades(start(false))).toBe(false);
   });
 });

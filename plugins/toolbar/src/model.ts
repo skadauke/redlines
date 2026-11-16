@@ -71,3 +71,12 @@ export function dismiss(state: ToolbarState, why: Dismissal): ToolbarState {
   if (why === 'writing' && state.how === 'keyboard') return state;
   return { ...state, how: null };
 }
+
+/**
+ * Whether the toolbar fades while the person types: the docked one, which typing doesn't put away.
+ * It comes back when the pointer moves. The others go (at the pointer) or stay for the keyboard
+ * (at the caret), where the keyboard is in them.
+ */
+export function fades(state: ToolbarState): boolean {
+  return state.how === 'docked';
+}

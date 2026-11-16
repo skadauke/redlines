@@ -440,6 +440,8 @@ editor.commands.register([
 // a plugin with commands in that menu registers before this one.
 const review = createReview(editor, {
   author,
+  // Why the toolbar's Accept or Reject was refused: a line that doesn't interrupt.
+  notice: (message) => notice.flash(message),
   showResolved: settings.showResolved,
   // The comments being written are kept for their document, and come back when it opens again.
   documentData: documentData.forPlugin(reviewManifest),

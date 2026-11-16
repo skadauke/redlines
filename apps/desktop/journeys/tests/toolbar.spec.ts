@@ -65,4 +65,95 @@ test.describe('the toolbar @views', () => {
     await j.page.keyboard.type('x');
     await expect(toolbar(j)).toBeHidden();
   });
+
+  test('a menu opens on a click, opaque, with the bar in the order Ask | Insert · Review · Format · Edit', async ({
+    start,
+  }) => {
+    const j = await start({ doc: DOC, tracking: false, view: 'clean' });
+    await j.caretAfter('brown');
+    await wrench(j).click();
+    const names = await toolbar(j).locator('.rl-toolbar-top').allTextContents();
+    expect(names.map((name) => name.trim())).toEqual([
+      'Ask',
+      'Insert',
+      'Review',
+      'List',
+      'Format',
+      'Edit',
+    ]);
+    await j.shot('bar');
+    const insert = toolbar(j).locator('.rl-toolbar-top', { hasText: 'Insert' });
+    await insert.click();
+    const menu = toolbar(j).locator('.rl-toolbar-menu:not([hidden])');
+    await expect(menu).toBeVisible();
+    expect(await isOpaque(menu)).toBe(true);
+    // It opens over the bar, never on it: the bar docked at the bottom, the menu above.
+    const [bar, open] = await Promise.all([
+      toolbar(j).locator('.rl-toolbar-bar').boundingBox(),
+      menu.boundingBox(),
+    ]);
+    expect(open!.y + open!.height).toBeLessThanOrEqual(bar!.y);
+    await j.shot('insert-menu');
+    // Hovering to another menu switches.
+    await toolbar(j).locator('.rl-toolbar-top', { hasText: 'Format' }).hover();
+    await expect(menu.locator('.rl-toolbar-menu-head')).toHaveText('Format');
+    await j.shot('format-menu');
+    await j.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(toolbar(j)).toBeVisible();
+  });
+
+  test('a grayed item says why, and Review holds Accept and Reject on one line', async ({
+    start,
+  }) => {
+    const j = await start({ doc: DOC, tracking: true, view: 'redlines' });
+    await j.caretAfter('quick');
+    await j.type(' very');
+    await j.caretAfter('lazy');
+    await wrench(j).click();
+    await toolbar(j).locator('.rl-toolbar-top', { hasText: 'Review' }).click();
+    const accept = toolbar(j).locator('[data-command="change.accept"]');
+    await expect(accept).toHaveAttribute('aria-disabled', 'true');
+    await accept.hover();
+    await expect(j.page.locator('.rl-toolbar-tip')).toContainText('tracked change');
+    await j.shot('review-grayed');
+    await j.caretAfter('very');
+    await expect(accept).toHaveAttribute('aria-disabled', 'false');
+    const [a, r] = await Promise.all([
+      accept.boundingBox(),
+      toolbar(j).locator('[data-command="change.reject"]').boundingBox(),
+    ]);
+    expect(Math.abs(a!.y - r!.y)).toBeLessThan(2);
+    await j.shot('review-open');
+  });
+
+  test('fades while typing and returns when the pointer moves', async ({ start }) => {
+    const j = await start({ doc: DOC, tracking: false, view: 'clean' });
+    await wrench(j).click();
+    await j.caretAfter('quick');
+    await j.type('x');
+    await expect(toolbar(j)).toHaveCSS('opacity', '0');
+    await j.shot('faded');
+    await j.page.mouse.move(300, 300);
+    await j.page.mouse.move(310, 305);
+    await expect(toolbar(j)).toHaveCSS('opacity', '1');
+  });
+
+  test('does not cover the last lines of the document', async ({ start }) => {
+    const long = Array.from({ length: 60 }, (_, i) => `Paragraph number ${i + 1} of the text.`);
+    const j = await start({ doc: `${long.join('\n\n')}\n`, tracking: false, view: 'clean' });
+    await wrench(j).click();
+    await j.page.keyboard.press('Meta+ArrowDown');
+    await j.caretAtEnd();
+    await j.page.evaluate(() => {
+      const scroller = document.querySelector('.rl-scroller')!;
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    const [bar, last] = await Promise.all([
+      toolbar(j).boundingBox(),
+      j.page.getByText('Paragraph number 60').boundingBox(),
+    ]);
+    expect(last!.y + last!.height).toBeLessThanOrEqual(bar!.y);
+    await j.shot('end-of-document');
+  });
 });

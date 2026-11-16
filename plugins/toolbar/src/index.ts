@@ -14,13 +14,14 @@ import type { Plugin } from '@redlines/plugin-api';
 import {
   type Dismissal,
   dismiss,
+  fades,
   keyAction,
   setAtBottom as modelSetAtBottom,
   type Summoned,
   wrench,
 } from './model.ts';
 import { editCommands, type ToolbarClipboard, pageClipboard } from './edit.ts';
-import { shownGroups } from './items.ts';
+import { shownBar } from './items.ts';
 import { type DrawnPanel, drawPanel, type PanelHandlers, type SpellingRows } from './panel.ts';
 import { type ToolbarSpelling, SPELLING_WAIT_MS, within } from './spelling.ts';
 import { installStyle } from './styles.ts';
@@ -85,6 +86,10 @@ const GAP = 8;
 /** The hint's distance from the item it names. */
 const HINT_GAP = 6;
 
+/** The room a docked toolbar leaves under the text: its distance from the window's edge, and a gap. */
+const DOCK_BOTTOM = 16;
+const DOCK_GAP = 8;
+
 const NO_TEXT = 'The clipboard has no text to paste.';
 
 /**
@@ -147,7 +152,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   let placeAgain: () => void = () => {};
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const groups = () => shownGroups(editor.commands.list(), view.state);
+  const bar = () => shownBar(editor.commands.list(), view.state);
 
   // The hint.
   const hideHint = () => {
@@ -192,11 +197,15 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     panel.style.top = `${clamp(top, height, win.innerHeight)}px`;
   };
 
+  /** Draws the bar as the registry has it now, with the spelling rows above it if there are any. */
+  const draw = (rows: SpellingRows | null) => {
+    drawn = drawPanel(panel, bar(), rows, handlers, () => hideHint());
+  };
+
   /** Draws the items as the registry has them now; in place when they are the ones drawn. */
   const refresh = () => {
     if (how === null) return;
-    if (!drawn?.refresh(groups()))
-      drawn = drawPanel(panel, groups(), spelling?.rows ?? null, handlers);
+    if (!drawn?.refresh(bar())) draw(spelling?.rows ?? null);
   };
 
   /** Draws the toolbar again with other spelling rows, or none, and the keyboard where it was. */
@@ -205,14 +214,15 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     spelling = next;
     // A hint waiting for a button that is gone goes too.
     hideHint();
-    drawn = drawPanel(panel, groups(), next?.rows ?? null, handlers);
+    draw(next?.rows ?? null);
     placeAgain();
-    if (hadFocus) drawn.rows()[0]?.[0]?.focus();
+    if (hadFocus) drawn?.entry()?.focus();
   };
   const dropSpelling = () => respell(null);
 
   /** Puts the toolbar away and the keyboard in the text: a choice made in the toolbar is for it. */
   const choose = (): void => {
+    drawn?.openMenu(null);
     // A docked toolbar stays: the next command may be one more.
     if (how !== 'docked') close();
     view.focus();
@@ -244,6 +254,13 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (event.key !== 'Escape' || event.isComposing) return;
     // A text box of the page that has the keyboard, a comment's or the find bar's, has the key.
     if (inOtherField()) return;
+    // A menu that is open goes first, with the keyboard on its button.
+    if (drawn?.escape()) {
+      event.preventDefault();
+      event.stopPropagation();
+      hideHint();
+      return;
+    }
     // A docked toolbar stays; Esc in it only gives the keyboard back to the text.
     if (how === 'docked') {
       if (!panel.contains(doc.activeElement)) return;
@@ -263,6 +280,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   const onPress = (event: PointerEvent) => {
     const target = event.target;
     if (target instanceof Node && panel.contains(target)) return;
+    // A press in the text puts an open menu away, whichever way the toolbar was shown.
+    drawn?.openMenu(null);
     // The control that shows and hides the toolbar (the title bar's wrench) acts on the click.
     if (target instanceof Element && target.closest('[data-toolbar-control]')) return;
     away('press');
@@ -272,12 +291,17 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (!(event.target instanceof Node) || !panel.contains(event.target)) away('scroll');
   };
   const onGone = () => away('blur');
+  // The pointer moving brings back a bar that faded while the person typed.
+  const onMove = () => {
+    if (panel.hasAttribute('data-writing')) panel.removeAttribute('data-writing');
+  };
   const onResize = () => away('resize');
 
   function listen(): void {
     doc.addEventListener('keydown', onKey, true);
     doc.addEventListener('pointerdown', onPress, true);
     doc.addEventListener('scroll', onScroll, true);
+    doc.addEventListener('pointermove', onMove, true);
     win.addEventListener('blur', onGone);
     win.addEventListener('resize', onResize);
   }
@@ -285,6 +309,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     doc.removeEventListener('keydown', onKey, true);
     doc.removeEventListener('pointerdown', onPress, true);
     doc.removeEventListener('scroll', onScroll, true);
+    doc.removeEventListener('pointermove', onMove, true);
     win.removeEventListener('blur', onGone);
     win.removeEventListener('resize', onResize);
   }
@@ -294,7 +319,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (how === null) listen();
     how = next;
     spelling = rows;
-    drawn = drawPanel(panel, groups(), rows?.rows ?? null, handlers);
+    draw(rows?.rows ?? null);
     // Docked, CSS places it; elsewhere, `place` does, with a left and a top of its own.
     panel.classList.toggle('rl-toolbar-docked', next === 'docked');
     if (next === 'docked') {
@@ -304,8 +329,25 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     panel.hidden = false;
     placeAgain = place;
     place();
+    keepRoom();
     tell();
   }
+  /**
+   * Keeps the text clear of a docked toolbar: the room it takes at the bottom of the window is
+   * published as `--rl-toolbar-room` on the toolbar's container (the page pads its scroller by it,
+   * so that the last lines scroll above the bar), and the editor keeps what it scrolls to above it.
+   */
+  function keepRoom(): void {
+    const docked = how === 'docked' && !panel.hidden;
+    if (docked) {
+      const room = panel.offsetHeight + DOCK_BOTTOM + DOCK_GAP;
+      container.style.setProperty('--rl-toolbar-room', `${room}px`);
+    } else container.style.removeProperty('--rl-toolbar-room');
+  }
+  // A docked toolbar that wraps in a narrow window changes height.
+  const watchSize =
+    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => keepRoom());
+  watchSize?.observe(panel);
   /** Tells the host whether the toolbar shows, when that has changed. */
   function tell(): void {
     const shown = how !== null;
@@ -339,6 +381,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     drawn = null;
     spelling = null;
     panel.hidden = true;
+    panel.removeAttribute('data-writing');
+    keepRoom();
     unlisten();
     tell();
     if (takeBack) view.focus();
@@ -352,41 +396,15 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   // The keys in the toolbar: the arrows move among the items, Home and End to the ends, and Tab and
   // Esc put it away. Return and Space press the item, as a button does.
   panel.addEventListener('keydown', (event) => {
-    const rows = drawn?.rows() ?? [];
-    const flat = rows.flat();
-    const at = flat.indexOf(doc.activeElement as HTMLButtonElement);
-    const row = rows.findIndex((r) => r.includes(doc.activeElement as HTMLButtonElement));
-    const go = (button: HTMLButtonElement | undefined) => button?.focus();
-    switch (event.key) {
-      case 'ArrowRight':
-        go(flat[(at + 1) % flat.length]);
-        break;
-      case 'ArrowLeft':
-        go(flat[(at - 1 + flat.length) % flat.length]);
-        break;
-      case 'ArrowDown':
-      case 'ArrowUp': {
-        const next = rows[(row + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length];
-        // The same column, or the last item of a shorter row.
-        const column = Math.max(0, rows[row]?.indexOf(doc.activeElement as HTMLButtonElement) ?? 0);
-        go(next?.[Math.min(column, next.length - 1)]);
-        break;
-      }
-      case 'Home':
-        go(flat[0]);
-        break;
-      case 'End':
-        go(flat.at(-1));
-        break;
-      case 'Tab':
-        event.preventDefault();
-        // A docked toolbar stays: Tab only gives the keyboard back to the text.
-        if (how === 'docked') view.focus();
-        else close(true);
-        return;
-      default:
-        return;
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      drawn?.openMenu(null);
+      // A docked toolbar stays: Tab only gives the keyboard back to the text.
+      if (how === 'docked') view.focus();
+      else close(true);
+      return;
     }
+    if (event.metaKey || event.ctrlKey || event.altKey || !drawn?.key(event)) return;
     event.preventDefault();
     event.stopPropagation();
   });
@@ -396,6 +414,12 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   const onWriting = (event: KeyboardEvent) => {
     if (event.key.length > 1 && !/^(Backspace|Delete|Enter|Tab)$/.test(event.key)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // Docked, it can't go: it fades, and the pointer moving brings it back.
+    if (how === 'docked' && fades({ how, atBottom })) {
+      drawn?.openMenu(null);
+      hideHint();
+      panel.setAttribute('data-writing', '');
+    }
     away('writing');
   };
   view.contentDOM.addEventListener('keydown', onWriting);
@@ -458,7 +482,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       rows,
     );
     // From the keyboard, the keyboard goes into the toolbar.
-    if (fromKeyboard) drawn?.rows()[0]?.[0]?.focus();
+    if (fromKeyboard) drawn?.entry()?.focus();
   }
 
   // The last press of the mouse in the text. A menu event after a press, at the same place, is the
@@ -485,14 +509,18 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
 
   // The toolbar stays true to the selection while it is open: Bold is on inside bold text, and
   // Cut and Copy need a selection.
-  const removeExtension = editor.addExtension(
+  const removeExtension = editor.addExtension([
+    EditorView.scrollMargins.of(() => ({
+      bottom: how === 'docked' && !panel.hidden ? panel.offsetHeight + DOCK_BOTTOM + DOCK_GAP : 0,
+    })),
     EditorView.updateListener.of((update) => {
       if (how === null) return;
+      if (update.geometryChanged || update.docChanged) keepRoom();
       // Suggestions are for the word where it was found: text that moves takes them away.
       if (update.docChanged && spelling) dropSpelling();
       if (update.selectionSet || update.docChanged) refresh();
     }),
-  );
+  ]);
 
   const failed = (what: 'cut' | 'copy' | 'paste') =>
     options.notice(what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`);
@@ -503,7 +531,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
         close(true);
         return false;
       case 'focus-toolbar':
-        drawn?.rows()[0]?.[0]?.focus();
+        drawn?.entry()?.focus();
         return true;
       case 'focus-document':
         view.focus();
@@ -514,7 +542,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
             view.coordsAtPos(view.state.selection.main.head) ?? view.dom.getBoundingClientRect(),
           ),
         );
-        drawn?.rows()[0]?.[0]?.focus();
+        drawn?.entry()?.focus();
         return true;
     }
   };
@@ -566,6 +594,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       close();
       removeCommands();
       removeExtension();
+      watchSize?.disconnect();
+      container.style.removeProperty('--rl-toolbar-room');
       view.contentDOM.removeEventListener('keydown', onWriting);
       view.contentDOM.removeEventListener('contextmenu', onContextMenu);
       view.contentDOM.removeEventListener('mousedown', notePress, true);
