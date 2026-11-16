@@ -8,12 +8,23 @@
 const NO_TEXT = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color']);
 
 export function startsFilter(event: KeyboardEvent): boolean {
-  if (event.defaultPrevented || event.isComposing || event.key === 'Process') return false;
+  if (
+    event.defaultPrevented ||
+    event.isComposing ||
+    event.key === 'Process' ||
+    event.keyCode === 229
+  )
+    return false;
   if (event.metaKey || event.ctrlKey || event.altKey) return false;
   if (event.key.length !== 1 || event.key === ' ') return false;
   const target = event.target;
   if (!(target instanceof HTMLElement)) return true;
-  if (target.isContentEditable || target.closest('[contenteditable], textarea, select'))
+  if (
+    target.isContentEditable ||
+    target.closest(
+      '[contenteditable], textarea, select, [role=menu], [role=listbox], [role=combobox], [role=textbox], [role=slider], [role=spinbutton]',
+    )
+  )
     return false;
   const input = target.closest('input');
   return !input || NO_TEXT.has(input.type);
