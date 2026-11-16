@@ -84,6 +84,16 @@ function touches(state: EditorState, from: number, to: number): boolean {
   return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
 }
 
+/**
+ * Whether a caret is at `from`–`to`, ends included. A selection over text is no caret: a list
+ * item's marker and box are drawn the same with a selection over them (#668).
+ */
+function caretTouches(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some(
+    (range) => range.empty && range.from <= to && range.to >= from,
+  );
+}
+
 function onLine(state: EditorState, line: Line): boolean {
   return touches(state, line.from, line.to);
 }
@@ -422,8 +432,9 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     // A task's text starts after its box, so its wrapped lines hang there.
     b.indent(line, hang, start);
   }
-  // A task's source shows while the selection is on its marker, as a list marker's does.
-  const shown = touches(state, mark.from, marker ? marker.to : mark.to);
+  // A task's source shows while the caret is on its marker, as a list marker's does; a selection
+  // over it leaves the bullet, the number and the box as they are drawn (#668).
+  const shown = caretTouches(state, mark.from, marker ? marker.to : mark.to);
   // A box is drawn, empty or not (an item with no text yet is an empty box at its indent), unless
   // a pending change we can't draw as a box covers its marker: then it stays source. A box with a
   // pending change of its own is drawn in its new state, in its author's color.
@@ -745,6 +756,11 @@ const previewField = StateField.define<Preview>({
     EditorView.atomicRanges.of((view) => view.state.field(field).breaks),
   ],
 });
+
+/** The hard breaks' hidden spaces and the images in `state`, which the caret steps over (none without a preview). */
+export function hardBreakAtoms(state: EditorState): DecorationSet {
+  return state.field(previewField, false)?.breaks ?? Decoration.none;
+}
 
 /**
  * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps

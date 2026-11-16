@@ -22,6 +22,7 @@ import {
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
 import { takeBackAnnotation } from '../blocks/open.ts';
+import { hardBreakAtoms } from '../preview/decorations.ts';
 import { atomsOf } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
@@ -172,23 +173,28 @@ export const undoKeymap: readonly KeyBinding[] = undoKeys();
  */
 function outOfHiddenText(tr: Transaction): EditorSelection {
   const { selection } = tr.state;
-  const atoms = atomsOf(tr.state);
+  // The hard breaks' spaces are in the preview's field, not among the atoms of `atomsOf` (#649).
+  const atoms = [atomsOf(tr.state), hardBreakAtoms(tr.state)];
   const end = bodyEnd(tr.state.field(parsedField));
   const outside = (pos: number, side: -1 | 0 | 1) => {
     let moved = pos;
-    atoms.between(pos, pos, (from, to) => {
-      if (from < pos && pos < to) {
-        moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
-      }
-    });
+    for (const set of atoms) {
+      set.between(pos, pos, (from, to) => {
+        if (from < pos && pos < to) {
+          moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+        }
+      });
+    }
     // Never past the body: onto the ledger that is hidden after it, in front of the closers that
     // end the body's text when the body's end is inside them (as `selectionInBody` stops a
     // selection).
     if (end !== null && moved > end) {
       moved = end;
-      atoms.between(end, end, (from, to) => {
-        if (from < end && end < to) moved = from;
-      });
+      for (const set of atoms) {
+        set.between(end, end, (from, to) => {
+          if (from < end && end < to) moved = from;
+        });
+      }
     }
     return moved;
   };

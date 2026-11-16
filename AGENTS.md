@@ -194,7 +194,11 @@ repo root.
   - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
     `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run, on pull requests and
     main alike, only when their flag is set; otherwise the job is skipped, which counts as passing.
-  The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
+  **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
+  `gh workflow run ci.yml --ref main`) sets every flag, runs every test with `REDLINES_COST=check`
+  and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
+  cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
+  cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
   skill's files, which a test checks. The Epic's final sweep runs everything.
 - `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
   baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
