@@ -39,7 +39,7 @@ const at = (editor: Editor, text: string, plus = 0) => editor.getDoc().indexOf(t
 const DOC = 'First paragraph.\n\nSecond paragraph.\n\nThird.\n';
 
 describe.each([false, true])('where an inserted block goes (tracking %s)', (tracking) => {
-  const TABLE = /\|  \|  \|/;
+  const TABLE = /\| {2}\| {2}\|/;
 
   it('takes the place of an empty paragraph', () => {
     const { editor } = mount('One.\n\n\n\nTwo.\n', tracking);
