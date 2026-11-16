@@ -375,7 +375,7 @@ export function images(
   ) => {
     if (!files.length) return false;
     event.preventDefault();
-    // Raw while edits are tracked takes no file: a file holds no text to ask about, so this says why
+    // Plain while edits are tracked takes no file: a file holds no text to ask about, so this says why
     // (the text of a paste or a drop is the sheet's, or `rawEditsRefused`'s where nothing asks).
     if (rawIsReadOnly(view.state)) {
       // Where nothing asks, `rawEditsRefused` has said it.

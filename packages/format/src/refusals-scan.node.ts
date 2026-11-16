@@ -106,7 +106,7 @@ export function refusalSites(root: string): RefusalSite[] {
       [/\brefusedEditEffect\.of\(/g, 'effect'],
     ];
     // A message that a constant holds, which is shown where the constant is used: `const NAME =
-    // "A comment can't be added in Raw."`. The words that make it a refusal are the ones every
+    // "A comment can't be added in Plain."`. The words that make it a refusal are the ones every
     // refusal of the interface says.
     for (const match of source.matchAll(
       /^(?:export )?const ([A-Z][A-Z_]+)\s*=\s*(?:\n\s*)?(['"`])((?:\\.|(?!\2)[^\\])*)\2/gm,

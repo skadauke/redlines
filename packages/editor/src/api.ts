@@ -8,7 +8,7 @@ import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
- * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
+ * How the document is shown (design §5.3): Clean, Redlines or Plain, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
  * insertions in their author's color without the underline, change bars and comments kept). Simple is no view of its own: a click on a
  * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
@@ -17,7 +17,7 @@ import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
- * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
+ * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
  * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
@@ -108,7 +108,7 @@ export interface EditorCommand {
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
+  menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**
@@ -243,7 +243,7 @@ export interface EditorOptions {
    * its own. `before` is the text of the block up to the word, for its language. The answer is the
    * corrected word, or null; it is made, as WebKit's corrections are, only if the word is still
    * exactly where it was. Asked only while `typing.spellCheck` is on, of a word in prose, and
-   * never in Raw. Default: none, and nothing is asked.
+   * never in Plain. Default: none, and nothing is asked.
    */
   correctWord?: (word: string, before: string) => Promise<string | null>;
   /**
@@ -290,7 +290,7 @@ export interface EditorOptions {
    * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
    * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
    * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
-   * image where it can't (Raw while Track Changes is on, code) through `onNotice`, and the host is
+   * image where it can't (Plain while Track Changes is on, code) through `onNotice`, and the host is
    * not called. Default: none, and the browser does what it does with such a paste or a drop.
    */
   onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
@@ -324,7 +324,7 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read, typing in Raw while Track
+   * tracked change inside code, where its markers would not be read, typing in Plain while Track
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
@@ -360,9 +360,9 @@ export interface AgentStep {
 export interface EditorTyping {
   /** The browser's spell check underlines. */
   spellCheck: boolean;
-  /** Curly quotes, and an em dash for two hyphens, except in code and in Raw. */
+  /** Curly quotes, and an em dash for two hyphens, except in code and in Plain. */
   smartPunctuation: boolean;
-  /** Closing brackets and backticks as you type them, except in code and in Raw. */
+  /** Closing brackets and backticks as you type them, except in code and in Plain. */
   closePairs: boolean;
 }
 
@@ -423,7 +423,7 @@ export interface Editor {
    */
   setViewMode(mode: ViewMode): void;
   /**
-   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Plain. Redlines is
    * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
    * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
@@ -435,7 +435,7 @@ export interface Editor {
    * effect: the full markup goes to the simple look and the simple look to the full markup, the
    * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
    * looking at (the one with the caret when it is on the screen, else the first on it) stays where
-   * it was. It does nothing in Clean and Raw, which have no look. A host's View menu has it as a
+   * it was. It does nothing in Clean and Plain, which have no look. A host's View menu has it as a
    * switch (design §5.3), so that the looks need no pointer.
    */
   switchLook(): void;
@@ -448,11 +448,11 @@ export interface Editor {
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
-   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
+   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Plain is
    * read-only, where an edit says why through `onNotice`. While it is off, an edit is an edit of
    * the text itself (format §3.10): what you type joins no pending change, and what you delete is
    * gone, with the marks that have no text left; an edit with no legal form says why through
-   * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
+   * `onNotice`. On or off, outside Plain, Backspace and Delete never delete a marker.
    *
    * The switch changes the editor's state and nothing else: it makes no edit, so it never makes the
    * document edited and has no step to undo, and it writes nothing to the file (format §5.6). With
@@ -477,7 +477,7 @@ export interface Editor {
   /**
    * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
    * `view: simple` (format §5.6): for the host to call when it saves the file, so that a document
-   * that has redlines opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * that has redlines opens in it. Plain leaves the view the file had. A view alone is no reason for a ledger, so a
    * file with none gets none, and a ledger that can't be read is left as it is. It is
    * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
    * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
@@ -545,7 +545,7 @@ export interface Editor {
    * The word at a position of the document, as the host's spell checker is asked about it: letters
    * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
    * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
-   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Plain. The
    * formatting palette asks it for the word under a right-click.
    */
   wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
@@ -560,7 +560,7 @@ export interface Editor {
   pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
-   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
+   * reason is said through `onNotice` (Plain read-only, or the history started over by a reload), or
    * else `onNothingToUndo` is called. Returns whether it did or said something.
    */
   undo(): boolean;

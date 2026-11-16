@@ -54,7 +54,7 @@ import type { DocView, MarkRange, Parsed, Range, Segment, TextChange } from './t
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
 const NOT_A_TYPE =
-  "This block can't change type: Markdown writes it in a way a change couldn't give back. Change it in Raw.";
+  "This block can't change type: Markdown writes it in a way a change couldn't give back. Change it in Plain.";
 const INSIDE =
   "A block inside a list or a quote can't change type. Change the list item or the quote it is in.";
 const ON_ITS_OWN =
@@ -97,15 +97,15 @@ const NO_ROOM = "This item can't be outdented: a line under it isn't indented fa
 const STACKED =
   "This change of a block's type can't be rejected while another change starts the block. Decide that one first.";
 const LOST =
-  "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Plain with Track Changes off.";
 const NOT_AN_ALERT =
   'This is not an alert: an alert is a quote at the left edge whose first line is a type in brackets, such as [!NOTE].';
 const ALERT_ON_ITS_OWN =
   'An alert changes type only with a blank line before and after it (or right under a heading, a thematic break or a closing fence), so that no line goes on from it.';
 const ALERT_END =
-  "This alert ends in a line that takes no marker at its end, such as a code block's fence, a rule or HTML, so its type can't change here. Change it in Raw, or add a line of text at the end of the alert.";
+  "This alert ends in a line that takes no marker at its end, such as a code block's fence, a rule or HTML, so its type can't change here. Change it in Plain, or add a line of text at the end of the alert.";
 const ALERT_LOST =
-  "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Plain with Track Changes off.";
 
 /** The syntax that the serializer writes for each type. */
 const SYNTAX: Record<BlockType, string> = {

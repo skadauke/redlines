@@ -323,7 +323,7 @@ describe('a click past the end of a block’s text (#434)', () => {
     expect(shift?.main.head).toBe(before);
     const double = clickAt(editor, end, { detail: 2 });
     expect(double?.main.head).toBeLessThanOrEqual(before);
-    // A click in the text is where it is; a double click in it and Raw are CodeMirror's, and a
+    // A click in the text is where it is; a double click in it and Plain are CodeMirror's, and a
     // triple click is `tripleClicks`'.
     expect(clickAt(editor, doc.indexOf('thr') + 2)?.main.head).toBe(doc.indexOf('thr') + 2);
     expect(clickAt(editor, doc.indexOf('thr') + 2, { detail: 2 })).toBeNull();
@@ -496,7 +496,7 @@ describe('triple-click', () => {
     expect(selected(editor)).toBe(text);
   });
 
-  it('is not the triple-click’s for one and two clicks, in Raw, and on a thematic break', () => {
+  it('is not the triple-click’s for one and two clicks, in Plain, and on a thematic break', () => {
     const editor = mount('One.⏎⏎Tw‸o.');
     // With no hidden closers at the end of a line, a click and a double-click are CodeMirror's.
     expect(click(editor, 8, 1)).toBeNull();

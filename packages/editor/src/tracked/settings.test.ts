@@ -159,7 +159,7 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(editor.getUiState().view).toBe('clean');
   });
 
-  it('is not Raw, which a ledger can’t ask for', () => {
+  it('is not Plain, which a ledger can’t ask for', () => {
     const editor = load(reviewed('view: raw'));
     expect(editor.getUiState().view).toBe('redlines');
   });
@@ -298,7 +298,7 @@ describe('Track Changes, recorded when the file is saved (format §5.6)', () => 
     expect(redoDepth(editor.view.state)).toBe(1);
   });
 
-  it('can be turned off in Raw, where typing is read-only while it is on', () => {
+  it('can be turned off in Plain, where typing is read-only while it is on', () => {
     const editor = load(reviewed('tracking: everyone'), { saveTracking: true });
     editor.setViewMode('raw');
     editor.setTracking(false);
@@ -428,7 +428,7 @@ describe('recording the view in the document (format §5.6)', () => {
     expect(editor.getDoc()).toBe(reviewed('view: redlines'));
   });
 
-  it('leaves the view the file had when the document is in Raw', () => {
+  it('leaves the view the file had when the document is in Plain', () => {
     for (const had of ['view: clean', 'view: redlines', 'view: simple']) {
       const editor = load(reviewed(had));
       editor.setViewMode('raw');

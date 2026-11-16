@@ -184,13 +184,13 @@ function key(name: string, init: KeyboardEventInit = {}): KeyboardEvent {
 }
 
 describe('the command', () => {
-  it('is Ask… in the Format menu beside Add Comment, with its key', () => {
+  it('is Ask… in the Review menu beside Add Comment, with its key', () => {
     const { editor } = mount();
     const command = editor.commands.list().find(({ id }) => id === 'ask.start');
     expect(command).toMatchObject({
       title: 'Ask…',
       shortcut: 'Mod-Alt-a',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
     });
   });
@@ -231,7 +231,7 @@ describe('the command', () => {
     expect(bubble()).toBeNull();
   });
 
-  it('is not for Raw, where a selection holds markers', () => {
+  it('is not for Plain, where a selection holds markers', () => {
     const { editor, notices } = mount({ view: 'raw' });
     select(editor, 'first lien');
     expect(editor.commands.run('ask.start')).toBe(false);
