@@ -72,7 +72,7 @@ describe('images', () => {
     expect(img.style.getPropertyValue('width')).not.toBe('');
   });
 
-  it('draws an image whose size isn’t known as it did', async () => {
+  it('draws an image whose size isn’t known as it did', () => {
     const editor = editorWith(
       '![cat](img/cat.png)\n\nend',
       (src) => `asset://${src}`,
