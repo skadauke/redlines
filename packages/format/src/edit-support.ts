@@ -111,7 +111,7 @@ export function assertNoMarkup(text: string): void {
   const found = scan(text);
   if (found.markers.length > 0 || found.ledgers.length > 0) {
     throw new EditError(
-      "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the raw view.",
+      "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the Plain view.",
       'markup',
     );
   }
@@ -205,7 +205,7 @@ function joinChanges(
 }
 
 /** The refusal of a change that would hide other changes in code or an HTML comment: in the words
- * of a decision, or of an edit, which can be made in Raw instead. A decision that would hide the
+ * of a decision, or of an edit, which can be made in Plain instead. A decision that would hide the
  * markers of a comment, which no decision takes away, says to delete the comment (`comment`). */
 export function hiddenError(removing: boolean, comment = false): EditError {
   if (removing && comment) {
@@ -217,7 +217,7 @@ export function hiddenError(removing: boolean, comment = false): EditError {
   return new EditError(
     removing
       ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
-      : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
+      : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.',
     'would-hide-marks',
   );
 }

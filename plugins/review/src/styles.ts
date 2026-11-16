@@ -536,8 +536,10 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     gap: '12px',
     padding: '7px 10px',
     borderRadius: '8px',
-    backgroundColor: 'var(--rl-tip)',
-    color: '#ffffff',
+    border: '1px solid var(--rl-rule)',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
@@ -554,7 +556,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   // The review bar's hints keep the interface's own size, whatever the text size.
   '.rl-review-panel .rl-hint': { fontSize: 'var(--rl-size-ui-small)' },
-  '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
+  '.rl-hint-keys': { color: 'var(--rl-ink-2)', letterSpacing: '0.04em' },
 
   '@media (prefers-reduced-motion: reduce)': {
     // Every selector above that moves something by a transition is here, with its own specificity.

@@ -51,3 +51,21 @@ export function localImageUrl(
   const path = localImagePath(src, documentPath, project);
   return path === null ? null : toUrl(path);
 }
+
+/**
+ * The path of the image at `imagePath` as the document at `documentPath` writes it: relative to the
+ * document's folder, `shot.png` beside it, `img/shot.png` below it and `../img/shot.png` beside its
+ * folder. Null when either has no path or they have no folder in common (another drive).
+ */
+export function relativeImagePath(documentPath: string | null, imagePath: string): string | null {
+  if (documentPath === null) return null;
+  const split = (path: string) => path.replaceAll('\\', '/').split('/');
+  const from = split(documentPath).slice(0, -1);
+  const to = split(imagePath);
+  let shared = 0;
+  while (shared < from.length && shared < to.length - 1 && from[shared] === to[shared]) shared++;
+  // Nothing in common: another drive.
+  if (shared === 0 && from.length > 0) return null;
+  const up = from.slice(shared).map(() => '..');
+  return [...up, ...to.slice(shared)].join('/');
+}

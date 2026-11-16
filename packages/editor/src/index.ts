@@ -40,10 +40,12 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
+export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -68,6 +70,7 @@ import {
   undoSayingWhy,
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -80,8 +83,15 @@ import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
-import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
+import {
+  imageOpening,
+  imageResolver,
+  imageSelection,
+  localImageAt,
+  refreshImagesEffect,
+} from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
+import { htmlInline } from './preview/html-inline.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
@@ -120,7 +130,15 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
-export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
+export {
+  agentOf,
+  followsText,
+  joinsNewestStep,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+} from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export {
@@ -192,6 +210,14 @@ export {
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  UNTRACKED_DETAILS,
+  UNTRACKED_TITLE,
+  type UntrackedAnswer,
+  type UntrackedAsker,
+  type UntrackedReason,
+  type UntrackedWords,
+} from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -224,7 +250,7 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views, Track Changes, copy and paste of the text as it reads, and
+ * in the Clean, Redlines and Plain views, Track Changes, copy and paste of the text as it reads, and
  * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
@@ -270,7 +296,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+      extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
@@ -285,11 +311,19 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
-    images(options.onImageFiles, options.onNotice),
+    images(options.onImageFiles, options.onNotice, options.projectImageLink),
     noticeFacet.of(options.onNotice),
+    options.onError
+      ? EditorView.exceptionSink.of((error) => {
+          console.error(error);
+          options.onError?.(error);
+        })
+      : [],
+    options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,
     markdownPreview(),
+    longLines(),
     options.openLink ? linkOpening({ open: options.openLink }) : [],
     tableLayout(),
     tableGhosts(),
@@ -301,6 +335,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    imageSelection(),
     undoHistory(),
     trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
@@ -561,7 +596,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     switchLook: () => {
-      // Nothing to measure in Clean and Raw, which have no look to switch.
+      // Nothing to measure in Clean and Plain, which have no look to switch.
       if (menuViewOf(view.state.field(viewModeField)) !== 'redlines') return;
       const at = lookedAt(view);
       switchLookAt(view, at.pos, undefined, undefined, at.row);
@@ -583,7 +618,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     recordView: () => {
       const shown = view.state.field(viewModeField);
-      // Raw is never saved: the file keeps the view it had.
+      // Plain is never saved: the file keeps the view it had.
       if (shown === 'raw') return;
       recordInFile(viewInFile(view.state.doc.toString(), shown));
     },

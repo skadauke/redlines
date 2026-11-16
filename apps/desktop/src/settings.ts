@@ -11,6 +11,7 @@ import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
+import { SIDEBAR_DEFAULT, sidebarWidthOf } from './ui/sidebar-resize.ts';
 
 /**
  * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
@@ -57,6 +58,8 @@ export interface Settings {
   /** Whether every window is light, dark, or as the system is (Match System, the default). */
   appearance: AppearanceChoice;
   sidebarOpen: boolean;
+  /** The sidebar's width in CSS px, between `SIDEBAR_MIN` and `SIDEBAR_MAX` (#680). */
+  sidebarWidth: number;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
@@ -152,6 +155,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   theme: 'default',
   appearance: 'system',
   sidebarOpen: false,
+  sidebarWidth: SIDEBAR_DEFAULT,
   showResolved: false,
   markupView: 'redlines',
   rotateIcon: true,
@@ -207,6 +211,7 @@ export function loadSettings(): Settings {
       ? value['appearance']
       : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
+    sidebarWidth: sidebarWidthOf(value['sidebarWidth']),
     showResolved: flag('showResolved'),
     markupView: value['markupView'] === 'simple' ? 'simple' : DEFAULT_SETTINGS.markupView,
     rotateIcon: flag('rotateIcon'),
@@ -342,6 +347,26 @@ export function saveSettings(settings: Settings): void {
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
   }
+}
+
+/**
+ * `incoming` (settings as stored, or as a change leaves them) with what is this window's own kept
+ * from `own`: its file sidebar and its text size. The stored text size is the Default text size of
+ * Preferences, which only Preferences changes; a window opens at it, and neither its own zoom nor
+ * a change of the default elsewhere moves the other (#557). `changed` is what this window itself
+ * just changed, which it keeps as it is.
+ */
+export function keepWindowOwn(
+  own: Settings,
+  incoming: Settings,
+  changed: Partial<Settings> = {},
+): Settings {
+  return {
+    ...incoming,
+    sidebarOpen: changed.sidebarOpen ?? own.sidebarOpen,
+    sidebarWidth: changed.sidebarWidth ?? own.sidebarWidth,
+    textSize: changed.textSize ?? own.textSize,
+  };
 }
 
 /**

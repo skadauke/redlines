@@ -62,6 +62,11 @@ export interface PluginContext {
   author: { handle: string; name: string };
   /** Shows a short message that does not interrupt. */
   notice(message: string): void;
+  /**
+   * Shows a card that goes by itself and may offer one action, such as Undo. A host with none leaves
+   * it out, and a plugin then does without.
+   */
+  toast?(toast: { text: string; action?: { label: string; run: () => void } }): void;
 }
 
 /** A command, for menus, the command palette and keyboard shortcuts. */

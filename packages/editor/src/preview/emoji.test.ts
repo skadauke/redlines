@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Emoji shortcodes in the preview (#312, design §5.2): a `:name:` the host knows is drawn as its emoji
-// in every view but Raw, as an entity is drawn as its character, and shows as written while the caret
+// in every view but Plain, as an entity is drawn as its character, and shows as written while the caret
 // is on it. The editor has no list of names: a host gives one, and without it the text stays as it is.
 
 import { forceParsing } from '@codemirror/language';
@@ -106,7 +106,7 @@ describe('an emoji shortcode in the preview (#312)', () => {
     ).toEqual([':+1:', ':smile:', ':tent:', ':tent:'].sort());
   });
 
-  it('is not drawn in Raw, which shows the text as written', () => {
+  it('is not drawn in Plain, which shows the text as written', () => {
     const editor = editorAt(doc, doc.length);
     editor.setViewMode('raw');
     expect(drawn(editor)).toEqual([]);

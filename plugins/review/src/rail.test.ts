@@ -1157,13 +1157,13 @@ describe('a new comment', () => {
     expect(field(editor)!.value).toBe('Mine');
   });
 
-  it('refuses in Raw, with text too', () => {
+  it('refuses in Plain, with text too', () => {
     const { editor, review, notices } = mount(plain);
     editor.setViewMode('raw');
     select(editor, 'importer');
     expect(review.startComment('x')).toBe(false);
     expect(field(editor)).toBeUndefined();
-    expect(notices.at(-1)).toContain('Raw');
+    expect(notices.at(-1)).toContain('Plain');
   });
 
   it("has its spelling checked, as a reply's box does, whatever the document's spell check", () => {
@@ -1420,7 +1420,7 @@ describe('a new comment', () => {
     }
   });
 
-  it('takes no comment in Raw, and says so', () => {
+  it('takes no comment in Plain, and says so', () => {
     const { editor, review, notices } = mount(plain);
     editor.setViewMode('raw');
     select(editor, 'importer');
@@ -1428,7 +1428,7 @@ describe('a new comment', () => {
     expect(field(editor)).toBeUndefined();
     expect(editor.getDoc()).toBe(plain);
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain('Raw');
+    expect(notices[0]).toContain('Plain');
     expect(editor.getUiState().view).toBe('raw');
   });
 
@@ -1782,7 +1782,7 @@ describe('a new comment', () => {
     expect(editor.getParsed().ledger.comments[0]?.id).toBe('c2dk');
   });
 
-  it('keeps a reply being written through Clean and Raw, out of sight', () => {
+  it('keeps a reply being written through Clean and Plain, out of sight', () => {
     const { editor, review } = mount(threads);
     button(notes(editor)[0]!, 'Reply').click();
     const box = field(editor)!;
@@ -1996,7 +1996,7 @@ describe('a new comment', () => {
     expect(texts(shown[2]!)[0]).toBe('Or May?');
   });
 
-  it('keeps the draft through Clean and Raw, out of sight', () => {
+  it('keeps the draft through Clean and Plain, out of sight', () => {
     const { editor, review } = mount(plain);
     select(editor, 'importer');
     review.startComment();
@@ -2066,7 +2066,7 @@ describe('a new comment', () => {
     expect(editor.view.dom.querySelector('.rl-card')).toBeNull();
   });
 
-  it('opens again after Raw or Clean, in a narrow editor', async () => {
+  it('opens again after Plain or Clean, in a narrow editor', async () => {
     const { editor, review } = mount(threads);
     stubWidth(editor.view.scrollDOM, 700);
     await frame();
@@ -2171,15 +2171,15 @@ describe('a new comment', () => {
 });
 
 describe('the Add Comment command', () => {
-  it('is for the Format menu, with its key', () => {
+  it('is for the Review menu, with its key', () => {
     const { editor } = mount(plain);
     const command = editor.commands.list().find(({ id }) => id === 'comment.add');
-    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'format' });
-    // Disabled in Raw and in front matter: the item is grayed, and its key says why.
+    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'review' });
+    // Disabled in Plain and in front matter: the item is grayed, and its key says why.
     expect('disabledReason' in command!).toBe(true);
   });
 
-  it('opens the box from the key and from a menu, and says why in Raw', () => {
+  it('opens the box from the key and from a menu, and says why in Plain', () => {
     const { editor, notices } = mount(plain);
     select(editor, 'importer');
     shortcut(editor, 'm', { altKey: true });

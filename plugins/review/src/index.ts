@@ -61,7 +61,7 @@ export interface ReviewController {
   /**
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
    * under the caret, or else the caret. A document shown Clean switches to the markup view, and what Escape
-   * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
+   * set aside on that anchor comes back. Returns false when it did nothing: Plain takes no comments,
    * and says so through the editor's `onNotice`. With `initialText`, an empty box opens with it, the
    * caret after it and nothing posted; a draft that Escape set aside, or a box being written in,
    * keeps its own words.
@@ -96,7 +96,7 @@ export interface ReviewController {
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
   refreshThread(thread: string): void;
   /**
-   * Shows a thread's note, as Show in a notification asks: a document shown Clean or Raw switches
+   * Shows a thread's note, as Show in a notification asks: a document shown Clean or Plain switches
    * to the markup view, the note is selected and scrolled into view, and in a narrow editor it is pinned
    * over the page from its dot. Returns false, changing nothing, when the rail has no note for it:
    * no such thread, or a resolved one that isn't shown.
@@ -131,7 +131,7 @@ export interface ReviewController {
    * first in the text stays level, and the other is laid out around it as a note is.
    *
    * It returns null, and lays out nothing, where the rail doesn't show its notes in full: in a
-   * narrow editor (the notes are dots), in Clean and Raw, and when the rail has no note of its own,
+   * narrow editor (the notes are dots), in Clean and Plain, and when the rail has no note of its own,
    * where the column makes no room for it, and when `anchor` throws. The host places the element
    * itself then, as it would without a rail. One that was laid out is let go when the rail stops
    * showing its notes, or when `anchor` throws, and `lost` is called, once, after the update that
@@ -152,11 +152,11 @@ export interface ReviewOptions extends RailOptions {
   onOpenChange?: (open: boolean) => void;
 }
 
-/** Why Add Comment can't run where the selection is, or undefined: Raw shows markers as text, and
+/** Why Add Comment can't run where the selection is, or undefined: Plain shows markers as text, and
  * front matter has no text to anchor in (format §3.8). */
 function commentDisabledReason(state: EditorState): string | undefined {
   if (state.field(viewModeField, false) === 'raw') {
-    return "A comment can't be made in Raw. Switch to Clean or Redlines.";
+    return "A comment can't be made in Plain. Switch to Clean or Redlines.";
   }
   if (inFrontMatter(state))
     return "A comment can't be anchored in front matter. Select text in the body.";
@@ -199,14 +199,14 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     }),
   ];
   const remove = editor.addExtension(extension);
-  // Come last in the Format menu, which lists commands in the order they are registered: Add
-  // Comment, then Highlight, in a group of their own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
+  // Add Comment is the Review menu's first command, and Ask… follows it; Highlight is Format's, in a
+  // group of its own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
   const removeCommands = editor.commands.register([
     {
       id: 'comment.add',
       title: 'Add Comment',
       shortcut: 'Mod-Alt-m',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
       disabledReason: commentDisabledReason,
       run: () => notes.startComment(),

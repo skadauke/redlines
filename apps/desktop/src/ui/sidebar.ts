@@ -4,6 +4,7 @@
 // ignores, and reads a folder only when it is opened. Documents come first and open in this window,
 // or in a new one with ⌘-click or while a run is live. Hidden by default.
 
+import { PROJECT_IMAGE_TYPE } from '@redlines/editor';
 import {
   basename,
   dirname,
@@ -12,7 +13,9 @@ import {
   type Host,
   type ProjectRoot,
 } from '../host.ts';
+import { isImageName } from '../image-add.ts';
 import { icon } from './icons.ts';
+import { createSidebarResize } from './sidebar-resize.ts';
 
 /**
  * The media query for a page too narrow to hold the sidebar beside it (the sidebar's 240 px, and a
@@ -33,6 +36,10 @@ export interface SidebarOptions {
   isRunLive?: () => boolean;
   /** Tells the person what went wrong, in one line. */
   notice(message: string): void;
+  /** The edge was dragged: keep the width (#680). */
+  onResize?(width: number): void;
+  /** The edge was dragged shut: close the sidebar, as ⌃⌘S does. */
+  onClose?(): void;
 }
 
 /** A saved document, and the project it is in. */
@@ -43,6 +50,8 @@ export interface SidebarDocument {
 
 export interface Sidebar {
   setOpen(open: boolean): void;
+  /** The width to draw, in CSS px (a stored one is made right). */
+  setWidth(width: number): void;
   /**
    * Shows the project of a document, with the folders down to it open and the document marked;
    * null for an untitled one.
@@ -57,14 +66,17 @@ export interface Sidebar {
 const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /**
- * The documents, then the folders, each in natural order: hidden ones, and every other file, are
- * left out.
+ * The documents, then the images, which are dragged into a document, then the folders, each in
+ * natural order: hidden ones, and every other file, are left out.
  */
 export function sortEntries(entries: FileEntry[]): FileEntry[] {
   const byName = (a: FileEntry, b: FileEntry) => NAMES.compare(a.name, b.name);
   const visible = entries.filter((entry) => !entry.name.startsWith('.')).sort(byName);
   return [
     ...visible.filter((entry) => !entry.isDir && isDocument(entry.name)),
+    ...visible.filter(
+      (entry) => !entry.isDir && !isDocument(entry.name) && isImageName(entry.name),
+    ),
     ...visible.filter((entry) => entry.isDir),
   ];
 }
@@ -96,6 +108,12 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   const list = document.createElement('ul');
   list.className = 'rl-sidebar-list';
   aside.append(head, label, list);
+  const resize = createSidebarResize({
+    aside,
+    app: container,
+    onResize: (width) => options.onResize?.(width),
+    onClose: () => options.onClose?.(),
+  });
   // Closed, it is out of the tab order and hidden from assistive technology.
   aside.inert = true;
   container.prepend(aside);
@@ -206,10 +224,21 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
-    button.addEventListener('click', (event) => {
-      if (entry.isDir) toggle(entry.path);
-      else choose(entry, event.metaKey);
-    });
+    if (!entry.isDir && !isDocument(entry.name)) {
+      // An image is not opened: it is dragged into the document, which links it by its path (#681).
+      button.draggable = true;
+      button.classList.add('rl-sidebar-image');
+      button.title = 'Drag into the document to insert it';
+      button.addEventListener('dragstart', (event) => {
+        event.dataTransfer?.setData(PROJECT_IMAGE_TYPE, entry.path);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+      });
+    } else {
+      button.addEventListener('click', (event) => {
+        if (entry.isDir) toggle(entry.path);
+        else choose(entry, event.metaKey);
+      });
+    }
     item.append(button);
     return item;
   };
@@ -246,6 +275,9 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   };
 
   return {
+    setWidth(width) {
+      resize.setWidth(width);
+    },
     setOpen(next) {
       if (next === open) return;
       open = next;
@@ -275,6 +307,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     },
     destroy() {
       epoch++;
+      resize.destroy();
       aside.remove();
     },
   };

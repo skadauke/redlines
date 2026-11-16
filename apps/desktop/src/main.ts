@@ -44,7 +44,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
-import { localImagePath, localImageUrl } from './images.ts';
+import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
@@ -69,6 +69,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -78,8 +79,13 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
+import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
@@ -100,6 +106,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
@@ -253,9 +260,24 @@ function dragFile(): void {
   });
 }
 
+// Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
+// is a document to take the shape of.
+let crashes: CrashWatch | null = null;
+// Unsaved edits are kept in the app's support folder while there are any (recovery.ts, #693).
+let recovery: Recovery | null = null;
+const untrackedAnswers = createUntrackedAnswers();
+
 const editor = createEditor(element('#editor'), {
   doc: '',
+  onError: (error) => crashes?.caught(error),
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
@@ -300,6 +322,8 @@ const editor = createEditor(element('#editor'), {
   markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
+    crashes?.documentChanged();
+    recovery?.changed();
     // Images the text shows now are watched once the typing pauses.
     imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -311,6 +335,8 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
+  projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -342,7 +368,7 @@ const webAccess = {
         text: `${name} wants to use the web, to look something up or check a source.`,
         dismissLabel: 'Don’t Allow',
         onDismiss: () => done('no')(card),
-        alternative: { label: 'Allow Once', run: done('once') },
+        secondaryAction: { label: 'Allow Once', run: done('once') },
         action: { label: 'Allow Always', run: done('always') },
       });
       const stopped = () => done('no')(card);
@@ -417,8 +443,7 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
   });
 };
 
-// The formatting commands are the Format and Paragraph menus. They register before the review
-// interface, so that its Add Comment comes last in Format.
+// The formatting commands are the Insert, Format and Paragraph menus.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
@@ -455,12 +480,11 @@ async function insertChosenImages(spot: ImageSpot): Promise<void> {
   }
 }
 
-// Registered before the review plugin's Add Comment, which comes last in Format.
 editor.commands.register([
   {
     id: 'image.insert',
     title: 'Image…',
-    menu: 'format',
+    menu: 'insert',
     group: 'insert',
     run: () => {
       const spot = editor.imageSpot();
@@ -471,8 +495,8 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
-// a plugin with commands in that menu registers before this one.
+// A menu lists its commands in the order they are registered: Add Comment and Ask… come last in the Review menu, after its own rows: its
+// commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
@@ -614,6 +638,7 @@ function showDocument(state: DocumentState): void {
     settings = { ...settings, recent };
     void refreshRecent();
   }
+  recovery?.follow(state);
   notice.setStanding(state.notice, () => controller.dismissNotice());
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
@@ -645,6 +670,11 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
+  onClose: () => {
+    changeSettings({ sidebarOpen: false });
+    render();
+  },
   notice: (message) => notice.flash(message),
 });
 
@@ -846,6 +876,19 @@ function showAgentLogs(): void {
   });
 }
 
+/**
+ * A window that opens a document finds the copy of its unsaved edits, if the page's process ended or
+ * the app crashed meanwhile, and puts the edits back.
+ */
+async function restoreAfterCrash(): Promise<void> {
+  const kept = await recovery?.find();
+  if (!kept || !controller.restore(kept.path, kept.text)) return;
+  await crashes?.recovered(() => {
+    void controller.showSavedVersion();
+    recovery?.discard();
+  });
+}
+
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
@@ -874,11 +917,7 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
@@ -916,6 +955,12 @@ const textZoom = followTextZoom(window, {
   say: (text) => notice.flash(text),
 });
 
+const toggleWordCount = () => {
+  changeSettings({ showWordCount: !settings.showWordCount });
+  wordCount.setVisible(settings.showWordCount);
+  render();
+};
+
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
@@ -939,6 +984,8 @@ function renameDocument(): void {
   if (doc?.path) titleBar.beginRename();
   else void controller.saveAs();
 }
+
+installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
@@ -982,6 +1029,32 @@ const wordCount = createEditorWordCount(main, editor, { visible: settings.showWo
 // off, and downloaded in the background. Restarting into the new version asks each window about its
 // unsaved edits first, as quitting does, and the new version reopens the documents. The app checks,
 // downloads and installs for all the windows (#122); this one shows what it says, and asks.
+// Failures leave a trace in the app's log and offer a report (crash.ts, #692); the app is where they
+// are logged, so a browser tab has none.
+if (isTauri) {
+  recovery = createRecovery({
+    link: tauriRecoveryLink(),
+    label: getCurrentWindow().label,
+    getText: () => editor.getDoc(),
+  });
+  const crashLink = tauriCrashLink();
+  crashes = watchCrashes({
+    link: crashLink,
+    notifications,
+    getText: () => editor.getDoc(),
+    where: () => {
+      const room = scroller.scrollHeight - scroller.clientHeight;
+      return room > 0 ? `${Math.round((scroller.scrollTop / room) * 100)}% down` : 'at the top';
+    },
+  });
+  if (import.meta.env.DEV) {
+    // In a debug build: `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')`.
+    (window as unknown as { __simulateFailure: (kind: string) => void }).__simulateFailure = (
+      kind,
+    ) => simulateFailure(kind, crashLink);
+  }
+}
+
 const updates = isTauri ? windowUpdates(tauriUpdateLink()) : null;
 const updateNotifications =
   updates &&
@@ -1031,6 +1104,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
   openReview,
@@ -1060,6 +1134,14 @@ const commands: MenuCommands = {
     else notice.flash('Preferences are in the app.');
   },
   showAgentLogs,
+  reportProblem: () => {
+    if (crashes) void crashes.reportProblem();
+    else notice.flash('Problem reports are in the app.');
+  },
+  revealCrashLog: () => {
+    if (crashes) void crashes.revealLog();
+    else notice.flash('The log is in the app.');
+  },
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -1067,6 +1149,23 @@ const commands: MenuCommands = {
 activatePlugins(editor, {}, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
+  toast: ({ text, action }) =>
+    notifications.show({
+      text,
+      key: 'plugin toast',
+      timeout: 8000,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                action.run();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
   documentData: (manifest) => documentData.forPlugin(manifest),
 });
 
@@ -1118,6 +1217,7 @@ function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
+  sidebar.setWidth(settings.sidebarWidth);
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
     name: doc.name,
@@ -1136,6 +1236,7 @@ function render(): void {
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
@@ -1168,6 +1269,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // Closed without saving, or with nothing unsaved: no copy is kept of it.
+      recovery?.discard();
       runs.stopAll();
       ask.close();
     }
@@ -1251,6 +1354,8 @@ if (isTauri) {
   }
   // A new document always starts with Track Changes off (#660): the switch is the document's own,
   // written at save, so no setting and no earlier document decides it.
+  // After a crash: the edits the window had, put back, with a card that says so (#693).
+  void restoreAfterCrash();
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
@@ -1295,7 +1400,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

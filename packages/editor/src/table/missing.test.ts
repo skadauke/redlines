@@ -86,7 +86,7 @@ describe('a row with fewer cells than the header is drawn with empty cells after
     });
   }
 
-  it('draws nothing of it in Raw, which shows the source', () => {
+  it('draws nothing of it in Plain, which shows the source', () => {
     const editor = load(SHORT, 0, 'raw');
     expect(editor.view.contentDOM.querySelectorAll('.rl-tc, .rl-tc-missing')).toHaveLength(0);
     expect(editor.view.contentDOM.textContent).toContain('| 1 |');
@@ -308,7 +308,7 @@ describe('the caret in a cell a row lacks', () => {
     expect(lacking(editor)).toBeNull();
   });
 
-  it('is in a cell of no other row, not in a table in a quote, nor in Raw', () => {
+  it('is in a cell of no other row, not in a table in a quote, nor in Plain', () => {
     const quote = '> | a | b | c |\n> | - | - | - |\n> | 1 |';
     const editor = load(quote, quote.length);
     expect(lacking(editor)).toBeNull();

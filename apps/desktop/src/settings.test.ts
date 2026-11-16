@@ -7,6 +7,7 @@ import {
   authorFrom,
   imageFolderNameOf,
   imageFolderNameProblem,
+  keepWindowOwn,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -48,11 +49,23 @@ function mockColorScheme(dark: boolean) {
 }
 
 describe('settings', () => {
+  it('keeps the sidebar width in range, and the default for what is not a width (#680)', () => {
+    const load = (width: unknown) => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sidebarWidth: width }));
+      return loadSettings().sidebarWidth;
+    };
+    expect(load(333)).toBe(333);
+    expect(load(20)).toBe(180);
+    expect(load(5000)).toBe(480);
+    expect(load('wide')).toBe(240);
+  });
+
   it('settings default and persist', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       theme: 'default',
       appearance: 'system',
       sidebarOpen: false,
+      sidebarWidth: 240,
       showResolved: false,
       markupView: 'redlines',
       rotateIcon: true,
@@ -85,6 +98,7 @@ describe('settings', () => {
       theme: 'book',
       appearance: 'dark',
       sidebarOpen: true,
+      sidebarWidth: 320,
       showResolved: true,
       markupView: 'simple',
       rotateIcon: false,
@@ -719,5 +733,28 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, `{"webAccess":${bad}}`);
       expect(loadSettings().webAccess).toBe(false);
     }
+  });
+});
+
+describe('the Default text size (#557)', () => {
+  it('is what a new window opens at, and no window’s own text size changes it', () => {
+    updateSettings({ textSize: 1.25 });
+    let own = { ...loadSettings(), textSize: 2 };
+    own = keepWindowOwn(own, updateSettings({ spellCheck: false }));
+    expect(own.textSize).toBe(2);
+    expect(loadSettings().textSize).toBe(1.25);
+  });
+
+  it('changes no window that is open', () => {
+    const open = { ...loadSettings(), textSize: 1.5 };
+    const stored = updateSettings({ textSize: 3 });
+    expect(keepWindowOwn(open, stored).textSize).toBe(1.5);
+    expect(loadSettings().textSize).toBe(3);
+  });
+
+  it('is changed by Preferences, which keeps what it set', () => {
+    const open = { ...loadSettings(), textSize: 1 };
+    const stored = updateSettings({ textSize: 1.75 });
+    expect(keepWindowOwn(open, stored, { textSize: 1.75 }).textSize).toBe(1.75);
   });
 });
