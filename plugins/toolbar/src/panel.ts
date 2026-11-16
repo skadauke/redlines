@@ -57,7 +57,8 @@ function update(button: HTMLButtonElement, item: ShownItem, paired: boolean): vo
   if (item.toggle) button.setAttribute('aria-checked', String(item.active));
   else button.removeAttribute('aria-checked');
   // What is said is what is drawn (WCAG 2.5.3): the menu's word, not the command's title.
-  button.setAttribute('aria-label', item.label.replace(/…$/, ''));
+  const said = item.label.replace(/…$/, '');
+  button.setAttribute('aria-label', item.side ? `${said}, ${item.side}` : said);
   if (item.aria) button.setAttribute('aria-keyshortcuts', item.aria);
   else button.removeAttribute('aria-keyshortcuts');
   // The hint: the reason a grayed item can't be used, and for the icons of a shared line, the name
@@ -272,14 +273,17 @@ export function drawPanel(
     list.hidden = true;
     const head = element('div', 'rl-toolbar-menu-head');
     head.textContent = menu.heading;
+    head.setAttribute('role', 'presentation');
     heads.set(menu.id, head);
     list.append(head);
     if (menu.sides) {
       list.classList.add('rl-toolbar-menu-sides');
       const sides = element('div', 'rl-toolbar-sides');
+      sides.setAttribute('role', 'presentation');
       for (const name of menu.sides) {
         const side = element('span', 'rl-toolbar-side');
         side.textContent = name;
+        side.setAttribute('role', 'presentation');
         sides.append(side);
       }
       list.append(sides);
@@ -295,6 +299,7 @@ export function drawPanel(
       if (caption) {
         const words = element('div', 'rl-toolbar-caption');
         words.textContent = caption;
+        words.setAttribute('role', 'presentation');
         list.append(words);
       }
       const buttons = shownRow.map((item) => {

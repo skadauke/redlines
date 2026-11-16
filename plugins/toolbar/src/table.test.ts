@@ -9,6 +9,7 @@ import {
 } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MENUS, shownBar } from './items.ts';
+import { createToolbar } from './index.ts';
 
 const T = 'Intro.\n\n| a | b |\n| - | - |\n| one | two |\n| three | four |\n\nAfter.\n';
 const editors: Editor[] = [];
@@ -102,6 +103,9 @@ describe('the Table menu', () => {
       'table.moveColumnRight',
       'table.selectColumn',
       'table.deleteColumn',
+      'table.alignLeft',
+      'table.alignCenter',
+      'table.alignRight',
     ]);
     at(editor, 'one');
     selectRect(editor.view, 'column');
@@ -117,5 +121,32 @@ describe('the Table menu', () => {
       ?.rows.flat()
       .find((i) => i.id === 'table.deleteRow');
     expect(item?.reason).toMatch(/Columns are selected/);
+  });
+
+  it('names the two sides of a line for assistive technology', () => {
+    const editor = mount();
+    at(editor, 'one');
+    const items = table(editor)?.rows.flat() ?? [];
+    expect(items.find((i) => i.id === 'table.selectRow')?.side).toBe('row');
+    expect(items.find((i) => i.id === 'table.selectColumn')?.side).toBe('column');
+    expect(items.find((i) => i.id === 'table.alignLeft')?.side).toBe('align column');
+  });
+
+  it('keeps its header up to date as the selection moves, without drawing the menu again', () => {
+    const editor = mount();
+    editor.commands.register(commands);
+    const toolbar = createToolbar(editor, { notice: () => {} });
+    at(editor, 'one');
+    toolbar.show();
+    const head = () =>
+      document.querySelector('.rl-toolbar-menu[aria-label="Table"] .rl-toolbar-menu-head');
+    const element = head();
+    expect(element?.textContent).toBe('Table · Row 2, column 1');
+    at(editor, 'four');
+    expect(head()).toBe(element);
+    expect(head()?.textContent).toBe('Table · Row 3, column 2');
+    selectRect(editor.view, 'column');
+    expect(head()?.textContent).toBe('Column 2 selected');
+    toolbar.destroy();
   });
 });

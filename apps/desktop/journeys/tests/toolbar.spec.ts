@@ -193,9 +193,16 @@ test.describe('the toolbar @views', () => {
       'false',
     );
     await j.shot('table-row-selected');
-    // Alignment writes the delimiter row.
+    // Alignment, from a caret, writes the delimiter row (with a row selected it dims, as Column does).
+    await expect(menu.locator('[data-command="table.alignRight"]')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await j.press('Escape');
+    await j.caretAfter('4');
+    await top.click();
     await menu.locator('[data-command="table.alignRight"]').click();
-    expect(await j.text()).toContain('| -: | -: |');
+    expect(await j.text()).toContain('| - | -: |');
     await top.click();
     await menu.locator('[data-command="table.deleteTable"]').click();
     expect(await j.text()).not.toContain('| A |');

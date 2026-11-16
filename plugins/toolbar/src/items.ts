@@ -39,6 +39,8 @@ export interface ItemSpec {
   reason?: (state: EditorState, context: Context) => string | undefined;
   /** A line of words over the item's line (on the first item of it): "Align column". */
   caption?: string;
+  /** What the item is for, which its accessible name adds where the line's other items share its word. */
+  side?: string;
 }
 
 export interface MenuSpec {
@@ -108,8 +110,14 @@ const pair = (
   columnIcon: ToolbarIcon,
   columnLabel: string,
 ): readonly ItemSpec[] => [
-  { command: rowCommand, icon: rowIcon, label: rowLabel, reason: rowSide },
-  { command: columnCommand, icon: columnIcon, label: columnLabel, reason: columnSide },
+  { command: rowCommand, icon: rowIcon, label: rowLabel, reason: rowSide, side: 'row' },
+  {
+    command: columnCommand,
+    icon: columnIcon,
+    label: columnLabel,
+    reason: columnSide,
+    side: 'column',
+  },
 ];
 
 /**
@@ -210,9 +218,28 @@ export const MENUS: readonly MenuSpec[] = [
       pair('table.selectRow', 'select', 'Select', 'table.selectColumn', 'select', 'Select'),
       pair('table.deleteRow', 'delete', 'Delete', 'table.deleteColumn', 'delete', 'Delete'),
       [
-        { command: 'table.alignLeft', icon: 'align-left', label: 'Left', caption: 'Align column' },
-        { command: 'table.alignCenter', icon: 'align-center', label: 'Center' },
-        { command: 'table.alignRight', icon: 'align-right', label: 'Right' },
+        {
+          command: 'table.alignLeft',
+          icon: 'align-left',
+          label: 'Left',
+          caption: 'Align column',
+          side: 'align column',
+          reason: columnSide,
+        },
+        {
+          command: 'table.alignCenter',
+          icon: 'align-center',
+          label: 'Center',
+          side: 'align column',
+          reason: columnSide,
+        },
+        {
+          command: 'table.alignRight',
+          icon: 'align-right',
+          label: 'Right',
+          side: 'align column',
+          reason: columnSide,
+        },
       ],
       one({ command: 'table.deleteTable', icon: 'delete' }),
     ],
@@ -263,6 +290,8 @@ export interface ShownItem {
   active: boolean;
   /** Words over the item's line, when it is the first of one that has them. */
   caption: string | null;
+  /** What the item is for (row, column), which its accessible name adds; null for most. */
+  side: string | null;
 }
 
 export interface ShownMenu {
@@ -302,6 +331,7 @@ function shown(
     toggle: command.isActive !== undefined,
     active: command.isActive?.(state) ?? false,
     caption: spec.caption ?? null,
+    side: spec.side ?? null,
   };
 }
 

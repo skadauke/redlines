@@ -291,7 +291,8 @@ The window, on the desktop:
   Insert Right, Move Up | Move Left, Move Down | Move Right, Select | Select, Delete | Delete), then
   Align column (Left | Center | Right, the caret's column checked) and Delete Table. With rows
   selected the Column side is dimmed, and with columns selected the Row side, each with its reason;
-  with a caret both sides work on the caret's row and column. The header row and the last column
+  with a caret both sides work on the caret's row and column (the header is row 1). Align column
+  dims with the Column side, since it changes the columns the selection touches. The header row and the last column
   keep the Table menu's own refusals as dimmed items with their reasons; Merge is not offered.
   An item that can't be used here is dimmed, and
   its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
