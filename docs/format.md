@@ -1215,6 +1215,20 @@ Track Changes on, or goes up a level, in the indentation of a marker), it is ref
 for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
 `packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
 
+**A number and a period at the start of an item's text.** `- 1.` is, to CommonMark (micromark
+4.0.2: `<ul><li><ol><li></li></ol></li></ul>`), a bullet item that holds an empty numbered list, and
+so is `- 1)`, and `1. 2.` a numbered item that holds one (`- [ ] 1.` is text: a box is no list). The editor decides by the keystroke which one the person
+means. The digits of an item's first line of text (one to nine) followed by a period or a
+parenthesis typed with nothing after the caret are text: the editor writes the delimiter escaped,
+`- 1\.` or `- 1\)`, which every reader shows as `1.` (the backslash also reads the same in every
+order of decisions: with Track Changes on it is one more letter of the author's insertion). A
+period typed before more text (`- 1.5`, written `- 1\.5` if it was typed in that order) is text
+the same way. The digits and the delimiter followed by a space, typed in that order, are the
+numbered sublist of an item (planned: #512); until that is built the space is text after
+`1\.`. A file that holds `- 1.` as it is, the empty numbered list, is read as that, and the keys
+treat it as an empty item (Return in it goes up a level, as in any empty item). Tested:
+`typed-number.test.ts` of `packages/editor/src/blocks`.
+
 A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
 line of that text, as CommonMark reads it: only a list that starts at 1 interrupts a paragraph, and
 micromark 4.0.2 reads `<li>a⏎2. b</li>`. The editor's parse reads a sublist there, because it lets
