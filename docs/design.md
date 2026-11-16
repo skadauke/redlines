@@ -297,7 +297,7 @@ The window, on the desktop:
   Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
   Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  available; an item whose command isn't registered is left out. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View has Show/Hide Word Count (#536). Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
   closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
