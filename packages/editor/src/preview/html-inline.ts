@@ -27,6 +27,7 @@ export interface HtmlTag {
   name: string;
   closing: boolean;
   attributes: string;
+  selfClosing: boolean;
   length: number;
 }
 
@@ -38,6 +39,7 @@ export function readTag(text: string): HtmlTag | null {
       name: (closing[1] as string).toLowerCase(),
       closing: true,
       attributes: '',
+      selfClosing: false,
       length: closing[0].length,
     };
   }
@@ -47,6 +49,7 @@ export function readTag(text: string): HtmlTag | null {
     name: (opening[1] as string).toLowerCase(),
     closing: false,
     attributes: opening[2] as string,
+    selfClosing: opening[3] === '/',
     length: opening[0].length,
   };
 }
@@ -92,6 +95,9 @@ export const htmlInline: MarkdownConfig = {
       before: 'HTMLTag',
       parse(cx, next, pos) {
         if (next !== 60 /* '<' */) return -1;
+        // A tag starts with a letter or a slash and a letter: most `<` are neither.
+        const after = cx.char(pos + 1);
+        if (!(after >= 65 && after <= 122) && after !== 47) return -1;
         // The text to the end of the line is enough for a tag, but one may run on.
         const tag = readTag(cx.slice(pos, Math.min(cx.end, pos + 2000)));
         if (!tag) return -1;
@@ -104,6 +110,8 @@ export const htmlInline: MarkdownConfig = {
         }
         switch (htmlHandling(name)) {
           case 'inline':
+            // A self-closing `<kbd/>` is no pair: it stays text.
+            if (tag.selfClosing) return -1;
             return cx.addDelimiter(delimiterOf(name), pos, end, !tag.closing, tag.closing);
           case 'unwrap':
             return cx.addElement(cx.elt('HtmlDropped', pos, end));

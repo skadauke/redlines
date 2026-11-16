@@ -54,6 +54,12 @@ const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 export const BULLETS = ['•', '◦', '▪'] as const;
 
+/** Whether a node is in a table. */
+function inTable(node: SyntaxNode): boolean {
+  for (let up = node.parent; up; up = up.parent) if (up.name === 'Table') return true;
+  return false;
+}
+
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {
   let depth = 0;
@@ -614,9 +620,13 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
       else if (name === 'HtmlElement') htmlElement(b, node);
-      else if (name === 'HtmlBreak') b.push(htmlBreak().range(node.from, node.to));
-      else if (name === 'HtmlWbr') b.push(htmlWbr().range(node.from, node.to));
-      else if (name === 'HtmlDropped')
+      // A `<br>` in a table cell is drawn by the table (table/layout.ts).
+      else if (name === 'HtmlBreak' || name === 'HtmlWbr') {
+        if (!inTable(node)) {
+          const decoration = name === 'HtmlBreak' ? htmlBreak() : htmlWbr();
+          b.push(decoration.range(node.from, node.to));
+        }
+      } else if (name === 'HtmlDropped')
         b.syntax(node.from, node.to, touches(state, node.from, node.to));
       else if (name === 'HtmlChip') htmlChip(b, node);
       else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
