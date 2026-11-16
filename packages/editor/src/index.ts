@@ -43,6 +43,13 @@ import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -156,6 +163,9 @@ export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
 export { indentReason } from './blocks/tab.ts';
+export { disabledReasonOf } from './commands.ts';
+export { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+export type { TwinHere } from './blocks/twin.ts';
 export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';

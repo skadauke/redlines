@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 // The panel's options, the scope of a selection, Tab, and replacing with Track Changes on (#554).
-import { createEditor, type Editor, type EditorOptions, undo } from '@redlines/editor';
+import {
+  containersOf,
+  createEditor,
+  type Editor,
+  type EditorOptions,
+  isSectionOpen,
+  undo,
+} from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFind, type FindPluginOptions } from './index.ts';
@@ -304,6 +311,30 @@ describe('the current-match hook', () => {
       [0, 3],
       [5, 8],
     ]);
+  });
+});
+
+describe('a closed section', () => {
+  const DOC = '<details>\n<summary>More</summary>\n\nA cat inside.\n\n</details>\n\nA cat after.\n';
+  const isOpen = (editor: Editor) =>
+    isSectionOpen(editor.view.state, containersOf(editor.view.state)[0]!);
+
+  it('opens while its match is the current one, and closes when the match moves out', () => {
+    const editor = mount(DOC);
+    expect(isOpen(editor)).toBe(false);
+    search(editor, 'cat');
+    // The first match, inside the section: it shows.
+    expect(
+      editor.view.state.sliceDoc(
+        editor.view.state.selection.main.from,
+        editor.view.state.selection.main.to,
+      ),
+    ).toBe('cat');
+    expect(isOpen(editor)).toBe(true);
+    editor.commands.run('find.next');
+    expect(isOpen(editor)).toBe(false);
+    editor.commands.run('find.next');
+    expect(isOpen(editor)).toBe(true);
   });
 });
 

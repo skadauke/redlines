@@ -419,6 +419,11 @@ README-style snippets) holds the editor to it.
 - **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
   no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
   as folding and opening a block's source, are view state and never written.
+- **Quick Look** (#691) draws the same list from tokens, since its JavaScriptCore has no DOM: the
+  source is never passed through, an attribute is kept only if GitHub keeps it and a static page
+  can use it (never `id`, `name`, `style`, `class`, `srcset` or a handler), and a remote image is
+  its alt text. `<details>` is WebKit's own, closed unless the file says `open` (ruling: a static
+  preview shows what GitHub shows at rest, and WebKit opens it on a click without script).
 - **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
   `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
   `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
@@ -433,9 +438,33 @@ README-style snippets) holds the editor to it.
 - **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
   hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
   on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
-  the conversion is exact. `<details>` is closed unless the file says `open`; a closed section
-  with pending changes shows a bar and a count. These come after the inline tags, in the order of
-  #686.
+  the conversion is exact. These come after the inline tags, in the order of #686.
+- **Markdown twins** (#690). An HTML heading (`<h1>` to `<h6>`, no attributes, one line) is drawn as
+  a heading with its tags hidden, edited in place, and listed in the outline. A blockquote, a simple
+  list, a simple table, an `<hr>` and a `pre` with code are edited as the HTML they are. A command
+  that changes structure (a heading level, Body, Quote, a list type, Indent and Tab, the Table
+  menu) first converts the block to its twin, as one change, only when the conversion is exact
+  (`docs/format.md` §3.15): with Track Changes on it is a substitution of the whole block whose
+  margin card says "Converted the `<h2>` heading to Markdown", with it off the block is replaced.
+  Where the HTML has no exact twin (a heading with an attribute, a table with a span or a caption,
+  Markdown in the text) the command is disabled and its hint says why; nothing is refused after
+  the fact.
+- **`<details>` and `<div align>` as containers** (#688). A container is an opening tag line (with
+  the `<summary>` line under it, for a `details`) and a closing tag line, each a block of its own
+  with blank lines around it, at the top of the document, as GitHub needs to read the Markdown
+  between them; a tag with other text in its block is an HTML block with no Markdown inside (a later
+  phase). The tag lines are hidden, the Markdown inside is ordinary blocks (tracked edits and all),
+  and while the caret is in an open container a faint bracket stands in the margin. The summary is
+  one line, drawn bold with a triangle; a `details` with none shows "Details". A `<div>` hides its
+  tags and aligns what is inside (`align`); a `details` with no closing tag folds to the end of the
+  text, as on GitHub. Folding is view state and never written: closed unless the file says `open`,
+  nothing remembered, the triangle or ⌥⌘↓ and ⌥⌘↑ on the summary line toggle it, and Down on a
+  closed summary steps over the content. A section is open for as long as the caret, or a Find or
+  Review match, is in it, and closes again when that moves out. A closed section with pending
+  changes shows a bar and their count on its summary line, so changes never hide. Backspace and
+  Delete never join a paragraph into a tag line, nor the summary's line break away. Insert ›
+  Collapsible Section writes the structure (open, with the summary's text selected), and wraps a
+  selection of blocks with two insertions.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
