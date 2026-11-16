@@ -3230,7 +3230,18 @@ or an input method's composition (which is asked about when it ends), and is mad
 still the one it was made against, and dropped if not. One answer holds for the edits that follow in
 the same run (the same reason, no pause of five seconds). "Don't ask again" is the app's, kept for
 the file by its path and never in the file, so that somebody else who opens it is asked. Where the
-host has no sheet, such an edit is refused as before.
+host has no sheet, such an edit is refused as before. One "Don't ask again" covers front matter and
+Raw together: a person who has said it doesn't want either asked.
+
+**With Track Changes off** an edit that §3.10 refuses, because it can't be made without changing the
+pending changes around it, is asked about in the same way, with its own title, "This edit can't be
+made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
+Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
+(§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
+results, as one step, so that one Undo gives back the file as it was. Rejecting is never chosen for
+the person. It is asked every time, since no answer to it stands for the next edit: the changes are
+gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
+before. The same words are used for an input method's composition, asked about when it ends.
 
 ## 4. Comments
 
