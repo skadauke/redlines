@@ -28,7 +28,7 @@ import {
 import { EditError, newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
-import { createPalette, pageClipboard } from '@redlines/palette';
+import { type AppCommand, createToolbar, pageClipboard } from '@redlines/toolbar';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -121,7 +121,9 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-followTheme(document.documentElement, settings, { ...(isTauri ? { setAppearance } : {}) });
+const windowTheme = followTheme(document.documentElement, settings, {
+  ...(isTauri ? { setAppearance } : {}),
+});
 // The window zoom the app handed this page, before anything draws (zoom.ts); 1 in a browser.
 applyZoom(document.documentElement, initialZoom() ?? 1);
 
@@ -510,6 +512,8 @@ editor.commands.register([
 // commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
+  // Why the toolbar's Accept or Reject was refused: a line that doesn't interrupt.
+  notice: (message) => notice.flash(message),
   showResolved: settings.showResolved,
   // The comments being written are kept for their document, and come back when it opens again.
   documentData: documentData.forPlugin(reviewManifest),
@@ -558,12 +562,20 @@ const review = createReview(editor, {
   },
 });
 
-// The formatting palette: shown only when summoned: on right-click, in place of WebKit's own menu,
-// and from the keyboard. Its items are commands of the registry, so it
+// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
+// (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
-const palette = createPalette(editor, {
+const toolbar = createToolbar(editor, {
   container: main,
+  // The palette (type with the toolbar open) searches the app's own commands and settings beside
+  // the registry's; a setting is a live control in its line (toolbar-commands.ts).
+  appCommands: () => toolbarCommands(),
+  // Ask has no way yet to start with a question typed: its box opens for the selection.
+  askAbout: () => void editor.commands.run('ask.start'),
+  // The wrench follows the toolbar, however it came to show or go.
+  onChange: () => render(),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
@@ -932,6 +944,102 @@ const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
+/**
+ * What the toolbar's palette offers besides the registry's commands: the app's own commands and
+ * the settings that are no part of the page's editing, each with the control that fits it. They
+ * read the live state when they are asked for, as the palette draws them again after each change.
+ */
+function toolbarCommands(): AppCommand[] {
+  const ui = () => editor.getUiState();
+  return [
+    {
+      id: 'app.tracking',
+      title: 'Track Changes',
+      keys: '⇧⌘E',
+      synonyms: ['suggest', 'suggesting', 'redline'],
+      control: {
+        kind: 'switch',
+        get: () => ui().tracking,
+        set: (on) => {
+          if (on !== ui().tracking) toggleTracking();
+        },
+      },
+    },
+    {
+      id: 'app.resolved',
+      title: 'Show Resolved Comments',
+      synonyms: ['done', 'closed'],
+      control: {
+        kind: 'switch',
+        get: () => settings.showResolved,
+        set: (on) => {
+          if (on !== settings.showResolved) toggleResolved();
+        },
+      },
+    },
+    {
+      id: 'app.appearance',
+      title: 'Appearance',
+      synonyms: ['dark mode', 'light mode', 'theme', 'night'],
+      control: {
+        kind: 'choice',
+        options: [
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+          { value: 'system', label: 'System' },
+        ],
+        get: () => settings.appearance,
+        set: (value) => {
+          if (value !== 'light' && value !== 'dark' && value !== 'system') return;
+          changeSettings({ appearance: value });
+          windowTheme.show(settings);
+        },
+      },
+    },
+    {
+      id: 'app.clean',
+      title: 'Show Clean View',
+      keys: '⌥⌘1',
+      synonyms: ['preview', 'read'],
+      run: () => editor.showView('clean'),
+    },
+    {
+      id: 'app.redlines',
+      title: 'Show Redlines View',
+      keys: '⌥⌘2',
+      synonyms: ['changes', 'markup'],
+      run: () => editor.showView('redlines'),
+    },
+    {
+      id: 'app.raw',
+      title: 'Show Raw View',
+      keys: '⌥⌘3',
+      synonyms: ['markdown', 'source'],
+      run: () => editor.showView('raw'),
+    },
+    {
+      id: 'app.simple',
+      title: 'Simple Look',
+      keys: '⌥⌘4',
+      synonyms: ['plain', 'quiet'],
+      run: () => editor.switchLook(),
+    },
+    {
+      id: 'app.preferences',
+      title: 'Open Preferences',
+      keys: '⌘,',
+      synonyms: ['settings', 'options'],
+      run: () => commands.openPreferences(),
+    },
+    {
+      id: 'app.updates',
+      title: 'Check for Updates',
+      run: () => commands.checkForUpdates(),
+      available: () => updateNotifications !== undefined,
+    },
+  ];
+}
+
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
 
 /** "125%", for the notices that say a level. */
@@ -1000,6 +1108,7 @@ function renameDocument(): void {
 installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
+  toggleToolbar: () => toolbar.toggle(),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -1025,6 +1134,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// The toolbar is at the bottom of the window from the start when the person wants it there.
+toolbar.setAtBottom(settings.toolbarAtBottom);
 
 // The title bar floats over the top of the scroller, and the text passes under it (styles.css): the
 // editor keeps what it scrolls to clear of it, as of the find bar, and the bar stops short of a
@@ -1240,6 +1352,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    toolbarShown: toolbar.isOpen(),
   });
   menuState = {
     view: ui.view,
@@ -1318,7 +1431,7 @@ if (isTauri) {
       kept = readingPlace(editor.view, scroller);
       titleBar.closeMenus();
       review.closePopovers();
-      palette.hide();
+      toolbar.hide();
     },
     after: (level, from) => {
       if (kept) {
@@ -1415,6 +1528,7 @@ watchSettings((changed) => {
   settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
+  toolbar.setAtBottom(settings.toolbarAtBottom);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
@@ -1447,7 +1561,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
   void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
 }
 
-// Debug only (palette-check.ts): the formatting palette's right-click and hints, and Ask's
+// Debug only (palette-check.ts): the toolbar's right-click and hints, and Ask's
 // bubble with the page's scripted agent, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
   void import('./palette-check.ts').then(({ runPaletteCheck }) =>

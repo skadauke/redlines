@@ -25,7 +25,7 @@
     "@redlines/format": "workspace:*",
     "@redlines/formatting": "workspace:*",
     "@redlines/outline": "workspace:*",
-    "@redlines/palette": "workspace:*",
+    "@redlines/toolbar": "workspace:*",
     "@redlines/tables": "workspace:*",
     "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*",

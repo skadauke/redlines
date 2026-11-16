@@ -304,21 +304,21 @@ describe('blocks', () => {
     expect(editor.getDoc()).toBe('Intro.\n\nlet x = 1;\nlet y = 2;\n');
   });
 
-  it('fences the paragraph under the caret, and an empty line gets an empty block', () => {
+  it('puts an empty code block below the paragraph under the caret, and on an empty line (#555)', () => {
     const { editor } = mount('Intro.\n\nrun `a`\nnow\n\n');
     select(editor, 12);
     editor.commands.run('block.code');
-    expect(editor.getDoc()).toBe('Intro.\n\n```\nrun `a`\nnow\n```\n\n');
+    expect(editor.getDoc()).toBe('Intro.\n\nrun `a`\nnow\n\n```\n\n```\n\n');
     select(editor, editor.getDoc().length);
     editor.commands.run('block.code');
     expect(editor.getDoc().endsWith('```\n\n```')).toBe(true);
   });
 
-  it('fences a paragraph as a tracked substitution with tracking on', () => {
+  it('fences selected lines as a tracked substitution with tracking on', () => {
     const { editor, notices, refused } = mount('Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.\n', {
       tracking: true,
     });
-    select(editor, 12);
+    select(editor, 8, 29);
     expect(editor.commands.run('block.code')).toBe(true);
     expect(notices).toEqual([]);
     expect(refused).toEqual([]);
@@ -345,7 +345,7 @@ describe('blocks', () => {
   it("says why a code block can't be made", () => {
     // Tracked, a heading keeps its `#`s in front of the change, and a fence after them is none.
     const heading = mount('Intro.\n\n# Head\n\nEnd.\n', { tracking: true });
-    select(heading.editor, 11);
+    select(heading.editor, 10, 14);
     expect(heading.editor.commands.run('block.code')).toBe(false);
     expect(heading.notices).toEqual([
       "A heading can't become a code block while Track Changes is on. Make it body text first.",
@@ -359,7 +359,7 @@ describe('blocks', () => {
     expect(code.refused).toEqual(['This is already a code block.']);
 
     const quoted = mount('> quoted text\n');
-    select(quoted.editor, 4);
+    select(quoted.editor, 2, 8);
     expect(quoted.editor.commands.run('block.code')).toBe(false);
     expect(quoted.notices).toHaveLength(1);
   });

@@ -7,6 +7,8 @@ import {
   barClickHandlers,
   type Editor,
   inFrontMatter,
+  isChange,
+  parsedField,
   viewModeField,
 } from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
@@ -19,7 +21,8 @@ import {
   toggleHighlight,
 } from './highlight.ts';
 import { type PinnedElement, rail, type RailOptions } from './rail.ts';
-import type { ReviewContext } from './shared.ts';
+import { EditError, type MarkRange, rejectReason } from '@redlines/format';
+import { decideSuggestion, type ReviewContext, spanOf } from './shared.ts';
 import { reviewTheme } from './styles.ts';
 
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
@@ -150,7 +153,12 @@ export interface ReviewOptions extends RailOptions {
    * It may come while the editor is updating, so it must not change the editor itself.
    */
   onOpenChange?: (open: boolean) => void;
+  /** Says in one line, without interrupting, why a decision from the toolbar was refused. */
+  notice?: (message: string) => void;
 }
+
+const NO_CHANGE = 'Put the caret in a tracked change to decide it.';
+const NO_CHANGES = 'There are no changes to review.';
 
 /** Why Add Comment can't run where the selection is, or undefined: Plain shows markers as text, and
  * front matter has no text to anchor in (format §3.8). */
@@ -161,6 +169,29 @@ function commentDisabledReason(state: EditorState): string | undefined {
   if (inFrontMatter(state))
     return "A comment can't be anchored in front matter. Select text in the body.";
   return undefined;
+}
+
+/**
+ * The pending changes of `state`, read from the text: a command's reason is asked for while the
+ * editor builds its state for the host, so it can't ask the editor for that.
+ */
+const pendingChanges = (state: EditorState): MarkRange[] =>
+  (state.field(parsedField, false)?.marks ?? []).filter(isChange);
+
+/** The change the selection touches, or undefined: the one a decision from the toolbar is for. */
+function changeAtSelection(state: EditorState): MarkRange | undefined {
+  const { from, to } = state.selection.main;
+  const changes = pendingChanges(state);
+  const reaches = (strict: boolean) =>
+    changes.find((mark) => {
+      const span = spanOf(mark);
+      return strict
+        ? span.from < Math.max(to, from + 1) && span.to > from
+        : span.from <= to && span.to >= from;
+    });
+  // Inside a change, before one that only touches the selection's edge: a caret between two
+  // changes decides the one it is in the middle of, or the first it touches.
+  return reaches(true) ?? reaches(false);
 }
 
 /**
@@ -201,6 +232,18 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
   const remove = editor.addExtension(extension);
   // Add Comment is the Review menu's first command, and Ask… follows it; Highlight is Format's, in a
   // group of its own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
+  const decideAtSelection = (how: 'accept' | 'reject'): boolean => {
+    const found = changeAtSelection(view.state);
+    if (!found) return false;
+    try {
+      decideSuggestion(ctx, how, found.id);
+      return true;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      options.notice?.(error.message);
+      return false;
+    }
+  };
   const removeCommands = editor.commands.register([
     {
       id: 'comment.add',
@@ -220,6 +263,34 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       disabledReason: highlightDisabledReason,
       run: () => toggleHighlight(ctx),
       isActive: (state) => highlightsAt(state).length > 0,
+    },
+    // The toolbar's Review menu: decide the change at the selection, and go through all of them.
+    {
+      id: 'change.accept',
+      title: 'Accept',
+      disabledReason: (state) => (changeAtSelection(state) ? undefined : NO_CHANGE),
+      run: () => decideAtSelection('accept'),
+    },
+    {
+      id: 'change.reject',
+      title: 'Reject',
+      disabledReason: (state) => {
+        const found = changeAtSelection(state);
+        if (!found) return NO_CHANGE;
+        const parsed = state.field(parsedField, false);
+        return parsed ? rejectReason(parsed, found) : undefined;
+      },
+      run: () => decideAtSelection('reject'),
+    },
+    {
+      id: 'review.start',
+      title: 'Review Changes',
+      disabledReason: (state) => (pendingChanges(state).length === 0 ? NO_CHANGES : undefined),
+      run: () => {
+        start(view, ctx);
+        report();
+        return true;
+      },
     },
   ]);
 
