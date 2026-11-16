@@ -77,10 +77,13 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
@@ -101,6 +104,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
@@ -259,11 +263,19 @@ function dragFile(): void {
 let crashes: CrashWatch | null = null;
 // Unsaved edits are kept in the app's support folder while there are any (recovery.ts, #693).
 let recovery: Recovery | null = null;
+const untrackedAnswers = createUntrackedAnswers();
 
 const editor = createEditor(element('#editor'), {
   doc: '',
   onError: (error) => crashes?.caught(error),
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
@@ -928,6 +940,8 @@ function renameDocument(): void {
   else void controller.saveAs();
 }
 
+installTitleHints();
+
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
@@ -1273,12 +1287,8 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
-  // person's own preference, not the document's, so nothing is written to it. A window opened for
-  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
-  if (controller.state.path === null && settings.trackNewDocuments) {
-    editor.setTracking(true, { inFile: false });
-  }
+  // A new document always starts with Track Changes off (#660): the switch is the document's own,
+  // written at save, so no setting and no earlier document decides it.
   // After a crash: the edits the window had, put back, with a card that says so (#693).
   void restoreAfterCrash();
   windows?.ready();
