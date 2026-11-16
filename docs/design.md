@@ -30,9 +30,10 @@ For teams and developers:
     comments are hidden: GitHub, VS Code, pandoc, R Markdown, Quarto, Hugo and Docusaurus.
   - Two modes: keep the current version only, or keep the full history, which lets you replay
     every edit made to a document.
-- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and in plain text (`.txt`) files,
-  and pandoc's Markdown in R Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common
-  variants, Obsidian's included.
+- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and pandoc's Markdown in R
+  Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common variants, Obsidian's included.
+- **Text and code files:** `.txt`, data and config files and source code (format §9.1) open in
+  Plain alone, in colors for the language, with no review at all (§5.3).
 - **Word, Google Docs, HTML and PDF:** import, export, copy and paste. Pasted text renders
   beautifully, always.
 - **Agents as collaborators,** through MCP tools, @mentions in comment threads, and a chat panel
@@ -178,11 +179,11 @@ The window, on the desktop:
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
   folder, opened down to the document: its folders, and the documents Redlines opens, Markdown,
-  R Markdown, Quarto and plain text (`.txt`) files, leaving out hidden files and what `.gitignore`
-  ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
-  opens it in a new one, as does a click while an agent is working in the window. A plain text
-  file is read as Markdown and saved under its own name, with Track Changes and comments like any
-  document (format §9.1). A document dropped on a window opens as one from Finder does, but for
+  R Markdown and Quarto files, and text and code files (format §9.1), leaving out hidden files and
+  what `.gitignore` ignores; text and code files are in the secondary ink, and Preferences › General
+  can leave them out (all but the open one). No other file is listed. Choosing a document opens it in the same window, and ⌘-click
+  opens it in a new one, as does a click while an agent is working in the window. A text or code
+  file is saved under its own name as it is, with no Track Changes, comments or ledger (§5.3). A document dropped on a window opens as one from Finder does, but for
   the file that the window's own document icon dragged, which opens nothing when it is dropped
   back on that window. Any other
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
@@ -190,13 +191,12 @@ The window, on the desktop:
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
   its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
-  which other apps declare), R Markdown and Quarto by their extensions, and `.txt` files by
-  theirs, so Finder's Open With offers Redlines for each, and for no other kind of text, such as
-  source code. Where the
+  which other apps declare), R Markdown, Quarto and the text and code files by their extensions, so Finder's Open With offers
+  Redlines for each, and for no other kind of text. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
-  Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
-  for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
-  editor of their choice.
+  Redlines. R Markdown, Quarto, text and code files it never takes, even where nothing else owns them:
+  for those Redlines is only an alternative, since people who write R Markdown, Quarto or code
+  have an editor of their choice.
   Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
@@ -428,6 +428,17 @@ page with a monospace # for Plain. Red shows there only as that state (besides t
 it switches between Clean and Redlines, and from Plain goes back to whichever of the two was shown
 last; Plain is for the menu, below a separator. The icon changing is the sign that the click did
 something, though Clean and Redlines look alike in a document without redlines.
+
+**A text or code file** (format §9.1) has Plain alone. Clean and Redlines are disabled in the menu
+and on ⌥⌘1 and ⌥⌘2, with "Only Markdown files have Clean and Redlines views." as their hint;
+Track Changes and Review Changes are disabled too ("Only Markdown files have Track Changes and
+review."), and so is every command that makes or reads Markdown, marks or comments (Format,
+Paragraph, Table, Image, Add Comment, Highlight, Ask), each with its reason, while Edit, find and
+replace and the outline stay. The text shows in the monospace Plain view, colored for its language
+by the same style as a code block (`codeFileHighlight`), or not colored for `.txt`, `.log` and
+`.csv` or past 2 MB. Typing is plain editing that Undo covers, and saving writes the text as it is:
+no ledger, and no view or tracking recorded. An agent reads and writes the file as text, and the
+`redlines` command line refuses to mark it.
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
@@ -1071,7 +1082,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 | **Google Docs** | Paste. Import through `.docx`, in which Google Docs writes its suggestions as tracked changes                                            | Export of `.docx`, which Google Docs opens with suggestions. Converting a Redlines `.md` file into a Google Doc drops every change and comment ([format §9.5](format.md#95-formatters-and-other-editors)). Later, a bridge to Google Docs suggestions through its API                |
 | **HTML**        | Paste                                                                                                                                    | Export from the static renderer, of the newest version by default, because hidden markup isn't removed markup                                                                                                                                                                    |
 | **PDF**         | —                                                                                                                                        | Print and export through Redlines' paginator: header rows repeat on every page, rows aren't split, and headings stay with what follows. One paper-size setting serves print, PDF and Copy for Word                                                                                |
-| **Markdown**    | Any `.md`, `.qmd`, `.Rmd` or `.txt` file                                                                                                 | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
+| **Markdown**    | Any `.md`, `.qmd`, `.Rmd` file                                                                                                | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside

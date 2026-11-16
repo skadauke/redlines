@@ -27,6 +27,11 @@ export type ViewName = 'clean' | 'simple' | 'redlines' | 'raw';
 export interface StartOptions {
   /** The document's text, with its ledger if it has changes. Default: the page's own sample. */
   doc?: string;
+  /**
+   * The name of a file to open `doc` as, such as `app.ts`: it is written in the page's folder and
+   * opened from there, so its extension decides what it is (Markdown, or text and code).
+   */
+  file?: string;
   /** Track Changes on or off for this page. Default: as the document says. */
   tracking?: boolean;
   /** The view to show. Default: as the document opens. */
@@ -72,6 +77,7 @@ interface Hook {
     getUiState(): Record<string, unknown>;
   };
   controller: { createWith(text: string): Promise<void> };
+  openFile(path: string, text: string): Promise<void>;
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
 }
 
@@ -504,7 +510,12 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
   await page.addStyleTag({
     content: `*, *::before, *::after { transition: none !important; animation: none !important; }`,
   });
-  if (options.doc !== undefined) {
+  if (options.doc !== undefined && options.file !== undefined) {
+    await page.evaluate(
+      ([path, text]) => window.__redlines!.openFile(path as string, text as string),
+      [options.file, options.doc],
+    );
+  } else if (options.doc !== undefined) {
     await page.evaluate((text) => window.__redlines!.controller.createWith(text), options.doc);
   }
   if (options.tracking !== undefined) {

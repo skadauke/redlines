@@ -1370,6 +1370,10 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      openFile: async (path, text) => {
+        await host.write(path, text);
+        await controller.open(path);
+      },
       // The menu bar is the app's, and a page has none: a journey chooses a row through this, which
       // runs it only while the menu would have it enabled.
       menuRow: (text) => {
