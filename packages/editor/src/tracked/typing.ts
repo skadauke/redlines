@@ -38,11 +38,14 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import {
+  acceptMarks,
   applyChanges,
+  changesIn,
   type EditContext,
   EditError,
   type FormatOp,
   idsIn,
+  type MarkRange,
   newId,
   openerRange,
   parse,
@@ -52,6 +55,8 @@ import {
   type TextChange,
   trackedEdit,
   trackedFormat,
+  type UnitKind,
+  unitsOf,
   untrackedEdit,
   untrackedFormat,
 } from '@redlines/format';
@@ -66,6 +71,8 @@ import {
   untrackedAskFacet,
   untrackedAsking,
   untrackedRunField,
+  type UntrackedReason,
+  type UntrackedWords,
 } from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
@@ -682,6 +689,116 @@ function suggests(state: EditorState, doc: Text, edits: readonly Edit[], tracked
   return !tracked.apply(doc).eq(ChangeSet.of(edits, doc.length).apply(doc));
 }
 
+/** The unit the edits are in, as the sheet names it. */
+const UNIT_WORDS: Record<UnitKind, string> = {
+  block: 'paragraph',
+  code: 'code block',
+  table: 'table',
+  item: 'list item',
+  list: 'list',
+  quote: 'quote',
+};
+
+/** The smallest unit that holds the edits, or the range of the units they reach. */
+function unitAround(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+): { range: Range; word: string } | null {
+  const from = Math.min(...edits.map((edit) => edit.from));
+  const to = Math.max(...edits.map((edit) => edit.to));
+  let units = unitsOf(text, parsed).filter((unit) => unit.lineFrom <= to && from <= unit.to);
+  if (units.length === 0) return null;
+  while (units.length === 1) {
+    const inside = units[0]!.children.filter((unit) => unit.lineFrom <= to && from <= unit.to);
+    if (inside.length === 0) break;
+    units = inside;
+  }
+  const first = units[0]!;
+  const last = units.at(-1)!;
+  return {
+    range: { from: first.lineFrom, to: last.to },
+    word: units.length === 1 ? UNIT_WORDS[first.kind] : 'selection',
+  };
+}
+
+/** "Bo Chen's and your 2 pending changes": whose changes the edit decides, and how many. */
+function acceptWords(
+  state: EditorState,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  word: string,
+): UntrackedWords {
+  const me = state.facet(authorFacet)?.handle;
+  const others: string[] = [];
+  let mine = false;
+  for (const { entry } of marks) {
+    if (entry.by === me) mine = true;
+    else {
+      const name =
+        entry.by === 'unknown'
+          ? 'an unknown author'
+          : (parsed.ledger.people.find((person) => person.handle === entry.by)?.name ?? entry.by);
+      if (!others.includes(name)) others.push(name);
+    }
+  }
+  const owners = [...others.map((name) => `${name}'s`), ...(mine ? ['your'] : [])];
+  const who =
+    owners.length > 2
+      ? `${owners.slice(0, -1).join(', ')} and ${owners.at(-1)}`
+      : owners.join(' and ');
+  const n = marks.length;
+  const changes = n === 1 ? '1 pending change' : `${n} pending changes`;
+  return {
+    // Changes of one suggestion are decided together, so some may lie outside the unit.
+    title: `This edit can't be made without accepting ${who} ${changes} in this ${word}${
+      marks.some((mark) => mark.entry.group) ? ', with the rest of their suggestion' : ''
+    }. Make the edit?`,
+  };
+}
+
+/**
+ * With Track Changes off, an edit that can't be made beside the pending changes around it is made
+ * after those in its unit are accepted (design §3.4): they are the text that the person sees, and
+ * the edit was made against it. Nothing when there are none to accept, or the edit still can't be
+ * made after them. The changes are one step: the acceptance and the edit, in the offsets of `text`.
+ */
+function acceptPlan(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+): { tracked: Tracked; words: UntrackedWords } | null {
+  const unit = unitAround(text, parsed, edits);
+  if (!unit) return null;
+  const marks = changesIn(parsed, unit.range);
+  if (marks.length === 0) return null;
+  try {
+    const decided = acceptMarks(
+      text,
+      marks.map((mark) => mark.id),
+    );
+    const accept = ChangeSet.of(decided, text.length);
+    const accepted = applyChanges(text, decided);
+    const moved = edits.map((edit) => ({
+      ...edit,
+      from: accept.mapPos(edit.from, 1),
+      to: accept.mapPos(edit.to, -1),
+    }));
+    // An edit inside text that accepting takes away has nowhere to go: not this way.
+    if (moved.some((edit) => edit.from > edit.to)) return null;
+    const made = untrackEdits(state, accepted, parse(accepted), moved, backward);
+    return {
+      tracked: { changes: accept.compose(made.changes), caret: made.caret },
+      words: acceptWords(state, parsed, marks, unit.word),
+    };
+  } catch (error) {
+    if (error instanceof EditError) return null;
+    throw error;
+  }
+}
+
 /**
  * The author's edits with Track Changes off (format §3.10), or nothing, with the reason, when they
  * can't be made. An edit that the format leaves as it is goes in as it is.
@@ -696,8 +813,20 @@ function untrackedSpec(
   try {
     result = untrackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
   } catch (error) {
-    if (error instanceof EditError) return refused(tr, error);
-    throw error;
+    if (!(error instanceof EditError)) throw error;
+    // The other people's pending changes around the edit are what it can't be made beside: the
+    // person is asked whether to accept them, and the edit is made after (design §3.4).
+    const plan =
+      !start.field(trackingField) &&
+      start.facet(untrackedAskFacet) &&
+      !tr.isUserEvent(AUTOCORRECTION)
+        ? acceptPlan(start, start.doc.toString(), start.field(parsedField), edits, backward)
+        : null;
+    if (!plan) return refused(tr, error);
+    if (tr.annotation(untrackedAnswerAnnotation) === true) {
+      return rewritten(tr, plan.tracked.changes, plan.tracked.caret);
+    }
+    return holdEdit(tr, 'accept-pending', annotationsOfTransaction(tr), plan.words);
   }
   if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
     // Marked so that the caret moves out of hidden text, which the edit can leave it in when it
@@ -865,7 +994,7 @@ function finishComposition(view: EditorView): void {
   const inRaw = state.field(viewModeField) === 'raw';
   const asker = state.facet(untrackedAskFacet);
   /** The composition taken back, and held for the sheet (design §3.1). */
-  const hold = (reason: 'raw' | 'front-matter') => {
+  const hold = (reason: UntrackedReason, words?: UntrackedWords) => {
     const base = back.apply(state.doc);
     const last = edits.at(-1);
     view.dispatch({
@@ -874,6 +1003,7 @@ function finishComposition(view: EditorView): void {
         composedEffect.of(null),
         heldEditEffect.of({
           reason,
+          ...(words ? { words } : {}),
           doc: base,
           changes: ChangeSet.of(
             edits.map(({ from, to, insert }) => ({ from, to, insert })),
@@ -908,6 +1038,11 @@ function finishComposition(view: EditorView): void {
     try {
       made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
     } catch (error) {
+      if (error instanceof EditError && asker && !tracking) {
+        // Beside other people's pending changes: asked whether to accept them (design §3.4).
+        const plan = acceptPlan(state, text, parsed, edits, false);
+        if (plan) return hold('accept-pending', plan.words);
+      }
       if (!(error instanceof EditError && error.code === 'front-matter' && asker && tracking)) {
         throw error;
       }

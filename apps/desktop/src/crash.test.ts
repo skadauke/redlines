@@ -232,3 +232,29 @@ describe('the heartbeat', () => {
     expect(t.link.slow).not.toHaveBeenCalled();
   });
 });
+
+describe('recovered edits', () => {
+  it('says so alone, with the saved version as its action, when nothing failed', async () => {
+    const t = setup();
+    current = t.watch;
+    const showSaved = vi.fn();
+    await t.watch.recovered(showSaved);
+    expect(t.cards()[0]?.textContent).toContain('recovered your unsaved edits');
+    expect(t.cards()[0]?.textContent).not.toContain('Report…');
+    press(t.cards()[0], 'Show the Saved Version');
+    expect(showSaved).toHaveBeenCalledOnce();
+    expect(t.cards()).toHaveLength(0);
+  });
+
+  it('joins the card of the failure that came before it, with Report… and the saved version', async () => {
+    const t = setup([stored({ kind: 'web-process' })]);
+    current = t.watch;
+    await t.flush();
+    expect(t.cards()[0]?.textContent).toContain('reloaded this window');
+    await t.watch.recovered(vi.fn());
+    expect(t.cards()).toHaveLength(1);
+    expect(t.cards()[0]?.textContent).toContain('recovered your document');
+    const labels = [...(t.cards()[0]?.querySelectorAll('button') ?? [])].map((b) => b.textContent);
+    expect(labels).toEqual(['Dismiss', 'Show the Saved Version', 'Report…']);
+  });
+});

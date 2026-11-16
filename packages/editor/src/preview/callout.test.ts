@@ -293,3 +293,38 @@ describe('two alerts one blank line apart (#389)', () => {
     );
   });
 });
+
+describe('tinted blocks under an alert, and an alert under code (#639)', () => {
+  const classesAt = (doc: string, needle: string) =>
+    lineClasses(editorAt(doc, doc.length)).get(doc.indexOf(needle)) ?? [];
+
+  it('put the space of code under an alert outside both boxes', () => {
+    const doc = '> [!NOTE]\n> Third.\n\n```\ncode\n```\n';
+    expect(classesAt(doc, '```\ncode')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '```\ncode')).toContain('rl-codeblock-first');
+    // Nothing is added to the alert's last line, which would grow its tint.
+    expect(classesAt(doc, '> Third.')).not.toContain('rl-space-block-below');
+  });
+
+  it('do the same for an alert under code, and for code under code', () => {
+    const under = '```\ncode\n```\n\n> [!NOTE]\n> Text.\n';
+    expect(classesAt(under, '> [!NOTE]')).toContain('rl-space-block-apart');
+    const two = '```\none\n```\n\n```\ntwo\n```\n';
+    expect(classesAt(two, '```\ntwo')).toContain('rl-space-block-apart');
+    // Under a table, which has no tint to keep clear of but none to take padding either.
+    const table = '| a | b |\n| - | - |\n| 1 | 2 |\n\n```\ncode\n```\n';
+    expect(classesAt(table, '```\ncode')).toContain('rl-space-block-apart');
+  });
+
+  it('put the space of a table under an alert below the alert, clipped out of its tint', () => {
+    const doc = '> [!NOTE]\n> Text.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
+    expect(classesAt(doc, '> Text.')).toContain('rl-space-block-clip');
+    expect(classesAt(doc, '> Text.')).toContain('rl-callout-last');
+  });
+
+  it('leave code under a plain paragraph with its space below the paragraph, as it was', () => {
+    const doc = 'Intro.\n\n```\ncode\n```\n';
+    expect(classesAt(doc, 'Intro.')).toContain('rl-space-block-below');
+    expect(classesAt(doc, '```\ncode')).not.toContain('rl-space-block-apart');
+  });
+});
