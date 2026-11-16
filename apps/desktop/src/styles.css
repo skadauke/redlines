@@ -344,8 +344,10 @@ body {
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--rl-tip, #1d1d1f);
-  color: #ffffff;
+  border: 1px solid var(--rl-rule);
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
   white-space: nowrap;
@@ -360,7 +362,7 @@ body {
 }
 
 .rl-tip-shortcut {
-  color: rgb(255 255 255 / 0.62);
+  color: var(--rl-ink-2);
   letter-spacing: 0.04em;
 }
 
