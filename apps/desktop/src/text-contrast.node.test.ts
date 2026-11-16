@@ -72,10 +72,13 @@ function disabledOnly(selector: string): boolean {
 }
 
 describe('text contrast (#578)', () => {
-  const all = sources().map((file) => ({
-    file,
-    uses: inkThreeText(readFileSync(new URL(file, repo), 'utf8')),
-  }));
+  const all = sources()
+    .map((file) => ({
+      file,
+      code: readFileSync(new URL(file, repo), 'utf8'),
+      uses: [] as string[],
+    }))
+    .map((source) => ({ ...source, uses: inkThreeText(source.code) }));
 
   it('reads the style sources, and finds the disabled controls that keep the tertiary gray', () => {
     const uses = all.flatMap(({ file, uses }) => uses.map((selector) => `${file}: ${selector}`));
@@ -112,5 +115,31 @@ describe('text contrast (#578)', () => {
       '.b, .c:disabled',
       '.d:not(:disabled)',
     ]);
+  });
+
+  // A focus ring is a shape: WCAG 1.4.11 asks 3:1 of it. The grays that hold that on the page, the
+  // tint and the card in every theme are --rl-ink-3 and the inks above it (plugins/themes tests); a
+  // ring in --rl-rule, --rl-syntax or --rl-mixed would be under it (#653).
+  it('draws every outline in --rl-ink-3 or darker, or in none', () => {
+    const wrong = all.flatMap(({ file, code }) =>
+      [...code.matchAll(/(?<![\w-])outline(?:-color)?\s*:\s*['"`]?([^;}\n]*)/g)]
+        .map(([, value = '']) => value.trim().replace(/['"`,]+$/, ''))
+        .filter((value) => /^(?:\d|var\(|#|rgb)/.test(value))
+        .filter((value) => !/^(none|0)\b/.test(value) && !/var\(--rl-ink(?:-[23])?\)/.test(value))
+        .map((value) => `${file}: outline ${value}`),
+    );
+    expect(wrong, `focus rings under 3:1:\n${wrong.join('\n')}`).toEqual([]);
+  });
+
+  // The rings drawn as an inset shadow (a menu item's, a tab's, the sidebar's current file) are the
+  // same shapes: in a gray that holds 3:1 on every ground, the pressed and the rule's as well.
+  it('draws every inset ring of a shadow in --rl-ink-3 or darker', () => {
+    const wrong = all.flatMap(({ file, code }) =>
+      [...code.matchAll(/box-shadow\s*:\s*['"`]?inset\s+0\s+0\s+0\s+\d+px\s+([^;}\n]*)/g)]
+        .map(([, value = '']) => value.trim().replace(/['"`,]+$/, ''))
+        .filter((value) => !/^var\(--rl-ink(?:-[23])?\b/.test(value))
+        .map((value) => `${file}: inset ring ${value}`),
+    );
+    expect(wrong, `rings under 3:1:\n${wrong.join('\n')}`).toEqual([]);
   });
 });

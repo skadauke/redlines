@@ -67,6 +67,8 @@ export { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './bl
 export type { BlockGap, BlockRun } from './block-move.ts';
 export { Untrackable, WIDEN_MOST_BLOCKS, widen } from './widen.ts';
 export type { UntrackableReason, Widened, WidenedUnit } from './widen.ts';
+export { unitsOf } from './widen-units.ts';
+export type { Unit, UnitKind } from './widen-units.ts';
 export { indentOf, readTables, tableAt } from './table.ts';
 export type {
   TableAlign,

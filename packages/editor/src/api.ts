@@ -280,6 +280,16 @@ export interface EditorOptions {
    */
   onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
   /**
+   * Called when an image file of the project is dragged into the document from the sidebar
+   * (`PROJECT_IMAGE_TYPE` in the drag's data, holding the file's path), with that path. Returns the
+   * path to write for it, relative to the document as `ImageSpot.insert` takes it, or null when it
+   * can't be linked (the editor then writes nothing). The file is not copied: it is the project's
+   * own. While the drag is over the document a line shows the gap between blocks it will land at,
+   * and the link is written there as a block of its own. Default: none, and such a drag is left
+   * alone.
+   */
+  projectImageLink?: (dragged: string) => string | null;
+  /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
    * from handles alone, so the same people look the same in a document wherever it is opened.
