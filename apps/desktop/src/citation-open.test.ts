@@ -65,7 +65,7 @@ describe('opensFromLink', () => {
   });
 
   it('opens any other file nowhere: code, data, archives and programs', () => {
-    const others = ['/p/src/importer.ts', '/p/package.json', '/p/a.zip', '/p/run.command'];
+    const others = ['/p/src/importer.zig', '/p/package.lock', '/p/a.zip', '/p/run.command'];
     expect(opens(others)).toEqual(all(others, 'none'));
   });
 });

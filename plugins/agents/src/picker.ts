@@ -20,6 +20,14 @@ export interface PickerEntry {
   insert: string;
 }
 
+/** The agents with the default one first (#528), the rest in the order they came. */
+export function defaultFirst(
+  agents: readonly AgentInfo[],
+  defaultAgent: string | null | undefined,
+): AgentInfo[] {
+  return [...agents].sort((a, b) => Number(b.id === defaultAgent) - Number(a.id === defaultAgent));
+}
+
 const matches = (query: string, ...fields: string[]) =>
   fields.some((field) => field.toLowerCase().includes(query));
 
@@ -61,7 +69,7 @@ export function pickerEntries(
   const colorOf = (handle: Handle) => colors.get(handle) ?? 0;
 
   const entries: PickerEntry[] = mine
-    .filter((agent) => matches(wanted, agent.name, agent.id))
+    .filter((agent) => matches(wanted, agent.name, agent.handle ?? agent.id))
     .map((agent) => ({
       handle: ownHandle(agent),
       name: agent.name,

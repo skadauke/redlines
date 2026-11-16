@@ -195,7 +195,7 @@ mark's markers there than the file had.
   later one gets a new one.
 - In a live session, an id may change until the server confirms the edit, and never after that.
 - People don't see ids. The editor numbers changes in document order ("Change 3 of 17"), as
-  Word's Reviewing pane does. Ids appear only in the raw view, the inspector and the agent API.
+  Word's Reviewing pane does. Ids appear only in the Plain view, the inspector and the agent API.
 
 Sequential numbers would be shorter, but they collide whenever two people work in parallel. In
 simulated live sessions, 14–30% of new sequential ids were already taken by another client, and
@@ -1215,6 +1215,30 @@ Track Changes on, or goes up a level, in the indentation of a marker), it is ref
 for an item with a space, with the words of that refusal. Tested: `bare-keys.test.ts` of
 `packages/editor/src/blocks`, and the keys among those of the editor's bare-marker walks.
 
+**A number and a period at the start of an item's text.** `- 1.` is, to CommonMark (micromark
+4.0.2: `<ul><li><ol><li></li></ol></li></ul>`), a bullet item that holds an empty numbered list, and
+so is `- 1)`, and `1. 2.` a numbered item that holds one (`- [ ] 1.` is text: a box is no list). The editor decides by the keystroke which one the person
+means. The digits of an item's first line of text (one to nine) followed by a period or a
+parenthesis typed with nothing after the caret are text: the editor writes the delimiter escaped,
+`- 1\.` or `- 1\)`, which every reader shows as `1.` (the backslash also reads the same in every
+order of decisions: with Track Changes on it is one more letter of the author's insertion). A
+period typed before more text (`- 1.5`, written `- 1\.5` if it was typed in that order) is text
+the same way. The digits and the delimiter followed by a space, typed in that order, are the
+numbered sublist of an item (#512): the space takes the backslash away (with Track Changes on it is
+a letter of the author's own insertion, which the deletion only takes back) and the item holds the
+numbered list, `- 1. ` (micromark 4.0.2 reads `<ul><li><ol><li></li></ol></li></ul>`; the digits are kept, so
+`- 3. ` is a list that starts at 3). The reverse needs no rule: `- ` typed at the start of a
+numbered item's text is a bullet list in the item, `1. - `, as it reads. Tab on an item that is the
+first of its list is still refused; a numbered item after a bullet list is the first of its own
+list, so a numbered sublist under a bullet is made by typing `1. ` in the bullet item, or by Tab
+(a nested bullet) and then the convert command (#506). The space after a backslash that the person typed by hand, `1\.`, takes the backslash away the same way. A file that holds `- 1.` as it is, the empty
+numbered list, is read as that, and the keys
+treat it as an empty item (Return in it goes up a level, as in any empty item). Only the delimiter
+typed at the end of the item's first line is escaped: the digits typed in front of an existing
+period, Backspace that leaves `1.`, a paste, and a line that goes on under the digits are written
+as they are, and read as the empty numbered list. Tested:
+`typed-number.test.ts` of `packages/editor/src/blocks`.
+
 A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
 line of that text, as CommonMark reads it: only a list that starts at 1 interrupts a paragraph, and
 micromark 4.0.2 reads `<li>a⏎2. b</li>`. The editor's parse reads a sublist there, because it lets
@@ -1360,6 +1384,17 @@ start a line of text.
 
 A block break (the blank line and prefix between two blocks) is text, and a deletion may contain
 it. It is written as `\n\n` followed by the next block's prefix (`## `, `- `, `> `).
+
+**A line of room** is a paragraph that holds only `&nbsp;`: Markdown collapses blank lines, so room
+between two paragraphs is written as `a\n\n&nbsp;\n\nb`, which micromark 4.0.2 reads as three
+paragraphs, the middle one a no-break space: an empty paragraph to GitHub and other readers (`<br>`
+works in fewer of them). Return in the empty paragraph that a Return opened, at the top level, writes one
+and opens the next empty paragraph below it; each further Return writes another. Every view of the
+editor draws a paragraph of `&nbsp;` alone as an empty line, with the caret before or after it and
+never inside the entity. With Track Changes on the line is the author's insertion of a paragraph
+like any typed one (`<!--ins k3x9-->\n\n&nbsp;<!--/k3x9-->`), and reads the same in every order of
+decisions. Backspace takes back the Returns one by one, byte for byte. A paragraph that holds
+`&nbsp;` with other text, or inside a table cell, a list item or a quote, is ordinary text.
 
 **A deletion across blocks** is one mark in the merged block. Deleting from the middle of one
 paragraph, across a heading, to the middle of a third paragraph:
@@ -2637,7 +2672,7 @@ it, one per line:
     text the ones before leave, so that every order of decisions writes the same bytes. A mark
     whose table has other columns than `SPEC` has, and a mark that no table holds, can be accepted
     and not rejected: "This alignment change can't be rejected, because its table no longer has
-    the columns it had. Accept it, or change the text in Raw with Track Changes off."
+    the columns it had. Accept it, or change the text in Plain with Track Changes off."
   - **One change per table.** The author's own pending alignment change is changed in place, the
     mark staying where it is, and is taken away, with its old row written back as it was, when the
     new alignments are the old ones. Another person's pending alignment change refuses yours: "Bo
@@ -2690,7 +2725,7 @@ it, one per line:
       cells and the rows of a table, so a column that goes or moves can put the mark inside code or
       a comment. The words are those of any change that an edit would hide there ("This edit would
       hide other changes in code or an HTML comment, where they would no longer be read. Accept or
-      reject them first, or edit the source in Raw with Track Changes off."; deleting columns says
+      reject them first, or edit the source in Plain with Track Changes off."; deleting columns says
       "This decision would hide other changes in code or an HTML comment, where they would no longer
       be read. Decide the changes next to it first.", as it does beside any other change).
   - A table keeps its alignment when its columns are inserted (a new column has none), deleted or
@@ -2909,7 +2944,8 @@ Changes on is made after the alert of §3.13, and leaves no mark. The commands f
 highlight are disabled in front matter, with the reason in their hint.
 
 Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
-the body's, and are written plain; anything else typed there is refused as an edit of front matter.
+the body's, and are written plain; anything else typed there with Track Changes on is asked about
+first (§3.13), and made without tracking if the person says so.
 
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends
@@ -3050,7 +3086,7 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Raw, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3245,11 +3281,94 @@ Every order of decisions reads the same, judged against micromark 4.0.2 with GFM
 
 ### 3.13 Untracked edits
 
-An edit that can't be tracked, and that no unit holds, or that is in front matter or in Raw while
+An edit that can't be tracked, and that no unit holds, or that is in front matter or in Plain while
 Track Changes is on, is made without tracking after the person is asked, and leaves no mark and no
 ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
 Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
 agent.
+
+The question is a sheet with the title "This edit can't be tracked. Make it without tracking?", a line
+that says why, "Don't ask again in this document", Cancel and Make Edit. Return and Escape are
+Cancel; Make Edit is a click or ⌘↩. The edit waits for the answer, whether it is a key, a paste, a drop
+or an input method's composition (which is asked about when it ends), and is made if the document is
+still the one it was made against, and dropped if not. One answer holds for the edits that follow in
+the same run (the same reason, no pause of five seconds). "Don't ask again" is the app's, kept for
+the file by its path and never in the file, so that somebody else who opens it is asked. Where the
+host has no sheet, such an edit is refused as before. One "Don't ask again" covers front matter and
+Raw together: a person who has said it doesn't want either asked.
+
+**With Track Changes off** an edit that §3.10 refuses, because it can't be made without changing the
+pending changes around it, is asked about in the same way, with its own title, "This edit can't be
+made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
+Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
+(§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
+results, as one step, so that one Undo gives back the file as it was. Rejecting is never chosen for
+the person. It is asked every time, since no answer to it stands for the next edit: the changes are
+gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
+before. The same words are used for an input method's composition, asked about when it ends.
+
+### 3.14 Moving blocks
+
+A move of whole blocks to another place among their siblings (⌥↑ and ⌥↓, a drag to a drop line) is
+written with no mark of its own: it is the deletion of the blocks where they stood and the insertion
+of the same text where they land, which every edit can already be written as, with one `group` on
+the marks (§2.2), so that they are accepted or rejected together, and every order of deciding them
+reads alike, like any deletion and insertion. Accepting both gives the blocks at the new place,
+rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
+blocks of the document's own flow, §3.7.)
+
+- **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
+  paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
+  a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with
+  what is nested in it; in an item's own nested list or quote, the unit there; a selection that
+  covers a whole list, quote or item moves it, and one across several siblings moves them all. A
+  block moves among its own siblings only: an item stays in its list, and a block in its quote.
+  Nothing moves above the first sibling or below the last, and the command says so.
+- **The text.** The moved text is the newest view of the blocks, with the break that the siblings
+  have between them. Another person's pending changes in the blocks are not carried: they stay in
+  the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
+  text they would give if accepted. Ordered lists keep their written numbers.
+- **When a fine write isn't sound.** The same text can be written by the siblings that the run passes
+  moving the other way (the same file when accepted), and if neither is sound the move is widened to
+  the blocks from the old place to the new, one substitution that keeps others' changes in its
+  old text (§3.12). A move that reaches more blocks than a widened edit may is not refused: the
+  person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
+- **Track Changes off.** The same two edits are made plain.
+
+### 3.15 HTML with a Markdown twin
+
+A block of HTML of one of these shapes has an exact Markdown form, its **twin**, and a command that
+changes the block's structure (a heading's level, Tab in a list, a row or a column) converts it first.
+The text of the HTML is edited as it is written, with no conversion.
+
+| HTML (a top-level block, on its own lines)                                    | Twin                 |
+| ----------------------------------------------------------------------------- | -------------------- |
+| `<h1>` to `<h6>`, no attributes, one line of inline content                   | `#` to `######`      |
+| `<hr>`, `<hr/>`, `<hr />`                                                     | `---` (`***` under a line of text) |
+| `<pre><code>` with plain text, the five entities of code only                 | a fence, longer than any run of backticks in the code |
+| `<blockquote>` of lines of inline content, or of `<p>`s of it                 | `>` lines (`>` alone between paragraphs) |
+| `<ul>`, `<ol>` (`start` only), `<li>` of inline content, with nested lists    | `-` and `1.` items, nested by their marker's width |
+| `<table>` with a header row of `<th>`, rows of `<td>`, and `align` kept per column | a pipe table with its delimiter row |
+
+**Exact** means the twin renders as the HTML did in GitHub's renderer (micromark 4.0.2 with GFM): the
+same elements, text and attributes, apart from what HTML itself ignores (white space between tags,
+the `thead` and `tbody` that rows sit in, the paragraph Markdown puts in a quote). To be sure of it,
+text is carried over only when no character in it means anything to Markdown: letters, numbers,
+spaces and `. , ; : ' " ? ! % ( ) + - / = ^ { } #` and entities, plain inline tags (`b`, `i`, `code`,
+`a`, `br` and the like, with plain attributes) in pairs, and no address that Markdown would link
+(`www.`, `http:`), no `*`, `_`, `` ` ``, `[`, `]`, `\`, `|`, `~`, `$`, `@` or `<` that starts anything
+else, no line that starts like another block (`#`, `-`, `+`, `>`, `1.`), and no `#` at the end. A list
+that isn't numbered from 1, a table and a numbered sublist need a blank line above, or a line of text
+would swallow them. Anything more than the twin has (an attribute, a span, a caption, a `<p>` in an
+item, a pending change or a comment in the block, a block in a quote or an item) is **no twin**.
+
+With Track Changes **on** the conversion is a substitution (§3.4) of the block's lines by the twin,
+one change whose ledger entry has a `note` that names it ("Converted the `<h2>` heading to
+Markdown"): accepting it gives the Markdown, rejecting it gives back the HTML. A block change can't
+start at a pending change, so a command that can say what it makes of the twin (a heading's level)
+is written into the same substitution; any other command runs after the conversion, and says why when
+it is refused. With Track Changes **off** the block is replaced. Where there is no twin the command is
+disabled, and its hint says why.
 
 ## 4. Comments
 
@@ -3547,8 +3666,8 @@ same values.
     that only records how it was left, open in Clean, whatever view was used last and whatever the
     ledger says, since there is nothing for another view to show. A file that gains redlines is
     saved with its view, and opens in it.
-  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
-    source, and a save made in Raw leaves the view the file had.
+  - Clean, Redlines and Simple are written. Plain never is: nobody wants a document to open as
+    source, and a save made in Plain leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave

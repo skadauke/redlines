@@ -366,7 +366,7 @@ const ANCHOR_CHANGED =
 const THREAD_GONE =
   'The comment this replied to is gone. Copy what you wrote, or Cancel to let it go.';
 
-const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
+const REFUSED_IN_RAW = "A comment can't be added in Plain. Switch to Redlines to add one.";
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
 function newCommentRange(state: EditorState): Range {
@@ -536,8 +536,17 @@ const settledOf = (notes: readonly Note[]): boolean[] | undefined =>
  * rail lays it out with the height it last measured; letting go draws every note again.
  */
 const PARKED = 'rl-note-parked';
+/** What a note not yet measured is taken to be high, before any is, in pixels. */
+const ESTIMATE_HEIGHT = 64;
 /** How far from the screen, in screens, a note must be to be parked. */
 const PARK_DISTANCE = 1;
+/**
+ * How far from the screen, in screens, a note is built and measured (#697): the rest have no
+ * element, and a height as last measured, or the mean of those. A note comes when the page scrolls
+ * near it, and goes again from `DROP_DISTANCE` screens.
+ */
+const BUILD_DISTANCE = 1;
+const DROP_DISTANCE = 3;
 /** What the host has chosen to show in the rail. */
 interface Choices {
   showResolved: boolean;
@@ -604,8 +613,10 @@ class Rail {
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
-  /** Each note's height as last measured, for the notes parked in a pinch. */
+  /** Each note's height as last measured, for the notes parked in a pinch and those not built. */
   private readonly heightOf = new Map<string, number>();
+  /** The part of the page that could be seen at the last measure or scroll (see `nearScreen`). */
+  private seenLast: Span | null = null;
   /** Keeps this document's drafts in the host's store, when it has one. */
   readonly keeper: DraftKeeper | null;
   /**
@@ -869,7 +880,7 @@ class Rail {
     // A stable sort, as in `notesIn`.
     notes.sort((a, b) => a.pos - b.pos);
     // The host's elements stay while the rail shows its notes in full: not as dots, and not with
-    // no note of its own, which is also what Clean and Raw leave it.
+    // no note of its own, which is also what Clean and Plain leave it.
     if (this.hosted.size && (this.compact || !notes.length)) this.dropHosted();
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
@@ -886,12 +897,35 @@ class Rail {
       this.views.delete(id);
     }
     if (this.popover && !ids.has(this.popover.id)) this.popover = null;
+    // Only the notes near the screen are built (#697); one with its box open, the focus, the
+    // selection or its dot's popover stays, wherever it is.
+    const near = this.nearScreen(BUILD_DISTANCE);
+    const far = this.nearScreen(DROP_DISTANCE);
+    const wanted = (note: Note): boolean => {
+      const had = this.views.get(note.id);
+      return (
+        !!note.host ||
+        !!note.orphan ||
+        note === selected ||
+        this.popover?.id === note.id ||
+        (!!had && (had.written || this.keeps(note.id, had))) ||
+        (had ? far(note) : near(note))
+      );
+    };
+    const drawn = notes.filter(wanted);
+    const drawnSet = new Set(drawn);
+    for (const note of notes) {
+      const had = this.views.get(note.id);
+      if (!had || drawnSet.has(note)) continue;
+      had.remove();
+      this.views.delete(note.id);
+    }
     // A new comment comes back as it was left, which in a narrow editor is over the page.
     const waiting = this.views.get(NEW_COMMENT);
     if (shown && this.compact && waiting && !waiting.dom.isConnected) {
       this.popover = { id: NEW_COMMENT, pinned: true };
     }
-    notes.forEach((note, i) => {
+    drawn.forEach((note, i) => {
       let view = this.views.get(note.id);
       if (!view) this.views.set(note.id, (view = new NoteView(this, note)));
       view.render(note, parsed, note === selected, this.popover?.id === note.id);
@@ -924,6 +958,7 @@ class Rail {
       note.writing ||
       this.popover?.id === id ||
       note.dom.contains(note.dom.ownerDocument.activeElement) ||
+      note.dot.contains(note.dom.ownerDocument.activeElement) ||
       !!this.options.extras?.keepShown?.(id)
     );
   }
@@ -938,6 +973,66 @@ class Rail {
     // A held rail parks the notes far from the screen, and the screen moves when the person
     // scrolls, with no change of size to measure again: it measures on every scroll (`onScroll`).
     if (!held) this.measure();
+  }
+
+  /**
+   * Whether a note is within `screens` of the part of the page that can be seen, by the editor's
+   * own estimate of its line, which needs no layout. With no screen known, every note is.
+   */
+  private nearScreen(screens: number): (note: Note) => boolean {
+    const { view } = this;
+    const win = view.dom.ownerDocument.defaultView;
+    const seen = this.seenLast ?? { top: 0, bottom: win?.innerHeight ?? 0 };
+    const reach = (seen.bottom - seen.top) * screens;
+    if (!(reach > 0)) return () => true;
+    const pad = view.documentPadding.top;
+    const end = view.state.doc.length;
+    return ({ pos }) => {
+      const top = view.lineBlockAt(Math.min(pos, end)).top + pad;
+      return top >= seen.top - reach && top <= seen.bottom + reach;
+    };
+  }
+
+  /**
+   * Builds the notes that have come near `seen`, and takes away those that are far and that nothing
+   * keeps (#697). Returns whether one was built, which has to be measured.
+   */
+  private drawNear(seen: Span): boolean {
+    this.seenLast = seen;
+    const near = this.nearScreen(BUILD_DISTANCE);
+    const far = this.nearScreen(DROP_DISTANCE);
+    const parsed = this.view.state.field(parsedField);
+    let built = false;
+    this.notes.forEach((note, i) => {
+      if (note.host || note.orphan) return;
+      const had = this.views.get(note.id);
+      if (had) {
+        if (
+          !far(note) &&
+          !had.written &&
+          !this.keeps(note.id, had) &&
+          note.id !== this.selectedId
+        ) {
+          had.remove();
+          this.views.delete(note.id);
+        }
+        return;
+      }
+      if (!near(note)) return;
+      const view = new NoteView(this, note);
+      this.views.set(note.id, view);
+      view.render(note, parsed, note.id === this.selectedId, this.popover?.id === note.id);
+      // In the notes' order: before the next that is built.
+      let next: NoteView | undefined;
+      for (let k = i + 1; k < this.notes.length && !next; k++) {
+        const candidate = this.views.get(this.notes[k]?.id ?? '');
+        if (candidate?.dom.parentNode === this.noteLayer) next = candidate;
+      }
+      this.noteLayer.insertBefore(view.dom, next?.dom ?? null);
+      this.dotLayer.insertBefore(view.dot, next?.dot ?? null);
+      built = true;
+    });
+    return built;
   }
 
   /** Places the notes, or the dots, once the editor has laid out the text. */
@@ -982,12 +1077,17 @@ class Rail {
     const screen = view.dom.ownerDocument.defaultView?.innerHeight ?? 0;
     const parked: boolean[] = [];
     let again = false;
+    // A note not built has the height it had when it was, or what the others have.
+    const known = [...this.heightOf.values()];
+    const estimate = known.length
+      ? known.reduce((sum, h) => sum + h, 0) / known.length
+      : ESTIMATE_HEIGHT * noteScale;
     const heights = notes.map(({ id }, i) => {
       // An element of the host's is never parked, and has the height it has.
       const hosted = this.hosted.get(id);
       if (hosted) return hosted.el.offsetHeight;
       const note = this.views.get(id);
-      if (!note) return 0;
+      if (!note) return this.heightOf.get(id) ?? estimate;
       const line = lines[i];
       const far =
         held &&
@@ -1070,8 +1170,11 @@ class Rail {
       read: (view) =>
         this.seen(view, view.scrollDOM.getBoundingClientRect().top - view.scrollDOM.scrollTop),
       write: (seen) => {
+        this.seenLast = seen;
         const { layout } = this;
         if (this.destroyed || !layout || layout.notes !== this.notes) return;
+        // A note that came near is built, and measured at the next measure.
+        if (this.drawNear(seen)) this.measure();
         this.place(layout, seen, false);
       },
     });
@@ -1084,6 +1187,11 @@ class Rail {
     if (!layout || layout.notes !== this.notes) return;
     if (layout.compact !== this.compact) {
       this.setCompact(layout.compact);
+      return;
+    }
+    // The page may be somewhere other than where the notes were built for: build what is near now.
+    if (this.drawNear(layout.view)) {
+      this.measure();
       return;
     }
     layout.notes.forEach(({ id }, i) => {
@@ -1289,7 +1397,7 @@ class Rail {
   }
 
   /**
-   * Opens a box for a new comment. Raw takes none, and says so, and a document shown Clean switches
+   * Opens a box for a new comment. Plain takes none, and says so, and a document shown Clean switches
    * to Redlines. A comment already being written keeps its place and its draft, but an empty box
    * moves to the selection, and so does a draft that was refused where it was, since the message
    * asks for another selection. On the anchor of what Escape set aside, that comes back. With
@@ -1356,7 +1464,7 @@ class Rail {
    * again and nothing more.
    *
    * The rail lays out only what it shows in full. In a narrow editor, where the notes are dots, and
-   * while it has no note of its own, as in Clean and Raw, or in a document with no comment (the
+   * while it has no note of its own, as in Clean and Plain, or in a document with no comment (the
    * column makes room for notes only), it takes nothing, and returns null: the host places the
    * element as it would without a rail. One it holds is let go when it stops showing them, and
    * `lost` is called once, after the update that did it (a host that places the element reads the
@@ -1490,7 +1598,7 @@ class Rail {
   }
 
   /**
-   * Shows a thread's note: Clean or Raw switch to the markup view, the note is selected and scrolled into
+   * Shows a thread's note: Clean or Plain switch to the markup view, the note is selected and scrolled into
    * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
    * nothing, when no note would be drawn for it.
    */

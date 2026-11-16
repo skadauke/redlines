@@ -140,7 +140,7 @@ otherwise.
   reaches into other text becomes a tracked change of that text; with Track Changes off it is a
   plain edit. A correction never crosses a hidden marker: the text on either side is corrected
   apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
-  apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
+  apps. Code, URLs and front matter are never corrected, nor spell checked outside Plain, and Plain
   isn't corrected. A word ended with Return or Shift-Return is corrected too, though the editor
   handles those keys itself: it asks the system for the word's correction, makes the break at once,
   and makes the correction as a step of its own (⌘Z takes it back before the Return) only if the
@@ -219,12 +219,32 @@ The window, on the desktop:
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
   As of a saved document starts in that document's own folder.
-- **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
-  markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
-  (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
-  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
-  match; ⌥⌘F with the bar open shows the row and focuses its box.
+- **Find.** ⌘F opens a panel at the top right of the page that searches the text a reader sees,
+  never the markers or the ledger. The Find box holds the count ("2 of 5", "No results", or
+  "Invalid" for a regular expression that does not compile) and four toggles: Match Case, Whole
+  Word, Regular Expression and Find in Selection; beside it are Previous, Next and Close. Every
+  match is marked and the current one is stronger; typing goes to the first match from the caret,
+  Return and ⇧Return step, and Esc closes the panel with the current match selected. While the
+  Find box has the focus, ⌥⌘C, ⌥⌘W, ⌥⌘R and ⌥⌘L turn the four toggles on and off, and Tab goes to
+  the Replace box (opening its row first) and ⇧Tab back. Every control has a hint with its name
+  and key. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace (⌥⌘F) and Use
+  Selection for Find (⌘E). A chevron at the start of the panel shows or hides the Replace row
+  ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current match;
+  ⌥⌘F with the panel open shows the row and focuses its box. The Replace row has Replace (Return
+  in its box) and Replace All; with Track Changes on a red pen in the box says so, and with a
+  regular expression `$1` and `$&` in the replacement stand for the groups of the match.
+  - *Seeding.* ⌘F with a selection: a short phrase (under 80 characters, inside one line, not a
+    whole block) becomes the search term; a selection of more than one block, with a line break,
+    of 80 characters or more, or a whole block limits Find to it instead (Find in Selection is on,
+    the box says "Find in selection", the scope stays shaded, and Replace All stays inside it).
+  - *Replacing.* Replacing is an edit like typing. Replace All is one step to undo (a toast at
+    the corner offers Undo), and each match is a change of its own: with Track Changes on, N
+    matches are N tracked changes, each with its own margin note, as if every one had been replaced
+    by hand. With Track Changes on, text that is already in a tracked change is not matched. A
+    replacement the editor refuses is left, and the panel says how many.
+  - *Hook.* A later feature that hides text, such as a closed fold, opens it while its match is
+    current through `currentMatchHandlers` (or `createFind`'s `onCurrentMatch`), which is called
+    whenever a match becomes the current one.
 - **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
   everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
@@ -253,37 +273,105 @@ The window, on the desktop:
   window's own zoom (⌘+ and ⌘−, and the palette's Text Size, change one window), for Track Changes
   on new documents, or for the views. Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
-  hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
-  view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
+  hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (a page that shows the view,
+  §5.3) sets the view, and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
 - **Icons without labels, explained on hover.** Hovering over Files shows its name and shortcut.
   Hovering over View or Review opens its menu after a short pause, with each item's shortcut, and
   the arrow keys open it from the keyboard. A click on either does what is done most often: View
-  switches between Clean and Redlines (from Raw, back to whichever of the two was shown last), and
+  switches between Clean and Redlines (from Plain, back to whichever of the two was shown last), and
   Review turns Track Changes on and off, as ⇧⌘E does. A click while the menu is open closes it and
   acts. Each icon's hint says what a click will do, with its key ("Show Redlines ⌥⌘2", "Turn off
   Track Changes ⇧⌘E"): the menu has the pointer's rest, so the hint shows when the keyboard brings
-  the focus to the icon, and after a click on the eye, when the pointer stays (a click on the pen
+  the focus to the icon, and after a click on View, when the pointer stays (a click on the pen
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A formatting palette, shown only when summoned.** There is no toolbar, and the palette is not
-  one: it opens only when asked, on right-click, at the pointer, where it takes the place of the
-  system's context menu, and from the keyboard. Nothing is drawn at the bottom of the window to
-  summon it (the handle that was there is gone, decided on 2026-11-15); one opened by right-click goes
-  away when you type. It is a small card of icons
-  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
-  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
-  act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
-  Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
-  Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
-  Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
-  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
+  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
+  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
+  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
+  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+  while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
+  it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
+  elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
+  Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
+  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
+  small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
+  Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
+  with a header, then one line for each item: icon, name and shortcut, with no descriptions.
+  Related actions share a line (Accept | Reject). Insert holds Link, Image, Table, Code Block,
+  Quote and Callout (and a place for Collapsible Section, which appears when its command is
+  registered); Review holds Comment, Highlight, Accept | Reject (the change at the selection),
+  and Review Changes; Format holds Bold, Italic, Strikethrough, Code, Subscript, Superscript and
+  Clear Formatting; Edit holds Cut, Copy and Paste. **List** (#506) is in the bar, between Review
+  and Format, only where the selection holds a paragraph or a list item (anywhere in it, not only
+  at its start; a heading, a code block or a table has none): Bullets, Numbers, Checkboxes and No
+  List, which make the selected paragraphs one list of that kind, turn the selected items into
+  another kind, or take them out of the list, with Track Changes on and off, as the Paragraph
+  menu's commands do. No List is grayed, with its reason, where the selection holds no list item,
+  and a conversion the block commands can't make (in a table cell, in Raw while tracking) is
+  grayed with their own hint.
+  Table (#552) is in the bar only with the caret in a
+  table. Its header says where the caret is or what is selected ("Table · Row 2, column 2", "Row 3
+  selected", "2 columns selected", "Whole table selected"). Its menu is two sides, Row and Column,
+  with the same six actions in each, in lines of two (Insert Above | Insert Left, Insert Below |
+  Insert Right, Move Up | Move Left, Move Down | Move Right, Select | Select, Delete | Delete), then
+  Align column (Left | Center | Right, the caret's column checked) and Delete Table. With rows
+  selected the Column side is dimmed, and with columns selected the Row side, each with its reason;
+  with a caret both sides work on the caret's row and column (the header is row 1). Align column
+  dims with the Column side, since it changes the columns the selection touches. The header row and the last column
+  keep the Table menu's own refusals as dimmed items with their reasons; Merge is not offered.
+  Image (#553) is in the bar only where an image is under the caret or in the selection. Its menu is
+  Align (Left | Center | Right, the image's own checked, centered by default), Size (Small | Medium
+  | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
+  file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
+  its place and appears when its command is registered. The items are the editor's own commands
+  (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same; they
+  exist where the host can open image files, and the menu is only there.
+  An item that can't be used here is dimmed, and
+  its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
+  opens on the side of the bar with room and scrolls when taller, never over the bar. A docked
+  toolbar fades while you type and comes back when the pointer moves, and it leaves room under the
+  text, so that the last lines can be scrolled clear of it. Its items are commands of the one
+  registry (§5.9), so that it, the Format and Paragraph menus and the shortcuts never disagree
+  about names, keys or whether an item is available; an item whose command isn't registered is
+  left out, and so is a menu with no items. The arrow keys move along the bar; ↓ or Return opens a
+  menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus.
+  Where an inserted block goes (#555), the same
+  for Insert's Table, Code Block, Quote and Callout and for Horizontal Rule: in an empty paragraph
+  it takes the paragraph's place; with the caret at the very start of a block (in front of a
+  heading's text or an item's, too) it goes above that block; anywhere else it goes below the block,
+  so that no sentence is split. With text selected, Quote, Callout and Code Block wrap the selected
+  blocks (a code block takes their text) instead, as one step to undo; with Track Changes on the
+  wrapped blocks are replaced by the wrapped text, so a reader sees the blocks as they were and as
+  they are. A selection that holds a table, an image or the markers of changes is not wrapped: the
+  block goes below, and nothing is refused. With Track Changes on, above a block that is no paragraph
+  goes at the end of the block before it (the format can't write an insertion that ends in line
+  breaks in front of a heading, a list or a quote), and below the first block of the document
+  where there is none before. Quote here is `insert.quote`, named Insert Quote or Make Selection a
+  Quote; the Paragraph menu's Quote (⌥⌘Q) is another command, which changes the block it is in.
+  Esc closes the open menu, then a toolbar at the caret or the pointer. **Typing with the toolbar
+  open is a search** (#550): the card turns into a search box and a list, in place of the bar's
+  row, over every command that works at the caret and every app command and setting the host
+  offers (Track Changes, Show Resolved Comments, Appearance, the views, Preferences…); a command that
+  doesn't work here is left out. A line has an icon, what the command does (a verb phrase that may
+  differ from the menu's word: Link… is Insert Link, Bullets is Make Bulleted List; the menu's word
+  and synonyms are searched too), its control or state, and its shortcut in a column of its own, with
+  no menu name. Matching is by whole word ("ordered list" finds Numbered List, never "unordered
+  list"), every word of the query must match, and a word of the name ranks above a synonym ("todo"
+  finds Make Checklist, "dark mode" Appearance, "h2o" Subscript, "picture" Insert Image). A setting is
+  a live control in its line and the palette stays open: a switch, a choice (← and → change it) or a
+  slider; Return flips a switch. ↑ and ↓ move among the lines, Return runs one (a command puts the
+  toolbar away and gives the text the keyboard; a docked toolbar stays, with the bar back), and Esc
+  gives the bar back. The last line is always "Ask about “…”". Changing a shortcut in the palette
+  (#551) and the other settings of Preferences come later. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
   and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
   nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
-  when there is none. The palette replaces the selection toolbar of §5.12.
+  when there is none. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert
+  and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View
+  has Show/Hide Word Count (#536). The toolbar replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left
@@ -373,10 +461,10 @@ Redlines covers everything in the Markdown Guide's
   list) start with them under the caret; Return or Tab writes the character, ↑ and ↓ move and Esc
   puts the list away. It stays out of the way of `10:30` and `Note:` (it opens only for a colon that
   has no letter, digit or colon before it, and two characters of a name after it, one of them a
-  letter), of code, front matter and Raw, and Redlines ›
+  letter), of code, front matter and Plain, and Redlines ›
   Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
   not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
-  emoji in every view but Raw, as an entity is drawn as its character, and shows as written while
+  emoji in every view but Plain, as an entity is drawn as its character, and shows as written while
   the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
   it. An emoji and a shortcode are one character for a change: no marker parts either
   ([format §3.1](format.md#31-inside-a-line)).
@@ -389,6 +477,67 @@ Redlines covers everything in the Markdown Guide's
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
+**HTML as GitHub draws it** (#686). What Redlines shows in Clean is as close as possible to what
+GitHub renders: GFM, GFM's escaped tags, and GitHub's list of allowed HTML. The aim is a standard,
+not perfection. The list (elements, attributes and protocols, from html-pipeline's
+`SanitizationFilter`) is one module, `github-html.ts` in `@redlines/format`, which Quick Look can
+share, and a check in development (micromark and GFM, then a sanitizer with the same list, over
+README-style snippets) holds the editor to it.
+
+- **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
+  no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
+  as folding and opening a block's source, are view state and never written.
+- **Quick Look** (#691) draws the same list from tokens, since its JavaScriptCore has no DOM: the
+  source is never passed through, an attribute is kept only if GitHub keeps it and a static page
+  can use it (never `id`, `name`, `style`, `class`, `srcset` or a handler), and a remote image is
+  its alt text. `<details>` is WebKit's own, closed unless the file says `open` (ruling: a static
+  preview shows what GitHub shows at rest, and WebKit opens it on a click without script).
+- **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
+  `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
+  `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
+  `<sup>` are, and edited in place. `ins`, `del` and `s` use the text's ink, never an author's
+  color; `mark` uses GitHub's yellow; `title` shows as an app hint. Removing a pair is a format
+  change (`-html=TAG`, format §2.6). `<br>` is a line break everywhere and `<wbr>` is invisible,
+  each one caret step. Shift-Return stays Markdown's hard break; `<br>` is written only in table
+  cells.
+- **The nine tags GFM escapes** (script, style, iframe, title, textarea, xmp, noembed, noframes,
+  plaintext) show as text. `<u>`, `font`, `center` and other unknown tags drop their tags and keep
+  their text. Underline has no command.
+- **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
+  hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
+  on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
+  the conversion is exact. These come after the inline tags, in the order of #686.
+- **Markdown twins** (#690). An HTML heading (`<h1>` to `<h6>`, no attributes, one line) is drawn as
+  a heading with its tags hidden, edited in place, and listed in the outline. A blockquote, a simple
+  list, a simple table, an `<hr>` and a `pre` with code are edited as the HTML they are. A command
+  that changes structure (a heading level, Body, Quote, a list type, Indent and Tab, the Table
+  menu) first converts the block to its twin, as one change, only when the conversion is exact
+  (`docs/format.md` §3.15): with Track Changes on it is a substitution of the whole block whose
+  margin card says "Converted the `<h2>` heading to Markdown", with it off the block is replaced.
+  Where the HTML has no exact twin (a heading with an attribute, a table with a span or a caption,
+  Markdown in the text) the command is disabled and its hint says why; nothing is refused after
+  the fact.
+- **`<details>` and `<div align>` as containers** (#688). A container is an opening tag line (with
+  the `<summary>` line under it, for a `details`) and a closing tag line, each a block of its own
+  with blank lines around it, at the top of the document, as GitHub needs to read the Markdown
+  between them; a tag with other text in its block is an HTML block with no Markdown inside (a later
+  phase). The tag lines are hidden, the Markdown inside is ordinary blocks (tracked edits and all),
+  and while the caret is in an open container a faint bracket stands in the margin. The summary is
+  one line, drawn bold with a triangle; a `details` with none shows "Details". A `<div>` hides its
+  tags and aligns what is inside (`align`); a `details` with no closing tag folds to the end of the
+  text, as on GitHub. Folding is view state and never written: closed unless the file says `open`,
+  nothing remembered, the triangle or ⌥⌘↓ and ⌥⌘↑ on the summary line toggle it, and Down on a
+  closed summary steps over the content. A section is open for as long as the caret, or a Find or
+  Review match, is in it, and closes again when that moves out. A closed section with pending
+  changes shows a bar and their count on its summary line, so changes never hide. Backspace and
+  Delete never join a paragraph into a tag line, nor the summary's line break away. Insert ›
+  Collapsible Section writes the structure (open, with the summary's text selected), and wraps a
+  selection of blocks with two insertions.
+- **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
+  WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
+  `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
+  anchors.
+
 **Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
 address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
 address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
@@ -399,43 +548,55 @@ the address again before it runs the system's opener, and the website's demos op
 link that doesn't open is left to the editor like any text, with no hint. A relative link to
 another document doesn't open yet.
 
-### 5.3 Views: Clean, Redlines, Raw
+### 5.3 Views: Clean, Redlines, Plain
 
-The View menu, under the eye at the top right (§5.1), sets how the document is shown. A click on
-the eye switches between Clean and Redlines, and from Raw goes back to whichever of the two was shown
-last; Raw is for the menu, below a separator. The click shows that it did something, for Clean and
-Redlines look alike in a document without redlines: the eye's pupil is red for a moment (the one use
-of red there besides the pen).
+The View menu, under the View button at the top right (§5.1), sets how the document is shown. The
+button is a small page that shows the view it is in: a page with lines of text for Clean, the same
+page with a red bar in its left margin, like the change bars, for Redlines (in either look), and the
+page with a monospace # for Plain. Red shows there only as that state (besides the pen). A click on
+it switches between Clean and Redlines, and from Plain goes back to whichever of the two was shown
+last; Plain is for the menu, below a separator. The icon changing is the sign that the click did
+something, though Clean and Redlines look alike in a document without redlines.
 
 - **Clean** (⌥⌘1): the document as it reads with every pending change accepted, without markup
   (Word's No Markup). The Mac's Quick Look preview of a Markdown file is this view (§10).
 - **Redlines** (⌥⌘2): the document with its tracked changes and comments (Word's All Markup). It is
   always there in the menu bar's View menu, with its shortcut, whatever the document holds and
-  whether Track Changes is on or off, since a disabled item would take its key away. The eye's menu
+  whether Track Changes is on or off, since a disabled item would take its key away. The View menu
   is for what there is to see: Redlines is disabled in it for a document with no changes and no
   ledger (no pending change, highlight or comment), where it would look nearly the same as Clean
-  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the eye still
-  show it. The eye's menu has no Simple Look row. Redlines has two
+  (it stays enabled, and checked, while it is the view shown); ⌥⌘2 and a click on the View button still
+  show it. The View menu has no Simple Look row. Redlines has two
   looks, and a click on a change bar in the margin or the menu bar's View ›
   **Simple Look** switch (⌥⌘4) chooses between them: the **full markup**, and the
   **simple look** ("Simple" for short), the same text as Clean with a change bar beside each screen
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. The click
-  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
+  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
-  checked while the simple look shows, there to choose only while Redlines shows (Clean and Raw
-  have no look); the eye's menu has no row for it. A change bar is a pointer's way, and the
+  checked while the simple look shows, there to choose only while Redlines shows (Clean and Plain
+  have no look); the View menu has no row for it. A change bar is a pointer's way, and the
   menu bar's switch (⌥⌘4) is the way for the keyboard and VoiceOver (#330): nobody needs a pointer
   to choose a look.
-- **Raw** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
+- **Plain** (⌥⌘3): the Markdown source, markers and ledger included, with syntax highlighting. It is
   the same editor with its decorations turned off.
 
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
-Raw shows them.
+Plain shows them.
+
+**Very long lines (every view, Raw included).** A line over 10,000 characters shows its first
+2,000 and a chip that holds the rest ("… 1.5 MB more"); the base64 of an embedded `data:` URI is a
+chip of its own ("PNG image, 1.1 MB, embedded"), wherever it stands in the line, since a base64
+picture in a code span is the usual cause. The page never lays out the text under a chip: a line of
+a million characters that wraps stalls it. The file is unchanged. The chip is one object: the caret
+steps over it, a click selects it, a deletion over it takes all of it (written whole, as any
+deletion), and a copy holds all of it, since a copy reads the document. There is no way yet to see
+it in parts. A `data:` URI of an image in `![](…)` or `<img src>` is drawn as the image.
 
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
@@ -447,22 +608,23 @@ a plain Markdown file, always opens in Clean, whatever view was used last and wh
 says: there are no redlines to show. Making a tracked change in Clean, or adding a comment or a highlight there, switches to
 Redlines in that look, so suggestions are never invisible to their author, and so does a document
 shown Clean that gains redlines; a tracked change made in the simple look stays in it, where its
-bar shows it. Choosing Redlines in the View menu, from Clean or Raw, brings back the look that was
-shown last, so that a trip through Clean or Raw comes back to where it began; in Redlines already,
+bar shows it. Choosing Redlines in the View menu, from Clean or Plain, brings back the look that was
+shown last, so that a trip through Clean or Plain comes back to where it began; in Redlines already,
 in either look, the menu leaves the look as it is. Reviewing (§5.6) shows the full markup, where
 each change shows, and what it showed is what comes back. With no change pending there is no bar to
 click, and the two looks differ only in the ordinary HTML comments that the full markup draws as
 dimmed notes. Otherwise the view stays as you chose it: deciding the last change doesn't switch it.
 **Switching views never changes the file,** and so never makes the document edited or causes a
 write: a Save, made for another reason, records the view (Clean, the full markup or the simple look,
-never Raw) in a file that has a ledger, so that reading a document leaves its git history quiet,
-and a view alone never adds a ledger to a plain file. A save made in Raw leaves the view the file
+never Plain) in a file that has a ledger, so that reading a document leaves its git history quiet,
+and a view alone never adds a ledger to a plain file. A save made in Plain leaves the view the file
 had. The look remembered is each person's own: it is kept in the app's settings, opens the files
 with redlines that record no view, and reaches every window for the documents each opens next, without changing
 the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
 menu also previews the original (every change rejected) and one person's changes alone (everyone
-else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it
-is on, or locked on, Raw is read-only, because typing there could forge or break markers.
+else's rejected). The previews are read-only. Plain can be edited while Track Changes is off; while it
+is on, or locked on, typing in Plain asks first, because Redlines can't mark a change there: a sheet
+offers to make the edit without tracking, as Word does.
 
 ### 5.4 Track Changes
 
@@ -584,7 +746,7 @@ mode has no counterpart in the desktop app.
 - **The review panel** (the review bar's place, Review Changes in the Review menu or the next-change
   shortcut ⌘⌥]) opens at once, on the document's first change or on the first change the selection
   touches (the selection goes), and marks that change. Opening it, or moving it to a change, shows
-  the full markup, from Clean, from the simple look and from Raw, so that each change shows while you
+  the full markup, from Clean, from the simple look and from Plain, so that each change shows while you
   decide it. Showing the simple look closes it, because a person who chooses to read has stopped
   stepping through changes, and while it is open a click on a change bar opens that change's card in
   place of switching the look. It is a card **beside the change**: in the margin to the right of the
@@ -698,7 +860,7 @@ mode has no counterpart in the desktop app.
   plugin; the website's scripted agent uses it to open the box with a question). The text goes only
   into an empty box: a draft that Escape set aside on that anchor comes back as it does today, and a
   box already being written in keeps its words, because the plugin never throws away what a person
-  typed. The app's menu opens the box with no text. Raw takes no comment, with text too.
+  typed. The app's menu opens the box with no text. Plain takes no comment, with text too.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
   open at once, and they survive a reload, of the document from disk and of the app.
   - **What is kept:** each new comment being written, with what it is on; the comment set aside
@@ -783,7 +945,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 - **Edits to the source are minimal.** A table is never re-padded unless you ask.
 - **A table stays its source, and is drawn as a table.** A block wrapper is the table, each line a
   row, each cell a mark; pipes, padding and the delimiter row are hidden, and the caret steps over
-  them, stopping only in cells. Raw shows the source. A table inside a quote or a list item stays
+  them, stopping only in cells. Plain shows the source. A table inside a quote or a list item stays
   source. Column widths are computed from every row and found again about 300 ms after typing
   pauses in the table (never on each key), and at once when the caret leaves it; a
   table never reaches past the text column, and scrolls sideways in its own box.
@@ -998,7 +1160,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
-| Clean, Redlines, Raw           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
+| Clean, Redlines, Plain           | ⌥⌘1, ⌥⌘2, ⌥⌘3                                                                                 | not chosen yet            |
 | Simple Look (switch)           | ⌥⌘4                                                                                           | not chosen yet            |
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
@@ -1008,13 +1170,14 @@ menus, shortcuts, the palette, plugins and agents.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
 | In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
+| Move a paragraph, list item or block up, down | ⌥↑ and ⌥↓ (the blocks a selection covers move together; tracked, it is one change that is accepted or rejected whole, format §3.14) | Alt+Up and Down |
 | In a table: insert column left, right; delete column | ⌥⌘← and ⌥⌘→; ⌃⌘⌫                                                                 | Ctrl+Alt+Left and Right; Ctrl+Win+Backspace |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | In a table: clear cells; delete emptied rows, columns, the table | ⌫ or ⌦; again once whole rows, columns or the table are selected and empty                  | Backspace or Delete; again       |
@@ -1068,9 +1231,10 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
   the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
   over the sidebar, the title bar or the ground below the text goes where the caret is. The image
-  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
-  draws an image only while the caret is off its link, draws one just added all the same until the
-  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  shows at once. The caret ends at the end of the links, as after any paste. The preview draws an
+  image whenever the selection has no end inside its syntax: a click on it selects it (an outline
+  and its handles, its Markdown or HTML hidden; the source shows in Plain), and the caret steps over
+  it as one unit with the arrows. Several images go in as links a space apart, and nothing else
   is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
   data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
@@ -1096,7 +1260,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   to load images from but for its own folder, takes images in that folder alone. The setting can't
   name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
-  or in Raw while Track Changes is on, and the editor says why before anything is saved. Images
+  or in Plain while Track Changes is on, and the editor says why before anything is saved. Images
   pasted from the web keep their URLs: a clipboard with HTML on it, such as an image copied in a
   browser, is left to the HTML.
 - **Editing an image in Preview.** A double-click on an image opens its file in Preview (and the
@@ -1115,7 +1279,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   document's own file alone, and the picture of a file that is gone stays as it was.
 - **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
   markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
-  someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Raw
+  someone else's change. Copy works the same way: Clean and Redlines, in either look, copy the newest text, and Plain
   copies the source. With Track Changes on, the pasted text is the paster's own insertion.
 - **Fonts:** each of a theme's fonts has a twin with the same character widths that Word and
   Google Docs both have (§6.6). The PDF embeds Redlines' own fonts, and Copy for Word and exports
@@ -1156,7 +1320,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
-  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  (§5.1), which opens from the title bar's wrench and on right-click rather than floating over a selection by
   itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
@@ -1167,14 +1331,14 @@ a new email under the same name becomes an alias in the ledger
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
-  step to undo. Not yet: deciding all of its changes at once;
+  step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
 - templates as plain `.md` files with `{{title}}` and `{{date}}`, never executable code;
 - focus and typewriter modes.
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes and cross-references; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 
@@ -1214,6 +1378,9 @@ syntax Markdown needs, and never shows them.
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
+- **Return again in the empty paragraph gives the text room.** At the top level it writes a line
+  that holds only `&nbsp;` and opens the next empty paragraph below it; every view draws that line
+  as an empty line, and GitHub and other readers show an empty paragraph (format §3.4).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
@@ -1299,7 +1466,7 @@ without the editor.
 | Package                | Contents                                                                                                                                   | Runs in                 |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
 | `@redlines/format`     | Parsing and serializing in each dialect; marks, ledger and history; views; accept and reject; the agent operations (§8.3); the conformance fixtures | Anywhere (no DOM, no Node APIs) |
-| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines (in two looks) and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
+| `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines (in two looks) and Plain views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
 | `@redlines/plugin-api` | The plugin interface: manifest, contributions, capabilities. Versioned on its own and kept stable                                         | —                       |
 | `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
 | `@redlines/agent-process` | What the Claude and Codex providers share: finding an agent's program, asking it whether it is signed in, and following a run to its end | Anywhere (no DOM, no Node APIs) |
@@ -1398,7 +1565,7 @@ written.
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `palette`    | The formatting palette: on right-click and ⌥⌘P (§5.1) | —                 |
+| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -1742,7 +1909,7 @@ Agent edits are animated, like a streaming chat answer.
     formatting palette (§5.1) beside Add Comment. A small box opens at the selection for the
     question, and an empty first question means "Explain this in the context of the document." (A
     Return in an empty follow-up field asks nothing.) The default agent answers, and @ picks
-    another, as in a comment. Not in Raw, where a selection
+    another, as in a comment. Not in Plain, where a selection
     holds markers that no answer could be about. (Fix, shorten and rephrase are not part of it.)
   - **The same access and guardrails as a comment's run:** the agent reads what the Agents pane
     allows (the document, or its folder), the first time it is asked in a folder the same question
@@ -1815,8 +1982,32 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
 (for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
-Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
-runs it.
+Agents. An agent is shown by its **handle, capitalized**: with the handle `ada`, the picker, Ask and
+the answers say "Ada", and `@` and the handle names it in a mention. The cards in Preferences keep the
+programs' names (Claude Code, Codex, OpenClaw).
+
+**Handles** (#558). Each card has a Handle field, which says "Shown as Ada". A handle is lowercase
+letters, digits and hyphens, no hyphen at either end, and at most 24 characters; a handle another agent
+has (Redlines' own, or the name of an OpenClaw agent) is refused with a note, and the old handle comes
+back when the field is left. The defaults are `claude` and `codex`; an OpenClaw agent is named by the
+person when it is added (Moby, by default in the form), and that name is its handle. There is one
+thing, not a display name beside the handle. What the host knows the agent by (its id) never changes,
+so a file's authors (`claude-<person>`) stay what they were; a mention of the old handle starts
+nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
+every look at the agents, so a change reaches the open documents' pickers at once.
+
+**Default agent** (#528). Once more than one agent is set up (a program found on this Mac, or an
+OpenClaw agent), the first row of the pane is a choice of them, by the names they are shown as. An Ask
+that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
+first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
+
+**Models** (#530). A provider lists the models its program can be told to run (`AgentProvider.models`:
+Claude Code's aliases Opus, Sonnet and Haiku, and a short list for Codex, which has no command that
+lists them); an OpenClaw agent lists none, because its Gateway chooses, so its card has no Model field.
+A card's Model field is Default, which says nothing and leaves the program's own default, or one of the
+list; the choice is kept in the app's settings (`agentModels`, by agent id) and reaches every run of the
+agent, a comment's and an Ask's. A request can carry its own model (`AgentRequest.model`), which Ask's
+picker uses; the program is told only a model its provider lists.
 
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
@@ -1828,6 +2019,12 @@ button, and Check Again always:
   installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
   <package>@latest` for a global npm install, and the agent's own `update` for any other
   (`claude update`, `codex update`). Redlines looks again when it ends.
+- **A newer version** (#527): a program that is fine but older than the newest shows Update too, and
+  says "Version 2.2.0 is available." Update shows only then, or when the program is too old. The newest
+  is the version npm's registry lists for the agent's package (the one its own updater installs), which
+  the app asks for with the system's `curl` at a fixed address, sending nothing of the person's, and
+  keeps for six hours; Check Again asks afresh. A look that fails (offline) shows no Update and says
+  nothing.
 - **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
   opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
   the same command and looks again when the person comes back.
@@ -1962,6 +2159,13 @@ while the setting allows it), and the answer is remembered for that agent and fo
 settings, never in the document: an answer narrower than the setting stands, and one wider than
 it is held to it and kept, and stands again if the setting is widened. A document in the home
 folder itself, or in the disk's root, has no folder to read, and is read as This document.
+**Web access** is one switch for every agent, Web access in Preferences › Agents, off by default.
+Off, Claude Code's web tools and Codex's search are not allowed to the run, and an agent that reaches
+for the web (a call to a web tool; for Codex, a `curl` or `wget` command, which its profile holds back)
+stops the run, and a card in the corner asks: Don't Allow, Allow Once (this run, which starts again
+with the web), or Allow Always, which turns the switch on. On, they are allowed to every run. An
+answer that used the web says so under it in Ask's bubble. An agent the person added, which is held
+to read-only by the host's rule, is not given the web.
 Preferences › Agents lists the agents found on this Mac with their state (not installed, needs an
 update, signed out, signed in), the remembered answers with a Forget button for each, and Show
 Agent Logs.

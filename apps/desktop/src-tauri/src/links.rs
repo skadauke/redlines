@@ -10,11 +10,13 @@ use std::process::Command;
 /// scheme (`javascript:`, `file:`, `data:`), no scheme, a link to another document.
 fn address(url: &str) -> Option<&str> {
     let url = url.trim();
-    let rest = ["https://", "http://", "mailto:"].into_iter().find_map(|scheme| {
-        url.get(..scheme.len())
-            .filter(|head| head.eq_ignore_ascii_case(scheme))
-            .map(|_| &url[scheme.len()..])
-    })?;
+    let rest = ["https://", "http://", "mailto:"]
+        .into_iter()
+        .find_map(|scheme| {
+            url.get(..scheme.len())
+                .filter(|head| head.eq_ignore_ascii_case(scheme))
+                .map(|_| &url[scheme.len()..])
+        })?;
     let plain = |c: char| !c.is_whitespace() && !c.is_control();
     (!rest.is_empty() && rest.chars().all(plain)).then_some(url)
 }
@@ -83,7 +85,10 @@ mod tests {
 
     #[test]
     fn leaves_out_the_white_space_around_an_address_it_opens() {
-        assert_eq!(address("  https://example.org \n"), Some("https://example.org"));
+        assert_eq!(
+            address("  https://example.org \n"),
+            Some("https://example.org")
+        );
     }
 
     #[test]
@@ -140,7 +145,10 @@ mod tests {
         ] {
             let built = command_for(url);
             assert!(built.is_err(), "{url:?} built a command");
-            assert_eq!(built.err().as_deref(), Some("Only web and mail addresses open."));
+            assert_eq!(
+                built.err().as_deref(),
+                Some("Only web and mail addresses open.")
+            );
         }
     }
 
@@ -149,8 +157,14 @@ mod tests {
         let command = command_for("  HTTPS://Example.org/?a=1&b=2\n").expect("a web address");
         let args: Vec<_> = command.get_args().collect();
         // The address as it was given, without the white space around it, and nothing else.
-        assert_eq!(args.last().and_then(|arg| arg.to_str()), Some("HTTPS://Example.org/?a=1&b=2"));
-        assert!(args.iter().all(|arg| !arg.to_string_lossy().starts_with('-')));
+        assert_eq!(
+            args.last().and_then(|arg| arg.to_str()),
+            Some("HTTPS://Example.org/?a=1&b=2")
+        );
+        assert!(
+            args.iter()
+                .all(|arg| !arg.to_string_lossy().starts_with('-'))
+        );
     }
 
     #[test]
@@ -158,8 +172,14 @@ mod tests {
         let command = opener("https://example.org/?a=1&b=2");
         let args: Vec<_> = command.get_args().collect();
         // One argument, which a program can't take for an option: it starts with its scheme.
-        assert_eq!(args.last().and_then(|arg| arg.to_str()), Some("https://example.org/?a=1&b=2"));
-        assert!(args.iter().all(|arg| !arg.to_string_lossy().starts_with('-')));
+        assert_eq!(
+            args.last().and_then(|arg| arg.to_str()),
+            Some("https://example.org/?a=1&b=2")
+        );
+        assert!(
+            args.iter()
+                .all(|arg| !arg.to_string_lossy().starts_with('-'))
+        );
         #[cfg(target_os = "macos")]
         {
             assert_eq!(command.get_program(), "open");

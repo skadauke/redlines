@@ -1,13 +1,13 @@
 // Parsing a file (format §2, §4, §5): the marks in the body, tied to the ledger. Markup that breaks
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
-import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
+import { CONTAINER_PREFIX, carrierEnd, LineIndex, lineStart, markerEnd } from './blocks.ts';
 import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { MOST_PAYLOAD_DEPTH } from './ledger-order.ts';
-import { holdsMarks, scan, scanPayload } from './scan.ts';
-import type { Marker, Scan } from './scan.ts';
+import { holdsMarks, scan, scanChanged, scanPayload } from './scan.ts';
+import type { Change, Marker, Scan } from './scan.ts';
 import type {
   Ledger,
   MarkEntry,
@@ -68,9 +68,12 @@ function startsBlocks(opener: Extract<Marker, { type: 'open' }>, closer?: Marker
 function segmentOf(
   body: string,
   opener: Extract<Marker, { type: 'open' }>,
-  closer?: Marker,
+  closer: Marker | undefined,
+  lines: LineIndex,
 ): Segment {
-  const end = startsBlocks(opener, closer) ? carrierEnd(body, opener.from, opener.to) : opener.to;
+  const end = startsBlocks(opener, closer)
+    ? carrierEnd(body, opener.from, opener.to, lines)
+    : opener.to;
   const segment: Segment = {
     open: rangeOf(opener),
     content: { from: opener.to, to: closer ? closer.from : opener.to },
@@ -84,9 +87,9 @@ function segmentOf(
 /** Whether a marker starts its line and has other text after it. A marker alone on its line is
  * how a mark that starts a block is written (format §3.3), and a line of markers has no text to
  * read as raw HTML. `range` starts at the marker. */
-function startsLineWithText(text: string, range: Range): boolean {
-  const lineStart = text.lastIndexOf('\n', range.from - 1) + 1;
-  if (!CONTAINER_PREFIX.test(text.slice(lineStart, range.from))) return false;
+function startsLineWithText(text: string, range: Range, lines: LineIndex): boolean {
+  const start = lineStart(text, range.from, lines);
+  if (!CONTAINER_PREFIX.test(text.slice(start, range.from))) return false;
   const end = markerEnd(text, range.from);
   const newline = text.indexOf('\n', end);
   const after = text.slice(end, newline === -1 ? text.length : newline);
@@ -97,6 +100,7 @@ function startsLineWithText(text: string, range: Range): boolean {
  * they make none (a closer with no opener, a comment with no thread). `warn` hears what is wrong. */
 function segmentsOf(
   body: string,
+  lines: LineIndex,
   id: string,
   markers: readonly Marker[],
   threads: ReadonlyMap<string, Thread>,
@@ -119,7 +123,7 @@ function segmentsOf(
   for (const marker of markers) {
     if (marker.type === 'close') {
       if (pending) {
-        segments.push(segmentOf(body, pending, marker));
+        segments.push(segmentOf(body, pending, marker, lines));
         pending = null;
       } else warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
       continue;
@@ -139,15 +143,15 @@ function segmentsOf(
         continue;
       }
       // A comment opener with no closer before the next one is a point comment.
-      segments.push(segmentOf(body, pending));
+      segments.push(segmentOf(body, pending, undefined, lines));
     }
     if (isPoint(marker, alone)) {
-      segments.push(segmentOf(body, marker));
+      segments.push(segmentOf(body, marker, undefined, lines));
       pending = null;
     } else pending = marker;
   }
   if (pending) {
-    if (kind === 'cmt') segments.push(segmentOf(body, pending));
+    if (kind === 'cmt') segments.push(segmentOf(body, pending, undefined, lines));
     else warn('unclosed-mark', `The ${kind} mark ${id} is never closed`, rangeOf(pending), id);
   }
   return { kind, thread, segments };
@@ -250,6 +254,7 @@ function readPayloads(
       else byId.set(marker.id, [marker]);
     }
     const here: MarkRange[] = [];
+    const siteLines = new LineIndex(site.text);
     const text = (id: string, why: string) =>
       warn(
         'payload-mark',
@@ -268,7 +273,7 @@ function readPayloads(
         continue;
       }
       let problem = '';
-      const grouped = segmentsOf(site.text, id, markers, threads, (_code, message) => {
+      const grouped = segmentsOf(site.text, siteLines, id, markers, threads, (_code, message) => {
         problem ||= message;
       });
       if (!grouped || problem) {
@@ -323,10 +328,11 @@ const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
  * Parses a file. Never throws. Given the parse of an earlier version of the same file, a ledger
  * whose text hasn't changed is taken from it rather than read again (an editor parses on every
  * keystroke, and reading the ledger's YAML is most of the work); the two parses then share the
- * ledger object, so treat it as read-only.
+ * ledger object, so treat it as read-only. With `change`, where the text differs from that
+ * earlier text, the markers are read again only near the edit (#700): the same parse, found faster.
  */
-export function parse(text: string, previous?: Parsed): Parsed {
-  const scanned = scan(text);
+export function parse(text: string, previous?: Parsed, change?: Change): Parsed {
+  const scanned = (previous && change && scanChanged(previous.text, text, change)) || scan(text);
   const span = findLedger(text, scanned);
   const known = span && previous ? ledgerReads.get(previous) : undefined;
   let read: LedgerRead | null = null;
@@ -350,8 +356,10 @@ export function parse(text: string, previous?: Parsed): Parsed {
   }
 
   const marks: MarkRange[] = [];
+  const bodyLines = new LineIndex(body);
+  const textLines = new LineIndex(text);
   for (const [id, markers] of byId) {
-    const grouped = segmentsOf(body, id, markers, threads, warn);
+    const grouped = segmentsOf(body, bodyLines, id, markers, threads, warn);
     if (!grouped) continue;
     const { kind, thread, segments } = grouped;
     const [firstSegment] = segments;
@@ -376,7 +384,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
     for (const segment of segments) {
       for (const range of [segment.open, segment.close]) {
-        if (range && startsLineWithText(text, range)) {
+        if (range && startsLineWithText(text, range, textLines)) {
           warn(
             'line-start-marker',
             `A marker for ${id} starts a line that has other text`,

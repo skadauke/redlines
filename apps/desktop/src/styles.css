@@ -74,6 +74,10 @@ body {
   /* A classic scrollbar that comes when the document grows (a table's row wraps) would move the
      centered text column, and every table in it, by half its width. */
   scrollbar-gutter: stable;
+  /* A toolbar docked at the bottom takes room that scrolls, so that the last lines can be lifted
+     clear of it (the toolbar sets --rl-toolbar-room on .rl-main while it is docked). */
+  padding-bottom: var(--rl-toolbar-room, 0);
+  scroll-padding-bottom: var(--rl-toolbar-room, 0);
 }
 
 /*
@@ -160,6 +164,8 @@ body {
   white-space: nowrap;
   -webkit-user-select: none;
   user-select: none;
+  /* The fade lets the pointer through to the text; the label takes it, for its hint (#682). */
+  pointer-events: auto;
 }
 
 /*
@@ -320,14 +326,19 @@ body {
   outline-offset: -2px;
 }
 
+/* The wrench is pressed while the toolbar shows. */
+.rl-wrench-button[aria-pressed='true'] {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
+}
+
 /* The Review pen is red while your edits are tracked (design §5.4). */
 .rl-pen-on {
   color: var(--rl-red, #d42a1e);
 }
 
-/* A click on the eye: the pupil is red for a moment (titlebar.ts). */
-.rl-eye-flash svg circle {
-  fill: var(--rl-red, #d42a1e);
+/* The View button shows Redlines by a red bar in the page's margin, the app's change bar (#661). */
+.rl-icon-button svg .rl-view-bar {
   stroke: var(--rl-red, #d42a1e);
 }
 
@@ -342,8 +353,10 @@ body {
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--rl-tip, #1d1d1f);
-  color: #ffffff;
+  border: 1px solid var(--rl-rule);
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
   white-space: nowrap;
@@ -358,7 +371,7 @@ body {
 }
 
 .rl-tip-shortcut {
-  color: rgb(255 255 255 / 0.62);
+  color: var(--rl-ink-2);
   letter-spacing: 0.04em;
 }
 
@@ -516,6 +529,7 @@ body {
   flex-direction: column;
   width: 0;
   overflow: hidden;
+  position: relative;
   background: var(--rl-tint);
   transition: width 180ms ease;
   -webkit-user-select: none;
@@ -523,7 +537,12 @@ body {
 }
 
 .rl-app[data-sidebar='open'] .rl-sidebar {
-  width: 240px;
+  width: var(--rl-sidebar-width, 240px);
+}
+
+/* While the edge is dragged the width follows the pointer, with no glide behind it. */
+.rl-app[data-sidebar-drag] .rl-sidebar {
+  transition: none;
 }
 
 /*
@@ -543,6 +562,30 @@ body {
   .rl-app[data-sidebar='open'] .rl-sidebar-head {
     height: 0;
   }
+}
+
+/*
+ * The edge a person drags to resize the sidebar (#680): a strip on its right side, with the
+ * resize cursor; a thin line shows under the pointer and while it has the keyboard's focus.
+ */
+.rl-sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.rl-sidebar-resize:hover,
+.rl-app[data-sidebar-drag] .rl-sidebar-resize {
+  box-shadow: inset -2px 0 0 var(--rl-ink-3);
+}
+
+.rl-sidebar-resize:focus-visible {
+  outline: 2px solid var(--rl-ink-3);
+  outline-offset: -2px;
 }
 
 .rl-sidebar-head {
@@ -565,7 +608,7 @@ body {
 
 .rl-sidebar-list {
   flex: 1;
-  width: 240px;
+  width: var(--rl-sidebar-width, 240px);
   margin: 0;
   padding: 0 8px 16px;
   overflow-y: auto;
@@ -721,6 +764,10 @@ body {
   animation: rl-rise 140ms ease-out;
 }
 
+.rl-notification-wide {
+  width: 360px;
+}
+
 .rl-notification-compact {
   flex-direction: row;
   align-items: flex-start;
@@ -749,6 +796,7 @@ body {
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
+  white-space: nowrap;
   cursor: default;
 }
 
@@ -815,6 +863,7 @@ body {
   .rl-tip,
   .rl-menu,
   .rl-notice,
+  .rl-sheet,
   .rl-notification {
     animation: none;
   }
@@ -824,6 +873,13 @@ body {
   .rl-sidebar,
   .rl-sidebar-folder svg {
     transition: none;
+  }
+}
+
+/* A table's empty header cells show a placeholder on screen; the page doesn't print it. */
+@media print {
+  .rl-tc-fill::before {
+    content: none !important;
   }
 }
 
@@ -850,6 +906,7 @@ body {
   .rl-review-panel,
   .rl-notice,
   .rl-notifications,
+  .rl-sheet-backdrop,
   .rl-menu-anchor {
     display: none !important;
   }
@@ -875,8 +932,8 @@ body {
   html[data-rl-theme][data-rl-appearance] #editor {
     --rl-page: #ffffff;
     --rl-ink: #1d1d1f;
-    --rl-ink-2: #6e6e73;
-    --rl-ink-3: #a1a1a6;
+    --rl-ink-2: #6a6a6f;
+    --rl-ink-3: #828285;
     --rl-rule: #e5e5ea;
     --rl-tint: #f3f3f5;
     --rl-syntax: #c7c7cc;
@@ -950,4 +1007,85 @@ body {
   #editor .rl-trow.rl-bar-mixed > .rl-tc:first-child::before {
     border-left-color: var(--rl-mixed);
   }
+}
+
+/*
+ * The alert's sheet (ui/untracked-sheet.ts): the one interruption, a card that drops from the title
+ * bar over a veil, modal to its window. Cancel is the default button, drawn as such.
+ */
+
+.rl-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--rl-page, Canvas) 40%, transparent);
+}
+
+.rl-sheet {
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  margin-top: calc(56 * var(--rl-pt));
+  padding: 16px 18px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  line-height: 1.4;
+  animation: rl-appear 120ms ease-out;
+}
+
+.rl-sheet-title {
+  font-weight: 700;
+}
+
+.rl-sheet-detail {
+  margin-top: 4px;
+  color: var(--rl-ink-2);
+}
+
+.rl-sheet-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-sheet-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.rl-sheet-button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  cursor: default;
+}
+
+.rl-sheet-button:hover {
+  background: var(--rl-pressed);
+}
+
+.rl-sheet-default {
+  background: var(--rl-pressed);
+  font-weight: 700;
+}
+
+.rl-sheet-button:focus-visible,
+.rl-sheet-check input:focus-visible {
+  outline: 2px solid var(--rl-ink-2);
+  outline-offset: 1px;
 }

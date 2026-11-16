@@ -65,7 +65,7 @@ export interface AskOptions extends AskDeps {
 export interface Ask {
   /**
    * Opens the box for a question about the selection, or the word under the caret, and puts the
-   * keyboard in it. Returns false when it can't: nothing to ask about, or Raw, which shows markers
+   * keyboard in it. Returns false when it can't: nothing to ask about, or Plain, which shows markers
    * that no answer could be about; the editor's `onNotice`-style message says why.
    */
   start(): boolean;
@@ -253,6 +253,10 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
   const onPress = (event: PointerEvent) => {
     const { target } = event;
     if (!open || !(target instanceof Node)) return;
+    // The web's card is not the document: its buttons answer the question the bubble is waiting on
+    // (Allow Once, for the web, #529), and a press on them leaves the bubble open.
+    if (target instanceof Element && target.closest('.rl-notification[data-key^="web-access"]'))
+      return;
     // The person went back to the bubble: whatever waited for a click leaves it open.
     if (open.bubble.el.contains(target)) return stopWaiting?.();
     // In one of the rail's notes the bubble waits for the click, if the rail holds it: it is the
@@ -409,7 +413,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       id: 'ask.start',
       title: 'Ask…',
       shortcut: 'Mod-Alt-a',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
       // The question's own box is a field: choosing Ask again, from the menu, asks about the new
       // selection, whoever has the keyboard.

@@ -31,6 +31,7 @@ function commands() {
     acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
+    toggleWordCount: vi.fn(),
     pastePlain: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -46,6 +47,8 @@ function commands() {
     openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
+    reportProblem: vi.fn(),
+    revealCrashLog: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -71,6 +74,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   canAcceptAll: false,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   zoom: 1,
   textSize: 1,
   hasFile: true,
@@ -164,7 +168,7 @@ describe('Simple Look (#330)', () => {
     expect(row().checked?.(state({ view: 'redlines' }))).toBe(false);
   });
 
-  it('can be chosen only while Redlines shows: Clean and Raw have no look to switch', () => {
+  it('can be chosen only while Redlines shows: Clean and Plain have no look to switch', () => {
     expect(row().enabled?.(state({ view: 'simple' }))).toBe(true);
     expect(row().enabled?.(state({ view: 'redlines' }))).toBe(true);
     expect(row().enabled?.(state({ view: 'clean' }))).toBe(false);
@@ -213,7 +217,7 @@ describe('the menu model', () => {
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
       ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Plain', 'Alt+CmdOrCtrl+3'],
       '---',
       ['Simple Look', 'Alt+CmdOrCtrl+4'],
       '---',
@@ -226,6 +230,7 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Word Count', undefined],
       '---',
       'Enter Full Screen',
     ]);
@@ -255,7 +260,12 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Window')).toEqual(['Minimize', 'Zoom', '---', 'BringAllToFront']);
     expect(model.menus.find((menu) => menu.title === 'Window')?.windowsMenu).toBe(true);
-    expect(readsAll(model, 'Help')).toEqual([['Show Agent Logs', undefined]]);
+    expect(readsAll(model, 'Help')).toEqual([
+      ['Report a Problem…', undefined],
+      ['Reveal Log', undefined],
+      '---',
+      ['Show Agent Logs', undefined],
+    ]);
     expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
@@ -277,7 +287,7 @@ describe('the menu model', () => {
     expect(c.revealInFinder).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
-    click('View', 'Raw');
+    click('View', 'Plain');
     expect(c.setView).toHaveBeenLastCalledWith('raw');
     // Redlines, which the editor shows in the look last chosen with a click on a change bar or the
     // Simple Look switch.
@@ -318,6 +328,10 @@ describe('the menu model', () => {
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
     expect(c.openPreferences).toHaveBeenCalledOnce();
+    click('Help', 'Report a Problem…');
+    expect(c.reportProblem).toHaveBeenCalledOnce();
+    click('Help', 'Reveal Log');
+    expect(c.revealCrashLog).toHaveBeenCalledOnce();
     click('Help', 'Show Agent Logs');
     expect(c.showAgentLogs).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');
@@ -357,6 +371,10 @@ describe('the menu model', () => {
     const files = actionRow(model, 'View', 'Show Files');
     expect(files.textFor?.(state({ sidebarOpen: false }))).toBe('Show Files');
     expect(files.textFor?.(state({ sidebarOpen: true }))).toBe('Hide Files');
+
+    const words = actionRow(model, 'View', 'Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: false }))).toBe('Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: true }))).toBe('Hide Word Count');
   });
 
   it('enables the size rows between the ends', () => {
@@ -477,8 +495,9 @@ describe('the menu model', () => {
       ['Rename…', undefined],
     ]);
     // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
-    expect(readsAll(model, 'View').slice(-6)).toEqual([
+    expect(readsAll(model, 'View').slice(-7)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Word Count', undefined],
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],

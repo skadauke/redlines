@@ -4,8 +4,9 @@
 // sentence of the document, and a comment's run with a canned reply. Never in a release build.
 
 import { fakeProvider, fakeRelay, type FakeScript } from '@redlines/agents/fake-provider';
-import { createMacAgents, type MacAgents } from '@redlines/agents';
+import { createMacAgents, type MacAgents, type MacAgentsOptions } from '@redlines/agents';
 import { newestView } from '@redlines/format';
+import { loadSettings } from './settings.ts';
 
 /** The first sentence of the document as a reader sees it, which the canned answer cites. */
 function firstSentence(text: string): string {
@@ -13,12 +14,26 @@ function firstSentence(text: string): string {
   return /^[^\n]*?[.!?](?=\s|$)/.exec(plain)?.[0] ?? plain.split('\n')[0] ?? '';
 }
 
-export function createDevAgents(): MacAgents {
+export function createDevAgents(
+  web: Pick<MacAgentsOptions, 'web' | 'askWeb' | 'allowWeb'> = {},
+): MacAgents {
   const relay = fakeRelay();
   const script: FakeScript = async function* ({ request, tools }) {
     await tools.initialize();
     const seen = await tools.call('view', {});
     if (request.thread.startsWith('ask-')) {
+      // A question that asks for the web (#529) reaches for it: asked first, unless it may.
+      if (/\bweb\b/i.test(request.prompt)) {
+        yield { type: 'web', allowed: request.web === true, text: 'Searching the web' };
+        yield {
+          type: 'done',
+          finalText:
+            request.web === true
+              ? 'This is a scripted answer, for development. It looked at the web.'
+              : 'This is a scripted answer, for development. It had no web.',
+        };
+        return;
+      }
       yield { type: 'status', text: 'Reading the document' };
       // A moment, so that the live line can be seen.
       await new Promise((resolve) => setTimeout(resolve, 900));
@@ -32,5 +47,9 @@ export function createDevAgents(): MacAgents {
     await tools.call('reply', { text: 'Scripted reply, for development.' });
     yield { type: 'done' };
   };
-  return createMacAgents([fakeProvider({ relay, script })], relay);
+  // The handle Preferences gave it, read at every look, as the app's agents are.
+  return createMacAgents([fakeProvider({ relay, script })], relay, {
+    handles: () => loadSettings().agentHandles,
+    ...web,
+  });
 }

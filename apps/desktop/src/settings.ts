@@ -4,12 +4,14 @@
 // helps, whether line breaks show their marks, what agents may read), and the file sidebar. A
 // window that changes a setting tells the others through the `storage` event (`watchSettings`).
 
+import { DEFAULT_HANDLES, isHandle } from '@redlines/agents';
 import { meetPeople, type Author, type MarkupView, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
+import { SIDEBAR_DEFAULT, sidebarWidthOf } from './ui/sidebar-resize.ts';
 
 /**
  * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
@@ -56,6 +58,8 @@ export interface Settings {
   /** Whether every window is light, dark, or as the system is (Match System, the default). */
   appearance: AppearanceChoice;
   sidebarOpen: boolean;
+  /** The sidebar's width in CSS px, between `SIDEBAR_MIN` and `SIDEBAR_MAX` (#680). */
+  sidebarWidth: number;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
@@ -98,16 +102,36 @@ export interface Settings {
   /** A list of matching emoji after a colon and two letters (`:te`), which a choice writes as the
    * character itself. The shortcodes already in a file are drawn as their emoji either way. */
   emojiSuggestions: boolean;
-  /** Whether a new document starts with Track Changes on. */
-  trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
   /** Whether the word count shows in the window's lower right corner (design §5.1). */
   showWordCount: boolean;
+  /** Whether the toolbar is shown at the bottom of the window, not only when it is summoned (#504). */
+  toolbarAtBottom: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
   consent: Record<string, AgentScope | 'no'>;
+  /**
+   * The handle the person gave an agent, by its id (Preferences › Agents, #558): what is written
+   * after an @, and, capitalized, the name it is shown by. Only the handles that differ from the
+   * defaults (claude, codex) are kept.
+   */
+  agentHandles: Record<string, string>;
+  /**
+   * The agent an Ask that names none goes to (#528), by id; null leaves it to the first ready one.
+   */
+  defaultAgent: string | null;
+  /**
+   * The model the person chose for each agent (#530), by agent id and model id; an agent with none
+   * runs its own default.
+   */
+  agentModels: Record<string, string>;
+  /**
+   * Whether agents may use the web (#529): one switch for every agent, off by default. Off, an agent
+   * that wants the web asks, and Allow Always turns this on.
+   */
+  webAccess: boolean;
   /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
@@ -133,6 +157,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   theme: 'default',
   appearance: 'system',
   sidebarOpen: false,
+  sidebarWidth: SIDEBAR_DEFAULT,
   showResolved: false,
   markupView: 'redlines',
   rotateIcon: true,
@@ -147,11 +172,15 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   smartPunctuation: true,
   closePairs: true,
   emojiSuggestions: true,
-  trackNewDocuments: false,
   showLineBreakMarks: false,
   showWordCount: true,
+  toolbarAtBottom: false,
   agentScope: 'folder',
   consent: {},
+  agentHandles: {},
+  defaultAgent: null,
+  agentModels: {},
+  webAccess: false,
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -175,18 +204,18 @@ export function loadSettings(): Settings {
       | 'rotateIcon'
       | 'checkForUpdates'
       | 'showLineBreakMarks'
-      | 'showWordCount',
+      | 'showWordCount'
+      | 'toolbarAtBottom',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
-  const typing = (
-    key:
-      'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions' | 'trackNewDocuments',
-  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
+  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions') =>
+    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
     theme: themeOf(value),
     appearance: isAppearanceChoice(value['appearance'])
       ? value['appearance']
       : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
+    sidebarWidth: sidebarWidthOf(value['sidebarWidth']),
     showResolved: flag('showResolved'),
     markupView: value['markupView'] === 'simple' ? 'simple' : DEFAULT_SETTINGS.markupView,
     rotateIcon: flag('rotateIcon'),
@@ -204,13 +233,20 @@ export function loadSettings(): Settings {
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
     emojiSuggestions: typing('emojiSuggestions'),
-    trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
+    toolbarAtBottom: flag('toolbarAtBottom'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
+    agentHandles: agentHandlesOf(value['agentHandles']),
+    defaultAgent:
+      typeof value['defaultAgent'] === 'string' && value['defaultAgent']
+        ? value['defaultAgent']
+        : null,
+    agentModels: agentModelsOf(value['agentModels']),
+    webAccess: value['webAccess'] === true,
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
@@ -243,6 +279,37 @@ function identityOf(value: unknown): Settings['identity'] {
   return name.trim() && handle && toHandle(handle) === handle
     ? { name: name.trim(), handle }
     : null;
+}
+
+/**
+ * The handles of the agents: each a handle (lowercase letters, digits, hyphens), none shared with
+ * another agent's, whose own handle is its default (claude, codex) until it is given one.
+ */
+function agentHandlesOf(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {};
+  const handles: Record<string, string> = {};
+  /** What each agent is called now, the defaults included. */
+  const effective: Record<string, string> = { ...DEFAULT_HANDLES };
+  for (const [id, handle] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof handle !== 'string' || !isHandle(handle)) continue;
+    // The default is no choice, and isn't kept.
+    if (handle === (DEFAULT_HANDLES[id] ?? id)) continue;
+    const shared = Object.entries(effective).some(([other, had]) => other !== id && had === handle);
+    if (shared) continue;
+    effective[id] = handle;
+    handles[id] = handle;
+  }
+  return handles;
+}
+
+/** The models chosen, by agent: only text, and nothing empty. */
+function agentModelsOf(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '',
+    ),
+  );
 }
 
 function recentOf(value: unknown): readonly string[] {
@@ -285,6 +352,26 @@ export function saveSettings(settings: Settings): void {
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
   }
+}
+
+/**
+ * `incoming` (settings as stored, or as a change leaves them) with what is this window's own kept
+ * from `own`: its file sidebar and its text size. The stored text size is the Default text size of
+ * Preferences, which only Preferences changes; a window opens at it, and neither its own zoom nor
+ * a change of the default elsewhere moves the other (#557). `changed` is what this window itself
+ * just changed, which it keeps as it is.
+ */
+export function keepWindowOwn(
+  own: Settings,
+  incoming: Settings,
+  changed: Partial<Settings> = {},
+): Settings {
+  return {
+    ...incoming,
+    sidebarOpen: changed.sidebarOpen ?? own.sidebarOpen,
+    sidebarWidth: changed.sidebarWidth ?? own.sidebarWidth,
+    textSize: changed.textSize ?? own.textSize,
+  };
 }
 
 /**

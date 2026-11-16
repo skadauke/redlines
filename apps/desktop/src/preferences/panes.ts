@@ -61,6 +61,8 @@ export type DefaultApp =
 export type DefaultAppChange = { outcome: 'made' } | { outcome: 'kept'; app: string | null };
 
 export interface PaneDeps {
+  /** Takes back every "Don't ask again" of the alert for an edit that can't be tracked. */
+  askAgain?: () => void;
   /** The settings as stored now. */
   settings: () => Settings;
   /** Changes some settings, at once. */
@@ -686,10 +688,31 @@ function editing(deps: PaneDeps): Section[] {
           'Show word count',
           toggle(current.showWordCount, (value) => update({ showWordCount: value })),
         ),
+        row(
+          'Show the toolbar at the bottom',
+          toggle(current.toolbarAtBottom, (value) => update({ toolbarAtBottom: value })),
+          line('Otherwise the wrench in the title bar, ⇧⌘P and a right-click show it.'),
+        ),
       ],
     },
     { title: 'Images', rows: [imagesRow(deps)] },
+    ...(deps.askAgain ? [{ title: 'Alerts', rows: [askAgainRow(deps.askAgain)] }] : []),
   ];
+}
+
+/** "Don't ask again" of the alert is kept for each document; this takes them all back. */
+function askAgainRow(askAgain: () => void): HTMLElement {
+  const button = el('button', 'rl-pref-button', 'Ask Again in All Documents');
+  button.type = 'button';
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  button.addEventListener('click', () => {
+    askAgain();
+    status.textContent = 'Edits that can’t be tracked will ask first again.';
+  });
+  const stack = el('div', 'rl-pref-stack');
+  stack.append(button, status);
+  return row('Edits that can’t be tracked', stack);
 }
 
 /** The rows that installed plugins contribute to a pane. */

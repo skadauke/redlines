@@ -7,6 +7,7 @@ import {
   authorFrom,
   imageFolderNameOf,
   imageFolderNameProblem,
+  keepWindowOwn,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -48,11 +49,23 @@ function mockColorScheme(dark: boolean) {
 }
 
 describe('settings', () => {
+  it('keeps the sidebar width in range, and the default for what is not a width (#680)', () => {
+    const load = (width: unknown) => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sidebarWidth: width }));
+      return loadSettings().sidebarWidth;
+    };
+    expect(load(333)).toBe(333);
+    expect(load(20)).toBe(180);
+    expect(load(5000)).toBe(480);
+    expect(load('wide')).toBe(240);
+  });
+
   it('settings default and persist', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       theme: 'default',
       appearance: 'system',
       sidebarOpen: false,
+      sidebarWidth: 240,
       showResolved: false,
       markupView: 'redlines',
       rotateIcon: true,
@@ -67,11 +80,15 @@ describe('settings', () => {
       smartPunctuation: true,
       closePairs: true,
       emojiSuggestions: true,
-      trackNewDocuments: false,
       showLineBreakMarks: false,
       showWordCount: true,
+      toolbarAtBottom: false,
       agentScope: 'folder',
       consent: {},
+      agentHandles: {},
+      defaultAgent: null,
+      agentModels: {},
+      webAccess: false,
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -82,6 +99,7 @@ describe('settings', () => {
       theme: 'book',
       appearance: 'dark',
       sidebarOpen: true,
+      sidebarWidth: 320,
       showResolved: true,
       markupView: 'simple',
       rotateIcon: false,
@@ -96,11 +114,15 @@ describe('settings', () => {
       smartPunctuation: false,
       closePairs: false,
       emojiSuggestions: false,
-      trackNewDocuments: true,
       showLineBreakMarks: true,
       showWordCount: false,
+      toolbarAtBottom: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      agentHandles: { claude: 'ada' },
+      defaultAgent: 'codex',
+      agentModels: { claude: 'opus' },
+      webAccess: true,
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -480,7 +502,7 @@ describe('settings', () => {
         smartPunctuation: 0,
         closePairs: null,
         emojiSuggestions: 'sure',
-        trackNewDocuments: 'no',
+        trackNewDocuments: true,
         showLineBreakMarks: 'yes',
         showWordCount: 'no',
         agentScope: 'machine',
@@ -599,7 +621,7 @@ describe('settings', () => {
     };
     const reopen = (lastDocument: string) =>
       reopenLastDocument({ ...DEFAULT_SETTINGS, onLaunch: 'reopen', lastDocument }, open);
-    for (const stale of ['/notes/logo.svg', '/notes/Makefile', '/notes/main.ts']) {
+    for (const stale of ['/notes/logo.docx', '/notes/Makefile', '/notes/main.zig']) {
       expect(await reopen(stale), stale).toBe(false);
     }
     // Not even read: nothing would be said.
@@ -669,5 +691,72 @@ describe('settings', () => {
     });
     const second = meetPeopleInSettings(['di'], first);
     expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
+  });
+
+  it('keeps the handles of agents that are handles, and none that another agent has', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        agentHandles: { claude: 'ada', codex: 'ada', x: 'Bo!', y: 'two-words', z: 3 },
+      }),
+    );
+    expect(loadSettings().agentHandles).toEqual({ claude: 'ada', y: 'two-words' });
+    // The handle of an agent with none of its own is taken, and a default is no choice.
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":{"claude":"codex","codex":"codex"}}');
+    expect(loadSettings().agentHandles).toEqual({});
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
+    expect(loadSettings().agentHandles).toEqual({});
+  });
+
+  it('keeps the default agent as an id, and nothing else (#528)', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"defaultAgent":"codex"}');
+    expect(loadSettings().defaultAgent).toBe('codex');
+    for (const bad of ['""', '3', 'null', '{}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"defaultAgent":${bad}}`);
+      expect(loadSettings().defaultAgent).toBeNull();
+    }
+  });
+
+  it('keeps the models chosen as text by agent, and drops the rest (#530)', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ agentModels: { claude: 'opus', codex: '', x: 3 } }),
+    );
+    expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
+    localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
+    expect(loadSettings().agentModels).toEqual({});
+  });
+
+  it('keeps web access only when it is true, and off otherwise (#529)', () => {
+    expect(loadSettings().webAccess).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, '{"webAccess":true}');
+    expect(loadSettings().webAccess).toBe(true);
+    for (const bad of ['"yes"', '1', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"webAccess":${bad}}`);
+      expect(loadSettings().webAccess).toBe(false);
+    }
+  });
+});
+
+describe('the Default text size (#557)', () => {
+  it('is what a new window opens at, and no window’s own text size changes it', () => {
+    updateSettings({ textSize: 1.25 });
+    let own = { ...loadSettings(), textSize: 2 };
+    own = keepWindowOwn(own, updateSettings({ spellCheck: false }));
+    expect(own.textSize).toBe(2);
+    expect(loadSettings().textSize).toBe(1.25);
+  });
+
+  it('changes no window that is open', () => {
+    const open = { ...loadSettings(), textSize: 1.5 };
+    const stored = updateSettings({ textSize: 3 });
+    expect(keepWindowOwn(open, stored).textSize).toBe(1.5);
+    expect(loadSettings().textSize).toBe(3);
+  });
+
+  it('is changed by Preferences, which keeps what it set', () => {
+    const open = { ...loadSettings(), textSize: 1 };
+    const stored = updateSettings({ textSize: 1.75 });
+    expect(keepWindowOwn(open, stored, { textSize: 1.75 }).textSize).toBe(1.75);
   });
 });

@@ -102,6 +102,11 @@ class GhostWidget extends WidgetType {
     );
   }
 
+  /** One row, as a table's rows are drawn (`ghostTableHeight` counts the same), so the room is held. */
+  override get estimatedHeight(): number {
+    return 36;
+  }
+
   override toDOM(): HTMLElement {
     const { ghost } = this;
     const row = document.createElement('div');

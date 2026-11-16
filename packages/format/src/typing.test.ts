@@ -2589,7 +2589,7 @@ describe('Enter in a numbered list numbers the items after it again (format §3.
   const intro = '## Try it\n\n1. Turn on **Track Changes**, then type.\n2. Press Enter twice.\n';
   const three = '3. Hover over a change to accept or reject it.\n';
   const four = '4. Reply to a comment from its note in the margin.\n';
-  const five = '5. Switch between Clean, Redlines and Raw with the eye.';
+  const five = '5. Switch between Clean, Redlines and Plain with the eye.';
   const quote = (decides: string) => `\n\n> Changes are kept until someone ${decides}, in any app.`;
   const body = `${intro}${three}${four}${five}${quote('<!--sub r4tn decides-->accepts them<!--/r4tn-->')}`;
   const IDS = ['k3x9', 'w8nn', 'p3qz', 'q4gt', 'r5tw', 's6vx'];
@@ -2667,7 +2667,7 @@ describe('Enter in a numbered list numbers the items after it again (format §3.
       expectList(
         after as string,
         '4. Reply to a comment fro\n5. m its note in the margin.\n',
-        '6. Switch between Clean, Redlines and Raw with the eye.',
+        '6. Switch between Clean, Redlines and Plain with the eye.',
       );
     });
 
@@ -2680,7 +2680,7 @@ describe('Enter in a numbered list numbers the items after it again (format §3.
       expectList(
         after,
         '4. Reply to a comment from its note in the margin.\n5. \n',
-        '6. Switch between Clean, Redlines and Raw with the eye.',
+        '6. Switch between Clean, Redlines and Plain with the eye.',
       );
     });
   }

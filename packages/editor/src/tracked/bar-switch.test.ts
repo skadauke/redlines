@@ -205,7 +205,7 @@ describe('the click on a change bar', () => {
     });
   });
 
-  it('switches nothing in Clean or Raw', () => {
+  it('switches nothing in Clean or Plain', () => {
     for (const view of ['clean', 'raw'] as const) {
       const editor = load({ view });
       switchLookAt(editor.view, 0, layout);
@@ -234,7 +234,7 @@ describe('the click on a change bar', () => {
     }
   });
 
-  it('does nothing for a press that moves 5 px, and for a press in Clean or Raw', () => {
+  it('does nothing for a press that moves 5 px, and for a press in Clean or Plain', () => {
     const editor = load({ view: 'simple' });
     click(editor, ON_BAR, {}, { x: ON_BAR.x + 5, y: ON_BAR.y });
     expect(viewOf(editor)).toBe('simple');

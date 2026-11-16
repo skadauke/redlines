@@ -1,13 +1,13 @@
 // Copy, cut and paste (design §5.10). In Clean and Redlines, what is copied or cut is the newest
 // text of the selection (format §8): what it reads with every change accepted, without markers,
-// deleted text or the ledger. Raw copies the source as written.
+// deleted text or the ledger. Plain copies the source as written.
 //
 // A paste never creates marks from the clipboard's content. In Clean and Redlines, pasted text that
 // holds Redlines markup becomes its newest text before it goes in, so it is plain text of the
-// paster's own, an insertion of theirs while Track Changes is on. Raw, where markup is edited by
+// paster's own, an insertion of theirs while Track Changes is on. Plain, where markup is edited by
 // hand, pastes the text as it is.
 //
-// Rich text goes both ways outside Raw. A copy also puts the same newest text on the clipboard as
+// Rich text goes both ways outside Plain. A copy also puts the same newest text on the clipboard as
 // HTML (clipboard/copy-html.ts), and a paste whose clipboard has HTML that says more than its plain
 // text is turned into Markdown (clipboard/paste-html.ts), which then goes in as a plain-text paste
 // does, through the guard above. Paste as Plain Text never reads HTML: it sends the text alone.
@@ -241,7 +241,7 @@ function listPaste(view: EditorView, text: string): boolean {
   return plain !== '' && pasteListItems(view, plain);
 }
 
-/** Copy, cut, drag and paste of the newest text, outside Raw. */
+/** Copy, cut, drag and paste of the newest text, outside Plain. */
 export function clipboard(): Extension {
   // The text this editor last put on the clipboard, which it knows again when it is pasted.
   let lastCopied: string | null = null;

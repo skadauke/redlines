@@ -36,7 +36,7 @@ import { EditorView } from '@codemirror/view';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { cellEscapes } from './escape.ts';
-import { type Dirty, type DirtyTable, dirtyOf, type Span } from './dirty.ts';
+import { type Dirty, type DirtyTable, dirtyOf, dirtyOfParse, type Span } from './dirty.ts';
 import {
   type Cell,
   type Row,
@@ -138,24 +138,26 @@ export function stopAtoms(state: EditorState): RangeSet<StopAtom> {
   return RangeSet.of(toAtoms(spans), true);
 }
 
-/** What a set keeps when the atoms that start in `from`..`to` are taken out. */
-const without = (from: number, to: number) => ({
-  filter: (a: number) => !(a >= from && a <= to),
-  filterFrom: from,
-  filterTo: to,
-});
+/** What a set keeps when the atoms that start in any of the spans are taken out, in one pass. */
+function withoutAny(spans: readonly Span[]) {
+  return {
+    filter: (a: number) => !spans.some((span) => a >= span.from && a <= span.to),
+    filterFrom: Math.min(...spans.map((span) => span.from)),
+    filterTo: Math.max(...spans.map((span) => span.to)),
+  };
+}
 
 /** The atoms after a change in the tables' text, as the layout's sets are patched: mapped, and built
  * again for the rows the change touches and the one before each (its last atom reaches into them). */
 function patchAtoms(value: RangeSet<StopAtom>, tr: Transaction, dirty: Dirty): RangeSet<StopAtom> {
   let atoms = value.map(tr.changes);
-  for (const span of dirty.gone) atoms = atoms.update(without(span.from - 1, span.to));
+  const cleared: Span[] = dirty.gone.map((span) => ({ from: span.from - 1, to: span.to }));
   // Taken out first, all of it, then built: see `patchLayout`.
   const wanted = new Map<DirtyTable, Row[]>();
   for (const dirtyTable of dirty.tables) {
     const { table, rows, clear } = dirtyTable;
     if (rows === null) {
-      atoms = atoms.update(without(clear.from - 1, clear.to));
+      cleared.push({ from: clear.from - 1, to: clear.to });
       continue;
     }
     const spans = new Map<Row, Span>();
@@ -166,15 +168,17 @@ function patchAtoms(value: RangeSet<StopAtom>, tr: Transaction, dirty: Dirty): R
     }
     for (const [row, span] of spans) {
       const from = row.index === 0 ? Math.min(span.from, clear.from - 1) : span.from;
-      atoms = atoms.update(without(from, Math.max(span.to, row.to)));
+      cleared.push({ from, to: Math.max(span.to, row.to) });
     }
     wanted.set(dirtyTable, [...spans.keys()]);
   }
+  if (cleared.length) atoms = atoms.update(withoutAny(cleared));
+  const added: ReturnType<typeof toAtoms> = [];
   for (const dirtyTable of dirty.tables) {
-    const { table } = dirtyTable;
     const rows = wanted.get(dirtyTable) ?? null;
-    atoms = atoms.update({ add: toAtoms(atomsOf(tr.state, table, rows)), sort: true });
+    added.push(...toAtoms(atomsOf(tr.state, dirtyTable.table, rows)));
   }
+  if (added.length) atoms = atoms.update({ add: added, sort: true });
   return atoms;
 }
 
@@ -184,9 +188,9 @@ const atomField = StateField.define<RangeSet<StopAtom>>({
     const tables = tr.state.field(tablesField, false);
     const mode = tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
     if (tr.startState.field(tablesField, false) === tables && !mode) return value;
-    if (mode || !tr.docChanged || tr.state.field(viewModeField, false) === 'raw') {
-      return stopAtoms(tr.state);
-    }
+    if (mode || tr.state.field(viewModeField, false) === 'raw') return stopAtoms(tr.state);
+    // A parse that went on, with no change to the text: the tables it read are built (#744).
+    if (!tr.docChanged) return patchAtoms(value, tr, dirtyOfParse(tr));
     if (!tables?.length && !tr.startState.field(tablesField, false)?.length) return value;
     const dirty = dirtyOf(tr);
     return dirty ? patchAtoms(value, tr, dirty) : stopAtoms(tr.state);
@@ -328,7 +332,7 @@ export function tableStops() {
 }
 
 /** Whether the selection is in a table's cells, as a view that draws tables shows them: the Paragraph
- * menu's block commands are not for text there. False in Raw, which draws none. */
+ * menu's block commands are not for text there. False in Plain, which draws none. */
 export function selectionInTable(state: EditorState): boolean {
   if (state.field(viewModeField, false) === 'raw') return false;
   const { head, anchor } = state.selection.main;
@@ -336,7 +340,7 @@ export function selectionInTable(state: EditorState): boolean {
 }
 
 /** Whether the head of the selection is in a cell: where a command that works from the caret (Insert
- * Row Below) has a row to work from, which `selectionInTable` is wider than. False in Raw. */
+ * Row Below) has a row to work from, which `selectionInTable` is wider than. False in Plain. */
 export function headInTable(state: EditorState): boolean {
   if (state.field(viewModeField, false) === 'raw') return false;
   return shownCellAt(state, state.selection.main.head) !== null;

@@ -140,7 +140,7 @@ export function insertRowAfter(view: EditorView, table: Table, row: Row): boolea
 }
 
 /** The rows the selection touches: a rectangle's rows, or the caret's row. Null outside a table, and
- * in Raw. */
+ * in Plain. */
 export function touchedRows(
   state: EditorState,
 ): { table: Table; first: number; last: number; rectangle: boolean } | null {
@@ -327,7 +327,7 @@ export function insertRowBelow(view: EditorView): boolean {
 // Columns: the same operations, on the columns the selection touches.
 
 /** The columns the selection touches: a rectangle's, or the caret's column; and the row the caret is
- * in. Null outside a table, and in Raw. */
+ * in. Null outside a table, and in Plain. */
 export function touchedCols(state: EditorState): {
   table: Table;
   first: number;

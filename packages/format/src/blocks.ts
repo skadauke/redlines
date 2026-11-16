@@ -46,9 +46,72 @@ export function markerEnd(text: string, from: number): number {
   return text.indexOf('-->', from) + 3;
 }
 
-/** Where the line that holds `position` starts. */
-export function lineStart(text: string, position: number): number {
-  return position === 0 ? 0 : text.lastIndexOf('\n', position - 1) + 1;
+/** How far back `lineStart` looks for a line break before it asks an index of them. */
+const NEAR = 256;
+
+/**
+ * The line breaks of one text, found once, for a reader that asks where a line starts for many
+ * positions of a very long line (the old text of a large deletion is one, its line breaks written as
+ * escapes): a search back from each costs the line's length.
+ */
+export class LineIndex {
+  private breaks: number[] | null = null;
+  readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+
+  /** Where the line that holds `position` starts. */
+  start(position: number): number {
+    if (!this.breaks) {
+      const breaks: number[] = [];
+      const { text } = this;
+      for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) breaks.push(at);
+      this.breaks = breaks;
+    }
+    const { breaks } = this;
+    let low = 0;
+    let high = breaks.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (breaks[middle]! < position) low = middle + 1;
+      else high = middle;
+    }
+    return low === 0 ? 0 : breaks[low - 1]! + 1;
+  }
+}
+
+/** Where the line that holds `position` starts (by `index` when the line is long). */
+export function lineStart(text: string, position: number, index?: LineIndex): number {
+  if (position === 0) return 0;
+  const near = Math.max(0, position - NEAR);
+  for (let at = position - 1; at >= near; at--) if (text.charCodeAt(at) === 10) return at + 1;
+  if (near === 0) return 0;
+  return index ? index.start(position) : text.lastIndexOf('\n', position - 1) + 1;
+}
+
+/** What may stand before a marker on its line, as a character (`CONTAINER_PREFIX`'s own). */
+const PREFIX_CHAR = /[ \t>\-*+0-9.)[\]xX]/;
+
+/**
+ * Whether the text from `start` to `from`, without its markers, can be a container prefix at all:
+ * false at the first character outside the markers that no prefix holds, which on a long line
+ * of text is the first, so that no marker on it reads the line before it again.
+ */
+function mayBePrefix(text: string, start: number, from: number): boolean {
+  for (let at = start; at < from;) {
+    if (text.startsWith('<!--', at)) {
+      const close = text.indexOf('-->', at + 4);
+      if (close !== -1 && close + 3 <= from) {
+        at = close + 3;
+        continue;
+      }
+    }
+    if (!PREFIX_CHAR.test(text[at]!)) return false;
+    at++;
+  }
+  return true;
 }
 
 /** Where the line after the one that holds `position` starts, past its line break (`\r\n` too), or
@@ -115,8 +178,9 @@ function isBlank(line: string): boolean {
  * the opener has no carrier: there is text after it on its line, or text before it other than
  * markers, or no block follows.
  */
-export function carrierEnd(text: string, from: number, to: number): number {
-  const start = lineStart(text, from);
+export function carrierEnd(text: string, from: number, to: number, index?: LineIndex): number {
+  const start = lineStart(text, from, index);
+  if (!mayBePrefix(text, start, from)) return to;
   // Markers may stand in front of the opener on its line: where the mark of one ends and another
   // starts a block, the closer of the first is in front of the opener of the second.
   const before = text.slice(start, from).replace(/<!--.*?-->/g, '');
