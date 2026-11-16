@@ -61,6 +61,9 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
       backdrop.append(sheet);
       container.append(backdrop);
       cancel.focus();
+      // The key that raised the sheet may still be down: its release must not answer it.
+      const opened = Date.now();
+      const settled = () => Date.now() - opened > 150;
 
       const done = (answer: UntrackedAnswer) => {
         if (answer === 'make' && check.checked) answers.skip(options.path());
@@ -69,8 +72,8 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
         options.restoreFocus();
         resolve(answer);
       };
-      cancel.addEventListener('click', () => done('cancel'));
-      make.addEventListener('click', () => done('make'));
+      cancel.addEventListener('click', () => settled() && done('cancel'));
+      make.addEventListener('click', () => settled() && done('make'));
       backdrop.addEventListener('keydown', (event) => {
         const focusable = [check, cancel, make];
         if (event.key === 'Escape') {

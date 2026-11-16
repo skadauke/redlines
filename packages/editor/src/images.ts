@@ -10,7 +10,8 @@ import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { ImageSpot } from './api.ts';
 import { freshImageEffect, freshImageField } from './preview/fresh.ts';
 import { rectOf } from './table/cells.ts';
-import { rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
+import { untrackedAskFacet } from './tracked/ask.ts';
+import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
 
 /** Why an image doesn't go where the caret is in code, which would show the link as it is. */
 export const IMAGE_IN_CODE = 'An image can’t go inside code.';
@@ -336,8 +337,13 @@ export function images(
   ) => {
     if (!files.length) return false;
     event.preventDefault();
-    // Raw while it is read-only says why for every paste and drop (`rawEditsRefused`).
-    if (rawIsReadOnly(view.state)) return true;
+    // Raw while edits are tracked takes no file: a file holds no text to ask about, so this says why
+    // (the text of a paste or a drop is the sheet's, or `rawEditsRefused`'s where nothing asks).
+    if (rawIsReadOnly(view.state)) {
+      // Where nothing asks, `rawEditsRefused` has said it.
+      if (view.state.facet(untrackedAskFacet)) notice?.(RAW_READ_ONLY);
+      return true;
+    }
     const spot = imageSpot(view, at, notice);
     if (spot) onImageFiles(files, spot, pasted);
     return true;

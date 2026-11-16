@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEditor, type Editor, type UntrackedAnswer, type UntrackedReason } from '../index.ts';
+import { undoSayingWhy } from '../history/guard.ts';
+import {
+  createEditor,
+  type Editor,
+  setViewModeEffect,
+  type UntrackedAnswer,
+  type UntrackedReason,
+} from '../index.ts';
 
 const open: Editor[] = [];
 afterEach(() => {
@@ -127,6 +134,16 @@ describe('the alert for an edit that no mark can hold', () => {
     answer('make');
     await tick();
     expect(editor.getDoc()).toBe(DOC.replace('words.', 'words.z'));
+  });
+
+  it('takes no step back in Raw while edits are tracked, with a host that asks', () => {
+    const { editor, asked } = load(DOC, 'redlines', []);
+    caret(editor, END);
+    type(editor, 'a');
+    editor.view.dispatch({ effects: setViewModeEffect.of('raw') });
+    expect(undoSayingWhy(editor.view)).toBe(true);
+    expect(editor.getDoc()).toContain('a');
+    expect(asked).toEqual([]);
   });
 
   describe('an input method', () => {

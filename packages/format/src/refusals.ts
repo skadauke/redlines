@@ -219,6 +219,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'the sheet itself: the title of the alert that offers to make the edit without tracking (format §3.13)',
   ],
   [
+    'packages/editor/src/images.ts',
+    'RAW_READ_ONLY',
+    'disable',
+    'an image file pasted or dropped in Raw while edits are tracked holds no text to ask about: it says why',
+  ],
+  [
     'packages/editor/src/tracked/typing.ts',
     'RAW_READ_ONLY',
     'alert',

@@ -28,6 +28,8 @@ test.describe('the alert for an edit that can’t be tracked @views', () => {
     expect(await j.text()).toBe(DOC);
 
     await j.type('X');
+    await expect(sheet).toBeVisible();
+    await j.page.waitForTimeout(200);
     await sheet.getByRole('button', { name: 'Make Edit' }).click();
     await expect(sheet).toBeHidden();
     expect(await j.text()).toBe(DOC.replace('Notes', 'NotesX'));

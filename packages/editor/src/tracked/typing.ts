@@ -755,6 +755,8 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
     // Markdown's own Enter and Backspace edit without looking at the read-only setting.
     if (!(tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start)) || answered) return tr;
     if (!start.facet(untrackedAskFacet)) return { effects: refusedEditEffect.of(RAW_READ_ONLY) };
+    // A correction the Mac made on its own is left out unsaid, as in front matter.
+    if (tr.isUserEvent(AUTOCORRECTION)) return {};
     // An input method's composition goes in as it is, and is asked about when it ends.
     if (isDeferred(tr)) return tr;
     const now = Date.now();

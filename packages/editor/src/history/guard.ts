@@ -124,7 +124,8 @@ export const redoDisabledReason = (state: EditorState): string | undefined =>
  */
 function sayingWhy(command: StateCommand, message: string): Command {
   return (view) => {
-    if (command(view)) return true;
+    // Raw while edits are tracked takes no step back, with or without a sheet that asks about typing.
+    if (!rawIsReadOnly(view.state) && command(view)) return true;
     const why = whyNot(view.state, message);
     if (!why) return false;
     view.dispatch({ effects: refusedEditEffect.of(why) });
