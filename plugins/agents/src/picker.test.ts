@@ -2,7 +2,7 @@
 import { parse } from '@redlines/format';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { attachPicker, pickerEntries } from './picker.ts';
+import { attachPicker, defaultFirst, pickerEntries } from './picker.ts';
 
 const doc = `Hello.
 
@@ -317,5 +317,14 @@ describe('attachPicker', () => {
     type(field, 'again @');
     expect(isOpen(box)).toBe(false);
     expect(field.hasAttribute('aria-activedescendant')).toBe(false);
+  });
+});
+
+describe('defaultFirst', () => {
+  it('puts the default agent first and keeps the order of the rest', () => {
+    const agents = [found('claude', 'Claude'), found('codex', 'Codex'), found('x', 'X')];
+    expect(defaultFirst(agents, 'x').map(({ id }) => id)).toEqual(['x', 'claude', 'codex']);
+    expect(defaultFirst(agents, null).map(({ id }) => id)).toEqual(['claude', 'codex', 'x']);
+    expect(defaultFirst(agents, 'gone').map(({ id }) => id)).toEqual(['claude', 'codex', 'x']);
   });
 });

@@ -45,6 +45,7 @@ import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
+export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -83,7 +84,13 @@ import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
-import { imageOpening, imageResolver, localImageAt, refreshImagesEffect } from './preview/image.ts';
+import {
+  imageOpening,
+  imageResolver,
+  imageSelection,
+  localImageAt,
+  refreshImagesEffect,
+} from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -126,7 +133,15 @@ export { followText } from './anchor.ts';
 /** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
 export const parsedAt = (state: EditorState, pos: number): boolean =>
   syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
-export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
+export {
+  agentOf,
+  followsText,
+  joinsNewestStep,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+} from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export {
@@ -204,6 +219,7 @@ export {
   type UntrackedAnswer,
   type UntrackedAsker,
   type UntrackedReason,
+  type UntrackedWords,
 } from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
@@ -300,8 +316,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
-    images(options.onImageFiles, options.onNotice),
+    images(options.onImageFiles, options.onNotice, options.projectImageLink),
     noticeFacet.of(options.onNotice),
+    options.onError
+      ? EditorView.exceptionSink.of((error) => {
+          console.error(error);
+          options.onError?.(error);
+        })
+      : [],
     options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,
@@ -318,6 +340,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    imageSelection(),
     undoHistory(),
     trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),

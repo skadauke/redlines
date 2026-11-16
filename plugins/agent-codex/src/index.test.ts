@@ -156,6 +156,16 @@ describe('codexArgs at This folder and my home folder', () => {
     expect(only.match(/"\/Users\/ada\/Documents"/g)).toBeNull();
   });
 
+  it('passes a listed model on, and leaves an unlisted one to Codex (#530)', () => {
+    const at = (model?: string) => {
+      const line = codexArgs({ ...wide, ...(model ? { model } : {}) }, endpoint, homebrew);
+      return line.indexOf('-m') < 0 ? null : line[line.indexOf('-m') + 1];
+    };
+    expect(at('gpt-5-codex')).toBe('gpt-5-codex');
+    expect(at('--oss')).toBeNull();
+    expect(at()).toBeNull();
+  });
+
   it('keeps every other door shut, as at This folder', () => {
     const line = codexArgs(wide, endpoint, homebrew);
     const folder = codexArgs(folderRequest, endpoint, homebrew);

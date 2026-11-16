@@ -55,6 +55,12 @@ A pill (a change's bar, a person's name, a count) is a small rounded rectangle o
 row, with icon buttons at a 28 px target. The only color in either is a person's author color, and
 the pen's red.
 
+The table's widgets follow it (`plugins/tables/src/grips.ts`): the + between rows and columns, the
+strips at the table's edge and the select-table square are one widget, on `--rl-card` with a 1 px
+`--rl-rule` border and a 6 px radius, `--rl-ink-2`, and under the pointer `--rl-pressed` and
+`--rl-ink`. A handle's pill is `--rl-rule` with a `--rl-ink-2` border, and `--rl-pressed` with an `--rl-ink`
+border under the pointer. A grip's menu is a menu as above (12 px radius, 32 px rows), and the row dragged is a card.
+
 ## Buttons
 
 An icon button is `--rl-ink-2` on no ground, `--rl-ink` and `--rl-rule` under the pointer and when

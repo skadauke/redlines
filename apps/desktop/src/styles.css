@@ -520,6 +520,7 @@ body {
   flex-direction: column;
   width: 0;
   overflow: hidden;
+  position: relative;
   background: var(--rl-tint);
   transition: width 180ms ease;
   -webkit-user-select: none;
@@ -527,7 +528,12 @@ body {
 }
 
 .rl-app[data-sidebar='open'] .rl-sidebar {
-  width: 240px;
+  width: var(--rl-sidebar-width, 240px);
+}
+
+/* While the edge is dragged the width follows the pointer, with no glide behind it. */
+.rl-app[data-sidebar-drag] .rl-sidebar {
+  transition: none;
 }
 
 /*
@@ -547,6 +553,30 @@ body {
   .rl-app[data-sidebar='open'] .rl-sidebar-head {
     height: 0;
   }
+}
+
+/*
+ * The edge a person drags to resize the sidebar (#680): a strip on its right side, with the
+ * resize cursor; a thin line shows under the pointer and while it has the keyboard's focus.
+ */
+.rl-sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.rl-sidebar-resize:hover,
+.rl-app[data-sidebar-drag] .rl-sidebar-resize {
+  box-shadow: inset -2px 0 0 var(--rl-ink-3);
+}
+
+.rl-sidebar-resize:focus-visible {
+  outline: 2px solid var(--rl-ink-3);
+  outline-offset: -2px;
 }
 
 .rl-sidebar-head {
@@ -569,7 +599,7 @@ body {
 
 .rl-sidebar-list {
   flex: 1;
-  width: 240px;
+  width: var(--rl-sidebar-width, 240px);
   margin: 0;
   padding: 0 8px 16px;
   overflow-y: auto;
@@ -832,6 +862,13 @@ body {
   }
 }
 
+/* A table's empty header cells show a placeholder on screen; the page doesn't print it. */
+@media print {
+  .rl-tc-fill::before {
+    content: none !important;
+  }
+}
+
 /*
  * Printing: the page alone, as the view shows it. The window's chrome goes, and the page flows over
  * as many sheets as the document needs, instead of scrolling inside the window.
@@ -881,8 +918,8 @@ body {
   html[data-rl-theme][data-rl-appearance] #editor {
     --rl-page: #ffffff;
     --rl-ink: #1d1d1f;
-    --rl-ink-2: #6e6e73;
-    --rl-ink-3: #a1a1a6;
+    --rl-ink-2: #6a6a6f;
+    --rl-ink-3: #828285;
     --rl-rule: #e5e5ea;
     --rl-tint: #f3f3f5;
     --rl-syntax: #c7c7cc;

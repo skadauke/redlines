@@ -28,6 +28,7 @@ import { installTitleHints } from '../ui/title-hints.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
+import { startsFilter } from './filter-key.ts';
 import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
@@ -152,10 +153,16 @@ const deps: PaneDeps = {
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
         id: provider.id,
-        name: provider.name,
+        // The card is the program's: what is shown of the agent in a document is its handle.
+        name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        ...(provider.models ? { models: provider.models } : {}),
         detect: (fresh?: boolean) => {
           if (fresh) detections.delete(provider.id);
-          const kept = detections.get(provider.id) ?? provider.detect();
+          const kept =
+            detections.get(provider.id) ??
+            (!isTauri && import.meta.env.DEV
+              ? import('./dev-detect.ts').then(({ devDetect }) => devDetect(provider.id))
+              : provider.detect());
           detections.set(provider.id, kept);
           // A look the person asked for may have found the agent changed under the documents too.
           if (fresh)
@@ -349,17 +356,9 @@ window.addEventListener('keydown', (event) => {
     leaveFilter();
     return;
   }
-  // A first character, typed where nothing takes it: not a shortcut, not a control's own key (Space
-  // presses a button), not a field's, and not while the filter is open.
-  if (!filter.hidden || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key.length !== 1 || event.key === ' ') return;
-  const target = event.target;
-  if (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.closest('input, textarea, select, button, a, [contenteditable], [role="button"]'))
-  )
-    return;
+  // A first letter or digit, from anywhere but a field that takes text (filter-key.ts), and not
+  // while the filter is open.
+  if (!filter.hidden || !startsFilter(event)) return;
   event.preventDefault();
   filter.hidden = false;
   filter.value = event.key;

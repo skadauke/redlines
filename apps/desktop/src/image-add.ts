@@ -41,6 +41,11 @@ const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   'tif',
 ]);
 
+/** Whether a file is an image the preview shows, by its name. */
+export function isImageName(name: string): boolean {
+  return IMAGE_EXTENSIONS.has(extension(name));
+}
+
 /**
  * The extension an image file is saved with: by its type, which a pasted image always has, and else
  * by its name; none for a file that isn't an image the preview shows.
