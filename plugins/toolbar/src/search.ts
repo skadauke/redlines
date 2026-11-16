@@ -34,17 +34,24 @@ const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className: strin
 };
 
 /** A control as it is drawn in a line. */
-function drawControl(control: Control, redraw: () => void): HTMLElement {
+function drawControl(
+  control: Control,
+  label: string,
+  redraw: () => void,
+  onDone: () => void,
+): HTMLElement {
   if (control.kind === 'switch') {
     const track = element('span', 'rl-toolbar-switch');
     track.setAttribute('role', 'switch');
     track.setAttribute('aria-checked', String(control.get()));
+    track.setAttribute('aria-label', label);
     track.append(element('span', 'rl-toolbar-knob'));
     return track;
   }
   if (control.kind === 'choice') {
     const group = element('span', 'rl-toolbar-segments');
     group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', label);
     const current = control.get();
     for (const option of control.options) {
       const segment = element('button', 'rl-toolbar-segment');
@@ -72,6 +79,9 @@ function drawControl(control: Control, redraw: () => void): HTMLElement {
   range.step = String(control.step);
   range.value = String(control.get());
   range.tabIndex = -1;
+  range.setAttribute('aria-label', label);
+  // The keyboard goes back to the search box when the pointer lets go.
+  range.addEventListener('pointerup', () => onDone());
   const value = element('span', 'rl-toolbar-value');
   const show = () => (value.textContent = (control.format ?? String)(control.get()));
   show();
@@ -118,7 +128,14 @@ export function drawSearch(initial: string, deps: SearchDeps): Search {
     name.textContent = entry.name;
     const state = element('span', 'rl-toolbar-result-state');
     if (entry.control) {
-      state.append(drawControl(entry.control, () => draw(false)));
+      state.append(
+        drawControl(
+          entry.control,
+          entry.name,
+          () => draw(false),
+          () => input.focus(),
+        ),
+      );
     }
     const keys = element('span', 'rl-toolbar-keys rl-toolbar-result-keys');
     keys.textContent = entry.keys ?? '';
@@ -128,8 +145,9 @@ export function drawSearch(initial: string, deps: SearchDeps): Search {
       if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
     });
     line.addEventListener('click', () => activate(entry));
-    line.addEventListener('pointermove', () => {
-      if (active === index) return;
+    // Only a pointer that moved chooses a line: lines drawn under a resting one don't.
+    line.addEventListener('mousemove', (event) => {
+      if (active === index || (!event.movementX && !event.movementY)) return;
       active = index;
       mark();
     });
@@ -158,6 +176,7 @@ export function drawSearch(initial: string, deps: SearchDeps): Search {
       none.textContent = 'No commands or settings match.';
       list.append(none);
     }
+    if (shown.length === 0) input.removeAttribute('aria-activedescendant');
     mark();
   }
 
@@ -211,6 +230,8 @@ export function drawSearch(initial: string, deps: SearchDeps): Search {
         }
         break;
       case 'Enter': {
+        // A held Return would flip a switch over and over.
+        if (event.repeat) break;
         const entry = shown[active];
         if (entry) activate(entry);
         break;

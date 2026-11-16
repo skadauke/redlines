@@ -1319,6 +1319,27 @@ describe('the palette in the toolbar', () => {
     expect(searchBox()).not.toBeNull();
   });
 
+  it('returns from a control to the search box on Esc, and only then gives the bar back', () => {
+    const { editor, toolbar } = mount('Hello', {
+      appCommands: () => [
+        {
+          id: 'size',
+          title: 'Text Size',
+          control: { kind: 'slider', min: 80, max: 160, step: 10, get: () => 100, set: () => {} },
+        },
+      ],
+    });
+    editor.commands.run('toolbar.show');
+    key(tops()[0]!, 't');
+    const range = document.querySelector<HTMLInputElement>('.rl-toolbar-range')!;
+    range.focus();
+    key(range, 'Escape');
+    expect(document.activeElement).toBe(searchBox());
+    expect(toolbar.isOpen()).toBe(true);
+    key(searchBox()!, 'Escape');
+    expect(searchBox()).toBeNull();
+  });
+
   it('ends with an Ask line for what was typed, when the host can ask', () => {
     const asked = vi.fn();
     const { editor } = mount('Hello', { askAbout: asked }, COMMANDS_FOR_SEARCH);

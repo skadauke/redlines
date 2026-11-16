@@ -255,7 +255,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   const choose = (): void => {
     drawn?.openMenu(null);
     // A docked toolbar stays, and has the bar back for the next command.
-    stopSearch(false);
+    if (how === 'docked') stopSearch(false);
     // A docked toolbar stays: the next command may be one more.
     if (how !== 'docked') close();
     view.focus();
@@ -341,7 +341,9 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     if (searching) {
       event.preventDefault();
       event.stopPropagation();
-      stopSearch(true);
+      // From a control (a slider the pointer used), Esc returns to the search box first.
+      if (doc.activeElement !== searching.input) searching.input.focus();
+      else stopSearch(true);
       return;
     }
     // A menu that is open goes first, with the keyboard on its button.
@@ -498,7 +500,11 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   }
 
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
-  panel.addEventListener('mousedown', (event) => event.preventDefault());
+  // (A slider in the palette takes the press, which a drag needs.)
+  panel.addEventListener('mousedown', (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.type === 'range') return;
+    event.preventDefault();
+  });
   // The keys in the toolbar: the arrows move among the items, Home and End to the ends, and Tab and
   // Esc put it away. Return and Space press the item, as a button does.
   panel.addEventListener('keydown', (event) => {
