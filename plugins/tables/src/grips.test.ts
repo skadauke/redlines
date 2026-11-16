@@ -713,8 +713,8 @@ describe('the widgets share the look of the app (#672)', () => {
     const { GRIPS_STYLE } = await import('./grips.ts');
     expect(GRIPS_STYLE).not.toContain('--rl-page');
     expect(GRIPS_STYLE).not.toMatch(/box-shadow:\s*0 /);
-    expect(GRIPS_STYLE).toContain(
-      '.rl-plus, .rl-col-plus, .rl-edge-add, .rl-table-select {\n  cursor: pointer;',
+    expect(GRIPS_STYLE).toMatch(
+      /\.rl-plus, \.rl-col-plus, \.rl-edge-add, \.rl-table-select \{\s*cursor: pointer;/,
     );
   });
 });

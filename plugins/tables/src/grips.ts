@@ -112,12 +112,12 @@ export const GRIPS_STYLE = `
 .rl-grip { width: ${GRIP_REACH}px; height: ${GRIP_SPAN}px; }
 .rl-col-grip { width: ${GRIP_SPAN}px; height: ${GRIP_REACH}px; }
 .rl-grip::before, .rl-col-grip::before {
-  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-3);
+  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-2);
   background: var(--rl-rule); transition: width 0.1s, height 0.1s, background-color 0.1s;
 }
 .rl-grip::before { width: 5px; height: 16px; }
 .rl-col-grip::before { width: 16px; height: 5px; }
-.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-pressed); border-color: var(--rl-ink-2); }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-pressed); border-color: var(--rl-ink); }
 .rl-grip:hover::before { width: 8px; height: 22px; }
 .rl-col-grip:hover::before { width: 22px; height: 8px; }
 .rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
