@@ -140,6 +140,29 @@ test.describe('the simple look @views', () => {
     await check('after a click past the end of the last line');
   });
 
+  test('a click on an insertion, or on a bar, opens the change’s card with Accept and Reject (#664)', async ({
+    start,
+  }) => {
+    const j = await open(start);
+    // The insertion's colored text.
+    await j.page.locator('.rl-ins-plain').first().click();
+    const card = j.page.locator('.rl-card');
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Accept' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Reject' })).toBeVisible();
+    await j.shot('simple-card-from-text');
+    expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
+      'simple',
+    );
+    // A change bar: the card of the change on its line, and the look stays.
+    await j.page.keyboard.press('Escape');
+    await expect(card).toHaveCount(0);
+    const at = await j.page.locator('.rl-bar-seg').first().boundingBox();
+    await j.page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
+    await expect(card).toBeVisible();
+    await j.shot('simple-card-from-bar');
+  });
+
   test('in dark, the insertion is readable', async ({ start }) => {
     const j = await open(start, 'dark');
     await j.shot('simple-dark');
