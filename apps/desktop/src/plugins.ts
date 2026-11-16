@@ -21,6 +21,8 @@ export interface ActivateOptions {
   author?: PluginContext['author'];
   /** Shows a short message that does not interrupt; defaults to the console. */
   notice?: (message: string) => void;
+  /** Shows a card that goes by itself, with one action such as Undo; plugins do without it if absent. */
+  toast?: PluginContext['toast'];
   /**
    * The store of document data for a plugin (`DocumentData.forPlugin`), or none for one whose
    * manifest doesn't ask for `document:data`. Each plugin gets its own.
@@ -58,7 +60,16 @@ export function activatePlugins(
     try {
       const documentData = options.documentData?.(plugin.manifest);
       const own: Host = documentData ? { ...shared, documentData } : shared;
-      removals.push({ id, remove: plugin.activate({ editor, host: own, author, notice }) });
+      removals.push({
+        id,
+        remove: plugin.activate({
+          editor,
+          host: own,
+          author,
+          notice,
+          ...(options.toast ? { toast: options.toast } : {}),
+        }),
+      });
     } catch (error) {
       console.error(`Plugin ${id} could not start`, error);
     }

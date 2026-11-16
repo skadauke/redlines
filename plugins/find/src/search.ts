@@ -1,51 +1,177 @@
 // What find knows: the query, and where it matches in the text a reader sees. The document holds
 // markers and a ledger that a reader never sees, so the search runs over the newest view (format
 // §8) and each match is mapped back to the document with `PositionMap.toSource`. Matches are
-// recomputed whenever the document, the query or the bar changes. Replacing goes through the same
-// input path as typing, so Track Changes turns it into substitutions (or refuses it inside code).
+// recomputed whenever the document, the query, the options or the bar changes. Replacing goes
+// through the same input path as typing, so Track Changes turns it into substitutions (or refuses
+// it inside code). Replace All is one transaction (one step to undo) in which every match is a
+// change of its own, so each becomes its own tracked change, as if replaced by hand.
 
 import { isolateHistory } from '@codemirror/commands';
 import {
   EditorSelection,
   type EditorState,
+  Facet,
   StateEffect,
   StateField,
   type TransactionSpec,
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { newestView } from '@redlines/format';
+import { joinsNewestStep, trackingField } from '@redlines/editor';
+import { newestView, parse } from '@redlines/format';
 
 /** A match, as positions in the document (CodeMirror's), which may span hidden markers. */
 export interface Match {
   from: number;
   to: number;
+  /** The groups of a regular expression's match, for `$1` in the replacement: whole match first. */
+  groups?: readonly (string | undefined)[];
+  /** The named groups of a regular expression's match, for `$<name>`. */
+  named?: Readonly<Record<string, string | undefined>>;
 }
 
-export interface FindState {
+/** The ways a search is narrowed, besides its text. */
+export interface FindOptions {
+  matchCase: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+}
+
+export interface FindState extends FindOptions {
   /** Whether the find bar is open: while it is closed, nothing is found or drawn. */
   open: boolean;
   /** Whether the bar shows the replace row. */
   replace: boolean;
   query: string;
+  /** The part of the document Find is limited to (Find in Selection), or null for all of it. */
+  scope: Match | null;
+  /** Whether Track Changes is on: then text in a tracked change is not matched. */
+  tracking: boolean;
+  /** Whether the query is a regular expression that does not compile. */
+  invalid: boolean;
   matches: readonly Match[];
   decorations: DecorationSet;
 }
 
-/** Changes the bar's state: any of these. */
-export const setFind = StateEffect.define<Partial<Pick<FindState, 'open' | 'replace' | 'query'>>>();
+/**
+ * Called whenever a match becomes the current one (it is selected: by stepping, by replacing or by
+ * typing a query), before the editor scrolls to it. A host that hides text, such as a closed fold,
+ * opens it here so that the match can be seen. Add a handler with `currentMatchHandlers.of(fn)`;
+ * `createFind`'s `onCurrentMatch` option does the same.
+ */
+export const currentMatchHandlers = Facet.define<(match: Match) => void>();
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Changes the bar's state: any of these. A `scope` of null turns Find in Selection off. */
+export const setFind =
+  StateEffect.define<
+    Partial<Pick<FindState, 'open' | 'replace' | 'query' | 'scope' | keyof FindOptions>>
+  >();
+
+export const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const plain: FindOptions = { matchCase: false, wholeWord: false, regex: false };
+
+/** Matches that are made at most: a search with more is cut off. */
+export const MAX_MATCHES = 10_000;
+/** A regular expression is run over no more text than this (characters a reader sees). */
+const MAX_REGEX_TEXT = 2_000_000;
+/** A quantified group holding a quantifier, `(a+)+`: the shape that backtracks without end. */
+const RUNAWAY = /\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]/;
+
+/**
+ * The expression a query stands for, or null when it is a regular expression that is no good, or
+ * of a shape that can hang the page (a quantified group holding a quantifier). Written with the
+ * `u` flag, which is exact about Unicode; a pattern that only a plain expression accepts, such as
+ * `\-`, is taken without it. `^` and `$` match at the ends of each line.
+ */
+export function expressionOf(query: string, options: FindOptions = plain): RegExp | null {
+  if (options.regex && RUNAWAY.test(query)) return null;
+  const flags = (options.matchCase ? 'g' : 'gi') + 'm';
+  for (const unicode of [true, false]) {
+    const word = unicode ? '[\\p{L}\\p{N}_]' : '[A-Za-z0-9_]';
+    let source = options.regex ? query : escapeRegExp(query);
+    if (options.wholeWord) source = `(?<!${word})(?:${source})(?!${word})`;
+    try {
+      return new RegExp(source, unicode ? `${flags}u` : flags);
+    } catch {
+      // Try again without `u`.
+    }
+  }
+  return null;
+}
+
+/** What a tracked insertion, replacement or format change holds: no match is made there. */
+function trackedRanges(doc: string): { from: number; to: number }[] {
+  return parse(doc).marks.flatMap((mark) =>
+    mark.kind === 'ins' || mark.kind === 'sub' || mark.kind === 'fmt'
+      ? mark.segments.map((s) => ({ from: s.open.from, to: s.close?.to ?? s.content.to }))
+      : [],
+  );
+}
+
+export interface SearchOptions extends Partial<FindOptions> {
+  /** Only matches inside this range of the document. */
+  scope?: { from: number; to: number } | null;
+  /** Leave out matches that touch text in a tracked change. */
+  skipTracked?: boolean;
+}
+
+/** The matches of `query` in the text a reader sees, in document order; `invalid` for a bad one. */
+export function searchDoc(
+  doc: string,
+  query: string,
+  options: SearchOptions = {},
+): { matches: Match[]; invalid: boolean } {
+  if (!query) return { matches: [], invalid: false };
+  const expression = expressionOf(query, { ...plain, ...options });
+  if (!expression) return { matches: [], invalid: true };
+  const { text, map } = newestView(doc);
+  if (options.regex && text.length > MAX_REGEX_TEXT) return { matches: [], invalid: true };
+  const tracked = options.skipTracked ? trackedRanges(doc) : [];
+  const { scope } = options;
+  const matches: Match[] = [];
+  for (const found of text.matchAll(expression)) {
+    if (!found[0]) continue;
+    // From after the markers that sit before the match, to before those after it.
+    const from = map.toSource(found.index, 1);
+    const to = map.toSource(found.index + found[0].length, -1);
+    if (scope && (from < scope.from || to > scope.to)) continue;
+    if (tracked.some((range) => from < range.to && to > range.from)) continue;
+    matches.push({
+      from,
+      to,
+      ...(options.regex
+        ? { groups: [...found], ...(found.groups ? { named: found.groups } : {}) }
+        : {}),
+    });
+    if (matches.length >= MAX_MATCHES) break;
+  }
+  return { matches, invalid: false };
+}
 
 /** The matches of `query` in the text a reader sees, without regard to case, in document order. */
 export function findMatches(doc: string, query: string): Match[] {
-  if (!query) return [];
-  const { text, map } = newestView(doc);
-  const found = text.matchAll(new RegExp(escapeRegExp(query), 'giu'));
-  return [...found].map((match) => ({
-    // From after the markers that sit before the match, to before those after it.
-    from: map.toSource(match.index, 1),
-    to: map.toSource(match.index + match[0].length, -1),
-  }));
+  return searchDoc(doc, query).matches;
+}
+
+/**
+ * The replacement for a match. With a regular expression it reads `$&`, `$$`, `$1` to `$99` and
+ * `$<name>` as JavaScript's replace does: a group that took no part is empty, and a number with no
+ * such group stays as written (`$10` with nine groups is `$1` and a 0).
+ */
+export function replacementFor(match: Match, text: string): string {
+  const { groups, named } = match;
+  if (!groups) return text;
+  const count = groups.length - 1;
+  return text.replace(/\$(\$|&|\d{1,2}|<[^>]*>)/g, (whole, what: string) => {
+    if (what === '$') return '$';
+    if (what === '&') return groups[0] ?? '';
+    if (what.startsWith('<')) return named ? (named[what.slice(1, -1)] ?? '') : whole;
+    const two = Number(what);
+    if (what.length === 2 && two >= 1 && two <= count) return groups[two] ?? '';
+    const one = Number(what[0]);
+    if (one >= 1 && one <= count) return (groups[one] ?? '') + what.slice(1);
+    return whole;
+  });
 }
 
 /** The index of the match the selection covers exactly, or -1. */
@@ -56,20 +182,29 @@ export function currentIndex(state: EditorState, matches: readonly Match[]): num
 
 const matchMark = Decoration.mark({ class: 'rl-find-match' });
 const currentMark = Decoration.mark({ class: 'rl-find-match rl-find-current' });
+const scopeMark = Decoration.mark({ class: 'rl-find-scope' });
 
-function decorate(state: EditorState, matches: readonly Match[]): DecorationSet {
+function decorate(
+  state: EditorState,
+  matches: readonly Match[],
+  scope: Match | null,
+): DecorationSet {
   const current = currentIndex(state, matches);
-  return Decoration.set(
-    matches.map((match, i) =>
-      (i === current ? currentMark : matchMark).range(match.from, match.to),
-    ),
+  const marks = matches.map((match, i) =>
+    (i === current ? currentMark : matchMark).range(match.from, match.to),
   );
+  if (scope && scope.from < scope.to) marks.push(scopeMark.range(scope.from, scope.to));
+  return Decoration.set(marks, true);
 }
 
 const closed: FindState = {
   open: false,
   replace: false,
   query: '',
+  ...plain,
+  scope: null,
+  tracking: false,
+  invalid: false,
   matches: [],
   decorations: Decoration.none,
 };
@@ -77,21 +212,62 @@ const closed: FindState = {
 export const findField = StateField.define<FindState>({
   create: () => closed,
   update(value, tr) {
-    let { open, replace, query } = value;
-    let changed = tr.docChanged;
+    let { open, replace, query, matchCase, wholeWord, regex, scope } = value;
+    const tracking = tr.state.field(trackingField, false) ?? false;
+    let changed = tr.docChanged || tracking !== value.tracking;
+    if (scope && tr.docChanged) {
+      scope = { from: tr.changes.mapPos(scope.from, -1), to: tr.changes.mapPos(scope.to, 1) };
+    }
     for (const effect of tr.effects) {
       if (!effect.is(setFind)) continue;
-      changed ||= effect.value.open !== undefined || effect.value.query !== undefined;
-      open = effect.value.open ?? open;
-      replace = effect.value.replace ?? replace;
-      query = effect.value.query ?? query;
+      const set = effect.value;
+      changed ||=
+        set.open !== undefined ||
+        set.query !== undefined ||
+        set.matchCase !== undefined ||
+        set.wholeWord !== undefined ||
+        set.regex !== undefined ||
+        set.scope !== undefined;
+      open = set.open ?? open;
+      replace = set.replace ?? replace;
+      query = set.query ?? query;
+      matchCase = set.matchCase ?? matchCase;
+      wholeWord = set.wholeWord ?? wholeWord;
+      regex = set.regex ?? regex;
+      if (set.scope !== undefined) scope = set.scope;
     }
     if (!open) {
-      return value.open || query !== value.query ? { ...closed, query } : value;
+      const same = !value.open && query === value.query;
+      return same &&
+        matchCase === value.matchCase &&
+        wholeWord === value.wholeWord &&
+        regex === value.regex
+        ? value
+        : { ...closed, query, matchCase, wholeWord, regex };
     }
     if (!changed && !tr.selection && replace === value.replace) return value;
-    const matches = changed ? findMatches(tr.newDoc.toString(), query) : value.matches;
-    return { open, replace, query, matches, decorations: decorate(tr.state, matches) };
+    const { matches, invalid } = changed
+      ? searchDoc(tr.newDoc.toString(), query, {
+          matchCase,
+          wholeWord,
+          regex,
+          scope,
+          skipTracked: tracking,
+        })
+      : { matches: value.matches, invalid: value.invalid };
+    return {
+      open,
+      replace,
+      query,
+      matchCase,
+      wholeWord,
+      regex,
+      scope,
+      tracking,
+      invalid,
+      matches,
+      decorations: decorate(tr.state, matches, scope),
+    };
   },
   provide: (field) => EditorView.decorations.from(field, (state) => state.decorations),
 });
@@ -115,6 +291,7 @@ export function neighbor(
 
 /** Selects a match and scrolls it into view. */
 export function select(view: EditorView, match: Match): void {
+  for (const handler of view.state.facet(currentMatchHandlers)) handler(match);
   view.dispatch({
     selection: EditorSelection.range(match.from, match.to),
     effects: EditorView.scrollIntoView(EditorSelection.range(match.from, match.to), {
@@ -131,6 +308,17 @@ export function step(view: EditorView, dir: 1 | -1): boolean {
   return !!match;
 }
 
+/**
+ * Selects the first match that starts at `pos` or after it, round to the first: what typing in the
+ * find box does, so that the match nearest the caret is the current one. False when none.
+ */
+export function selectFrom(view: EditorView, pos: number): boolean {
+  const { matches } = findState(view.state);
+  const match = matches.find((m) => m.from >= pos) ?? matches[0];
+  if (match) select(view, match);
+  return !!match;
+}
+
 /** The text a reader sees in the selection, up to its first line break. */
 export function selectedText(state: EditorState): string {
   const { from, to } = state.selection.main;
@@ -138,12 +326,40 @@ export function selectedText(state: EditorState): string {
   return text.slice(map.fromSource(from), map.fromSource(to)).split('\n')[0] ?? '';
 }
 
+/** A selection this long (in characters a reader sees) limits Find to itself. */
+export const SCOPE_LENGTH = 80;
+
+/**
+ * What a selection means for Find. A selection limits Find to itself (`scope`) when it is more than
+ * one block or holds a line break, is 80 characters or more, or is a whole block; a shorter phrase
+ * is the search term (`query`) instead. An empty selection means nothing.
+ */
+export function seedOf(state: EditorState): { query?: string; scope?: Match } | null {
+  const { from, to, empty } = state.selection.main;
+  if (empty) return null;
+  const { text, map } = newestView(state.doc.toString());
+  const a = map.fromSource(from);
+  const b = map.fromSource(to);
+  const picked = text.slice(a, b);
+  if (!picked.trim()) return null;
+  const whole = (a === 0 || text[a - 1] === '\n') && (b === text.length || text[b] === '\n');
+  if (picked.includes('\n') || picked.length >= SCOPE_LENGTH || whole) {
+    return { scope: { from, to } };
+  }
+  return { query: picked };
+}
+
+/** One replacement: the match and the text that goes in its place. */
 const replacing = (
   matches: readonly Match[],
   text: string,
   userEvent = 'input.replace',
 ): TransactionSpec => ({
-  changes: matches.map(({ from, to }) => ({ from, to, insert: text })),
+  changes: matches.map((match) => ({
+    from: match.from,
+    to: match.to,
+    insert: replacementFor(match, text),
+  })),
   // Typing, to Track Changes, and a step of its own to undo. Replace All has its own kind, so that
   // the Edit menu can tell it from Replace.
   userEvent,
@@ -182,9 +398,10 @@ export function replaceCurrent(view: EditorView, text: string): boolean {
 }
 
 /**
- * Replaces every match in one step to undo. Matches the editor would refuse are left alone, the
- * first of them with its reason through `onNotice`. Returns how many were replaced and how many
- * left.
+ * Replaces every match in one step to undo, each as a change of its own: with Track Changes on,
+ * each is its own tracked change, as if replaced by hand. Matches the editor would refuse are left
+ * alone, the first of them with its reason through `onNotice`. Returns how many were replaced and
+ * how many left.
  */
 export function replaceAll(view: EditorView, text: string): { replaced: number; left: number } {
   const { matches } = findState(view.state);
@@ -192,6 +409,24 @@ export function replaceAll(view: EditorView, text: string): { replaced: number; 
   const refused = matches.find((match) => !ok.includes(match));
   // Dispatched for the reason it gives, as a replacement one at a time would.
   if (refused) view.dispatch(replacing([refused], text));
-  if (ok.length) view.dispatch(replacing(ok, text, 'input.replace.all'));
+  if (ok.length) {
+    // One transaction for each match, last to first so that the places of the earlier ones hold,
+    // and one step to undo. A single transaction would join matches that touch (`catcat`) into
+    // one change; replaced by hand, each is its own.
+    let state = view.state;
+    const steps = [...ok].reverse().map((match, i, all) => {
+      const spec = replacing([match], text, 'input.replace.all');
+      const tr = state.update({
+        ...spec,
+        annotations: [
+          i === 0 ? isolateHistory.of('before') : joinsNewestStep.of(true),
+          ...(i === all.length - 1 ? [isolateHistory.of('after')] : []),
+        ],
+      });
+      state = tr.state;
+      return tr;
+    });
+    view.dispatch(steps);
+  }
   return { replaced: ok.length, left: matches.length - ok.length };
 }

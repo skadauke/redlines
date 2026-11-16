@@ -21,6 +21,8 @@ const TOP = 100;
 let tableLeft = LEFT;
 /** Where a second table in the document is drawn (its top), when a test has one. */
 let secondTop: number | null = null;
+/** Where the paragraph after the table is drawn (its top), when a test has it near. */
+let nextTop: number | null = null;
 
 const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
   left,
@@ -42,6 +44,9 @@ beforeEach(() => {
     if (this.classList.contains('rl-tbl')) {
       const second = secondTop !== null && this !== document.querySelector('.rl-tbl');
       return rect(tableLeft, second ? (secondTop ?? TOP) : TOP, 400, 160);
+    }
+    if (nextTop !== null && this.classList.contains('cm-line') && !this.closest('.rl-trow')) {
+      return rect(LEFT, nextTop, 400, 24);
     }
     const line = this.closest('.rl-trow');
     // The cells are 200 px wide, side by side: the columns' boxes.
@@ -79,6 +84,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   tableLeft = LEFT;
   secondTop = null;
+  nextTop = null;
 });
 
 const layer = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-grips');
@@ -562,6 +568,23 @@ describe('edge widgets', () => {
     expect(parseFloat(widget?.style.width ?? '')).toBe(400);
   });
 
+  it('makes Add row shorter where the next paragraph is near, so it never covers its first line (#631)', () => {
+    nextTop = BOTTOM + 14;
+    const editor = mount();
+    move(editor, LEFT + 100, BOTTOM - 10);
+    const widget = q(editor, '.rl-edge-row');
+    expect(widget).not.toBeNull();
+    const height = parseFloat(widget?.style.height ?? '');
+    // 4 px under the table, ending 2 px above the paragraph.
+    expect(BOTTOM + 4 + height).toBeLessThanOrEqual(BOTTOM + 14);
+    expect(height).toBeGreaterThanOrEqual(8);
+    // With the paragraph far, the strip is its full 20 px.
+    nextTop = BOTTOM + 80;
+    move(editor, LEFT + 300, BOTTOM - 10);
+    move(editor, LEFT + 100, BOTTOM - 10);
+    expect(parseFloat(q(editor, '.rl-edge-row')?.style.height ?? '')).toBe(20);
+  });
+
   it('adds a column at the end, and a row at the end, on a click', () => {
     const editor = mount();
     move(editor, LEFT + 300, TOP + 60);
@@ -706,4 +729,15 @@ describe('whole rows through the grip when the last selected row is shorter (#45
       expect(doc).toContain('| 31 | 32 | 33 |');
     });
   }
+});
+
+describe('the widgets share the look of the app (#672)', () => {
+  it('draws them on the card ground with the theme shadow, and the + strips and square in one rule', async () => {
+    const { GRIPS_STYLE } = await import('./grips.ts');
+    expect(GRIPS_STYLE).not.toContain('--rl-page');
+    expect(GRIPS_STYLE).not.toMatch(/box-shadow:\s*0 /);
+    expect(GRIPS_STYLE).toMatch(
+      /\.rl-plus, \.rl-col-plus, \.rl-edge-add, \.rl-table-select \{\s*cursor: pointer;/,
+    );
+  });
 });

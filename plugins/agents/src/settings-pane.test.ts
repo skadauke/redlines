@@ -25,7 +25,12 @@ function setup(
   start: Partial<AgentsPaneSettings> = {},
   skills: Record<string, PaneSkill> = {},
 ) {
-  let settings: AgentsPaneSettings = { agentScope: 'folder', consent: {}, ...start };
+  let settings: AgentsPaneSettings = {
+    agentScope: 'folder',
+    consent: {},
+    agentHandles: {},
+    ...start,
+  };
   const detect = vi.fn<(id: string, fresh?: boolean) => Promise<AgentState>>((id) => {
     const state = states[id];
     if (state instanceof Error) return Promise.reject(state);
@@ -1001,7 +1006,14 @@ describe('the Agents pane', () => {
     renderAgentsPane(container, deps);
     expect(
       [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-    ).toEqual(['Claude', 'Codex', 'What agents may read', 'Remembered answers', 'Agent logs']);
+    ).toEqual([
+      'Default agent',
+      'Claude',
+      'Codex',
+      'What agents may read',
+      'Remembered answers',
+      'Agent logs',
+    ]);
   });
 
   describe('other agents', () => {
@@ -1059,7 +1071,14 @@ describe('the Agents pane', () => {
       await settle();
       expect(
         [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-      ).toEqual(['Claude', 'Codex', 'Other agents', 'What agents may read', 'Agent logs']);
+      ).toEqual([
+        'Default agent',
+        'Claude',
+        'Codex',
+        'Other agents',
+        'What agents may read',
+        'Agent logs',
+      ]);
       const text = row(container, 'Other agents').textContent;
       expect(text).toContain('Gemini');
       expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');
@@ -1568,5 +1587,113 @@ describe('the Redlines skill', () => {
     tidy();
     await settle();
     expect(words(container)).not.toMatch(/skill/i);
+  });
+
+  describe('the handle', () => {
+    const field = (container: HTMLElement, id: string) => {
+      const root = container.querySelector<HTMLElement>(`[data-handle-of="${id}"]`)!;
+      return {
+        input: root.querySelector('input')!,
+        text: () => root.textContent ?? '',
+      };
+    };
+    const type = async (input: HTMLInputElement, value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new Event('change'));
+      await settle();
+    };
+    const ready: AgentState = { found: true, signedIn: true };
+
+    it('starts as claude and codex, shown as Claude and Codex', async () => {
+      const { container, deps } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(field(container, 'claude').input.value).toBe('claude');
+      expect(field(container, 'claude').text()).toContain('Shown as Claude');
+      expect(field(container, 'codex').input.value).toBe('codex');
+    });
+
+    it('keeps a new handle, and shows what it is shown as', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'ada');
+      expect(now().agentHandles).toEqual({ claude: 'ada' });
+      expect(field(container, 'claude').text()).toContain('Shown as Ada');
+    });
+
+    it('refuses a handle another agent has, says so, and puts the old one back', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'codex');
+      expect(now().agentHandles).toEqual({});
+      expect(field(container, 'claude').input.value).toBe('claude');
+      expect(field(container, 'claude').text()).toContain('Another agent is @codex.');
+    });
+
+    it('keeps nothing for a handle put back to the default', async () => {
+      const { container, deps, now } = setup(
+        { claude: ready, codex: ready },
+        { agentHandles: { claude: 'ada' } },
+      );
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'claude');
+      expect(now().agentHandles).toEqual({});
+    });
+
+    it('refuses what is not a handle', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'codex').input, 'Bo Peep');
+      expect(now().agentHandles).toEqual({});
+      expect(field(container, 'codex').input.value).toBe('codex');
+      expect(field(container, 'codex').text()).toMatch(/lowercase letters, digits and hyphens/);
+    });
+  });
+});
+
+describe('the Model field (#530)', () => {
+  const ok: AgentState = { found: true, signedIn: true, version: '1', path: '/bin/x' };
+  const models = [
+    { id: 'opus', name: 'Opus' },
+    { id: 'sonnet', name: 'Sonnet' },
+  ];
+  const field = (container: HTMLElement) =>
+    container.querySelector<HTMLSelectElement>('.rl-pref-agent-model select');
+
+  it('has none for an agent that lists no models', async () => {
+    const { container, deps } = setup({ claude: ok, codex: ok });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(field(container)).toBeNull();
+  });
+
+  it('lists Default and the models, shows the one kept, and keeps a new choice', async () => {
+    const { container, deps, now } = setup(
+      { claude: ok, codex: ok },
+      { agentModels: { claude: 'sonnet' } },
+    );
+    deps.agents = deps.agents.map((agent) =>
+      agent.id === 'claude' ? { ...agent, models } : agent,
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const select = field(container)!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Default',
+      'Opus',
+      'Sonnet',
+    ]);
+    expect(select.value).toBe('sonnet');
+    select.value = 'opus';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({ claude: 'opus' });
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({});
   });
 });
