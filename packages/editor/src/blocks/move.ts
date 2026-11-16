@@ -5,7 +5,7 @@
 // be written), plain with it off, and one step to undo.
 
 import { isolateHistory } from '@codemirror/commands';
-import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
+import { ChangeSet, EditorSelection, type EditorState, Transaction } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   type BlockGap,
@@ -26,11 +26,13 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import {
   authoredChanges,
   contextFor,
   refusedEditEffect,
   trackingField,
+  untrackedChanges,
 } from '../tracked/typing.ts';
 
 /** The run the selection names, with Raw and several selections excluded. */
@@ -68,44 +70,98 @@ export function moveBlocks(view: EditorView, up: boolean): boolean {
 export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boolean {
   const { state } = view;
   const text = state.doc.toString();
+  const tracking = state.field(trackingField);
   let changes: ChangeSet;
   let moved: Range;
+  let untracked = !tracking;
   try {
-    if (state.field(trackingField)) {
-      const done = trackedBlockMove(text, run, gap, contextFor(state));
-      if (!done) return false;
-      changes = ChangeSet.of(done.changes, state.doc.length);
-      moved = done.moved;
+    if (tracking) {
+      try {
+        const done = trackedBlockMove(text, run, gap, contextFor(state));
+        if (!done) return false;
+        changes = ChangeSet.of(done.changes, state.doc.length);
+        moved = done.moved;
+      } catch (error) {
+        if (!(error instanceof Untrackable)) throw error;
+        // Not even the widened write holds it: the person is asked, and the move is made untracked
+        // (design: widen, alert or disable, §3.1), never refused.
+        untracked = true;
+        const plain = plainMove(state, text, run, gap, true);
+        if (!plain) return false;
+        ({ changes, moved } = plain);
+      }
     } else {
-      const plan = moveBlockEdits(text, run, gap);
-      if (!plan) return false;
-      changes = authoredChanges(state, text, state.field(parsedField), plan.edits);
-      moved = plan.moved;
+      const plain = plainMove(state, text, run, gap);
+      if (!plain) return false;
+      ({ changes, moved } = plain);
     }
   } catch (error) {
-    if (error instanceof EditError || error instanceof Untrackable) {
-      const message =
-        error instanceof EditError
-          ? error.message
-          : 'This move reaches too many blocks to be tracked. Turn off Track Changes to move it.';
+    if (error instanceof EditError) {
+      const message = error.message;
       view.dispatch({ effects: refusedEditEffect.of(message) });
       return true;
     }
     throw error;
   }
   const after = changes.apply(state.doc).toString();
+  const selection = selectionAfter(state, after, run, moved);
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full')];
+  if (tracking && untracked) {
+    const asker = state.facet(untrackedAskFacet);
+    if (asker) {
+      // Held for the sheet: Make Edit makes the same move without tracking, Cancel drops it.
+      view.dispatch({
+        effects: heldEditEffect.of({
+          reason: 'accept-pending',
+          words: { title: TOO_MANY_BLOCKS },
+          doc: state.doc,
+          changes,
+          selection,
+          annotations: [Transaction.userEvent.of('move.block'), ...annotations],
+          scrollIntoView: true,
+        }),
+      });
+      return true;
+    }
+    annotations.push(untrackedAnswerAnnotation.of(true));
+  }
   view.dispatch({
     changes,
-    selection: selectionAfter(state, after, run, moved),
+    selection,
     userEvent: 'move.block',
-    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    annotations,
     effects:
-      state.field(trackingField) && state.field(viewModeField) === 'clean'
+      tracking && !untracked && state.field(viewModeField) === 'clean'
         ? [setViewModeEffect.of(state.facet(markupViewFacet))]
         : [],
     scrollIntoView: true,
   });
   return true;
+}
+
+/** The sheet's question for a move that no tracked write holds. */
+const TOO_MANY_BLOCKS =
+  'This move reaches too many blocks to be tracked. Make it without tracking?';
+
+/** The move as plain edits, in offsets of the text (none when the run is no longer there). */
+function plainMove(
+  state: EditorState,
+  text: string,
+  run: BlockRun,
+  gap: BlockGap,
+  forced = false,
+): { changes: ChangeSet; moved: Range } | undefined {
+  const plan = moveBlockEdits(text, run, gap);
+  if (!plan) return undefined;
+  return {
+    changes: (forced ? untrackedChanges : authoredChanges)(
+      state,
+      text,
+      state.field(parsedField),
+      plan.edits,
+    ),
+    moved: plan.moved,
+  };
 }
 
 /** The selection once the move is made: the moved blocks, selected as the person had them (a caret

@@ -131,6 +131,17 @@ describe('claudeArgs at This folder and my home folder', () => {
   };
   const args = claudeArgs(wide, endpoint);
 
+  it('passes a listed model on, and leaves an unlisted one to Claude Code (#530)', () => {
+    const at = (model?: string) => {
+      const line = claudeArgs({ ...wide, ...(model ? { model } : {}) }, endpoint);
+      return line.indexOf('--model') < 0 ? null : line[line.indexOf('--model') + 1];
+    };
+    expect(at('opus')).toBe('opus');
+    expect(at('haiku')).toBe('haiku');
+    expect(at('--dangerously-skip-permissions')).toBeNull();
+    expect(at()).toBeNull();
+  });
+
   it('grants each folder the host lists, after --restricted and before anything else', () => {
     const at = args.indexOf('--restricted');
     expect(args.slice(at, at + 1 + roots.length * 2 + 1)).toEqual([

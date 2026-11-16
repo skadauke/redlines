@@ -3302,8 +3302,8 @@ blocks of the document's own flow, §3.7.)
 - **When a fine write isn't sound.** The same text can be written by the siblings that the run passes
   moving the other way (the same file when accepted), and if neither is sound the move is widened to
   the blocks from the old place to the new, one substitution that keeps others' changes in its
-  old text (§3.12). A move that reaches more blocks than a widened edit may is refused: "This move
-  reaches too many blocks to be tracked. Move it in smaller steps."
+  old text (§3.12). A move that reaches more blocks than a widened edit may is not refused: the
+  person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
 - **Track Changes off.** The same two edits are made plain.
 
 ## 4. Comments

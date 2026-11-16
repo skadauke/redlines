@@ -36,16 +36,22 @@ on:
       - '!**/*.md'
       - 'apps/desktop/src/sample.md'
   workflow_dispatch:
+  # Called by ci.yml's full run (every two hours), with `main-tier`: the middle tier, as a push.
+  workflow_call:
+    inputs:
+      main-tier:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 # A newer push to a pull request replaces its run, and a newer commit on main replaces the run of
 # the one before, so that only the newest main commit holds a macOS runner. The sweep is left to
-# finish.
+# finish, and so is the scheduled run that ci.yml's full run calls.
 concurrency:
   group: journeys-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' }}
 
 jobs:
   # A pull request runs the journeys only when it changes them (apps/desktop/journeys) or carries
@@ -137,7 +143,9 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           GREP: ${{ steps.choose.outputs.grep }}
+          MAIN_TIER: ${{ inputs.main-tier }}
         run: |
+          [ "$MAIN_TIER" = true ] && EVENT=push
           case "$EVENT" in
             pull_request) export JOURNEYS_PROJECTS=light ;;
             push) export JOURNEYS_PROJECTS=all JOURNEYS_OTHER_GREP='@smoke' ;;

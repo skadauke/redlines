@@ -14,6 +14,7 @@
 // at the end of the file.
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
 import {
   Annotation,
   ChangeSet,
@@ -60,6 +61,7 @@ import {
   untrackedEdit,
   untrackedFormat,
 } from '@redlines/format';
+import type { SyntaxNode } from '@lezer/common';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -225,6 +227,56 @@ function inBody(edits: Edit[], end: number | null): Edit[] {
     const from = Math.min(edit.from, end);
     return from < end || edit.insert ? [{ ...edit, from, to: end }] : [];
   });
+}
+
+/**
+ * A deletion of all the text between the markers of an inline format (`**a**`, `~~a~~`, a code
+ * span) takes the markers too, from the outermost format it empties: what is left, `****`, is no
+ * format and no text, and read again it would be something else (#584).
+ */
+function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
+  const tree = syntaxTree(state);
+  const widened = edits.map((edit) => {
+    if (edit.insert || edit.from >= edit.to) return edit;
+    let { from, to } = edit;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
+        const first = node.firstChild;
+        const last = node.lastChild;
+        if (
+          first &&
+          last &&
+          first !== last &&
+          /Mark$/.test(first.name) &&
+          /Mark$/.test(last.name) &&
+          first.to === from &&
+          last.from === to &&
+          /^(StrongEmphasis|Emphasis|Strikethrough|InlineCode)$/.test(node.name)
+        ) {
+          from = node.from;
+          to = node.to;
+          moved = true;
+          break;
+        }
+      }
+    }
+    return from === edit.from && to === edit.to ? edit : { ...edit, from, to };
+  });
+  // Edits that now overlap (several carets) are one.
+  const merged: Edit[] = [];
+  for (const edit of widened) {
+    const previous = merged.at(-1);
+    if (previous && edit.from < previous.to) {
+      merged[merged.length - 1] = {
+        ...previous,
+        to: Math.max(previous.to, edit.to),
+        insert: previous.insert + edit.insert,
+        main: previous.main || edit.main,
+      };
+    } else merged.push(edit);
+  }
+  return merged;
 }
 
 /** The visible character beside `pos`, past any hidden text, or null at the document's edge. */
@@ -621,6 +673,23 @@ export function authoredChanges(
   return untrackEdits(state, text, parsed, made, false).changes;
 }
 
+/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
+ * question to the person answered Make Edit asks for (`ask.ts`). */
+export function untrackedChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet {
+  return untrackEdits(
+    state,
+    text,
+    parsed,
+    edits.map((edit): Edit => ({ ...edit, main: false })),
+    false,
+  ).changes;
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
 function trackedSpec(
   tr: Transaction,
@@ -903,6 +972,14 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   const block = tr.isUserEvent('delete.backward.block') || tr.isUserEvent('delete.forward.block');
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
+  }
+  // A cut or a drag keeps what it takes as it is: the clipboard holds the text with its markers.
+  if (
+    tr.isUserEvent('delete') &&
+    !tr.isUserEvent('delete.cut') &&
+    !tr.isUserEvent('delete.dragMove')
+  ) {
+    edits = emptiedFormats(start, edits);
   }
   if (start.field(trackingField) && !answered) {
     return trackedSpec(tr, keepingSpaces(tr, edits), backward);
