@@ -100,10 +100,14 @@ function isLinked(node: SyntaxNode | null): boolean {
   return node.getChild('URL') !== null || node.getChild('LinkLabel') !== null;
 }
 
-/** The headings of the document, in order. A heading with no text is left out. */
-export function headingsOf(state: EditorState): Heading[] {
+/**
+ * The headings of the document, in order, from `start` (a parse that went on reads only what it
+ * added). A heading with no text is left out.
+ */
+export function headingsOf(state: EditorState, start = 0): Heading[] {
   const found: Heading[] = [];
   syntaxTree(state).iterate({
+    from: start,
     enter(ref) {
       const atx = /^ATXHeading([1-6])$/.exec(ref.name);
       const setext = /^SetextHeading([12])$/.exec(ref.name);
@@ -124,7 +128,7 @@ export function headingsOf(state: EditorState): Heading[] {
         to = state.doc.lineAt(marks[0].from).from;
       }
       const text = textBetween(state, from, to);
-      if (text) found.push({ from: ref.from, level, text });
+      if (text && ref.from >= start) found.push({ from: ref.from, level, text });
       return false;
     },
   });

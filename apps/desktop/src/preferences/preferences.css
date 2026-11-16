@@ -149,6 +149,10 @@ body {
 }
 
 /* A row: the label right-aligned in its column, the control beside it. */
+.rl-pref-row[hidden] {
+  display: none;
+}
+
 .rl-pref-row {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
@@ -252,8 +256,9 @@ select:focus-visible {
   width: 120px;
 }
 
-/* An agent's handle, in its card (#558). */
-.rl-pref-agent-handle {
+/* An agent's handle and model, in its card (#558, #530). */
+.rl-pref-agent-handle,
+.rl-pref-agent-model {
   margin-top: 8px;
 }
 

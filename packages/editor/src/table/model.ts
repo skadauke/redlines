@@ -372,8 +372,15 @@ export const tablesField = StateField.define<readonly Table[]>({
     if (!tr.docChanged) {
       // A parse that went on, with no change to the text, may have found more of the tables.
       const tree = syntaxTree(tr.state);
-      if (read.get(tables) === tree) return tables;
-      const again = inheritIds(buildTables(tr.state), tables);
+      const before = read.get(tables);
+      if (before === tree) return tables;
+      // Only the stretch the parse added is read: the tables before the block it went on from stay.
+      const block = before ? tree.topNode.childBefore(before.length) : null;
+      const from = block?.prevSibling?.from ?? block?.from ?? 0;
+      const kept = tables.filter((table) => table.to < from);
+      const dropped = tables.filter((table) => table.to >= from);
+      const added = inheritIds(tablesBetween(tr.state, tree, from, tr.state.doc.length), dropped);
+      const again = [...kept, ...added];
       read.set(again, tree);
       return again;
     }

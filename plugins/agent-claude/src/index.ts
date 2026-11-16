@@ -4,6 +4,7 @@
 
 import type {
   AgentEvent,
+  AgentModel,
   AgentProvider,
   AgentRequest,
   HostProcesses,
@@ -30,6 +31,16 @@ export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 
 /** What Claude Code's own site says to run to install it. Redlines shows it and never runs it. */
 export const INSTALL_COMMAND = 'curl -fsSL https://claude.ai/install.sh | bash';
+
+/**
+ * The models a run can be told to use, by the aliases Claude Code takes, which follow its newest
+ * version of each (#530). A run with none says nothing, and Claude Code uses its own default.
+ */
+export const CLAUDE_MODELS: readonly AgentModel[] = [
+  { id: 'opus', name: 'Opus' },
+  { id: 'sonnet', name: 'Sonnet' },
+  { id: 'haiku', name: 'Haiku' },
+];
 
 const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
 
@@ -65,6 +76,8 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     '--output-format',
     'stream-json',
     '--verbose',
+    // Only a model the provider lists is passed on; anything else is left to Claude Code.
+    ...(CLAUDE_MODELS.some(({ id }) => id === request.model) ? ['--model', request.model!] : []),
     '--restricted',
     ...(wide
       ? [...wide.roots.flatMap((root) => ['--add-dir', root]), '--disable-slash-commands']
@@ -325,6 +338,7 @@ export function createClaudeProvider(
     id: 'claude',
     name: 'Claude',
     readLimit: 'folder',
+    models: CLAUDE_MODELS,
 
     async detect() {
       const state = await detectAgent(processes, {

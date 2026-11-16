@@ -1,4 +1,4 @@
-// Moving blocks (format §3.15): the edits that take whole blocks, a run of siblings, from where they
+// Moving blocks (format §3.14): the edits that take whole blocks, a run of siblings, from where they
 // stand and put them where a gap between siblings is. The units are those of a widened edit
 // (`widen-units.ts`): a paragraph, heading or other block, a code block, a table, a quote, a list, a
 // list item. They are read from the newest view, so that other people's pending changes are no part
@@ -20,7 +20,7 @@ import { newestView } from './views.ts';
 /** A place between two siblings where a run can land. Offsets are in the source of the file. */
 export interface BlockGap {
   /** Where the sibling after the gap starts (its line's start); for the gap after the last
-   * sibling, where that one ends. */
+   * sibling, where that one ends. Information only: the edits are made from `index`. */
   at: number;
   /** The gap is below the line that `at` ends: the one after the last sibling. */
   after: boolean;
@@ -153,7 +153,8 @@ export function neighbourGap(run: BlockRun, up: boolean): BlockGap | undefined {
  * The edits that move `run` to `gap` (one of its `gaps`): the run's text and the break that follows
  * it (or, for the last of its siblings, the break before it) are taken out, and the text with a
  * break of the siblings' kind goes in at the gap. In offsets of the source, for the tracked layer
- * or for a plain edit, with where the run is in the newest view after them. Undefined when the run, as the file reads now, is not the one the run names
+ * or for a plain edit, with where the run is in the newest view after them. Exact in the newest
+ * view only: another person's pending changes are not carried (§3.14). Undefined when the run, as the file reads now, is not the one the run names
  * (the text has changed since).
  */
 export function moveBlockEdits(

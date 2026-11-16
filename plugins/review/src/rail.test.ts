@@ -2171,10 +2171,10 @@ describe('a new comment', () => {
 });
 
 describe('the Add Comment command', () => {
-  it('is for the Format menu, with its key', () => {
+  it('is for the Review menu, with its key', () => {
     const { editor } = mount(plain);
     const command = editor.commands.list().find(({ id }) => id === 'comment.add');
-    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'format' });
+    expect(command).toMatchObject({ title: 'Add Comment', shortcut: 'Mod-Alt-m', menu: 'review' });
     // Disabled in Raw and in front matter: the item is grayed, and its key says why.
     expect('disabledReason' in command!).toBe(true);
   });

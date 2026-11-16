@@ -117,6 +117,15 @@ export interface Settings {
    */
   agentHandles: Record<string, string>;
   /**
+   * The agent an Ask that names none goes to (#528), by id; null leaves it to the first ready one.
+   */
+  defaultAgent: string | null;
+  /**
+   * The model the person chose for each agent (#530), by agent id and model id; an agent with none
+   * runs its own default.
+   */
+  agentModels: Record<string, string>;
+  /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
    */
@@ -161,6 +170,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   agentScope: 'folder',
   consent: {},
   agentHandles: {},
+  defaultAgent: null,
+  agentModels: {},
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -219,6 +230,11 @@ export function loadSettings(): Settings {
       : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     agentHandles: agentHandlesOf(value['agentHandles']),
+    defaultAgent:
+      typeof value['defaultAgent'] === 'string' && value['defaultAgent']
+        ? value['defaultAgent']
+        : null,
+    agentModels: agentModelsOf(value['agentModels']),
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']
@@ -274,6 +290,16 @@ function agentHandlesOf(value: unknown): Record<string, string> {
   return handles;
 }
 
+/** The models chosen, by agent: only text, and nothing empty. */
+function agentModelsOf(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '',
+    ),
+  );
+}
+
 function recentOf(value: unknown): readonly string[] {
   if (!Array.isArray(value)) return [];
   const paths = value.filter((path): path is string => typeof path === 'string' && path !== '');
@@ -314,6 +340,26 @@ export function saveSettings(settings: Settings): void {
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
   }
+}
+
+/**
+ * `incoming` (settings as stored, or as a change leaves them) with what is this window's own kept
+ * from `own`: its file sidebar and its text size. The stored text size is the Default text size of
+ * Preferences, which only Preferences changes; a window opens at it, and neither its own zoom nor
+ * a change of the default elsewhere moves the other (#557). `changed` is what this window itself
+ * just changed, which it keeps as it is.
+ */
+export function keepWindowOwn(
+  own: Settings,
+  incoming: Settings,
+  changed: Partial<Settings> = {},
+): Settings {
+  return {
+    ...incoming,
+    sidebarOpen: changed.sidebarOpen ?? own.sidebarOpen,
+    sidebarWidth: changed.sidebarWidth ?? own.sidebarWidth,
+    textSize: changed.textSize ?? own.textSize,
+  };
 }
 
 /**
