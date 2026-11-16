@@ -6,6 +6,7 @@ import {
   explain,
   keyOf,
   menuKey,
+  ariaKey,
   normalizeKey,
   recordKey,
   type ShortcutEntry,
@@ -45,6 +46,8 @@ describe('normalizeKey', () => {
   it('writes the menu bar’s notation and the Mac’s glyphs', () => {
     expect(menuKey('Shift-Mod-p')).toBe('Shift+CmdOrCtrl+P');
     expect(menuKey('Ctrl-ArrowUp')).toBe('Ctrl+ArrowUp');
+    expect(ariaKey('Mod-Alt-1')).toBe('Alt+Meta+1');
+    expect(ariaKey('Shift-Mod-e')).toBe('Shift+Meta+E');
     expect(displayKey('Mod-Shift-p')).toBe('⇧⌘P');
     expect(displayKey('Alt-Enter')).toBe('⌥↩');
   });
