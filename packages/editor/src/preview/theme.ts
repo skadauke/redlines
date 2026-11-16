@@ -260,8 +260,8 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
   '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
-  // A click selects the image: an outline in the selection's color, and its handles.
-  '.rl-image-selected img': { outline: '2px solid Highlight' },
+  // A click selects the image: an outline in the theme's focus-ring ink, and its handles.
+  '.rl-image-selected img': { outline: '2px solid var(--rl-ink-3)' },
   '.rl-image-selected .rl-image-handle': { opacity: '1' },
   '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
     backgroundColor: 'transparent',
