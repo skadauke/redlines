@@ -156,4 +156,48 @@ test.describe('the toolbar @views', () => {
     expect(last!.y + last!.height).toBeLessThanOrEqual(bar!.y);
     await j.shot('end-of-document');
   });
+
+  // #552: the Table menu is in the bar only in a table, two sides, and follows the selection.
+  test('the Table menu shows Row and Column side by side and follows the selection', async ({
+    start,
+  }) => {
+    const table = '| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n';
+    const j = await start({ doc: `Intro\n\n${table}\nAfter\n`, tracking: false, view: 'clean' });
+    await j.caretAfter('Intro');
+    await wrench(j).click();
+    await expect(toolbar(j).locator('.rl-toolbar-top[data-menu="table"]')).toHaveCount(0);
+    await j.caretAfter('3');
+    const top = toolbar(j).locator('.rl-toolbar-top[data-menu="table"]');
+    await expect(top).toBeVisible();
+    await top.click();
+    const menu = toolbar(j).locator('.rl-toolbar-menu:not([hidden])');
+    await expect(menu.locator('.rl-toolbar-menu-head')).toHaveText('Table · Row 3, column 1');
+    expect(await isOpaque(menu)).toBe(true);
+    await j.shot('table-caret');
+    // The two sides of a line are level.
+    const [above, left] = await Promise.all([
+      menu.locator('[data-command="table.insertRowAbove"]').boundingBox(),
+      menu.locator('[data-command="table.insertColumnLeft"]').boundingBox(),
+    ]);
+    expect(Math.abs(above!.y - left!.y)).toBeLessThan(2);
+    // Select a row: the Column side dims.
+    await menu.locator('[data-command="table.selectRow"]').click();
+    await top.click();
+    await expect(menu.locator('.rl-toolbar-menu-head')).toHaveText('Row 3 selected');
+    await expect(menu.locator('[data-command="table.insertColumnLeft"]')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(menu.locator('[data-command="table.insertRowBelow"]')).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    );
+    await j.shot('table-row-selected');
+    // Alignment writes the delimiter row.
+    await menu.locator('[data-command="table.alignRight"]').click();
+    expect(await j.text()).toContain('| -: | -: |');
+    await top.click();
+    await menu.locator('[data-command="table.deleteTable"]').click();
+    expect(await j.text()).not.toContain('| A |');
+  });
 });

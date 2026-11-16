@@ -185,6 +185,8 @@ export function drawPanel(
 ): DrawnPanel {
   panel.replaceChildren();
   const items = new Map<string, { button: HTMLButtonElement; paired: boolean }>();
+  /** The headers of the menus, which say what the selection is where the menu is about one. */
+  const heads = new Map<MenuId, HTMLElement>();
   if (spelling) panel.append(spellingBlock(spelling, handlers), rule(true));
   const row = element('div', 'rl-toolbar-bar');
   panel.append(row);
@@ -269,8 +271,19 @@ export function drawPanel(
     list.setAttribute('aria-label', menu.label);
     list.hidden = true;
     const head = element('div', 'rl-toolbar-menu-head');
-    head.textContent = menu.label;
+    head.textContent = menu.heading;
+    heads.set(menu.id, head);
     list.append(head);
+    if (menu.sides) {
+      list.classList.add('rl-toolbar-menu-sides');
+      const sides = element('div', 'rl-toolbar-sides');
+      for (const name of menu.sides) {
+        const side = element('span', 'rl-toolbar-side');
+        side.textContent = name;
+        sides.append(side);
+      }
+      list.append(sides);
+    }
     const rowButtons: HTMLButtonElement[][] = [];
     for (const shownRow of menu.rows) {
       const line = element(
@@ -278,6 +291,12 @@ export function drawPanel(
         shownRow.length > 1 ? 'rl-toolbar-line rl-toolbar-pair' : 'rl-toolbar-line',
       );
       const paired = shownRow.length > 1;
+      const caption = shownRow[0]?.caption;
+      if (caption) {
+        const words = element('div', 'rl-toolbar-caption');
+        words.textContent = caption;
+        list.append(words);
+      }
       const buttons = shownRow.map((item) => {
         const button = itemButton(item, paired, handlers);
         items.set(item.id, { button, paired });
@@ -330,6 +349,8 @@ export function drawPanel(
         }
       }
       for (const menu of next.menus) {
+        const head = heads.get(menu.id);
+        if (head && head.textContent !== menu.heading) head.textContent = menu.heading;
         for (const shownRow of menu.rows) {
           for (const item of shownRow) {
             const entry = items.get(item.id);

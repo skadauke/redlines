@@ -9,16 +9,18 @@
 // Section, which appears when its command (`block.collapsible`) is registered.
 
 import type { EditorState } from '@codemirror/state';
-import type { EditorCommand } from '@redlines/editor';
+import { rectOf, touchedCols, touchedRows, wholeRect, type EditorCommand } from '@redlines/editor';
 import type { ToolbarIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 
-export type MenuId = 'insert' | 'review' | 'list' | 'format' | 'edit';
+export type MenuId = 'insert' | 'review' | 'list' | 'table' | 'image' | 'format' | 'edit';
 
 /** What a toolbar item may ask of the registry, besides its own command. */
 export interface Context {
   /** Whether the command `id` is registered and on where the selection is. */
   isOn(id: string): boolean;
+  /** Whether the command `id` is registered and has no reason against it where the selection is. */
+  canRun(id: string): boolean;
 }
 
 /** An item the toolbar may hold: the command it runs, and how it is drawn. */
@@ -35,6 +37,8 @@ export interface ItemSpec {
   keys?: string;
   /** Why the item makes no sense here, besides the command's own reason. */
   reason?: (state: EditorState, context: Context) => string | undefined;
+  /** A line of words over the item's line (on the first item of it): "Align column". */
+  caption?: string;
 }
 
 export interface MenuSpec {
@@ -44,6 +48,10 @@ export interface MenuSpec {
   rows: readonly (readonly ItemSpec[])[];
   /** Whether the menu is in the bar for the selection; default: always. */
   shownWhen?: (context: Context) => boolean;
+  /** What the menu's header says for the selection; default: the menu's name. */
+  heading?: (state: EditorState) => string;
+  /** The names of the two sides of a menu whose lines are pairs (Table: Row | Column). */
+  sides?: readonly [string, string];
 }
 
 /** Ask has no menu: it is the bar's first button, and a rule follows it. */
@@ -54,6 +62,55 @@ export const CONVERTIBLE = ['block.body', 'block.ul', 'block.ol', 'block.task'] 
 export const LISTS = ['block.ul', 'block.ol', 'block.task'] as const;
 
 const one = (spec: ItemSpec): readonly ItemSpec[] => [spec];
+
+/** What the selection of a table covers as a whole, when it is a group of cells. */
+const coverOf = (state: EditorState) => {
+  const rect = rectOf(state);
+  return rect ? wholeRect(rect) : null;
+};
+const PICKED_COLUMNS = 'Columns are selected, so there is no one row to change here.';
+const PICKED_ROWS = 'Rows are selected, so there is no one column to change here.';
+/** The Row side dims when columns are selected, as the Column side does when rows are. */
+const rowSide = (state: EditorState): string | undefined =>
+  coverOf(state) === 'column' ? PICKED_COLUMNS : undefined;
+const columnSide = (state: EditorState): string | undefined =>
+  coverOf(state) === 'row' ? PICKED_ROWS : undefined;
+
+const plural = (n: number, word: string) => (n === 1 ? `1 ${word}` : `${n} ${word}s`);
+
+/** The Table menu's header: where the caret is, or what is selected. */
+export function tableHeading(state: EditorState): string {
+  const rect = rectOf(state);
+  if (rect) {
+    const cover = wholeRect(rect);
+    const rows = rect.rows[1] - rect.rows[0] + 1;
+    const cols = rect.cols[1] - rect.cols[0] + 1;
+    if (cover === 'table') return 'Whole table selected';
+    if (cover === 'row') {
+      return rows === 1 ? `Row ${rect.rows[0] + 1} selected` : `${rows} rows selected`;
+    }
+    if (cover === 'column') {
+      return cols === 1 ? `Column ${rect.cols[0] + 1} selected` : `${cols} columns selected`;
+    }
+    return `Table · ${plural(rows * cols, 'cell')} selected`;
+  }
+  const row = touchedRows(state);
+  const col = touchedCols(state);
+  return row && col ? `Table · Row ${row.first + 1}, column ${col.first + 1}` : 'Table';
+}
+
+/** A line of the Table menu: the same action on a row and on a column. */
+const pair = (
+  rowCommand: string,
+  rowIcon: ToolbarIcon,
+  rowLabel: string,
+  columnCommand: string,
+  columnIcon: ToolbarIcon,
+  columnLabel: string,
+): readonly ItemSpec[] => [
+  { command: rowCommand, icon: rowIcon, label: rowLabel, reason: rowSide },
+  { command: columnCommand, icon: columnIcon, label: columnLabel, reason: columnSide },
+];
 
 /**
  * The menus, in the order the bar shows them. Table and Image (#552, #553) join after List.
@@ -111,6 +168,56 @@ export const MENUS: readonly MenuSpec[] = [
     ],
   },
   {
+    id: 'table',
+    label: 'Table',
+    // Only in a table; the commands say so themselves (`NOT_IN_TABLE`).
+    shownWhen: (context) => context.canRun('table.deleteTable'),
+    heading: tableHeading,
+    sides: ['Row', 'Column'],
+    rows: [
+      pair(
+        'table.insertRowAbove',
+        'row-above',
+        'Insert Above',
+        'table.insertColumnLeft',
+        'col-left',
+        'Insert Left',
+      ),
+      pair(
+        'table.insertRowBelow',
+        'row-below',
+        'Insert Below',
+        'table.insertColumnRight',
+        'col-right',
+        'Insert Right',
+      ),
+      pair(
+        'table.moveRowUp',
+        'move-up',
+        'Move Up',
+        'table.moveColumnLeft',
+        'move-left',
+        'Move Left',
+      ),
+      pair(
+        'table.moveRowDown',
+        'move-down',
+        'Move Down',
+        'table.moveColumnRight',
+        'move-right',
+        'Move Right',
+      ),
+      pair('table.selectRow', 'select', 'Select', 'table.selectColumn', 'select', 'Select'),
+      pair('table.deleteRow', 'delete', 'Delete', 'table.deleteColumn', 'delete', 'Delete'),
+      [
+        { command: 'table.alignLeft', icon: 'align-left', label: 'Left', caption: 'Align column' },
+        { command: 'table.alignCenter', icon: 'align-center', label: 'Center' },
+        { command: 'table.alignRight', icon: 'align-right', label: 'Right' },
+      ],
+      one({ command: 'table.deleteTable', icon: 'delete' }),
+    ],
+  },
+  {
     id: 'format',
     label: 'Format',
     rows: [
@@ -154,11 +261,17 @@ export interface ShownItem {
   toggle: boolean;
   /** Whether the command is on where the selection is, as Bold is inside bold text. */
   active: boolean;
+  /** Words over the item's line, when it is the first of one that has them. */
+  caption: string | null;
 }
 
 export interface ShownMenu {
   id: MenuId;
   label: string;
+  /** The header: the menu's name, or what its selection is. */
+  heading: string;
+  /** The names of the two sides of a menu of pairs, or null. */
+  sides: readonly [string, string] | null;
   rows: ShownItem[][];
 }
 
@@ -188,6 +301,7 @@ function shown(
     reason,
     toggle: command.isActive !== undefined,
     active: command.isActive?.(state) ?? false,
+    caption: spec.caption ?? null,
   };
 }
 
@@ -196,6 +310,10 @@ export function shownBar(commands: readonly EditorCommand[], state: EditorState)
   const byId = new Map(commands.map((command) => [command.id, command]));
   const context: Context = {
     isOn: (id) => byId.get(id)?.isActive?.(state) ?? false,
+    canRun: (id) => {
+      const found = byId.get(id);
+      return found !== undefined && found.disabledReason?.(state) === undefined;
+    },
   };
   const item = (spec: ItemSpec): ShownItem[] => {
     const command = byId.get(spec.command);
@@ -204,7 +322,17 @@ export function shownBar(commands: readonly EditorCommand[], state: EditorState)
   const menus = MENUS.flatMap((menu) => {
     if (menu.shownWhen && !menu.shownWhen(context)) return [];
     const rows = menu.rows.map((row) => row.flatMap(item)).filter((row) => row.length > 0);
-    return rows.length ? [{ id: menu.id, label: menu.label, rows }] : [];
+    return rows.length
+      ? [
+          {
+            id: menu.id,
+            label: menu.label,
+            heading: menu.heading?.(state) ?? menu.label,
+            sides: menu.sides ?? null,
+            rows,
+          },
+        ]
+      : [];
   });
   return { ask: item(ASK)[0] ?? null, menus };
 }
