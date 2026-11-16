@@ -50,7 +50,9 @@ describe('typing a number and a period at the start of an item (#666)', () => {
         doc,
         keys: [...typed].map((type) => (type === '⏎' ? 'Enter' : { type })),
         tc,
-        expect: tc ? {} : { file },
+        // Tracked, the newest view is the file as typed, and the original the document as it was:
+        // the backslash left no deletion behind.
+        expect: tc ? { newest: file, original: doc.replace('‸', '') } : { file },
       });
     }
     // Text that is no marker stays as it is: a period with text after it, a box, a letter.

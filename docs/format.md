@@ -1231,7 +1231,7 @@ numbered list, `- 1. ` (micromark 4.0.2 reads `<ul><li><ol><li></li></ol></li></
 numbered item's text is a bullet list in the item, `1. - `, as it reads. Tab on an item that is the
 first of its list is still refused; a numbered item after a bullet list is the first of its own
 list, so a numbered sublist under a bullet is made by typing `1. ` in the bullet item, or by Tab
-(a nested bullet) and then the convert command (#506). A file that holds `- 1.` as it is, the empty
+(a nested bullet) and then the convert command (#506). The space after a backslash that the person typed by hand, `1\.`, takes the backslash away the same way. A file that holds `- 1.` as it is, the empty
 numbered list, is read as that, and the keys
 treat it as an empty item (Return in it goes up a level, as in any empty item). Only the delimiter
 typed at the end of the item's first line is escaped: the digits typed in front of an existing
