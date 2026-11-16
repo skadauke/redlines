@@ -331,6 +331,11 @@ export interface AgentProvider {
   toolbox?: false;
   /** The models the agent can be told to run, none for an agent that chooses its own (#530). */
   models?: readonly AgentModel[];
+  /**
+   * `true` for an agent that can look at a picture the toolbox shows it (`view_image`, an MCP image
+   * content block): the one that writes an image's alt text. Without it, Alt Text does not ask it.
+   */
+  seesImages?: true;
   detect(): Promise<AgentState>;
   run(request: AgentRequest, tools: McpEndpoint, signal: AbortSignal): AsyncIterable<AgentEvent>;
 }
@@ -347,6 +352,8 @@ export interface AgentInfo {
   toolbox?: false;
   /** The models it can run (`AgentProvider.models`); absent when it chooses its own (#530). */
   models?: readonly AgentModel[];
+  /** `true` when the agent can look at a picture (`AgentProvider.seesImages`). */
+  seesImages?: true;
   state: AgentState;
 }
 

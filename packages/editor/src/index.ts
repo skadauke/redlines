@@ -142,6 +142,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { imageAt, imageInSelection, setImageAlt, type ImageElement } from './image-size.ts';
 /** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
 export const parsedAt = (state: EditorState, pos: number): boolean =>
   syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
@@ -429,6 +430,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   ];
   /** Extensions added after the editor was made (`addExtension`), each once, in order. */
   const addedCompartment = new Compartment();
+  /** The commands' keys: ahead of every other extension, so that the person's own keys win. */
+  const commandKeysCompartment = new Compartment();
+  let commandKeymap: Extension = [];
   let added: { extension: Extension }[] = [];
   const addedExtensions = () => added.map((entry) => entry.extension);
   /** A state for a loaded file, shown and tracked as given, or by default as its document asks. */
@@ -436,6 +440,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const state = EditorState.create({
       doc: loaded.doc,
       extensions: [
+        commandKeysCompartment.of(commandKeymap),
         loaded.extension,
         plainOnlyCompartment.of(plainOnlyFacet.of(kind === 'plain-only')),
         dialectCompartment.of(dialectFacet.of(dialect)),
@@ -460,6 +465,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     () => editor,
     report,
     (message) => options.onNotice?.(message),
+    options.commandKeys,
+    (keymap) => {
+      commandKeymap = keymap;
+      view.dispatch({ effects: commandKeysCompartment.reconfigure(commandKeymap) });
+    },
   );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);

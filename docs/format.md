@@ -2144,10 +2144,18 @@ follows; the pandoc block's is under it.
   Markdown would read as more than text (no `[`, `]`, `\`, `*`, `_`, backtick, `<`, `>`, `&`, `!` or
   line break in the alt text; no `"`, `\`, `<`, `&` or line break in a title; in a table cell, no `|`
   anywhere, which is written `&#124;` in a tag). Any other tag stays a tag, without its width.
+- **Alt text.** Giving an image alt text writes it between `![` and `]`, or as a tag's `alt`
+  attribute (in the place it had, or after `src`), and leaves every other part of the image as it
+  was. The text is one line (whitespace runs are one space); in the brackets a backslash, `[`, `]`,
+  `&`, a backtick, `*`, `_` and `<` and `>` are written with a backslash in front, and in a table cell
+  `|` too, so that reading the image back gives the text as it was given; in a tag the attribute rules
+  above apply. An empty text takes the alt away: `![](src)`, and a tag's `alt=""` (a tag that never had one is left as it is). Under Track Changes it is
+  a substitution of the whole image, like any change to an image; it is never refused.
 - **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
   an image alone on its line is otherwise centered, which is the absence of the attribute, so
   centering takes it away. Other readers float the image to that side. An image among words is not
-  placed.
+  placed, so the Align commands are disabled for it, with that reason in their hint (#633), and an
+  aligned image has no resize handle on the side it is anchored to.
 - **Track Changes.** An image is atomic content (above), and its size is its text: a new size or
   alignment is a substitution of the whole image, `![alt](src)` the old text in the payload and the
   tag the new text (or the other way round), which reads the same in every order of decisions. No

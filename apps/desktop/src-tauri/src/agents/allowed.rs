@@ -310,7 +310,8 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             ]
         };
         let toolbox = "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
-                       mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status";
+                       mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status,\
+                       mcp__redlines__view_image";
         let allowed = vec![toolbox.to_owned(), format!("{toolbox},WebSearch,WebFetch")];
         let settings = wide.map_or_else(
             || r#"{"disableAllHooks":true}"#.to_owned(),

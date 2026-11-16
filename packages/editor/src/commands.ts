@@ -7,10 +7,12 @@
 // bar, whose item would run the command again (a Mac's webview sees a key before the menu bar does),
 // or to WebKit, which would make the text bold itself.
 
-import { EditorState, Prec } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
-import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
+import type { CommandKeys, CommandRegistry, Editor, EditorCommand } from './api.ts';
+import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
 import { plainOnlyFacet } from './tracked/field.ts';
+import { trackingField } from './tracked/typing.ts';
 
 /**
  * The commands that work in a Plain-only file, by the start of their id: Edit's, find and replace,
@@ -26,8 +28,6 @@ function plainOnlyReason(id: string): string {
   }
   return 'Only Markdown files have formatting.';
 }
-import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
-import { trackingField } from './tracked/typing.ts';
 
 const ACCEPT_FIRST =
   "This HTML must be changed to Markdown first, and with Track Changes on that is a pending change that this can't build on. Turn Track Changes off to make this change.";
@@ -141,14 +141,33 @@ function focusInOtherField(view: EditorView): boolean {
  * Makes the registry of an editor that doesn't exist yet: `editor` is asked for it when a command
  * is registered or run. `changed` is told when the list of commands has changed. `notice` says why a
  * key does nothing: the key of a disabled command says its reason (`EditorCommand.disabledReason`),
- * unless the key goes on to the core's binding.
+ * unless the key goes on to the core's binding. `keys` has the person's own keys: a command's key is
+ * what it says, which is the command's own until they change it, and the keys follow a change.
  */
 export function createCommandRegistry(
   editor: () => Editor,
   changed: () => void,
   notice: (message: string) => void = () => {},
+  keys?: CommandKeys,
+  /**
+   * Puts the commands' keymap in the editor ahead of every other (`Editor.addExtension` adds after
+   * the others, and a keymap of the same precedence that came first wins); replaces its last one.
+   */
+  install?: (keymap: Extension) => void,
 ): CommandRegistry {
   let commands: readonly EditorCommand[] = [];
+  /** The commands as listed: each with the key it has now, and the one it came with. */
+  let listed: readonly EditorCommand[] = [];
+  const keyOf = (command: EditorCommand) =>
+    keys ? keys.keyOf(command.id, command.shortcut) : command.shortcut;
+  const relist = () => {
+    listed = commands.map((command) => {
+      const shortcut = keyOf(command);
+      return shortcut === command.shortcut
+        ? command
+        : { ...command, shortcut, defaultShortcut: command.shortcut ?? '' };
+    });
+  };
 
   /** Runs a command, or says why it can't be run: a disabled command (its key, or a click that got
    * past a grayed menu item or button) is told, since a command that does nothing and says nothing
@@ -187,11 +206,35 @@ export function createCommandRegistry(
       return run(command) || !goesOn;
     },
   });
-  const bindings = (added: readonly EditorCommand[]) =>
-    added.flatMap((command) => (command.shortcut ? [binding(command, command.shortcut)] : []));
+  const bindings = () =>
+    commands.flatMap((command) => {
+      const key = keyOf(command);
+      return key ? [binding(command, key)] : [];
+    });
+  let removeKeys = () => {};
+  const bind = (extension: Extension) => {
+    if (install) {
+      install(extension);
+      return () => {};
+    }
+    return editor().addExtension(extension);
+  };
+  /**
+   * Binds every command's key again, in one keymap that comes before every other, so that a key the
+   * person chose beats a binding of the editor's or a plugin's own, added earlier or later (#551).
+   */
+  const bindAll = () => {
+    removeKeys();
+    relist();
+    removeKeys = bind(Prec.highest(keymap.of(bindings())));
+  };
+  keys?.subscribe(() => {
+    if (commands.length) bindAll();
+    changed();
+  });
 
   return {
-    list: () => commands,
+    list: () => listed,
     register(added) {
       const ids = new Set(commands.map(({ id }) => id));
       for (const command of added) {
@@ -200,14 +243,14 @@ export function createCommandRegistry(
         checkShortcut(command);
       }
       commands = [...commands, ...added];
-      const removeKeys = editor().addExtension(Prec.high(keymap.of(bindings(added))));
+      bindAll();
       changed();
       let removed = false;
       return () => {
         if (removed) return;
         removed = true;
         commands = commands.filter((command) => !added.includes(command));
-        removeKeys();
+        bindAll();
         changed();
       };
     },

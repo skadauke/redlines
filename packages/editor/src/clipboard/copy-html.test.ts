@@ -92,6 +92,16 @@ describe('markdownToHtml', () => {
     expect(out).not.toContain('<input');
   });
 
+  it('copies a sized image, a tag, as the image element (#633)', () => {
+    expect(html('<img src="https://example.com/p.png" alt="a &amp; b" width="320">')).toContain(
+      '<p><img src="https://example.com/p.png" alt="a &amp; b" width="320"></p>',
+    );
+    expect(html('Words <img src="https://example.com/p.png" width="50%"> more.')).toContain(
+      'Words <img src="https://example.com/p.png" alt=""> more.',
+    );
+    expect(html('<img src="javascript:alert(1)" alt="x">')).not.toContain('<img');
+  });
+
   it('escapes raw HTML in the source instead of copying it live', () => {
     const out = html(
       'A <script>alert(1)</script> and <b onclick="x()">bold</b>.\n\n<div>block</div>\n\n<!-- note -->',

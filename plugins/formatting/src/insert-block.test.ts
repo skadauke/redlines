@@ -208,3 +208,68 @@ describe('a wrap with Track Changes on reads the same in every order of decision
     expect(newestView(rejected).text).toBe(DOC);
   });
 });
+
+// A selection in list items wraps the items it touches, not the whole list (#754): the list is split
+// around the block, and the other items stay as they were.
+describe.each([false, true])('with the selection in list items (tracking %s)', (tracking) => {
+  const LIST = 'Intro.\n\n- one\n- two\n  - sub\n- three\n- four\n\nEnd.\n';
+  const quoted = (body: string) =>
+    body
+      .split('\n')
+      .map((l) => (l ? `> ${l}` : '>'))
+      .join('\n');
+  const WRAP: Record<string, (body: string) => string> = {
+    'insert.quote': quoted,
+    'block.alert': (body) => `> [!NOTE]\n${quoted(body)}`,
+    'block.code': (body) => `\`\`\`\n${body}\n\`\`\``,
+  };
+  // Untracked, the items touched are wrapped and the list is split around them. Tracked, the
+  // replacement of items inside a list can't be written yet, so the whole list is replaced, as it
+  // was (a code block in a list stays as refused as it was: that waits for the widened replacement).
+  // (The format keeps the first item's marker in front of what replaces it, so tracked text reads
+  // "- > - one"; that is how a tracked replacement of a list starts today.)
+  const expected = (id: string, items: string, before: string, after: string) =>
+    `Intro.\n\n${before}${WRAP[id]?.(items)}\n${after}\n\nEnd.\n`;
+
+  it.each(Object.keys(WRAP))('%s wraps one item with its sublist', (id) => {
+    const { editor, notices } = mount(LIST, tracking);
+    select(editor, at(editor, 'two', 0), at(editor, 'two', 3));
+    const ran = editor.commands.run(id);
+    if (tracking && id === 'block.code') {
+      expect(ran).toBe(false);
+      expect(editor.getDoc()).toBe(LIST);
+      return;
+    }
+    expect(ran, notices.join('|')).toBe(true);
+    expect(notices).toEqual([]);
+    if (tracking) expect(seen(editor)).toContain('> - two\n>   - sub\n> - three\n> - four');
+    else expect(seen(editor)).toBe(expected(id, '- two\n  - sub', '- one\n', '- three\n- four'));
+    const doc = editor.getDoc();
+    if (tracking) expect(newestView(applyChanges(doc, rejectAll(doc))).text).toBe(LIST);
+    expect(newestView(applyChanges(doc, acceptAll(doc))).text).toBe(seen(editor));
+  });
+
+  it.each(Object.keys(WRAP))('%s wraps several items, a sublist item selected', (id) => {
+    const { editor, notices } = mount(LIST, tracking);
+    select(editor, at(editor, 'sub', 1), at(editor, 'three', 2));
+    const ran = editor.commands.run(id);
+    if (tracking && id === 'block.code') {
+      expect(ran).toBe(false);
+      return;
+    }
+    expect(ran, notices.join('|')).toBe(true);
+    expect(notices).toEqual([]);
+    if (tracking) expect(seen(editor)).toContain('> - two\n>   - sub\n> - three\n> - four');
+    else expect(seen(editor)).toBe(expected(id, '- two\n  - sub\n- three', '- one\n', '- four'));
+    const doc = editor.getDoc();
+    if (tracking) expect(newestView(applyChanges(doc, rejectAll(doc))).text).toBe(LIST);
+  });
+
+  it('undoes in one step', () => {
+    const { editor } = mount(LIST, tracking);
+    select(editor, at(editor, 'three', 0), at(editor, 'three', 3));
+    editor.commands.run('insert.quote');
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(LIST);
+  });
+});

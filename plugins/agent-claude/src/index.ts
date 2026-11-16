@@ -52,7 +52,9 @@ const FILE_TOOLS = ['Read', 'Grep', 'Glob'];
  */
 const WEB_TOOLS = ['WebSearch', 'WebFetch'];
 
-const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
+// `view_image` is offered only to a request to describe an image, which has the one picture it is
+// about; it is allowed here for every run, and a run that is not offered it never sees it.
+const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'];
 
 /**
  * The whole command line, in one place, so that a correction is a one-line change, here and in the
@@ -374,6 +376,8 @@ export function createClaudeProvider(
     name: 'Claude',
     readLimit: 'folder',
     models: CLAUDE_MODELS,
+    // Claude Code passes an MCP tool's image to the model (`view_image`).
+    seesImages: true,
 
     async detect() {
       const state = await detectAgent(processes, {

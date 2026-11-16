@@ -259,8 +259,8 @@ The window, on the desktop:
   lines rewrap; at the largest sizes it is the window's width less the margins, long words, links
   and code wrap, a table scrolls in its own box when its cells can't fit, and the margin notes
   are dots that open on hover wherever the window is too narrow for them beside the column. Both are each window's own: a zoom changes only the window it is made in, and a window opened later starts at the last window zoom set anywhere, kept across launches, and its text at the Default text size of Preferences › Appearance, which no window's own text size changes and which changes no window that is open; neither reaches the file, a print, the clipboard or an export.
-- **Preferences** (⌘,) is its own window with labeled tabs: General, Editor, Appearance and Agents
-  (Shortcuts, a fifth, is still to come). The rows of each pane are in groups under small headings:
+- **Preferences** (⌘,) is its own window with labeled tabs: General, Editor, Appearance, Agents
+  and Shortcuts (§5.9). The rows of each pane are in groups under small headings:
   General has You (name and handle), Opening (what opens at launch, the default folder for new
   documents) and The app (automatic updates, the default app for Markdown, the Quick Look preview of
   Markdown files, installing the `redlines` command line, the Dock icon's rotation); Editor has
@@ -325,8 +325,23 @@ The window, on the desktop:
   Image (#553) is in the bar only where an image is under the caret or in the selection. Its menu is
   Align (Left | Center | Right, the image's own checked, centered by default), Size (Small | Medium
   | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
-  file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
-  its place and appears when its command is registered. The items are the editor's own commands
+  file in Preview and follows its saves (§5.10). Alt Text… (`image.altText`, Edit Image Alt Text… in the
+  palette; the agents' plugin) opens a small bubble by the image: a field with the alt text it has, Cancel and
+  Save, and, where an agent can see pictures, "Describe with <agent>" (the default agent, or the one in Ask's
+  picker, by its display name). While the agent writes, the field and Save wait; its text then goes into the
+  field with "Written by <agent>. Read it and change it before saving." Nothing is written to the file until
+  Save, which writes it as any edit: tracked with Track Changes on (the image is atomic content, so a
+  substitution of the image, §3.5.1 of the format), untracked off, and never refused. The item says "Added"
+  once the image has alt text.
+  How the agent sees the image, with the least permission: it is given the one picture through
+  `view_image` (no argument, so no path to name), which the host read first (the app's
+  `image_for_agent` reads only inside a folder its sidebars show, only PNG, JPEG, GIF or WebP, at
+  most 3.5 MB, so that it stays under a model's 5 MB in base64); and the request is at "This document" with only `view_image` and `status`, so the
+  agent has no tool that reads the document and no file tool of its own, and no folder question
+  is asked. Only an agent that can look at pictures is asked (Claude, which passes an MCP tool's
+  image to the model): the default agent when it can, else another ready one that can, named in
+  the button; with none, the button is grayed with the reason. Others (Codex, ACP agents) are not
+  yet asked. The items are the editor's own commands
   (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same; they
   exist where the host can open image files, and the menu is only there.
   An item that can't be used here is dimmed, and
@@ -1160,6 +1175,18 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
 every command, with its shortcut, and recent commands first. One command registry serves the
 menus, shortcuts, the palette, plugins and agents.
 
+**Your own shortcuts** (#535, #551). Every command's key is in one book: the command's own, and
+over it what the person changed (`settings.shortcuts`, a command's id to a key, or "" for none),
+which every window shares. The editor's keys, the menu bar and the title bar's hints and menus all
+read it, so a change works at once and survives a restart. Preferences › Shortcuts lists every
+command under its menu with its key. A click on the key records a new one: it needs ⌘, ⌃ or ⌥, Esc
+cancels and ⌫ clears. A key that is another command's asks "⌘I is Italic's" with Replace (which
+leaves the other with no key) or Cancel; a key macOS keeps (⌘Q, ⌘H, ⌘M, ⌘W, ⌘Space, ⌥⌘H, ⌃⌘F, ⌘Tab,
+⌃↑, ⌃↓) and Cut, Copy, Paste and Select All are refused, with the reason in the row. Quit, Undo and
+Redo keep their keys. The pane has its own Filter (typing in it goes there, not to the window's
+filter) and Reset All. The commands' keymap comes before every other keymap of the editor, so a
+key the person chose beats a binding of the editor's or a plugin's own.
+
 | Action                         | macOS                                                                                         | Windows and Linux         |
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |
 | New paragraph, line break      | Return and ⇧Return                                                                            | Enter and Shift+Enter     |
@@ -1337,7 +1364,7 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- alt text and captions of images (resizing is built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
   are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
@@ -1479,7 +1506,7 @@ without the editor.
 | `@redlines/format`     | Parsing and serializing in each dialect; marks, ledger and history; views; accept and reject; the agent operations (§8.3); the conformance fixtures | Anywhere (no DOM, no Node APIs) |
 | `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines (in two looks) and Plain views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
 | `@redlines/plugin-api` | The plugin interface: manifest, contributions, capabilities. Versioned on its own and kept stable                                         | —                       |
-| `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
+| `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. A seventh, `view_image`, is offered only to a request to describe an image (Alt Text, §5.2): it takes no argument and returns the one picture the host chose, as an MCP image content block. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
 | `@redlines/agent-process` | What the Claude and Codex providers share: finding an agent's program, asking it whether it is signed in, and following a run to its end | Anywhere (no DOM, no Node APIs) |
 | `@redlines/react`      | `<RedlinesEditor>` for React, and a `<redlines-editor>` web component for other frameworks                                                 | Browsers                |
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |

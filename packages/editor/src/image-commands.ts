@@ -12,7 +12,7 @@ import {
   keepsAttributes,
   setImageLook,
 } from './image-size.ts';
-import { columnWidth } from './preview/image.ts';
+import { aloneInItsLine, columnWidth } from './preview/image.ts';
 
 /** The sizes a menu offers, as the part of the text column the image fills. */
 export const IMAGE_SIZES = [
@@ -66,6 +66,9 @@ export function imageSizeCommands(notice?: (message: string) => void): EditorCom
       disabledReason: (state: Parameters<typeof here>[0]) => {
         const image = imageInSelection(state);
         if (image === null) return NO_IMAGE;
+        if (!aloneInItsLine(state, image)) {
+          return 'An image among words stays in its line; put it on a line of its own to align it.';
+        }
         return align !== 'center' && !keepsAttributes(image) ? IMAGE_ATTRIBUTES : undefined;
       },
       isActive: (state: Parameters<typeof here>[0]) => imageInSelection(state)?.align === align,
