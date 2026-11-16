@@ -183,8 +183,8 @@ repo root.
 
 - `ci.yml`: a `changes` job (Ubuntu, no install) lists the files a change touches, against the
   pull request's base or the push's previous commit, and sets flags: `rust` (`apps/desktop/src-tauri`,
-  `apps/desktop/redlines`, `packages/cli`, `packages/format`), `quicklook` (`apps/desktop/quicklook`,
-  `packages/format`, `scripts/build-quicklook`) and `ui` (the desktop's `src` and `journeys`,
+  `apps/desktop/redlines`, `packages/cli`, and on main `packages/format`), `quicklook`
+  (`apps/desktop/quicklook`, `scripts/build-quicklook`, and on main `packages/format`) and `ui` (the desktop's `src` and `journeys`,
   `plugins`, `packages/editor`, `packages/format`); a change to `.github/workflows/**`, or a diff
   that can't be made, sets all. Then:
   - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
@@ -192,8 +192,8 @@ repo root.
     chain, a file the PR changed (a package's dependents' among them), and all of them when a
     config or `package.json` changes. **On main** it runs every test, the timing tests included.
   - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
-    `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run, on pull requests and
-    main alike, only when their flag is set; otherwise the job is skipped, which counts as passing.
+    `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
+    set; otherwise the job is skipped, which counts as passing.
   **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
   `gh workflow run ci.yml --ref main`) sets every flag, runs every test with `REDLINES_COST=check`
   and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
@@ -216,8 +216,8 @@ repo root.
   extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
-  `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
-  `docs/design.md`, the lockfile or the workflow itself.
+  `website/**`, `apps/website-embed/**`, the icon masters, `docs/design.md`, the lockfile or the
+  workflow itself, and, on main only, to the packages and plugins the embed bundles.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
   (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
