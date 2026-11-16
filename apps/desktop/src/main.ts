@@ -14,6 +14,7 @@ import {
   createLiveLines,
   createMacAgents,
   createRuns,
+  defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
@@ -407,7 +408,8 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     getParsed: () => editor.getParsed(),
     getMet: () => settings.people,
     me: author.handle,
-    agents: () => knownAgents,
+    // The default agent comes first in the list (#528).
+    agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
   });
 };
 
@@ -802,6 +804,8 @@ const ask = createAsk(editor, {
   },
   projectRoot: projectOf,
   settings: agentSettings,
+  // An Ask that names no agent goes to the one the person chose in Preferences (#528).
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),

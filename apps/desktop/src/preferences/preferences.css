@@ -149,6 +149,10 @@ body {
 }
 
 /* A row: the label right-aligned in its column, the control beside it. */
+.rl-pref-row[hidden] {
+  display: none;
+}
+
 .rl-pref-row {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
