@@ -34,6 +34,7 @@ export interface KeyEdit {
   userEvent:
     | 'input.break'
     | 'input.break.line'
+    | 'input.type'
     | 'input.paste'
     | 'delete.selection'
     | 'delete.backward.block'
@@ -697,6 +698,21 @@ function continuationOf(item: Item): string {
   return `${item.indent}${' '.repeat(item.marker.length)}${item.after}`;
 }
 
+/** A line of room: it holds only a no-break space entity, which every reader draws as empty. */
+export const NBSP_LINE = '&nbsp;';
+
+/**
+ * Whether Return is in the open empty paragraph at the top level, where it writes a line of room.
+ */
+export function inRoomParagraph(state: EditorState): boolean {
+  const open = openBlock(state);
+  const { main } = state.selection;
+  if (!open || !main.empty || main.head < open.empty.from || main.head > open.empty.to) {
+    return false;
+  }
+  return state.doc.lineAt(open.empty.from).text === '' && !open.item && !open.line;
+}
+
 /** Return in the open empty paragraph. */
 function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const open = openBlock(state);
@@ -706,6 +722,7 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const syntax = line.text;
   // At the top level: nothing (Markdown keeps no second empty paragraph). In a list item: a new
   // item after it, or nothing between two of its paragraphs.
+  // (Return again in the empty paragraph at the top level writes a line of room: `keys.ts`.)
   if (!/>[ \t]?$/.test(syntax)) return syntax ? returnInOpenItem(state, line) : nothing(state);
   // In a quote: out of it one level, from the end of the block above, as the empty paragraph opened
   // after it. In the middle of the quote, this parts it.

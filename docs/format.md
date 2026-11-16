@@ -1361,6 +1361,17 @@ start a line of text.
 A block break (the blank line and prefix between two blocks) is text, and a deletion may contain
 it. It is written as `\n\n` followed by the next block's prefix (`## `, `- `, `> `).
 
+**A line of room** is a paragraph that holds only `&nbsp;`: Markdown collapses blank lines, so room
+between two paragraphs is written as `a\n\n&nbsp;\n\nb`, which micromark 4.0.2 reads as three
+paragraphs, the middle one a no-break space: an empty paragraph to GitHub and other readers (`<br>`
+works in fewer of them). Return in the empty paragraph that a Return opened, at the top level, writes one
+and opens the next empty paragraph below it; each further Return writes another. Every view of the
+editor draws a paragraph of `&nbsp;` alone as an empty line, with the caret before or after it and
+never inside the entity. With Track Changes on the line is the author's insertion of a paragraph
+like any typed one (`<!--ins k3x9-->\n\n&nbsp;<!--/k3x9-->`), and reads the same in every order of
+decisions. Backspace takes back the Returns one by one, byte for byte. A paragraph that holds
+`&nbsp;` with other text, or inside a table cell, is ordinary text.
+
 **A deletion across blocks** is one mark in the merged block. Deleting from the middle of one
 paragraph, across a heading, to the middle of a third paragraph:
 
