@@ -1020,13 +1020,13 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     'message',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
-    'plugins/palette/src/index.ts',
+    'plugins/toolbar/src/index.ts',
     "what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`",
     'disable',
     'an image paste holds no text',
