@@ -3,11 +3,13 @@ import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
+import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import { trackedEdit } from './track.ts';
+import type { TextChange } from './types.ts';
 import {
   ada,
   bo,
@@ -26,7 +28,7 @@ import { newestView, originalView, reviewView } from './views.ts';
 const FRUIT =
   '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| Pears  | 5     |\n| Plums  | 7     |';
 const trim = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
-const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
+const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs', 'r2zd', 's4ab', 't5cd', 'u6ef'];
 
 type Shape =
   | { kind: 'deleteRows'; rows: number[] }
@@ -39,6 +41,9 @@ function edit(text: string, shape: Shape, who: typeof ada | null = ada, ids = ID
   const done = who ? tableEdit(text, op, context(who, ids)) : untrackedTableEdit(text, op);
   return { ...done, after: applyChanges(text, done.changes) };
 }
+/** An edit that the fine rules refuse and `widen` writes: read alike in every order, rejected back. */
+const widened = (text: string, run: () => { changes: TextChange[] }, own?: string) =>
+  expectWidened('widened', text, run().changes, own);
 const said = (run: () => unknown) => {
   try {
     run();
@@ -136,21 +141,15 @@ describe('deleting rows, tracked (format §3.7)', () => {
     expect(Object.keys(parse(folded.after).ledger.marks)).toEqual(['k3x9']);
   });
 
-  it('rule 3: refuses another person’s pending change in the row, or their inserted or moved row', () => {
+  it('rule 3: widens another person’s pending change in the row, or their inserted or moved row', () => {
     const inside = file(FRUIT.replace('Pears', 'Pe<!--ins m2bd-->x<!--/m2bd-->ars'), {
       m2bd: 'bo',
     });
-    expect(said(() => edit(inside, { kind: 'deleteRows', rows: [2] }))).toBe(
-      "Bo Chen's pending change is in this row. Decide it first.",
-    );
+    widened(inside, () => edit(inside, { kind: 'deleteRows', rows: [2] }), 'ada');
     const inserted = file(FRUIT.replace('| Pears ', '| <!--ins m2bd row--> Pears'), { m2bd: 'bo' });
-    expect(said(() => edit(inserted, { kind: 'deleteRows', rows: [2] }))).toBe(
-      "Bo Chen's inserted row is pending. Decide it first.",
-    );
+    widened(inserted, () => edit(inserted, { kind: 'deleteRows', rows: [2] }), 'ada');
     const moved = edit(file(FRUIT), { kind: 'moveRows', rows: [3], to: 1 }, bo, ['m2bd', 'n3cd']);
-    expect(said(() => edit(moved.after, { kind: 'deleteRows', rows: [1] }))).toBe(
-      "Bo Chen's moved row is pending. Decide it first.",
-    );
+    widened(moved.after, () => edit(moved.after, { kind: 'deleteRows', rows: [1] }), 'ada');
     // With Track Changes off the rows go, and what was pending in them.
     const plain = edit(inside, { kind: 'deleteRows', rows: [2] }, null);
     expect(trim(plain.after)).toBe(FRUIT.replace('| Pears  | 5     |\n', ''));
@@ -168,18 +167,18 @@ describe('deleting rows, tracked (format §3.7)', () => {
     expectInOrder('comment', ['c9qf'], end.after);
   });
 
-  it('rule 2: allowed with rows pending, refused with a column deleted or, tracked, inserted', () => {
+  it('rule 2: allowed with rows pending, widened with a column deleted or, tracked, inserted', () => {
     const column = `${FRUIT}\n\n<!--del m2bd col=2 \\| Count \\\\n \\| ----- \\\\n \\| 3 \\\\n \\| 5 \\\\n \\| 7-->`;
-    expect(said(() => edit(file(column, { m2bd: 'bo' }), { kind: 'deleteRows', rows: [2] }))).toBe(
-      'Accept or reject the column changes in this table first.',
+    widened(
+      file(column, { m2bd: 'bo' }),
+      () => edit(file(column, { m2bd: 'bo' }), { kind: 'deleteRows', rows: [2] }),
+      'ada',
     );
     expect(
       said(() => edit(file(column, { m2bd: 'bo' }), { kind: 'deleteRows', rows: [2] }, null)),
     ).toBe('Accept or reject the column changes in this table first.');
     const inserted = file(FRUIT.replace('Count', '<!--ins m2bd col--> Count'), { m2bd: 'bo' });
-    expect(said(() => edit(inserted, { kind: 'deleteRows', rows: [2] }))).toBe(
-      'Accept or reject the column changes in this table first.',
-    );
+    widened(inserted, () => edit(inserted, { kind: 'deleteRows', rows: [2] }), 'ada');
     expect(said(() => edit(inserted, { kind: 'deleteRows', rows: [2] }, null))).toBe('no error');
   });
 });
@@ -219,12 +218,10 @@ describe('comments at the start of a row of a table without a pipe there', () =>
     expect(trim(back)).toBe('a |\n-- |\n1<!--cmt r4st--> |\nx<!--/r4st--> |');
   });
 
-  it('refuses to move a row to the top with a comment parked after its closing pipe', () => {
+  it('widens a move of a row to the top with a comment parked after its closing pipe', () => {
     const text = file('b |\n-- |\nx |\ncafé |\nb |');
     const commented = commentedAt(text, 'b |');
-    expect(said(() => edit(commented, { kind: 'moveRows', rows: [2], to: 0 }))).toContain(
-      "Bo Chen's comment runs from one row of this table into the next.",
-    );
+    widened(commented, () => edit(commented, { kind: 'moveRows', rows: [2], to: 0 }), 'ada');
   });
 });
 
@@ -257,14 +254,14 @@ describe('operations that would leave a table unread are refused when they are m
     }
   });
 
-  it('refuses to delete the header under a comment parked after the closing pipe below it', () => {
+  it('widens the deletion of the header under a comment parked after the closing pipe below it', () => {
     const text = commentOn(file('a | b |\n-- | -- |\nm | n |\nk | l |'), 'k | l');
     expect(trim(text)).toContain('m | n |<!--cmt r4st-->');
-    for (const who of [ada, null]) {
-      expect(said(() => edit(text, { kind: 'deleteRows', rows: [0] }, who))).toContain(
-        "Bo Chen's comment",
-      );
-    }
+    widened(text, () => edit(text, { kind: 'deleteRows', rows: [0] }), 'ada');
+    // With Track Changes off nothing is tracked to widen: the refusal stays.
+    expect(said(() => edit(text, { kind: 'deleteRows', rows: [0] }, null))).toContain(
+      "Bo Chen's comment",
+    );
   });
 
   // A comment that starts a row with no pipe at its start is written at the end of the row above
@@ -405,14 +402,12 @@ describe('moving rows (format §3.7)', () => {
     expect(trim(top.after)).toContain('<!--del w8nn row=3 \\| Pears  \\| 5     \\|-->');
   });
 
-  it('refuses a move that changes nothing, and moving another person’s inserted or moved row', () => {
+  it('refuses a move that changes nothing, and widens moving another person’s inserted or moved row', () => {
     expect(said(() => edit(file(FRUIT), { kind: 'moveRows', rows: [2], to: 3 }))).toBe(
       'The rows are already there.',
     );
     const inserted = file(FRUIT.replace('| Pears ', '| <!--ins m2bd row--> Pears'), { m2bd: 'bo' });
-    expect(said(() => edit(inserted, { kind: 'moveRows', rows: [2], to: 0 }))).toBe(
-      "Bo Chen's inserted row is pending. Decide it first.",
-    );
+    widened(inserted, () => edit(inserted, { kind: 'moveRows', rows: [2], to: 0 }), 'ada');
   });
 
   it('moves your own pending row plainly, as it is in no original', () => {

@@ -185,7 +185,7 @@ describe.each(['format.bold', 'format.italic'] as const)('tracked %s over a colu
     expectEveryOrderAlike(`${command} beside cells with marks`, after);
   }, 60_000);
 
-  it('refuses a cell that holds another person’s change, in words that name the cell and the person', () => {
+  it('writes a cell that holds another person’s change as a replacement of the table', () => {
     const body = [
       '| Item | Note |',
       '| ---- | ---- |',
@@ -194,10 +194,10 @@ describe.each(['format.bold', 'format.italic'] as const)('tracked %s over a colu
     ];
     const doc = file(body.join('\n'), { k3x9: 'bo' });
     const { ran, notices, after } = run(doc, 'Item', 'two', command);
-    expect(ran).toBe(false);
-    expect(after).toBe(doc);
-    expect(notices).toEqual([
-      "Bo Chen's insertion is in the cell in row 1, column 1. Accept or reject it first, then format the cell.",
-    ]);
+    expect(ran).toBe(true);
+    expect(notices).toEqual([]);
+    // His insertion stays in the old text of the replacement, decided as it was.
+    expect(after).not.toBe(doc);
+    expectEveryOrderAlike(`${command} over a column holding a change`, after);
   });
 });

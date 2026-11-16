@@ -75,7 +75,7 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
-export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';
