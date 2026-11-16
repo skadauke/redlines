@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The Alt Text bubble (#553): its field, Save and Cancel, "Describe with <agent>" and the states
 // around the agent's answer, and that nothing is written to the file before Save.
+import { forceParsing } from '@codemirror/language';
 import { createEditor, type Editor } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -49,6 +50,7 @@ function mount(options: { describer?: AltDescriber; notices?: string[]; doc?: st
     openImage: () => {},
     onNotice: (message) => notices.push(message),
   });
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   const alt = createAltText(editor, {
     notice: (message) => notices.push(message),
     ...(options.describer ? { describer: options.describer } : {}),
