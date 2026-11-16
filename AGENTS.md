@@ -202,8 +202,8 @@ repo root.
   skill's files, which a test checks. The Epic's final sweep runs everything.
 - `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
   baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
-  they change `apps/desktop/journeys/**` or carry the **`journeys` label** (lanes run their journeys
-  locally and attach screenshots; adding the label runs them in CI), and then run the smoke
+  someone adds the **`journeys` label** (lanes run their journeys locally and attach screenshots;
+  a push doesn't run them), and then run the smoke
   journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
   look; **main** runs every journey in the light look and the smoke journeys in the other
   three looks from `ci.yml`'s full run every two hours, not on every push (nobody waits on it;
