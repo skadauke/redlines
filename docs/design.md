@@ -389,6 +389,38 @@ Redlines covers everything in the Markdown Guide's
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
+**HTML as GitHub draws it** (#686). What Redlines shows in Clean is as close as possible to what
+GitHub renders: GFM, GFM's escaped tags, and GitHub's list of allowed HTML. The aim is a standard,
+not perfection. The list (elements, attributes and protocols, from html-pipeline's
+`SanitizationFilter`) is one module, `github-html.ts` in `@redlines/format`, which Quick Look can
+share, and a check in development (micromark and GFM, then a sanitizer with the same list, over
+README-style snippets) holds the editor to it.
+
+- **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
+  no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
+  as folding and opening a block's source, are view state and never written.
+- **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
+  `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
+  `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
+  `<sup>` are, and edited in place. `ins`, `del` and `s` use the text's ink, never an author's
+  color; `mark` uses GitHub's yellow; `title` shows as an app hint. Removing a pair is a format
+  change (`-html=TAG`, format §2.6). `<br>` is a line break everywhere and `<wbr>` is invisible,
+  each one caret step. Shift-Return stays Markdown's hard break; `<br>` is written only in table
+  cells.
+- **The nine tags GFM escapes** (script, style, iframe, title, textarea, xmp, noembed, noframes,
+  plaintext) show as text. `<u>`, `font`, `center` and other unknown tags drop their tags and keep
+  their text. Underline has no command.
+- **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
+  hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
+  on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
+  the conversion is exact. `<details>` is closed unless the file says `open`; a closed section
+  with pending changes shows a bar and a count. These come after the inline tags, in the order of
+  #686.
+- **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
+  WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
+  `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
+  anchors.
+
 **Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
 address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
 address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
@@ -1185,7 +1217,7 @@ a new email under the same name becomes an alias in the ledger
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes and cross-references; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 
