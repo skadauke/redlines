@@ -1,12 +1,14 @@
 // What the toolbar holds (issues #313, #504): a row of menus, Ask | Insert · Review · [List] ·
-// Format · Edit, whose items are commands of the registry, by id, so that the toolbar, the Format
-// menu and the shortcuts never disagree about names, keys or whether an item is there. An item whose
-// command isn't registered is left out, and appears when its command lands; a menu with none left
-// is not drawn. The pure part: `shownBar` says what is in the bar for a state, and `index.ts` draws.
+// [Table] · [Image] · Format · Edit, whose items are commands of the registry, by id, so that the
+// toolbar, the Format menu and the shortcuts never disagree about names, keys or whether an item is
+// there. An item whose command isn't registered is left out, and appears when its command lands; a
+// menu with none left is not drawn. The pure part: `shownBar` says what is in the bar for a state,
+// and `index.ts` draws.
 //
-// Parts that come later are named here so that their place is kept: the Table and Image menus
-// (#552, #553) go to the right of Review, after List, and Insert holds a slot for Collapsible
-// Section, which appears when its command (`block.collapsible`) is registered.
+// Table and Image (#552, #553) are in the bar only where the selection is in a table or holds an
+// image. Parts that come later keep their place: Insert holds a slot for Collapsible Section
+// (`block.collapsible`) and Image one for Alt Text… (`image.altText`), each shown when its command
+// is registered.
 
 import type { EditorState } from '@codemirror/state';
 import { rectOf, touchedCols, touchedRows, wholeRect, type EditorCommand } from '@redlines/editor';
@@ -242,6 +244,47 @@ export const MENUS: readonly MenuSpec[] = [
         },
       ],
       one({ command: 'table.deleteTable', icon: 'delete' }),
+    ],
+  },
+  {
+    id: 'image',
+    label: 'Image',
+    // Only where an image is under the caret or in the selection; its commands say so themselves.
+    shownWhen: (context) => context.canRun('image.align.left'),
+    rows: [
+      [
+        {
+          command: 'image.align.left',
+          icon: 'align-left',
+          label: 'Left',
+          caption: 'Align',
+          side: 'align image',
+        },
+        {
+          command: 'image.align.center',
+          icon: 'align-center',
+          label: 'Center',
+          side: 'align image',
+        },
+        { command: 'image.align.right', icon: 'align-right', label: 'Right', side: 'align image' },
+      ],
+      [
+        {
+          command: 'image.size.small',
+          icon: 'size-small',
+          label: 'Small',
+          caption: 'Size',
+          side: 'image size',
+        },
+        { command: 'image.size.medium', icon: 'size-medium', label: 'Medium', side: 'image size' },
+        { command: 'image.size.large', icon: 'size-large', label: 'Large', side: 'image size' },
+      ],
+      one({ command: 'image.size.original', icon: 'original-size', label: 'Original Size' }),
+      // Edit in Preview is the editor's own (#525), where the host can open files. Alt Text… needs
+      // an agent to write the description (the agents' lane) and keeps its place: the item appears
+      // when its command, `image.altText`, is registered.
+      one({ command: 'image.edit', icon: 'preview', label: 'Edit in Preview' }),
+      one({ command: 'image.altText', icon: 'alt-text', label: 'Alt Text…' }),
     ],
   },
   {
