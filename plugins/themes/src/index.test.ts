@@ -310,13 +310,15 @@ describe('text contrast on the grounds', () => {
   // The tertiary gray draws shapes: the focus rings, the checkboxes' outlines, a field's border when
   // it is focused (WCAG 1.4.11 asks 3:1 of them), and the text of disabled controls, which is
   // exempt and stays dimmer than --rl-ink-2 (#653).
-  it('--rl-ink-3 keeps 3:1 on the page, the tint and the card, and stays dimmer than --rl-ink-2', () => {
+  it('--rl-ink-3 keeps 3:1 on every ground a ring sits on, and stays dimmer than --rl-ink-2', () => {
     const failing: string[] = [];
     for (const { name } of THEMES) {
       for (const appearance of APPEARANCES) {
         const declared = block(name, appearance);
         const ink3 = resolve(declared.get('--rl-ink-3')!);
-        for (const ground of ['--rl-page', '--rl-tint', '--rl-card']) {
+        // A ring is on the page, on a tint or a card, and on a row the pointer is over or that is
+        // pressed or current, which is --rl-pressed, or --rl-rule.
+        for (const ground of ['--rl-page', '--rl-tint', '--rl-card', '--rl-pressed', '--rl-rule']) {
           const value = ratio(ink3, resolve(declared.get(ground)!));
           if (value < 3)
             failing.push(`${name} ${appearance} ink-3 on ${ground}: ${value.toFixed(2)}:1`);

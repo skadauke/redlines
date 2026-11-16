@@ -133,4 +133,16 @@ describe('text contrast (#578)', () => {
     );
     expect(wrong, `focus rings under 3:1:\n${wrong.join('\n')}`).toEqual([]);
   });
+
+  // The rings drawn as an inset shadow (a menu item's, a tab's, the sidebar's current file) are the
+  // same shapes: in a gray that holds 3:1 on every ground, the pressed and the rule's as well.
+  it('draws every inset ring of a shadow in --rl-ink-3 or darker', () => {
+    const wrong = all.flatMap(({ file, code }) =>
+      [...code.matchAll(/box-shadow\s*:\s*['"`]?inset\s+0\s+0\s+0\s+\d+px\s+([^;}\n]*)/g)]
+        .map(([, value = '']) => value.trim().replace(/['"`,]+$/, ''))
+        .filter((value) => !/^var\(--rl-ink(?:-[23])?\b/.test(value))
+        .map((value) => `${file}: inset ring ${value}`),
+    );
+    expect(wrong, `rings under 3:1:\n${wrong.join('\n')}`).toEqual([]);
+  });
 });
