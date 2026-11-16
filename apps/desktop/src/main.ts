@@ -77,8 +77,11 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
@@ -99,6 +102,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
@@ -252,9 +256,18 @@ function dragFile(): void {
   });
 }
 
+const untrackedAnswers = createUntrackedAnswers();
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
@@ -902,6 +915,8 @@ function renameDocument(): void {
   if (doc?.path) titleBar.beginRename();
   else void controller.saveAs();
 }
+
+installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),

@@ -471,7 +471,8 @@ with redlines that record no view, and reaches every window for the documents ea
 the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
 menu also previews the original (every change rejected) and one person's changes alone (everyone
 else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it
-is on, or locked on, Raw is read-only, because typing there could forge or break markers.
+is on, or locked on, typing in Raw asks first, because Redlines can't mark a change there: a sheet
+offers to make the edit without tracking, as Word does.
 
 ### 5.4 Track Changes
 

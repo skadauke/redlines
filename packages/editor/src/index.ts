@@ -40,6 +40,7 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
 import { tableMarkers } from './table/markers.ts';
@@ -193,6 +194,13 @@ export {
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  UNTRACKED_DETAILS,
+  UNTRACKED_TITLE,
+  type UntrackedAnswer,
+  type UntrackedAsker,
+  type UntrackedReason,
+} from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -288,6 +296,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice),
     noticeFacet.of(options.onNotice),
+    options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,
     markdownPreview(),
