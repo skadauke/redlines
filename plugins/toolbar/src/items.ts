@@ -70,7 +70,7 @@ export const MENUS: readonly MenuSpec[] = [
       one({ command: 'image.insert', icon: 'image' }),
       one({ command: 'block.table', icon: 'table' }),
       one({ command: 'block.code', icon: 'code-block' }),
-      one({ command: 'block.quote', icon: 'quote' }),
+      one({ command: 'insert.quote', icon: 'quote', label: 'Quote' }),
       one({ command: 'block.alert', icon: 'alert', label: 'Callout' }),
       // A later lane's: the item appears when its command is registered.
       one({ command: 'block.collapsible', icon: 'collapsible' }),

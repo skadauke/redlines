@@ -292,7 +292,20 @@ The window, on the desktop:
   registry (§5.9), so that it, the Format and Paragraph menus and the shortcuts never disagree
   about names, keys or whether an item is available; an item whose command isn't registered is
   left out, and so is a menu with no items. The arrow keys move along the bar; ↓ or Return opens a
-  menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus;
+  menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus.
+  Where an inserted block goes (#555), the same
+  for Insert's Table, Code Block, Quote and Callout and for Horizontal Rule: in an empty paragraph
+  it takes the paragraph's place; with the caret at the very start of a block (in front of a
+  heading's text or an item's, too) it goes above that block; anywhere else it goes below the block,
+  so that no sentence is split. With text selected, Quote, Callout and Code Block wrap the selected
+  blocks (a code block takes their text) instead, as one step to undo; with Track Changes on the
+  wrapped blocks are replaced by the wrapped text, so a reader sees the blocks as they were and as
+  they are. A selection that holds a table, an image or the markers of changes is not wrapped: the
+  block goes below, and nothing is refused. With Track Changes on, above a block that is no paragraph
+  goes at the end of the block before it (the format can't write an insertion that ends in line
+  breaks in front of a heading, a list or a quote), and below the first block of the document
+  where there is none before. Quote here is `insert.quote`, named Insert Quote or Make Selection a
+  Quote; the Paragraph menu's Quote (⌥⌘Q) is another command, which changes the block it is in.
   Esc closes the open menu, then a toolbar at the caret or the pointer. The command palette, the
   Table and Image menus come in later batches. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
