@@ -755,7 +755,7 @@ test.describe('tables @tables', () => {
           const style = getComputedStyle(cell);
           return {
             // The tint is painted from column line to column line (#673): a gradient over the box, and a
-            // shadow over the gap before it; the cell's own fill (a change's tint) is not drawn.
+            // block before it over the gap; the cell's own fill (a change's tint) is not drawn.
             fill: style.backgroundImage,
             under: style.backgroundColor,
             outline: style.outlineStyle,
@@ -770,10 +770,7 @@ test.describe('tables @tables', () => {
       expect(cell.fill, `cell ${i} has the selection blue`).toContain(paint.selection);
       expect(cell.under, `cell ${i} shows no change's tint under it`).toBe('rgba(0, 0, 0, 0)');
       expect(cell.outline, `cell ${i} has no outline`).toBe('none');
-      expect(
-        cell.shadow === 'none' || cell.shadow.startsWith(paint.selection),
-        `cell ${i}'s only shadow is the selection blue`,
-      ).toBe(true);
+      expect(cell.shadow, `cell ${i} has no shadow`).toBe('none');
     }
     expect(paint.inks.length, 'a change inside a selected cell is drawn').toBeGreaterThan(0);
     for (const one of paint.inks) {
