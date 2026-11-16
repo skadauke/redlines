@@ -295,6 +295,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice),
     noticeFacet.of(options.onNotice),
+    options.onError
+      ? EditorView.exceptionSink.of((error) => {
+          console.error(error);
+          options.onError?.(error);
+        })
+      : [],
     options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,

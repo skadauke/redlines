@@ -303,6 +303,8 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
+  onError?: (error: unknown) => void;
   /**
    * The alert of an edit that no mark can hold: an edit in the YAML front matter, and typing in Raw,
    * with Track Changes on. The host shows a sheet that offers to make the edit without tracking
