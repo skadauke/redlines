@@ -610,7 +610,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
 
   /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
-  const insertBlock = (text: string, find: string, caret: number, selected = 0): boolean => {
+  const insertBlock = (
+    text: string,
+    find: string,
+    caret: number,
+    selected = 0,
+    place = selected > 0,
+  ): boolean => {
     if (onEmptyLine()) return putOnEmptyLine(text, find, caret, selected);
     const { doc } = view.state;
     const { head } = view.state.selection.main;
@@ -618,7 +624,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
     const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
-    if (done) {
+    if (done && place) {
       const start = view.state.doc.toString().indexOf(find, at);
       if (start >= 0) {
         const anchor = afterVisible(start, caret);
@@ -1023,7 +1029,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Table',
       shortcut: 'Mod-Alt-t',
       // The caret is in the first header cell, which is empty: typing names the column.
-      run: () => insertBlock(TABLE, '|  |  |', 2),
+      run: () => insertBlock(TABLE, '|  |  |', 2, 0, true),
     }),
     command('paragraph', 'insert', {
       id: 'block.alert',

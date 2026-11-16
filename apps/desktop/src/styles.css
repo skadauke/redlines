@@ -827,6 +827,13 @@ body {
   }
 }
 
+/* A table's empty header cells show a placeholder on screen; the page doesn't print it. */
+@media print {
+  .rl-tc-fill::before {
+    content: none !important;
+  }
+}
+
 /*
  * Printing: the page alone, as the view shows it. The window's chrome goes, and the page flows over
  * as many sheets as the document needs, instead of scrolling inside the window.
