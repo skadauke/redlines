@@ -2145,7 +2145,8 @@ pandoc file's `{width=}` is not written yet). The rule:
 - **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
   an image alone on its line is otherwise centered, which is the absence of the attribute, so
   centering takes it away. Other readers float the image to that side. An image among words is not
-  placed.
+  placed, so the Align commands are disabled for it, with that reason in their hint (#633), and an
+  aligned image has no resize handle on the side it is anchored to.
 - **Track Changes.** An image is atomic content (above), and its size is its text: a new size or
   alignment is a substitution of the whole image, `![alt](src)` the old text in the payload and the
   tag the new text (or the other way round), which reads the same in every order of decisions. No

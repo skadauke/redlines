@@ -55,6 +55,7 @@ import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.t
 import { blockDrag } from './drag.ts';
 import { moveBlocks } from './move.ts';
 import { planTab } from './tab.ts';
+import { readTag } from '../image-size.ts';
 import { convertTwin, htmlListMoves } from './twin.ts';
 import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
@@ -597,9 +598,10 @@ export function planDownAtEnd(view: EditorView): KeyEdit | null {
   const block = blockAt(state, main.head);
   if (!block || block.kind === 'table') return null;
   const quoted = block.containers.some((c) => c.kind === 'quote');
-  const picture =
-    block.kind === 'paragraph' &&
-    /^!\[[^\]]*\]\([^)]*\)\s*$/.test(state.sliceDoc(block.text.from, block.text.to));
+  const written = block.kind === 'paragraph' ? state.sliceDoc(block.text.from, block.text.to) : '';
+  // An image alone: `![…](…)`, or a tag (an image with a size, format §3.5.1) that is a paragraph
+  // where a closer follows it on its line (#633).
+  const picture = /^!\[[^\]]*\]\([^)]*\)\s*$/.test(written) || readTag(written) !== null;
   if (!quoted && !picture && !['code', 'rule', 'html'].includes(block.kind)) return null;
   // Code with no closing fence runs to the end of the file: a line after it is code (Return writes
   // a plain line break there). ↓ there writes the closing fence first (`closeFenceAtEnd`).

@@ -9,6 +9,7 @@
 // that Redlines bundles (design §6.6), then a generic family.
 
 import { GFM, parser } from '@lezer/markdown';
+import { readTag } from '../image-size.ts';
 import { scriptTags } from '../preview/script.ts';
 
 /** The font stacks of a copy. */
@@ -111,6 +112,23 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
     },
   });
   const style = (stack: string) => ` style="font-family:${escape(stack)}"`;
+  /**
+   * An `<img>` tag (an image with a size, format §3.5.1) as the element a target can paste: its
+   * address, alt text and width. Null for anything else, and for an image kept as text.
+   */
+  function tagPicture(tag: string): string | null {
+    const attributes = readTag(tag);
+    if (!attributes) return null;
+    const value = (name: string) => attributes.find((a) => a.name === name)?.value ?? null;
+    const href = value('src') ?? '';
+    if (!href) return null;
+    if (!safe(href) || keepAsText(href)) return escape(value('alt') ?? '');
+    const width = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(value('width') ?? '')?.[1];
+    return `<img src="${escape(href)}" alt="${escape(value('alt') ?? '')}"${
+      width && Number(width) > 0 ? ` width="${Math.round(Number(width))}"` : ''
+    }>`;
+  }
+
   /** Whether a table cell is being written. */
   let inCell = false;
   const slice = (from: number, to: number) => src.slice(from, to);
@@ -212,11 +230,14 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
       }
       case 'HardBreak':
         return '<br>';
-      case 'HTMLTag':
+      case 'HTMLTag': {
+        const picture = tagPicture(slice(node.from, node.to));
+        if (picture !== null) return picture;
         // A line break in a table cell is written `<br>`; elsewhere HTML stays text.
         return inCell && /^<br\s*\/?>$/i.test(slice(node.from, node.to))
           ? '<br>'
           : text(node.from, node.to);
+      }
       case 'Comment':
       case 'ProcessingInstruction':
       case 'QuoteMark':
@@ -351,8 +372,11 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
         return table(node);
       case 'LinkReference':
         return `<p>${text(node.from, node.to)}</p>`;
-      case 'HTMLBlock':
+      case 'HTMLBlock': {
+        const picture = tagPicture(slice(node.from, node.to));
+        if (picture !== null) return `<p>${picture}</p>`;
         return `<p>${text(node.from, node.to).replace(/\n/g, '<br>')}</p>`;
+      }
       default:
         return '';
     }

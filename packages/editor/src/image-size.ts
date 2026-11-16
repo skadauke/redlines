@@ -20,7 +20,7 @@ type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 export type ImageAlign = 'left' | 'center' | 'right';
 
 /** One attribute of an `<img>` tag: its name in lowercase, its value read, and its text. */
-interface Attribute {
+export interface Attribute {
   name: string;
   /** The value with its quotes taken off and its character references read; null for none. */
   value: string | null;
@@ -94,7 +94,7 @@ const TAG = /^<img((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))
 const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
 /** The attributes of an `<img>` tag as it is written, or null when `text` is no one whole tag. */
-function readTag(text: string): Attribute[] | null {
+export function readTag(text: string): Attribute[] | null {
   const match = TAG.exec(text.trim());
   if (!match) return null;
   const attributes: Attribute[] = [];

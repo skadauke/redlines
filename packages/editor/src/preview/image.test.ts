@@ -463,6 +463,19 @@ describe('an image with a size (#526)', () => {
     expect(drawn(editorWith('<img src="cat.png">\nmore text', local, 0))).toHaveLength(0);
   });
 
+  it('has no handle on the edge an aligned image is anchored to', () => {
+    for (const [align, kept] of [
+      ['left', 'right'],
+      ['right', 'left'],
+    ] as const) {
+      const [image] = drawn(editorWith(`<img src="cat.png" align="${align}">`, local, 0));
+      const handles = [...image!.querySelectorAll('.rl-image-handle')];
+      expect(handles.map((h) => h.className)).toEqual([
+        expect.stringContaining(`rl-image-handle-${kept}`),
+      ]);
+    }
+  });
+
   it('draws a left or right alignment on a line of its own', () => {
     const [image] = drawn(
       editorWith('Before\n\n<img src="cat.png" align="left">\n\nAfter', local, 0),
