@@ -1224,8 +1224,15 @@ parenthesis typed with nothing after the caret are text: the editor writes the d
 order of decisions: with Track Changes on it is one more letter of the author's insertion). A
 period typed before more text (`- 1.5`, written `- 1\.5` if it was typed in that order) is text
 the same way. The digits and the delimiter followed by a space, typed in that order, are the
-numbered sublist of an item (planned: #512); until that is built the space is text after
-`1\.`. A file that holds `- 1.` as it is, the empty numbered list, is read as that, and the keys
+numbered sublist of an item (#512): the space takes the backslash away (with Track Changes on it is
+a letter of the author's own insertion, which the deletion only takes back) and the item holds the
+numbered list, `- 1. ` (micromark 4.0.2 reads `<ul><li><ol><li></li></ol></li></ul>`; the digits are kept, so
+`- 3. ` is a list that starts at 3). The reverse needs no rule: `- ` typed at the start of a
+numbered item's text is a bullet list in the item, `1. - `, as it reads. Tab on an item that is the
+first of its list is still refused; a numbered item after a bullet list is the first of its own
+list, so a numbered sublist under a bullet is made by typing `1. ` in the bullet item, or by Tab
+(a nested bullet) and then the convert command (#506). A file that holds `- 1.` as it is, the empty
+numbered list, is read as that, and the keys
 treat it as an empty item (Return in it goes up a level, as in any empty item). Only the delimiter
 typed at the end of the item's first line is escaped: the digits typed in front of an existing
 period, Backspace that leaves `1.`, a paste, and a line that goes on under the digits are written

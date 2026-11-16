@@ -10,7 +10,7 @@
 // - `---`, `***` or `___` and Return: a thematic break and an empty paragraph after it.
 // - A number and a period typed as the start of a list item's text (`- 1.`): Markdown reads a
 //   marker with nothing after it as a numbered list in the item, so the period is written escaped
-//   (`- 1\.`), which stays text (#666). A space after the period is the numbered sublist (#512).
+//   (`- 1\.`), which stays text (#666). A space after it takes the backslash away: the numbered sublist (#512).
 // - A row of cells, `| a | b |`, and Return: the table's delimiter row (and a first row to type in).
 
 import { syntaxTree } from '@codemirror/language';
@@ -143,18 +143,18 @@ const closeFence = EditorState.transactionFilter.of((tr) => {
 });
 
 /**
- * The period or parenthesis typed after the digits that are the whole of a list item's first line
- * of text, with nothing after the caret: written escaped, so that the line reads as text and not as
- * the marker of a numbered list in the item (#666; format §3.2).
+ * A single character typed at the caret, with nothing selected, in a list item's first line of
+ * text, where `pattern` matches the text before the caret (markers of the tracked layer left out)
+ * and nothing but markers follows it on the line. Null otherwise.
  */
-const escapeMarker = EditorState.transactionFilter.of((tr) => {
+function typedAtItemStart(tr: Transaction, chars: string[], pattern: RegExp) {
   if (!tr.docChanged || !tr.isUserEvent('input.type') || tr.isUserEvent('input.type.compose')) {
-    return tr;
+    return null;
   }
   const { startState: start } = tr;
-  if (start.field(viewModeField, false) === 'raw') return tr;
+  if (start.field(viewModeField, false) === 'raw') return null;
   const { main } = start.selection;
-  if (start.selection.ranges.length > 1 || !main.empty) return tr;
+  if (start.selection.ranges.length > 1 || !main.empty) return null;
   let seen: string | null = null;
   let single = true;
   tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => {
@@ -162,11 +162,11 @@ const escapeMarker = EditorState.transactionFilter.of((tr) => {
     seen = text.toString();
   });
   const typed = String(seen ?? '');
-  if (!single || (typed !== '.' && typed !== ')')) return tr;
+  if (!single || !chars.includes(typed)) return null;
   const block = blockAt(start, main.head);
   const item = block?.containers.at(-1);
   // A task item's `1.` is text for Markdown as it stands (a box is no list).
-  if (!block || block.kind !== 'paragraph' || item?.kind !== 'item' || item.task) return tr;
+  if (!block || block.kind !== 'paragraph' || item?.kind !== 'item' || item.task) return null;
   // The item's first paragraph: its marker is on the block's first line, or alone on the line
   // above it, where a tracked insertion's opener (the carrier) put the text on a line of its own.
   const first = start.doc.lineAt(block.lines.from);
@@ -177,19 +177,51 @@ const escapeMarker = EditorState.transactionFilter.of((tr) => {
       above.replace(/<!--[^]*?-->/g, ''),
     )
   ) {
-    return tr;
+    return null;
   }
   const from = textStart(start, block);
-  if (main.head < from) return tr;
+  if (main.head < from) return null;
   const before = start.sliceDoc(from, main.head).replace(/<!--[^]*?-->/g, '');
-  if (!/^\d{1,9}$/.test(before)) return tr;
+  if (!pattern.test(before)) return null;
   // Nothing after the caret but markers: a period before more text, as `1.5`, is text as it is.
   const line = start.doc.lineAt(main.head);
   const after = start.sliceDoc(main.head, line.to).replace(/<!--[^]*?-->/g, '');
-  if (/\S/.test(after) || block.text.to > line.to) return tr;
+  if (/\S/.test(after) || block.text.to > line.to) return null;
+  return { head: main.head, typed };
+}
+
+/**
+ * The period or parenthesis typed after the digits that are the whole of a list item's first line
+ * of text, with nothing after the caret: written escaped, so that the line reads as text and not as
+ * the marker of a numbered list in the item (#666; format §3.2).
+ */
+const escapeMarker = EditorState.transactionFilter.of((tr) => {
+  const found = typedAtItemStart(tr, ['.', ')'], /^\d{1,9}$/);
+  if (!found) return tr;
   return {
-    changes: { from: main.head, insert: `\\${typed}` },
-    selection: EditorSelection.cursor(main.head + 2),
+    changes: { from: found.head, insert: `\\${found.typed}` },
+    selection: EditorSelection.cursor(found.head + 2),
+    annotations: annotationsOf(tr),
+    effects: tr.effects,
+    scrollIntoView: tr.scrollIntoView,
+  };
+});
+
+/**
+ * The space typed after the escaped delimiter (`- 1\.`, the whole of the item's first line): the
+ * person typed `1. ` at the start of the item's text, the numbered sublist (#512; format §3.2). The
+ * backslash goes (with Track Changes on it is a letter of the author's own insertion, which a
+ * deletion of it only takes back) and the item holds the numbered list, `- 1. `.
+ */
+const startSublist = EditorState.transactionFilter.of((tr) => {
+  const found = typedAtItemStart(tr, [' '], /^\d{1,9}\\[.)]$/);
+  if (!found || !/^\\[.)]$/.test(tr.startState.sliceDoc(found.head - 2, found.head))) return tr;
+  return {
+    changes: [
+      { from: found.head - 2, to: found.head - 1 },
+      { from: found.head, insert: ' ' },
+    ],
+    selection: EditorSelection.cursor(found.head),
     annotations: annotationsOf(tr),
     effects: tr.effects,
     scrollIntoView: tr.scrollIntoView,
@@ -197,4 +229,4 @@ const escapeMarker = EditorState.transactionFilter.of((tr) => {
 });
 
 /** Typed syntax that needs more than typing. Below the tracked layer's filter, which runs after. */
-export const typedSyntax = Prec.low([closeFence, escapeMarker]);
+export const typedSyntax = Prec.low([closeFence, escapeMarker, startSublist]);

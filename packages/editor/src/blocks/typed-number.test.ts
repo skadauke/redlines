@@ -34,6 +34,25 @@ describe('typing a number and a period at the start of an item (#666)', () => {
         expect: tc ? (views ? { newest: '- a⏎- 1\\.', original: '- a⏎- ' } : {}) : { file },
       });
     }
+    // The space after it is the numbered sublist (#512): the backslash goes, and the item holds the
+    // numbered list. The reverse, a bullet in a numbered item, is typed as it reads.
+    for (const [name, doc, typed, file] of [
+      ['1. then a space', '- a⏎- ‸', '1. ', '- a⏎- 1. '],
+      ['1. then a space and text', '- a⏎- ‸', '1. b', '- a⏎- 1. b'],
+      ['10) then a space', '- a⏎- ‸', '10) ', '- a⏎- 10) '],
+      ['1. then a space in a numbered item', '1. a⏎2. ‸', '1. b', '1. a⏎2. 1. b'],
+      ['1. then a space in a quoted item', '> - a⏎> - ‸', '1. b', '> - a⏎> - 1. b'],
+      ['- in a numbered item', '1. a⏎2. ‸', '- b', '1. a⏎2. - b'],
+      ['- then Return in a numbered item', '1. a⏎2. ‸', '- b⏎c', '1. a⏎2. - b⏎   - c'],
+    ] as const) {
+      rows.push({
+        name: `${name}: the sublist, Track Changes ${on}`,
+        doc,
+        keys: [...typed].map((type) => (type === '⏎' ? 'Enter' : { type })),
+        tc,
+        expect: tc ? {} : { file },
+      });
+    }
     // Text that is no marker stays as it is: a period with text after it, a box, a letter.
     for (const [name, doc, typed, file] of [
       ['a period before more text in the line', '- a⏎- ‸', 'x1.', '- a⏎- x1.'],
