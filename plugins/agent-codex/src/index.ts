@@ -4,6 +4,7 @@
 
 import type {
   AgentEvent,
+  AgentModel,
   AgentProvider,
   AgentRequest,
   HostProcesses,
@@ -95,6 +96,15 @@ export interface CodexSetup {
 }
 
 /**
+ * The models a run can be told to use (#530). Codex has no command that lists them, so these are
+ * the ones it is documented to take; a run with none uses Codex's own default.
+ */
+export const CODEX_MODELS: readonly AgentModel[] = [
+  { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
+  { id: 'gpt-5', name: 'GPT-5' },
+];
+
+/**
  * The whole command line, in one place, so that a correction is a one-line change, here and in the
  * rule that lets only this line through (apps/desktop/src-tauri/src/agents/allowed.rs).
  * `provider-lines.node.test.ts` in apps/desktop fails when the two differ.
@@ -130,6 +140,8 @@ export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: Code
     '-C',
     setup.folder,
     '--skip-git-repo-check',
+    // Only a model the provider lists is passed on; anything else is left to Codex.
+    ...(CODEX_MODELS.some(({ id }) => id === request.model) ? ['-m', request.model!] : []),
     '--ignore-user-config',
     '--ignore-rules',
     '-c',
@@ -325,6 +337,7 @@ export function createCodexProvider(
 
   return {
     id: 'codex',
+    models: CODEX_MODELS,
     name: 'Codex',
     readLimit: 'folder',
 

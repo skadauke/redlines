@@ -33,12 +33,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which parts of the repository a change touches, from the files it changes: against the pull
+  # request's base, or for a push against the commit before it. A change to a workflow sets every
+  # flag, and so does a diff that can't be made (a new branch, a forced push). No install: it is
+  # a few seconds of shell on Ubuntu.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.flags.outputs.rust }}
+      quicklook: ${{ steps.flags.outputs.quicklook }}
+      ui: ${{ steps.flags.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: List the changed files and set the flags
+        id: flags
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          base="$BASE"
+          [ "$EVENT" = push ] && base="$BEFORE"
+          all=false
+          if ! git diff --name-only --no-renames "$base" HEAD > changed.txt 2>/dev/null; then
+            all=true
+          fi
+          echo "Changed files:"; cat changed.txt
+          flag() { # flag <name> <extended regex>
+            if [ "$all" = true ] || grep -Eq '^\.github/workflows/' changed.txt \
+              || grep -Eq "$2" changed.txt; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          # The redlines program bundles packages/cli and packages/format.
+          flag rust '^(apps/desktop/src-tauri/|apps/desktop/redlines/|packages/cli/|packages/format/)'
+          flag quicklook '^(apps/desktop/quicklook/|packages/format/|apps/desktop/scripts/build-quicklook)'
+          flag ui '^(apps/desktop/src/|apps/desktop/journeys/|plugins/|packages/editor/|packages/format/)'
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
+          # Pull requests: the history, so that vitest can ask what changed since the base.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
 
       # The pnpm version comes from packageManager in package.json.
@@ -58,9 +105,19 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # A pull request runs the tests that a change can reach: vitest follows the imports from
+      # each changed file to the tests that load it (a package's dependents among them), and runs
+      # every test when a config or package.json changes. Main runs them all, as does the sweep.
       - name: Test
-        run: pnpm test
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            pnpm exec vitest run --changed "$BASE" --passWithNoTests
+          else
+            pnpm test
+          fi
         env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
           # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main. Pull
           # requests skip them until the ten tests of #432 are re-bound and the timing files get a job
           # of their own on pull requests.
@@ -82,6 +139,8 @@ jobs:
   # both architectures, and its renderer is run in the system's JavaScriptCore on the fixtures of
   # apps/desktop/quicklook (apps/desktop/scripts/build-quicklook).
   quicklook:
+    needs: changes
+    if: ${{ needs.changes.outputs.quicklook == 'true' }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -103,6 +162,8 @@ jobs:
         run: apps/desktop/scripts/build-quicklook --check
 
   desktop:
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     # Ubuntu 26.04 replaces GNU coreutils with uutils, whose multicall binary refuses to run under
     # another name (the agent tests run /bin/echo as a stand-in for claude) and stops a sleep
     # differently. Pinned until the tests stop depending on GNU coreutils (#481).

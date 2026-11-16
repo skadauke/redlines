@@ -43,5 +43,25 @@ test.describe('the agents pane @views', () => {
     const row = j.page.locator('.rl-picker-row').first();
     await expect(row).toContainText('Ada');
     await j.shot('agents-picker-ada');
+
+    // Update shows only for an agent with a newer version out (#527): the page's Codex has one.
+    await expect(prefs.getByRole('button', { name: 'Update Codex' })).toBeVisible();
+    await expect(prefs.getByRole('button', { name: 'Update Claude Code' })).toHaveCount(0);
+    await expect(prefs.locator('[data-row="Codex"]')).toContainText('Version 0.41.0 is available.');
+    await shot('agents-pane-update');
+
+    // The Model of an agent (#530): Default, then the models its program takes.
+    const model = prefs.getByLabel('Model for Claude Code');
+    await expect(model.locator('option')).toHaveText(['Default', 'Opus', 'Sonnet', 'Haiku']);
+    await model.selectOption('opus');
+    await shot('agents-pane-model');
+
+    // The Default agent (#528): the first control of the pane, once two agents are set up.
+    await prefs.bringToFront();
+    const chooser = prefs.getByLabel('Default agent');
+    await expect(chooser).toBeVisible();
+    await expect(chooser.locator('option')).toHaveText(['Ada', 'Codex']);
+    await chooser.selectOption('codex');
+    await shot('agents-pane-default-agent');
   });
 });

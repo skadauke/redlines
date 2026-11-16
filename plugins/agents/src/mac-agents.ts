@@ -41,6 +41,11 @@ export interface MacAgentsOptions {
    * keeps the name it has, as an agent the person named themselves does.
    */
   handles?: () => Readonly<Record<string, string>>;
+  /**
+   * The model the person chose for each agent, by id (Preferences, #530), asked at every run. A
+   * request that names no model of its own (Ask's picker does) runs the one chosen here.
+   */
+  models?: () => Readonly<Record<string, string>>;
 }
 
 export function createMacAgents(
@@ -73,6 +78,7 @@ export function createMacAgents(
           name: provider.name,
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          ...(provider.models ? { models: provider.models } : {}),
           state,
         };
       }),
@@ -107,7 +113,7 @@ export function createMacAgents(
       kept = null;
     },
 
-    async *run(agent, request, tools, signal): AsyncGenerator<AgentEvent> {
+    async *run(agent, asked, tools, signal): AsyncGenerator<AgentEvent> {
       // An agent added since the last look is looked for once more.
       const find = (list: readonly AgentProvider[]) => list.find(({ id }) => id === agent);
       const provider = find(current) ?? (options.more ? find(await look()) : undefined);
@@ -115,6 +121,11 @@ export function createMacAgents(
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
         return;
       }
+      // The model chosen in Preferences, unless the request names one the agent lists.
+      const listed = (model: string | undefined) =>
+        model !== undefined && provider.models?.some(({ id }) => id === model) === true;
+      const chosen = options.models?.()[agent];
+      const request = !listed(asked.model) && listed(chosen) ? { ...asked, model: chosen } : asked;
       // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
       // an error that its tools never started.
       if (provider.toolbox === false) {

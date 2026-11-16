@@ -28,6 +28,7 @@ import { installTitleHints } from '../ui/title-hints.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
+import { startsFilter } from './filter-key.ts';
 import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
@@ -154,9 +155,14 @@ const deps: PaneDeps = {
         id: provider.id,
         // The card is the program's: what is shown of the agent in a document is its handle.
         name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        ...(provider.models ? { models: provider.models } : {}),
         detect: (fresh?: boolean) => {
           if (fresh) detections.delete(provider.id);
-          const kept = detections.get(provider.id) ?? provider.detect();
+          const kept =
+            detections.get(provider.id) ??
+            (!isTauri && import.meta.env.DEV
+              ? import('./dev-detect.ts').then(({ devDetect }) => devDetect(provider.id))
+              : provider.detect());
           detections.set(provider.id, kept);
           // A look the person asked for may have found the agent changed under the documents too.
           if (fresh)
@@ -174,6 +180,8 @@ const deps: PaneDeps = {
               signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
               signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
               stop: () => agentSetup.stop(provider.id),
+              // The newest version, so that Update shows only when there is one (#527).
+              latest: (fresh?: boolean) => agentSetup.latest(provider.id, fresh),
               running: () => setups.running(provider.id),
               // The skill that teaches the agent Redlines files, in the folder it reads skills
               // from. OpenClaw reads Codex's folder too.
@@ -182,6 +190,15 @@ const deps: PaneDeps = {
                 install: () => agentSkills.install(provider.id),
                 ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
               },
+            }
+          : {}),
+        // A plain page in development says a newer Codex is out, so that Update can be seen.
+        ...(!isTauri && import.meta.env.DEV
+          ? {
+              // Nothing to update here: an update ends well, and changes nothing.
+              update: () => Promise.resolve({ ok: true, message: '' }),
+              latest: () =>
+                import('./dev-detect.ts').then(({ devLatest }) => devLatest(provider.id)),
             }
           : {}),
       })),
@@ -350,17 +367,9 @@ window.addEventListener('keydown', (event) => {
     leaveFilter();
     return;
   }
-  // A first character, typed where nothing takes it: not a shortcut, not a control's own key (Space
-  // presses a button), not a field's, and not while the filter is open.
-  if (!filter.hidden || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key.length !== 1 || event.key === ' ') return;
-  const target = event.target;
-  if (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.closest('input, textarea, select, button, a, [contenteditable], [role="button"]'))
-  )
-    return;
+  // A first letter or digit, from anywhere but a field that takes text (filter-key.ts), and not
+  // while the filter is open.
+  if (!filter.hidden || !startsFilter(event)) return;
   event.preventDefault();
   filter.hidden = false;
   filter.value = event.key;

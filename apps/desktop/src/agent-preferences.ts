@@ -90,6 +90,9 @@ export const agentSetup = {
     invoke<SetupOutcome>('agent_sign_in', { agent }).then((outcome) => setupResult(outcome, true)),
   /** Opens Terminal with the login's command, for a login that needs one. */
   signInInTerminal: (agent: string) => invoke<void>('agent_terminal_sign_in', { agent }),
+  /** The newest version of the agent's program, for Update (#527); `fresh` skips what was kept. */
+  latest: (agent: string, fresh = false) =>
+    invoke<string>('agent_latest_version', { agent, fresh }),
   /** Stops the update or the sign-in under way, which then ends as stopped. */
   stop: (agent: string) => invoke<void>('agent_setup_stop', { agent }),
 };

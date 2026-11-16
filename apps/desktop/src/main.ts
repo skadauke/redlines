@@ -14,6 +14,7 @@ import {
   createLiveLines,
   createMacAgents,
   createRuns,
+  defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
@@ -68,6 +69,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -360,6 +362,8 @@ const agents =
         {
           // What the person named each agent in Preferences, read at every look.
           handles: () => loadSettings().agentHandles,
+          // The model the person chose for each agent, read at every run.
+          models: () => loadSettings().agentModels,
           ...(isTauri
             ? {
                 more: async () =>
@@ -407,7 +411,8 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     getParsed: () => editor.getParsed(),
     getMet: () => settings.people,
     me: author.handle,
-    agents: () => knownAgents,
+    // The default agent comes first in the list (#528).
+    agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
   });
 };
 
@@ -802,6 +807,8 @@ const ask = createAsk(editor, {
   },
   projectRoot: projectOf,
   settings: agentSettings,
+  // An Ask that names no agent goes to the one the person chose in Preferences (#528).
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
@@ -885,12 +892,7 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
@@ -1365,12 +1367,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = {
-    ...changed,
-    sidebarOpen: settings.sidebarOpen,
-    sidebarWidth: settings.sidebarWidth,
-    textSize: settings.textSize,
-  };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

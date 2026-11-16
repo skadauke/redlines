@@ -35,6 +35,26 @@ test.describe('the alert for an edit that can’t be tracked @views', () => {
     expect(await j.text()).toBe(DOC.replace('Notes', 'NotesX'));
   });
 
+  test('with Track Changes off, an edit beside pending changes asks to accept them', async ({
+    start,
+  }) => {
+    const doc = 'First <!--ins k3x9-->new words<!--/k3x9--> here.\n\nSecond paragraph.\n';
+    const j = await start({ doc, tracking: false, view: 'redlines' });
+    await j.caretAfter('First <!--ins k3x9-->new');
+    await j.type('X');
+    const sheet = j.page.locator('.rl-sheet');
+    await expect(sheet).toContainText('accepting');
+    await expect(sheet).toContainText('pending change in this paragraph. Make the edit?');
+    // No detail line and no "Don't ask again": it decides other people's changes, every time.
+    await expect(sheet.getByRole('checkbox')).toHaveCount(0);
+    expect(await j.text()).toBe(doc);
+    await j.shot('sheet-accept-pending');
+    await j.page.waitForTimeout(200);
+    await sheet.getByRole('button', { name: 'Make Edit' }).click();
+    await expect(sheet).toBeHidden();
+    expect(await j.text()).toBe('First newX words here.\n\nSecond paragraph.\n');
+  });
+
   test('Raw asks once for a word, and the answer holds for the run', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: true, view: 'raw' });
     await j.caretAfter('then more');
