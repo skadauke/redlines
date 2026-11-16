@@ -85,6 +85,7 @@ describe('settings', () => {
       consent: {},
       agentHandles: {},
       defaultAgent: null,
+      agentModels: {},
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -116,6 +117,7 @@ describe('settings', () => {
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       agentHandles: { claude: 'ada' },
       defaultAgent: 'codex',
+      agentModels: { claude: 'opus' },
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -708,5 +710,15 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, `{"defaultAgent":${bad}}`);
       expect(loadSettings().defaultAgent).toBeNull();
     }
+  });
+
+  it('keeps the models chosen as text by agent, and drops the rest (#530)', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ agentModels: { claude: 'opus', codex: '', x: 3 } }),
+    );
+    expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
+    localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
+    expect(loadSettings().agentModels).toEqual({});
   });
 });

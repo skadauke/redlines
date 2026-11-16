@@ -7,10 +7,11 @@
 // `deps`.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
-import type { AgentState } from '@redlines/plugin-api';
+import type { AgentModel, AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
 import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
+import { modelField } from './model-field.ts';
 import { handleField } from './handle-field.ts';
 import { displayName, handleOf } from './handles.ts';
 import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
@@ -27,6 +28,8 @@ export interface AgentsPaneSettings {
   agentHandles: Record<string, string>;
   /** The agent an Ask that names none goes to (#528); none chosen means the first ready one. */
   defaultAgent?: string | null;
+  /** The model chosen for each agent, by id (#530); an agent with none runs its default. */
+  agentModels?: Record<string, string>;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -58,6 +61,8 @@ export interface SetupUnderWay {
 export interface PaneAgent {
   id: string;
   name: string;
+  /** The models the agent can be told to run (#530); without any, the card has no Model field. */
+  models?: readonly AgentModel[];
   /** Installs the Redlines skill for the agent. Without it, the row says nothing of a skill. */
   skill?: PaneSkill;
   /** `fresh` asks the program again, where the host keeps what it found. */
@@ -462,6 +467,20 @@ function agentRow(
       taken,
       alive,
     }),
+    ...(agent.models?.length
+      ? [
+          modelField(agent.name, {
+            models: agent.models,
+            chosen: () => deps.settings().agentModels?.[agent.id],
+            save: (model) => {
+              const rest = { ...deps.settings().agentModels };
+              if (model === undefined) delete rest[agent.id];
+              else rest[agent.id] = model;
+              deps.update({ agentModels: rest });
+            },
+          }),
+        ]
+      : []),
     ...skillUi.nodes,
   );
   const root = row(agent.name, status, rest);

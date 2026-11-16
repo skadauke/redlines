@@ -361,6 +361,8 @@ const agents =
         {
           // What the person named each agent in Preferences, read at every look.
           handles: () => loadSettings().agentHandles,
+          // The model the person chose for each agent, read at every run.
+          models: () => loadSettings().agentModels,
           ...(isTauri
             ? {
                 more: async () =>

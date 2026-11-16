@@ -1655,3 +1655,45 @@ describe('the Redlines skill', () => {
     });
   });
 });
+
+describe('the Model field (#530)', () => {
+  const ok: AgentState = { found: true, signedIn: true, version: '1', path: '/bin/x' };
+  const models = [
+    { id: 'opus', name: 'Opus' },
+    { id: 'sonnet', name: 'Sonnet' },
+  ];
+  const field = (container: HTMLElement) =>
+    container.querySelector<HTMLSelectElement>('.rl-pref-agent-model select');
+
+  it('has none for an agent that lists no models', async () => {
+    const { container, deps } = setup({ claude: ok, codex: ok });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(field(container)).toBeNull();
+  });
+
+  it('lists Default and the models, shows the one kept, and keeps a new choice', async () => {
+    const { container, deps, now } = setup(
+      { claude: ok, codex: ok },
+      { agentModels: { claude: 'sonnet' } },
+    );
+    deps.agents = deps.agents.map((agent) =>
+      agent.id === 'claude' ? { ...agent, models } : agent,
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const select = field(container)!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Default',
+      'Opus',
+      'Sonnet',
+    ]);
+    expect(select.value).toBe('sonnet');
+    select.value = 'opus';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({ claude: 'opus' });
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({});
+  });
+});

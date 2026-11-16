@@ -44,6 +44,12 @@ test.describe('the agents pane @views', () => {
     await expect(row).toContainText('Ada');
     await j.shot('agents-picker-ada');
 
+    // The Model of an agent (#530): Default, then the models its program takes.
+    const model = prefs.getByLabel('Model for Claude Code');
+    await expect(model.locator('option')).toHaveText(['Default', 'Opus', 'Sonnet', 'Haiku']);
+    await model.selectOption('opus');
+    await shot('agents-pane-model');
+
     // The Default agent (#528): the first control of the pane, once two agents are set up.
     await prefs.bringToFront();
     const chooser = prefs.getByLabel('Default agent');
