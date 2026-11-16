@@ -707,3 +707,14 @@ describe('whole rows through the grip when the last selected row is shorter (#45
     });
   }
 });
+
+describe('the widgets share the look of the app (#672)', () => {
+  it('draws them on the card ground with the theme shadow, and the + strips and square in one rule', async () => {
+    const { GRIPS_STYLE } = await import('./grips.ts');
+    expect(GRIPS_STYLE).not.toContain('--rl-page');
+    expect(GRIPS_STYLE).not.toMatch(/box-shadow:\s*0 /);
+    expect(GRIPS_STYLE).toContain(
+      '.rl-plus, .rl-col-plus, .rl-edge-add, .rl-table-select {\n  cursor: pointer;',
+    );
+  });
+});
