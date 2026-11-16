@@ -233,7 +233,9 @@ export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[]
       const apartBoxes = boxOf(state, leaf) !== boxOf(state, above) || boxOf(state, leaf) === null;
       const tintedStart = TINTED.has(leaf.name) || startsCallout(state, leaf);
       const apart = apartBoxes && tintedStart && (tinted(above) || above.name === 'Table');
-      const clip = apartBoxes && leaf.name === 'Table' && tinted(above);
+      // Front matter has no last-line rule: the space stays where it was for a table under it.
+      const clip =
+        apartBoxes && leaf.name === 'Table' && tinted(above) && above.name !== 'FrontMatter';
       const below = !apart && !clip && boxed(leaf) && !boxed(above);
       found.push({
         line: doc.lineAt(below || clip ? above.to : leaf.from).number,
