@@ -299,7 +299,8 @@ The window, on the desktop:
   | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
   file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
   its place and appears when its command is registered. The items are the editor's own commands
-  (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same.
+  (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same; they
+  exist where the host can open image files, and the menu is only there.
   An item that can't be used here is dimmed, and
   its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
   opens on the side of the bar with room and scrolls when taller, never over the bar. A docked

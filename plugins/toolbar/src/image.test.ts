@@ -43,6 +43,26 @@ describe('the Image menu', () => {
     expect(image(editor)?.label).toBe('Image');
   });
 
+  it('is in the bar for a selection that holds an image, and not for one that ends before it', () => {
+    const editor = mount();
+    const text = editor.view.state.doc.toString();
+    const spot = text.indexOf('![');
+    editor.view.dispatch({ selection: { anchor: 2, head: spot + 4 } });
+    expect(image(editor)?.label).toBe('Image');
+    editor.view.dispatch({ selection: { anchor: 2, head: spot - 2 } });
+    expect(image(editor)).toBeUndefined();
+  });
+
+  it('is not in the bar where the host can’t open files, which is where its commands come from', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: DOC, author: { handle: 'ada', name: 'Ada' } });
+    editors.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
+    at(editor, 'A red');
+    expect(image(editor)).toBeUndefined();
+  });
+
   it('holds Align and Size in lines of their own, Original Size and Edit in Preview', () => {
     const editor = mount();
     at(editor, 'A red');

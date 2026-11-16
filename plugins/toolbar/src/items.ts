@@ -1,12 +1,14 @@
 // What the toolbar holds (issues #313, #504): a row of menus, Ask | Insert · Review · [List] ·
-// Format · Edit, whose items are commands of the registry, by id, so that the toolbar, the Format
-// menu and the shortcuts never disagree about names, keys or whether an item is there. An item whose
-// command isn't registered is left out, and appears when its command lands; a menu with none left
-// is not drawn. The pure part: `shownBar` says what is in the bar for a state, and `index.ts` draws.
+// [Table] · [Image] · Format · Edit, whose items are commands of the registry, by id, so that the
+// toolbar, the Format menu and the shortcuts never disagree about names, keys or whether an item is
+// there. An item whose command isn't registered is left out, and appears when its command lands; a
+// menu with none left is not drawn. The pure part: `shownBar` says what is in the bar for a state,
+// and `index.ts` draws.
 //
-// Parts that come later are named here so that their place is kept: the Table and Image menus
-// (#552, #553) go to the right of Review, after List, and Insert holds a slot for Collapsible
-// Section, which appears when its command (`block.collapsible`) is registered.
+// Table and Image (#552, #553) are in the bar only where the selection is in a table or holds an
+// image. Parts that come later keep their place: Insert holds a slot for Collapsible Section
+// (`block.collapsible`) and Image one for Alt Text… (`image.altText`), each shown when its command
+// is registered.
 
 import type { EditorState } from '@codemirror/state';
 import { rectOf, touchedCols, touchedRows, wholeRect, type EditorCommand } from '@redlines/editor';

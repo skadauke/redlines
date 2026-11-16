@@ -244,7 +244,7 @@ test.describe('the toolbar @views', () => {
     );
     await j.shot('image-menu');
     await menu.locator('[data-command="image.align.right"]').click();
-    expect(await j.text()).toMatch(/align="right"|align:\s*right/);
+    expect(await j.text()).toContain('align="right"');
     // The image the caret is in is drawn as its source; the menu follows the caret.
     await top.click();
     await expect(menu.locator('[data-command="image.align.right"]')).toHaveAttribute(
@@ -261,5 +261,8 @@ test.describe('the toolbar @views', () => {
         (window as unknown as { __redlinesImages: { opened: string[] } }).__redlinesImages.opened,
     );
     expect(opened.at(-1)).toContain('red.png');
+    // Away from the image, the menu is gone from the bar.
+    await j.caretAfter('After');
+    await expect(top).toHaveCount(0);
   });
 });
