@@ -14,6 +14,7 @@
 // at the end of the file.
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
 import {
   Annotation,
   ChangeSet,
@@ -60,6 +61,7 @@ import {
   untrackedEdit,
   untrackedFormat,
 } from '@redlines/format';
+import type { SyntaxNode } from '@lezer/common';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -224,6 +226,42 @@ function inBody(edits: Edit[], end: number | null): Edit[] {
     if (edit.to <= end) return [edit];
     const from = Math.min(edit.from, end);
     return from < end || edit.insert ? [{ ...edit, from, to: end }] : [];
+  });
+}
+
+/**
+ * A deletion of all the text between the markers of an inline format (`**a**`, `~~a~~`, a code
+ * span) takes the markers too, from the outermost format it empties: what is left, `****`, is no
+ * format and no text, and read again it would be something else (#584).
+ */
+function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
+  const tree = syntaxTree(state);
+  return edits.map((edit) => {
+    if (edit.insert || edit.from >= edit.to) return edit;
+    let { from, to } = edit;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
+        const first = node.firstChild;
+        const last = node.lastChild;
+        if (
+          first &&
+          last &&
+          first !== last &&
+          /Mark$/.test(first.name) &&
+          /Mark$/.test(last.name) &&
+          first.to === from &&
+          last.from === to &&
+          /^(StrongEmphasis|Emphasis|Strikethrough|InlineCode)$/.test(node.name)
+        ) {
+          from = node.from;
+          to = node.to;
+          moved = true;
+          break;
+        }
+      }
+    }
+    return from === edit.from && to === edit.to ? edit : { ...edit, from, to };
   });
 }
 
@@ -904,6 +942,7 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
   }
+  if (tr.isUserEvent('delete')) edits = emptiedFormats(start, edits);
   if (start.field(trackingField) && !answered) {
     return trackedSpec(tr, keepingSpaces(tr, edits), backward);
   }
