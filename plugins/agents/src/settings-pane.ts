@@ -10,6 +10,7 @@
 import type { AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
+import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
 import { handleField } from './handle-field.ts';
 import { displayName, handleOf } from './handles.ts';
 import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
@@ -24,6 +25,8 @@ export interface AgentsPaneSettings {
   consent: Record<string, 'document' | 'folder' | 'everything' | 'no'>;
   /** The handle the person gave each agent, by id (#558). */
   agentHandles: Record<string, string>;
+  /** The agent an Ask that names none goes to (#528); none chosen means the first ready one. */
+  defaultAgent?: string | null;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -170,8 +173,36 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     return taken;
   };
 
+  // The Default agent row comes first and shows once more than one agent is set up: a program that
+  // was found, or an OpenClaw agent. Each card reports what it found, and the list is drawn again.
+  const found = new Map<string, boolean>();
+  let openclawChoices: DefaultChoice[] = [];
+  const defaultRow = defaultAgentRow({
+    chosen: () => deps.settings().defaultAgent,
+    save: (id) => deps.update({ defaultAgent: id }),
+  });
+  const drawDefault = () => {
+    if (!alive) return;
+    const mine = deps.agents
+      .filter(({ id }) => found.get(id) === true)
+      .map(({ id }) => ({ id, name: shownName(id) }));
+    defaultRow.show([...mine, ...openclawChoices]);
+  };
+  container.append(defaultRow.row);
+
   for (const agent of deps.agents) {
-    const drawn = agentRow(agent, deps, () => alive, waiting, takenHandles);
+    const drawn = agentRow(
+      agent,
+      deps,
+      () => alive,
+      waiting,
+      takenHandles,
+      (isFound) => {
+        found.set(agent.id, isFound);
+        drawDefault();
+      },
+      drawDefault,
+    );
     looks.push({
       id: agent.id,
       check: (fresh, options) => drawn.check(fresh, options),
@@ -184,8 +215,31 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   }
 
   if (deps.openclaw) {
+    const openclaw = deps.openclaw;
+    const listed = (agents: readonly { id: string; name: string }[]) => {
+      openclawChoices = agents.map(({ id, name }) => ({
+        id,
+        name: displayName(name.toLowerCase()),
+      }));
+      drawDefault();
+    };
+    void openclaw.list().then(listed, () => {});
+    // An agent added or removed here changes the list at once.
+    const tracked: OpenClawDeps = {
+      ...openclaw,
+      add: async (input) => {
+        const agents = await openclaw.add(input);
+        listed(agents);
+        return agents;
+      },
+      remove: async (id) => {
+        const agents = await openclaw.remove(id);
+        listed(agents);
+        return agents;
+      },
+    };
     container.append(
-      renderOpenClaw(deps.openclaw, {
+      renderOpenClaw(tracked, {
         alive: () => alive,
         // What an agent was allowed isn't what another of its name is: Remove takes the answers.
         forgetAnswers: (agent) => {
@@ -372,6 +426,8 @@ function agentRow(
   alive: () => boolean,
   waiting: Set<string>,
   taken: () => Promise<Record<string, string>>,
+  looked: (found: boolean) => void,
+  renamed: () => void,
 ): AgentRow {
   const status = el('div', 'rl-pref-status', 'Checking…');
   status.setAttribute('role', 'status');
@@ -399,7 +455,10 @@ function agentRow(
     said,
     handleField(agent.id, {
       handles: () => deps.settings().agentHandles,
-      save: (agentHandles) => deps.update({ agentHandles }),
+      save: (agentHandles) => {
+        deps.update({ agentHandles });
+        renamed();
+      },
       taken,
       alive,
     }),
@@ -475,6 +534,7 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
+        looked(state?.found === true && state.signedIn);
         skillUi.look(state?.found === true);
         const ready = state?.found === true && state.signedIn;
         if (ready) {

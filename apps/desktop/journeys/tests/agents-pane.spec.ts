@@ -43,5 +43,13 @@ test.describe('the agents pane @views', () => {
     const row = j.page.locator('.rl-picker-row').first();
     await expect(row).toContainText('Ada');
     await j.shot('agents-picker-ada');
+
+    // The Default agent (#528): the first control of the pane, once two agents are set up.
+    await prefs.bringToFront();
+    const chooser = prefs.getByLabel('Default agent');
+    await expect(chooser).toBeVisible();
+    await expect(chooser.locator('option')).toHaveText(['Ada', 'Codex']);
+    await chooser.selectOption('codex');
+    await shot('agents-pane-default-agent');
   });
 });
