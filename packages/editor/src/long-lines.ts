@@ -59,17 +59,30 @@ function whole(text: string, at: number, floor: number): number {
  * line that is not long. The base64 of every `data:` URI in it that is long enough is a chip; and
  * once the line's own text shown passes `SHOWN`, everything from there to the line's end is one.
  */
-export function chipsOfLine(text: string, base: number): ChipSpec[] {
+export function chipsOfLine(
+  text: string,
+  base: number,
+  before: { from: number; to: number } | null = null,
+): ChipSpec[] {
   if (text.length <= LONG_LINE) return [];
   const chips: ChipSpec[] = [];
   let shown = 0;
   let at = 0;
+  // The "more" chip this line had before an edit, followed through it: while it is still where the
+  // text was cut, the cut stays at the same text, so that what is typed at its edges stays outside
+  // it (typed at its start the text is shown; typed at the end of the line it is shown after it).
+  const kept =
+    before && before.from >= base && before.to <= base + text.length && before.from < before.to
+      ? { from: before.from - base, to: before.to - base }
+      : null;
   const cutFrom = (from: number): void => {
-    const cut = whole(text, from, at);
+    const keeps = kept !== null && kept.from >= at && kept.from - at <= 2 * SHOWN;
+    const cut = keeps ? kept.from : whole(text, from, at);
+    const end = keeps ? kept.to : text.length;
     chips.push({
       from: base + cut,
-      to: base + text.length,
-      label: `… ${sizeLabel(text.length - cut)} more`,
+      to: base + end,
+      label: `… ${sizeLabel(end - cut)} more`,
     });
     at = text.length;
   };
@@ -80,6 +93,11 @@ export function chipsOfLine(text: string, base: number): ChipSpec[] {
     const end = start + (BASE64.exec(text)?.[0].length ?? 0);
     DATA_URI.lastIndex = Math.max(end, DATA_URI.lastIndex);
     if (end - start < MIN_DATA) continue;
+    // A data URI inside the kept cut is under it.
+    if (kept && found.index >= kept.from && kept.from >= at) {
+      cutFrom(at + (SHOWN - shown));
+      return chips;
+    }
     // What is shown before this data counts against the line's allowance.
     if (shown + (found.index - at) > SHOWN) {
       cutFrom(at + (SHOWN - shown));
@@ -126,11 +144,17 @@ function decorate(spec: ChipSpec): Range<Decoration> {
 }
 
 /** The chips of the lines from `from` to `to`, which are whole lines of `doc`. */
-function chipsBetween(doc: Text, from: number, to: number): Range<Decoration>[] {
+function chipsBetween(
+  doc: Text,
+  from: number,
+  to: number,
+  kept: readonly { from: number; to: number }[],
+): Range<Decoration>[] {
   const out: Range<Decoration>[] = [];
   let pos = from;
   for (const text of doc.iterLines(doc.lineAt(from).number, doc.lineAt(to).number + 1)) {
-    out.push(...chipsOfLine(text, pos).map(decorate));
+    const here = kept.find((chip) => chip.from >= pos && chip.from <= pos + text.length);
+    out.push(...chipsOfLine(text, pos, here ?? null).map(decorate));
     pos += text.length + 1;
   }
   return out;
@@ -162,7 +186,13 @@ export const chipsField = StateField.define<DecorationSet>({
       else touched.push({ from: start, to: end });
     });
     for (const { from, to } of touched) {
-      const fresh = chipsBetween(doc, from, to);
+      // The "more" chips these lines had, which the edit moved with their text.
+      const kept: { from: number; to: number }[] = [];
+      next.between(from, to, (start, end, value) => {
+        const widget = (value.spec as { widget?: Chip }).widget;
+        if (widget?.label.startsWith('…')) kept.push({ from: start, to: end });
+      });
+      const fresh = chipsBetween(doc, from, to, kept);
       next = next.update({
         filterFrom: from,
         filterTo: to,
@@ -182,9 +212,9 @@ export const chipsField = StateField.define<DecorationSet>({
 /** The chip that holds `pos` or touches it, as a range, or null. */
 function chipAt(chips: DecorationSet, pos: number): { from: number; to: number } | null {
   let found: { from: number; to: number } | null = null;
-  chips.between(pos, pos, (from, to) => {
-    found = { from, to };
-    return false;
+  // Two chips can touch (a data chip, then the rest of the line): the one that starts at `pos`.
+  chips.between(pos, pos + 1, (from, to) => {
+    if (found === null && from <= pos && pos < to) found = { from, to };
   });
   return found;
 }

@@ -78,6 +78,30 @@ describe('the chips of a line', () => {
   });
 });
 
+describe('typing at the edges of a chip', () => {
+  const type = (editor: Editor, at: number, text: string) =>
+    editor.view.dispatch({
+      changes: { from: at, insert: text },
+      selection: { anchor: at + text.length },
+    });
+
+  it('stays outside it: typed where the shown text ends, and at the end of the line', () => {
+    const line = 'word '.repeat(5_000);
+    const editor = editorWith(`${line}\n`, 'clean');
+    const [{ from, to }] = chipRanges(editor.view.state) as [{ from: number; to: number }];
+    type(editor, from, 'XY');
+    const moved = chipRanges(editor.view.state);
+    expect(moved).toHaveLength(1);
+    expect(moved[0]!.from).toBe(from + 2);
+    expect(editor.getDoc().slice(from, from + 2)).toBe('XY');
+    type(editor, to + 2, 'Z');
+    const last = chipRanges(editor.view.state);
+    expect(last).toHaveLength(1);
+    // The letter typed after the chip is shown, after it.
+    expect(last[0]!.to).toBe(to + 2);
+  });
+});
+
 describe('a document with very long lines', () => {
   const doc = `# Title\n\nBefore\n\n> - \`${png(400_000)}\`\n\nAfter\n`;
 
