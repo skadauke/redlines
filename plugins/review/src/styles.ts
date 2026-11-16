@@ -366,7 +366,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     flexDirection: 'column',
     gap: '8px',
     boxSizing: 'border-box',
-    width: '304px',
+    width: '328px',
     maxWidth: 'calc(100vw - 24px)',
     padding: '8px 10px 10px',
     border: '1px solid var(--rl-rule)',
@@ -439,14 +439,27 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     WebkitUserSelect: 'text',
   },
   '.rl-rp-field:focus': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-1px' },
-  '.rl-rp-actions': { display: 'flex', gap: '2px', flexWrap: 'wrap' },
-  '.rl-rp-nav': {
+  // Two rows on one grid (#665): Accept, Reject and Comment on one line, never wrapping; Previous
+  // and Next under them, at the same left and right edges. The keys are small enough for all three
+  // to fit the panel; in a panel made narrower than that they are left out (`rl-rp-narrow`).
+  '.rl-rp-actions, .rl-rp-nav': {
     display: 'flex',
+    flexWrap: 'nowrap',
     justifyContent: 'space-between',
     margin: '0 -4px',
-    paddingTop: '6px',
-    borderTop: '1px solid var(--rl-rule)',
   },
+  '.rl-rp-nav': { paddingTop: '6px', borderTop: '1px solid var(--rl-rule)' },
+  '.rl-rp-actions .rl-bar-text, .rl-rp-nav .rl-bar-text': {
+    gap: '4px',
+    padding: '0 6px',
+    whiteSpace: 'nowrap',
+  },
+  '.rl-rp-actions .rl-bar-key, .rl-rp-nav .rl-bar-key': {
+    marginLeft: '1px',
+    minWidth: '14px',
+    padding: '0 3px',
+  },
+  '.rl-rp-narrow .rl-bar-key': { display: 'none' },
   '.rl-rp-actions[hidden], .rl-rp-nav[hidden]': { display: 'none' },
   '.rl-bar-key': {
     marginLeft: '2px',

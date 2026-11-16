@@ -149,6 +149,33 @@ test.describe('the Review Changes panel @views', () => {
     await j.shot('review-panel-first');
   });
 
+  test('its buttons sit on two aligned rows, never wrapping (#665)', async ({ start }) => {
+    const j = await withChanges(start);
+    await reviewChanges(j);
+    const rows = await j.page.evaluate(() => {
+      const box = (selector: string) => {
+        const r = document.querySelector(selector)!.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      };
+      return {
+        panel: box('.rl-review-panel'),
+        accept: box('.rl-rp-actions button:nth-child(1)'),
+        reject: box('.rl-rp-actions button:nth-child(2)'),
+        comment: box('.rl-rp-actions button:nth-child(3)'),
+        previous: box('.rl-rp-nav button:nth-child(1)'),
+        next: box('.rl-rp-nav button:nth-child(2)'),
+      };
+    });
+    await j.shot('review-panel-rows');
+    expect(rows.reject.top, 'Accept, Reject and Comment share a line').toBe(rows.accept.top);
+    expect(rows.comment.top).toBe(rows.accept.top);
+    expect(rows.next.top, 'Previous and Next share the next').toBe(rows.previous.top);
+    expect(rows.previous.top).toBeGreaterThan(rows.accept.bottom);
+    expect(rows.previous.left, 'Previous is under Accept').toBe(rows.accept.left);
+    expect(rows.next.right, 'Next is under Comment').toBe(rows.comment.right);
+    expect(rows.comment.right).toBeLessThanOrEqual(rows.panel.right);
+  });
+
   test('takes the keyboard, and A, R, C and the arrows do the review', async ({ start }) => {
     const j = await withChanges(start);
     await reviewChanges(j);
