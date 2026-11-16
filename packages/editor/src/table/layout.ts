@@ -4,7 +4,7 @@
 // nothing else splits. Pipes, padding and the delimiter row are hidden (the caret steps over them:
 // `stops.ts`), `<br>` is drawn as a line break, and an empty cell has a filler for the caret to
 // stand on. A row with fewer cells than the header is drawn with empty cells after its last, as GFM
-// reads it (`missing.ts`): a widget for each, at the end of the row. Raw draws none of it.
+// reads it (`missing.ts`): a widget for each, at the end of the row. Plain draws none of it.
 //
 // What the prototype found, and the layout keeps to: nothing but a cell is a direct child of a row
 // (the change bar is drawn by the first cell, not the row; the exception is the buffers and the
@@ -369,7 +369,7 @@ function wrappersOf(table: Table): Range<BlockWrapper>[] {
   ];
 }
 
-/** The layout of the tables of a state: none in Raw. */
+/** The layout of the tables of a state: none in Plain. */
 export function layoutOf(state: EditorState): Layout {
   const none: Layout = {
     wrappers: BlockWrapper.set([]),

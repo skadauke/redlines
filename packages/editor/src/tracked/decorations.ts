@@ -4,7 +4,7 @@
 // inserted line break shows a small pilcrow when line break marks are shown; comments and
 // highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
 // shows the newest text, as if every change were accepted, without markup or ordinary HTML
-// comments. Raw shows the source as written, highlighted in grays.
+// comments. Plain shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -1326,7 +1326,7 @@ const HIDDEN_RUN = new HiddenRun();
 
 /**
  * The lines Clean and Redlines hide, each run from the start of its first line to the end of its
- * last (the caret steps over it with the line breaks around it); none in Raw.
+ * last (the caret steps over it with the line breaks around it); none in Plain.
  */
 export function hiddenLines(state: EditorState): RangeSet<HiddenRun> {
   const model = state.field(trackedField, false)?.model ?? analyze(state, keptLine(state));
@@ -1455,7 +1455,7 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
-/** What the caret steps over in a state: hidden text and hidden lines, none in Raw. */
+/** What the caret steps over in a state: hidden text and hidden lines, none in Plain. */
 export function atomsOf(state: EditorState): RangeSet<Atom> {
   return state.field(trackedField, false)?.atomic ?? RangeSet.of<Atom>([]);
 }
@@ -1494,7 +1494,7 @@ export function pastHidden(state: EditorState, pos: number, forward: boolean): n
 }
 
 /**
- * Leaving Raw, a new version of the file from outside, or an edit the tracked layer dealt with
+ * Leaving Plain, a new version of the file from outside, or an edit the tracked layer dealt with
  * (tracked or plain) or a decision can leave the caret in text that is hidden now: inside markers
  * that an edit brought together, on a blank line under a new own-line marker, or past the hidden
  * ledger. It moves out.
@@ -1525,7 +1525,7 @@ const viewClass = EditorView.editorAttributes.compute([viewModeField], (state) =
   class: `rl-view-${state.field(viewModeField)}`,
 }));
 
-/** Markdown's syntax in Raw, drawn in grays: color means a person. */
+/** Markdown's syntax in Plain, drawn in grays: color means a person. */
 const rawHighlighter = tagHighlighter([
   { tag: tags.heading, class: 'rl-tok-heading' },
   { tag: tags.strong, class: 'rl-tok-strong' },
@@ -1536,7 +1536,7 @@ const rawHighlighter = tagHighlighter([
   { tag: tags.comment, class: 'rl-tok-comment' },
 ]);
 
-/** The highlighting of the visible text, in Raw only: the other views draw the document. */
+/** The highlighting of the visible text, in Plain only: the other views draw the document. */
 function rawDecorations(view: EditorView): DecorationSet {
   if (view.state.field(viewModeField) !== 'raw') return Decoration.none;
   const builder = new RangeSetBuilder<Decoration>();
@@ -1719,7 +1719,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-2)', fontSize: '0.85em' },
 
-  // Raw: the source in the code font, a little wider and more open than the document's column,
+  // Plain: the source in the code font, a little wider and more open than the document's column,
   // markers and the ledger in the second ink.
   '&.rl-view-raw .cm-scroller': { fontFamily: 'var(--rl-font-mono)' },
   '&.rl-view-raw .cm-content': {

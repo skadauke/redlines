@@ -94,7 +94,7 @@ domain on record in the repository, as Syrus does.
   a test in `apps/website-embed` holds to the sample file the editor opens
   (`apps/website-embed/src/docs/launch-plan.md`): when the file changes, the test says to update the
   JSON, which holds the agent panel's note too, as the scripted Claude leaves it. The illustrations'
-  copy and the hand-kept Raw view are gone. The sections' other sheets hold their own sample text.
+  copy and the hand-kept Plain view are gone. The sections' other sheets hold their own sample text.
 - **Interactive parts** are the only client components: the demo panels (`components/demo-panel.tsx`,
   with the controls the page draws for them in `components/demo-controls.tsx`) and the tab icon's
   rotation (below), which renders nothing. The agent demo is a panel too: the same editor with a

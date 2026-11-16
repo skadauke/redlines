@@ -76,7 +76,7 @@ describe('hidden blank lines', () => {
     }
   });
 
-  it('draws every line in Raw', () => {
+  it('draws every line in Plain', () => {
     const editor = load('One.\n\n\nTwo.\n');
     editor.setViewMode('raw');
     expect(drawn(editor)).toEqual(['One.', '', '', 'Two.', '']);

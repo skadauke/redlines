@@ -25,17 +25,17 @@ import { applyEdit, editContext, openerEnd, type ReviewContext } from './shared.
 /** What the person is told when no text is there to highlight. */
 const NO_TEXT = 'Select some text to highlight.';
 
-/** What a highlight in Raw says: its markers are text there, and no highlight is drawn. */
+/** What a highlight in Plain says: its markers are text there, and no highlight is drawn. */
 const REFUSED_IN_RAW =
-  "A highlight can't be made or removed in Raw. Switch to Redlines to do either.";
+  "A highlight can't be made or removed in Plain. Switch to Redlines to do either.";
 
-/** Why Highlight is disabled in Raw: its markers are text there. */
-const IN_RAW_HINT = "A highlight can't be made or removed in Raw. Switch to Clean or Redlines.";
+/** Why Highlight is disabled in Plain: its markers are text there. */
+const IN_RAW_HINT = "A highlight can't be made or removed in Plain. Switch to Clean or Redlines.";
 /** Why Highlight is disabled in front matter (format §3.8). */
 const IN_FRONT_MATTER_HINT = "A highlight can't be made in front matter. Select text in the body.";
 
 /**
- * Why Highlight can't run where the selection is, or undefined: in Raw, in front matter, and with no
+ * Why Highlight can't run where the selection is, or undefined: in Plain, in front matter, and with no
  * text to highlight (a caret away from any word, a selection of line breaks and markers only). A
  * highlight that is there is removed, which is always possible.
  */
@@ -82,7 +82,7 @@ function inSegment(segment: Segment, from: number, to: number): boolean {
 
 /**
  * The highlights that the selection or caret is inside of, or that the selection overlaps, in
- * document order: the ones the command removes, and that a menu shows as on. None in Raw, where
+ * document order: the ones the command removes, and that a menu shows as on. None in Plain, where
  * the command does neither, and none in a state without the editor's fields, such as the empty one
  * that a menu asks for a title (`baseTitle`).
  */
@@ -132,7 +132,7 @@ function highlightTarget(state: EditorState): Range | null {
 /**
  * Makes a highlight on the selection or on the word under the caret, or, where the selection or
  * caret is in a highlight or overlaps one, removes those. Both are one step to undo. Returns
- * whether it did something: Raw takes no highlight and says so, as a comment is refused there, and
+ * whether it did something: Plain takes no highlight and says so, as a comment is refused there, and
  * so is a selection with no text to highlight, or one that the format refuses, in its words, all
  * through the editor's `onNotice`.
  *

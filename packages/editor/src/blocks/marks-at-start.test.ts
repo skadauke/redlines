@@ -29,7 +29,7 @@ const both = (rows: Row[]): Script[] =>
   );
 
 const REWRITE =
-  'This line holds a tracked change by bo, which the join would have to write again. Decide that change first, or edit it in the raw view.';
+  'This line holds a tracked change by bo, which the join would have to write again. Decide that change first, or edit it in the Plain view.';
 
 const ONLY_DELETED =
   "This block holds only text that bo deleted, so it can't be joined while the change is pending. Decide that change first.";

@@ -607,7 +607,7 @@ describe('when a decision would hide another change', () => {
     } catch (error) {
       expect((error as EditError).code).toBe('would-hide-marks');
     }
-    // In the words of a decision, not of an edit, which can be made in Raw instead.
+    // In the words of a decision, not of an edit, which can be made in Plain instead.
     expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow(
       'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.',
     );

@@ -574,9 +574,9 @@ describe('title bar', () => {
     expect(redlines().textContent).toContain('⌥⌘2');
     redlines().click();
     expect(actions.setView).not.toHaveBeenCalled();
-    // Clean and Raw stay open to choose.
+    // Clean and Plain stay open to choose.
     expect(item(menu('View'), 'Clean').disabled).toBe(false);
-    expect(item(menu('View'), 'Raw').disabled).toBe(false);
+    expect(item(menu('View'), 'Plain').disabled).toBe(false);
     bar.update({ ...BASE, hasRedlines: true });
     expect(shown(redlines()) && !redlines().disabled).toBe(true);
     redlines().click();
@@ -592,12 +592,12 @@ describe('title bar', () => {
     expect(redlines().disabled).toBe(true);
   });
 
-  it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {
+  it('lists Clean, Redlines and Plain in order, with their keys and one check mark', () => {
     const { actions, menu, button } = setup({ view: 'clean' });
     hover(button('View'));
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
     // Simple is Redlines' simple look, which has a switch of its own below the three views.
-    expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Raw⌥⌘3']);
+    expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Plain⌥⌘3']);
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     // Each has an icon of its own.
     expect(rows.every((row) => row.querySelector('svg'))).toBe(true);
@@ -605,19 +605,19 @@ describe('title bar', () => {
     expect(actions.setView).toHaveBeenCalledWith('redlines');
   });
 
-  it('has no Simple Look row, and Raw sits below a separator (#499)', () => {
+  it('has no Simple Look row, and Plain sits below a separator (#499)', () => {
     const { menu, button } = setup({ view: 'redlines' });
     hover(button('View'));
     const view = menu('View');
     expect(() => item(view, 'Simple Look')).toThrow();
     expect(view.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(0);
-    // Clean, Redlines, a separator, Raw: and nothing after Raw.
+    // Clean, Redlines, a separator, Plain: and nothing after Plain.
     const order = [...view.children]
       .filter((el) => el.matches('[role^="menuitem"], [role="separator"]'))
       .map((el) =>
         el.matches('[role="separator"]') ? '—' : el.querySelector('.rl-menu-label')?.textContent,
       );
-    expect(order).toEqual(['Clean', 'Redlines', '—', 'Raw']);
+    expect(order).toEqual(['Clean', 'Redlines', '—', 'Plain']);
   });
 
   it('checks Redlines, and no other view, in its simple look', () => {
@@ -636,14 +636,14 @@ describe('title bar', () => {
   it('tints the current view', () => {
     const { menu } = setup({ view: 'redlines' });
     expect(item(menu('View'), 'Redlines').getAttribute('aria-checked')).toBe('true');
-    expect(item(menu('View'), 'Raw').getAttribute('aria-checked')).toBe('false');
+    expect(item(menu('View'), 'Plain').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('clicking Raw calls setView(raw)', () => {
+  it('clicking Plain calls setView(raw)', () => {
     const { actions, button, menu } = setup();
     enter(button('View'));
     vi.advanceTimersByTime(120);
-    item(menu('View'), 'Raw').click();
+    item(menu('View'), 'Plain').click();
     expect(actions.setView).toHaveBeenCalledWith('raw');
   });
 
@@ -748,11 +748,11 @@ describe('title bar', () => {
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Redlines'));
     press(view, 'ArrowDown');
-    expect(document.activeElement).toBe(item(view, 'Raw'));
+    expect(document.activeElement).toBe(item(view, 'Plain'));
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Clean'));
     press(view, 'ArrowUp');
-    expect(document.activeElement).toBe(item(view, 'Raw'));
+    expect(document.activeElement).toBe(item(view, 'Plain'));
     press(view, 'Escape');
     expect(shown(view)).toBe(false);
     expect(document.activeElement).toBe(button('View'));
@@ -764,18 +764,18 @@ describe('title bar', () => {
     const open = redlines.menu('View');
     expect(document.activeElement).toBe(item(open, 'Clean'));
     press(open, 'ArrowDown');
-    expect(document.activeElement).toBe(item(open, 'Raw'));
+    expect(document.activeElement).toBe(item(open, 'Plain'));
     press(open, 'ArrowDown');
     expect(document.activeElement).toBe(item(open, 'Clean'));
     press(open, 'ArrowUp');
-    expect(document.activeElement).toBe(item(open, 'Raw'));
+    expect(document.activeElement).toBe(item(open, 'Plain'));
     redlines.bar.destroy();
     document.body.replaceChildren();
     const clean = setup({ view: 'clean' });
     press(clean.button('View'), 'ArrowDown');
     const view = clean.menu('View');
     press(view, 'End');
-    expect(document.activeElement).toBe(item(view, 'Raw'));
+    expect(document.activeElement).toBe(item(view, 'Plain'));
   });
 
   it('shows the file name, and Edited when there are unsaved edits', () => {
@@ -869,7 +869,7 @@ describe('a click on the View and Review icons', () => {
     expect(actions.setView).toHaveBeenCalledWith('clean');
   });
 
-  it('goes back from Raw to the one of Clean and Redlines that was shown last', () => {
+  it('goes back from Plain to the one of Clean and Redlines that was shown last', () => {
     const { actions, bar, button } = setup({ view: 'clean' });
     bar.update({ ...BASE, view: 'raw' });
     click(button('View'));
@@ -885,7 +885,7 @@ describe('a click on the View and Review icons', () => {
     expect(actions.setView).toHaveBeenLastCalledWith('redlines');
   });
 
-  it('goes to Redlines from a Raw that no other view came before', () => {
+  it('goes to Redlines from a Plain that no other view came before', () => {
     const { actions, button } = setup({ view: 'raw' });
     click(button('View'));
     expect(actions.setView).toHaveBeenCalledWith('redlines');
@@ -987,7 +987,7 @@ describe('a click on the View and Review icons', () => {
   it('leaves the menu’s own items to choose for themselves', () => {
     const { actions, button, menu } = setup({ view: 'redlines' });
     hover(button('View'));
-    item(menu('View'), 'Raw').click();
+    item(menu('View'), 'Plain').click();
     expect(actions.setView).toHaveBeenCalledOnce();
     expect(actions.setView).toHaveBeenCalledWith('raw');
   });
@@ -1041,7 +1041,7 @@ describe('the keys the icons name', () => {
     for (const [view, text] of [
       ['clean', 'Clean'],
       ['redlines', 'Redlines'],
-      ['raw', 'Raw'],
+      ['raw', 'Plain'],
     ] as const) {
       expect(VIEW_KEYS[view], view).toBe(mac(accelerator(text)));
       expect(VIEW_ARIA_KEYS[view], view).toBe(aria(accelerator(text)));
@@ -1064,7 +1064,7 @@ describe('what a click on the icons will do, said before it is made', () => {
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
     bar.update({ ...BASE, view: 'clean' });
     expect(view?.textContent).toBe('Show Redlines⌥⌘2');
-    // From Raw, the one shown last: Clean, then.
+    // From Plain, the one shown last: Clean, then.
     bar.update({ ...BASE, view: 'raw' });
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
     bar.update({ ...BASE, view: 'redlines' });

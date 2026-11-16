@@ -69,13 +69,13 @@ export const UNTRACKED_SELF_CHECK =
   "This edit can't be made with Track Changes off without changing other text or the changes around it. Accept or reject those changes first, or turn on Track Changes.";
 
 const HIDES =
-  'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.';
+  'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain.';
 
 /** The way around a refusal next to a mark: decide it, or for a comment, which has nothing to
  * decide, work on the source. */
 const wayAround = (mark: MarkRange | undefined) =>
   mark?.kind === 'cmt'
-    ? 'Turn on Track Changes, or edit the source in Raw.'
+    ? 'Turn on Track Changes, or edit the source in Plain.'
     : 'Accept or reject it first, or turn on Track Changes.';
 
 /** A stretch of the file: text, or a marker (an opener with its carrier), or the ledger. */
