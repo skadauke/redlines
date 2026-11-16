@@ -86,8 +86,6 @@ function takeFocus(panel: HTMLElement): void {
 const PANEL_WIDTH = 328;
 /** The narrowest it is made to fit the margin; with less room it goes below or above the change. */
 const PANEL_MIN_WIDTH = 240;
-/** The narrowest the panel is with the keys shown on its buttons; narrower, they are left out. */
-const PANEL_KEYS_WIDTH = 316;
 const PANEL_GAP = 16;
 const PANEL_MARGIN = 12;
 
@@ -745,8 +743,11 @@ class Panel {
         this.panel.style.left = `${Math.round(left)}px`;
         this.panel.style.top = `${Math.round(top)}px`;
         if (at.width !== undefined) this.panel.style.width = `${Math.round(at.width)}px`;
-        // Narrower than Accept, Reject and Comment fit with their keys: without the keys (#665).
-        this.panel.classList.toggle('rl-rp-narrow', (at.width ?? width) < PANEL_KEYS_WIDTH);
+        // Where Accept, Reject and Comment don't fit with their keys, they go without them (#665):
+        // measured, as the fonts and the text size decide how wide they are.
+        this.panel.classList.remove('rl-rp-narrow');
+        const row = this.controls?.actions;
+        if (row && row.scrollWidth > row.clientWidth) this.panel.classList.add('rl-rp-narrow');
       },
     });
   }

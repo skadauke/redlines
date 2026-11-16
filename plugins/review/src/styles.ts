@@ -441,7 +441,8 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-rp-field:focus': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-1px' },
   // Two rows on one grid (#665): Accept, Reject and Comment on one line, never wrapping; Previous
   // and Next under them, at the same left and right edges. The keys are small enough for all three
-  // to fit the panel; in a panel made narrower than that they are left out (`rl-rp-narrow`).
+  // to fit the panel; where they don't fit they are left out (`rl-rp-narrow`), and a label that still
+  // doesn't fit is cut short.
   '.rl-rp-actions, .rl-rp-nav': {
     display: 'flex',
     flexWrap: 'nowrap',
@@ -453,6 +454,12 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     gap: '4px',
     padding: '0 6px',
     whiteSpace: 'nowrap',
+    minWidth: '0',
+    flex: '0 1 auto',
+  },
+  '.rl-rp-actions .rl-bar-label, .rl-rp-nav .rl-bar-label': {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   '.rl-rp-actions .rl-bar-key, .rl-rp-nav .rl-bar-key': {
     marginLeft: '1px',
