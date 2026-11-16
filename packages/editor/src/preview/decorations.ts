@@ -23,6 +23,7 @@ import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { imageOfNode } from '../image-size.ts';
+import { htmlBreak, htmlChip, htmlElement, htmlWbr } from './html-draw.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
@@ -52,6 +53,12 @@ const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 export const BULLETS = ['•', '◦', '▪'] as const;
+
+/** Whether a node is in a table. */
+function inTable(node: SyntaxNode): boolean {
+  for (let up = node.parent; up; up = up.parent) if (up.name === 'Table') return true;
+  return false;
+}
 
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {
@@ -563,7 +570,7 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
 }
 
 /**
- * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
+ * The preview's decorations for a state. Exported for tests; the editor caches them. The Plain view
  * shows the source as written, without them.
  */
 export function previewDecorations(state: EditorState, window?: Window): DecorationSet {
@@ -623,6 +630,16 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
+      else if (name === 'HtmlElement') htmlElement(b, node);
+      // A `<br>` in a table cell is drawn by the table (table/layout.ts).
+      else if (name === 'HtmlBreak' || name === 'HtmlWbr') {
+        if (!inTable(node)) {
+          const decoration = name === 'HtmlBreak' ? htmlBreak() : htmlWbr();
+          b.push(decoration.range(node.from, node.to));
+        }
+      } else if (name === 'HtmlDropped')
+        b.syntax(node.from, node.to, touches(state, node.from, node.to));
+      else if (name === 'HtmlChip') htmlChip(b, node);
       else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
         // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
         if (imageOfNode(state, node.node)) {
@@ -770,8 +787,8 @@ export function hardBreakAtoms(state: EditorState): DecorationSet {
  */
 const hardBreakCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
-    // A change, a selection, or a switch of the view (Raw has no atoms: a caret between the spaces
-    // that Raw allowed goes out when the spaces hide).
+    // A change, a selection, or a switch of the view (Plain has no atoms: a caret between the spaces
+    // that Plain allowed goes out when the spaces hide).
     if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
       return tr;
     }

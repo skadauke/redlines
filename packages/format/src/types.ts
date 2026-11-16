@@ -111,7 +111,7 @@ export interface MarkEntry extends MarkExtras {
 }
 
 /** The view a document opens in (format §5.6): Clean, Redlines' full markup, or Redlines' simple
- * look. Raw is never saved. */
+ * look. Plain is never saved. */
 export type LedgerView = 'clean' | 'redlines' | 'simple';
 
 /** The YAML ledger in the `<!-- redlines` comment at the end of the file. */

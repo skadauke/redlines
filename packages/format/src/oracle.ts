@@ -105,3 +105,47 @@ export function expectSound(label: string, text: string): void {
   expect(stuck, `${label}: stuck`).toEqual([]);
   expectEveryOrderRead(label, text);
 }
+
+/**
+ * An edit that the fine rules refuse and the widened write takes (lane R2): it is written, reads
+ * alike in every order of decisions, and rejecting what it added gives `before` back (the other
+ * people's changes stay in the old text, and the author's own pending changes, which the write
+ * takes in as `author` rejects them, are rejected in `before`, so `own` names them). Returns the
+ * file after the edit.
+ */
+export function expectWidened(
+  label: string,
+  before: string,
+  changes: Parameters<typeof applyChanges>[1],
+  own?: string,
+): string {
+  expect(changes.length, `${label}: written`).toBeGreaterThan(0);
+  const after = applyChanges(before, changes);
+  // A file that reads otherwise in some order of its own decisions (a delimiter run that another
+  // change leaves in front of a comment's `<`) is no worse for the write: it is held to read as its
+  // newest view as it stands, and the orders that its own tell apart are left to it.
+  let soundBefore = true;
+  try {
+    expectEveryOrderRead(label, before);
+  } catch {
+    soundBefore = false;
+  }
+  if (soundBefore) expectEveryOrderRead(label, after);
+  else expect(readAs(bodyOf(after)), label).toBe(readAs(newestView(after).text));
+  const read = parse(before);
+  const known = new Set(Object.keys(read.ledger.marks));
+  let back = after;
+  for (const mark of parse(after).marks) {
+    if (known.has(mark.id) || mark.kind === 'cmt') continue;
+    if (!parse(back).marks.some((m) => m.id === mark.id)) continue;
+    back = applyChanges(back, reject(back, mark.id));
+  }
+  let want = before;
+  for (const mark of read.marks) {
+    if (mark.kind === 'cmt' || read.ledger.marks[mark.id]?.by !== own || own === undefined)
+      continue;
+    want = applyChanges(want, reject(want, mark.id));
+  }
+  expect(bodyOf(back).trimEnd(), `${label}: rejects back`).toBe(bodyOf(want).trimEnd());
+  return after;
+}

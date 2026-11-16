@@ -103,7 +103,7 @@ describe('arrow keys', () => {
     expect(head(editor)).toBe(text + 'new'.length);
   });
 
-  it('moves over every character of the source in Raw', () => {
+  it('moves over every character of the source in Plain', () => {
     const editor = load(fixture, { view: 'raw' });
     caret(editor, opener);
     press(editor, 'ArrowRight');

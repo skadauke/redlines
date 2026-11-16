@@ -23,7 +23,7 @@ describe('mountDemo', () => {
     expect(handle.getDoc()).toBe(DOCS.plan.text);
   });
 
-  it('reaches every view, and takes no comment in Raw', () => {
+  it('reaches every view, and takes no comment in Plain', () => {
     const { handle, states, notices } = mountForTest('plan');
     handle.setView('clean');
     expect(states.at(-1)!.view).toBe('clean');
@@ -31,7 +31,9 @@ describe('mountDemo', () => {
     expect(states.at(-1)!.view).toBe('raw');
     expect(states.at(-1)!.canComment).toBe(false);
     expect(handle.startComment()).toBe(false);
-    expect(notices.at(-1)).toBe("A comment can't be added in Raw. Switch to Redlines to add one.");
+    expect(notices.at(-1)).toBe(
+      "A comment can't be added in Plain. Switch to Redlines to add one.",
+    );
   });
 
   it('keeps Redlines pressed in its simple look, and shows that look again from Clean', () => {
@@ -68,13 +70,13 @@ describe('mountDemo', () => {
     expect(parse(handle.getDoc()).marks).toHaveLength(4);
   });
 
-  it('refuses typing in Raw while Track Changes is on, in the editor’s words', () => {
+  it('refuses typing in Plain while Track Changes is on, in the editor’s words', () => {
     const { handle, view, notices } = mountForTest('plan');
     handle.setView('raw');
     typeAt(view, 3, 'x');
     expect(handle.getDoc()).toBe(DOCS.plan.text);
     expect(notices.at(-1)).toBe(
-      'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.',
+      'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.',
     );
   });
 
