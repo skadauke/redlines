@@ -63,6 +63,8 @@ export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
 export { findInPayload, payloadMarksOf } from './payload-marks.ts';
 export type { PayloadFound } from './payload-marks.ts';
+export { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './block-move.ts';
+export type { BlockGap, BlockRun } from './block-move.ts';
 export { Untrackable, WIDEN_MOST_BLOCKS, widen } from './widen.ts';
 export type { UntrackableReason, Widened, WidenedUnit } from './widen.ts';
 export { unitsOf } from './widen-units.ts';
@@ -75,7 +77,7 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
-export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

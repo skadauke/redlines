@@ -238,7 +238,7 @@ describe('the caret in a table', () => {
     expect([main.anchor, main.head]).toEqual([2, at(T, 'cc', 2)]);
   });
 
-  it('has no stops, and no guard, in a table in a quote, or in Raw', () => {
+  it('has no stops, and no guard, in a table in a quote, or in Plain', () => {
     const quote = '> | a | b |\n> | - | - |\n> | c | d |';
     const editor = load(quote, 1);
     expect(head(editor)).toBe(1);

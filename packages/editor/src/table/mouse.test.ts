@@ -208,7 +208,7 @@ describe('a press in a cell', () => {
     expect(text.defaultPrevented).toBe(false);
   });
 
-  it('is left to the editor with other modifiers, in Raw, and outside a table', () => {
+  it('is left to the editor with other modifiers, in Plain, and outside a table', () => {
     const editor = load();
     hitTest(editor, at('dd'));
     expect(press(editor, 20, 45, { altKey: true }).style).toBeNull();

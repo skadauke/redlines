@@ -1,6 +1,6 @@
 // The table keymap (design: tables, "The caret and the keys"): one set of keys, above the editor's
 // others, that acts only while the caret is in a cell of a table and the view is Clean, Simple or
-// Redlines. Raw keeps CodeMirror's. A key that moves the caret writes nothing; the keys that edit
+// Redlines. Plain keeps CodeMirror's. A key that moves the caret writes nothing; the keys that edit
 // plan plain edits that the tracked layer records as it records typing, and never write markers.
 //
 // ← and → are CodeMirror's: the caret steps over the atoms of `stops.ts`, so a press at a cell's
@@ -393,7 +393,7 @@ function tab(forward: boolean): Command {
 
 /** ⌘A: in a cell, the cell's text; with that selected already (or the cell empty), the whole table;
  * with the table selected, the document (CodeMirror's Select All, which this declines). Outside a
- * cell, and in Raw, not for this. */
+ * cell, and in Plain, not for this. */
 export const selectAllInCell: Command = (view) => {
   const { state } = view;
   const rect = rectOf(state);

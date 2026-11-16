@@ -11,6 +11,7 @@ import {
   rejectMarks,
 } from './decide.ts';
 import { EditError } from './errors.ts';
+import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import {
   pendingOf,
@@ -275,14 +276,12 @@ describe('rule 2: rows and columns don’t change together', () => {
     );
   });
 
-  it('refuses the operation, tracked and not, with a column pending deleted', () => {
+  it('widens the tracked operation, and writes the plain one, with a column pending deleted', () => {
     const body = `${FRUIT}\n\n<!--del m2bd col=2 \\| Count \\\\n \\| ----- \\\\n \\| 3 \\\\n \\| 5-->`;
     const text = file(body, { m2bd: 'bo' });
     const table = readTables(text, parse(text))[0]?.from ?? 0;
     const op: TableOp = { kind: 'insertRows', table, after: 1, count: 1 };
-    expect(() => tableEdit(text, op, context(ada, ['k3x9']))).toThrow(
-      'Accept or reject the column changes in this table first.',
-    );
+    expectWidened('rule 2', text, tableEdit(text, op, context(ada, ['k3x9'])).changes);
     expect(() => untrackedTableEdit(text, op)).toThrow(EditError);
   });
 });
@@ -537,6 +536,12 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     throw new Error('the deletion was not refused');
   };
 
+  /** The changes of ada's deletion of the table, which the fine rules refuse and `widen` writes. */
+  function widenChanges(text: string, who: typeof ada = ada, ids = IDS) {
+    const table = readTables(text, parse(text))[0]?.from ?? 0;
+    return tableEdit(text, { kind: 'deleteTable', table }, context(who, ids)).changes;
+  }
+
   function remove(text: string, who: typeof ada | null = ada, ids = IDS) {
     const table = readTables(text, parse(text))[0]?.from ?? 0;
     const op: TableOp = { kind: 'deleteTable', table };
@@ -727,7 +732,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       '   ```\n   code\n   ```',
     ];
 
-    it('refuses a code block after the table, and says to put a paragraph between them', () => {
+    it('widens a code block after the table: the table and the block are one replacement', () => {
       for (const fence of FENCES) {
         for (const [head, gap, tail] of [
           ['Intro.\n\n', '\n\n', ''],
@@ -738,9 +743,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
           const label = JSON.stringify(head + FRUIT + gap + fence + tail);
           const text = file(head + FRUIT + gap + fence + tail);
           expect(readTables(text, parse(text)), label).toHaveLength(1);
-          const error = refusal(() => remove(text));
-          expect(error.message, label).toBe(CODE_AFTER);
-          expect(error.code, label).toBe('no-legal-placement');
+          expectWidened(label, text, widenChanges(text));
           // Track Changes off takes the table as text, and leaves the code block as it was.
           expect(trimmed(remove(text, null).after), label).toBe(head + fence + tail);
           // A paragraph between them, as text or as a pending insertion of anyone's, gives it a place.
@@ -937,17 +940,18 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
 
   describe('another person’s pending change stays theirs', () => {
     for (const [name, text] of Object.entries(pendingBy('bo'))) {
-      it(`refuses ${name} of Bo’s, with Track Changes on, naming him`, () => {
-        // A refusal gives no changes (`refusal` fails on a return), and says whose change it is.
-        const error = refusal(() => remove(text));
-        expect(error.message).toBe(pending('Bo Chen'));
-        expect(error.code).toBe('no-legal-placement');
+      it(`widens ${name} of Bo’s into a replacement of the table, with Track Changes on`, () => {
+        // His change stays in the old text of the replacement, to be decided as it was.
+        const after = expectWidened(name, text, widenChanges(text));
+        expect(parse(after).marks.some((mark) => mark.kind === 'sub')).toBe(true);
+        expect(shown(after)).toHaveLength(0);
       });
     }
 
     for (const [name, text] of Object.entries(pendingBy('ada'))) {
-      it(`refuses ${name} of Ada’s when Bo deletes the table`, () => {
-        expect(said(() => remove(text, bo))).toBe(pending('Ada Lovelace'));
+      it(`widens ${name} of Ada’s when Bo deletes the table`, () => {
+        const after = expectWidened(name, text, widenChanges(text, bo));
+        expect(shown(after)).toHaveLength(0);
       });
     }
 
@@ -960,15 +964,15 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       expect(said(() => remove(text))).toBe('no error');
     });
 
-    it('is refused for a pending change that holds the table, as it is for one in it', () => {
+    it('is widened for a pending change that holds the table, as it is for one in it', () => {
       const text = file(`Intro.\n\n<!--ins m2bd-->\n\n${FRUIT}\n\n<!--/m2bd-->\n\nAfter.`, {
         m2bd: 'bo',
       });
       expect(readTables(text, parse(text))).toHaveLength(1);
-      expect(said(() => remove(text))).toBe(pending('Bo Chen'));
+      expectWidened('holds the table', text, widenChanges(text));
     });
 
-    it('names Bo for his change when Ada’s own row is pending beside it', () => {
+    it('keeps Bo’s change in the old text when Ada’s own row is pending beside it', () => {
       const text = file(
         around(
           FRUIT.replace('| Pears ', '| <!--ins m2bd row--> Pears').replace(
@@ -978,7 +982,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
         ),
         { m2bd: 'ada', n3cd: 'bo' },
       );
-      expect(said(() => remove(text))).toBe(pending('Bo Chen'));
+      expectWidened('beside Ada’s row', text, widenChanges(text), 'ada');
     });
   });
 
@@ -1045,14 +1049,14 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       }
     });
 
-    it('refuses a change of yours that runs from the table into the text around it, which would take both', () => {
+    it('widens a change of yours that runs from the table into the text around it, which would take both', () => {
       const text = file(
         `Intro <!--ins m2bd-->words.\n\n${FRUIT.replace('Apples', 'Ap<!--/m2bd-->ples')}\n\nAfter.`,
         { m2bd: 'ada' },
       );
       expect(readTables(text, parse(text))).toHaveLength(1);
-      expect(said(() => remove(text))).toBe(pending('Ada Lovelace'));
-      expect(said(() => remove(text, bo))).toBe(pending('Ada Lovelace'));
+      expectWidened('yours, across', text, widenChanges(text), 'ada');
+      expectWidened('Ada’s, Bo deletes', text, widenChanges(text, bo));
     });
 
     it('is a table that is only your own pending insertion: it goes with no trace', () => {
@@ -1180,21 +1184,19 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       expectEveryOrderAlike('highlight', done.after, exactly);
     });
 
-    it('refuses a comment that runs from the table into the text around it, naming its author', () => {
-      const words = (name: string) =>
-        `${name}'s comment runs from this table into the text next to it. Delete it first, or turn off Track Changes.`;
+    it('widens a comment that runs from the table into the text around it', () => {
       const above = file(
         `Intro <!--cmt c9qf-->words.\n\n${FRUIT.replace('Pears', 'Pears<!--/c9qf-->')}\n\nAfter.`,
         {},
         thread('c9qf', 'bo'),
       );
-      expect(said(() => remove(above))).toBe(words('Bo Chen'));
+      expectWidened('above', above, widenChanges(above));
       const below = file(
         `Intro.\n\n${FRUIT.replace('Pears', '<!--cmt c9qf-->Pears')}\n\nAfter <!--/c9qf-->words.`,
         {},
         thread('c9qf', 'ada'),
       );
-      expect(said(() => remove(below))).toBe(words('Ada Lovelace'));
+      expectWidened('below', below, widenChanges(below));
       // A comment that holds the whole table, with no marker in it, is not in the table.
       const over = file(
         `Intro <!--cmt c9qf-->words.\n\n${FRUIT}\n\nAfter <!--/c9qf-->words.`,
@@ -1206,11 +1208,10 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       expect(parse(done.after).marks.find((m) => m.id === 'c9qf')?.segments).toHaveLength(1);
     });
 
-    it('refuses when the only text next to the table is code, which holds no point', () => {
+    it('widens when the only text next to the table is code, which holds no point', () => {
       const body = `${FRUIT.replace('Pears', '<!--cmt c9qf-->Pears<!--/c9qf-->')}\n\n\`\`\`\ncode\n\`\`\``;
-      expect(said(() => remove(file(body, {}, thread('c9qf', 'bo'))))).toBe(
-        "Bo Chen's comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.",
-      );
+      const text = file(body, {}, thread('c9qf', 'bo'));
+      expectWidened('code next to it', text, widenChanges(text));
     });
 
     it('refuses when no text is there to keep the point, and says to delete the comment', () => {

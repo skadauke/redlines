@@ -6,7 +6,7 @@
 //
 // It keeps out of the way. It opens only after a colon that starts a word (never `10:30`, nor
 // `Note:` or `a:b`), with a letter in what follows it, and not in code, in front matter or a link's
-// address, in Raw, while an input method composes, or where the text is read only. Nothing else in
+// address, in Plain, while an input method composes, or where the text is read only. Nothing else in
 // the editor changes: the macOS emoji picker inserts text as it does in any text field.
 
 import { syntaxTree } from '@codemirror/language';
@@ -126,7 +126,7 @@ class Suggester {
   }
 
   update(update: ViewUpdate): void {
-    // The view too: the list is not for Raw, whatever was typed before the view was switched.
+    // The view too: the list is not for Plain, whatever was typed before the view was switched.
     const view = (state: EditorState) => state.field(viewModeField, false);
     const switched = view(update.startState) !== view(update.state);
     if (!update.docChanged && !update.selectionSet && !update.focusChanged && !switched) return;

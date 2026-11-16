@@ -465,15 +465,14 @@ describe('selecting a column that the last row does not reach', () => {
       const cleared = newestView(editor.getDoc()).text;
       expect(cleared).toBe('| a | b |  |\n| - | - | - |\n| 1 | 2 |  |\n| 4 | 5 |');
       expect(rectOf(editor.view.state)?.cols).toEqual([2, 2]);
-      // ⌫ again deletes the column: with Track Changes off the cells go, and with it on the format
-      // refuses a column that a row lacks, in words, and nothing else changes.
-      const before = editor.getDoc();
+      // ⌫ again deletes the column: with Track Changes off the cells go, and with it on the column's
+      // deletion is written as a replacement of the table, which no row's lack of a cell refuses.
       press(editor, 'Backspace');
       if (tracking) {
-        expect(editor.getDoc()).toBe(before);
-        expect(notices(editor)).toEqual([
-          'A row of this table has fewer cells than its header. Fill it in first.',
-        ]);
+        expect(newestView(editor.getDoc()).text.trimEnd()).toBe(
+          '| a | b |\n| - | - |\n| 1 | 2 |\n| 4 | 5 |',
+        );
+        expect(notices(editor)).toEqual([]);
       } else {
         expect(editor.getDoc()).toBe('| a | b |\n| - | - |\n| 1 | 2 |\n| 4 | 5 |');
         expect(notices(editor)).toEqual([]);
@@ -580,12 +579,10 @@ describe('selecting a column that no body row reaches', () => {
       );
       press(editor, 'Backspace');
       if (tracking) {
-        // The format refuses columns that rows lack, in words, and nothing else changes.
-        expect(notices(editor)).toEqual([
-          'A row of this table has fewer cells than its header. Fill it in first.',
-        ]);
-        expect(newestView(editor.getDoc()).text).toBe(
-          '| a | b |  |  |\n| - | - | - | - |\n| 1 | 2 |\n| 4 | 5 |',
+        // The columns' deletion, which rows lack, is written as a replacement of the table.
+        expect(notices(editor)).toEqual([]);
+        expect(newestView(editor.getDoc()).text.trimEnd()).toBe(
+          '| a | b |\n| - | - |\n| 1 | 2 |\n| 4 | 5 |',
         );
       } else {
         expect(editor.getDoc()).toBe('| a | b |\n| - | - |\n| 1 | 2 |\n| 4 | 5 |');

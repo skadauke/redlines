@@ -32,7 +32,7 @@ export const UNTRACKED_TITLE = "This edit can't be tracked. Make it without trac
 export const UNTRACKED_DETAILS: Record<Exclude<UntrackedReason, 'accept-pending'>, string> = {
   'front-matter':
     "Front matter is data that other tools read, so Redlines can't mark a change in it.",
-  raw: "Raw shows the file's own text, where Redlines can't mark changes.",
+  raw: "Plain shows the file's own text, where Redlines can't mark changes.",
 };
 
 export type UntrackedAnswer = 'make' | 'cancel';

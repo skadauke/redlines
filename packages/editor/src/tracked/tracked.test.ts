@@ -146,6 +146,19 @@ describe('Redlines', () => {
     expect(lineClasses(single, 3)).toEqual([]);
   });
 
+  it('puts the bar of lines drawn as one on the first of them, though the change is on a later (#654)', () => {
+    // The comment's opener and its text run over two lines, which the view draws as one; the
+    // insertion is only on the second.
+    const doc = withLedger(
+      'a <!--cmt b2b2 hello\nworld--> b <!--ins c3c3-->x<!--/c3c3-->\nnext',
+      { c3c3: 'bo' },
+      'comments:\n  b2b2:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
+    );
+    const editor = load(doc, { view: 'simple' });
+    expect(lineClasses(editor, 2)).toEqual([]);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+  });
+
   it('marks a point comment with a pin and leaves resolved comments untinted', () => {
     const thread = (id: string, resolved: boolean) =>
       `  ${id}:\n    by: bo\n    at: 2026-10-31T09:40Z\n` +
@@ -268,7 +281,7 @@ describe('Redlines', () => {
     expect(editor.view.moveByChar(EditorSelection.cursor(from), true).head).toBe(lineEnd);
   });
 
-  it('lets the caret step over markers and the ledger, except in Raw', () => {
+  it('lets the caret step over markers and the ledger, except in Plain', () => {
     const editor = load(fixture);
     const ranges = atomic(editor);
     const parsed = parse(fixture);
@@ -1053,8 +1066,8 @@ describe('Simple', () => {
   });
 });
 
-describe('Raw', () => {
-  it('Raw has no replace decorations', () => {
+describe('Plain', () => {
+  it('Plain has no replace decorations', () => {
     const editor = load(fixture);
     editor.setViewMode('raw');
     const { state } = editor.view;
@@ -1072,12 +1085,12 @@ describe('Raw', () => {
     const markers = [...editor.view.contentDOM.querySelectorAll('.rl-tok-comment')];
     expect(markers.map((m) => m.textContent)).toContain('<!--ins k3x9-->');
     expect(getComputedStyle(markers[0]!).color).toBe('#6e6e73');
-    // The other views draw the document, without Raw's highlighting.
+    // The other views draw the document, without Plain's highlighting.
     editor.setViewMode('redlines');
     expect(editor.view.contentDOM.querySelector('[class*="rl-tok-"]')).toBeNull();
   });
 
-  it('moves the caret out of a marker when Raw is left', () => {
+  it('moves the caret out of a marker when Plain is left', () => {
     const editor = load(fixture, { view: 'raw' });
     editor.view.dispatch({ selection: { anchor: fixture.indexOf('k3x9') } });
     editor.setViewMode('redlines');
@@ -1247,7 +1260,7 @@ describe('loading', () => {
     editor.reloadDoc(fixture);
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: true });
 
-    // Clean chosen for a document with redlines stays Clean, and Raw stays Raw.
+    // Clean chosen for a document with redlines stays Clean, and Plain stays Plain.
     editor.setViewMode('clean');
     editor.reloadDoc(fixture.replace('April', 'May'));
     expect(editor.getUiState().view).toBe('clean');
