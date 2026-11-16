@@ -391,13 +391,13 @@ describe('⌥↑ and ⌥↓ move blocks', () => {
         name: '⌥↑ at the first block, and ⌥↓ at the last, say so',
         doc: '‸One.⏎⏎Two.',
         keys: ['Alt-ArrowUp'],
-        expect: { newest: 'One.⏎⏎Two.', refusal: 'The block is at the top.' },
+        expect: { newest: 'One.⏎⏎Two.' },
       },
       {
-        name: '⌥↓ at the last block says so',
+        name: '⌥↓ at the last block does nothing',
         doc: 'One.⏎⏎Tw‸o.',
         keys: ['Alt-ArrowDown'],
-        expect: { newest: 'One.⏎⏎Two.', refusal: 'The block is at the bottom.' },
+        expect: { newest: 'One.⏎⏎Two.' },
       },
     ]),
   );

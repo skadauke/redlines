@@ -195,12 +195,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   [
     'packages/editor/src/blocks/move.ts',
-    'edge',
-    'info',
-    'tells that there is no place to move to; the command grays in the menu when its hint says so',
-  ],
-  [
-    'packages/editor/src/blocks/move.ts',
     'message',
     'info',
     "a move that reaches more blocks than a widened edit can hold asks first, through the sheet, and is made untracked on Make Edit (§3.13); the notice is only the format's own message for a ledger that can't be read",
