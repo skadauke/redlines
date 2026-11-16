@@ -107,7 +107,7 @@ describe('closing pairs', () => {
     expect(fence.getDoc()).toBe('```\n\n```');
   });
 
-  it('does nothing in code or in Raw', () => {
+  it('does nothing in code or in Plain', () => {
     const code = load('`a b`\n');
     code.view.dispatch({ selection: { anchor: 3 } });
     key(code, '(');

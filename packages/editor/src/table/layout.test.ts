@@ -152,7 +152,7 @@ describe('a table laid out as a table', () => {
     }
   });
 
-  it('is drawn in Clean and Redlines, and not in Raw', () => {
+  it('is drawn in Clean and Redlines, and not in Plain', () => {
     const editor = load(PLAIN);
     for (const mode of ['clean', 'redlines'] as const) {
       editor.setViewMode(mode);

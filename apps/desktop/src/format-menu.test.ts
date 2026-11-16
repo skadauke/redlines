@@ -72,6 +72,7 @@ const STATE = {
   inDocument: true,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   hasFile: false,
   recent: [],
   view: 'redlines',
@@ -81,18 +82,20 @@ const STATE = {
   textSize: 1,
 };
 
-it('puts Format and Paragraph between Edit and View', () => {
+it('puts Insert, Format and Paragraph between Edit and View', () => {
   const { model } = mount('Some text.\n');
   const titles = model.menus.map((menu) => menu.title);
   expect(titles.slice(titles.indexOf('Edit'), titles.indexOf('View') + 1)).toEqual([
     'Edit',
+    'Insert',
     'Format',
     'Paragraph',
+    'Table',
     'View',
   ]);
 });
 
-it('lists the Format rows with their keys, set apart by group, Add Comment and Highlight last', () => {
+it('lists the Format rows with their keys, set apart by group, Highlight last', () => {
   const { model } = mount('Some text.\n');
   const rows = rowsOf(model, 'Format');
   expect(rows.map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)))).toEqual([
@@ -107,7 +110,6 @@ it('lists the Format rows with their keys, set apart by group, Add Comment and H
     'Separator',
     ['Clear Formatting', 'CmdOrCtrl+\\'],
     'Separator',
-    ['Add Comment', 'CmdOrCtrl+Alt+M'],
     ['Highlight', 'CmdOrCtrl+Shift+H'],
   ]);
 });
@@ -130,14 +132,32 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
     ['Task List', 'CmdOrCtrl+Alt+X'],
     ['Check Item', 'CmdOrCtrl+Shift+U'],
     'Separator',
-    ['Code Block', 'CmdOrCtrl+Alt+C'],
-    ['Table', 'CmdOrCtrl+Alt+T'],
-    ['Alert', undefined],
-    ['Horizontal Rule', undefined],
-    'Separator',
     ['Indent', 'CmdOrCtrl+]'],
     ['Outdent', 'CmdOrCtrl+['],
   ]);
+});
+
+it('lists the Insert rows, and Insert Table again at the top of the Table menu', () => {
+  const { model } = mount('Some text.\n');
+  const read = (title: string) =>
+    rowsOf(model, title).map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)));
+  expect(read('Insert').map((row) => row?.[0] ?? row)).toEqual([
+    'Code Block',
+    'Table',
+    'Alert',
+    'Horizontal Rule',
+  ]);
+  expect(read('Table')[0]).toEqual(['Insert Table', undefined]);
+});
+
+it('has Add Comment and Ask… in the Review menu, not in Format', () => {
+  const { model } = mount('Some text.\n');
+  const names = (title: string) =>
+    rowsOf(model, title)
+      .filter(isAction)
+      .map((row) => row.text);
+  expect(names('Review')).toEqual(expect.arrayContaining(['Add Comment']));
+  expect(names('Format')).not.toContain('Add Comment');
 });
 
 it('disables Check Item outside a task item, and enables it inside one', () => {

@@ -68,7 +68,7 @@ describe('the Highlight command', () => {
     const ids = editor.commands.list().map(({ id }) => id);
     expect(ids.indexOf('highlight.toggle')).toBe(ids.indexOf('comment.add') + 1);
     expect(editor.commands.list().find(({ id }) => id === 'comment.add')?.group).toBe('comment');
-    // Disabled in Raw, front matter and where there is no text, and its key says why.
+    // Disabled in Plain, front matter and where there is no text, and its key says why.
     expect('disabledReason' in command(editor)!).toBe(true);
   });
 
@@ -248,7 +248,7 @@ describe('the Highlight command', () => {
     expect(notices).toHaveLength(1);
   });
 
-  it('takes no highlight in Raw, to make or to remove, and says so', () => {
+  it('takes no highlight in Plain, to make or to remove, and says so', () => {
     for (const text of [plain, marked]) {
       const { editor, notices } = mount(text);
       editor.setViewMode('raw');
@@ -257,11 +257,11 @@ describe('the Highlight command', () => {
       shortcut(editor, 'H', { shiftKey: true, keyCode: 72 });
       expect(notices).toHaveLength(2);
       expect(notices[0]).toBe(
-        "A highlight can't be made or removed in Raw. Switch to Clean or Redlines.",
+        "A highlight can't be made or removed in Plain. Switch to Clean or Redlines.",
       );
       expect(doc(editor)).toBe(text);
       expect(editor.getUiState().view).toBe('raw');
-      // In Raw the command is a plain "Highlight", with no check: nothing it does is on offer.
+      // In Plain the command is a plain "Highlight", with no check: nothing it does is on offer.
       expect(titleOf(editor)).toBe('Highlight');
       expect(activeIds(editor)).not.toContain(HIGHLIGHT_COMMAND);
     }

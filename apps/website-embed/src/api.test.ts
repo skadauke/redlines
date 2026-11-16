@@ -13,7 +13,7 @@ describe('the page-facing API', () => {
     expect(VIEWS).toEqual([
       { view: 'clean', label: 'Clean' },
       { view: 'redlines', label: 'Redlines' },
-      { view: 'raw', label: 'Raw' },
+      { view: 'raw', label: 'Plain' },
     ]);
   });
 });
