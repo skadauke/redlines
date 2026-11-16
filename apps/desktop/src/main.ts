@@ -736,6 +736,7 @@ const runs = createRuns({
   author,
   document: {
     path: () => controller.state.path,
+    plainOnly: () => editor.getUiState().kind === 'plain-only',
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     parsed: () => editor.getParsed(),

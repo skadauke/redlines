@@ -36,7 +36,17 @@ export interface ToolContext {
   requestedBy: Handle;
   onStatus(text: string): void;
   onReply(): void;
+  /**
+   * Whether the document is a Plain-only file (text or code, format §9.1), which holds no tracked
+   * changes, comments or ledger. The tools that would mark it refuse; `view` and `status` don't.
+   * Default: false. Asked on each call, since the app may rename the document into another kind.
+   */
+  plainOnly?(): boolean;
 }
+
+/** What `str_replace`, `comment` and `reply` say in a Plain-only file. */
+export const PLAIN_ONLY_ERROR =
+  "This is a plain text file, which can't hold tracked changes or comments.";
 
 export interface ToolResult {
   text: string;
@@ -342,6 +352,9 @@ function messageOf(error: unknown): string {
   }
 }
 
+/** The tools that write a mark, a comment or a ledger. */
+const MARKING_TOOLS: ReadonlySet<string> = new Set(['str_replace', 'comment', 'reply']);
+
 /**
  * Runs the tool `name`. Whatever goes wrong, a wrong argument, text that doesn't match, a document
  * that can't be written, comes back as a result with `isError`, for the agent to read and recover
@@ -350,6 +363,7 @@ function messageOf(error: unknown): string {
 export async function callTool(ctx: ToolContext, name: string, args: unknown): Promise<ToolResult> {
   const given = record(args);
   try {
+    if (MARKING_TOOLS.has(name) && ctx.plainOnly?.() === true) return fail(PLAIN_ONLY_ERROR);
     switch (name) {
       case 'view':
         return view(ctx, given);

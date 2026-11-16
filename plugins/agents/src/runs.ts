@@ -105,6 +105,8 @@ export interface RunDeps {
   author: Author;
   document: {
     path(): string | null;
+    /** Whether it is a Plain-only file (text or code): the tools that mark refuse there. */
+    plainOnly?(): boolean;
     /** Bumped whenever another document replaces this one. */
     generation(): number;
     read(): string;
@@ -610,6 +612,7 @@ export function createRuns(deps: RunDeps): RunController {
       thread: job.thread,
       now: () => new Date(),
       requestedBy: me,
+      plainOnly: () => deps.document.plainOnly?.() === true,
       onStatus: (status) => running(run, status),
       onReply: () => {
         run.replied = true;
