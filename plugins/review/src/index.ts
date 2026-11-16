@@ -181,10 +181,17 @@ const pendingChanges = (state: EditorState): MarkRange[] =>
 /** The change the selection touches, or undefined: the one a decision from the toolbar is for. */
 function changeAtSelection(state: EditorState): MarkRange | undefined {
   const { from, to } = state.selection.main;
-  return pendingChanges(state).find((mark) => {
-    const span = spanOf(mark);
-    return span.from <= to && span.to >= from;
-  });
+  const changes = pendingChanges(state);
+  const reaches = (strict: boolean) =>
+    changes.find((mark) => {
+      const span = spanOf(mark);
+      return strict
+        ? span.from < Math.max(to, from + 1) && span.to > from
+        : span.from <= to && span.to >= from;
+    });
+  // Inside a change, before one that only touches the selection's edge: a caret between two
+  // changes decides the one it is in the middle of, or the first it touches.
+  return reaches(true) ?? reaches(false);
 }
 
 /**

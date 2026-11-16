@@ -205,7 +205,21 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   /** Draws the items as the registry has them now; in place when they are the ones drawn. */
   const refresh = () => {
     if (how === null) return;
-    if (!drawn?.refresh(bar())) draw(spelling?.rows ?? null);
+    if (drawn?.refresh(bar())) return;
+    // The items changed (List came or went with the selection): drawn again, with the menu that was
+    // open open, and the keyboard on the same item, or at the start when that is gone.
+    const active = doc.activeElement;
+    const focused = active instanceof HTMLElement && panel.contains(active) ? active : null;
+    const menu = drawn?.openId() ?? null;
+    draw(spelling?.rows ?? null);
+    drawn?.openMenu(menu);
+    if (!focused) return;
+    const same = focused.dataset['command']
+      ? panel.querySelector<HTMLElement>(`[data-command="${focused.dataset['command']}"]`)
+      : focused.dataset['menu']
+        ? panel.querySelector<HTMLElement>(`[data-menu="${focused.dataset['menu']}"]`)
+        : null;
+    (same ?? drawn?.entry())?.focus();
   };
 
   /** Draws the toolbar again with other spelling rows, or none, and the keyboard where it was. */
@@ -409,6 +423,11 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     event.stopPropagation();
   });
 
+  // A Space that pressed a button on its key down must not press it again on its key up.
+  panel.addEventListener('keyup', (event) => {
+    if (event.key === ' ') event.preventDefault();
+  });
+
   // Typing: a toolbar that the pointer opened goes, as the person went back to writing. A key that
   // only moves the caret or holds a modifier is not writing.
   const onWriting = (event: KeyboardEvent) => {
@@ -531,6 +550,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
         close(true);
         return false;
       case 'focus-toolbar':
+        // A bar that faded while typing is seen again when the keyboard goes to it.
+        panel.removeAttribute('data-writing');
         drawn?.entry()?.focus();
         return true;
       case 'focus-document':

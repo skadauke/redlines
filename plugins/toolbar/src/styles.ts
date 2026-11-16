@@ -154,6 +154,7 @@ export const TOOLBAR_STYLE = `
   pointer-events: none;
   transition: opacity 120ms ease-out;
 }
+.rl-toolbar[data-writing]:focus-within { opacity: 1; pointer-events: auto; }
 .rl-toolbar:not([data-writing]) { transition: opacity 120ms ease-out; }
 
 /* Spelling suggestions, when the right-click is on a misspelled word: the only words in it. */

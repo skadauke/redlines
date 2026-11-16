@@ -169,6 +169,8 @@ describe('the items', () => {
       expect(button.querySelector('.rl-toolbar-label')?.textContent).toBeTruthy();
     }
     expect(itemFor('format.link')?.getAttribute('aria-label')).toBe('Link');
+    // What is said is what is drawn: the menu's word, not the command's title.
+    expect(itemFor('comment.add')?.getAttribute('aria-label')).toBe('Comment');
     expect(itemFor('format.link')?.textContent).toBe('Link…⌘K');
     expect(itemFor('comment.add')?.querySelector('.rl-toolbar-label')?.textContent).toBe('Comment');
     expect(itemFor('format.bold')?.getAttribute('aria-keyshortcuts')).toBe('Meta+B');
@@ -1035,6 +1037,36 @@ describe('docked, by the wrench or the preference', () => {
     editor.commands.run('toolbar.show');
     editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
     expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+  });
+
+  it('shows again when the key takes the keyboard to a bar that faded', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(true);
+    editor.commands.run('toolbar.show');
+    expect(panelOf()?.hasAttribute('data-writing')).toBe(false);
+    expect(document.activeElement).toBe(tops()[0]);
+  });
+
+  it('draws again when the items change, with the open menu open and the keyboard kept', () => {
+    let paragraph = true;
+    const ids = ['block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
+    const { editor, toolbar } = mount(
+      'Hello',
+      {},
+      ids.map((id) => command(id, { isActive: () => paragraph && id === 'block.body' })),
+    );
+    toolbar.toggle();
+    tops()[0]!.focus();
+    key(tops()[0]!, 'ArrowDown');
+    expect(tops().map((top) => top.textContent)).toEqual(['List', 'Format']);
+    expect(document.activeElement).toBe(itemFor('block.ul'));
+    // The selection moves out of the paragraph: List goes, and the keyboard stays in the bar.
+    paragraph = false;
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    expect(tops().map((top) => top.textContent)).toEqual(['Format']);
+    expect(panelOf()?.contains(document.activeElement)).toBe(true);
   });
 
   it('leaves the room it takes at the bottom to the page, and gives it back', () => {

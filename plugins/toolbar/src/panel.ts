@@ -56,7 +56,8 @@ function update(button: HTMLButtonElement, item: ShownItem, paired: boolean): vo
   button.setAttribute('aria-disabled', String(!item.enabled));
   if (item.toggle) button.setAttribute('aria-checked', String(item.active));
   else button.removeAttribute('aria-checked');
-  button.setAttribute('aria-label', item.name);
+  // What is said is what is drawn (WCAG 2.5.3): the menu's word, not the command's title.
+  button.setAttribute('aria-label', item.label.replace(/…$/, ''));
   if (item.aria) button.setAttribute('aria-keyshortcuts', item.aria);
   else button.removeAttribute('aria-keyshortcuts');
   // The hint: the reason a grayed item can't be used, and for the icons of a shared line, the name
@@ -203,7 +204,8 @@ export function drawPanel(
     menu.style.maxHeight = '';
     menu.style.left = '0px';
     menu.classList.remove('rl-toolbar-menu-up');
-    const anchor = panel.getBoundingClientRect();
+    // From the bar's own row: the suggestions above it in the same card are not what it opens over.
+    const anchor = row.getBoundingClientRect();
     const height = menu.offsetHeight;
     const below = win.innerHeight - anchor.bottom - MENU_GAP - EDGE;
     const above = anchor.top - MENU_GAP - EDGE;
@@ -338,7 +340,10 @@ export function drawPanel(
       if (open !== null) placeMenu(open);
       return true;
     },
-    openMenu: (id) => setOpen(id === null ? null : boxes.findIndex((box) => box.id === id)),
+    openMenu(id) {
+      const index = id === null ? -1 : boxes.findIndex((box) => box.id === id);
+      setOpen(index < 0 ? null : index);
+    },
     openId: () => (open === null ? null : (boxes[open]?.id ?? null)),
     entry: () => words()[0] ?? tops[0],
     key(event) {
