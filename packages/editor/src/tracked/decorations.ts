@@ -651,7 +651,7 @@ function analyze(state: EditorState, kept: number | null): Model {
   // The empty paragraph that is open is no blank line that a marker's line takes along.
   const open = openBlock(state)?.empty ?? null;
   const drawn = (line: Line) => open !== null && line.from <= open.to && line.to >= open.from;
-  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length, drawn);
+  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length, drawn, kept);
   return model;
 }
 
@@ -730,6 +730,7 @@ function hideMarkerLines(
   model: Model,
   bodyEnd: number,
   drawn: (line: Line) => boolean,
+  kept: number | null = null,
 ): void {
   /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
   const textBelow = (n: number) => {
@@ -788,6 +789,9 @@ function hideMarkerLines(
     // A `>` right against a marker is text, typed in front of it, not the marker of a quote: a
     // quote's own are followed by a space (format §3.2).
     if (!before.endsWith('>') && BLANK.test(before + between + after)) {
+      // The caret is on it (an empty paragraph the caret just opened inside an insertion): it
+      // shows as the empty line the caret is on, its markers hidden where they stand (#670).
+      if (kept === line.from) continue;
       // Deleted text with no block below it, as when all the text is deleted, stays on its line.
       if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);

@@ -219,12 +219,32 @@ The window, on the desktop:
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
   As of a saved document starts in that document's own folder.
-- **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
-  markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
-  (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
-  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
-  match; ⌥⌘F with the bar open shows the row and focuses its box.
+- **Find.** ⌘F opens a panel at the top right of the page that searches the text a reader sees,
+  never the markers or the ledger. The Find box holds the count ("2 of 5", "No results", or
+  "Invalid" for a regular expression that does not compile) and four toggles: Match Case, Whole
+  Word, Regular Expression and Find in Selection; beside it are Previous, Next and Close. Every
+  match is marked and the current one is stronger; typing goes to the first match from the caret,
+  Return and ⇧Return step, and Esc closes the panel with the current match selected. While the
+  Find box has the focus, ⌥⌘C, ⌥⌘W, ⌥⌘R and ⌥⌘L turn the four toggles on and off, and Tab goes to
+  the Replace box (opening its row first) and ⇧Tab back. Every control has a hint with its name
+  and key. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace (⌥⌘F) and Use
+  Selection for Find (⌘E). A chevron at the start of the panel shows or hides the Replace row
+  ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current match;
+  ⌥⌘F with the panel open shows the row and focuses its box. The Replace row has Replace (Return
+  in its box) and Replace All; with Track Changes on a red pen in the box says so, and with a
+  regular expression `$1` and `$&` in the replacement stand for the groups of the match.
+  - *Seeding.* ⌘F with a selection: a short phrase (under 80 characters, inside one line, not a
+    whole block) becomes the search term; a selection of more than one block, with a line break,
+    of 80 characters or more, or a whole block limits Find to it instead (Find in Selection is on,
+    the box says "Find in selection", the scope stays shaded, and Replace All stays inside it).
+  - *Replacing.* Replacing is an edit like typing. Replace All is one step to undo (a toast at
+    the corner offers Undo), and each match is a change of its own: with Track Changes on, N
+    matches are N tracked changes, each with its own margin note, as if every one had been replaced
+    by hand. With Track Changes on, text that is already in a tracked change is not matched. A
+    replacement the editor refuses is left, and the panel says how many.
+  - *Hook.* A later feature that hides text, such as a closed fold, opens it while its match is
+    current through `currentMatchHandlers` (or `createFind`'s `onCurrentMatch`), which is called
+    whenever a match becomes the current one.
 - **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
   everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
@@ -389,6 +409,38 @@ Redlines covers everything in the Markdown Guide's
 
 Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
+**HTML as GitHub draws it** (#686). What Redlines shows in Clean is as close as possible to what
+GitHub renders: GFM, GFM's escaped tags, and GitHub's list of allowed HTML. The aim is a standard,
+not perfection. The list (elements, attributes and protocols, from html-pipeline's
+`SanitizationFilter`) is one module, `github-html.ts` in `@redlines/format`, which Quick Look can
+share, and a check in development (micromark and GFM, then a sanitizer with the same list, over
+README-style snippets) holds the editor to it.
+
+- **Two deliberate exceptions.** Nothing in the file is invisible: an element GitHub drops that has
+  no text (video, audio, svg, input, button, embed) shows as a small muted chip. Editing aids, such
+  as folding and opening a block's source, are view state and never written.
+- **Inline tags** (`b`, `strong`, `i`, `em`, `code`, `tt`, `kbd`, `samp`, `var`, `s`, `strike`,
+  `del`, `ins`, `sub`, `sup`, `mark`, `small`, `abbr`, `dfn`, `cite`, `q`, `time`, `span`, `bdo`,
+  `ruby`, `a`): the text is wrapped in the real element, with its tags hidden as `<sub>` and
+  `<sup>` are, and edited in place. `ins`, `del` and `s` use the text's ink, never an author's
+  color; `mark` uses GitHub's yellow; `title` shows as an app hint. Removing a pair is a format
+  change (`-html=TAG`, format §2.6). `<br>` is a line break everywhere and `<wbr>` is invisible,
+  each one caret step. Shift-Return stays Markdown's hard break; `<br>` is written only in table
+  cells.
+- **The nine tags GFM escapes** (script, style, iframe, title, textarea, xmp, noembed, noframes,
+  plaintext) show as text. `<u>`, `font`, `center` and other unknown tags drop their tags and keep
+  their text. Underline has no command.
+- **Containers** (`details`, `summary`, `div`, `blockquote`) hold Markdown, with the tag lines
+  hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
+  on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
+  the conversion is exact. `<details>` is closed unless the file says `open`; a closed section
+  with pending changes shows a bar and a count. These come after the inline tags, in the order of
+  #686.
+- **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
+  WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
+  `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
+  anchors.
+
 **Links** are drawn underlined and stay text to edit: a click places the caret. ⌘-click opens the
 address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
 address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
@@ -422,8 +474,9 @@ of red there besides the pen).
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. The click
-  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
+  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -1178,14 +1231,14 @@ a new email under the same name becomes an alias in the ledger
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
-  step to undo. Not yet: deciding all of its changes at once;
+  step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
 - templates as plain `.md` files with `{{title}}` and `{{date}}`, never executable code;
 - focus and typewriter modes.
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes and cross-references; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 
@@ -1225,6 +1278,9 @@ syntax Markdown needs, and never shows them.
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
+- **Return again in the empty paragraph gives the text room.** At the top level it writes a line
+  that holds only `&nbsp;` and opens the next empty paragraph below it; every view draws that line
+  as an empty line, and GitHub and other readers show an empty paragraph (format §3.4).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.

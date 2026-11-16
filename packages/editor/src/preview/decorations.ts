@@ -34,7 +34,7 @@ import {
   type Window,
 } from '../restyle.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
-import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
+import { entityDecoration, pendingBox, roomDecoration, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -302,6 +302,20 @@ function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
       b.syntax(Math.max(hiddenTo, spaceBefore(line, mark.from)), mark.to, false);
     }
   }
+}
+
+/** Whether an entity is the whole text of its paragraph and is `&nbsp;`: a line of room. */
+function isRoom(state: EditorState, node: SyntaxNode): boolean {
+  const paragraph = node.parent;
+  return (
+    state.sliceDoc(node.from, node.to) === '&nbsp;' &&
+    paragraph?.name === 'Paragraph' &&
+    paragraph.parent?.name === 'Document' &&
+    state
+      .sliceDoc(paragraph.from, paragraph.to)
+      .replace(/<!--[^]*?-->/g, '')
+      .trim() === '&nbsp;'
+  );
 }
 
 /** A hard line break: its syntax is hidden (the line break itself is drawn as the break). */
@@ -615,6 +629,11 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
       // Entities in table cells are drawn by the table widget, not here (out of scope for now).
       else if (name === 'Entity') {
+        // A paragraph of `&nbsp;` alone is a line of room: an empty line, with the caret in it too.
+        if (isRoom(state, node)) {
+          b.push(roomDecoration().range(node.from, node.to));
+          return true;
+        }
         const decoration = touches(state, node.from, node.to)
           ? null
           : entityDecoration(state, node.from, node.to);
@@ -635,8 +654,8 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       return true;
     },
   });
-  for (const { line, spacing, below, apart } of spacings(read.reading, leaves)) {
-    const kind = below ? '-below' : apart ? '-apart' : '';
+  for (const { line, spacing, below, apart, clip } of spacings(read.reading, leaves)) {
+    const kind = below ? '-below' : apart ? '-apart' : clip ? '-clip' : '';
     b.lineClass(state.doc.line(line), `rl-space-${spacing}${kind}`);
   }
   return b.finish();
