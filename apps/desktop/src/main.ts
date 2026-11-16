@@ -351,20 +351,24 @@ const agents =
     : createMacAgents(
         isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
         createRelay(),
-        isTauri
-          ? {
-              more: async () =>
-                (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
-                  createAcpProvider(processes, {
-                    id,
-                    name,
-                    command: program,
-                    args,
-                    ...(bridge === undefined ? {} : { bridge }),
-                  }),
-                ),
-            }
-          : {},
+        {
+          // What the person named each agent in Preferences, read at every look.
+          handles: () => loadSettings().agentHandles,
+          ...(isTauri
+            ? {
+                more: async () =>
+                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                    createAcpProvider(processes, {
+                      id,
+                      name,
+                      command: program,
+                      args,
+                      ...(bridge === undefined ? {} : { bridge }),
+                    }),
+                  ),
+              }
+            : {}),
+        },
       );
 // An agent added or removed by another window, or one that Preferences has updated, signed in or
 // found changed, is looked for again at the next comment box.

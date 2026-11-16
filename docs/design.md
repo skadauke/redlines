@@ -1825,8 +1825,19 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
 (for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
-Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
-runs it.
+Agents. An agent is shown by its **handle, capitalized**: with the handle `ada`, the picker, Ask and
+the answers say "Ada", and `@` and the handle names it in a mention. The cards in Preferences keep the
+programs' names (Claude Code, Codex, OpenClaw).
+
+**Handles** (#558). Each card has a Handle field, which says "Shown as Ada". A handle is lowercase
+letters, digits and hyphens, no hyphen at either end, and at most 24 characters; a handle another agent
+has (Redlines' own, or the name of an OpenClaw agent) is refused with a note, and the old handle comes
+back when the field is left. The defaults are `claude` and `codex`; an OpenClaw agent is named by the
+person when it is added (Moby, by default in the form), and that name is its handle. There is one
+thing, not a display name beside the handle. What the host knows the agent by (its id) never changes,
+so a file's authors (`claude-<person>`) stay what they were; a mention of the old handle starts
+nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
+every look at the agents, so a change reaches the open documents' pickers at once.
 
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
