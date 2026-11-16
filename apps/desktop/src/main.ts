@@ -629,6 +629,11 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
+  onClose: () => {
+    changeSettings({ sidebarOpen: false });
+    render();
+  },
   notice: (message) => notice.flash(message),
 });
 
@@ -859,6 +864,7 @@ const changeSettings = (change: Partial<Settings>) => {
   settings = {
     ...updateSettings(change),
     sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
+    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
     textSize: change.textSize ?? settings.textSize,
   };
 };
@@ -1131,6 +1137,7 @@ function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
+  sidebar.setWidth(settings.sidebarWidth);
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
     name: doc.name,
@@ -1308,7 +1315,12 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
+  settings = {
+    ...changed,
+    sidebarOpen: settings.sidebarOpen,
+    sidebarWidth: settings.sidebarWidth,
+    textSize: settings.textSize,
+  };
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
