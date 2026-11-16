@@ -144,6 +144,7 @@ it('lists the Insert rows, and Insert Table again at the top of the Table menu',
   expect(read('Insert').map((row) => row?.[0] ?? row)).toEqual([
     'Code Block',
     'Table',
+    'Collapsible Section',
     'Alert',
     'Horizontal Rule',
   ]);
