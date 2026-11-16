@@ -707,7 +707,13 @@ export const NBSP_LINE = '&nbsp;';
 export function inRoomParagraph(state: EditorState): boolean {
   const open = openBlock(state);
   const { main } = state.selection;
-  if (!open || !main.empty || main.head < open.empty.from || main.head > open.empty.to) {
+  if (
+    !open ||
+    state.selection.ranges.length > 1 ||
+    !main.empty ||
+    main.head < open.empty.from ||
+    main.head > open.empty.to
+  ) {
     return false;
   }
   return state.doc.lineAt(open.empty.from).text === '' && !open.item && !open.line;

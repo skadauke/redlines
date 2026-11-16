@@ -302,6 +302,7 @@ function isRoom(state: EditorState, node: SyntaxNode): boolean {
   return (
     state.sliceDoc(node.from, node.to) === '&nbsp;' &&
     paragraph?.name === 'Paragraph' &&
+    paragraph.parent?.name === 'Document' &&
     state
       .sliceDoc(paragraph.from, paragraph.to)
       .replace(/<!--[^]*?-->/g, '')

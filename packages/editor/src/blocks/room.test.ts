@@ -7,7 +7,7 @@ import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from '../preview/decorations.ts';
-import { type Script, scriptRows, type Step } from './script.ts';
+import { runScript, type Script, scriptRows, type Step } from './script.ts';
 
 const typeEach = (text: string): Step[] => [...text].map((type) => ({ type }));
 
@@ -34,6 +34,21 @@ for (const tc of [false, true]) {
   }
 }
 scriptRows(rows);
+
+describe('The second Return in a container leaves it, and writes no room', () => {
+  it.each(['> a‸', '- a‸', '1. a‸', '> [!NOTE]⏎> a‸'])('%s', (doc) => {
+    for (const tc of [false, true]) {
+      const result = runScript({
+        name: 'x',
+        doc,
+        keys: ['Enter', 'Enter'],
+        tc,
+        expect: {},
+      });
+      expect(result.file).not.toContain('&nbsp;');
+    }
+  });
+});
 
 describe('the views draw a line of room as an empty line', () => {
   const open: Editor[] = [];

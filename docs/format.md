@@ -1370,7 +1370,7 @@ editor draws a paragraph of `&nbsp;` alone as an empty line, with the caret befo
 never inside the entity. With Track Changes on the line is the author's insertion of a paragraph
 like any typed one (`<!--ins k3x9-->\n\n&nbsp;<!--/k3x9-->`), and reads the same in every order of
 decisions. Backspace takes back the Returns one by one, byte for byte. A paragraph that holds
-`&nbsp;` with other text, or inside a table cell, is ordinary text.
+`&nbsp;` with other text, or inside a table cell, a list item or a quote, is ordinary text.
 
 **A deletion across blocks** is one mark in the merged block. Deleting from the middle of one
 paragraph, across a heading, to the middle of a third paragraph:
