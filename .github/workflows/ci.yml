@@ -169,6 +169,12 @@ jobs:
         run: |
           if [ "$EVENT" = pull_request ]; then
             pnpm exec vitest run --changed "$BASE" --passWithNoTests
+            # The rules every change must keep are tests that read the source files rather than
+            # import them, so --changed never picks them; they run on every pull request.
+            pnpm exec vitest run packages/format/src/refusals.node.test.ts \
+              apps/desktop/src/text-contrast.node.test.ts apps/desktop/src/interface-text.node.test.ts \
+              apps/desktop/src/command-permissions.node.test.ts apps/desktop/src/hints.node.test.ts \
+              apps/desktop/src/styles.node.test.ts apps/desktop/src/skills.node.test.ts
           else
             pnpm test
           fi
