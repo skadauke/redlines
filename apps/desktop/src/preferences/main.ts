@@ -26,7 +26,7 @@ import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
-import { noFocusOnPress } from './tabs.ts';
+import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import {
@@ -267,7 +267,7 @@ for (const { id, label } of PANES) {
   button.id = `rl-pref-tab-${id}`;
   button.setAttribute('role', 'tab');
   button.append(icon(ICONS[id], 20), label);
-  noFocusOnPress(button);
+  noRingOnClick(button);
   button.addEventListener('click', () => {
     clearFilter();
     show(id);

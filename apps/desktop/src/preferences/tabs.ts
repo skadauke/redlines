@@ -1,8 +1,12 @@
 /**
- * A press on a tab (a click) doesn't give it the keyboard's focus, so that no ring is left around
- * the tab that was clicked (#679). The click still selects the tab. Tab and the arrow keys bring the
- * focus to the tabs as before, and the ring shows then, for `:focus-visible` alone.
+ * A tab that a click focused shows no focus ring (#679): the ring is for the keyboard. The tab
+ * keeps the focus, so that the arrow keys go on from it, and is marked while the pointer put the
+ * focus there; any key, or the focus leaving, takes the mark off, and the ring shows for the keys
+ * again (`.rl-pref-tab[data-by-pointer]`, preferences.css).
  */
-export function noFocusOnPress(button: HTMLElement): void {
-  button.addEventListener('mousedown', (event) => event.preventDefault());
+export function noRingOnClick(button: HTMLElement): void {
+  const off = () => button.removeAttribute('data-by-pointer');
+  button.addEventListener('mousedown', () => button.setAttribute('data-by-pointer', ''));
+  button.addEventListener('keydown', off);
+  button.addEventListener('blur', off);
 }

@@ -7,5 +7,9 @@ describe('the tabs’ focus ring', () => {
   it('is drawn for :focus-visible only, never for a plain :focus', () => {
     expect(css).toMatch(/\.rl-pref-tab:focus-visible\s*\{[^}]*box-shadow/);
     expect(css).not.toMatch(/\.rl-pref-tab:focus(?!-visible)/);
+    // And not after a click, which marks the tab (tabs.ts).
+    expect(css).toMatch(
+      /\.rl-pref-tab\[data-by-pointer\]:focus-visible\s*\{[^}]*box-shadow:\s*none/,
+    );
   });
 });
