@@ -92,6 +92,11 @@ body {
   box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
 
+/* After a click the tab has the focus and no ring: the ring is for the keyboard (tabs.ts). */
+.rl-pref-tab[data-by-pointer]:focus-visible {
+  box-shadow: none;
+}
+
 .rl-pref-pane {
   flex: 1;
   overflow-y: auto;
@@ -245,6 +250,15 @@ select:focus-visible {
 .rl-pref-handle {
   flex: 0 0 120px;
   width: 120px;
+}
+
+/* An agent's handle, in its card (#558). */
+.rl-pref-agent-handle {
+  margin-top: 8px;
+}
+
+.rl-pref-agent-handle .rl-pref-text {
+  width: 160px;
 }
 
 .rl-pref-inline {

@@ -290,3 +290,12 @@ export function entityDecoration(state: EditorState, from: number, to: number): 
   const char = decodeEntity(source);
   return char === null ? null : Decoration.replace({ widget: new EntityWidget(char, source) });
 }
+
+/**
+ * A line of room (#515, format §3.4): a paragraph that holds only `&nbsp;`, drawn as an empty line
+ * whatever the caret does, and stepped over like a hard break's syntax (`hardBreak` in the spec), so
+ * that the caret rests before or after it and Backspace takes it whole.
+ */
+export function roomDecoration(): Decoration {
+  return Decoration.replace({ widget: new EntityWidget('\u00a0', '&nbsp;'), hardBreak: true });
+}

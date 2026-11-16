@@ -4,22 +4,66 @@
 
 import type { Editor, EditorCommand } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
-import { findBar } from './bar.ts';
-import { findState, selectedText, setFind, step } from './search.ts';
+import { findBar, type FindHost } from './bar.ts';
+import {
+  currentMatchHandlers,
+  escapeRegExp,
+  findState,
+  type Match,
+  seedOf,
+  selectedText,
+  setFind,
+  step,
+} from './search.ts';
+
+export { currentMatchHandlers, type Match } from './search.ts';
+export type { FindHost } from './bar.ts';
+
+export interface FindPluginOptions extends FindHost {
+  /**
+   * Called whenever a match becomes the current one, before the editor scrolls to it. A later
+   * plugin that hides text (a closed fold, say) opens it here while its match is current. Other
+   * plugins can use the `currentMatchHandlers` facet instead.
+   */
+  onCurrentMatch?: (match: Match) => void;
+}
 
 /**
  * Adds find and replace to an editor, with its commands: Find ⌘F, Find Next ⌘G, Find Previous ⇧⌘G,
  * Find and Replace ⌥⌘F and Use Selection for Find ⌘E, in the Edit menu. Returns a function that
  * takes it out again.
  */
-export function createFind(editor: Editor): () => void {
+export function createFind(editor: Editor, options: FindPluginOptions = {}): () => void {
   const { view } = editor;
-  const bar = findBar(editor);
-  const removeBar = editor.addExtension(bar.extension);
+  const bar = findBar(editor, options);
+  const removeBar = editor.addExtension([
+    bar.extension,
+    options.onCurrentMatch ? currentMatchHandlers.of(options.onCurrentMatch) : [],
+  ]);
 
   /** Opens the bar, with or without the replace row, and puts the caret in its find box, or in its replace box when asked for the row. */
   const open = (replace: boolean) => {
-    view.dispatch({ effects: setFind.of({ open: true, replace: replace || undefined }) });
+    // A short phrase selected is what to find; a longer or whole-block selection is where to find.
+    // With the bar open and a match selected, the selection is that match: it seeds nothing.
+    const { matches, open: wasOpen } = findState(view.state);
+    const { from, to } = view.state.selection.main;
+    const onMatch = matches.some((m) => m.from === from && m.to === to);
+    const seed = wasOpen && onMatch ? null : seedOf(view.state);
+    view.dispatch({
+      effects: setFind.of({
+        open: true,
+        replace: replace || undefined,
+        // A phrase is searched for as it is written, even with Regular Expression on, and it
+        // replaces any scope from before; a scope is set, never left over.
+        ...(seed?.query !== undefined
+          ? {
+              query: findState(view.state).regex ? escapeRegExp(seed.query) : seed.query,
+              scope: null,
+            }
+          : {}),
+        ...(seed?.scope ? { scope: seed.scope } : {}),
+      }),
+    });
     bar.focus(replace);
     return true;
   };
@@ -64,7 +108,14 @@ export function createFind(editor: Editor): () => void {
       run: () => {
         const query = selectedText(view.state);
         if (!query) return false;
-        view.dispatch({ effects: setFind.of({ open: true, query }) });
+        const { regex } = findState(view.state);
+        view.dispatch({
+          effects: setFind.of({
+            open: true,
+            query: regex ? escapeRegExp(query) : query,
+            scope: null,
+          }),
+        });
         return true;
       },
     }),
@@ -92,5 +143,8 @@ export const plugin: Plugin = {
       ],
     },
   },
-  activate: (context) => createFind(context.editor as Editor),
+  activate: (context) =>
+    createFind(context.editor as Editor, {
+      toast: (toast) => context.toast?.(toast),
+    }),
 };
