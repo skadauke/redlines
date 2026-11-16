@@ -57,14 +57,14 @@ describe('an HTML table', () => {
     expect(editor.getDoc().startsWith('| Name |  | Role |\n')).toBe(true);
   });
 
-  it('tracked: the conversion is a substitution, and its card names it', () => {
+  it('tracked: the row commands are disabled before the click, and nothing changes', () => {
     const editor = mount(HTML, true);
     caretIn(editor, 'Ada');
-    editor.commands.run('table.insertRowBelow');
-    const doc = editor.getDoc();
-    // The HTML is the substitution's old text, and the ledger's note names the conversion.
-    expect(doc).toMatch(/<!--sub \w+ <table>/);
-    expect(doc).toContain('note: Converted the table to Markdown');
+    expect(editor.getUiState().disabledReasons['table.insertRowBelow']).toMatch(
+      /Turn Track Changes off/,
+    );
+    expect(editor.commands.run('table.insertRowBelow')).toBe(false);
+    expect(editor.getDoc()).toBe(HTML);
   });
 
   it('is disabled, with its reason, when it has a caption or a span', () => {

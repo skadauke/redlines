@@ -136,13 +136,12 @@ describe('an HTML list', () => {
     expect(reason(editor, 'block.indent')).toMatch(/can't be changed as Markdown/);
   });
 
-  it('tracked: a substitution that names the list', () => {
+  it('tracked: Indent is disabled before the click, with its reason, and nothing changes', () => {
     const editor = mount(LIST, true);
     caretIn(editor, 'two');
-    expect(editor.commands.run('block.indent')).toBe(true);
-    const notes = Object.values(parse(editor.getDoc()).ledger.marks).map((entry) => entry.note);
-    expect(notes).toContain('Converted the bulleted list to Markdown');
-    expect(originalView(editor.getDoc()).text).toBe(LIST);
+    expect(reason(editor, 'block.indent')).toMatch(/Turn Track Changes off/);
+    expect(editor.commands.run('block.indent')).toBe(false);
+    expect(editor.getDoc()).toBe(LIST);
   });
 });
 

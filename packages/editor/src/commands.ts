@@ -13,6 +13,9 @@ import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
 import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
 import { trackingField } from './tracked/typing.ts';
 
+const ACCEPT_FIRST =
+  "This HTML must be changed to Markdown first, and with Track Changes on that is a pending change that this can't build on. Turn Track Changes off to make this change.";
+
 /** Why `command` can't run in `state`, or undefined when it can. */
 export const disabledReasonOf = (
   command: EditorCommand,
@@ -22,7 +25,13 @@ export const disabledReasonOf = (
   if (command.structure) {
     const reason = twinReason(state, command.structure);
     if (reason !== undefined) return reason;
-    if (inTwin(state, command.structure)) return undefined;
+    if (inTwin(state, command.structure)) {
+      // A pending conversion can't be acted on: a command that can't write its result into the
+      // conversion waits for it to be accepted, and is disabled until then.
+      const twin = twinAt(state, state.selection.main.head)?.twin;
+      const folds = twin && command.twinAs?.(twin) != null;
+      return state.field(trackingField) && !folds ? ACCEPT_FIRST : undefined;
+    }
   }
   return command.disabledReason?.(state);
 };
@@ -142,15 +151,7 @@ export function createCommandRegistry(
         return false;
       }
       if (as != null) return true;
-      // A tracked conversion is pending, and a change can't start at a pending change: say so when
-      // the command could not follow it.
-      const done = command.run(editor());
-      if (!done && view.state.field(trackingField)) {
-        notice(
-          'Converted to Markdown as a pending change. Accept it, then make this change again.',
-        );
-      }
-      return done;
+      return command.run(editor());
     }
     return command.run(editor());
   };

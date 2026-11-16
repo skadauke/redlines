@@ -197,7 +197,7 @@ function placeAfter(markdown: string, count: number): number {
 export function htmlListMoves(state: EditorState, outdent: boolean): boolean {
   const { head } = state.selection.main;
   const here = twinAt(state, head);
-  if (here?.kind !== 'list' || !here.twin) return false;
+  if (here?.kind !== 'list' || !here.twin || state.field(trackingField)) return false;
   const before = state.sliceDoc(here.lines.from, head);
   const items = before.match(/<li[\s>]/gi)?.length ?? 0;
   if (!outdent) return items > 1;
