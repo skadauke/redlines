@@ -917,8 +917,8 @@ body {
   html[data-rl-theme][data-rl-appearance] #editor {
     --rl-page: #ffffff;
     --rl-ink: #1d1d1f;
-    --rl-ink-2: #6e6e73;
-    --rl-ink-3: #a1a1a6;
+    --rl-ink-2: #6a6a6f;
+    --rl-ink-3: #828285;
     --rl-rule: #e5e5ea;
     --rl-tint: #f3f3f5;
     --rl-syntax: #c7c7cc;

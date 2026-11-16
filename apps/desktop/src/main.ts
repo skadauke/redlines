@@ -43,7 +43,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
-import { localImagePath, localImageUrl } from './images.ts';
+import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
@@ -80,6 +80,7 @@ import { createNotice } from './ui/notice.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { installTitleHints } from './ui/title-hints.ts';
@@ -260,6 +261,8 @@ function dragFile(): void {
 // Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
 // is a document to take the shape of.
 let crashes: CrashWatch | null = null;
+// Unsaved edits are kept in the app's support folder while there are any (recovery.ts, #693).
+let recovery: Recovery | null = null;
 const untrackedAnswers = createUntrackedAnswers();
 
 const editor = createEditor(element('#editor'), {
@@ -318,6 +321,7 @@ const editor = createEditor(element('#editor'), {
   onChange: (text) => {
     controller.markEdited(text);
     crashes?.documentChanged();
+    recovery?.changed();
     // Images the text shows now are watched once the typing pauses.
     imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -329,6 +333,8 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
+  projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -605,6 +611,7 @@ function showDocument(state: DocumentState): void {
     settings = { ...settings, recent };
     void refreshRecent();
   }
+  recovery?.follow(state);
   notice.setStanding(state.notice, () => controller.dismissNotice());
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
@@ -840,6 +847,19 @@ function showAgentLogs(): void {
   });
 }
 
+/**
+ * A window that opens a document finds the copy of its unsaved edits, if the page's process ended or
+ * the app crashed meanwhile, and puts the edits back.
+ */
+async function restoreAfterCrash(): Promise<void> {
+  const kept = await recovery?.find();
+  if (!kept || !controller.restore(kept.path, kept.text)) return;
+  await crashes?.recovered(() => {
+    void controller.showSavedVersion();
+    recovery?.discard();
+  });
+}
+
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
@@ -986,6 +1006,11 @@ const wordCount = createEditorWordCount(main, editor, { visible: settings.showWo
 // Failures leave a trace in the app's log and offer a report (crash.ts, #692); the app is where they
 // are logged, so a browser tab has none.
 if (isTauri) {
+  recovery = createRecovery({
+    link: tauriRecoveryLink(),
+    label: getCurrentWindow().label,
+    getText: () => editor.getDoc(),
+  });
   const crashLink = tauriCrashLink();
   crashes = watchCrashes({
     link: crashLink,
@@ -1097,6 +1122,23 @@ const commands: MenuCommands = {
 activatePlugins(editor, {}, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
+  toast: ({ text, action }) =>
+    notifications.show({
+      text,
+      key: 'plugin toast',
+      timeout: 8000,
+      ...(action
+        ? {
+            action: {
+              label: action.label,
+              run: (card) => {
+                action.run();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
   documentData: (manifest) => documentData.forPlugin(manifest),
 });
 
@@ -1200,6 +1242,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // Closed without saving, or with nothing unsaved: no copy is kept of it.
+      recovery?.discard();
       runs.stopAll();
       ask.close();
     }
@@ -1283,6 +1327,8 @@ if (isTauri) {
   }
   // A new document always starts with Track Changes off (#660): the switch is the document's own,
   // written at save, so no setting and no earlier document decides it.
+  // After a crash: the edits the window had, put back, with a card that says so (#693).
+  void restoreAfterCrash();
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.

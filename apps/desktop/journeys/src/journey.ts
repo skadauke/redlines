@@ -59,6 +59,7 @@ interface Hook {
         selection: { main: { anchor: number; head: number } };
       };
       contentDOM: HTMLElement;
+      viewport: { from: number; to: number };
       coordsAtPos(pos: number): { left: number; right: number; top: number; bottom: number } | null;
       focus(): void;
       requestMeasure(): void;
